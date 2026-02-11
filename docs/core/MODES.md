@@ -73,7 +73,7 @@ Before planning, the agent must review:
 
 ### Plan Artifact
 
-When Plan Mode starts, create `docs/specs/<id>/plan.md` with YAML frontmatter:
+When Plan Mode starts, create `docs/specs/<id>/plan.md` using the template at [`docs/templates/plan.md`](../templates/plan.md). Initialize the YAML frontmatter:
 
 ```yaml
 status: Draft
