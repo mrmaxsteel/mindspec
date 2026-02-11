@@ -1,0 +1,30 @@
+# Mindspec Architecture Policies
+
+policies:
+  - id: spec-required
+    description: "Every functional change must refer to a spec in docs/specs/"
+    severity: error
+    scope: "src/**/*"
+
+  - id: doc-sync-required
+    description: "Changes to core logic must be accompanied by updates to docs/core/ or docs/features/"
+    severity: warning
+    scope: "src/**/*"
+
+  - id: forbidden-external-memory
+    description: "Memory must be persisted locally in ~/.mindspec; no external DB dependencies allowed in core."
+    severity: error
+
+  - id: spec-mode-no-code
+    description: "In Spec Mode, only markdown files may be created or modified. Code changes are forbidden until the spec is approved."
+    severity: error
+    scope: "src/**/*"
+    mode: spec
+    reference: "docs/core/MODES.md#spec-mode"
+
+  - id: implementation-requires-approved-spec
+    description: "Implementation Mode requires an approved spec with all acceptance criteria defined and human sign-off recorded."
+    severity: error
+    scope: "src/**/*"
+    mode: implementation
+    reference: "docs/core/MODES.md#implementation-mode"

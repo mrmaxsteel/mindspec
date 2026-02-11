@@ -1,0 +1,16 @@
+[project]
+name = "mindspec"
+version = "0.1.0"
+description = "Spec-driven development and self-documentation system"
+dependencies = [
+    "click>=8.0.0",
+    "PyYAML>=6.0",
+    "markdown>=3.0",
+]
+
+[project.scripts]
+mindspec = "mindspec.main:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
