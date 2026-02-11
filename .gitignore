@@ -1,6 +1,9 @@
 # Mindspec local state (not version-controlled)
 .mindspec/
 
+# Beads runtime artifacts (sockets must not end up in build contexts)
+**/bd.sock
+
 # Python
 __pycache__/
 *.py[cod]

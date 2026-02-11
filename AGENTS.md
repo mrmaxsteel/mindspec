@@ -1,41 +1,88 @@
-# Mindspec Agent Instructions
+# MindSpec Agent Instructions
 
-This repository uses **mindspec** for spec-driven development. All agents working in this repository must follow the mode system and workflows defined here.
+This repository uses **MindSpec** for spec-driven development. All agents must follow the mode system, Beads conventions, and governance rules defined here.
 
 ## Mode System
 
-All work follows a two-phase approach:
+All work follows a three-phase approach:
 
 ### Spec Mode (Default)
-- **Permitted**: Markdown files only (`docs/`, `GLOSSARY.md`, specs)
-- **Focus**: Requirements, acceptance criteria, documentation
+- **Permitted**: Markdown files only (specs, domain docs, glossary, ADR drafts)
+- **Focus**: User value, acceptance criteria, impacted domains, ADR touchpoints, open questions
 - **Exit**: Explicit user approval via `/spec-approve`
 
-### Implementation Mode
-- **Permitted**: Code changes in `src/`, tests, configuration
-- **Requires**: Approved spec with all acceptance criteria defined
-- **Obligations**: Doc-sync, scope discipline, proof-of-done
+### Plan Mode
+- **Permitted**: Beads entries (implementation beads), plan documents, ADR proposals
+- **Focus**: Bounded work chunks with verification steps, ADR review, dependency mapping
+- **Required**: Review domain docs + accepted ADRs + Context Map before planning
+- **Exit**: Explicit user approval via `/plan-approve`
 
-> **Rule**: Never create or modify code in `src/` without an approved spec.
+### Implementation Mode
+- **Permitted**: Code, tests, configuration, documentation updates
+- **Requires**: Approved spec + approved plan + assigned bead + worktree
+- **Obligations**: Scope discipline, doc-sync, proof-of-done, ADR compliance, worktree isolation
+
+> **Rule**: Never create or modify code without an approved spec AND an approved plan.
+
+---
+
+## Beads Integration
+
+Beads is the **execution tracking substrate** (not a planning system):
+
+- Spec beads: concise summary + link to canonical spec file. Do not embed long-form specs.
+- Implementation beads: scope, micro-plan, verification steps, dependencies.
+- Keep the active workset small. Rely on git history + docs for archival traceability.
+- Beads entries must remain concise and execution-oriented.
+
+See [ADR-0002](docs/adr/ADR-0002.md) for full Beads integration strategy.
+
+---
+
+## Worktree Execution
+
+All implementation work runs in **isolated git worktrees**:
+
+- Worktree naming includes the bead ID
+- Changes are isolated per bead
+- Closing a bead requires evidence + doc updates + clean state sync
+
+---
+
+## ADR Governance
+
+If implementation or planning requires changes that diverge from an accepted ADR:
+
+1. **Stop** immediately
+2. Inform the user: specify the ADR and the nature of divergence
+3. Present options: continue-as-is vs. propose new superseding ADR
+4. If user approves divergence: create a new ADR superseding the old one
+5. The new ADR must be accepted before work resumes
+
+> **Rule**: ADR divergence always triggers a human gate. The ADR is the decision artifact.
+
+---
+
+## Domain Awareness
+
+MindSpec uses DDD-inspired domains as first-class primitives:
+
+- Specs must declare impacted domains
+- Context Packs route content based on domain boundaries
+- Domain operations (add/split/merge) require human approval and produce ADRs
+
+See [ADR-0001](docs/adr/ADR-0001.md) for DDD enablement details.
 
 ---
 
 ## Required Workflows
 
 | Command | Purpose |
-| :------ | :------ |
+|:--------|:--------|
 | `/spec-init` | Initialize a new specification |
-| `/spec-approve` | Request transition to Implementation Mode |
-| `/spec-status` | Check current mode and active spec |
-
----
-
-## Before Writing Code
-
-1. Check if an approved spec exists for the work
-2. Verify the spec has `Status: APPROVED` in its Approval section
-3. Confirm the proposed changes are within the spec's scope
-4. If any check fails → remain in Spec Mode, complete the spec first
+| `/spec-approve` | Request Spec → Plan transition |
+| `/plan-approve` | Request Plan → Implementation transition |
+| `/spec-status` | Check current mode and active spec/bead state |
 
 ---
 
@@ -50,47 +97,16 @@ Every code change must:
 
 ---
 
-## Architecture Divergence
-
-If implementation requires changes that diverge from documented architecture:
-
-1. **Stop** code changes immediately
-2. **Assess**: Is this a scope change or an architecture divergence?
-   - **Scope change**: Minor additions within existing patterns
-   - **Architecture divergence**: Changes to invariants, patterns, or system boundaries
-3. **For architecture divergence**:
-   - Create an **ACP** (Architecture Change Proposal) in `docs/architecture/proposals/`
-   - ACP must include: summary, motivation, options, impact, required doc updates
-   - **Await explicit human approval** before proceeding
-4. **After approval**: Update spec with new requirements, request re-approval
-5. **For scope changes**: Update spec directly, request re-approval
-
-> **Rule**: Architecture divergence always triggers an ACP. The ACP is the decision artifact.
-
----
-
 ## Key Documentation
 
 | Document | Purpose |
-| :------- | :------ |
+|:---------|:--------|
+| [CLAUDE.md](CLAUDE.md) | Claude Code project instructions |
+| [mindspec.md](mindspec.md) | Product specification (source of truth) |
 | [MODES.md](docs/core/MODES.md) | Mode definitions and transitions |
 | [ARCHITECTURE.md](docs/core/ARCHITECTURE.md) | System design and invariants |
 | [CONVENTIONS.md](docs/core/CONVENTIONS.md) | File organization and naming |
 | [GLOSSARY.md](GLOSSARY.md) | Term definitions for context injection |
 | [policies.yml](architecture/policies.yml) | Machine-checkable policies |
-
----
-
-## State Tracking
-
-Active spec and mode are tracked in `.mindspec/current-spec.json`:
-
-```json
-{
-  "activeSpec": "<spec-id>",
-  "mode": "spec" | "implementation",
-  "lastUpdated": "<ISO timestamp>"
-}
-```
-
-This file is gitignored (local state only). The spec file itself is the source of truth for approval status.
+| [ADR-0001](docs/adr/ADR-0001.md) | DDD enablement + context packs |
+| [ADR-0002](docs/adr/ADR-0002.md) | Beads integration strategy |

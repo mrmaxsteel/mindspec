@@ -6,11 +6,20 @@ Enable deterministic retrieval of documentation sections based on keyword matchi
 
 ## Background
 
-Mindspec uses a glossary (`GLOSSARY.md`) to map keywords/concepts to specific documentation anchors. This spec implements the parsing and matching logic that powers context injection.
+MindSpec uses a glossary (`GLOSSARY.md`) to map keywords/concepts to specific documentation anchors. This spec implements the parsing and matching logic that powers context injection — the foundation of the Context Pack system.
+
+## Impacted Domains
+
+- context-system: glossary is a core input for Context Pack assembly
+
+## ADR Touchpoints
+
+- [ADR-0001](../../adr/ADR-0001.md): Glossary/registry is listed as a required primitive for deterministic context injection
+- [ADR-0002](../../adr/ADR-0002.md): Glossary targets point to the documentation system (not Beads)
 
 ## Requirements
 
-1. **Glossary Parsing**: Load and parse `GLOSSARY.md` into a keyword → target mapping
+1. **Glossary Parsing**: Load and parse `GLOSSARY.md` into a keyword-to-target mapping
 2. **Keyword Matching**: Given input text (prompt, spec, etc.), identify matching glossary terms
 3. **Section Extraction**: Retrieve the targeted documentation sections
 4. **CLI Command**: Expose functionality via `mindspec glossary` subcommands
@@ -26,6 +35,12 @@ Mindspec uses a glossary (`GLOSSARY.md`) to map keywords/concepts to specific do
 - Full context pack generation (see Spec 003)
 - Vector/semantic search
 - Memory recall integration
+- Domain-based routing (that's Context Pack's responsibility)
+
+## Non-Goals
+
+- Replacing glossary with embeddings or vector search
+- Automatic glossary generation
 
 ## Acceptance Criteria
 
@@ -38,8 +53,12 @@ Mindspec uses a glossary (`GLOSSARY.md`) to map keywords/concepts to specific do
 ## Validation Proofs
 
 - `python -m mindspec glossary list`: Should list all terms from GLOSSARY.md
-- `python -m mindspec glossary match "spec mode approval"`: Should match "Spec Mode" and "Approval Gate"
+- `python -m mindspec glossary match "spec mode approval"`: Should match "Spec Mode" and related terms
 - `python -m mindspec glossary show "Context Pack"`: Should display the linked doc section
+
+## Open Questions
+
+- (none)
 
 ## Approval
 

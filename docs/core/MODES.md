@@ -1,157 +1,206 @@
-# Mindspec Operational Modes
+# MindSpec Operational Modes
 
-This document defines the two operational modes that govern how agents and developers interact with the mindspec-managed development workflow.
+MindSpec enforces a **gated, three-phase lifecycle** where specification precedes planning, and planning precedes implementation. Each mode controls allowed outputs, required context, and transition gates.
 
-## Overview
-
-Mindspec enforces a **gated lifecycle** where specification must precede implementation. This is mechanically enforced through two distinct modes:
-
-```mermaid
-flowchart LR
-    A[Intent] --> B[Spec Mode]
-    B --> C{Approval Gate}
-    C -->|Approved| D[Implementation Mode]
-    C -->|Rejected| B
-    D --> E[Validation]
-    E --> F[Complete]
+```
+Intent → [Spec Mode] → approval → [Plan Mode] → approval → [Implementation Mode] → validation → Done
+              ↑                        ↑                            ↑
+              └── rejected ────────────┘──── divergence ────────────┘
 ```
 
 ---
 
 ## Spec Mode {#spec-mode}
 
-### Definition
+### Objective
 
-**Spec Mode** is the initial phase where intent is captured, requirements are formalized, and the specification is refined until it meets acceptance criteria.
+Discuss user-facing value and how to validate it. Spec Mode is intentionally **implementation-light**: no deep design unless necessary to define what "done" means.
+
+### Output
+
+A **Spec Bead** (parent bead in Beads) containing:
+
+- Problem statement and target user outcome
+- Acceptance criteria and validation plan (manual + automated where applicable)
+- Non-goals / constraints
+- Impacted domains (see [Domains](ARCHITECTURE.md#domains))
+- Required architecture touchpoints (ADRs/docs to follow)
+- Open questions that must be resolved before planning
 
 ### Permitted Artifacts
 
-In Spec Mode, **only markdown and configuration artifacts** may be created or modified:
-
 | Artifact | Location | Purpose |
-| :------- | :------- | :------ |
-| `spec.md` | `docs/specs/<id>/` | Formal specification |
-| `tasks.json` | `docs/specs/<id>/` | Task graph definition |
-| `context-pack.md` | `docs/specs/<id>/` | Injected context provenance |
+|:---------|:---------|:--------|
+| Spec files | `docs/specs/<id>/spec.md` | Formal specification |
+| Domain docs | `docs/domains/<domain>/` | Domain documentation |
 | Glossary entries | `GLOSSARY.md` | New term definitions |
-| Architecture docs | `docs/core/`, `docs/features/` | Context/rationale |
+| Architecture docs | `docs/core/` | Context/rationale |
+| ADR drafts | `docs/adr/` or `docs/domains/<domain>/adr/` | Proposed decisions |
 
 ### Forbidden Actions
 
-- **No code changes** in `src/` or equivalent implementation directories
-- **No test code** (tests accompany implementation)
-- **No build/config changes** that affect runtime behavior
+- Creating or modifying code in `src/` or equivalent implementation directories
+- Creating or modifying test code
+- Changing build/config that affects runtime behavior
 
-### Exit Criteria
+### Exit Gate
 
-To transition out of Spec Mode, the specification must:
+To leave Spec Mode, the spec must:
 
-1. Have all **Acceptance Criteria** explicitly defined
-2. Have all Acceptance Criteria marked as **verifiable** (not vague)
-3. Receive **human approval** (explicit sign-off)
+1. Have all acceptance criteria explicitly defined and verifiable
+2. Declare impacted domains and ADR touchpoints
+3. Have all open questions resolved
+4. Receive **explicit human approval**
+
+---
+
+## Plan Mode {#plan-mode}
+
+### Objective
+
+Turn an approved spec bead into bounded, executable work chunks.
+
+### Required Review
+
+Before planning, the agent must review:
+
+- Applicable ADRs (accepted, not superseded) for impacted domains
+- Domain docs (`overview.md`, `architecture.md`, `interfaces.md`)
+- Context Map for neighboring context contracts
+- Existing constraints and invariants
+
+### Output
+
+Child beads (**Implementation Beads**) in Beads, each with:
+
+- Small scope ("one slice of value")
+- 3-7 step micro-plan
+- Explicit verification steps
+- Dependencies between beads
+- Worktree assignment convention
+
+### ADR Fitness Check
+
+If the planner detects that an accepted ADR blocks progress or is unfit:
+
+1. **Stop** and inform the user
+2. Present a divergence option set (continue-as-is vs. propose change)
+3. If user accepts divergence, create a **new ADR** that **supersedes** the prior ADR(s)
+4. Resume planning with the updated architecture
+
+### Permitted Artifacts
+
+- Beads entries (implementation beads, dependency links)
+- Plan documents / micro-plans
+- ADR proposals (if divergence detected)
+- Documentation updates (if clarifying scope)
+
+### Forbidden Actions
+
+- Writing implementation code
+- Widening scope beyond the spec bead's defined user value
+
+### Exit Gate
+
+To leave Plan Mode:
+
+1. All implementation beads are defined with verification steps
+2. Dependencies are explicit
+3. ADRs cited for each bead's architectural assumptions
+4. **Explicit human approval** of the plan
 
 ---
 
 ## Implementation Mode {#implementation-mode}
 
-### Definition
+### Objective
 
-**Implementation Mode** is the phase where code is written to fulfill an approved specification. It is entered **only** after passing the Approval Gate.
-
-### Permitted Artifacts
-
-All artifacts are permitted, including:
-
-- Source code (`src/**/*`)
-- Tests (`tests/**/*`)
-- Build configuration
-- Documentation updates (doc-sync requirement still applies)
+Execute one implementation bead in an isolated worktree.
 
 ### Prerequisites
 
-Implementation Mode **requires**:
+- An approved plan with implementation beads
+- A worktree created for the target bead
+- Context Pack loaded (mode-specific, budgeted)
 
-1. A linked `spec.md` with status `APPROVED`
-2. All Acceptance Criteria defined and understood
-3. Human approval recorded in the spec
+### Output
+
+- Code changes within the bead's defined scope
+- Evidence / proof (commands, test outputs, screenshots)
+- Documentation updates / refactors
+- Status progression and closure notes in Beads
 
 ### Obligations
 
-While in Implementation Mode:
+| Obligation | Detail |
+|:-----------|:-------|
+| **Scope discipline** | Changes must stay within the bead's scope. Discovered work becomes new beads. |
+| **Doc sync** | Every code change must update corresponding documentation |
+| **Proof of done** | Bead closes only when verification steps pass |
+| **Worktree isolation** | Work happens in a bead-specific worktree |
+| **ADR compliance** | Implementation must follow cited ADRs; divergence triggers the ADR divergence protocol |
 
-- **Doc Sync**: Any code change must update corresponding documentation
-- **Proof of Done**: Tasks complete only when validation proofs pass
-- **Scope Discipline**: Changes must stay within the spec's defined scope
-- **Divergence Protocol**: Architecture deviations trigger ACP and halt
+### ADR Divergence Protocol
 
----
+If implementation requires deviation from a cited ADR:
 
-## Transition Criteria {#transition-criteria}
+1. **Stop** code changes immediately
+2. Inform the user with the specific ADR and the nature of the divergence
+3. Present options: continue-as-is, propose new ADR, or revise scope
+4. If user approves divergence: create a new ADR superseding the old, then continue
+5. The new ADR must be accepted before implementation resumes
 
-The transition from Spec Mode to Implementation Mode is a **gated checkpoint**.
+### Forbidden Actions
 
-### Acceptance Criteria Quality
+- Widening scope (new work becomes new beads + dependencies)
+- Ignoring ADR divergence
+- Completing a bead without proof and doc-sync
 
-A spec's acceptance criteria must be:
+### Exit Gate
 
-| Quality | Description |
-| :------ | :---------- |
-| **Specific** | Each criterion describes a single, concrete outcome |
-| **Measurable** | Can be verified via automated proof or manual test |
-| **Complete** | All requirements are covered; no implicit ones |
-| **Unambiguous** | No room for interpretation |
+A bead is complete when:
 
-### Approval Protocol
-
-```markdown
-## Approval
-
-- **Status**: APPROVED
-- **Approved By**: @username
-- **Approval Date**: 2026-01-31
-- **Notes**: (optional reviewer comments)
-```
-
-Valid status values:
-
-| Status | Meaning |
-| :----- | :------ |
-| `DRAFT` | Work in progress, not ready for review |
-| `PENDING_REVIEW` | Ready for human review |
-| `APPROVED` | Cleared for implementation |
-| `REJECTED` | Requires revision before approval |
+1. All verification steps pass with captured evidence
+2. Documentation is updated
+3. Bead status is updated in Beads with closure notes
+4. Worktree changes are ready for review
 
 ---
 
-## Mode Enforcement
+## Human-in-the-Loop Gates {#human-gates}
+
+MindSpec requires explicit human confirmation for:
+
+| Gate | Trigger |
+|:-----|:--------|
+| Spec approval | Spec Mode → Plan Mode transition |
+| Plan approval | Plan Mode → Implementation Mode transition |
+| ADR divergence | Any mode detects an ADR is unfit or blocking |
+| Domain operations | Adding, splitting, or merging domains |
+| Scope expansion | Changes to the user value definition in a spec |
+| Non-automatable validation | Acceptance of items that cannot be verified automatically |
+
+---
+
+## Mode Enforcement {#mode-enforcement}
 
 ### Policy Integration
 
-Mode enforcement is defined in `architecture/policies.yml`:
+Mode enforcement policies are defined in [`architecture/policies.yml`](../../architecture/policies.yml):
 
-- `spec-mode-no-code`: Blocks code changes while in Spec Mode
-- `implementation-requires-approved-spec`: Blocks implementation without approval
+- `spec-mode-no-code`: Blocks code changes in Spec Mode
+- `plan-mode-no-code`: Blocks code changes in Plan Mode
+- `implementation-requires-approved-plan`: Blocks implementation without plan approval
 
-### Validation
+### State Tracking
 
-- `mindspec validate mode` — Reports current mode and any violations
-- `mindspec validate spec <id>` — Checks acceptance criteria quality
-
----
-
-## Rationale
-
-This mode system ensures:
-
-1. **Deliberate Design**: Implementation cannot begin without clear intent
-2. **Human Oversight**: Approval gate prevents autonomous runaway
-3. **Quality Baseline**: Acceptance criteria force specificity upfront
-4. **Audit Trail**: Approval status and reviewer are recorded in the spec
+Active mode and bead are tracked via Beads status. The spec file and bead state are the sources of truth for approval status.
 
 ---
 
 ## See Also
 
-- [ARCHITECTURE.md](file:///Users/Max/Documents/mindspec/docs/core/ARCHITECTURE.md) — Core system design
-- [policies.yml](file:///Users/Max/Documents/mindspec/architecture/policies.yml) — Machine-checkable policies
-- [CONVENTIONS.md](file:///Users/Max/Documents/mindspec/docs/core/CONVENTIONS.md) — File organization
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Core system design
+- [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
+- [policies.yml](../../architecture/policies.yml) — Machine-checkable policies
+- [mindspec.md](../../mindspec.md) — Product specification

@@ -1,19 +1,7 @@
-# Mindspec Architecture Policies
+# MindSpec Architecture Policies
 
 policies:
-  - id: spec-required
-    description: "Every functional change must refer to a spec in docs/specs/"
-    severity: error
-    scope: "src/**/*"
-
-  - id: doc-sync-required
-    description: "Changes to core logic must be accompanied by updates to docs/core/ or docs/features/"
-    severity: warning
-    scope: "src/**/*"
-
-  - id: forbidden-external-memory
-    description: "Memory must be persisted locally in ~/.mindspec; no external DB dependencies allowed in core."
-    severity: error
+  # --- Mode enforcement ---
 
   - id: spec-mode-no-code
     description: "In Spec Mode, only markdown files may be created or modified. Code changes are forbidden until the spec is approved."
@@ -22,9 +10,80 @@ policies:
     mode: spec
     reference: "docs/core/MODES.md#spec-mode"
 
-  - id: implementation-requires-approved-spec
-    description: "Implementation Mode requires an approved spec with all acceptance criteria defined and human sign-off recorded."
+  - id: plan-mode-no-code
+    description: "In Plan Mode, only Beads entries, plan documents, ADR proposals, and documentation may be modified. Code changes are forbidden until the plan is approved."
+    severity: error
+    scope: "src/**/*"
+    mode: plan
+    reference: "docs/core/MODES.md#plan-mode"
+
+  - id: implementation-requires-approved-plan
+    description: "Implementation Mode requires an approved spec with all acceptance criteria defined, an approved plan with implementation beads, and a bead-specific worktree."
     severity: error
     scope: "src/**/*"
     mode: implementation
     reference: "docs/core/MODES.md#implementation-mode"
+
+  # --- Spec and doc policies ---
+
+  - id: spec-required
+    description: "Every functional change must refer to a spec in docs/specs/"
+    severity: error
+    scope: "src/**/*"
+
+  - id: doc-sync-required
+    description: "Changes to core logic must be accompanied by updates to docs/core/, docs/domains/, or docs/features/. Done includes doc-sync."
+    severity: warning
+    scope: "src/**/*"
+
+  # --- ADR governance ---
+
+  - id: adr-divergence-gate
+    description: "If implementation or planning detects that an accepted ADR blocks progress or is unfit, the agent must stop, inform the user, and present divergence options. A new superseding ADR requires human approval."
+    severity: error
+    reference: "docs/core/MODES.md#implementation-mode"
+
+  - id: plan-must-cite-adrs
+    description: "Plans and implementation beads must cite the ADRs they rely on. Uncited ADR reliance is a policy violation."
+    severity: warning
+    reference: "docs/core/ARCHITECTURE.md#adr-lifecycle"
+
+  # --- Domain governance ---
+
+  - id: domain-operations-require-approval
+    description: "Adding, splitting, or merging domains requires explicit human approval and must produce an ADR."
+    severity: error
+    reference: "docs/core/ARCHITECTURE.md#domains"
+
+  - id: spec-declares-impacted-domains
+    description: "Every spec must declare its impacted domains and relevant ADR touchpoints."
+    severity: warning
+    reference: "docs/core/MODES.md#spec-mode"
+
+  # --- Beads discipline ---
+
+  - id: beads-concise-entries
+    description: "Beads entries must remain concise and execution-oriented. Long-form specs, ADRs, and domain docs live in the documentation system, not in Beads."
+    severity: warning
+    reference: "docs/adr/ADR-0002.md"
+
+  - id: beads-active-workset
+    description: "Keep only active and near-term issues open in Beads. Regularly clean up completed work. Rely on git history + docs for archival traceability."
+    severity: warning
+    reference: "docs/adr/ADR-0002.md"
+
+  # --- Scope discipline ---
+
+  - id: implementation-scope-discipline
+    description: "Implementation Mode must not widen scope beyond the bead definition. Discovered work becomes new beads with explicit dependencies."
+    severity: error
+    mode: implementation
+    reference: "docs/core/MODES.md#implementation-mode"
+
+  # --- Worktree discipline ---
+
+  - id: worktree-required-for-implementation
+    description: "Implementation work must run in an isolated git worktree tied to the bead. Changes outside the assigned worktree are forbidden."
+    severity: error
+    mode: implementation
+    reference: "docs/core/ARCHITECTURE.md#worktrees"

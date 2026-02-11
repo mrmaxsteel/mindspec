@@ -1,5 +1,5 @@
 ---
-description: Check the current mindspec mode and active specification
+description: Check the current MindSpec mode and active specification
 ---
 
 # Spec Status Workflow
@@ -12,85 +12,92 @@ User invokes `/spec-status` or asks about current mode/spec.
 
 ## Steps
 
-### 1. Check State File
+### 1. Determine Current State
 
-Read `.mindspec/current-spec.json`.
+Check for:
+- Active spec files in `docs/specs/`
+- Spec approval status
+- Implementation beads in Beads (if any)
+- Plan approval status
+- Active worktrees
 
-If file doesn't exist:
-> 📭 **No active spec**
-> 
-> Use `/spec-init <id>` to start a new specification.
-> 
-> **Current mode**: Spec Mode (no approved spec)
+### 2. Determine Mode
 
-### 2. Parse Current State
+| Condition | Mode |
+|:----------|:-----|
+| No approved spec | **Spec Mode** |
+| Approved spec, no approved plan | **Plan Mode** |
+| Approved spec + approved plan + active bead | **Implementation Mode** |
 
-Extract from the state file:
-- `activeSpec`: The current spec ID
-- `mode`: Either "spec" or "implementation"
-- `lastUpdated`: Timestamp of last state change
-
-### 3. Read Spec Details
-
-If an active spec exists, read `docs/specs/<activeSpec>/spec.md`:
-- Extract the Goal (first line summary)
-- Count acceptance criteria (total and completed)
-- Get current Approval status
-
-### 4. Report Status
-
-Present the status:
+### 3. Report Status
 
 #### If in Spec Mode:
 
-> 📝 **Mode**: Spec Mode
-> 
+> **Mode**: Spec Mode
+>
 > **Active Spec**: `<id>` — <goal summary>
-> 
+>
 > **Approval Status**: <DRAFT | PENDING_REVIEW>
-> 
+>
+> **Impacted Domains**: <domain list>
+>
 > **Acceptance Criteria**: <N> defined
-> 
-> **Last Updated**: <timestamp>
-> 
+>
 > ---
-> 
+>
 > **Next steps**:
-> - Complete requirements and acceptance criteria
-> - Use `/spec-approve` when ready for implementation
+> - Complete requirements, domains, and acceptance criteria
+> - Use `/spec-approve` when ready for planning
+
+#### If in Plan Mode:
+
+> **Mode**: Plan Mode
+>
+> **Active Spec**: `<id>` — <goal summary> (APPROVED)
+>
+> **Implementation Beads**: <N> defined
+>
+> **ADRs Cited**: <list>
+>
+> ---
+>
+> **Next steps**:
+> - Define implementation beads with verification steps
+> - Use `/plan-approve` when ready for implementation
 
 #### If in Implementation Mode:
 
-> 🔨 **Mode**: Implementation Mode
-> 
-> **Active Spec**: `<id>` — <goal summary>
-> 
-> **Approval Status**: APPROVED
-> 
-> **Acceptance Criteria**: <completed>/<total> complete
-> 
-> **Last Updated**: <timestamp>
-> 
+> **Mode**: Implementation Mode
+>
+> **Active Spec**: `<id>` — <goal summary> (APPROVED)
+>
+> **Active Bead**: <bead-id> — <scope summary>
+>
+> **Worktree**: <worktree path>
+>
+> **Verification Steps**: <completed>/<total> complete
+>
 > ---
-> 
+>
 > **Reminders**:
-> - Stay within spec scope
+> - Stay within bead scope
 > - Update docs alongside code
-> - Mark acceptance criteria as complete when done
+> - Mark verification steps as complete when done
 
-### 5. List Recent Specs (Optional)
+### 4. List Recent Specs (Optional)
 
 If user asks, list specs in `docs/specs/`:
 
-| Spec ID | Status | Criteria |
-| :------ | :----- | :------- |
-| 001-skeleton | DRAFT | 5 defined |
-| 002-memory | APPROVED | 3/7 complete |
+| Spec ID | Status | Domains | Criteria |
+|:--------|:-------|:--------|:---------|
+| 001-skeleton | DRAFT | core | 5 defined |
+| 002-glossary | DRAFT | context-system | 5 defined |
 
 ---
 
 ## Notes
 
 - This workflow is read-only; it doesn't change state
-- Use `/spec-init` to change active spec
-- Use `/spec-approve` to transition modes
+- Use `/spec-init` to start a new spec
+- Use `/spec-approve` to transition Spec → Plan
+- Use `/plan-approve` to transition Plan → Implementation

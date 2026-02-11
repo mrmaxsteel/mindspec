@@ -1,11 +1,11 @@
-# Mindspec Product Backlog
+# MindSpec Product Backlog
 
-> **Principle**: Prioritize features that enable mindspec to assist in building mindspec itself (dogfooding).
+> **Principle**: Prioritize features that enable MindSpec to assist in building MindSpec itself (dogfooding).
 
 ## Priority Tiers
 
 | Tier | Description |
-| :--- | :---------- |
+|:-----|:-----------|
 | **P0** | Immediately useful for the next development session |
 | **P1** | Needed within the first few specs |
 | **P2** | Important for scaled usage |
@@ -13,51 +13,100 @@
 
 ---
 
-## P0: Immediate Value (Use While Building Mindspec)
+## Done
 
-### ✅ Done: Mode System + Antigravity Integration
-- [x] Spec Mode vs Implementation Mode documentation
-- [x] `/spec-init`, `/spec-approve`, `/spec-status` workflows
-- [x] Agent rules for mode enforcement
-- [x] `AGENTS.md` repository instructions
+### Documentation Alignment
+- [x] Three-mode system (Spec/Plan/Implement) documented in MODES.md
+- [x] ARCHITECTURE.md rewritten for Beads + worktrees + domains + Claude Code
+- [x] AGENTS.md updated for three-mode system + Beads + ADR governance
+- [x] Agent rules (.agent/rules/mindspec-modes.md) aligned with three modes
+- [x] GLOSSARY.md rebuilt with v1 primitives
+- [x] CONVENTIONS.md updated with domain/worktree/Beads conventions
+- [x] policies.yml expanded for Plan mode, ADR governance, domains, Beads, worktrees
+- [x] ADR-0001: DDD Enablement + DDD-Informed Context Packs (proposed)
+- [x] ADR-0002: Beads Integration Strategy (proposed)
+- [x] INIT.md archived (superseded by mindspec.md)
 
-### 🔲 001: CLI Skeleton + Doctor
+---
+
+## P0: Immediate Value (Use While Building MindSpec)
+
+### 001: CLI Skeleton + Doctor
 **Why P0**: Establishes CLI foundation and provides immediate project health validation.
 
 **Scope**:
-- CLI entry point: `python -m mindspec`
+- CLI entry point
 - `mindspec doctor` command for project structure health checks
-- Validate: docs/core/, GLOSSARY.md, docs/specs/ exist
+- Validate: `docs/core/`, `docs/domains/`, `GLOSSARY.md`, `docs/specs/`, `architecture/` exist
 
-**Immediate Use**: Validate mindspec's own project structure.
+**Immediate Use**: Validate MindSpec's own project structure.
 
-### 🔲 002: Glossary-Based Context Injection
+### 002: Glossary-Based Context Injection
 **Why P0**: Enables deterministic doc retrieval based on keywords.
 
 **Scope**:
-- Parse `GLOSSARY.md` into keyword → target mapping
+- Parse `GLOSSARY.md` into keyword-to-target mapping
 - Match keywords from input text
 - Extract targeted documentation sections
 - CLI: `mindspec glossary list|match|show`
 
 **Immediate Use**: Agent can pull architectural context when working on specs.
 
-### 🔲 003: Context Pack Generation
+### 003: Context Pack Generation (with DDD Routing)
 **Why P0**: Reproducible context bundles for agent sessions.
 
 **Scope**:
 - CLI command: `mindspec context pack <spec-id>`
-- Include: spec, matched docs, policies, commit tuple
-- Output: `context-pack.md` in spec directory
+- Include: spec, matched domain docs, accepted ADRs, policies, commit tuple
+- DDD-informed assembly: start from impacted domains, 1-hop neighbor expansion via Context Map (per ADR-0001)
+- Output: `context-pack.md` in spec directory with provenance
 
-**Immediate Use**: Consistent context for every implementation session.
+**Immediate Use**: Consistent, domain-aware context for every session.
 
 ---
 
 ## P1: Core Workflow Support
 
-### 🔲 004: Proof Runner (MVP)
-**Why P1**: Foundation for "proof-of-done" invariant; enables trust in completion.
+### 004: Beads Integration Conventions + Tooling
+**Why P1**: Beads is central to the execution model; conventions must be codified.
+
+**Scope**:
+- Spec bead creation from approved spec (concise summary + link)
+- Implementation bead creation from plan
+- Active workset hygiene commands
+- Bead-to-worktree mapping
+
+### 005: Worktree Lifecycle Management
+**Why P1**: Implementation Mode requires worktree isolation.
+
+**Scope**:
+- Create worktree for a bead: `mindspec worktree create <bead-id>`
+- Naming convention: `worktree-<bead-id>`
+- Clean state sync on bead closure
+- List active worktrees: `mindspec worktree list`
+
+### 006: Domain Scaffold + Context Map
+**Why P1**: DDD primitives need tooling support.
+
+**Scope**:
+- `mindspec domain add <name>`: scaffold `/docs/domains/<domain>/` with template files
+- `mindspec domain list`: show registered domains
+- Context Map template at `/docs/context-map.md`
+- Domain operations produce ADR drafts
+
+**Partial**: Initial domain structure (`docs/domains/{core,context-system,workflow}/`) and `docs/context-map.md` created manually. CLI tooling (`mindspec domain add/list`) still needed.
+
+### 007: ADR Lifecycle Tooling
+**Why P1**: ADR governance needs tooling support.
+
+**Scope**:
+- `mindspec adr create <title>`: generate ADR template with metadata
+- `mindspec adr list`: show ADRs by status
+- Superseding workflow: create new ADR linking to superseded one
+- Validate ADR citations in plans
+
+### 008: Proof Runner (MVP)
+**Why P1**: Foundation for "proof-of-done" invariant.
 
 **Scope**:
 - Parse `Validation Proofs` section from spec.md
@@ -65,98 +114,73 @@
 - Report pass/fail with artifacts
 - CLI: `mindspec proof run <spec-id>`
 
-**Use**: Verify specs before marking complete; dogfood immediately.
-
-### 🔲 005: Task Graph Generation
-**Why P1**: Convert spec requirements into structured task graph.
+### 009: Doc Sync Validation
+**Why P1**: Enforce "done includes doc-sync" rule.
 
 **Scope**:
-- Parse spec.md requirements and scope
-- Generate `tasks.json` with dependencies
-- Support multi-file tasks
-
-**Use**: Break down specs into actionable, trackable tasks.
-
-### 🔲 006: Doc Sync Validation
-**Why P1**: Verify that code changes have corresponding doc updates.
-
-**Scope**:
-- CLI command: `mindspec validate docs`
+- CLI: `mindspec validate docs`
 - Compare changed files against doc requirements
 - Flag missing doc updates
-
-**Use**: Enforce "done includes doc-sync" rule.
-
-### 🔲 007: ACP Workflow
-**Why P1**: Formalizes architecture divergence handling with templated proposals.
-
-**Scope**:
-- CLI: `mindspec acp create <title>`
-- Generate ACP template in `docs/architecture/proposals/`
-- Include: summary, motivation, options, impact, required doc updates, approval question
-
-**Use**: Standardize divergence decisions; human gate for architecture changes.
 
 ---
 
 ## P2: Project Health + Memory
 
-### 🔲 008: Spec Validation
+### 010: Spec Validation
 **Why P2**: Enables `/spec-approve` to verify acceptance criteria quality.
 
 **Scope**:
-- CLI command: `mindspec validate spec <id>`
-- Check: All sections filled, criteria count, measurability
-- Output: Pass/fail with specific feedback
+- CLI: `mindspec validate spec <id>`
+- Check: all sections filled, criteria count, measurability, impacted domains declared
 
-### 🔲 009: Memory Service (Basic)
-**Why P2**: Persist decisions, gotchas, debugging outcomes.
+### 011: Plan Validation
+**Why P2**: Ensures plan quality before Implementation Mode.
 
 **Scope**:
-- SQLite-based local store
+- Verify implementation beads have verification steps
+- Verify ADR citations
+- Verify dependency graph is acyclic
+- Verify scope coverage against spec requirements
+
+### 012: Memory Service (Basic)
+**Why P2**: Persist decisions, gotchas, debugging outcomes across sessions.
+
+**Scope**:
+- Local persistent store
 - CLI: `mindspec memory save`, `mindspec memory recall`
-- Tag by spec-id, keywords
-
-**Use**: Cross-session continuity.
-
-### 🔲 010: Workspace Provider
-**Why P2**: Multi-repo support, submodule resolution.
-
-**Scope**:
-- `workspace.yml` configuration
-- Resolve repo roots and aliases
-- **Default implementation**: Meta-repo + submodules provider
-- Commit tuple generation for reproducibility
+- Tag by spec-id, domain, keywords
+- Memory entries reference canonical beads or specs (per ADR-0002)
 
 ---
 
 ## P3: Advanced Features
 
-### 🔲 011: Architecture Divergence Detection
+### 013: Architecture Divergence Detection
 - Compare implementation against documented architecture
-- Auto-trigger ACP workflow when divergence detected
+- Auto-trigger ADR divergence protocol when violations detected
 
-### 🔲 012: Parallel Task Dispatch
-- Identify ready tasks (no dependencies)
-- Generate per-task context packets
+### 014: Parallel Task Dispatch
+- Identify ready beads (no unresolved dependencies)
+- Generate per-bead context packets for parallel agent execution
 
-### 🔲 013: Observability / Telemetry
+### 015: Observability / Telemetry
 - Glossary hit/miss rates
 - Token budgets and cache rates
+- OTel-friendly event shaping for future Agent Mind Visualization
 
 ---
 
 ## Implementation Order
 
-Based on feedback interpretation:
-
 ```
 P0: 001 → 002 → 003 (CLI foundation → glossary → context packs)
-P1: 004 → 007 → 005 → 006 (proof runner → ACP → tasks → doc-sync)
-P2: 008 → 009 → 010 (spec validation → memory → workspace)
+P1: 004 → 005 → 006 → 007 → 008 → 009 (Beads → worktrees → domains → ADRs → proofs → doc-sync)
+P2: 010 → 011 → 012 (spec validation → plan validation → memory)
 ```
 
 **Rationale**:
-- Proof Runner (004) comes early to match "proof-of-done" invariant
-- ACP Workflow (007) supports the ACP-first divergence gate
-- Workspace Provider (010) has meta-repo/submodules as target implementation
+- CLI + glossary + context packs are immediately useful for dogfooding
+- Beads and worktree conventions codify the execution model from ADR-0002
+- Domain scaffold enables the DDD model from ADR-0001
+- ADR tooling supports the governance model
+- Proof runner and doc-sync enforce core invariants

@@ -10,8 +10,9 @@ MindSpec is a **spec-driven development + context management framework** (Claude
 2. **Spec + context management** that is concise, deterministic, and portable with the repo.
 3. **Architecture decisions lifecycle** as a first-class primitive (ADR-aware, divergence-gated).
 4. **DDD-aware documentation structure** where domains are explicit and govern where specs/ADRs/docs live.
-5. **Claude Code-first integration** that feels native and minimizes operator friction.
-6. **Worktree-first execution model** so work can be isolated, parallelized, and reviewed cleanly.
+5. **Explicit Context Map** that documents boundaries, integrations, and source-of-truth ownership.
+6. **Claude Code-first integration** that feels native and minimizes operator friction.
+7. **Worktree-first execution model** so work can be isolated, parallelized, and reviewed cleanly.
 
 ## Non-Goals (v1)
 
@@ -168,6 +169,21 @@ These operations produce ADRs (or a “Domain Decision Record”) because they c
 
 ---
 
+### 5) Context Map (integration blueprint)
+
+MindSpec maintains a lightweight **Context Map** to make boundaries, ownership, and integrations explicit.
+
+**Location (v1):** `/docs/context-map.md`
+
+**What it captures (v1):**
+
+* the major MindSpec contexts (e.g., Roadmap/Work Graph, Spec, Plan, Implement, Knowledge/Governance, Context Delivery, Telemetry)
+* upstream/downstream relationships between contexts (who produces truth vs who consumes it)
+* integration contracts and translation points (e.g., published language/event schemas, adapters/ACLs around Beads/Git/agent tooling)
+* source-of-truth notes per concept (e.g., where status, validation evidence, ADR state, and domain boundaries are authoritative)
+
+**Maintenance rule (v1):** any change that introduces a new context, changes ownership, or adds a new integration contract must update the Context Map in the same bead.
+
 ## Context System (the “hero feature” for v1)
 
 MindSpec’s most important capability is **efficient, deterministic context delivery** per mode.
@@ -249,6 +265,7 @@ v1 should emit structured events (even if minimal) so that later we can build th
 
 * Beads-based roadmap + spec/task primitives and conventions
 * Three-mode workflow semantics (Spec/Plan/Implement)
+* Context Map (`/docs/context-map.md`) defining major contexts, integrations, and source-of-truth ownership
 * ADR lifecycle + superseding workflow with explicit user gate
 * Domain-first docs/ADR structure and domain change governance
 * Deterministic, budgeted Context Packs (mode-specific) with provenance

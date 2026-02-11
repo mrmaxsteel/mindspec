@@ -1,127 +1,145 @@
 ---
-description: Mindspec spec-mode vs implementation-mode enforcement
+description: MindSpec three-mode enforcement rules for agents
 ---
 
-# Mindspec Mode Rules
+# MindSpec Mode Rules
 
-These rules enforce the spec-driven development workflow where specifications must be approved before any code is written.
+These rules enforce the spec-driven development workflow. MindSpec uses three modes: **Spec**, **Plan**, and **Implementation**. Each mode gates what artifacts you may create or modify.
 
 ## Core Invariant
 
-Before writing any code in `src/` or implementation directories, you MUST verify:
+Before writing any code, you MUST verify:
 
-1. **Spec Exists**: A corresponding spec in `docs/specs/<id>/spec.md` exists
-2. **Spec Approved**: The spec has `Status: APPROVED` in its Approval section
-3. **Acceptance Criteria Defined**: All acceptance criteria are explicitly listed
+1. **Spec exists and is approved**: A spec in `docs/specs/<id>/spec.md` with `Status: APPROVED`
+2. **Plan exists and is approved**: Implementation beads are defined in Beads with explicit verification steps
+3. **You are working on a specific bead**: A bead ID is active with a worktree assigned
 
-If these conditions are not met, you are in **Spec Mode**: only create/modify markdown files.
+If conditions 1-3 are not met, you are in **Spec Mode** or **Plan Mode** respectively. Only proceed to Implementation Mode when all three hold.
 
 ---
 
-## Spec Mode Behavior
+## Spec Mode
 
-When no approved spec exists for the current work:
+**When**: No approved spec exists for the current work.
 
 ### Permitted Actions
 - Create/update `docs/specs/<id>/spec.md`
-- Define acceptance criteria as checkable items
-- Build task graph in `docs/specs/<id>/tasks.json`
-- Generate context packs
-- Update documentation in `docs/core/` or `docs/features/`
+- Define acceptance criteria
+- Declare impacted domains and ADR touchpoints
+- Document open questions
+- Update documentation in `docs/core/`, `docs/domains/`, or `docs/features/`
 - Modify `GLOSSARY.md`
+- Draft ADR proposals in `docs/adr/`
 - Request human review when spec is ready
 
 ### Forbidden Actions
-- Creating or modifying files in `src/`
-- Creating or modifying files in `tests/`
+- Creating or modifying files in `src/` or test directories
 - Changing build configuration that affects runtime
-- Any implementation code
+- Creating implementation beads in Beads (that's Plan Mode)
+
+### Transition
+User must explicitly approve the spec via `/spec-approve` or direct confirmation. The spec's Approval section must be updated to `Status: APPROVED`.
 
 ---
 
-## Implementation Mode Transition
+## Plan Mode
 
-To transition from Spec Mode to Implementation Mode:
+**When**: An approved spec exists but implementation beads are not yet approved.
 
-1. The user must explicitly approve the spec (via `/spec-approve` or direct confirmation)
-2. Update the spec's Approval section:
-   ```markdown
-   ## Approval
-   - **Status**: APPROVED
-   - **Approved By**: @username
-   - **Approval Date**: YYYY-MM-DD
-   ```
-3. Only then may code changes begin
+### Permitted Actions
+- Create implementation beads (child beads) in Beads with:
+  - Small scope (one slice of value)
+  - 3-7 step micro-plan
+  - Explicit verification steps
+  - Dependencies between beads
+- Review and cite applicable ADRs for each bead
+- Review domain docs and Context Map
+- Propose new ADRs if divergence is detected
+- Update documentation to clarify scope
 
----
+### Required Review (before planning)
+1. Read accepted ADRs for impacted domains
+2. Read domain docs (`overview.md`, `architecture.md`, `interfaces.md`)
+3. Check Context Map for neighboring context contracts
+4. Verify existing constraints and invariants
 
-## Mode Check Protocol
+### Forbidden Actions
+- Writing implementation code in `src/` or test directories
+- Widening scope beyond the spec's defined user value
+- Skipping ADR review
 
-Before any tool call that creates or modifies code:
+### ADR Fitness Check
+If an accepted ADR blocks progress or is unfit:
+1. **Stop** and inform the user
+2. Present options: continue-as-is vs. propose superseding ADR
+3. If user accepts divergence, create a new ADR that supersedes the prior one
+4. Resume planning with updated architecture
 
-1. Identify the relevant spec ID from context or ask the user
-2. Read `docs/specs/<id>/spec.md`
-3. Check the Approval section for `Status: APPROVED`
-4. If not approved:
-   - Inform the user: "This spec is not yet approved. We're in Spec Mode."
-   - Offer to help complete the spec or request approval
-   - Do not proceed with code changes
-
----
-
-## Active Spec Tracking
-
-Check `.mindspec/current-spec.json` for the active spec:
-
-```json
-{
-  "activeSpec": "<spec-id>",
-  "mode": "spec" | "implementation",
-  "lastUpdated": "<ISO timestamp>"
-}
-```
-
-Update this file when:
-- A new spec is initialized (`/spec-init`)
-- A spec is approved (`/spec-approve`)
-- Work on a spec is completed
+### Transition
+User must explicitly approve the plan. All implementation beads must have verification steps and ADR citations.
 
 ---
 
-## Divergence Handling
+## Implementation Mode
 
-If implementation requires changes not covered by the approved spec:
+**When**: An approved spec and approved plan exist; you are executing a specific implementation bead.
 
+### Permitted Actions
+- Code changes within the bead's defined scope
+- Test creation for the bead's scope
+- Documentation updates (doc-sync is mandatory)
+- Capturing proof/evidence (command outputs, test results)
+- Updating bead status in Beads
+
+### Obligations
+1. **Worktree isolation**: Work in a bead-specific worktree
+2. **Scope discipline**: Stay within the bead's scope. Discovered work becomes new beads + dependencies.
+3. **Doc sync**: Update corresponding documentation with every code change
+4. **Proof of done**: Bead closes only when verification steps pass with captured evidence
+5. **ADR compliance**: Follow cited ADRs; divergence triggers the divergence protocol
+
+### Forbidden Actions
+- Widening scope beyond the bead definition
+- Ignoring ADR divergence
+- Completing a bead without proof and doc-sync
+- Making changes outside the assigned worktree
+
+### ADR Divergence Protocol
+If implementation requires deviation from a cited ADR:
 1. **Stop** code changes immediately
-2. **Return to Spec Mode**
-3. Update the spec with new requirements
-4. Request re-approval before continuing implementation
+2. Inform the user: specify the ADR and the nature of divergence
+3. Present options: continue-as-is, propose new superseding ADR, or revise scope
+4. A new ADR must be accepted before implementation resumes
 
-This ensures the spec remains the source of truth.
+### Completion
+A bead is complete when:
+1. All verification steps pass with captured evidence
+2. Documentation is updated
+3. Bead status is updated in Beads with closure notes
+4. Worktree changes are ready for review
 
 ---
 
-## Documentation Sync
+## Human-in-the-Loop Gates
 
-Even in Implementation Mode, every code change must:
+Always stop and request explicit human confirmation for:
 
-1. Update corresponding documentation
-2. Keep acceptance criteria aligned
-3. Maintain glossary entries for new concepts
-
-"Done" is not complete until doc-sync passes.
+- **Spec approval**: Spec Mode → Plan Mode
+- **Plan approval**: Plan Mode → Implementation Mode
+- **ADR divergence**: any mode detects an ADR is unfit
+- **Domain operations**: adding, splitting, or merging domains
+- **Scope expansion**: changes to user value definition
 
 ---
 
 ## Workflow Commands
 
-Use these workflows for explicit mode management:
-
 | Command | Purpose |
-| :------ | :------ |
-| `/spec-init` | Initialize a new specification |
-| `/spec-approve` | Request transition to Implementation Mode |
-| `/spec-status` | Check current mode and active spec |
+|:--------|:--------|
+| `/spec-init` | Initialize a new specification (enters Spec Mode) |
+| `/spec-approve` | Request Spec Mode → Plan Mode transition |
+| `/plan-approve` | Request Plan Mode → Implementation Mode transition |
+| `/spec-status` | Check current mode, active spec, and bead state |
 
 ---
 
@@ -130,3 +148,4 @@ Use these workflows for explicit mode management:
 - [MODES.md](docs/core/MODES.md) — Full mode definitions
 - [ARCHITECTURE.md](docs/core/ARCHITECTURE.md) — System design
 - [policies.yml](architecture/policies.yml) — Machine-checkable policies
+- [mindspec.md](mindspec.md) — Product specification
