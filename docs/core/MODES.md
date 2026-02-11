@@ -71,6 +71,30 @@ Before planning, the agent must review:
 - Context Map for neighboring context contracts
 - Existing constraints and invariants
 
+### Plan Artifact
+
+When Plan Mode starts, create `docs/specs/<id>/plan.md` with YAML frontmatter:
+
+```yaml
+status: Draft
+spec_id: <id>
+version: "0.1"
+last_updated: YYYY-MM-DD
+```
+
+The plan is iteratively edited during Plan Mode — always readable on disk. On approval, update the frontmatter:
+
+```yaml
+status: Approved
+approved_at: YYYY-MM-DDTHH:MM:SSZ
+approved_by: <human>
+approved_sha: <git commit SHA>
+bead_ids: [beads-xxx, beads-yyy]
+adr_citations: [ADR-NNNN]
+```
+
+Frontmatter is the single source of truth for plan status.
+
 ### Output
 
 Child beads (**Implementation Beads**) in Beads, each with:
@@ -92,8 +116,8 @@ If the planner detects that an accepted ADR blocks progress or is unfit:
 
 ### Permitted Artifacts
 
+- `docs/specs/<id>/plan.md` (the live plan draft)
 - Beads entries (implementation beads, dependency links)
-- Plan documents / micro-plans
 - ADR proposals (if divergence detected)
 - Documentation updates (if clarifying scope)
 

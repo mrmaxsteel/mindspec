@@ -12,7 +12,8 @@ All work follows a three-phase approach:
 - **Exit**: Explicit user approval via `/spec-approve`
 
 ### Plan Mode
-- **Permitted**: Beads entries (implementation beads), plan documents, ADR proposals
+- **Artifact**: `docs/specs/<id>/plan.md` — created at Plan Mode start (`status: Draft`), iteratively edited, approved via frontmatter state change (`status: Approved` + `approved_at`, `approved_by`, `approved_sha`, `bead_ids`, `adr_citations`)
+- **Permitted**: `plan.md`, Beads entries (implementation beads), ADR proposals
 - **Focus**: Bounded work chunks with verification steps, ADR review, dependency mapping
 - **Required**: Review domain docs + accepted ADRs + Context Map before planning
 - **Exit**: Explicit user approval via `/plan-approve`

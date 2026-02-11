@@ -81,7 +81,11 @@ Normal commits during a mode use the same prefix convention. Use `chore(<bead-id
 
 **When**: An approved spec exists but implementation beads are not yet approved.
 
+### Plan Artifact
+When Plan Mode starts, create `docs/specs/<id>/plan.md` with YAML frontmatter (`status: Draft`, `spec_id`, `version`, `last_updated`). Edit iteratively during planning — it is always readable on disk. On approval, update frontmatter to `status: Approved` and record `approved_at`, `approved_by`, `approved_sha`, `bead_ids`, `adr_citations`. Frontmatter is the single source of truth for plan status.
+
 ### Permitted Actions
+- Create/edit `docs/specs/<id>/plan.md` (live plan draft)
 - Create implementation beads (child beads) in Beads with:
   - Small scope (one slice of value)
   - 3-7 step micro-plan

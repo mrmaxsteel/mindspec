@@ -30,6 +30,56 @@ Each domain lives at `/docs/domains/<domain>/` with:
 | `runbook.md` | Ops/dev workflows |
 | `adr/ADR-xxxx.md` | Domain-scoped architecture decision records |
 
+## Spec Folder Layout
+
+All artifacts for a feature are co-located in a single spec folder:
+
+```
+docs/specs/NNN-slug/
+  spec.md                  # canonical specification
+  plan.md                  # plan (live draft → approved)
+  context-pack.md          # generated context pack
+  proofs/                  # optional: proof runner outputs
+    2026-02-11_1800.txt
+```
+
+If multiple plan iterations are needed, use a subfolder:
+
+```
+docs/specs/NNN-slug/
+  spec.md
+  plan/
+    plan-v1.md
+    plan-v2.md
+  context/
+    pack-v1.md
+```
+
+### `plan.md` Lifecycle
+
+`plan.md` is a **first-class versioned artifact**, created as soon as Plan Mode starts:
+
+1. **Plan Mode starts** — Create `plan.md` with YAML frontmatter:
+   ```yaml
+   status: Draft
+   spec_id: NNN-slug
+   version: "0.1"
+   last_updated: YYYY-MM-DD
+   ```
+2. **During Plan Mode** — Iteratively edit `plan.md`. It is always readable on disk.
+3. **Approval** — Update frontmatter to record the state change:
+   ```yaml
+   status: Approved
+   approved_at: YYYY-MM-DDTHH:MM:SSZ
+   approved_by: <human>
+   approved_sha: <git commit SHA>
+   bead_ids: [beads-xxx, beads-yyy]
+   adr_citations: [ADR-NNNN]
+   ```
+4. **On approval** — Create/confirm implementation beads in Beads and write bead IDs back into `plan.md`.
+
+Frontmatter is the **single source of truth** for plan status. No separate approval section at the bottom.
+
 ## Specification Naming
 
 Specs follow the pattern `NNN-slug-name`:
