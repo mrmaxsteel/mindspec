@@ -64,5 +64,8 @@ make build                   # Build binary to ./bin/mindspec
 ./bin/mindspec next          # Claim next ready bead and get guidance
 ./bin/mindspec state show    # Check current mode/spec/bead
 ./bin/mindspec instruct      # Emit mode-aware guidance
+./bin/mindspec validate spec <id>   # Validate spec quality
+./bin/mindspec validate plan <id>   # Validate plan quality
+./bin/mindspec validate docs        # Check doc-sync compliance
 make test                    # Run all tests
 ```
