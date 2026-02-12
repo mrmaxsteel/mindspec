@@ -42,6 +42,16 @@ Execute the active bead in an isolated worktree. Stay within scope.
 
 Use `impl({{.ActiveBead}}): <summary>` for implementation commits.
 
+## Completion Checklist
+
+When the bead is done:
+
+1. Run verification steps and capture evidence
+2. Update documentation (doc-sync)
+3. Close the bead: `bd close <id>`
+4. Advance state: if more beads remain, set next bead or `--mode=plan`; if all done, `mindspec state set --mode=idle`
+5. Milestone commit (include `.mindspec/state.json` and `.beads/` changes)
+
 ## Next Action
 
-Implement the bead's scope, run verification steps, update docs, then close the bead with `bd close`.
+Implement the bead's scope, then follow the completion checklist above.
