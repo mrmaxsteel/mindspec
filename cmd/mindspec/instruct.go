@@ -6,6 +6,7 @@ import (
 
 	"github.com/mindspec/mindspec/internal/instruct"
 	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mindspec/mindspec/internal/trace"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -57,6 +58,14 @@ var instructCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		trace.Emit(trace.NewEvent("instruct.render").
+			WithSpec(s.ActiveSpec).
+			WithTokens(trace.EstimateTokens(output)).
+			WithData(map[string]any{
+				"tokens_total": trace.EstimateTokens(output),
+				"mode":         s.Mode,
+				"template":     s.Mode + ".md",
+			}))
 		fmt.Print(output)
 		return nil
 	},

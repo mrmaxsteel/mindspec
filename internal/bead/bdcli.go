@@ -7,6 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/mindspec/mindspec/internal/trace"
 )
 
 // execCommand is a package-level variable for testability.
@@ -62,8 +65,7 @@ func Create(title, desc, issueType string, priority int, parent string) (*BeadIn
 		args = append(args, "--parent="+parent)
 	}
 
-	cmd := execCommand("bd", args...)
-	out, err := cmd.Output()
+	out, err := tracedOutput("create", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd create failed: %s", string(exitErr.Stderr))
@@ -80,8 +82,8 @@ func Create(title, desc, issueType string, priority int, parent string) (*BeadIn
 
 // Search searches for beads matching query, returning only open beads.
 func Search(query string) ([]BeadInfo, error) {
-	cmd := execCommand("bd", "search", query, "--json", "--status=open")
-	out, err := cmd.Output()
+	args := []string{"search", query, "--json", "--status=open"}
+	out, err := tracedOutput("search", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd search failed: %s", string(exitErr.Stderr))
@@ -98,8 +100,8 @@ func Search(query string) ([]BeadInfo, error) {
 
 // SearchAny searches for beads matching query, returning beads of any status.
 func SearchAny(query string) ([]BeadInfo, error) {
-	cmd := execCommand("bd", "search", query, "--json")
-	out, err := cmd.Output()
+	args := []string{"search", query, "--json"}
+	out, err := tracedOutput("search-any", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd search failed: %s", string(exitErr.Stderr))
@@ -116,8 +118,8 @@ func SearchAny(query string) ([]BeadInfo, error) {
 
 // Show returns details for a single bead by ID.
 func Show(id string) (*BeadInfo, error) {
-	cmd := execCommand("bd", "show", id, "--json")
-	out, err := cmd.Output()
+	args := []string{"show", id, "--json"}
+	out, err := tracedOutput("show", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd show failed: %s", string(exitErr.Stderr))
@@ -134,8 +136,8 @@ func Show(id string) (*BeadInfo, error) {
 
 // ListOpen returns all open beads.
 func ListOpen() ([]BeadInfo, error) {
-	cmd := execCommand("bd", "list", "--status=open", "--json")
-	out, err := cmd.Output()
+	args := []string{"list", "--status=open", "--json"}
+	out, err := tracedOutput("list-open", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd list failed: %s", string(exitErr.Stderr))
@@ -152,8 +154,8 @@ func ListOpen() ([]BeadInfo, error) {
 
 // DepAdd adds a dependency: blocked depends on blocker.
 func DepAdd(blocked, blocker string) error {
-	cmd := execCommand("bd", "dep", "add", blocked, blocker)
-	out, err := cmd.CombinedOutput()
+	args := []string{"dep", "add", blocked, blocker}
+	out, err := tracedCombined("dep-add", args)
 	if err != nil {
 		return fmt.Errorf("bd dep add failed: %s", string(out))
 	}
@@ -162,8 +164,8 @@ func DepAdd(blocked, blocker string) error {
 
 // Update changes a bead's status.
 func Update(id, status string) error {
-	cmd := execCommand("bd", "update", id, "--status="+status)
-	out, err := cmd.CombinedOutput()
+	args := []string{"update", id, "--status=" + status}
+	out, err := tracedCombined("update", args)
 	if err != nil {
 		return fmt.Errorf("bd update failed: %s", string(out))
 	}
@@ -176,8 +178,7 @@ func Close(ids ...string) error {
 		return fmt.Errorf("Close requires at least one bead ID")
 	}
 	args := append([]string{"close"}, ids...)
-	cmd := execCommand("bd", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := tracedCombined("close", args)
 	if err != nil {
 		return fmt.Errorf("bd close failed: %s", string(out))
 	}
@@ -212,8 +213,7 @@ func WorktreeCreate(name, branch string) error {
 	if branch != "" {
 		args = append(args, "--branch="+branch)
 	}
-	cmd := execCommand("bd", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := tracedCombined("worktree-create", args)
 	if err != nil {
 		return fmt.Errorf("bd worktree create failed: %s", string(out))
 	}
@@ -222,8 +222,8 @@ func WorktreeCreate(name, branch string) error {
 
 // WorktreeList returns all worktrees via `bd worktree list --json`.
 func WorktreeList() ([]WorktreeListEntry, error) {
-	cmd := execCommand("bd", "worktree", "list", "--json")
-	out, err := cmd.Output()
+	args := []string{"worktree", "list", "--json"}
+	out, err := tracedOutput("worktree-list", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd worktree list failed: %s", string(exitErr.Stderr))
@@ -247,8 +247,7 @@ func WorktreeRemove(name string) error {
 	if !hasGitRemote() {
 		args = append(args, "--force")
 	}
-	cmd := execCommand("bd", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := tracedCombined("worktree-remove", args)
 	if err != nil {
 		return fmt.Errorf("bd worktree remove failed: %s", string(out))
 	}
@@ -267,8 +266,8 @@ func hasGitRemote() bool {
 
 // WorktreeInfo returns info about the current worktree via `bd worktree info --json`.
 func WorktreeInfo() (*WorktreeInfoResult, error) {
-	cmd := execCommand("bd", "worktree", "info", "--json")
-	out, err := cmd.Output()
+	args := []string{"worktree", "info", "--json"}
+	out, err := tracedOutput("worktree-info", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd worktree info failed: %s", string(exitErr.Stderr))
@@ -289,8 +288,8 @@ func WorktreeInfo() (*WorktreeInfoResult, error) {
 // Uses `bd ready --parent <parentID> --json` to find work items
 // whose dependencies are satisfied within the molecule.
 func MolReady(parentID string) ([]BeadInfo, error) {
-	cmd := execCommand("bd", "ready", "--parent", parentID, "--json")
-	out, err := cmd.Output()
+	args := []string{"ready", "--parent", parentID, "--json"}
+	out, err := tracedOutput("mol-ready", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd ready --parent failed: %s", string(exitErr.Stderr))
@@ -308,8 +307,8 @@ func MolReady(parentID string) ([]BeadInfo, error) {
 // MolShow returns the molecule structure as raw JSON bytes.
 // Uses `bd mol show <id> --json`.
 func MolShow(id string) ([]byte, error) {
-	cmd := execCommand("bd", "mol", "show", id, "--json")
-	out, err := cmd.Output()
+	args := []string{"mol", "show", id, "--json"}
+	out, err := tracedOutput("mol-show", args)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("bd mol show failed: %s", string(exitErr.Stderr))
@@ -317,6 +316,36 @@ func MolShow(id string) ([]byte, error) {
 		return nil, fmt.Errorf("bd mol show failed: %w", err)
 	}
 	return out, nil
+}
+
+// tracedOutput runs a bd command via cmd.Output() with trace instrumentation.
+func tracedOutput(op string, args []string) ([]byte, error) {
+	start := time.Now()
+	cmd := execCommand("bd", args...)
+	out, err := cmd.Output()
+	trace.Emit(trace.NewEvent("bead.cli").
+		WithDuration(time.Since(start)).
+		WithData(map[string]any{
+			"op":   op,
+			"args": args,
+			"ok":   err == nil,
+		}))
+	return out, err
+}
+
+// tracedCombined runs a bd command via cmd.CombinedOutput() with trace instrumentation.
+func tracedCombined(op string, args []string) ([]byte, error) {
+	start := time.Now()
+	cmd := execCommand("bd", args...)
+	out, err := cmd.CombinedOutput()
+	trace.Emit(trace.NewEvent("bead.cli").
+		WithDuration(time.Since(start)).
+		WithData(map[string]any{
+			"op":   op,
+			"args": args,
+			"ok":   err == nil,
+		}))
+	return out, err
 }
 
 // parseBeadList parses JSON output containing a list of BeadInfo.

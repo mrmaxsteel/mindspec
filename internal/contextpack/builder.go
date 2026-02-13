@@ -32,11 +32,12 @@ type ContextPack struct {
 	Goal       string
 	Domains    []string
 	Neighbors  []string
-	Sections   []packSection
+	Sections   []PackSection
 	Provenance []ProvenanceEntry
 }
 
-type packSection struct {
+// PackSection represents a titled section within a context pack.
+type PackSection struct {
 	Heading string
 	Content string
 }
@@ -88,7 +89,7 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 					continue
 				}
 				if doc.Interfaces != "" {
-					pack.Sections = append(pack.Sections, packSection{
+					pack.Sections = append(pack.Sections, PackSection{
 						Heading: fmt.Sprintf("Neighbor Domain: %s — Interfaces", neighbor),
 						Content: doc.Interfaces,
 					})
@@ -114,7 +115,7 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 
 	filtered := FilterADRs(adrs, relevantDomains)
 	for _, adr := range filtered {
-		pack.Sections = append(pack.Sections, packSection{
+		pack.Sections = append(pack.Sections, PackSection{
 			Heading: fmt.Sprintf("ADR: %s", adr.ID),
 			Content: adr.Content,
 		})
@@ -135,7 +136,7 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 	} else {
 		filteredPolicies := FilterPolicies(policies, mode)
 		if len(filteredPolicies) > 0 {
-			pack.Sections = append(pack.Sections, packSection{
+			pack.Sections = append(pack.Sections, PackSection{
 				Heading: "Applicable Policies",
 				Content: renderPoliciesTable(filteredPolicies),
 			})
@@ -156,7 +157,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 
 	// All modes: overview
 	if doc.Overview != "" {
-		pack.Sections = append(pack.Sections, packSection{
+		pack.Sections = append(pack.Sections, PackSection{
 			Heading: fmt.Sprintf("Domain: %s — Overview", domain),
 			Content: doc.Overview,
 		})
@@ -169,7 +170,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 
 	// Plan + Implement: architecture
 	if (mode == ModePlan || mode == ModeImplement) && doc.Architecture != "" {
-		pack.Sections = append(pack.Sections, packSection{
+		pack.Sections = append(pack.Sections, PackSection{
 			Heading: fmt.Sprintf("Domain: %s — Architecture", domain),
 			Content: doc.Architecture,
 		})
@@ -183,7 +184,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 	// Implement only: interfaces + runbook
 	if mode == ModeImplement {
 		if doc.Interfaces != "" {
-			pack.Sections = append(pack.Sections, packSection{
+			pack.Sections = append(pack.Sections, PackSection{
 				Heading: fmt.Sprintf("Domain: %s — Interfaces", domain),
 				Content: doc.Interfaces,
 			})
@@ -194,7 +195,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 			})
 		}
 		if doc.Runbook != "" {
-			pack.Sections = append(pack.Sections, packSection{
+			pack.Sections = append(pack.Sections, PackSection{
 				Heading: fmt.Sprintf("Domain: %s — Runbook", domain),
 				Content: doc.Runbook,
 			})

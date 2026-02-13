@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/mindspec/mindspec/internal/trace"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
@@ -75,8 +76,20 @@ func Write(root string, s *State) error {
 	return nil
 }
 
-// SetMode validates inputs and writes a new state.
+// SetMode validates inputs and writes a new state. Emits a trace event on transition.
 func SetMode(root, mode, spec, bead string) error {
+	// Read previous state for trace event
+	prevMode := "none"
+	if prev, err := Read(root); err == nil {
+		prevMode = prev.Mode
+	}
+	trace.Emit(trace.NewEvent("state.transition").
+		WithSpec(spec).
+		WithData(map[string]any{
+			"from":    prevMode,
+			"to":      mode,
+			"spec_id": spec,
+		}))
 	if !isValidMode(mode) {
 		return fmt.Errorf("invalid mode %q: must be one of %v", mode, ValidModes)
 	}

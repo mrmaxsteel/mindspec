@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/glossary"
+	"github.com/mindspec/mindspec/internal/trace"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -67,6 +68,20 @@ var glossaryMatchCmd = &cobra.Command{
 		}
 
 		matched := glossary.Match(entries, args[0])
+
+		// Emit trace event for glossary match
+		tokensMatched := 0
+		for _, e := range matched {
+			tokensMatched += trace.EstimateTokens(e.Term + " " + e.Target)
+		}
+		trace.Emit(trace.NewEvent("glossary.match").
+			WithTokens(tokensMatched).
+			WithData(map[string]any{
+				"query":          args[0],
+				"hit_count":      len(matched),
+				"tokens_matched": tokensMatched,
+			}))
+
 		if len(matched) == 0 {
 			fmt.Println("No matching terms found.")
 			return nil

@@ -1,0 +1,290 @@
+package bench
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+)
+
+// Collector is a lightweight OTLP/HTTP JSON receiver that extracts
+// Claude Code telemetry events and writes them as NDJSON.
+type Collector struct {
+	port   int
+	output string
+	mu     sync.Mutex
+	w      io.WriteCloser
+	server *http.Server
+	count  int
+}
+
+// NewCollector creates a collector that listens on the given port
+// and writes NDJSON to the output path.
+func NewCollector(port int, output string) *Collector {
+	return &Collector{port: port, output: output}
+}
+
+// Run starts the HTTP server and blocks until ctx is cancelled.
+func (c *Collector) Run(ctx context.Context) error {
+	f, err := os.Create(c.output)
+	if err != nil {
+		return fmt.Errorf("creating output file: %w", err)
+	}
+	c.w = f
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/logs", c.handleLogs)
+	mux.HandleFunc("/v1/metrics", c.handleMetrics)
+
+	c.server = &http.Server{
+		Addr:    fmt.Sprintf(":%d", c.port),
+		Handler: mux,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := c.server.ListenAndServe(); err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	fmt.Fprintf(os.Stderr, "Collecting on :%d → %s (Ctrl-C to stop)\n", c.port, c.output)
+
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		return err
+	}
+
+	shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c.server.Shutdown(shutCtx) //nolint:errcheck
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "\nCollected %d events → %s\n", c.count, c.output)
+	return c.w.Close()
+}
+
+// handleLogs processes OTLP/HTTP JSON log export requests.
+// Extracts claude_code.api_request events.
+func (c *Collector) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+
+	events := extractLogEvents(body)
+	c.writeEvents(events)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}")) //nolint:errcheck
+}
+
+// handleMetrics processes OTLP/HTTP JSON metric export requests.
+// Extracts claude_code.token.usage and claude_code.cost.usage metrics.
+func (c *Collector) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+
+	events := extractMetricEvents(body)
+	c.writeEvents(events)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}")) //nolint:errcheck
+}
+
+func (c *Collector) writeEvents(events []CollectedEvent) {
+	if len(events) == 0 {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, e := range events {
+		data, err := json.Marshal(e)
+		if err != nil {
+			continue
+		}
+		data = append(data, '\n')
+		c.w.Write(data) //nolint:errcheck
+		c.count++
+	}
+}
+
+// CollectedEvent is the normalized NDJSON schema for collected telemetry.
+type CollectedEvent struct {
+	TS    string         `json:"ts"`
+	Event string         `json:"event"`
+	Data  map[string]any `json:"data,omitempty"`
+}
+
+// extractLogEvents parses an OTLP ExportLogsServiceRequest JSON body
+// and extracts claude_code.api_request events.
+func extractLogEvents(body []byte) []CollectedEvent {
+	// OTLP JSON structure (simplified):
+	// { "resourceLogs": [ { "scopeLogs": [ { "logRecords": [ ... ] } ] } ] }
+	var req struct {
+		ResourceLogs []struct {
+			ScopeLogs []struct {
+				LogRecords []struct {
+					TimeUnixNano string         `json:"timeUnixNano"`
+					Body         otlpValue      `json:"body"`
+					Attributes   []otlpKeyValue `json:"attributes"`
+				} `json:"logRecords"`
+			} `json:"scopeLogs"`
+		} `json:"resourceLogs"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+
+	var events []CollectedEvent
+	for _, rl := range req.ResourceLogs {
+		for _, sl := range rl.ScopeLogs {
+			for _, lr := range sl.LogRecords {
+				attrs := flattenAttributes(lr.Attributes)
+				eventName, _ := attrs["event.name"].(string)
+				if eventName == "" {
+					// Try body for event name
+					if s := lr.Body.StringValue; s != "" {
+						eventName = s
+					}
+				}
+
+				// We're interested in claude_code events
+				if eventName == "" {
+					continue
+				}
+
+				ts := parseOTLPTimestamp(lr.TimeUnixNano)
+				e := CollectedEvent{
+					TS:    ts,
+					Event: eventName,
+					Data:  attrs,
+				}
+				delete(e.Data, "event.name")
+				events = append(events, e)
+			}
+		}
+	}
+	return events
+}
+
+// extractMetricEvents parses OTLP ExportMetricsServiceRequest JSON body
+// and extracts claude_code.token.usage and claude_code.cost.usage data points.
+func extractMetricEvents(body []byte) []CollectedEvent {
+	var req struct {
+		ResourceMetrics []struct {
+			ScopeMetrics []struct {
+				Metrics []struct {
+					Name string `json:"name"`
+					Sum  *struct {
+						DataPoints []struct {
+							TimeUnixNano string         `json:"timeUnixNano"`
+							AsInt        *int64         `json:"asInt"`
+							AsDouble     *float64       `json:"asDouble"`
+							Attributes   []otlpKeyValue `json:"attributes"`
+						} `json:"dataPoints"`
+					} `json:"sum"`
+				} `json:"metrics"`
+			} `json:"scopeMetrics"`
+		} `json:"resourceMetrics"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+
+	var events []CollectedEvent
+	for _, rm := range req.ResourceMetrics {
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Sum == nil {
+					continue
+				}
+				for _, dp := range m.Sum.DataPoints {
+					attrs := flattenAttributes(dp.Attributes)
+					var value float64
+					if dp.AsInt != nil {
+						value = float64(*dp.AsInt)
+					} else if dp.AsDouble != nil {
+						value = *dp.AsDouble
+					}
+					attrs["value"] = value
+					attrs["metric"] = m.Name
+
+					ts := parseOTLPTimestamp(dp.TimeUnixNano)
+					events = append(events, CollectedEvent{
+						TS:    ts,
+						Event: m.Name,
+						Data:  attrs,
+					})
+				}
+			}
+		}
+	}
+	return events
+}
+
+// otlpValue represents an OTLP AnyValue.
+type otlpValue struct {
+	StringValue string `json:"stringValue"`
+	IntValue    string `json:"intValue"`
+	DoubleValue *float64 `json:"doubleValue"`
+}
+
+// otlpKeyValue represents an OTLP KeyValue.
+type otlpKeyValue struct {
+	Key   string    `json:"key"`
+	Value otlpValue `json:"value"`
+}
+
+// flattenAttributes converts OTLP attributes to a flat map.
+func flattenAttributes(attrs []otlpKeyValue) map[string]any {
+	m := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		if a.Value.StringValue != "" {
+			m[a.Key] = a.Value.StringValue
+		} else if a.Value.IntValue != "" {
+			// Parse int from string
+			var v int64
+			fmt.Sscanf(a.Value.IntValue, "%d", &v)
+			m[a.Key] = v
+		} else if a.Value.DoubleValue != nil {
+			m[a.Key] = *a.Value.DoubleValue
+		}
+	}
+	return m
+}
+
+// parseOTLPTimestamp converts a nanosecond Unix timestamp string to RFC3339Nano.
+func parseOTLPTimestamp(nanos string) string {
+	var n int64
+	fmt.Sscanf(nanos, "%d", &n)
+	if n == 0 {
+		return time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return time.Unix(0, n).UTC().Format(time.RFC3339Nano)
+}

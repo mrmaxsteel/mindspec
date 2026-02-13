@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/mindspec/mindspec/internal/contextpack"
+	"github.com/mindspec/mindspec/internal/trace"
 	"github.com/spf13/cobra"
 )
 
@@ -38,10 +40,31 @@ and provenance for the specified spec. Content varies by --mode.`,
 			return fmt.Errorf("invalid mode %q: must be spec, plan, or implement", mode)
 		}
 
+		buildStart := time.Now()
 		pack, err := contextpack.Build(root, specID, mode)
 		if err != nil {
 			return fmt.Errorf("building context pack: %w", err)
 		}
+
+		// Emit trace with per-section token breakdown
+		sectionTokens := make(map[string]any)
+		tokensTotal := 0
+		rendered := pack.Render()
+		for _, s := range pack.Sections {
+			t := trace.EstimateTokens(s.Content)
+			sectionTokens[s.Heading] = t
+			tokensTotal += t
+		}
+		trace.Emit(trace.NewEvent("contextpack.build").
+			WithSpec(specID).
+			WithDuration(time.Since(buildStart)).
+			WithTokens(trace.EstimateTokens(rendered)).
+			WithData(map[string]any{
+				"tokens_total":  tokensTotal,
+				"sections":      sectionTokens,
+				"section_count": len(pack.Sections),
+				"mode":          mode,
+			}))
 
 		if err := pack.WriteToFile(root, specID); err != nil {
 			return fmt.Errorf("writing context pack: %w", err)
