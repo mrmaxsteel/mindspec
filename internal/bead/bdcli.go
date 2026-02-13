@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // execCommand is a package-level variable for testability.
@@ -221,13 +222,29 @@ func WorktreeList() ([]WorktreeListEntry, error) {
 
 // WorktreeRemove removes a worktree via `bd worktree remove`.
 // Beads performs safety checks (uncommitted changes, unpushed commits).
+// When no git remote is configured, --force is passed to skip the
+// unpushed-commits check (which would always fail without a remote).
 func WorktreeRemove(name string) error {
-	cmd := execCommand("bd", "worktree", "remove", name)
+	args := []string{"worktree", "remove", name}
+	if !hasGitRemote() {
+		args = append(args, "--force")
+	}
+	cmd := execCommand("bd", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd worktree remove failed: %s", string(out))
 	}
 	return nil
+}
+
+// hasGitRemote returns true if at least one git remote is configured.
+func hasGitRemote() bool {
+	cmd := execCommand("git", "remote")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
 }
 
 // WorktreeInfo returns info about the current worktree via `bd worktree info --json`.

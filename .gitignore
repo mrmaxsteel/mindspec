@@ -33,7 +33,5 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
-# bd worktree
 worktree-mindspec-ov9/
-# bd worktree
 worktree-mindspec-ov9.2/
