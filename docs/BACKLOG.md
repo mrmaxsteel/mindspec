@@ -57,20 +57,10 @@
 ### 008b: Human Gates for Approval Workflow ✓
 ### 008c: Compose `bd prime` into `mindspec instruct` ✓
 
-### 009: Workflow Happy-Path Gap Fixes ← **NEXT**
-**Why P1**: A dogfooding review ([docs/happy-path.md](happy-path.md)) found 8 gaps between what the workflow promises and what actually works. The most critical: bead creation is never automated — approve commands assume beads exist but nothing creates them.
+### 009: Workflow Happy-Path Gap Fixes ✓
+### 010: `mindspec spec-init` CLI Command ✓
 
-**Scope**:
-- Automate bead creation in `approve spec` and `approve plan` commands
-- Fix spec ID parsing in `ResolveMode` for bracket-prefix bead titles
-- Suppress false worktree mismatch warning after `mindspec next`
-- Generate context pack on spec approval
-- Add `--approved-by` flag to approval commands
-- Fix "stash" error message in `complete` to match conventions
-- Add `## Next Action` directive to idle instruct template
-- Document milestone commits as agent-convention-only
-
-### 010: Domain Scaffold + Context Map (was 009)
+### 011: Domain Scaffold + Context Map
 **Why P1**: DDD primitives need tooling support.
 
 **Scope**:
@@ -80,7 +70,7 @@
 
 **Partial**: Initial domain structure and `docs/context-map.md` created manually.
 
-### 011: ADR Lifecycle Tooling (was 010)
+### 012: ADR Lifecycle Tooling
 **Why P1**: ADR governance needs tooling support.
 
 **Scope**:
@@ -89,7 +79,7 @@
 - Superseding workflow: create new ADR linking to superseded one
 - Validate ADR citations in plans
 
-### 012: Proof Runner (MVP) (was 011)
+### 013: Proof Runner (MVP)
 **Why P1**: Foundation for "proof-of-done" invariant.
 
 **Scope**:
@@ -102,7 +92,7 @@
 
 ## P2: Project Health + Memory
 
-### 013: Memory Service (Basic) (was 012)
+### 014: Memory Service (Basic)
 **Why P2**: Persist decisions, gotchas, debugging outcomes across sessions.
 
 **Scope**:
@@ -111,7 +101,7 @@
 - Tag by spec-id, domain, keywords
 - Memory entries reference canonical beads or specs (per ADR-0002)
 
-### 014: `mindspec init` — Project Bootstrap (was 013)
+### 015: `mindspec init` — Project Bootstrap
 **Why P2**: Scaffolds a new MindSpec project from scratch.
 
 **Scope**:
@@ -125,20 +115,20 @@
 
 ## P3: Advanced Features
 
-### 015: Architecture Divergence Detection (was 014)
+### 016: Architecture Divergence Detection
 - Compare implementation against documented architecture
 - Auto-trigger ADR divergence protocol when violations detected
 
-### 016: Parallel Task Dispatch (was 015)
+### 017: Parallel Task Dispatch
 - Identify ready beads (no unresolved dependencies)
 - Generate per-bead context packets for parallel agent execution
 
-### 017: Observability / Telemetry (was 016)
+### 018: Observability / Telemetry
 - Glossary hit/miss rates
 - Token budgets and cache rates
 - OTel-friendly event shaping for future Agent Mind Visualization
 
-### 018: Cross-Platform Release Automation (was 017)
+### 019: Cross-Platform Release Automation
 - CI/CD pipeline for Go binary builds
 - Multi-arch binaries (darwin/linux, amd64/arm64)
 - GitHub Releases or homebrew tap
@@ -153,12 +143,11 @@ P0: 000 ✓ → 001 ✓ (Go skeleton + doctor)
 
 P1: 004 ✓ (instruct) → 005 ✓ (next) → 006 ✓ (validate) → 007 ✓ (Beads tooling)
     → 008 ✓ (worktree lifecycle) → 008b ✓ (human gates) → 008c ✓ (prime compose)
-    → 009 (workflow gap fixes)  ← NEXT
-    → 010 (domains) → 011 (ADRs) → 012 (proofs)
+    → 009 ✓ (workflow gap fixes) → 010 ✓ (spec-init CLI)
+    → 011 (domains) → 012 (ADRs) → 013 (proofs)
 
-P2: 013 (memory) → 014 (init)
+P2: 014 (memory) → 015 (init)
 ```
 
 **Rationale**:
-- 001–008c are done. 009 (workflow gap fixes) is next — closes all happy-path dogfooding gaps.
-- 010+ resume after workflow gaps are addressed.
+- 001–010 are done. 011+ resume with domain tooling.

@@ -2,75 +2,9 @@
 description: Initialize a new MindSpec specification
 ---
 
-# Initialize Spec Workflow
+# Spec Init
 
-Use this workflow to start a new specification in Spec Mode.
-
-## Trigger
-
-User invokes `/spec-init` or expresses intent to start a new feature/change.
-
-## Steps
-
-### 1. Gather Information
-
-Ask the user for:
-- **Spec ID**: A slug like `004-feature-name` (check `docs/specs/` for next available number)
-- **Title**: Brief description of the feature or change
-- **Context**: Any relevant background or requirements
-
-### 2. Create Directory Structure
-
-Create the spec directory:
-
-```
-docs/specs/<id>/
-├── spec.md          # Main specification
-└── context-pack.md  # Generated context (placeholder)
-```
-
-### 3. Generate spec.md from Template
-
-Copy `docs/templates/spec.md` to `docs/specs/<id>/spec.md` and fill in the `<ID>` and `<Title>` placeholders.
-
-### 4. Update MindSpec State
-
-Run the following command to set the workflow state to Spec Mode:
-
-```bash
-mindspec state set --mode=spec --spec=<id>
-```
-
-This must happen **before** any milestone commit so that `.mindspec/state.json` is co-committed with the spec artifacts.
-
-### 5. Inform User
-
-Tell the user:
-
-> Spec initialized: `docs/specs/<id>/spec.md`
->
-> You are now in **Spec Mode**.
->
-> **Next steps:**
-> 1. Fill in the Goal, Requirements, and Scope sections
-> 2. Declare impacted domains and ADR touchpoints
-> 3. Define specific, measurable Acceptance Criteria
-> 4. Resolve all Open Questions
-> 5. When ready, use `/spec-approve` to request approval
-
-### 6. Open Spec for Editing
-
-If possible, open the spec file in the editor for the user.
-
----
-
-## Notes
-
-- Spec IDs should be sequential: `001`, `002`, etc.
-- The slug should be descriptive: `004-beads-integration`, `005-worktree-lifecycle`
-- All work in Spec Mode is markdown-only; no code changes permitted
-- Specs must declare impacted domains and ADR touchpoints before approval
-
-## Known Gaps
-
-- **Context pack is a placeholder at init time**: Step 2 creates an empty `context-pack.md` because the spec template has no goal/domains to extract yet. The real context pack should be generated after the spec has content — either on-demand (`mindspec context pack <id>`) or automatically as part of `/spec-approve`. Currently the agent must remember to run the command manually.
+1. Ask the user for a spec ID (check `docs/specs/` for next available number)
+2. Run `mindspec spec-init <id>` (optionally with `--title "..."`)
+3. If it fails, show the error and help the user fix it
+4. On success: begin drafting the spec (the init output includes guidance)
