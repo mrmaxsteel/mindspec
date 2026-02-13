@@ -19,7 +19,8 @@ type WorkChunk struct {
 
 // Generated holds machine-written metadata in plan frontmatter.
 type Generated struct {
-	BeadIDs map[string]string `yaml:"bead_ids,omitempty"`
+	MolParentID string            `yaml:"mol_parent_id,omitempty"`
+	BeadIDs     map[string]string `yaml:"bead_ids,omitempty"`
 }
 
 // PlanMeta represents the YAML frontmatter of a plan.md file.

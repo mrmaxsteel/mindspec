@@ -12,6 +12,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(beadCmd)
+	rootCmd.AddCommand(completeCmd)
 	rootCmd.AddCommand(contextCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(glossaryCmd)
