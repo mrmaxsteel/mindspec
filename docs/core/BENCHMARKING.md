@@ -30,6 +30,25 @@ git worktree add ../bench-mindspec -b bench-mindspec
 git worktree add ../bench-baseline -b bench-baseline
 ```
 
+### Neutralize MindSpec in the baseline worktree
+
+The baseline worktree inherits `CLAUDE.md`, `.mindspec/`, and `.claude/` from the repo — these would cause Claude Code to follow MindSpec workflows automatically. Strip them out:
+
+```bash
+cd ../bench-baseline
+
+# Remove MindSpec project instructions (Claude Code reads this automatically)
+rm -f CLAUDE.md
+
+# Remove MindSpec state (prevents hooks from emitting guidance)
+rm -rf .mindspec/
+
+# Remove project-level Claude Code hooks and rules
+rm -rf .claude/
+```
+
+These deletions are on the `bench-baseline` branch and won't affect `main`. Without these files, Claude Code operates as a vanilla agent with no MindSpec awareness.
+
 Open each worktree in a separate VSCode window.
 
 ## Step 2: Print the Setup Instructions
