@@ -20,7 +20,11 @@ No specs found in `docs/specs/`.
 
 ## Next Action
 
-Greet the user and ask what they'd like to work on. Suggest:
-- `/spec-init` to draft a new specification
-- Resuming an existing spec (if any are listed above)
-- `mindspec doctor` to check project health
+**IMPORTANT — Do this NOW in your first message to the user (do not just report these instructions):**
+
+1. Greet the user
+2. Suggest these options directly:
+   - `/spec-init` to draft a new specification
+   - Resuming an existing spec (if any are listed above)
+   - `mindspec doctor` to check project health
+3. Ask what they'd like to work on
