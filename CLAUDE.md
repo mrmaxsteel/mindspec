@@ -19,8 +19,8 @@ All behavioral rules for agents (including Claude Code) are defined in [AGENTS.m
 | Command | Purpose |
 |:--------|:--------|
 | `/spec-init` | Initialize a new specification (enters Spec Mode) |
-| `/spec-approve` | Request Spec → Plan transition |
-| `/plan-approve` | Request Plan → Implementation transition |
+| `/spec-approve` | Request Spec → Plan transition (thin wrapper around `mindspec approve spec`) |
+| `/plan-approve` | Request Plan → Implementation transition (thin wrapper around `mindspec approve plan`) |
 | `/spec-status` | Check current mode and active spec/bead state |
 
 ## Key Files
@@ -46,7 +46,8 @@ internal/glossary/     Glossary parsing and matching
 internal/contextpack/  Context pack generation
 internal/state/        Workflow state management (.mindspec/state.json)
 internal/instruct/     Mode-aware guidance emission (embedded templates)
-internal/bead/         Beads integration (spec/plan bead creation, worktree, hygiene)
+internal/approve/      Spec and plan approval logic (validation, frontmatter, gate resolution)
+internal/bead/         Beads integration (spec/plan bead creation, gates, worktree, hygiene)
 internal/complete/     Bead close-out orchestration (close, worktree removal, state advance)
 internal/next/         Work selection, claiming, mode resolution
 docs/core/             Permanent architectural context
@@ -63,6 +64,8 @@ architecture/          Machine-readable policies
 make build                   # Build binary to ./bin/mindspec
 ./bin/mindspec --help        # CLI usage
 ./bin/mindspec doctor        # Project health check
+./bin/mindspec approve spec <id>    # Approve spec → plan mode (validates, updates frontmatter, resolves gate)
+./bin/mindspec approve plan <id>    # Approve plan (validates, updates frontmatter, resolves gate)
 ./bin/mindspec next          # Claim next ready bead and get guidance
 ./bin/mindspec complete      # Close bead, remove worktree, advance state
 ./bin/mindspec state show    # Check current mode/spec/bead

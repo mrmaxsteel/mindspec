@@ -32,13 +32,16 @@ var beadSpecCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		info, err := bead.CreateSpecBead(root, specID)
+		result, err := bead.CreateSpecBead(root, specID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("Spec bead: %s\n", info.ID)
+		fmt.Printf("Spec bead: %s\n", result.Bead.ID)
+		if result.GateID != "" {
+			fmt.Printf("Spec gate: %s (resolve via `mindspec approve spec %s`)\n", result.GateID, specID)
+		}
 		return nil
 	},
 }
@@ -75,6 +78,9 @@ var beadPlanCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Molecule parent: %s\n", result.MolParentID)
+		if result.PlanGateID != "" {
+			fmt.Printf("Plan gate: %s (resolve via `mindspec approve plan %s`)\n", result.PlanGateID, specID)
+		}
 		fmt.Println("Implementation beads created:")
 		for chunkID, beadID := range result.ChunkBeads {
 			fmt.Printf("  chunk %d → %s\n", chunkID, beadID)

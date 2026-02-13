@@ -111,6 +111,15 @@ Bead titles use bracketed prefixes for idempotent lookup and convention enforcem
 
 `mindspec bead spec` and `mindspec bead plan` create beads using these conventions. The bracket prefix enables reliable search-based idempotency.
 
+### Gate Title Conventions
+
+Human gates use the `[GATE ...]` prefix for idempotent lookup:
+
+- **Spec approval gate**: `[GATE spec-approve <spec-id>]` — child of the spec bead. Resolved by `mindspec approve spec`.
+- **Plan approval gate**: `[GATE plan-approve <spec-id>]` — child of the molecule parent. Resolved by `mindspec approve plan`.
+
+Gates control `bd ready` visibility: implementation beads depend on the plan gate, which depends on the spec gate. Until both gates are resolved, `bd ready` will not show impl beads.
+
 ### Structured Descriptions
 
 - **Spec bead descriptions** (≤400 chars): `Summary: <goal>\nSpec: docs/specs/<id>/spec.md\nDomains: <list>`
@@ -272,5 +281,17 @@ The primary interface is the Go CLI binary. Key commands:
 - `mindspec instruct`: Emit mode-appropriate operating guidance (ADR-0003)
 - `mindspec bead spec|plan|worktree|hygiene`: Beads lifecycle tooling (Spec 007)
 - `mindspec validate spec|plan|docs`: Check artifact quality (Spec 006)
+- `mindspec approve spec|plan <id>`: Validate, update frontmatter, resolve gate, set state, emit instruct (Spec 008b)
 - `mindspec next`: Select and claim next ready work (Spec 005)
 - `mindspec complete`: Close bead, remove worktree, advance state (Spec 008)
+
+## Instruct-Tail Convention {#instruct-tail}
+
+Every state-changing command emits `mindspec instruct` output as its tail. This ensures the agent always receives fresh, mode-appropriate guidance after a transition:
+
+- **`mindspec approve spec <id>`** — emits plan mode guidance after spec approval
+- **`mindspec approve plan <id>`** — emits guidance after plan approval
+- **`mindspec next`** — emits implement mode guidance after claiming a bead
+- **`mindspec complete`** — emits guidance for the new mode (next bead, plan, or idle)
+
+The session-start hook (`mindspec instruct`) covers cold-start. The instruct-tail covers all subsequent transitions. Together, the agent never lacks context about its operating mode.

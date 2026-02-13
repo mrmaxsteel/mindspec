@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/instruct"
 	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -98,24 +97,10 @@ to "here's your bead, here's the mode, here are your rules" in one step.`,
 		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)
 		fmt.Println()
 
-		// Step 8: Emit guidance
-		s, err := state.Read(root)
-		if err != nil {
-			return fmt.Errorf("reading state: %w", err)
+		// Step 8: Emit guidance (instruct-tail convention)
+		if err := emitInstruct(root); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
 		}
-
-		ctx := instruct.BuildContext(root, s)
-		if s.Mode == state.ModeImplement {
-			if warning := instruct.CheckWorktree(s.ActiveBead); warning != "" {
-				ctx.Warnings = append(ctx.Warnings, "[worktree] "+warning)
-			}
-		}
-
-		output, err := instruct.Render(ctx)
-		if err != nil {
-			return fmt.Errorf("rendering guidance: %w", err)
-		}
-		fmt.Print(output)
 
 		return nil
 	},

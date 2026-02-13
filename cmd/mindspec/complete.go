@@ -43,6 +43,12 @@ The bead ID defaults to the activeBead from state if not provided.`,
 		}
 
 		fmt.Print(complete.FormatResult(result))
+
+		// Instruct-tail: emit guidance for the new mode
+		fmt.Println() // separator between summary and guidance
+		if err := emitInstruct(root); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+		}
 		return nil
 	},
 }

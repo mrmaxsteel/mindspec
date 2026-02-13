@@ -13,6 +13,9 @@ MindSpec is a **spec-driven development + context management framework** (Claude
 5. **Explicit Context Map** that documents boundaries, integrations, and source-of-truth ownership.
 6. **Claude Code-first integration** that feels native and minimizes operator friction.
 7. **Worktree-first execution model** so work can be isolated, parallelized, and reviewed cleanly.
+8. **CLI-first, minimal IDE glue** — enabling MindSpec in an agentic coding IDE should require minimal static markdown/skills that need to be maintained. Two facets:
+   - **Dynamic over static**: agent instructions are emitted at runtime by `mindspec instruct` based on current state (mode, active bead, worktree), not maintained as static workspace files that try to anticipate every scenario.
+   - **Logic in CLI, not skills**: workflow operations (`approve`, `next`, `complete`) are CLI commands (testable, versionable Go code). IDE skills/commands are thin shims that call the CLI.
 
 ## Non-Goals (v1)
 

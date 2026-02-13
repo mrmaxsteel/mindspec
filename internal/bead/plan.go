@@ -80,6 +80,7 @@ func ParsePlanMeta(planPath string) (*PlanMeta, error) {
 // PlanBeadResult holds the results of molecule-based plan decomposition.
 type PlanBeadResult struct {
 	MolParentID string         // molecule parent (epic) bead ID
+	PlanGateID  string         // plan approval gate bead ID (empty if not created)
 	ChunkBeads  map[int]string // chunk ID -> child bead ID
 }
 
@@ -87,7 +88,9 @@ type PlanBeadResult struct {
 // The molecule parent is an epic with the spec bead as its parent.
 // Work chunks become task children under the molecule parent.
 // Dependencies are wired between children via DepAdd.
+// Also creates a plan approval gate and wires impl beads to depend on it.
 // Idempotent: searches for existing beads before creating.
+// Requires spec gate to be resolved (if one exists).
 func CreatePlanBeads(root, specID string) (*PlanBeadResult, error) {
 	planPath := fmt.Sprintf("%s/docs/specs/%s/plan.md", root, specID)
 	meta, err := ParsePlanMeta(planPath)
@@ -103,6 +106,20 @@ func CreatePlanBeads(root, specID string) (*PlanBeadResult, error) {
 	// Validate work_chunks present
 	if len(meta.WorkChunks) == 0 {
 		return nil, fmt.Errorf("plan has no work_chunks defined")
+	}
+
+	// Check spec gate is resolved (if one exists)
+	specGateTitle := SpecGateTitle(specID)
+	specGateResolved, _ := IsGateResolved(specGateTitle)
+	if !specGateResolved {
+		return nil, fmt.Errorf("spec gate is not resolved — run `mindspec approve spec %s` first", specID)
+	}
+
+	// Find spec gate ID for dependency wiring
+	var specGateID string
+	specGate, _ := FindGateAnyStatus(specGateTitle)
+	if specGate != nil {
+		specGateID = specGate.ID
 	}
 
 	// Find spec bead as grandparent
@@ -129,6 +146,20 @@ func CreatePlanBeads(root, specID string) (*PlanBeadResult, error) {
 		molParentID = molBead.ID
 	}
 
+	// Create or find plan approval gate
+	planGateTitle := PlanGateTitle(specID)
+	var planGateID string
+	planGate, err := FindOrCreateGate(planGateTitle, molParentID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not create plan gate: %v\n", err)
+	} else {
+		planGateID = planGate.ID
+		// Wire plan gate to depend on spec gate (if spec gate exists)
+		if specGateID != "" {
+			_ = DepAdd(planGateID, specGateID) // best-effort
+		}
+	}
+
 	// Create beads per chunk as molecule children (idempotent)
 	mapping := make(map[int]string)
 	for _, chunk := range meta.WorkChunks {
@@ -150,6 +181,11 @@ func CreatePlanBeads(root, specID string) (*PlanBeadResult, error) {
 			return nil, fmt.Errorf("creating bead for chunk %d: %w", chunk.ID, err)
 		}
 		mapping[chunk.ID] = bead.ID
+
+		// Wire impl bead to depend on plan gate
+		if planGateID != "" {
+			_ = DepAdd(bead.ID, planGateID) // best-effort
+		}
 	}
 
 	// Wire dependencies between children
@@ -171,6 +207,7 @@ func CreatePlanBeads(root, specID string) (*PlanBeadResult, error) {
 
 	return &PlanBeadResult{
 		MolParentID: molParentID,
+		PlanGateID:  planGateID,
 		ChunkBeads:  mapping,
 	}, nil
 }

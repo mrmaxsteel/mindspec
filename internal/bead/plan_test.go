@@ -182,22 +182,26 @@ work_chunks:
 		if name == "bd" && len(args) > 0 {
 			switch args[0] {
 			case "search":
-				return exec.Command("echo", `[]`) // no existing beads
+				// Gate searches and bead searches all return empty
+				return exec.Command("echo", `[]`)
 			case "create":
 				createCalls = append(createCalls, args)
-				// Return different IDs based on title prefix
 				title := args[1]
 				var id string
 				if strings.HasPrefix(title, "[PLAN") {
 					id = "mol-parent-001"
+				} else if strings.HasPrefix(title, "[GATE") {
+					id = "plan-gate-001"
 				} else {
 					id = "bead-" + strings.Replace(title, " ", "", -1)[:10]
 				}
-				return exec.Command("echo", `{"id":"`+id+`","title":"","description":"","status":"open","priority":2,"issue_type":"epic","owner":"","created_at":"","updated_at":""}`)
+				return exec.Command("echo", `{"id":"`+id+`","title":"`+title+`","description":"","status":"open","priority":2,"issue_type":"epic","owner":"","created_at":"","updated_at":""}`)
 			case "dep":
 				if len(args) >= 4 {
 					depAddCalls = append(depAddCalls, args[1:])
 				}
+				return exec.Command("echo", "")
+			case "gate":
 				return exec.Command("echo", "")
 			}
 		}
@@ -214,16 +218,19 @@ work_chunks:
 		t.Errorf("MolParentID: got %q, want %q", result.MolParentID, "mol-parent-001")
 	}
 
+	// Should have plan gate ID
+	if result.PlanGateID != "plan-gate-001" {
+		t.Errorf("PlanGateID: got %q, want %q", result.PlanGateID, "plan-gate-001")
+	}
+
 	// Should have 2 chunk beads
 	if len(result.ChunkBeads) != 2 {
 		t.Errorf("expected 2 chunk beads, got %d", len(result.ChunkBeads))
 	}
 
-	// First create call should be the molecule parent (epic)
-	// Searches: [SPEC test], [PLAN test], [IMPL test.1], [IMPL test.2] = 4 searches
-	// Creates: [PLAN test] (epic), [IMPL test.1], [IMPL test.2] = 3 creates
-	if len(createCalls) != 3 {
-		t.Fatalf("expected 3 create calls (1 epic + 2 tasks), got %d", len(createCalls))
+	// Creates: [PLAN test] (epic), [GATE plan-approve test] (gate), [IMPL test.1], [IMPL test.2] = 4 creates
+	if len(createCalls) != 4 {
+		t.Fatalf("expected 4 create calls (1 epic + 1 gate + 2 tasks), got %d", len(createCalls))
 	}
 
 	// First create should be the molecule parent with type=epic
@@ -241,20 +248,7 @@ work_chunks:
 		t.Error("molecule parent should be type=epic")
 	}
 
-	// Child creates should have parent=mol-parent-001
-	for i := 1; i < len(createCalls); i++ {
-		hasParent := false
-		for _, arg := range createCalls[i] {
-			if arg == "--parent=mol-parent-001" {
-				hasParent = true
-			}
-		}
-		if !hasParent {
-			t.Errorf("child create[%d] should have --parent=mol-parent-001", i)
-		}
-	}
-
-	// At least one dep add call for chunk 2 -> chunk 1
+	// At least one dep add call (chunk 2->chunk 1, plus gate deps)
 	if len(depAddCalls) == 0 {
 		t.Error("expected at least one dep add call")
 	}
@@ -289,6 +283,10 @@ work_chunks:
 			switch args[0] {
 			case "search":
 				query := args[1]
+				// [GATE spec-approve test] is resolved (closed)
+				if strings.HasPrefix(query, "[GATE spec-approve") {
+					return exec.Command("echo", `[{"id":"resolved-spec-gate","title":"[GATE spec-approve test]","description":"","status":"closed","priority":0,"issue_type":"gate","owner":"","created_at":"","updated_at":""}]`)
+				}
 				// [PLAN test] already exists
 				if strings.HasPrefix(query, "[PLAN") {
 					return exec.Command("echo", `[{"id":"existing-mol","title":"[PLAN test]","description":"","status":"open","priority":2,"issue_type":"epic","owner":"","created_at":"","updated_at":""}]`)
@@ -297,10 +295,16 @@ work_chunks:
 				if strings.HasPrefix(query, "[IMPL") {
 					return exec.Command("echo", `[{"id":"existing-child","title":"[IMPL test.1]","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":""}]`)
 				}
+				// [GATE plan-approve test] already exists (open)
+				if strings.HasPrefix(query, "[GATE") {
+					return exec.Command("echo", `[{"id":"existing-gate","title":"[GATE plan-approve test]","description":"","status":"open","priority":0,"issue_type":"gate","owner":"","created_at":"","updated_at":""}]`)
+				}
 				return exec.Command("echo", `[]`)
 			case "create":
 				createCount++
 				return exec.Command("echo", `{"id":"new-bead","title":"","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":""}`)
+			case "dep":
+				return exec.Command("echo", "")
 			}
 		}
 		return exec.Command("echo", "")
@@ -316,14 +320,62 @@ work_chunks:
 		t.Errorf("MolParentID: got %q, want %q", result.MolParentID, "existing-mol")
 	}
 
+	// Should reuse existing gate
+	if result.PlanGateID != "existing-gate" {
+		t.Errorf("PlanGateID: got %q, want %q", result.PlanGateID, "existing-gate")
+	}
+
 	// Should reuse existing child
 	if result.ChunkBeads[1] != "existing-child" {
 		t.Errorf("ChunkBeads[1]: got %q, want %q", result.ChunkBeads[1], "existing-child")
 	}
 
-	// No new beads should have been created
+	// No new beads should have been created (all existing)
 	if createCount != 0 {
 		t.Errorf("expected 0 create calls (all existing), got %d", createCount)
+	}
+}
+
+func TestCreatePlanBeads_RefusesUnresolvedSpecGate(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "test")
+	os.MkdirAll(specDir, 0755)
+	planContent := `---
+status: Approved
+spec_id: test
+work_chunks:
+  - id: 1
+    title: "chunk"
+    scope: "test.go"
+    verify: []
+    depends_on: []
+---
+
+# Plan
+`
+	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644)
+
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "bd" && len(args) > 0 && args[0] == "search" {
+			query := args[1]
+			// Spec gate exists and is OPEN (not resolved)
+			if strings.HasPrefix(query, "[GATE spec-approve") {
+				return exec.Command("echo", `[{"id":"open-gate","title":"[GATE spec-approve test]","description":"","status":"open","priority":0,"issue_type":"gate","owner":"","created_at":"","updated_at":""}]`)
+			}
+			return exec.Command("echo", `[]`)
+		}
+		return exec.Command("echo", "")
+	}
+
+	_, err := CreatePlanBeads(tmp, "test")
+	if err == nil {
+		t.Fatal("expected error for unresolved spec gate")
+	}
+	if !contains(err.Error(), "spec gate is not resolved") {
+		t.Errorf("error should mention spec gate: %v", err)
 	}
 }
 

@@ -7,9 +7,16 @@ import (
 	"strings"
 )
 
+// SpecBeadResult holds the result of spec bead creation.
+type SpecBeadResult struct {
+	Bead   *BeadInfo
+	GateID string // empty if gate creation was skipped or failed
+}
+
 // CreateSpecBead creates a spec bead from an approved specification.
 // It is idempotent: if a bead with the [SPEC <specID>] prefix already exists, it returns that.
-func CreateSpecBead(root, specID string) (*BeadInfo, error) {
+// Also creates a human gate bead [GATE spec-approve <specID>] as a child of the spec bead.
+func CreateSpecBead(root, specID string) (*SpecBeadResult, error) {
 	specPath := filepath.Join(root, "docs", "specs", specID, "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
@@ -30,16 +37,36 @@ func CreateSpecBead(root, specID string) (*BeadInfo, error) {
 	// Build structured description (capped at 400 chars)
 	desc := buildSpecDescription(goal, specID, domains)
 
-	// Idempotent lookup
+	// Idempotent lookup for spec bead
 	prefix := fmt.Sprintf("[SPEC %s]", specID)
+	var specBead *BeadInfo
 	existing, err := Search(prefix)
 	if err == nil && len(existing) > 0 {
-		return &existing[0], nil
+		specBead = &existing[0]
+	} else {
+		// Create new bead
+		beadTitle := fmt.Sprintf("%s %s", prefix, title)
+		specBead, err = Create(beadTitle, desc, "feature", 2, "")
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Create new bead
-	beadTitle := fmt.Sprintf("%s %s", prefix, title)
-	return Create(beadTitle, desc, "feature", 2, "")
+	// Create or find the spec approval gate
+	gateTitle := SpecGateTitle(specID)
+	gate, err := FindOrCreateGate(gateTitle, specBead.ID)
+	var gateID string
+	if err != nil {
+		// Gate creation is best-effort — warn but don't fail
+		fmt.Fprintf(os.Stderr, "warning: could not create spec gate: %v\n", err)
+	} else {
+		gateID = gate.ID
+	}
+
+	return &SpecBeadResult{
+		Bead:   specBead,
+		GateID: gateID,
+	}, nil
 }
 
 // isSpecApproved checks for approval status in the spec content.

@@ -145,18 +145,22 @@ Build a test feature for validation.
 				return exec.Command("echo", `[]`)
 			}
 			if args[0] == "create" {
+				// Both spec bead and gate creation use "create"
 				return exec.Command("echo", `{"id":"test-bead-010","title":"[SPEC 010-test] Test Feature","description":"","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":""}`)
 			}
 		}
 		return exec.Command("echo", "")
 	}
 
-	info, err := CreateSpecBead(tmp, "010-test")
+	result, err := CreateSpecBead(tmp, "010-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if info.ID != "test-bead-010" {
-		t.Errorf("expected bead ID test-bead-010, got %s", info.ID)
+	if result.Bead.ID != "test-bead-010" {
+		t.Errorf("expected bead ID test-bead-010, got %s", result.Bead.ID)
+	}
+	if result.GateID == "" {
+		t.Error("expected gate ID to be set")
 	}
 }
 
@@ -204,20 +208,30 @@ Build a test.
 	origExec := execCommand
 	defer func() { execCommand = origExec }()
 
-	// Mock Search returns existing bead
+	// Mock Search returns existing bead (first call for spec, second for gate)
+	callCount := 0
 	execCommand = func(name string, args ...string) *exec.Cmd {
+		callCount++
 		if name == "bd" && len(args) > 0 && args[0] == "search" {
-			return exec.Command("echo", `[{"id":"existing-bead","title":"[SPEC 010-test] Test Feature","description":"","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":""}]`)
+			if callCount == 1 {
+				// Spec bead lookup
+				return exec.Command("echo", `[{"id":"existing-bead","title":"[SPEC 010-test] Test Feature","description":"","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":""}]`)
+			}
+			// Gate lookup
+			return exec.Command("echo", `[{"id":"existing-gate","title":"[GATE spec-approve 010-test]","description":"","status":"open","priority":0,"issue_type":"gate","owner":"","created_at":"","updated_at":""}]`)
 		}
 		return exec.Command("echo", "")
 	}
 
-	info, err := CreateSpecBead(tmp, "010-test")
+	result, err := CreateSpecBead(tmp, "010-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if info.ID != "existing-bead" {
-		t.Errorf("expected existing bead ID, got %s", info.ID)
+	if result.Bead.ID != "existing-bead" {
+		t.Errorf("expected existing bead ID, got %s", result.Bead.ID)
+	}
+	if result.GateID != "existing-gate" {
+		t.Errorf("expected existing gate ID, got %s", result.GateID)
 	}
 }
 

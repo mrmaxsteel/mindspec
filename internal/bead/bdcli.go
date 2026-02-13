@@ -292,3 +292,8 @@ func parseBeadList(data []byte) ([]BeadInfo, error) {
 	}
 	return items, nil
 }
+
+// parseJSON unmarshals JSON data into the given target.
+func parseJSON(data []byte, target interface{}) error {
+	return json.Unmarshal(data, target)
+}
