@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -107,7 +108,7 @@ func TestExtractMetricEvents(t *testing.T) {
 func TestFlattenAttributes(t *testing.T) {
 	attrs := []otlpKeyValue{
 		{Key: "str", Value: otlpValue{StringValue: "hello"}},
-		{Key: "num", Value: otlpValue{IntValue: "42"}},
+		{Key: "num", Value: otlpValue{IntValue: json.RawMessage(`"42"`)}},
 		{Key: "dbl", Value: otlpValue{DoubleValue: ptr(3.14)}},
 	}
 

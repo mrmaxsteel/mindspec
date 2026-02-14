@@ -56,7 +56,7 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 				"cache_creation_input_tokens", "model", "cost_usd"),
 		})
 
-	case "claude_code.tool_use", "tool_use":
+	case "claude_code.tool_use", "tool_use", "claude_code.tool_decision", "tool_decision":
 		toolName, _ := e.Data["tool_name"].(string)
 		if toolName == "" {
 			toolName, _ = e.Data["name"].(string)
