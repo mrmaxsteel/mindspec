@@ -36,3 +36,5 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+# bd worktree
+worktree-mindspec-bjt/
