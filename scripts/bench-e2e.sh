@@ -100,6 +100,24 @@ parse_args() {
     fi
 }
 
+# ── Portability Helpers ───────────────────────────────────────────────────
+# macOS ships bash 3.2 (no ${var^^}) and no timeout command.
+
+# Uppercase a string (portable replacement for ${var^^})
+to_upper() { echo "$1" | tr '[:lower:]' '[:upper:]'; }
+
+# Portable timeout: prefer GNU timeout, fall back to perl
+if command -v timeout >/dev/null 2>&1; then
+    run_with_timeout() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+    run_with_timeout() { gtimeout "$@"; }
+else
+    run_with_timeout() {
+        local secs="$1"; shift
+        perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+    }
+fi
+
 # ── Prerequisites ──────────────────────────────────────────────────────────
 validate_prerequisites() {
     local errors=0
@@ -235,7 +253,7 @@ run_session() {
         if [[ -n "${trace_path}" ]]; then
             export MINDSPEC_TRACE="${trace_path}"
         fi
-        timeout "${SESSION_TIMEOUT}" claude "${claude_args[@]}" \
+        run_with_timeout "${SESSION_TIMEOUT}" claude "${claude_args[@]}" \
             > "${WORK_DIR}/output-${label}.txt" 2>&1
     ) || claude_exit=$?
 
@@ -299,7 +317,7 @@ collect_plans() {
         fi
 
         if [[ -z "${plan_content}" ]]; then
-            plan_content="(No plan artifact found for Session ${label^^})"
+            plan_content="(No plan artifact found for Session $(to_upper "${label}"))"
         fi
 
         if [[ "${label}" == "a" ]]; then
