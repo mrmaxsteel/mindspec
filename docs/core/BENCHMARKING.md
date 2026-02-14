@@ -1,6 +1,6 @@
 # Benchmarking MindSpec vs Freestyle Claude Code
 
-This guide walks through running an A/B comparison between a MindSpec-assisted session and a freestyle Claude Code session, then producing a quantitative report.
+This guide walks through running an A/B comparison between a MindSpec-assisted session and a freestyle Claude Code session, then producing a quantitative report. Both sessions run sequentially in the same window from the same starting commit.
 
 ## What You'll Measure
 
@@ -15,28 +15,78 @@ This guide walks through running an A/B comparison between a MindSpec-assisted s
 
 ## Prerequisites
 
-- Two VSCode windows (or terminals with `claude` CLI)
 - MindSpec binary built: `make build`
-- A feature spec written down (same description for both sessions)
-- Same repo, same commit — use git worktrees to isolate
+- A feature description written down (same prompt for both sessions)
+- Clean git working tree
 
-## Step 1: Prepare the Worktrees
-
-From your main repo:
+## Step 1: Record the Starting Commit
 
 ```bash
-# Create two worktrees on the same commit
-git worktree add ../bench-mindspec -b bench-mindspec
-git worktree add ../bench-baseline -b bench-baseline
+export BENCH_START=$(git rev-parse HEAD)
+echo "Starting commit: $BENCH_START"
 ```
 
-### Neutralize MindSpec in the baseline worktree
-
-The baseline worktree inherits `CLAUDE.md`, `.mindspec/`, and `.claude/` from the repo — these would cause Claude Code to follow MindSpec workflows automatically. Strip them out:
+## Step 2: Print the Setup Instructions
 
 ```bash
-cd ../bench-baseline
+mindspec bench setup
+```
 
+This prints environment variable blocks for both sessions. You can also configure manually — see below.
+
+## Step 3: Run Session A (MindSpec)
+
+### Start the collector
+
+In a separate terminal:
+
+```bash
+mindspec bench collect --port 4318 --output /tmp/bench-session-a.jsonl
+```
+
+### Configure telemetry
+
+In your main terminal, set these environment variables **before** starting Claude Code:
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export MINDSPEC_TRACE=/tmp/mindspec-bench-a-trace.jsonl
+```
+
+### Run the session
+
+Start Claude Code and follow the MindSpec workflow:
+
+1. `/spec-init` → write the spec
+2. `/spec-approve` → plan
+3. Write the plan → `/plan-approve`
+4. `mindspec next` → implement each bead
+5. `mindspec complete` when done
+
+When finished, exit Claude Code and press `Ctrl-C` in the collector terminal.
+
+## Step 4: Preserve Session A and Reset
+
+```bash
+# Commit any uncommitted work
+git add -A && git commit -m "bench: Session A (mindspec)"
+
+# Tag the result so you can come back to it
+git tag bench-a-result
+
+# Reset back to the starting commit
+git checkout $BENCH_START
+```
+
+You're now back at the exact same starting point, on a detached HEAD.
+
+## Step 5: Neutralize MindSpec for Session B
+
+The repo contains `CLAUDE.md`, `.mindspec/`, and `.claude/` — these would cause Claude Code to follow MindSpec workflows automatically. Strip them out:
+
+```bash
 # Remove MindSpec project instructions (Claude Code reads this automatically)
 rm -f CLAUDE.md
 
@@ -47,88 +97,52 @@ rm -rf .mindspec/
 rm -rf .claude/
 ```
 
-These deletions are on the `bench-baseline` branch and won't affect `main`. Without these files, Claude Code operates as a vanilla agent with no MindSpec awareness.
+These deletions are uncommitted and will be discarded when you return to a branch. Without these files, Claude Code operates as a vanilla agent with no MindSpec awareness.
 
-Open each worktree in a separate VSCode window.
+## Step 6: Run Session B (Baseline)
 
-## Step 2: Print the Setup Instructions
+### Start the collector
 
-```bash
-mindspec bench setup
-```
-
-This prints environment variable blocks for both sessions. You can also configure manually — see below.
-
-## Step 3: Start the Collectors
-
-Open two terminals (these run in the foreground and capture telemetry):
+In a separate terminal:
 
 ```bash
-# Terminal 1 — collects Session A (MindSpec)
-mindspec bench collect --port 4318 --output /tmp/bench-session-a.jsonl
-
-# Terminal 2 — collects Session B (Baseline)
-mindspec bench collect --port 4319 --output /tmp/bench-session-b.jsonl
+mindspec bench collect --port 4318 --output /tmp/bench-session-b.jsonl
 ```
 
-Each collector is a lightweight HTTP server that receives OTel events from Claude Code and writes them as NDJSON.
-
-## Step 4: Configure the Sessions
-
-### Session A — MindSpec
-
-In the VSCode terminal for `../bench-mindspec`, set these environment variables **before** starting Claude Code:
+### Configure telemetry
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export MINDSPEC_TRACE=/tmp/mindspec-bench-a-trace.jsonl
 ```
 
-Then start Claude Code normally. The `MINDSPEC_TRACE` variable also enables MindSpec's internal tracing (context pack sizes, glossary matches, bead CLI timing).
+(No `MINDSPEC_TRACE` — there's no MindSpec to trace.)
 
-### Session B — Baseline (no MindSpec)
+### Run the session
 
-In the VSCode terminal for `../bench-baseline`:
-
-```bash
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4319
-```
-
-Then start Claude Code normally. No MindSpec commands — just give Claude the feature description directly.
-
-## Step 5: Run the Experiment
-
-Give both sessions the **exact same feature description**. For example:
+Start Claude Code and give it the **exact same feature description** you used in Session A. For example:
 
 > "Implement a `widget list` command that reads widgets from a YAML file and prints them in a table. Include tests."
 
-### Session A workflow (MindSpec):
-1. `/spec-init` → write the spec
-2. `/spec-approve` → plan
-3. Write the plan → `/plan-approve`
-4. `mindspec next` → implement each bead
-5. `mindspec complete` when done
+No MindSpec commands — just let Claude implement it however it wants. Iterate until satisfied.
 
-### Session B workflow (freestyle):
-1. Paste the feature description
-2. Let Claude implement it however it wants
-3. Iterate until satisfied
+When finished, exit Claude Code and press `Ctrl-C` in the collector terminal.
 
 **Important:** Try to achieve roughly equivalent quality in both sessions. The comparison is most meaningful when both produce working, tested code.
 
-## Step 6: Stop the Collectors
+## Step 7: Preserve Session B and Return to Main
 
-When both sessions are complete, press `Ctrl-C` in each collector terminal. The collector prints a summary:
+```bash
+# Commit any uncommitted work (on detached HEAD)
+git add -A && git commit -m "bench: Session B (baseline)"
+git tag bench-b-result
 
+# Return to main
+git checkout main
 ```
-Collected 47 events → /tmp/bench-session-a.jsonl
-```
 
-## Step 7: Generate the Report
+## Step 8: Generate the Report
 
 ```bash
 mindspec bench report \
@@ -161,7 +175,7 @@ mindspec bench report /tmp/bench-session-a.jsonl /tmp/bench-session-b.jsonl \
   --labels "mindspec,baseline" --format json > /tmp/bench-report.json
 ```
 
-## Step 8: Inspect MindSpec Trace (Optional)
+## Step 9: Inspect MindSpec Trace (Optional)
 
 Session A also produces a MindSpec-side trace showing where tokens were spent:
 
@@ -197,15 +211,22 @@ jq -r 'select(.event=="bead.cli") | "\(.data.dur_ms | tostring | .[:6])ms \(.dat
   /tmp/mindspec-bench-a-trace.jsonl | sort -rn
 ```
 
+## Comparing the Code
+
+To diff the output of both sessions:
+
+```bash
+git diff bench-a-result bench-b-result
+```
+
 ## Cleanup
 
 ```bash
-# Remove worktrees
-git worktree remove ../bench-mindspec
-git worktree remove ../bench-baseline
+# Remove tags
+git tag -d bench-a-result bench-b-result
 
 # Remove trace files
-rm /tmp/bench-session-a.jsonl /tmp/bench-session-b.jsonl /tmp/mindspec-bench-a-trace.jsonl
+rm -f /tmp/bench-session-a.jsonl /tmp/bench-session-b.jsonl /tmp/mindspec-bench-a-trace.jsonl
 ```
 
 ## Tips
@@ -214,3 +235,4 @@ rm /tmp/bench-session-a.jsonl /tmp/bench-session-b.jsonl /tmp/mindspec-bench-a-t
 - **Same model:** Ensure both sessions use the same Claude model. Check with `/model` in Claude Code.
 - **Warm cache:** If running multiple experiments, the second run may benefit from prompt caching. Consider running a throwaway warm-up session first, or comparing cache rates as part of the analysis.
 - **Quality:** The report only measures cost and time. Assess quality separately — review the code both sessions produced, check test coverage, architectural cleanliness, etc.
+- **Order bias:** Running MindSpec first means the baseline session happens after you've already seen one implementation. To control for this, consider alternating order across experiments.
