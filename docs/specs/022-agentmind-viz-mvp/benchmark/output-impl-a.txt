@@ -1,0 +1,22 @@
+Done. Here's a summary of what was implemented:
+
+## Agent Activity Galaxy MVP — Committed
+
+**13 files, 1,730 lines** in `viz/` — committed as `0a33b05`.
+
+### Server (`viz/server/`)
+- **`otlp-receiver.ts`** — Parses OTLP/HTTP JSON for `/v1/logs` and `/v1/metrics`, mirroring the Go collector pattern
+- **`normalizer.ts`** — Maps `CollectedEvent` → `GraphOp[]` with 5 node types (agent, tool, mcp_server, llm, file) and 5 edge types (tool_call, mcp_call, model_call, read, write)
+- **`graph-state.ts`** — In-memory graph with dedup, edge decay (5min fade → 15min remove), hard caps (200 nodes, 1000 edges), orphan cleanup
+- **`replay.ts`** — NDJSON file replay with original inter-event timing and speed multiplier
+- **`index.ts`** — Express + WebSocket server, OTLP endpoints, snapshot on connect, backpressure (64KB buffer limit), periodic stats broadcast
+
+### Browser (`viz/public/`)
+- **`index.html`** — Canvas + HUD overlay (stats, controls, legend, detail card)
+- **`style.css`** — Dark theme with glassmorphism panels
+- **`app.js`** — 3d-force-graph with custom Three.js meshes per node type, emissive glow, 3000-point starfield, auto-rotate camera, search/filter, detail cards with prompt redaction
+
+### Tests — 19 passing
+- **`normalizer.test.ts`** — 8 tests covering all event→graph mappings + privacy
+- **`graph-state.test.ts`** — 11 tests covering dedup, decay, caps, orphans, callbacks
+- **`fixtures/sample.ndjson`** — 30 representative events for testing/replay

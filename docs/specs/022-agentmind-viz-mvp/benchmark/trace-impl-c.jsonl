@@ -1,0 +1,46 @@
+{"ts":"2026-02-14T17:11:47.939881Z","event":"command.start","run_id":"0ac3fea54faa86e6","data":{"args":[],"command":"show"}}
+{"ts":"2026-02-14T17:11:47.940679Z","event":"command.end","run_id":"0ac3fea54faa86e6","dur_ms":1.339375,"data":{"command":"show"}}
+{"ts":"2026-02-14T17:11:51.247643Z","event":"command.start","run_id":"8def9106eb6c6d7b","data":{"args":["022-agentmind-viz-mvp"],"command":"spec"}}
+{"ts":"2026-02-14T17:11:59.651767Z","event":"command.start","run_id":"dbe2be84a31f75a8","data":{"args":["022-agentmind-viz-mvp"],"command":"spec"}}
+{"ts":"2026-02-14T17:11:59.802648Z","event":"bead.cli","run_id":"dbe2be84a31f75a8","dur_ms":145.877667,"data":{"args":["search","[SPEC 022-agentmind-viz-mvp]","--json","--status=open"],"ok":true,"op":"search"}}
+{"ts":"2026-02-14T17:11:59.907165Z","event":"bead.cli","run_id":"dbe2be84a31f75a8","dur_ms":104.442,"data":{"args":["create","[SPEC 022-agentmind-viz-mvp] AgentMind Viz MVP","--description=Summary: Give operators a real-time, visually rich 3D visualization of Claude Code agent activity.\nSpec: docs/specs/022-agentmind-viz-mvp/spec.md\nDomains: core, workflow","--type=feature","--priority=2","--json"],"ok":true,"op":"create"}}
+{"ts":"2026-02-14T17:11:59.976729Z","event":"bead.cli","run_id":"dbe2be84a31f75a8","dur_ms":69.478916,"data":{"args":["search","[GATE spec-approve 022-agentmind-viz-mvp]","--json","--status=open"],"ok":true,"op":"search"}}
+{"ts":"2026-02-14T17:12:00.15193Z","event":"state.transition","run_id":"dbe2be84a31f75a8","spec_id":"022-agentmind-viz-mvp","data":{"from":"spec","spec_id":"022-agentmind-viz-mvp","to":"plan"}}
+{"ts":"2026-02-14T17:12:00.197098Z","event":"command.end","run_id":"dbe2be84a31f75a8","dur_ms":545.3735,"data":{"command":"spec"}}
+{"ts":"2026-02-14T17:13:46.620423Z","event":"command.start","run_id":"a1a5aa4cfd6b3dda","data":{"args":[],"command":"show"}}
+{"ts":"2026-02-14T17:13:46.621303Z","event":"command.end","run_id":"a1a5aa4cfd6b3dda","dur_ms":1.023875,"data":{"command":"show"}}
+{"ts":"2026-02-14T17:13:49.537527Z","event":"command.start","run_id":"29ed67d7a9a5e5ea","data":{"args":["022-agentmind-viz-mvp"],"command":"plan"}}
+{"ts":"2026-02-14T17:14:06.861546Z","event":"command.start","run_id":"7dd477752f983156","data":{"args":["022-agentmind-viz-mvp"],"command":"plan"}}
+{"ts":"2026-02-14T17:14:30.692779Z","event":"command.start","run_id":"7b8f7ce260a26076","data":{"args":["022-agentmind-viz-mvp"],"command":"plan"}}
+{"ts":"2026-02-14T17:15:44.027593Z","event":"command.start","run_id":"5d4fc8d1400187df","data":{"args":["022-agentmind-viz-mvp"],"command":"plan"}}
+{"ts":"2026-02-14T17:15:44.215325Z","event":"state.transition","run_id":"5d4fc8d1400187df","spec_id":"022-agentmind-viz-mvp","data":{"from":"plan","spec_id":"022-agentmind-viz-mvp","to":"plan"}}
+{"ts":"2026-02-14T17:15:44.264542Z","event":"command.end","run_id":"5d4fc8d1400187df","dur_ms":237.104,"data":{"command":"plan"}}
+{"ts":"2026-02-14T17:15:48.27071Z","event":"command.start","run_id":"e2c1eb380542f56f","data":{"args":[],"command":"next"}}
+{"ts":"2026-02-14T17:16:01.741499Z","event":"command.start","run_id":"6d317f2c95a42274","data":{"args":[],"command":"next"}}
+{"ts":"2026-02-14T17:16:01.872582Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":121.616209,"data":{"args":["search","[PLAN ","--json","--status=open"],"ok":true,"op":"search"}}
+{"ts":"2026-02-14T17:16:02.047286Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":88.753917,"data":{"args":["update","mindspec-nem","--status=in_progress"],"ok":true,"op":"update"}}
+{"ts":"2026-02-14T17:16:02.132185Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":84.852375,"data":{"args":["worktree","list","--json"],"ok":true,"op":"worktree-list"}}
+{"ts":"2026-02-14T17:16:02.334841Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":202.572916,"data":{"args":["worktree","create","worktree-mindspec-nem","--branch=bead/mindspec-nem"],"ok":true,"op":"worktree-create"}}
+{"ts":"2026-02-14T17:16:02.422981Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":88.102667,"data":{"args":["worktree","list","--json"],"ok":true,"op":"worktree-list"}}
+{"ts":"2026-02-14T17:16:02.507822Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":84.724625,"data":{"args":["search","[PLAN Spec 022]","--json"],"ok":true,"op":"search-any"}}
+{"ts":"2026-02-14T17:16:02.595174Z","event":"bead.cli","run_id":"6d317f2c95a42274","dur_ms":87.291875,"data":{"args":["search","[SPEC Spec 022]","--json"],"ok":true,"op":"search-any"}}
+{"ts":"2026-02-14T17:16:02.595529Z","event":"state.transition","run_id":"6d317f2c95a42274","spec_id":"Spec 022","data":{"from":"plan","spec_id":"Spec 022","to":"spec"}}
+{"ts":"2026-02-14T17:16:06.151419Z","event":"command.start","run_id":"59b98db74456d9a9","data":{"args":[],"command":"next"}}
+{"ts":"2026-02-14T17:16:14.011868Z","event":"command.start","run_id":"aa68b16d77c0b373","data":{"args":[],"command":"next"}}
+{"ts":"2026-02-14T17:16:14.100335Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":80.961,"data":{"args":["search","[PLAN ","--json","--status=open"],"ok":true,"op":"search"}}
+{"ts":"2026-02-14T17:16:14.258249Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":81.846375,"data":{"args":["update","mindspec-3bv","--status=in_progress"],"ok":true,"op":"update"}}
+{"ts":"2026-02-14T17:16:14.337083Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":78.792541,"data":{"args":["worktree","list","--json"],"ok":true,"op":"worktree-list"}}
+{"ts":"2026-02-14T17:16:14.512648Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":175.482042,"data":{"args":["worktree","create","worktree-mindspec-3bv","--branch=bead/mindspec-3bv"],"ok":true,"op":"worktree-create"}}
+{"ts":"2026-02-14T17:16:14.598762Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":86.078292,"data":{"args":["worktree","list","--json"],"ok":true,"op":"worktree-list"}}
+{"ts":"2026-02-14T17:16:14.67412Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":75.062375,"data":{"args":["search","[PLAN 022-agentmind-viz-mvp]","--json"],"ok":true,"op":"search-any"}}
+{"ts":"2026-02-14T17:16:14.748059Z","event":"bead.cli","run_id":"aa68b16d77c0b373","dur_ms":73.888209,"data":{"args":["search","[SPEC 022-agentmind-viz-mvp]","--json"],"ok":true,"op":"search-any"}}
+{"ts":"2026-02-14T17:16:14.748493Z","event":"state.transition","run_id":"aa68b16d77c0b373","spec_id":"022-agentmind-viz-mvp","data":{"from":"plan","spec_id":"022-agentmind-viz-mvp","to":"plan"}}
+{"ts":"2026-02-14T17:16:14.795917Z","event":"command.end","run_id":"aa68b16d77c0b373","dur_ms":784.09025,"data":{"command":"next"}}
+{"ts":"2026-02-14T17:28:20.110071Z","event":"command.start","run_id":"465eb44976487063","data":{"args":[],"command":"show"}}
+{"ts":"2026-02-14T17:28:20.111107Z","event":"command.end","run_id":"465eb44976487063","dur_ms":1.230917,"data":{"command":"show"}}
+{"ts":"2026-02-14T17:28:23.092726Z","event":"command.start","run_id":"a1c9fe5c68e8c543","data":{"args":["022-agentmind-viz-mvp"],"command":"impl"}}
+{"ts":"2026-02-14T17:28:32.358494Z","event":"command.start","run_id":"7b027f47a45a310f","data":{"args":[],"command":"set"}}
+{"ts":"2026-02-14T17:28:32.358769Z","event":"state.transition","run_id":"7b027f47a45a310f","data":{"from":"plan","spec_id":"","to":"review"}}
+{"ts":"2026-02-14T17:28:39.861185Z","event":"command.start","run_id":"bff128471f0d81ee","data":{"args":["022-agentmind-viz-mvp"],"command":"impl"}}
+{"ts":"2026-02-14T17:28:39.998937Z","event":"bead.cli","run_id":"bff128471f0d81ee","dur_ms":137.635917,"data":{"args":["search","[SPEC 022-agentmind-viz-mvp]","--json"],"ok":true,"op":"search-any"}}
+{"ts":"2026-02-14T17:28:40.051793Z","event":"command.end","run_id":"bff128471f0d81ee","dur_ms":190.660583,"data":{"command":"impl"}}

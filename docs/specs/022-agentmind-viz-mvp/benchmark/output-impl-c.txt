@@ -1,0 +1,33 @@
+Spec 022 — AgentMind Viz MVP is complete. Here's a summary of what was implemented:
+
+## Implementation Summary
+
+**3 commits** on `bench-c-022-agentmind-viz-mvp-20260214-152732`:
+
+### Files Created (3,161 lines of new code)
+
+**Go Backend (`internal/viz/`):**
+- `graph.go` — Thread-safe in-memory graph with Node/Edge types, upsert/dedup, staleness/fade decay, hard caps (500 nodes / 2000 edges)
+- `normalize.go` — Maps OTLP `CollectedEvent` to graph operations (NodeUpsert, EdgeEvent) with tool classification (retrieval, write, model_call, mcp_call, tool_call)
+- `hub.go` — WebSocket hub with concurrent fan-out, backpressure handling, and dropped message counting
+- `server.go` — HTTP server with `embed.FS` static assets and WebSocket upgrade endpoint
+- `replay.go` — NDJSON file replay with configurable speed (1x/5x/10x/max) and rate-based sampling
+- `live.go` — OTLP/HTTP receiver (`/v1/logs`, `/v1/metrics`) that normalizes events in real time
+
+**Web UI (`internal/viz/web/`):**
+- `index.html` — SPA shell with HUD, legend, controls, detail card
+- `app.js` — Three.js 3D visualization: force-directed layout, starfield, type-colored glowing nodes, animated edges, OrbitControls with auto-orbit, raycasting hover/click, search/filter, pause/resume, show-raw toggle
+- `style.css` — Dark starfield aesthetic with monospace typography
+
+**CLI (`cmd/mindspec/viz.go`):**
+- `mindspec viz live [--otlp-port 4318] [--ui-port 8420]`
+- `mindspec viz replay <file.jsonl> [--speed 1] [--ui-port 8420]`
+
+### Tests (24 passing)
+- Graph: upsert dedup, edge dedup, staleness, fade, hard caps
+- Normalize: API request, tool use, MCP call, metrics, unknown events
+- Hub: broadcast, dropped counting, unregister
+- Server: HTML serving, WebSocket snapshot, broadcast update
+- Replay: NDJSON reading, speed control, max speed
+- Live: OTLP log/metric POST, method validation
+- Integration: end-to-end replay+WebSocket, hard cap enforcement

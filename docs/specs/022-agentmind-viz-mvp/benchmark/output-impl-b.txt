@@ -1,0 +1,27 @@
+Here's a summary of what was implemented and committed:
+
+## Agent Activity Galaxy — MVP Web Visualizer
+
+**12 files changed, 2,465 insertions** committed as `54f806f`.
+
+### Files created:
+| File | Purpose | Lines |
+|------|---------|-------|
+| `internal/viz/types.go` | OTLP parsing (duplicated from bench to avoid import cycle) | ~140 |
+| `internal/viz/normalizer.go` | Converts `CollectedEvent` → `GraphEvent[]` with node/edge/stat mapping | ~280 |
+| `internal/viz/normalizer_test.go` | 10 tests: API request, tokens, cost, tools, MCP, safety stripping, pruning, snapshots | ~270 |
+| `internal/viz/hub.go` | WebSocket client registry, snapshot-on-connect, broadcast fan-out | ~120 |
+| `internal/viz/server.go` | HTTP UI (`:8080`), OTLP receiver (`:4318`), WebSocket upgrade, embedded HTML | ~160 |
+| `internal/viz/replay.go` | NDJSON file reader with inter-event timing and speed multiplier | ~90 |
+| `internal/viz/replay_test.go` | 3 tests: basic replay, speed multiplier, context cancellation | ~110 |
+| `internal/viz/static/index.html` | Self-contained 3D galaxy UI with 3d-force-graph, starfield, HUD, search, pause | ~1000 |
+| `cmd/mindspec/viz.go` | `mindspec viz serve` and `mindspec viz replay` CLI commands | ~90 |
+
+### Files modified:
+- `cmd/mindspec/root.go` — registered `vizCmd`
+- `go.mod` / `go.sum` — added `nhooyr.io/websocket v1.8.17`
+
+### Verification:
+- All 13 viz tests pass
+- Full project test suite passes (18 packages, 0 failures)
+- Clean build
