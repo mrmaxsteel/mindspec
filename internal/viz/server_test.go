@@ -48,8 +48,8 @@ func TestServerServesHTML(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	if !strings.Contains(html, "<canvas") {
-		t.Error("expected <canvas element in HTML")
+	if !strings.Contains(html, "graph-container") {
+		t.Error("expected graph-container element in HTML")
 	}
 
 	if !strings.Contains(html, "AgentMind Viz") {

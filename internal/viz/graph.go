@@ -49,7 +49,7 @@ type Edge struct {
 	EndTime    time.Time      `json:"endTime,omitempty"`
 	Duration   time.Duration  `json:"duration,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
-	Faded      bool           `json:"faded"`
+	Opacity    float64        `json:"opacity"`
 	CallCount  int            `json:"callCount"`
 }
 
@@ -84,7 +84,8 @@ type GraphSnapshot struct {
 // GraphConfig holds configurable thresholds for the graph.
 type GraphConfig struct {
 	StaleThreshold int           // Events since last seen before marking stale (default 200)
-	FadeTimeout    time.Duration // Duration before edges are marked faded (default 120s)
+	FadeStart      time.Duration // Duration before edges start fading (default 30s)
+	FadeEnd        time.Duration // Duration when edges become fully transparent (default 120s)
 	MaxNodes       int           // Hard cap on nodes (default 500)
 	MaxEdges       int           // Hard cap on edges (default 2000)
 }
@@ -93,10 +94,19 @@ type GraphConfig struct {
 func DefaultGraphConfig() GraphConfig {
 	return GraphConfig{
 		StaleThreshold: 200,
-		FadeTimeout:    120 * time.Second,
+		FadeStart:      30 * time.Second,
+		FadeEnd:        120 * time.Second,
 		MaxNodes:       500,
 		MaxEdges:       2000,
 	}
+}
+
+// GraphStats holds cumulative statistics for the graph.
+type GraphStats struct {
+	APICalls    int     `json:"apiCalls"`
+	TotalTokens int64  `json:"totalTokens"`
+	ErrorCount  int     `json:"errorCount"`
+	CostUSD     float64 `json:"costUSD"`
 }
 
 // Graph is a thread-safe in-memory graph for visualization.
@@ -108,6 +118,12 @@ type Graph struct {
 	eventN int // total events processed (for staleness tracking)
 	nodeN  map[string]int // node ID → last event number seen
 	capped bool
+
+	// Cumulative stats (protected by mu)
+	apiCalls    int
+	totalTokens int64
+	errorCount  int
+	costUSD     float64
 }
 
 // NewGraph creates a new graph with the given configuration.
@@ -178,7 +194,7 @@ func (g *Graph) AddEdge(e EdgeEvent) {
 		existing.StartTime = e.StartTime
 		existing.EndTime = e.EndTime
 		existing.Duration = e.Duration
-		existing.Faded = false
+		existing.Opacity = 1.0
 		for k, v := range e.Attributes {
 			if existing.Attributes == nil {
 				existing.Attributes = make(map[string]any)
@@ -202,6 +218,7 @@ func (g *Graph) AddEdge(e EdgeEvent) {
 		EndTime:    e.EndTime,
 		Duration:   e.Duration,
 		Attributes: attrs,
+		Opacity:    1.0,
 		CallCount:  1,
 	}
 }
@@ -221,10 +238,16 @@ func (g *Graph) Tick() bool {
 		}
 	}
 
-	// Mark faded edges
+	// Compute edge opacity via linear interpolation
 	for _, e := range g.edges {
-		if now.Sub(e.StartTime) > g.config.FadeTimeout {
-			e.Faded = true
+		age := now.Sub(e.StartTime)
+		switch {
+		case age < g.config.FadeStart:
+			e.Opacity = 1.0
+		case age > g.config.FadeEnd:
+			e.Opacity = 0.0
+		default:
+			e.Opacity = 1.0 - float64(age-g.config.FadeStart)/float64(g.config.FadeEnd-g.config.FadeStart)
 		}
 	}
 
@@ -283,7 +306,7 @@ func (g *Graph) evictFadedEdges(count int) {
 		if evicted >= count {
 			break
 		}
-		if e.Faded {
+		if e.Opacity <= 0 {
 			delete(g.edges, id)
 			evicted++
 		}
@@ -341,4 +364,34 @@ func (g *Graph) EdgeCount() int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return len(g.edges)
+}
+
+// RecordEdgeStats records edge-level stats (error count tracking).
+func (g *Graph) RecordEdgeStats(status string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if status == "error" {
+		g.errorCount++
+	}
+}
+
+// RecordAPIStats records API-level stats (tokens, cost).
+func (g *Graph) RecordAPIStats(inputTokens, outputTokens int64, cost float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.apiCalls++
+	g.totalTokens += inputTokens + outputTokens
+	g.costUSD += cost
+}
+
+// Stats returns a snapshot of cumulative graph statistics.
+func (g *Graph) Stats() GraphStats {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return GraphStats{
+		APICalls:    g.apiCalls,
+		TotalTokens: g.totalTokens,
+		ErrorCount:  g.errorCount,
+		CostUSD:     g.costUSD,
+	}
 }

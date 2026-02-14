@@ -44,8 +44,6 @@ func (r *Replay) Run(ctx context.Context) error {
 
 	var prevTS time.Time
 	var eventCount int
-	var errorCount int
-	var totalLatencyMs float64
 	startTime := time.Now()
 	sampleN := 1
 
@@ -109,12 +107,15 @@ func (r *Replay) Run(ctx context.Context) error {
 		}
 		for _, edge := range edges {
 			r.graph.AddEdge(edge)
-			if edge.Status == "error" {
-				errorCount++
-			}
-			if edge.Duration > 0 {
-				totalLatencyMs += float64(edge.Duration) / float64(time.Millisecond)
-			}
+			r.graph.RecordEdgeStats(edge.Status)
+		}
+
+		// Record API-level stats from raw event data
+		if e.Event == "claude_code.api_request" {
+			inTok, _ := e.Data["input_tokens"].(float64)
+			outTok, _ := e.Data["output_tokens"].(float64)
+			cost, _ := e.Data["cost_usd"].(float64)
+			r.graph.RecordAPIStats(int64(inTok), int64(outTok), cost)
 		}
 
 		// Broadcast update
@@ -128,22 +129,18 @@ func (r *Replay) Run(ctx context.Context) error {
 		// Periodic tick + stats
 		if eventCount%10 == 0 {
 			capped := r.graph.Tick()
+			gstats := r.graph.Stats()
 			elapsed := time.Since(startTime)
 			eps := 0.0
 			if elapsed.Seconds() > 0 {
 				eps = float64(eventCount) / elapsed.Seconds()
-			}
-			avgLatency := 0.0
-			if eventCount > 0 {
-				avgLatency = totalLatencyMs / float64(eventCount)
 			}
 
 			r.hub.Broadcast(WSMessage{
 				Type: MsgStats,
 				Data: StatsData{
 					EventsPerSec: eps,
-					ErrorCount:   errorCount,
-					AvgLatencyMs: avgLatency,
+					ErrorCount:   gstats.ErrorCount,
 					Connected:    true,
 					Capped:       capped,
 					Dropped:      r.hub.Dropped(),

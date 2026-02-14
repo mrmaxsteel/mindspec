@@ -19,8 +19,6 @@ type LiveReceiver struct {
 	hub        *Hub
 	server     *http.Server
 	eventCount atomic.Int64
-	errorCount atomic.Int64
-	totalLatNs atomic.Int64
 	sampling   atomic.Bool
 	startTime  time.Time
 }
@@ -134,12 +132,15 @@ func (l *LiveReceiver) processEvents(events []bench.CollectedEvent) {
 		}
 		for _, edge := range edges {
 			l.graph.AddEdge(edge)
-			if edge.Status == "error" {
-				l.errorCount.Add(1)
-			}
-			if edge.Duration > 0 {
-				l.totalLatNs.Add(int64(edge.Duration))
-			}
+			l.graph.RecordEdgeStats(edge.Status)
+		}
+
+		// Record API-level stats from raw event data
+		if e.Event == "claude_code.api_request" {
+			inTok, _ := e.Data["input_tokens"].(float64)
+			outTok, _ := e.Data["output_tokens"].(float64)
+			cost, _ := e.Data["cost_usd"].(float64)
+			l.graph.RecordAPIStats(int64(inTok), int64(outTok), cost)
 		}
 
 		// Broadcast update
@@ -162,23 +163,19 @@ func (l *LiveReceiver) statsLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			capped := l.graph.Tick()
+			gstats := l.graph.Stats()
 			count := l.eventCount.Load()
 			elapsed := time.Since(l.startTime)
 			eps := 0.0
 			if elapsed.Seconds() > 0 {
 				eps = float64(count) / elapsed.Seconds()
 			}
-			avgLatMs := 0.0
-			if count > 0 {
-				avgLatMs = float64(l.totalLatNs.Load()) / float64(count) / 1e6
-			}
 
 			l.hub.Broadcast(WSMessage{
 				Type: MsgStats,
 				Data: StatsData{
 					EventsPerSec: eps,
-					ErrorCount:   int(l.errorCount.Load()),
-					AvgLatencyMs: avgLatMs,
+					ErrorCount:   gstats.ErrorCount,
 					Connected:    true,
 					Capped:       capped,
 					Dropped:      l.hub.Dropped(),

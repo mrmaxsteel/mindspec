@@ -2,6 +2,8 @@ package viz
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mindspec/mindspec/internal/bench"
@@ -49,7 +51,7 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 			Status:    "ok",
 			StartTime: ts,
 			Duration:  dur,
-			Attributes: filterAttrs(e.Data,
+			Attributes: safeMeta(e.Data,
 				"input_tokens", "output_tokens", "cache_read_input_tokens",
 				"cache_creation_input_tokens", "model", "cost_usd"),
 		})
@@ -92,9 +94,33 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 			Status:    status,
 			StartTime: ts,
 			Duration:  dur,
-			Attributes: filterAttrs(e.Data,
+			Attributes: safeMeta(e.Data,
 				"tool_name", "name", "duration_ms"),
 		})
+
+		// File/data_source node classification
+		if edgeType == EdgeRetrieval || edgeType == EdgeWrite {
+			filePath := extractFilePath(e.Data)
+			if filePath != "" {
+				fileID := "file:" + filePath
+				nodes = append(nodes, NodeUpsert{
+					ID:    fileID,
+					Type:  NodeDataSource,
+					Label: filepath.Base(filePath),
+					Attributes: map[string]any{
+						"path": filePath,
+					},
+				})
+				edges = append(edges, EdgeEvent{
+					ID:        fmt.Sprintf("edge:%s->%s:%d", toolID, fileID, ts.UnixNano()),
+					Src:       toolID,
+					Dst:       fileID,
+					Type:      edgeType,
+					Status:    status,
+					StartTime: ts,
+				})
+			}
+		}
 
 	case "claude_code.mcp_call", "mcp_call":
 		serverName, _ := e.Data["server_name"].(string)
@@ -107,6 +133,7 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 
 		mcpID := "mcp:" + serverName
 		agentID := "agent:claude-code"
+		dur := parseDuration(e.Data)
 
 		nodes = append(nodes, NodeUpsert{
 			ID:    mcpID,
@@ -119,18 +146,50 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 			Label: "Claude Code",
 		})
 
-		dur := parseDuration(e.Data)
-		edges = append(edges, EdgeEvent{
-			ID:        fmt.Sprintf("edge:%s->%s:%d", agentID, mcpID, ts.UnixNano()),
-			Src:       agentID,
-			Dst:       mcpID,
-			Type:      EdgeMCPCall,
-			Status:    "ok",
-			StartTime: ts,
-			Duration:  dur,
-			Attributes: filterAttrs(e.Data,
-				"server_name", "server", "method", "duration_ms"),
-		})
+		toolName, _ := e.Data["tool_name"].(string)
+		if toolName != "" {
+			// Route through tool node: agent→tool + tool→mcp
+			toolID := "tool:" + toolName
+			nodes = append(nodes, NodeUpsert{
+				ID:    toolID,
+				Type:  NodeTool,
+				Label: toolName,
+			})
+			edges = append(edges, EdgeEvent{
+				ID:        fmt.Sprintf("edge:%s->%s:%d", agentID, toolID, ts.UnixNano()),
+				Src:       agentID,
+				Dst:       toolID,
+				Type:      EdgeToolCall,
+				Status:    "ok",
+				StartTime: ts,
+				Duration:  dur,
+				Attributes: safeMeta(e.Data,
+					"tool_name", "method", "duration_ms"),
+			})
+			edges = append(edges, EdgeEvent{
+				ID:        fmt.Sprintf("edge:%s->%s:%d", toolID, mcpID, ts.UnixNano()),
+				Src:       toolID,
+				Dst:       mcpID,
+				Type:      EdgeMCPCall,
+				Status:    "ok",
+				StartTime: ts,
+				Attributes: safeMeta(e.Data,
+					"server_name", "server", "method"),
+			})
+		} else {
+			// Direct agent→mcp edge (backwards compatible)
+			edges = append(edges, EdgeEvent{
+				ID:        fmt.Sprintf("edge:%s->%s:%d", agentID, mcpID, ts.UnixNano()),
+				Src:       agentID,
+				Dst:       mcpID,
+				Type:      EdgeMCPCall,
+				Status:    "ok",
+				StartTime: ts,
+				Duration:  dur,
+				Attributes: safeMeta(e.Data,
+					"server_name", "server", "method", "duration_ms"),
+			})
+		}
 
 	default:
 		// Token/cost metrics create LLM endpoint nodes
@@ -179,6 +238,42 @@ func classifyToolEdge(toolName string) EdgeType {
 	default:
 		return EdgeToolCall
 	}
+}
+
+func extractFilePath(data map[string]any) string {
+	if p, ok := data["file_path"].(string); ok && p != "" {
+		return p
+	}
+	if p, ok := data["path"].(string); ok && p != "" {
+		return p
+	}
+	return ""
+}
+
+// sensitiveFields are keys that must never be passed to the frontend.
+var sensitiveFields = map[string]bool{
+	"prompt":            true,
+	"content":           true,
+	"message":           true,
+	"system_prompt":     true,
+	"user_message":      true,
+	"assistant_message": true,
+	"human_message":     true,
+}
+
+func isSensitive(key string) bool {
+	return sensitiveFields[strings.ToLower(key)]
+}
+
+// safeMeta wraps filterAttrs with a sensitive-field post-check.
+func safeMeta(data map[string]any, keys ...string) map[string]any {
+	out := filterAttrs(data, keys...)
+	for k := range out {
+		if isSensitive(k) {
+			delete(out, k)
+		}
+	}
+	return out
 }
 
 func filterAttrs(data map[string]any, keys ...string) map[string]any {

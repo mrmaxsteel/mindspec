@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -41,19 +40,7 @@ var vizLiveCmd = &cobra.Command{
 			cancel()
 		}()
 
-		graph := viz.NewGraph(viz.DefaultGraphConfig())
-		hub := viz.NewHub()
-		go hub.Run(ctx)
-
-		server := viz.NewServer(uiPort, hub, graph)
-		go func() {
-			if err := server.Run(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "UI server error: %v\n", err)
-			}
-		}()
-
-		receiver := viz.NewLiveReceiver(otlpPort, graph, hub)
-		return receiver.Run(ctx)
+		return viz.RunLive(ctx, otlpPort, uiPort)
 	},
 }
 
@@ -66,7 +53,6 @@ var vizReplayCmd = &cobra.Command{
 		speed, _ := cmd.Flags().GetFloat64("speed")
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 
-		// speed=0 means max
 		if speed <= 0 {
 			speed = 0
 		}
@@ -81,26 +67,7 @@ var vizReplayCmd = &cobra.Command{
 			cancel()
 		}()
 
-		graph := viz.NewGraph(viz.DefaultGraphConfig())
-		hub := viz.NewHub()
-		go hub.Run(ctx)
-
-		server := viz.NewServer(uiPort, hub, graph)
-		go func() {
-			if err := server.Run(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "UI server error: %v\n", err)
-			}
-		}()
-
-		replay := viz.NewReplay(filePath, speed, graph, hub)
-		if err := replay.Run(ctx); err != nil {
-			return err
-		}
-
-		// Keep server running after replay completes
-		fmt.Fprintf(os.Stderr, "Replay done. Server still running at http://localhost:%d (Ctrl-C to stop)\n", uiPort)
-		<-ctx.Done()
-		return nil
+		return viz.RunReplay(ctx, filePath, speed, uiPort)
 	},
 }
 

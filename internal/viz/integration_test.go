@@ -98,7 +98,8 @@ func TestIntegrationHardCaps(t *testing.T) {
 	cfg.MaxNodes = 10
 	cfg.MaxEdges = 5
 	cfg.StaleThreshold = 0
-	cfg.FadeTimeout = 0
+	cfg.FadeStart = 0
+	cfg.FadeEnd = 0
 	graph := NewGraph(cfg)
 
 	// Flood with synthetic nodes

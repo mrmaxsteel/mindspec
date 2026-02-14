@@ -135,11 +135,13 @@ func TestGraphTick_Staleness(t *testing.T) {
 	}
 }
 
-func TestGraphTick_Fade(t *testing.T) {
+func TestGraphTick_GradientOpacity(t *testing.T) {
 	cfg := DefaultGraphConfig()
-	cfg.FadeTimeout = 1 * time.Millisecond
+	cfg.FadeStart = 10 * time.Millisecond
+	cfg.FadeEnd = 20 * time.Millisecond
 	g := NewGraph(cfg)
 
+	// Edge well past FadeEnd — should be opacity 0
 	g.AddEdge(EdgeEvent{
 		ID:        "e1",
 		Src:       "a",
@@ -148,15 +150,56 @@ func TestGraphTick_Fade(t *testing.T) {
 		StartTime: time.Now().Add(-time.Second),
 	})
 
-	time.Sleep(2 * time.Millisecond)
+	// Fresh edge — should be opacity 1.0
+	g.AddEdge(EdgeEvent{
+		ID:        "e2",
+		Src:       "a",
+		Dst:       "c",
+		Type:      EdgeRetrieval,
+		StartTime: time.Now(),
+	})
+
+	g.Tick()
+
+	snap := g.Snapshot()
+	for _, e := range snap.Edges {
+		if e.Src == "a" && e.Dst == "b" {
+			if e.Opacity != 0.0 {
+				t.Errorf("old edge should have opacity 0.0, got %f", e.Opacity)
+			}
+		}
+		if e.Src == "a" && e.Dst == "c" {
+			if e.Opacity != 1.0 {
+				t.Errorf("fresh edge should have opacity 1.0, got %f", e.Opacity)
+			}
+		}
+	}
+}
+
+func TestGraphTick_GradientOpacityMidpoint(t *testing.T) {
+	cfg := DefaultGraphConfig()
+	cfg.FadeStart = 100 * time.Millisecond
+	cfg.FadeEnd = 200 * time.Millisecond
+	g := NewGraph(cfg)
+
+	// Edge at ~midpoint of fade window
+	g.AddEdge(EdgeEvent{
+		ID:        "e1",
+		Src:       "a",
+		Dst:       "b",
+		Type:      EdgeToolCall,
+		StartTime: time.Now().Add(-150 * time.Millisecond),
+	})
+
 	g.Tick()
 
 	snap := g.Snapshot()
 	if len(snap.Edges) == 0 {
-		t.Fatal("edge should still exist (faded, not removed)")
+		t.Fatal("edge should still exist")
 	}
-	if !snap.Edges[0].Faded {
-		t.Error("edge should be faded after timeout")
+	op := snap.Edges[0].Opacity
+	if op <= 0.0 || op >= 1.0 {
+		t.Errorf("midpoint edge should have opacity between 0 and 1, got %f", op)
 	}
 }
 
@@ -165,7 +208,8 @@ func TestGraphHardCaps(t *testing.T) {
 	cfg.MaxNodes = 5
 	cfg.MaxEdges = 3
 	cfg.StaleThreshold = 0 // everything becomes stale immediately
-	cfg.FadeTimeout = 0
+	cfg.FadeStart = 0
+	cfg.FadeEnd = 0
 	g := NewGraph(cfg)
 
 	// Add more nodes than cap
@@ -204,6 +248,30 @@ func TestGraphHardCaps(t *testing.T) {
 	snap := g.Snapshot()
 	if !snap.Capped {
 		t.Error("snapshot should report capped=true")
+	}
+}
+
+func TestGraphStats(t *testing.T) {
+	g := NewGraph(DefaultGraphConfig())
+
+	g.RecordEdgeStats("ok")
+	g.RecordEdgeStats("error")
+	g.RecordEdgeStats("error")
+	g.RecordAPIStats(100, 50, 0.01)
+	g.RecordAPIStats(200, 100, 0.02)
+
+	stats := g.Stats()
+	if stats.APICalls != 2 {
+		t.Errorf("expected 2 API calls, got %d", stats.APICalls)
+	}
+	if stats.TotalTokens != 450 {
+		t.Errorf("expected 450 total tokens, got %d", stats.TotalTokens)
+	}
+	if stats.ErrorCount != 2 {
+		t.Errorf("expected 2 errors, got %d", stats.ErrorCount)
+	}
+	if stats.CostUSD < 0.029 || stats.CostUSD > 0.031 {
+		t.Errorf("expected cost ~0.03, got %f", stats.CostUSD)
 	}
 }
 

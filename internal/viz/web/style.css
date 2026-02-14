@@ -14,6 +14,14 @@ canvas {
   height: 100vh;
 }
 
+#graph-container {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
 #hud {
   position: fixed;
   top: 16px;
