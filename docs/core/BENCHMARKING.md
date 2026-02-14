@@ -256,9 +256,9 @@ For repeatable benchmarks, use `scripts/bench-e2e.sh`. It automates the full wor
 
 | Session | Description |
 |:--------|:------------|
-| A (mindspec) | Full MindSpec tooling |
+| A (no-docs)  | No MindSpec, no docs/ — pure freestyle with no project documentation |
 | B (baseline) | No CLAUDE.md/.mindspec; hooks stripped from settings; docs/ present |
-| C (no-docs)  | Same as B plus docs/ removed — no project documentation at all |
+| C (mindspec) | Full MindSpec tooling |
 
 ### Example
 
@@ -305,12 +305,12 @@ The script auto-commits these to the current branch unless `--skip-commit` is pa
 ### How It Works
 
 1. Creates 3 git worktrees from the current HEAD
-2. Neutralizes B (removes CLAUDE.md, .mindspec/, MindSpec commands, hooks) and C (same + removes docs/)
-3. Runs `claude -p` sequentially in each worktree with OTEL telemetry pointed at a per-session collector
-4. Collects plans: Session A's `docs/specs/<ID>/plan.md`, Sessions B/C's `.claude/plans/*.md`
+2. Neutralizes A (removes CLAUDE.md, .mindspec/, MindSpec commands, hooks, and docs/) and B (same but keeps docs/)
+3. Runs `claude -p` sequentially (A → B → C; MindSpec last to avoid cache warmup advantage)
+4. Collects plans: Session C's `docs/specs/<ID>/plan.md`, Sessions A/B's `.claude/plans/*.md`
 5. Generates pairwise `mindspec bench report` comparisons (A-vs-B, A-vs-C, B-vs-C)
 6. Runs a qualitative analysis via `claude -p` comparing all 3 implementations and plans
-7. Runs an improvements analysis identifying what B/C did better
+7. Runs an improvements analysis identifying what A/B did better
 8. Assembles results and cleans up worktrees
 
 The manual workflow above remains available for interactive sessions where you want more control.

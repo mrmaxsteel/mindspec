@@ -39,9 +39,9 @@ Usage: scripts/bench-e2e.sh --spec-id <ID> --prompt "..." [options]
 Run 3 Claude Code sessions under different conditions and produce a
 comparative benchmark report.
 
-  Session A (mindspec):  Full MindSpec tooling
+  Session A (no-docs):   No CLAUDE.md/.mindspec; hooks stripped; no docs/
   Session B (baseline):  No CLAUDE.md/.mindspec; hooks stripped; docs/ present
-  Session C (no-docs):   No CLAUDE.md/.mindspec; hooks stripped; no docs/
+  Session C (mindspec):  Full MindSpec tooling
 
 Required:
   --spec-id <NNN-slug>    Spec folder ID (e.g., 015-project-bootstrap)
@@ -278,14 +278,14 @@ run_session() {
 collect_plans() {
     local plan_a="" plan_b="" plan_c=""
 
-    # Session A: mindspec plan is at docs/specs/<ID>/plan.md
-    local spec_plan="${WORK_DIR}/wt-a/docs/specs/${SPEC_ID}/plan.md"
+    # Session C (mindspec): plan is at docs/specs/<ID>/plan.md
+    local spec_plan="${WORK_DIR}/wt-c/docs/specs/${SPEC_ID}/plan.md"
     if [[ -f "${spec_plan}" ]]; then
-        plan_a="$(cat "${spec_plan}")"
+        plan_c="$(cat "${spec_plan}")"
     fi
 
-    # Sessions B and C: Claude's built-in /plan mode writes to .claude/plans/
-    for label in b c; do
+    # Sessions A and B: Claude's built-in /plan mode writes to .claude/plans/
+    for label in a b; do
         local wt="${WORK_DIR}/wt-${label}"
         local plan_content=""
 
@@ -302,10 +302,10 @@ collect_plans() {
             plan_content="(No plan artifact found for Session ${label^^})"
         fi
 
-        if [[ "${label}" == "b" ]]; then
-            plan_b="${plan_content}"
+        if [[ "${label}" == "a" ]]; then
+            plan_a="${plan_content}"
         else
-            plan_c="${plan_content}"
+            plan_b="${plan_content}"
         fi
     done
 
@@ -337,12 +337,12 @@ generate_diffs() {
 generate_quantitative() {
     local ms="${REPO_ROOT}/bin/mindspec"
 
-    REPORT_AB="$("${ms}" bench report "${WORK_DIR}/session-a.jsonl" "${WORK_DIR}/session-b.jsonl" \
-        --labels "mindspec,baseline" 2>/dev/null || echo "(report failed)")"
-    REPORT_AC="$("${ms}" bench report "${WORK_DIR}/session-a.jsonl" "${WORK_DIR}/session-c.jsonl" \
+    REPORT_CA="$("${ms}" bench report "${WORK_DIR}/session-c.jsonl" "${WORK_DIR}/session-a.jsonl" \
         --labels "mindspec,no-docs" 2>/dev/null || echo "(report failed)")"
-    REPORT_BC="$("${ms}" bench report "${WORK_DIR}/session-b.jsonl" "${WORK_DIR}/session-c.jsonl" \
-        --labels "baseline,no-docs" 2>/dev/null || echo "(report failed)")"
+    REPORT_CB="$("${ms}" bench report "${WORK_DIR}/session-c.jsonl" "${WORK_DIR}/session-b.jsonl" \
+        --labels "mindspec,baseline" 2>/dev/null || echo "(report failed)")"
+    REPORT_AB="$("${ms}" bench report "${WORK_DIR}/session-a.jsonl" "${WORK_DIR}/session-b.jsonl" \
+        --labels "no-docs,baseline" 2>/dev/null || echo "(report failed)")"
 }
 
 # ── Qualitative Analysis ──────────────────────────────────────────────────
@@ -352,13 +352,13 @@ run_qualitative() {
 You are a senior software engineer reviewing three implementations of the same feature,
 produced by Claude Code under different conditions:
 
-- **Session A (mindspec)**: Full MindSpec tooling — spec-driven workflow with CLAUDE.md,
-  hooks, domain documentation, glossary, context map, and policies.
+- **Session A (no-docs)**: No MindSpec tooling AND no docs/ directory — pure freestyle
+  with no project documentation.
 - **Session B (baseline)**: No MindSpec tooling (CLAUDE.md, .mindspec/ removed, hooks
   stripped from .claude/settings.json, MindSpec commands removed), but docs/ directory
   (domain docs, ADRs, glossary, context map) and .claude/ directory still present.
-- **Session C (no-docs)**: Same as B but also with docs/ directory removed — pure freestyle
-  with no project documentation.
+- **Session C (mindspec)**: Full MindSpec tooling — spec-driven workflow with CLAUDE.md,
+  hooks, domain documentation, glossary, context map, and policies.
 
 All three sessions started from the same git commit and received the same feature prompt:
 
@@ -366,24 +366,24 @@ All three sessions started from the same git commit and received the same featur
 
 ## Quantitative Reports
 
-### A vs B (mindspec vs baseline)
+### C vs A (mindspec vs no-docs)
+\`\`\`
+${REPORT_CA}
+\`\`\`
+
+### C vs B (mindspec vs baseline)
+\`\`\`
+${REPORT_CB}
+\`\`\`
+
+### A vs B (no-docs vs baseline)
 \`\`\`
 ${REPORT_AB}
 \`\`\`
 
-### A vs C (mindspec vs no-docs)
-\`\`\`
-${REPORT_AC}
-\`\`\`
-
-### B vs C (baseline vs no-docs)
-\`\`\`
-${REPORT_BC}
-\`\`\`
-
 ## Plans
 
-### Session A Plan (mindspec plan.md)
+### Session A Plan (Claude /plan mode)
 \`\`\`markdown
 ${PLAN_A}
 \`\`\`
@@ -393,14 +393,14 @@ ${PLAN_A}
 ${PLAN_B}
 \`\`\`
 
-### Session C Plan (Claude /plan mode)
+### Session C Plan (mindspec plan.md)
 \`\`\`markdown
 ${PLAN_C}
 \`\`\`
 
 ## Implementation Diffs
 
-### Session A (mindspec)
+### Session A (no-docs)
 \`\`\`diff
 ${DIFF_A}
 \`\`\`
@@ -410,7 +410,7 @@ ${DIFF_A}
 ${DIFF_B}
 \`\`\`
 
-### Session C (no-docs)
+### Session C (mindspec)
 \`\`\`diff
 ${DIFF_C}
 \`\`\`
@@ -438,9 +438,9 @@ Use this exact structure:
 ## Planning Quality
 | Session | Rating | Assessment |
 |---------|--------|------------|
-| A (mindspec) | X/5 | ... |
+| A (no-docs)  | X/5 | ... |
 | B (baseline) | X/5 | ... |
-| C (no-docs)  | X/5 | ... |
+| C (mindspec) | X/5 | ... |
 
 [repeat for each dimension]
 
@@ -463,14 +463,14 @@ run_improvements() {
     local prompt_file="${WORK_DIR}/improv-prompt.txt"
     cat > "${prompt_file}" <<IMPROV_EOF
 You are analyzing three implementations of the same feature to identify what the
-non-MindSpec sessions (B and C) did BETTER than the MindSpec session (A).
+non-MindSpec sessions (A and B) did BETTER than the MindSpec session (C).
 
 The feature prompt was:
 > ${PROMPT}
 
 ## Plans
 
-### Session A Plan (mindspec)
+### Session A Plan (no-docs)
 \`\`\`markdown
 ${PLAN_A}
 \`\`\`
@@ -480,14 +480,14 @@ ${PLAN_A}
 ${PLAN_B}
 \`\`\`
 
-### Session C Plan (no-docs)
+### Session C Plan (mindspec)
 \`\`\`markdown
 ${PLAN_C}
 \`\`\`
 
 ## Implementation Diffs
 
-### Session A (mindspec)
+### Session A (no-docs — no MindSpec, no docs/)
 \`\`\`diff
 ${DIFF_A}
 \`\`\`
@@ -497,7 +497,7 @@ ${DIFF_A}
 ${DIFF_B}
 \`\`\`
 
-### Session C (no-docs — no MindSpec, no docs/)
+### Session C (mindspec)
 \`\`\`diff
 ${DIFF_C}
 \`\`\`
@@ -508,34 +508,34 @@ ${QUAL_ANALYSIS}
 
 ## Your Task
 
-Identify specific, actionable improvements from sessions B and C that session A should
+Identify specific, actionable improvements from sessions A and B that session C should
 adopt. Focus on:
 
-1. **Code patterns** B/C used that are objectively better (simpler, more idiomatic, better error handling)
-2. **Features or edge cases** B/C handled that A missed
-3. **Architectural decisions** in B/C that are cleaner (even if session A was "correct by spec")
-4. **Planning approaches** in B/C that produced better outcomes
-5. **Test approaches** in B/C that are more thorough or practical
-6. **Documentation or naming** that B/C got right where A did not
+1. **Code patterns** A/B used that are objectively better (simpler, more idiomatic, better error handling)
+2. **Features or edge cases** A/B handled that C missed
+3. **Architectural decisions** in A/B that are cleaner (even if session C was "correct by spec")
+4. **Planning approaches** in A/B that produced better outcomes
+5. **Test approaches** in A/B that are more thorough or practical
+6. **Documentation or naming** that A/B got right where C did not
 
 For each improvement, provide:
-- Which session(s) it came from (B, C, or both)
+- Which session(s) it came from (A, B, or both)
 - What specifically was better
 - A concrete suggestion for how to incorporate it into the MindSpec implementation
 
-If there are no meaningful improvements from B/C, say so explicitly.
+If there are no meaningful improvements from A/B, say so explicitly.
 
 Output format:
 
 # Improvements from Non-MindSpec Sessions
 
 ## Summary
-[1-2 sentences: overall, did B/C produce anything worth adopting?]
+[1-2 sentences: overall, did A/B produce anything worth adopting?]
 
 ## Improvements
 
 ### 1. [Brief title]
-**Source**: Session B / C / Both
+**Source**: Session A / B / Both
 **What was better**: ...
 **Suggestion**: ...
 
@@ -558,8 +558,8 @@ assemble_benchmark_md() {
     [[ -f "${WORK_DIR}/session-c.jsonl" ]] && event_c=$(wc -l < "${WORK_DIR}/session-c.jsonl" | tr -d ' ')
 
     local trace_summary=""
-    if [[ -f "${WORK_DIR}/trace-a.jsonl" ]]; then
-        trace_summary="$("${REPO_ROOT}/bin/mindspec" trace summary "${WORK_DIR}/trace-a.jsonl" 2>/dev/null || echo "(trace summary unavailable)")"
+    if [[ -f "${WORK_DIR}/trace-c.jsonl" ]]; then
+        trace_summary="$("${REPO_ROOT}/bin/mindspec" trace summary "${WORK_DIR}/trace-c.jsonl" 2>/dev/null || echo "(trace summary unavailable)")"
     fi
 
     local prompt_display="${PROMPT}"
@@ -583,31 +583,31 @@ ${prompt_display}
 
 | Session | Description | Port | Events |
 |---------|-------------|------|--------|
-| A (mindspec) | Full MindSpec tooling | ${PORT_A} | ${event_a} |
+| A (no-docs)  | No CLAUDE.md/.mindspec; hooks stripped; no docs/ | ${PORT_A} | ${event_a} |
 | B (baseline) | No CLAUDE.md/.mindspec; hooks stripped; docs/ present | ${PORT_B} | ${event_b} |
-| C (no-docs)  | No CLAUDE.md/.mindspec; hooks stripped; no docs/ | ${PORT_C} | ${event_c} |
+| C (mindspec) | Full MindSpec tooling | ${PORT_C} | ${event_c} |
 
 ## Quantitative Comparison
 
-### A vs B (mindspec vs baseline)
+### C vs A (mindspec vs no-docs)
+
+\`\`\`
+${REPORT_CA}
+\`\`\`
+
+### C vs B (mindspec vs baseline)
+
+\`\`\`
+${REPORT_CB}
+\`\`\`
+
+### A vs B (no-docs vs baseline)
 
 \`\`\`
 ${REPORT_AB}
 \`\`\`
 
-### A vs C (mindspec vs no-docs)
-
-\`\`\`
-${REPORT_AC}
-\`\`\`
-
-### B vs C (baseline vs no-docs)
-
-\`\`\`
-${REPORT_BC}
-\`\`\`
-
-## MindSpec Trace Summary (Session A)
+## MindSpec Trace Summary (Session C)
 
 \`\`\`
 ${trace_summary}
@@ -620,10 +620,10 @@ ${QUAL_ANALYSIS:-_(skipped)_}
 ## Raw Data
 
 Telemetry and output files are in \`${WORK_DIR}/\`:
-- \`session-a.jsonl\` — Session A OTEL telemetry
-- \`session-b.jsonl\` — Session B OTEL telemetry
-- \`session-c.jsonl\` — Session C OTEL telemetry
-- \`trace-a.jsonl\` — Session A MindSpec trace
+- \`session-a.jsonl\` — Session A (no-docs) OTEL telemetry
+- \`session-b.jsonl\` — Session B (baseline) OTEL telemetry
+- \`session-c.jsonl\` — Session C (mindspec) OTEL telemetry
+- \`trace-c.jsonl\` — Session C MindSpec trace
 - \`output-a.txt\` — Session A Claude output
 - \`output-b.txt\` — Session B Claude output
 - \`output-c.txt\` — Session C Claude output
@@ -690,15 +690,15 @@ main() {
     create_worktree "bench-b-${SPEC_ID}-${TIMESTAMP}" "${WORK_DIR}/wt-b"
     create_worktree "bench-c-${SPEC_ID}-${TIMESTAMP}" "${WORK_DIR}/wt-c"
 
-    # Neutralize B and C
-    echo "Neutralizing sessions B and C..."
+    # Neutralize A and B (C is the full MindSpec session)
+    echo "Neutralizing sessions A and B..."
+    neutralize_nodocs "${WORK_DIR}/wt-a"
     neutralize_baseline "${WORK_DIR}/wt-b"
-    neutralize_nodocs "${WORK_DIR}/wt-c"
 
-    # Run sessions sequentially (baselines first so MindSpec gets no cache warmup advantage)
+    # Run sessions sequentially (A → B → C; MindSpec last to avoid cache warmup advantage)
+    run_session "a" "${WORK_DIR}/wt-a" "${PORT_A}" "${WORK_DIR}/session-a.jsonl" ""
     run_session "b" "${WORK_DIR}/wt-b" "${PORT_B}" "${WORK_DIR}/session-b.jsonl" ""
-    run_session "c" "${WORK_DIR}/wt-c" "${PORT_C}" "${WORK_DIR}/session-c.jsonl" ""
-    run_session "a" "${WORK_DIR}/wt-a" "${PORT_A}" "${WORK_DIR}/session-a.jsonl" "${WORK_DIR}/trace-a.jsonl"
+    run_session "c" "${WORK_DIR}/wt-c" "${PORT_C}" "${WORK_DIR}/session-c.jsonl" "${WORK_DIR}/trace-c.jsonl"
 
     # Generate quantitative reports
     echo ""
@@ -743,7 +743,7 @@ main() {
     echo "Done. Results in docs/specs/${SPEC_ID}/"
     echo "  benchmark.md    — quantitative + qualitative report"
     if [[ -n "${IMPROVEMENTS}" ]]; then
-        echo "  improvements.md — actionable findings from B/C"
+        echo "  improvements.md — actionable findings from A/B"
     fi
 }
 
