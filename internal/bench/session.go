@@ -19,6 +19,7 @@ type SessionDef struct {
 	Port        int
 	Neutralize  func(wtPath string) error // nil for session C (full MindSpec)
 	EnableTrace bool
+	Prompt      string // per-session prompt override (if non-empty, overrides cfg.Prompt)
 }
 
 // SessionResult holds the outcome of a single benchmark session.
@@ -67,55 +68,20 @@ func RunSession(ctx context.Context, cfg *RunConfig, def *SessionDef, wtPath str
 	}
 	defer outFile.Close()
 
-	// Build claude command
-	args := []string{"-p", cfg.Prompt, "--dangerously-skip-permissions", "--no-session-persistence"}
-	if cfg.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", cfg.MaxTurns))
-	}
-	if cfg.Model != "" {
-		args = append(args, "--model", cfg.Model)
+	// Determine prompt
+	prompt := cfg.Prompt
+	if def.Prompt != "" {
+		prompt = def.Prompt
 	}
 
-	// Apply session timeout
-	sessionCtx, sessionCancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer sessionCancel()
-
-	cmd := exec.CommandContext(sessionCtx, "claude", args...)
-	cmd.Dir = wtPath
-	cmd.Stdout = io.MultiWriter(cfg.Stdout, outFile)
-	cmd.Stderr = io.MultiWriter(cfg.Stdout, outFile)
-	cmd.Cancel = func() error {
-		return cmd.Process.Signal(syscall.SIGTERM)
-	}
-	cmd.WaitDelay = 10 * time.Second
-
-	// Set environment
-	env := os.Environ()
-	env = append(env,
-		"CLAUDECODE=",
-		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
-		"OTEL_METRICS_EXPORTER=otlp",
-		"OTEL_LOGS_EXPORTER=otlp",
-		"OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
-		fmt.Sprintf("OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:%d", def.Port),
-		"OTEL_LOG_TOOL_DETAILS=1",
-	)
-	if def.EnableTrace {
-		tracePath := filepath.Join(cfg.WorkDir, fmt.Sprintf("trace-%s.jsonl", def.Label))
-		env = append(env, "MINDSPEC_TRACE="+tracePath)
-	}
-	cmd.Env = env
+	// Build environment
+	env := buildSessionEnv(def.Port, cfg.WorkDir, def.Label, def.EnableTrace)
 
 	// Run claude
-	runErr := cmd.Run()
-	if runErr != nil {
-		if sessionCtx.Err() == context.DeadlineExceeded {
-			result.TimedOut = true
-		}
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		}
-	}
+	exitCode, timedOut, _ := runClaude(ctx, prompt, wtPath, env,
+		cfg.MaxTurns, cfg.Model, cfg.Timeout, cfg.Stdout, outFile)
+	result.ExitCode = exitCode
+	result.TimedOut = timedOut
 
 	// Give collector time to flush remaining events
 	time.Sleep(2 * time.Second)
@@ -174,4 +140,62 @@ func CheckPortFree(port int) error {
 	}
 	conn.Close()
 	return fmt.Errorf("port %d is already in use", port)
+}
+
+// runClaude executes a single claude -p invocation. It is the core execution
+// primitive used by both RunSession and runWithRetries.
+func runClaude(ctx context.Context, prompt, wtPath string, env []string,
+	maxTurns int, model string, timeout time.Duration,
+	stdout io.Writer, outFile *os.File) (exitCode int, timedOut bool, err error) {
+
+	args := []string{"-p", prompt, "--dangerously-skip-permissions", "--no-session-persistence"}
+	if maxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns))
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+
+	sessionCtx, sessionCancel := context.WithTimeout(ctx, timeout)
+	defer sessionCancel()
+
+	cmd := exec.CommandContext(sessionCtx, "claude", args...)
+	cmd.Dir = wtPath
+	cmd.Stdout = io.MultiWriter(stdout, outFile)
+	cmd.Stderr = io.MultiWriter(stdout, outFile)
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = 10 * time.Second
+	cmd.Env = env
+
+	runErr := cmd.Run()
+	if runErr != nil {
+		if sessionCtx.Err() == context.DeadlineExceeded {
+			timedOut = true
+		}
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return exitCode, timedOut, nil
+}
+
+// buildSessionEnv creates the environment for a benchmark Claude session.
+func buildSessionEnv(port int, workDir, label string, enableTrace bool) []string {
+	env := os.Environ()
+	env = append(env,
+		"CLAUDECODE=",
+		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
+		"OTEL_METRICS_EXPORTER=otlp",
+		"OTEL_LOGS_EXPORTER=otlp",
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+		fmt.Sprintf("OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:%d", port),
+		"OTEL_LOG_TOOL_DETAILS=1",
+	)
+	if enableTrace {
+		tracePath := filepath.Join(workDir, fmt.Sprintf("trace-%s.jsonl", label))
+		env = append(env, "MINDSPEC_TRACE="+tracePath)
+	}
+	return env
 }

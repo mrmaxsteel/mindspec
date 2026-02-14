@@ -23,6 +23,15 @@ func CreateWorktree(repoRoot, branch, wtPath, commit string) error {
 	return nil
 }
 
+// CheckoutWorktree creates a git worktree at wtPath from an existing branch.
+func CheckoutWorktree(repoRoot, branch, wtPath string) error {
+	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", wtPath, branch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add (existing branch): %w\n%s", err, out)
+	}
+	return nil
+}
+
 // RemoveWorktree force-removes a git worktree and prunes.
 func RemoveWorktree(repoRoot, wtPath string) error {
 	cmd := exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", wtPath)

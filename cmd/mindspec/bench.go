@@ -179,6 +179,47 @@ comparative benchmark report.
 	},
 }
 
+var benchResumeCmd = &cobra.Command{
+	Use:   "resume",
+	Short: "Resume a phase-1 benchmark with implementation sessions",
+	Long: `Resume from a completed phase-1 benchmark run (where sessions produced
+plans/specs but no implementation code) and drive sessions through to
+implementation via a retry loop with auto-approve.
+
+Requires existing bench-{a,b,c}-<spec-id>-* branches and plan/spec
+artifacts in docs/specs/<spec-id>/benchmark/.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		specID, _ := cmd.Flags().GetString("spec-id")
+		timeoutSec, _ := cmd.Flags().GetInt("timeout")
+		maxTurns, _ := cmd.Flags().GetInt("max-turns")
+		maxRetries, _ := cmd.Flags().GetInt("max-retries")
+		model, _ := cmd.Flags().GetString("model")
+		workDir, _ := cmd.Flags().GetString("work-dir")
+		skipCleanup, _ := cmd.Flags().GetBool("skip-cleanup")
+		skipQual, _ := cmd.Flags().GetBool("skip-qualitative")
+		skipCommit, _ := cmd.Flags().GetBool("skip-commit")
+
+		if specID == "" {
+			return fmt.Errorf("--spec-id is required")
+		}
+
+		cfg := &bench.ResumeConfig{
+			SpecID:          specID,
+			Timeout:         time.Duration(timeoutSec) * time.Second,
+			MaxTurns:        maxTurns,
+			MaxRetries:      maxRetries,
+			Model:           model,
+			WorkDir:         workDir,
+			SkipCleanup:     skipCleanup,
+			SkipQualitative: skipQual,
+			SkipCommit:      skipCommit,
+			Stdout:          os.Stdout,
+		}
+
+		return bench.Resume(cfg)
+	},
+}
+
 func splitLabels(s string) []string {
 	if s == "" {
 		return nil
@@ -217,8 +258,19 @@ func init() {
 	benchRunCmd.Flags().Bool("skip-qualitative", false, "Skip qualitative analysis (quantitative only)")
 	benchRunCmd.Flags().Bool("skip-commit", false, "Don't commit results to docs/specs/")
 
+	benchResumeCmd.Flags().String("spec-id", "", "Spec folder ID (e.g., 022-agentmind-viz-mvp)")
+	benchResumeCmd.Flags().Int("timeout", 1800, "Per-attempt timeout in seconds")
+	benchResumeCmd.Flags().Int("max-turns", 0, "Max agentic turns per attempt (0 = unlimited)")
+	benchResumeCmd.Flags().Int("max-retries", 3, "Max retry attempts per session")
+	benchResumeCmd.Flags().String("model", "", "Claude model for all sessions")
+	benchResumeCmd.Flags().String("work-dir", "", "Base dir for worktrees (default: /tmp/mindspec-bench-<spec-id>-impl)")
+	benchResumeCmd.Flags().Bool("skip-cleanup", false, "Preserve worktrees after completion")
+	benchResumeCmd.Flags().Bool("skip-qualitative", false, "Skip qualitative analysis")
+	benchResumeCmd.Flags().Bool("skip-commit", false, "Don't commit results to docs/specs/")
+
 	benchCmd.AddCommand(benchSetupCmd)
 	benchCmd.AddCommand(benchCollectCmd)
 	benchCmd.AddCommand(benchReportCmd)
 	benchCmd.AddCommand(benchRunCmd)
+	benchCmd.AddCommand(benchResumeCmd)
 }
