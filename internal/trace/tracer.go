@@ -40,7 +40,7 @@ func Init(path string) error {
 	if path == "-" {
 		w = nopCloser{os.Stderr}
 	} else {
-		f, err := os.Create(path)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("trace init: %w", err)
 		}
