@@ -233,10 +233,75 @@ git tag -d bench-a-result bench-b-result
 rm -f /tmp/bench-session-a.jsonl /tmp/bench-session-b.jsonl /tmp/mindspec-bench-a-trace.jsonl
 ```
 
+## Automated E2E Benchmarking
+
+For repeatable benchmarks, use `scripts/bench-e2e.sh`. It automates the full workflow — worktree creation, session execution, telemetry collection, quantitative reports, qualitative analysis, and result persistence — for 3 sessions:
+
+| Session | Description |
+|:--------|:------------|
+| A (mindspec) | Full MindSpec tooling |
+| B (baseline) | No CLAUDE.md/.mindspec; hooks stripped from settings; docs/ present |
+| C (no-docs)  | Same as B plus docs/ removed — no project documentation at all |
+
+### Example
+
+```bash
+scripts/bench-e2e.sh \
+  --spec-id 015-project-bootstrap \
+  --prompt "Plan and implement: mindspec init — a bootstrap command that scaffolds a new project" \
+  --max-turns 30 \
+  --timeout 1800
+```
+
+Or read the prompt from a file:
+
+```bash
+scripts/bench-e2e.sh \
+  --spec-id 015-project-bootstrap \
+  --prompt-file prompts/015.txt
+```
+
+### Flags
+
+| Flag | Description | Default |
+|:-----|:------------|:--------|
+| `--spec-id <NNN-slug>` | Spec folder ID (required) | — |
+| `--prompt <string>` | Feature prompt for all 3 sessions (required unless `--prompt-file`) | — |
+| `--prompt-file <path>` | Read prompt from file | — |
+| `--timeout <seconds>` | Per-session timeout | 1800 (30 min) |
+| `--max-turns <int>` | Max agentic turns per session | unlimited |
+| `--model <model>` | Claude model for all sessions | system default |
+| `--work-dir <path>` | Base dir for worktrees | `/tmp/mindspec-bench-<spec-id>` |
+| `--skip-cleanup` | Preserve worktrees after completion | false |
+| `--skip-qualitative` | Skip qualitative analysis (quantitative only) | false |
+| `--skip-commit` | Don't commit results to docs/specs/ | false |
+
+### Output
+
+Results are written to `docs/specs/<spec-id>/`:
+
+- **`benchmark.md`** — metadata, 3 pairwise quantitative reports, qualitative analysis with per-dimension 1-5 ratings
+- **`improvements.md`** — actionable findings: what the non-MindSpec sessions did better
+
+The script auto-commits these to the current branch unless `--skip-commit` is passed.
+
+### How It Works
+
+1. Creates 3 git worktrees from the current HEAD
+2. Neutralizes B (removes CLAUDE.md, .mindspec/, MindSpec commands, hooks) and C (same + removes docs/)
+3. Runs `claude -p` sequentially in each worktree with OTEL telemetry pointed at a per-session collector
+4. Collects plans: Session A's `docs/specs/<ID>/plan.md`, Sessions B/C's `.claude/plans/*.md`
+5. Generates pairwise `mindspec bench report` comparisons (A-vs-B, A-vs-C, B-vs-C)
+6. Runs a qualitative analysis via `claude -p` comparing all 3 implementations and plans
+7. Runs an improvements analysis identifying what B/C did better
+8. Assembles results and cleans up worktrees
+
+The manual workflow above remains available for interactive sessions where you want more control.
+
 ## Tips
 
 - **Same complexity:** Pick a feature that's complex enough to show differentiation (at least 2-3 files, with tests) but not so large that session variance dominates.
-- **Same model:** Ensure both sessions use the same Claude model. Check with `/model` in Claude Code.
+- **Same model:** Ensure both sessions use the same Claude model. Check with `/model` in Claude Code, or use `--model` with the automated script.
 - **Warm cache:** If running multiple experiments, the second run may benefit from prompt caching. Consider running a throwaway warm-up session first, or comparing cache rates as part of the analysis.
-- **Quality:** The report only measures cost and time. Assess quality separately — review the code both sessions produced, check test coverage, architectural cleanliness, etc.
+- **Quality:** The quantitative report measures cost and time. For the manual workflow, assess quality separately. The automated script handles this via qualitative analysis.
 - **Order bias:** Running MindSpec first means the baseline session happens after you've already seen one implementation. To control for this, consider alternating order across experiments.
