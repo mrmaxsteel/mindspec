@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentMind Viz</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-title">AgentMind Viz</div>
+  <div class="hud-row"><span class="hud-label">Status</span> <span id="hud-status">connecting...</span></div>
+  <div class="hud-row"><span class="hud-label">Events/s</span> <span id="hud-eps">0</span></div>
+  <div class="hud-row"><span class="hud-label">Errors</span> <span id="hud-errors">0</span></div>
+  <div class="hud-row"><span class="hud-label">Avg Latency</span> <span id="hud-latency">—</span></div>
+  <div class="hud-row"><span class="hud-label">Nodes</span> <span id="hud-nodes">0</span></div>
+  <div class="hud-row"><span class="hud-label">Edges</span> <span id="hud-edges">0</span></div>
+  <div class="hud-row" id="hud-capped-row" style="display:none"><span class="hud-label">Capped</span> <span id="hud-capped" class="warn">YES</span></div>
+  <div class="hud-row" id="hud-dropped-row" style="display:none"><span class="hud-label">Dropped</span> <span id="hud-dropped" class="warn">0</span></div>
+  <div class="hud-row" id="hud-sampling-row" style="display:none"><span class="hud-label">Sampling</span> <span class="warn">ACTIVE</span></div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="legend-title">Node Types</div>
+  <div class="legend-item"><span class="dot" style="background:#4fc3f7"></span> Agent</div>
+  <div class="legend-item"><span class="dot" style="background:#81c784"></span> Tool</div>
+  <div class="legend-item"><span class="dot" style="background:#ce93d8"></span> MCP Server</div>
+  <div class="legend-item"><span class="dot" style="background:#ffb74d"></span> Data Source</div>
+  <div class="legend-item"><span class="dot" style="background:#ffd54f"></span> LLM Endpoint</div>
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <input type="text" id="search" placeholder="Filter nodes..." />
+  <button id="btn-pause">Pause</button>
+  <button id="btn-reset">Reset Camera</button>
+  <label id="raw-toggle"><input type="checkbox" id="chk-raw"> Show Raw</label>
+</div>
+
+<!-- Detail Card -->
+<div id="detail-card" style="display:none">
+  <div id="detail-close">&times;</div>
+  <div id="detail-content"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

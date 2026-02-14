@@ -141,6 +141,11 @@ type CollectedEvent struct {
 
 // extractLogEvents parses an OTLP ExportLogsServiceRequest JSON body
 // and extracts claude_code.api_request events.
+// ExtractLogEvents is the exported wrapper for extractLogEvents.
+func ExtractLogEvents(body []byte) []CollectedEvent {
+	return extractLogEvents(body)
+}
+
 func extractLogEvents(body []byte) []CollectedEvent {
 	// OTLP JSON structure (simplified):
 	// { "resourceLogs": [ { "scopeLogs": [ { "logRecords": [ ... ] } ] } ] }
@@ -194,6 +199,11 @@ func extractLogEvents(body []byte) []CollectedEvent {
 
 // extractMetricEvents parses OTLP ExportMetricsServiceRequest JSON body
 // and extracts claude_code.token.usage and claude_code.cost.usage data points.
+// ExtractMetricEvents is the exported wrapper for extractMetricEvents.
+func ExtractMetricEvents(body []byte) []CollectedEvent {
+	return extractMetricEvents(body)
+}
+
 func extractMetricEvents(body []byte) []CollectedEvent {
 	var req struct {
 		ResourceMetrics []struct {
