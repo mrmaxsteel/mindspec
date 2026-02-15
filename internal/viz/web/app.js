@@ -725,6 +725,15 @@ document.getElementById('btn-reset').addEventListener('click', () => {
   Graph.cameraPosition({ x: 0, y: 0, z: 300 });
 });
 
+document.getElementById('btn-clear').addEventListener('click', () => {
+  state.nodes.clear();
+  state.edges.clear();
+  state.pinned = null;
+  document.getElementById('detail-card').style.display = 'none';
+  state.graphDirty = true;
+  syncGraphData();
+});
+
 document.getElementById('search').addEventListener('input', (e) => {
   state.filterText = e.target.value;
   Graph.nodeColor(Graph.nodeColor());
