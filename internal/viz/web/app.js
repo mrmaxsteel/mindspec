@@ -7,15 +7,6 @@ const NODE_COLORS = {
   llm_endpoint:'#fde68a',
 };
 
-const EDGE_COLORS = {
-  tool_call:   '#86efac',
-  mcp_call:    '#c4b5fd',
-  retrieval:   '#5eead4',
-  write:       '#fdba74',
-  model_call:  '#fde68a',
-  spawn:       '#5eead4',
-};
-
 // Pre-computed THREE.Color for GPU vertex color updates
 const NODE_COLORS_THREE = {};
 for (const [t, hex] of Object.entries(NODE_COLORS)) {
@@ -53,16 +44,6 @@ const EDGE_GLOW = {
   BASE_WIDTH: 0.4,     // Visible at rest
   MAX_WIDTH: 2.0,      // Bright flash on activity
 };
-
-// Desaturate edge colors (~60% saturation) for subtle constellation lines
-const EDGE_COLORS_DESAT = {};
-for (const [type, hex] of Object.entries(EDGE_COLORS)) {
-  const c = new window.THREE.Color(hex);
-  const hsl = {};
-  c.getHSL(hsl);
-  c.setHSL(hsl.h, hsl.s * 0.6, hsl.l);
-  EDGE_COLORS_DESAT[type] = '#' + c.getHexString();
-}
 
 const pendingParticles = []; // edge keys that need a glow particle spawned
 const activeParticles = [];  // { sprite, srcId, dstId, startTime, duration }

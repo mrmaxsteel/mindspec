@@ -81,11 +81,6 @@ canvas {
   letter-spacing: 1px;
 }
 
-.legend-divider {
-  border-top: 1px solid rgba(176, 176, 176, 0.15);
-  margin: 8px 0;
-}
-
 .legend-item {
   display: flex;
   align-items: center;
@@ -97,13 +92,6 @@ canvas {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  display: inline-block;
-}
-
-.edge-line {
-  width: 16px;
-  height: 0;
-  border-top: 2px dashed;
   display: inline-block;
 }
 
