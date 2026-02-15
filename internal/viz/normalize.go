@@ -39,12 +39,12 @@ func resolveAgentID(resource, data map[string]any) (id string, label string) {
 	return "agent:claude-code", "Claude Code"
 }
 
-// truncateSessionID returns the first 4 hex chars of a session UUID for display.
+// truncateSessionID returns the first 8 hex chars of a session UUID for display.
+// 8 hex chars = 4 billion values, effectively collision-free for concurrent agents.
 func truncateSessionID(id string) string {
-	// Strip hyphens and take first 4 chars
 	clean := strings.ReplaceAll(id, "-", "")
-	if len(clean) > 4 {
-		return clean[:4]
+	if len(clean) > 8 {
+		return clean[:8]
 	}
 	return clean
 }

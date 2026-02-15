@@ -451,15 +451,15 @@ func TestNormalizeAgentIdentityFromSessionID(t *testing.T) {
 	if agentNode == nil {
 		t.Fatal("expected agent node")
 	}
-	// session.id "a595bc37..." → first 4 hex chars after stripping hyphens = "a595"
-	if agentNode.ID != "agent:session:a595" {
-		t.Errorf("agent ID = %q, want agent:session:a595", agentNode.ID)
+	// session.id "a595bc37..." → first 8 hex chars after stripping hyphens = "a595bc37"
+	if agentNode.ID != "agent:session:a595bc37" {
+		t.Errorf("agent ID = %q, want agent:session:a595bc37", agentNode.ID)
 	}
-	if agentNode.Label != "Claude Code (a595)" {
-		t.Errorf("agent label = %q, want %q", agentNode.Label, "Claude Code (a595)")
+	if agentNode.Label != "Claude Code (a595bc37)" {
+		t.Errorf("agent label = %q, want %q", agentNode.Label, "Claude Code (a595bc37)")
 	}
-	if edges[0].Src != "agent:session:a595" {
-		t.Errorf("edge src = %q, want agent:session:a595", edges[0].Src)
+	if edges[0].Src != "agent:session:a595bc37" {
+		t.Errorf("edge src = %q, want agent:session:a595bc37", edges[0].Src)
 	}
 }
 
@@ -487,11 +487,11 @@ func TestNormalizeAgentIdentityServiceNamePlusSessionID(t *testing.T) {
 	if agentNode == nil {
 		t.Fatal("expected agent node")
 	}
-	if agentNode.ID != "agent:claude-code:7f3b" {
-		t.Errorf("agent ID = %q, want agent:claude-code:7f3b", agentNode.ID)
+	if agentNode.ID != "agent:claude-code:7f3b1234" {
+		t.Errorf("agent ID = %q, want agent:claude-code:7f3b1234", agentNode.ID)
 	}
-	if agentNode.Label != "claude-code (7f3b)" {
-		t.Errorf("agent label = %q, want %q", agentNode.Label, "claude-code (7f3b)")
+	if agentNode.Label != "claude-code (7f3b1234)" {
+		t.Errorf("agent label = %q, want %q", agentNode.Label, "claude-code (7f3b1234)")
 	}
 }
 
