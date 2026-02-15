@@ -1,19 +1,19 @@
 // ─── Color Palette ──────────────────────────────────────────
 const NODE_COLORS = {
-  agent:       '#4fc3f7',
-  tool:        '#81c784',
-  mcp_server:  '#ce93d8',
-  data_source: '#ffb74d',
-  llm_endpoint:'#ffd54f',
+  agent:       '#5eead4',
+  tool:        '#86efac',
+  mcp_server:  '#c4b5fd',
+  data_source: '#fdba74',
+  llm_endpoint:'#fde68a',
 };
 
 const EDGE_COLORS = {
-  tool_call:   '#81c784',
-  mcp_call:    '#ce93d8',
-  retrieval:   '#4fc3f7',
-  write:       '#ffb74d',
-  model_call:  '#ffd54f',
-  spawn:       '#4fc3f7',
+  tool_call:   '#86efac',
+  mcp_call:    '#c4b5fd',
+  retrieval:   '#5eead4',
+  write:       '#fdba74',
+  model_call:  '#fde68a',
+  spawn:       '#5eead4',
 };
 
 // Pre-computed THREE.Color for GPU vertex color updates
@@ -50,12 +50,24 @@ const EDGE_GLOW = {
   FIRE_BOOST: 0.8,     // energy added per firing (cumulative, stacks high)
   DECAY_RATE: 0.985,   // per-tick multiplier (50ms ticks → half-life ~2.3s)
   DECAY_FLOOR: 0.005,
+  BASE_WIDTH: 0.15,    // Thin constellation-style base width
+  MAX_WIDTH: 0.6,      // Maximum width under energy
 };
+
+// Desaturate edge colors (~60% saturation) for subtle constellation lines
+const EDGE_COLORS_DESAT = {};
+for (const [type, hex] of Object.entries(EDGE_COLORS)) {
+  const c = new window.THREE.Color(hex);
+  const hsl = {};
+  c.getHSL(hsl);
+  c.setHSL(hsl.h, hsl.s * 0.6, hsl.l);
+  EDGE_COLORS_DESAT[type] = '#' + c.getHexString();
+}
 
 const pendingParticles = []; // edge keys that need a glow particle spawned
 const activeParticles = [];  // { sprite, srcId, dstId, startTime, duration }
-const PARTICLE_DURATION = 1.0; // seconds to traverse full edge
-const PARTICLE_SIZE_FACTOR = 0.5; // relative to node size
+const PARTICLE_DURATION = 1.5; // seconds to traverse full edge (slower, subtler)
+const PARTICLE_SIZE_FACTOR = 0.3; // smaller particles for constellation look
 
 // Reusable vectors for edge billboard math (avoid per-frame allocations)
 const _edgeDir = new window.THREE.Vector3();
@@ -90,7 +102,7 @@ const Graph = ForceGraph3D()(container)
       map: lineGlowTexture,
       vertexColors: true,
       transparent: true,
-      opacity: 0.06,
+      opacity: 0.08,
       blending: window.THREE.AdditiveBlending,
       depthWrite: false,
       side: window.THREE.DoubleSide,
@@ -148,16 +160,14 @@ const Graph = ForceGraph3D()(container)
     col.array[9] = dstColor.r; col.array[10] = dstColor.g; col.array[11] = dstColor.b;
     col.needsUpdate = true;
 
-    // Scale: X = edge length, Y = glow width (blooms with cumulative energy)
-    const baseSize = 6 + Math.log2(((srcNode && srcNode.activityCount) || 1) + 1) * 2;
+    // Scale: thin constellation lines with energy-driven width
     const edgeData = state.edges.get(link.id);
     const energy = edgeData ? edgeData._energy : 0;
-    const baseGlow = baseSize * PARTICLE_SIZE_FACTOR * 1.0;
-    const glowWidth = baseGlow * (1 + energy * 0.8);
+    const glowWidth = Math.min(EDGE_GLOW.MAX_WIDTH, EDGE_GLOW.BASE_WIDTH + energy * 0.5);
     mesh.scale.set(len, glowWidth, 1);
 
-    // Opacity from energy — always visible, cumulative pulses push toward full brightness
-    mesh.material.opacity = Math.min(1.0, 0.25 + energy * 0.8);
+    // Opacity: subtle baseline, flashes on activity
+    mesh.material.opacity = Math.min(1.0, 0.12 + energy * 0.9);
 
     return true;
   })
@@ -171,47 +181,166 @@ const Graph = ForceGraph3D()(container)
     hideDetail();
   });
 
-// Add starfield via underlying Three.js scene
-const THREE = Graph.scene().constructor.__proto__.constructor;
-(function createStarfield() {
-  const scene = Graph.scene();
+// ─── Multi-Layer Starfield ────────────────────────────────────
+function buildStarfieldLayer(count, spread, size, color) {
   const geo = new window.THREE.BufferGeometry();
-  const count = 2000;
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count * 3; i++) {
-    positions[i] = (Math.random() - 0.5) * 2000;
+    positions[i] = (Math.random() - 0.5) * spread * 2;
   }
   geo.setAttribute('position', new window.THREE.BufferAttribute(positions, 3));
-  const mat = new window.THREE.PointsMaterial({ color: 0x444466, size: 0.5, sizeAttenuation: true });
-  scene.add(new window.THREE.Points(geo, mat));
+
+  let sizes;
+  if (typeof size === 'object') {
+    // Random size range { min, max }
+    sizes = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      sizes[i] = size.min + Math.random() * (size.max - size.min);
+    }
+    geo.setAttribute('size', new window.THREE.BufferAttribute(sizes, 1));
+  }
+
+  const mat = new window.THREE.PointsMaterial({
+    color: new window.THREE.Color(color),
+    size: typeof size === 'number' ? size : size.min,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  });
+  const points = new window.THREE.Points(geo, mat);
+  points.layers.set(0); // Non-bloom layer
+  return points;
+}
+
+function buildBrightStars(count, spread) {
+  // Cross-shaped sprite texture for landmark stars
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const cx = 32, cy = 32;
+
+  // Core glow
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 28);
+  grad.addColorStop(0, 'rgba(255,255,255,1.0)');
+  grad.addColorStop(0.15, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.15)');
+  grad.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+
+  // Cross spikes (subtle)
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, 2); ctx.lineTo(cx, 62);
+  ctx.moveTo(2, cy); ctx.lineTo(62, cy);
+  ctx.stroke();
+  ctx.globalAlpha = 1.0;
+
+  const tex = new window.THREE.CanvasTexture(canvas);
+  const group = new window.THREE.Group();
+  group.layers.set(0);
+
+  for (let i = 0; i < count; i++) {
+    const mat = new window.THREE.SpriteMaterial({
+      map: tex,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.7 + Math.random() * 0.3,
+      depthWrite: false,
+    });
+    const sprite = new window.THREE.Sprite(mat);
+    sprite.position.set(
+      (Math.random() - 0.5) * spread * 2,
+      (Math.random() - 0.5) * spread * 2,
+      (Math.random() - 0.5) * spread * 2
+    );
+    const s = 2.5 + Math.random() * 1.5;
+    sprite.scale.set(s, s, 1);
+    sprite.layers.set(0);
+    group.add(sprite);
+  }
+  return group;
+}
+
+(function createStarfield() {
+  const scene = Graph.scene();
+  scene.add(buildStarfieldLayer(8000, 3000, 0.3, '#333355'));   // Far
+  scene.add(buildStarfieldLayer(3000, 2000, 0.6, '#555577'));   // Mid
+  scene.add(buildStarfieldLayer(500, 1000, { min: 1.0, max: 2.0 }, '#8888aa')); // Near
+  scene.add(buildBrightStars(20, 1200));  // Bright landmarks
 })();
 
-// ─── Glowing Star Nodes ─────────────────────────────────────
-function createGlowTexture(size) {
+// ─── Star-Point Node Textures ────────────────────────────────
+function createCoreTexture(size) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const center = size / 2;
-
-  const grad = ctx.createRadialGradient(center, center, 0, center, center, center);
+  const c = size / 2;
+  const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
   grad.addColorStop(0, 'rgba(255,255,255,1.0)');
-  grad.addColorStop(0.28, 'rgba(255,255,255,1.0)');
-  grad.addColorStop(0.32, 'rgba(255,255,255,0.7)');
-  grad.addColorStop(0.50, 'rgba(255,255,255,0.25)');
-  grad.addColorStop(0.70, 'rgba(255,255,255,0.06)');
-  grad.addColorStop(0.90, 'rgba(255,255,255,0.01)');
+  grad.addColorStop(0.2, 'rgba(255,255,255,1.0)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.6)');
+  grad.addColorStop(0.7, 'rgba(255,255,255,0.1)');
   grad.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new window.THREE.CanvasTexture(canvas);
+}
+
+function createHaloTexture(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const c = size / 2;
+  const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
+  grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(0.2, 'rgba(255,255,255,0.3)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+  grad.addColorStop(0.8, 'rgba(255,255,255,0.02)');
+  grad.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new window.THREE.CanvasTexture(canvas);
+}
+
+function createDiffractionTexture(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const c = size / 2;
+
+  // 4-point cross spikes
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(c, 4); ctx.lineTo(c, size - 4);
+  ctx.moveTo(4, c); ctx.lineTo(size - 4, c);
+  ctx.stroke();
+
+  // Subtle center glow
+  ctx.globalAlpha = 0.3;
+  const grad = ctx.createRadialGradient(c, c, 0, c, c, c * 0.3);
+  grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
 
   return new window.THREE.CanvasTexture(canvas);
 }
 
-const glowTexture = createGlowTexture(128);
+const coreTexture = createCoreTexture(64);
+const haloTexture = createHaloTexture(128);
+const diffractionTexture = createDiffractionTexture(128);
 
-// Line glow: vertical gradient (bright center, soft falloff to edges)
-// Applied to a PlaneGeometry ribbon billboarded along each edge
+// Line glow: vertical gradient for edge ribbons
 function createLineGlowTexture(size) {
   const canvas = document.createElement('canvas');
   canvas.width = 4;
@@ -232,11 +361,12 @@ function createLineGlowTexture(size) {
 
 const lineGlowTexture = createLineGlowTexture(64);
 
+// Material cache for glow particles
 const glowMaterialCache = new Map();
 function getGlowMaterial(hexColor) {
   if (glowMaterialCache.has(hexColor)) return glowMaterialCache.get(hexColor);
   const mat = new window.THREE.SpriteMaterial({
-    map: glowTexture,
+    map: coreTexture,
     color: new window.THREE.Color(hexColor),
     transparent: true,
     depthWrite: false,
@@ -246,14 +376,18 @@ function getGlowMaterial(hexColor) {
   return mat;
 }
 
+// Track max activity for relative glow brightness
+let maxActivityCount = 1;
+
 Graph.nodeThreeObject(node => {
   const color = NODE_COLORS[node.type] || '#cccccc';
-  const mat = getGlowMaterial(color);
-  const sprite = new window.THREE.Sprite(mat.clone());
+  const activity = node.activityCount || 1;
+  if (activity > maxActivityCount) maxActivityCount = activity;
 
-  const size = 6 + Math.log2((node.activityCount || 1) + 1) * 2;
-  sprite.scale.set(size, size, 1);
+  const coreSize = Math.min(20, 4 + Math.log2(activity + 1) * 2);
+  const haloSize = coreSize * 3.5;
 
+  // Opacity based on filter/stale state
   let opacity = 1.0;
   if (state.filterText) {
     const filter = state.filterText.toLowerCase();
@@ -264,9 +398,58 @@ Graph.nodeThreeObject(node => {
   } else if (node.stale) {
     opacity = 0.3;
   }
-  sprite.material.opacity = opacity;
 
-  return sprite;
+  const group = new window.THREE.Group();
+
+  // Halo sprite (larger, softer glow — bloom-eligible)
+  const haloMat = new window.THREE.SpriteMaterial({
+    map: haloTexture,
+    color: new window.THREE.Color(color),
+    transparent: true,
+    opacity: Math.min(0.8, Math.max(0.15, activity / Math.max(maxActivityCount, 1))) * opacity,
+    depthWrite: false,
+    blending: window.THREE.AdditiveBlending,
+  });
+  const halo = new window.THREE.Sprite(haloMat);
+  halo.scale.set(haloSize, haloSize, 1);
+  halo.layers.enable(1); // Bloom layer
+  group.add(halo);
+
+  // Core sprite (bright center)
+  const coreMat = new window.THREE.SpriteMaterial({
+    map: coreTexture,
+    color: new window.THREE.Color(color),
+    transparent: true,
+    opacity: opacity,
+    depthWrite: false,
+    blending: window.THREE.AdditiveBlending,
+  });
+  const core = new window.THREE.Sprite(coreMat);
+  core.scale.set(coreSize, coreSize, 1);
+  core.layers.enable(1); // Bloom layer
+  group.add(core);
+
+  // Diffraction spikes for high-activity nodes
+  if (activity > 10) {
+    const diffMat = new window.THREE.SpriteMaterial({
+      map: diffractionTexture,
+      color: new window.THREE.Color(color),
+      transparent: true,
+      opacity: Math.min(0.6, (activity - 10) / 40) * opacity,
+      depthWrite: false,
+      blending: window.THREE.AdditiveBlending,
+    });
+    const diff = new window.THREE.Sprite(diffMat);
+    const diffSize = coreSize * 2.5;
+    diff.scale.set(diffSize, diffSize, 1);
+    diff.layers.enable(1);
+    group.add(diff);
+  }
+
+  // Store reference for label system
+  group.userData = { nodeId: node.id, nodeType: node.type };
+
+  return group;
 });
 
 // ─── Token Animation System (DOM overlay) ───────────────────
@@ -279,8 +462,8 @@ const TOKEN_ANIM = {
   STAGGER_PX: 28,
   MAX_PER_NODE: 3,
   MAX_GLOBAL: 50,
-  INPUT_COLOR: '#4fc3f7',
-  OUTPUT_COLOR: '#ffd54f',
+  INPUT_COLOR: '#5eead4',
+  OUTPUT_COLOR: '#fde68a',
 };
 
 const tokenLayer = document.createElement('div');
@@ -365,6 +548,16 @@ function elasticOut(t) {
   return Math.pow(2, -10 * t) * Math.sin((t - 0.075) * (2 * Math.PI) / 0.3) + 1;
 }
 
+// Always-on label state (must be before animate loop)
+const LABEL_CONFIG = {
+  TOP_N: 8,
+  RECALC_MS: 2000,
+  FADE_MS: 500,
+  FONT_SIZE: 3,
+  OPACITY: 0.5,
+};
+const activeLabels = new Map(); // nodeId → { sprite, fadeStart }
+
 let lastDecayTime = performance.now();
 
 function animate() {
@@ -446,6 +639,9 @@ function animate() {
       p.sprite.material.opacity = fade;
     }
   }
+
+  // ── Always-on label fading ──
+  tickLabels();
 
   // ── Token label animation ──
 
@@ -539,10 +735,17 @@ function showDetail(obj) {
   if (obj.type === 'node') {
     const d = state.nodes.get(obj.id);
     if (!d) return;
-    let html = `<div class="detail-type">${d.type.toUpperCase()}: ${escapeHtml(d.label)}</div>`;
+    const pipColor = NODE_COLORS[d.type] || '#cccccc';
+    let html = `<div class="detail-type"><span class="detail-pip" style="background:${pipColor};box-shadow:0 0 6px ${pipColor}"></span>${d.type.toUpperCase()}: ${escapeHtml(d.label)}</div>`;
     html += row('ID', d.id);
     html += row('Type', d.type);
     html += row('Activity', d.activityCount);
+    if (d.cumulativeTokens) {
+      html += `<div class="detail-row"><span class="detail-key">Tokens</span><span class="detail-value tokens-in">${formatNum(d.cumulativeTokens)}</span></div>`;
+    }
+    if (d.cumulativeCost) {
+      html += `<div class="detail-row"><span class="detail-key">Cost</span><span class="detail-value cost">$${d.cumulativeCost.toFixed(4)}</span></div>`;
+    }
     html += row('Last Seen', d.lastSeen || '—');
     html += row('Stale', d.stale ? 'Yes' : 'No');
     if (state.showRaw && d.attributes) {
@@ -588,7 +791,7 @@ function updateHUD() {
     statusEl.style.color = '#f7768e';
   } else if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     statusEl.textContent = state.stats.mode || 'connected';
-    statusEl.style.color = '#81c784';
+    statusEl.style.color = '#86efac';
   } else {
     statusEl.textContent = 'disconnected';
     statusEl.style.color = '#f7768e';
@@ -714,6 +917,7 @@ function handleUpdate(data) {
 document.getElementById('btn-pause').addEventListener('click', function() {
   state.paused = !state.paused;
   this.textContent = state.paused ? 'Resume' : 'Pause';
+  this.classList.toggle('active', state.paused);
   if (!state.paused) {
     for (const msg of state.eventBuffer) {
       handleMessage(msg);
@@ -971,6 +1175,194 @@ window.addEventListener('keydown', (e) => {
     pendingFile = null;
   }
 });
+
+// ─── Bloom Post-Processing ───────────────────────────────────
+(async function initBloom() {
+  try {
+    const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
+    const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js');
+    const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js');
+    const { ShaderPass } = await import('three/addons/postprocessing/ShaderPass.js');
+
+    const renderer = Graph.renderer();
+    const scene = Graph.scene();
+    const camera = Graph.camera();
+
+    // Half-resolution bloom for performance
+    const bloomWidth = Math.floor(renderer.domElement.width / 2);
+    const bloomHeight = Math.floor(renderer.domElement.height / 2);
+
+    const bloomComposer = new EffectComposer(renderer);
+    bloomComposer.renderToScreen = false;
+    bloomComposer.addPass(new RenderPass(scene, camera));
+
+    const bloomPass = new UnrealBloomPass(
+      new window.THREE.Vector2(bloomWidth, bloomHeight),
+      1.2,  // strength
+      0.8,  // radius
+      0.6   // threshold
+    );
+    bloomComposer.addPass(bloomPass);
+
+    // Final composite shader: blend bloom on top of regular render
+    const compositeShader = {
+      uniforms: {
+        baseTexture: { value: null },
+        bloomTexture: { value: bloomComposer.renderTarget2.texture },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D baseTexture;
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+          vec4 base = texture2D(baseTexture, vUv);
+          vec4 bloom = texture2D(bloomTexture, vUv);
+          gl_FragColor = base + bloom;
+        }
+      `,
+    };
+
+    const finalComposer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    finalComposer.addPass(renderPass);
+
+    const compositePass = new ShaderPass(new window.THREE.ShaderMaterial(compositeShader), 'baseTexture');
+    compositePass.needsSwap = true;
+    finalComposer.addPass(compositePass);
+
+    // Override the default render loop
+    const origTick = Graph._animationCycle || null;
+    Graph.postProcessingComposer = () => finalComposer;
+
+    // Custom render with selective bloom via layers
+    const darkMaterial = new window.THREE.MeshBasicMaterial({ color: 0x000000 });
+    const materials = {};
+
+    function darkenNonBloom(obj) {
+      if (obj.isMesh || obj.isSprite) {
+        if (!obj.layers.test(new window.THREE.Layers().set(1))) {
+          // Not on bloom layer — temporarily darken
+          materials[obj.uuid] = obj.material;
+          obj.material = darkMaterial;
+        }
+      }
+    }
+
+    function restoreMaterials(obj) {
+      if (materials[obj.uuid]) {
+        obj.material = materials[obj.uuid];
+        delete materials[obj.uuid];
+      }
+    }
+
+    // Hook into the animation frame
+    const onBeforeRender = () => {
+      // Bloom pass: darken non-bloom objects
+      scene.traverse(darkenNonBloom);
+      bloomComposer.render();
+      scene.traverse(restoreMaterials);
+
+      // Final composite
+      finalComposer.render();
+    };
+
+    // Replace renderer's render function
+    const origRender = renderer.render.bind(renderer);
+    let bloomEnabled = true;
+    renderer.render = function(s, c) {
+      if (bloomEnabled && s === scene) {
+        onBeforeRender();
+        return;
+      }
+      origRender(s, c);
+    };
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      bloomComposer.setSize(Math.floor(w / 2), Math.floor(h / 2));
+      finalComposer.setSize(w, h);
+    });
+
+    console.log('[AgentMind] Bloom post-processing initialized');
+  } catch (err) {
+    console.warn('[AgentMind] Bloom unavailable (import map or CDN issue):', err.message);
+  }
+})();
+
+// ─── Always-On Node Labels ──────────────────────────────────
+
+function updateActiveLabels() {
+  // Rank nodes by activityCount
+  const ranked = Array.from(state.nodes.values())
+    .filter(n => !n.stale)
+    .sort((a, b) => (b.activityCount || 0) - (a.activityCount || 0))
+    .slice(0, LABEL_CONFIG.TOP_N);
+
+  const topIds = new Set(ranked.map(n => n.id));
+
+  // Fade out labels for nodes no longer in top N
+  for (const [nodeId, label] of activeLabels) {
+    if (!topIds.has(nodeId) && !label.fadeStart) {
+      label.fadeStart = performance.now();
+    }
+  }
+
+  // Add labels for new top-N nodes
+  for (const node of ranked) {
+    if (activeLabels.has(node.id)) {
+      // Re-entered top N — cancel fade
+      const existing = activeLabels.get(node.id);
+      existing.fadeStart = null;
+      continue;
+    }
+
+    // Check if SpriteText is available
+    if (typeof SpriteText === 'undefined') continue;
+
+    const sprite = new SpriteText(node.label, LABEL_CONFIG.FONT_SIZE, '#e0e0e0');
+    sprite.fontFace = 'Menlo, Consolas, monospace';
+    sprite.material.opacity = LABEL_CONFIG.OPACITY;
+    sprite.material.transparent = true;
+    sprite.material.depthWrite = false;
+    sprite.position.set(0, 8, 0); // Above node
+    sprite.layers.set(0); // Don't bloom labels
+
+    // Find the node's THREE.Group and attach the label
+    const graphData = Graph.graphData();
+    const gNode = graphData.nodes.find(n => n.id === node.id);
+    if (gNode && gNode.__threeObj) {
+      gNode.__threeObj.add(sprite);
+      activeLabels.set(node.id, { sprite, fadeStart: null, parentObj: gNode.__threeObj });
+    }
+  }
+}
+
+function tickLabels() {
+  const now = performance.now();
+  for (const [nodeId, label] of activeLabels) {
+    if (label.fadeStart) {
+      const elapsed = now - label.fadeStart;
+      const t = Math.min(1, elapsed / LABEL_CONFIG.FADE_MS);
+      label.sprite.material.opacity = LABEL_CONFIG.OPACITY * (1 - t);
+      if (t >= 1) {
+        // Remove fully faded label
+        if (label.parentObj) label.parentObj.remove(label.sprite);
+        activeLabels.delete(nodeId);
+      }
+    }
+  }
+}
+
+setInterval(updateActiveLabels, LABEL_CONFIG.RECALC_MS);
 
 // ─── Init ───────────────────────────────────────────────────
 connectWS();

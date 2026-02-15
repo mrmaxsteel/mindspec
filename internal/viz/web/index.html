@@ -26,11 +26,19 @@
 <!-- Legend -->
 <div id="legend">
   <div class="legend-title">Node Types</div>
-  <div class="legend-item"><span class="dot" style="background:#4fc3f7"></span> Agent</div>
-  <div class="legend-item"><span class="dot" style="background:#81c784"></span> Tool</div>
-  <div class="legend-item"><span class="dot" style="background:#ce93d8"></span> MCP Server</div>
-  <div class="legend-item"><span class="dot" style="background:#ffb74d"></span> Data Source</div>
-  <div class="legend-item"><span class="dot" style="background:#ffd54f"></span> LLM Endpoint</div>
+  <div class="legend-item"><span class="dot" style="background:#5eead4;box-shadow:0 0 6px #5eead4"></span> Agent</div>
+  <div class="legend-item"><span class="dot" style="background:#86efac;box-shadow:0 0 6px #86efac"></span> Tool</div>
+  <div class="legend-item"><span class="dot" style="background:#c4b5fd;box-shadow:0 0 6px #c4b5fd"></span> MCP Server</div>
+  <div class="legend-item"><span class="dot" style="background:#fdba74;box-shadow:0 0 6px #fdba74"></span> Data Source</div>
+  <div class="legend-item"><span class="dot" style="background:#fde68a;box-shadow:0 0 6px #fde68a"></span> LLM Endpoint</div>
+  <div class="legend-divider"></div>
+  <div class="legend-title">Edge Types</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#86efac;box-shadow:0 0 4px #86efac"></span> Tool Call</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#c4b5fd;box-shadow:0 0 4px #c4b5fd"></span> MCP Call</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#5eead4;box-shadow:0 0 4px #5eead4"></span> Retrieval</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#fdba74;box-shadow:0 0 4px #fdba74"></span> Write</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#fde68a;box-shadow:0 0 4px #fde68a"></span> Model Call</div>
+  <div class="legend-item"><span class="edge-line" style="border-color:#5eead4;box-shadow:0 0 4px #5eead4"></span> Spawn</div>
 </div>
 
 <!-- Controls -->
@@ -77,6 +85,15 @@
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three-spritetext@1.9.0/dist/three-spritetext.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 <script src="app.js"></script>
 </body>
 </html>

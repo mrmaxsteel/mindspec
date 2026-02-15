@@ -1,6 +1,7 @@
 package viz
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -34,9 +35,11 @@ type Node struct {
 	Type          NodeType          `json:"type"`
 	Label         string            `json:"label"`
 	Attributes    map[string]any    `json:"attributes,omitempty"`
-	LastSeen      time.Time         `json:"lastSeen"`
-	ActivityCount int               `json:"activityCount"`
-	Stale         bool              `json:"stale"`
+	LastSeen         time.Time         `json:"lastSeen"`
+	ActivityCount    int               `json:"activityCount"`
+	Stale            bool              `json:"stale"`
+	CumulativeTokens int64             `json:"cumulativeTokens,omitempty"`
+	CumulativeCost   float64           `json:"cumulativeCost,omitempty"`
 }
 
 // Edge represents an edge in the visualization graph.
@@ -162,13 +165,14 @@ func (g *Graph) UpsertNode(u NodeUpsert) {
 		existing.ActivityCount++
 		existing.Stale = false
 		g.nodeN[u.ID] = g.eventN
+		accumulateNodeStats(existing, u.Attributes)
 	} else {
 		// Create new node
 		attrs := make(map[string]any)
 		for k, v := range u.Attributes {
 			attrs[k] = v
 		}
-		g.nodes[u.ID] = &Node{
+		node := &Node{
 			ID:            u.ID,
 			Type:          u.Type,
 			Label:         u.Label,
@@ -176,8 +180,48 @@ func (g *Graph) UpsertNode(u NodeUpsert) {
 			LastSeen:      time.Now(),
 			ActivityCount: 1,
 		}
+		accumulateNodeStats(node, u.Attributes)
+		g.nodes[u.ID] = node
 		g.nodeN[u.ID] = g.eventN
 	}
+}
+
+// accumulateNodeStats adds token and cost values from attributes to a node's cumulative fields.
+func accumulateNodeStats(n *Node, attrs map[string]any) {
+	n.CumulativeTokens += toInt64(attrs["input_tokens"]) + toInt64(attrs["output_tokens"])
+	n.CumulativeCost += toFloat64(attrs["cost_usd"])
+}
+
+// toInt64 converts a numeric attribute value to int64.
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return i
+	}
+	return 0
+}
+
+// toFloat64 converts a numeric attribute value to float64.
+func toFloat64(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	}
+	return 0
 }
 
 // AddEdge adds an edge. If an edge with the same src+dst+type exists, increments its call count.

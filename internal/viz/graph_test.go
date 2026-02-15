@@ -275,6 +275,68 @@ func TestGraphStats(t *testing.T) {
 	}
 }
 
+func TestNodeCumulativeStats(t *testing.T) {
+	g := NewGraph(DefaultGraphConfig())
+
+	// First upsert with tokens and cost
+	g.UpsertNode(NodeUpsert{
+		ID:    "llm:sonnet",
+		Type:  NodeLLM,
+		Label: "sonnet",
+		Attributes: map[string]any{
+			"input_tokens":  int64(1000),
+			"output_tokens": int64(500),
+			"cost_usd":      0.015,
+		},
+	})
+
+	snap := g.Snapshot()
+	n := snap.Nodes[0]
+	if n.CumulativeTokens != 1500 {
+		t.Errorf("expected 1500 cumulative tokens, got %d", n.CumulativeTokens)
+	}
+	if n.CumulativeCost < 0.014 || n.CumulativeCost > 0.016 {
+		t.Errorf("expected cost ~0.015, got %f", n.CumulativeCost)
+	}
+
+	// Second upsert accumulates
+	g.UpsertNode(NodeUpsert{
+		ID:    "llm:sonnet",
+		Type:  NodeLLM,
+		Label: "sonnet",
+		Attributes: map[string]any{
+			"input_tokens":  int64(2000),
+			"output_tokens": int64(800),
+			"cost_usd":      0.025,
+		},
+	})
+
+	snap = g.Snapshot()
+	n = snap.Nodes[0]
+	if n.CumulativeTokens != 4300 {
+		t.Errorf("expected 4300 cumulative tokens (1500+2800), got %d", n.CumulativeTokens)
+	}
+	if n.CumulativeCost < 0.039 || n.CumulativeCost > 0.041 {
+		t.Errorf("expected cost ~0.04, got %f", n.CumulativeCost)
+	}
+
+	// Upsert without token attrs doesn't change cumulative
+	g.UpsertNode(NodeUpsert{
+		ID:    "llm:sonnet",
+		Type:  NodeLLM,
+		Label: "sonnet",
+		Attributes: map[string]any{
+			"model": "claude-sonnet",
+		},
+	})
+
+	snap = g.Snapshot()
+	n = snap.Nodes[0]
+	if n.CumulativeTokens != 4300 {
+		t.Errorf("cumulative tokens should be unchanged, got %d", n.CumulativeTokens)
+	}
+}
+
 func nodeID(i int) string {
 	return "node-" + string(rune('a'+i))
 }
