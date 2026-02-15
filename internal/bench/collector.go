@@ -134,9 +134,10 @@ func (c *Collector) writeEvents(events []CollectedEvent) {
 
 // CollectedEvent is the normalized NDJSON schema for collected telemetry.
 type CollectedEvent struct {
-	TS    string         `json:"ts"`
-	Event string         `json:"event"`
-	Data  map[string]any `json:"data,omitempty"`
+	TS       string         `json:"ts"`
+	Event    string         `json:"event"`
+	Data     map[string]any `json:"data,omitempty"`
+	Resource map[string]any `json:"resource,omitempty"`
 }
 
 // extractLogEvents parses an OTLP ExportLogsServiceRequest JSON body
@@ -151,6 +152,9 @@ func extractLogEvents(body []byte) []CollectedEvent {
 	// { "resourceLogs": [ { "scopeLogs": [ { "logRecords": [ ... ] } ] } ] }
 	var req struct {
 		ResourceLogs []struct {
+			Resource struct {
+				Attributes []otlpKeyValue `json:"attributes"`
+			} `json:"resource"`
 			ScopeLogs []struct {
 				LogRecords []struct {
 					TimeUnixNano string         `json:"timeUnixNano"`
@@ -167,6 +171,11 @@ func extractLogEvents(body []byte) []CollectedEvent {
 
 	var events []CollectedEvent
 	for _, rl := range req.ResourceLogs {
+		var resAttrs map[string]any
+		if len(rl.Resource.Attributes) > 0 {
+			resAttrs = flattenAttributes(rl.Resource.Attributes)
+		}
+
 		for _, sl := range rl.ScopeLogs {
 			for _, lr := range sl.LogRecords {
 				attrs := flattenAttributes(lr.Attributes)
@@ -190,9 +199,10 @@ func extractLogEvents(body []byte) []CollectedEvent {
 
 				ts := parseOTLPTimestamp(lr.TimeUnixNano)
 				e := CollectedEvent{
-					TS:    ts,
-					Event: eventName,
-					Data:  attrs,
+					TS:       ts,
+					Event:    eventName,
+					Data:     attrs,
+					Resource: resAttrs,
 				}
 				delete(e.Data, "event.name")
 				events = append(events, e)
@@ -212,6 +222,9 @@ func ExtractMetricEvents(body []byte) []CollectedEvent {
 func extractMetricEvents(body []byte) []CollectedEvent {
 	var req struct {
 		ResourceMetrics []struct {
+			Resource struct {
+				Attributes []otlpKeyValue `json:"attributes"`
+			} `json:"resource"`
 			ScopeMetrics []struct {
 				Metrics []struct {
 					Name string `json:"name"`
@@ -234,6 +247,11 @@ func extractMetricEvents(body []byte) []CollectedEvent {
 
 	var events []CollectedEvent
 	for _, rm := range req.ResourceMetrics {
+		var resAttrs map[string]any
+		if len(rm.Resource.Attributes) > 0 {
+			resAttrs = flattenAttributes(rm.Resource.Attributes)
+		}
+
 		for _, sm := range rm.ScopeMetrics {
 			for _, m := range sm.Metrics {
 				if m.Sum == nil {
@@ -252,9 +270,10 @@ func extractMetricEvents(body []byte) []CollectedEvent {
 
 					ts := parseOTLPTimestamp(dp.TimeUnixNano)
 					events = append(events, CollectedEvent{
-						TS:    ts,
-						Event: m.Name,
-						Data:  attrs,
+						TS:       ts,
+						Event:    m.Name,
+						Data:     attrs,
+						Resource: resAttrs,
 					})
 				}
 			}

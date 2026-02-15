@@ -125,4 +125,104 @@ func TestFlattenAttributes(t *testing.T) {
 	}
 }
 
+func TestExtractLogEventsWithResourceAttrs(t *testing.T) {
+	body := []byte(`{
+		"resourceLogs": [{
+			"resource": {
+				"attributes": [
+					{"key": "service.name", "value": {"stringValue": "my-agent"}},
+					{"key": "service.instance.id", "value": {"stringValue": "abc123"}}
+				]
+			},
+			"scopeLogs": [{
+				"logRecords": [{
+					"timeUnixNano": "1707840000000000000",
+					"body": {"stringValue": "claude_code.api_request"},
+					"attributes": [
+						{"key": "model", "value": {"stringValue": "claude-sonnet-4-5-20250929"}}
+					]
+				}]
+			}]
+		}]
+	}`)
+
+	events := extractLogEvents(body)
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	e := events[0]
+	if e.Resource == nil {
+		t.Fatal("expected Resource to be populated")
+	}
+	if v, ok := e.Resource["service.name"].(string); !ok || v != "my-agent" {
+		t.Errorf("service.name = %v, want my-agent", e.Resource["service.name"])
+	}
+	if v, ok := e.Resource["service.instance.id"].(string); !ok || v != "abc123" {
+		t.Errorf("service.instance.id = %v, want abc123", e.Resource["service.instance.id"])
+	}
+}
+
+func TestExtractLogEventsNoResource(t *testing.T) {
+	body := []byte(`{
+		"resourceLogs": [{
+			"scopeLogs": [{
+				"logRecords": [{
+					"timeUnixNano": "1707840000000000000",
+					"body": {"stringValue": "claude_code.api_request"},
+					"attributes": [
+						{"key": "model", "value": {"stringValue": "claude-sonnet-4-5-20250929"}}
+					]
+				}]
+			}]
+		}]
+	}`)
+
+	events := extractLogEvents(body)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Resource != nil {
+		t.Errorf("expected nil Resource when no resource block, got %v", events[0].Resource)
+	}
+}
+
+func TestExtractMetricEventsWithResourceAttrs(t *testing.T) {
+	body := []byte(`{
+		"resourceMetrics": [{
+			"resource": {
+				"attributes": [
+					{"key": "agent.name", "value": {"stringValue": "sub-agent-1"}}
+				]
+			},
+			"scopeMetrics": [{
+				"metrics": [{
+					"name": "claude_code.token.usage",
+					"sum": {
+						"dataPoints": [{
+							"timeUnixNano": "1707840000000000000",
+							"asInt": 1000,
+							"attributes": [
+								{"key": "model", "value": {"stringValue": "claude-opus-4-6"}}
+							]
+						}]
+					}
+				}]
+			}]
+		}]
+	}`)
+
+	events := extractMetricEvents(body)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Resource == nil {
+		t.Fatal("expected Resource to be populated")
+	}
+	if v := events[0].Resource["agent.name"]; v != "sub-agent-1" {
+		t.Errorf("agent.name = %v, want sub-agent-1", v)
+	}
+}
+
 func ptr(f float64) *float64 { return &f }

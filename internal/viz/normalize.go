@@ -9,12 +9,50 @@ import (
 	"github.com/mindspec/mindspec/internal/bench"
 )
 
+// resolveAgentID derives an agent identity from OTLP resource attributes.
+// Precedence: agent.name > service.name+service.instance.id > service.name > "claude-code".
+func resolveAgentID(resource map[string]any) (id string, label string) {
+	if name, ok := resource["agent.name"].(string); ok && name != "" {
+		return "agent:" + name, name
+	}
+	svcName, _ := resource["service.name"].(string)
+	svcInstance, _ := resource["service.instance.id"].(string)
+	if svcName != "" && svcInstance != "" {
+		return "agent:" + svcName + ":" + svcInstance, svcName
+	}
+	if svcName != "" {
+		return "agent:" + svcName, svcName
+	}
+	return "agent:claude-code", "Claude Code"
+}
+
 // NormalizeEvent converts a CollectedEvent into graph operations (node upserts and edge events).
 func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 	var nodes []NodeUpsert
 	var edges []EdgeEvent
 
 	ts := parseTimestamp(e.TS)
+	agentID, agentLabel := resolveAgentID(e.Resource)
+
+	// Sub-agent hierarchy: if agent.parent is set, emit parent→child spawn edge
+	if parentName, ok := e.Resource["agent.parent"].(string); ok && parentName != "" {
+		parentID := "agent:" + parentName
+		if parentID != agentID {
+			nodes = append(nodes, NodeUpsert{
+				ID:    parentID,
+				Type:  NodeAgent,
+				Label: parentName,
+			})
+			edges = append(edges, EdgeEvent{
+				ID:        fmt.Sprintf("edge:%s->%s:%d", parentID, agentID, ts.UnixNano()),
+				Src:       parentID,
+				Dst:       agentID,
+				Type:      EdgeSpawn,
+				Status:    "ok",
+				StartTime: ts,
+			})
+		}
+	}
 
 	switch e.Event {
 	case "claude_code.api_request":
@@ -34,11 +72,10 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 		})
 
 		// Create agent node
-		agentID := "agent:claude-code"
 		nodes = append(nodes, NodeUpsert{
 			ID:    agentID,
 			Type:  NodeAgent,
-			Label: "Claude Code",
+			Label: agentLabel,
 		})
 
 		// Edge: agent → llm_endpoint
@@ -66,7 +103,6 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 		}
 
 		toolID := "tool:" + toolName
-		agentID := "agent:claude-code"
 
 		nodes = append(nodes, NodeUpsert{
 			ID:    toolID,
@@ -76,7 +112,7 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 		nodes = append(nodes, NodeUpsert{
 			ID:    agentID,
 			Type:  NodeAgent,
-			Label: "Claude Code",
+			Label: agentLabel,
 		})
 
 		edgeType := classifyToolEdge(toolName)
@@ -132,7 +168,6 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 		}
 
 		mcpID := "mcp:" + serverName
-		agentID := "agent:claude-code"
 		dur := parseDuration(e.Data)
 
 		nodes = append(nodes, NodeUpsert{
@@ -143,7 +178,7 @@ func NormalizeEvent(e bench.CollectedEvent) ([]NodeUpsert, []EdgeEvent) {
 		nodes = append(nodes, NodeUpsert{
 			ID:    agentID,
 			Type:  NodeAgent,
-			Label: "Claude Code",
+			Label: agentLabel,
 		})
 
 		toolName, _ := e.Data["tool_name"].(string)

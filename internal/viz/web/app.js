@@ -13,6 +13,7 @@ const EDGE_COLORS = {
   retrieval:   '#4fc3f7',
   write:       '#ffb74d',
   model_call:  '#ffd54f',
+  spawn:       '#4fc3f7',
 };
 
 // Pre-computed THREE.Color for GPU vertex color updates

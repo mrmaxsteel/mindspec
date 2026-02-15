@@ -25,6 +25,7 @@ const (
 	EdgeRetrieval EdgeType = "retrieval"
 	EdgeWrite     EdgeType = "write"
 	EdgeModelCall EdgeType = "model_call"
+	EdgeSpawn     EdgeType = "spawn"
 )
 
 // Node represents a node in the visualization graph.

@@ -282,6 +282,188 @@ func TestNormalizeMCPCallDirectFallback(t *testing.T) {
 	}
 }
 
+func TestNormalizeAgentIdentityFromAgentName(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "claude_code.api_request",
+		Data: map[string]any{
+			"model":        "claude-sonnet-4-5-20250929",
+			"input_tokens": int64(100),
+		},
+		Resource: map[string]any{
+			"agent.name": "main",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+
+	var agentNode *NodeUpsert
+	for i := range nodes {
+		if nodes[i].Type == NodeAgent {
+			agentNode = &nodes[i]
+		}
+	}
+	if agentNode == nil {
+		t.Fatal("expected agent node")
+	}
+	if agentNode.ID != "agent:main" {
+		t.Errorf("agent ID = %q, want agent:main", agentNode.ID)
+	}
+	if agentNode.Label != "main" {
+		t.Errorf("agent label = %q, want main", agentNode.Label)
+	}
+	if edges[0].Src != "agent:main" {
+		t.Errorf("edge src = %q, want agent:main", edges[0].Src)
+	}
+}
+
+func TestNormalizeAgentIdentityFromServiceName(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "claude_code.api_request",
+		Data: map[string]any{
+			"model": "claude-sonnet-4-5-20250929",
+		},
+		Resource: map[string]any{
+			"service.name":        "foo",
+			"service.instance.id": "bar",
+		},
+	}
+
+	nodes, _ := NormalizeEvent(e)
+
+	var agentNode *NodeUpsert
+	for i := range nodes {
+		if nodes[i].Type == NodeAgent {
+			agentNode = &nodes[i]
+		}
+	}
+	if agentNode == nil {
+		t.Fatal("expected agent node")
+	}
+	if agentNode.ID != "agent:foo:bar" {
+		t.Errorf("agent ID = %q, want agent:foo:bar", agentNode.ID)
+	}
+	if agentNode.Label != "foo" {
+		t.Errorf("agent label = %q, want foo", agentNode.Label)
+	}
+}
+
+func TestNormalizeAgentFallbackNoResource(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "claude_code.api_request",
+		Data: map[string]any{
+			"model": "claude-sonnet-4-5-20250929",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+
+	var agentNode *NodeUpsert
+	for i := range nodes {
+		if nodes[i].Type == NodeAgent {
+			agentNode = &nodes[i]
+		}
+	}
+	if agentNode == nil {
+		t.Fatal("expected agent node")
+	}
+	if agentNode.ID != "agent:claude-code" {
+		t.Errorf("agent ID = %q, want agent:claude-code", agentNode.ID)
+	}
+	if agentNode.Label != "Claude Code" {
+		t.Errorf("agent label = %q, want Claude Code", agentNode.Label)
+	}
+	if edges[0].Src != "agent:claude-code" {
+		t.Errorf("edge src = %q, want agent:claude-code", edges[0].Src)
+	}
+}
+
+func TestNormalizeSubAgentSpawnEdge(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "claude_code.api_request",
+		Data: map[string]any{
+			"model": "claude-sonnet-4-5-20250929",
+		},
+		Resource: map[string]any{
+			"agent.name":   "sub-1",
+			"agent.parent": "main",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+
+	// Should have 3 nodes: parent agent, child agent, LLM
+	agentNodes := []NodeUpsert{}
+	for _, n := range nodes {
+		if n.Type == NodeAgent {
+			agentNodes = append(agentNodes, n)
+		}
+	}
+	if len(agentNodes) != 2 {
+		t.Fatalf("expected 2 agent nodes (parent + child), got %d", len(agentNodes))
+	}
+
+	// Should have spawn edge + model_call edge
+	var spawnEdge, modelEdge *EdgeEvent
+	for i := range edges {
+		switch edges[i].Type {
+		case EdgeSpawn:
+			spawnEdge = &edges[i]
+		case EdgeModelCall:
+			modelEdge = &edges[i]
+		}
+	}
+	if spawnEdge == nil {
+		t.Fatal("expected spawn edge")
+	}
+	if spawnEdge.Src != "agent:main" || spawnEdge.Dst != "agent:sub-1" {
+		t.Errorf("spawn edge = %s→%s, want agent:main→agent:sub-1", spawnEdge.Src, spawnEdge.Dst)
+	}
+	if modelEdge == nil {
+		t.Fatal("expected model_call edge")
+	}
+	if modelEdge.Src != "agent:sub-1" {
+		t.Errorf("model_call src = %q, want agent:sub-1", modelEdge.Src)
+	}
+}
+
+func TestNormalizeSubAgentSelfLoopSkipped(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "claude_code.api_request",
+		Data: map[string]any{
+			"model": "claude-sonnet-4-5-20250929",
+		},
+		Resource: map[string]any{
+			"agent.name":   "main",
+			"agent.parent": "main",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+
+	// Should NOT create a spawn edge (self-loop)
+	for _, edge := range edges {
+		if edge.Type == EdgeSpawn {
+			t.Error("should not create spawn edge when parent == self")
+		}
+	}
+
+	// Only one agent node (no duplicate)
+	agentCount := 0
+	for _, n := range nodes {
+		if n.Type == NodeAgent {
+			agentCount++
+		}
+	}
+	if agentCount != 1 {
+		t.Errorf("expected 1 agent node (no duplicate), got %d", agentCount)
+	}
+}
+
 func TestNormalizeTokenMetric(t *testing.T) {
 	e := bench.CollectedEvent{
 		TS:    "2026-02-14T12:00:00Z",
