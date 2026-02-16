@@ -14,16 +14,13 @@ func setupTestRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	// Create mindspec.md marker
-	os.WriteFile(filepath.Join(root, "mindspec.md"), []byte("# test"), 0644)
+	// Create .mindspec marker dir
+	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 
 	// Create template
 	tmplDir := filepath.Join(root, "docs", "templates")
 	os.MkdirAll(tmplDir, 0755)
 	os.WriteFile(filepath.Join(tmplDir, "spec.md"), []byte("# Spec <ID>: <Title>\n\n## Goal\n"), 0644)
-
-	// Create .mindspec dir
-	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 
 	return root
 }

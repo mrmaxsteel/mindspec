@@ -1,6 +1,6 @@
 # CLAUDE.md — MindSpec
 
-MindSpec is a spec-driven development framework (Claude Code-first). See [mindspec.md](mindspec.md) for the full product specification, or [USAGE.md](docs/core/USAGE.md) for the development workflow.
+MindSpec is a spec-driven development framework (Claude Code-first). See [USAGE.md](docs/core/USAGE.md) for the development workflow, or [docs/guides/claude-code.md](docs/guides/claude-code.md) for the quick start guide.
 
 ## Guidance
 

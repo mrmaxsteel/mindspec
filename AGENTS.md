@@ -1,6 +1,6 @@
 # AGENTS.md — MindSpec
 
-MindSpec is a spec-driven development framework. See [mindspec.md](mindspec.md) for the full product specification, or [USAGE.md](docs/core/USAGE.md) for the development workflow.
+MindSpec is a spec-driven development framework. See [USAGE.md](docs/core/USAGE.md) for the development workflow, or [docs/guides/codex.md](docs/guides/codex.md) for the Codex quick start guide.
 
 ## Guidance
 

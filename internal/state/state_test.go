@@ -10,9 +10,7 @@ import (
 func setupTestProject(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	// Create mindspec.md marker
-	os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644)
-	// Create .mindspec dir
+	// Create .mindspec marker dir
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 	// Create a spec directory
 	os.MkdirAll(filepath.Join(tmp, "docs", "specs", "004-instruct"), 0755)
@@ -50,7 +48,6 @@ func TestReadWrite(t *testing.T) {
 
 func TestReadNoFile(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644)
 
 	_, err := Read(tmp)
 	if err != ErrNoState {
@@ -60,7 +57,6 @@ func TestReadNoFile(t *testing.T) {
 
 func TestWriteCreatesDir(t *testing.T) {
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644)
 
 	s := &State{Mode: ModeIdle}
 	if err := Write(tmp, s); err != nil {

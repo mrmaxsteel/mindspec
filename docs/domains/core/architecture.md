@@ -4,7 +4,7 @@
 
 ### Workspace Resolution
 
-The `Workspace` class finds the project root by walking up from the current directory looking for `mindspec.md` or `.git`. All path resolution is relative to this root.
+The `Workspace` package finds the project root by walking up from the current directory looking for `.mindspec/` or `.git`. All path resolution is relative to this root.
 
 ### Health Checks
 

@@ -13,7 +13,7 @@ Validates project structure and reports issues. Exit code 0 = healthy, 1 = error
 ### Verify Workspace Detection
 
 If `mindspec doctor` can't find the project root, ensure one of these exists in an ancestor directory:
-- `mindspec.md` (preferred)
+- `.mindspec/` directory (preferred)
 - `.git` directory
 
 ### Add a New CLI Command

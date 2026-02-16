@@ -1,4 +1,4 @@
-> **ARCHIVED**: This document is superseded by [mindspec.md](../mindspec.md), [ADR-0001](../adr/ADR-0001.md), and [ADR-0002](../adr/ADR-0002.md). Retained for historical context only.
+> **ARCHIVED**: This document is superseded by [mindspec-v1-spec.md](mindspec-v1-spec.md), [ADR-0001](../adr/ADR-0001.md), and [ADR-0002](../adr/ADR-0002.md). Retained for historical context only.
 
 # Antigravity Spec-Driven Development + Memory + Self-Documentation System (Workspace-Aware)
 

@@ -108,7 +108,7 @@ func TestListEmpty(t *testing.T) {
 
 func TestListNoDomainDir(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "mindspec.md"), []byte("# test"), 0644)
+	os.Mkdir(filepath.Join(root, ".mindspec"), 0755)
 	// No docs/domains/ directory at all
 
 	entries, err := List(root)

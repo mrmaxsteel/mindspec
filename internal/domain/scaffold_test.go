@@ -12,7 +12,7 @@ func setupTestRoot(t *testing.T) string {
 	root := t.TempDir()
 
 	// Create marker
-	os.WriteFile(filepath.Join(root, "mindspec.md"), []byte("# test"), 0644)
+	os.Mkdir(filepath.Join(root, ".mindspec"), 0755)
 
 	// Create domains dir
 	os.MkdirAll(filepath.Join(root, "docs", "domains"), 0755)

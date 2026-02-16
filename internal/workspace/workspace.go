@@ -7,10 +7,10 @@ import (
 )
 
 // ErrNoRoot is returned when no project root marker is found.
-var ErrNoRoot = errors.New("no mindspec project root found (looked for mindspec.md or .git)")
+var ErrNoRoot = errors.New("no mindspec project root found (looked for .mindspec/, .git)")
 
-// FindRoot walks up from startDir looking for mindspec.md or .git at each level.
-// It checks mindspec.md first, then .git, matching the Python prototype behavior.
+// FindRoot walks up from startDir looking for .mindspec/ or .git at each level.
+// It checks .mindspec/ first, then .git, to identify the project root.
 func FindRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
@@ -18,7 +18,7 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if exists(filepath.Join(dir, "mindspec.md")) {
+		if exists(filepath.Join(dir, ".mindspec")) {
 			return dir, nil
 		}
 		if exists(filepath.Join(dir, ".git")) {

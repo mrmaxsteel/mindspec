@@ -16,7 +16,7 @@ This document outlines the file organization, naming, and structural conventions
 | `docs/templates/` | Templates for specs, ADRs, domain docs |
 | `AGENTS.md` | Agent behavioral instructions |
 | `CLAUDE.md` | Claude Code project instructions |
-| `mindspec.md` | Product specification (source of truth) |
+| `docs/archive/mindspec-v1-spec.md` | Original product specification (archived) |
 | `.mindspec/state.json` | Workflow state: current mode, active spec/bead (ADR-0005) |
 
 ## Domain Doc Structure

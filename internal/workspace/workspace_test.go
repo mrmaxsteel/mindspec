@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestFindRoot_MindspecMD(t *testing.T) {
+func TestFindRoot_MindspecDir(t *testing.T) {
 	tmp := t.TempDir()
-	// Create mindspec.md marker
-	if err := os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644); err != nil {
+	// Create .mindspec/ directory marker
+	if err := os.Mkdir(filepath.Join(tmp, ".mindspec"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -24,7 +24,7 @@ func TestFindRoot_MindspecMD(t *testing.T) {
 
 func TestFindRoot_GitOnly(t *testing.T) {
 	tmp := t.TempDir()
-	// Create .git directory (no mindspec.md)
+	// Create .git directory (no .mindspec/)
 	if err := os.Mkdir(filepath.Join(tmp, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestFindRoot_WalksUp(t *testing.T) {
 	if err := os.MkdirAll(nested, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644); err != nil {
+	if err := os.Mkdir(filepath.Join(tmp, ".mindspec"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,10 +57,10 @@ func TestFindRoot_WalksUp(t *testing.T) {
 	}
 }
 
-func TestFindRoot_MindspecMDPriority(t *testing.T) {
+func TestFindRoot_MindspecDirPriority(t *testing.T) {
 	tmp := t.TempDir()
-	// Both mindspec.md and .git exist — mindspec.md should be found first
-	if err := os.WriteFile(filepath.Join(tmp, "mindspec.md"), []byte("# test"), 0644); err != nil {
+	// Both .mindspec/ and .git exist — .mindspec/ should be found first
+	if err := os.Mkdir(filepath.Join(tmp, ".mindspec"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(tmp, ".git"), 0755); err != nil {

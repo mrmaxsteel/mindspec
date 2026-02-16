@@ -7,7 +7,7 @@
 ```go
 package workspace
 
-// FindRoot walks up from startDir looking for mindspec.md or .git.
+// FindRoot walks up from startDir looking for .mindspec/ or .git.
 func FindRoot(startDir string) (string, error)
 
 // DocsDir returns the docs directory path under root.

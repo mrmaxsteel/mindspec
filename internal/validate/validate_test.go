@@ -343,13 +343,16 @@ func TestParseSections(t *testing.T) {
 
 func findProjectRoot(t *testing.T) string {
 	t.Helper()
-	// Walk up from test file to find project root (has mindspec.md)
+	// Walk up from test file to find project root (has .mindspec/ or .git)
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "mindspec.md")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, ".mindspec")); err == nil {
+			return dir
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)

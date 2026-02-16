@@ -233,4 +233,4 @@ Active mode and bead are tracked via Beads status. The spec file and bead state 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Core system design
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
 - [policies.yml](../../architecture/policies.yml) — Machine-checkable policies
-- [mindspec.md](../../mindspec.md) — Product specification
+- [mindspec-v1-spec.md](../archive/mindspec-v1-spec.md) — Original product specification (archived)

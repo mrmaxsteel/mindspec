@@ -164,7 +164,7 @@ v1 emits structured events (minimal) for future "Agent Mind Visualization":
 
 ## See Also
 
-- [mindspec.md](../../mindspec.md) — Product specification
+- [mindspec-v1-spec.md](../archive/mindspec-v1-spec.md) — Original product specification (archived)
 - [MODES.md](MODES.md) — Mode definitions and transitions
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
 - [ADR-0001](../adr/ADR-0001.md) — DDD enablement + context packs
