@@ -126,7 +126,7 @@ func commitWorktreeChanges(wtPath, label string) {
 		return
 	}
 
-	exec.Command("git", "-C", wtPath, "add", "-A").Run()                                               //nolint:errcheck
+	exec.Command("git", "-C", wtPath, "add", "-A").Run()                                                      //nolint:errcheck
 	exec.Command("git", "-C", wtPath, "commit", "-m", "bench: Session "+label+" output", "--no-verify").Run() //nolint:errcheck
 }
 
@@ -213,8 +213,6 @@ func buildSessionEnvEndpoint(endpoint, workDir, label string, enableTrace bool) 
 		"OTEL_LOGS_EXPORTER=otlp",
 		"OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
 		"OTEL_EXPORTER_OTLP_ENDPOINT="+endpoint,
-		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta",
-		"OTEL_LOG_TOOL_DETAILS=1",
 	)
 	if enableTrace {
 		tracePath := filepath.Join(workDir, fmt.Sprintf("trace-%s.jsonl", label))
