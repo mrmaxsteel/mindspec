@@ -16,6 +16,7 @@ last-touched
 # Local version tracking (prevents upgrade notification spam after git ops)
 .local_version
 .migration-hint-ts
+.jsonl.lock
 
 # Legacy database files
 db.sqlite
