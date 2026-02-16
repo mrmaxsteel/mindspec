@@ -11,7 +11,7 @@ func TestNormalizeAPIRequest(t *testing.T) {
 		TS:    "2026-02-14T12:00:00Z",
 		Event: "claude_code.api_request",
 		Data: map[string]any{
-			"model":        "claude-sonnet-4-5-20250929",
+			"model":         "claude-sonnet-4-5-20250929",
 			"input_tokens":  int64(1000),
 			"output_tokens": int64(500),
 		},
@@ -584,5 +584,165 @@ func TestNormalizeTokenMetric(t *testing.T) {
 	}
 	if len(edges) != 0 {
 		t.Errorf("expected no edges for metric, got %d", len(edges))
+	}
+}
+
+func TestNormalizeCodexAPIRequest(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "codex.api_request",
+		Data: map[string]any{
+			"model":                      "gpt-5-codex",
+			"gen_ai.usage.input_tokens":  float64(1200),
+			"gen_ai.usage.output_tokens": float64(320),
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes (agent + llm), got %d", len(nodes))
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(edges))
+	}
+	if edges[0].Type != EdgeModelCall {
+		t.Fatalf("edge type = %s, want model_call", edges[0].Type)
+	}
+	if edges[0].Src != "agent:codex" {
+		t.Fatalf("edge src = %s, want agent:codex", edges[0].Src)
+	}
+	if edges[0].Attributes["metric_only"] != false {
+		t.Fatalf("metric_only = %v, want false", edges[0].Attributes["metric_only"])
+	}
+	if edges[0].Attributes["input_tokens"] != float64(1200) {
+		t.Fatalf("input_tokens = %v, want 1200", edges[0].Attributes["input_tokens"])
+	}
+	if edges[0].Attributes["output_tokens"] != float64(320) {
+		t.Fatalf("output_tokens = %v, want 320", edges[0].Attributes["output_tokens"])
+	}
+}
+
+func TestNormalizeCodexToolCallAlias(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "codex.tool_call",
+		Data: map[string]any{
+			"tool.name": "Read",
+		},
+	}
+
+	_, edges := NormalizeEvent(e)
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(edges))
+	}
+	if edges[0].Type != EdgeToolCall {
+		t.Fatalf("edge type = %s, want tool_call", edges[0].Type)
+	}
+	if edges[0].Attributes["tool_name"] != "Read" {
+		t.Fatalf("tool_name = %v, want Read", edges[0].Attributes["tool_name"])
+	}
+}
+
+func TestNormalizeCodexSSEWebSearchCompletedAsToolCall(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-16T17:43:27.954Z",
+		Event: "codex.sse_event",
+		Data: map[string]any{
+			"event.kind":  "response.web_search_call.completed",
+			"duration_ms": "2165",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes (agent + tool), got %d", len(nodes))
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 tool_call edge, got %d", len(edges))
+	}
+	if edges[0].Type != EdgeToolCall {
+		t.Fatalf("edge type = %s, want tool_call", edges[0].Type)
+	}
+	if edges[0].Src != "agent:codex" {
+		t.Fatalf("edge src = %s, want agent:codex", edges[0].Src)
+	}
+	if edges[0].Dst != "tool:WebSearch" {
+		t.Fatalf("edge dst = %s, want tool:WebSearch", edges[0].Dst)
+	}
+	if edges[0].Attributes["tool_name"] != "WebSearch" {
+		t.Fatalf("tool_name = %v, want WebSearch", edges[0].Attributes["tool_name"])
+	}
+}
+
+func TestNormalizeCodexSSEWebSearchInProgressIgnored(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-16T17:43:25.752Z",
+		Event: "codex.sse_event",
+		Data: map[string]any{
+			"event.kind": "response.web_search_call.in_progress",
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+	if len(nodes) != 0 || len(edges) != 0 {
+		t.Fatalf("expected no graph changes for in_progress, got nodes=%d edges=%d", len(nodes), len(edges))
+	}
+}
+
+func TestNormalizeCodexTokenMetricCreatesModelEdge(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "codex.token.usage",
+		Data: map[string]any{
+			"model": "gpt-5-codex",
+			"type":  "input",
+			"value": float64(700),
+		},
+	}
+
+	nodes, edges := NormalizeEvent(e)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes (agent + llm), got %d", len(nodes))
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 model_call edge, got %d", len(edges))
+	}
+	if edges[0].Type != EdgeModelCall {
+		t.Fatalf("edge type = %s, want model_call", edges[0].Type)
+	}
+	if edges[0].Attributes["metric_only"] != true {
+		t.Fatalf("metric_only = %v, want true", edges[0].Attributes["metric_only"])
+	}
+	if edges[0].Attributes["input_tokens"] != float64(700) {
+		t.Fatalf("input_tokens = %v, want 700", edges[0].Attributes["input_tokens"])
+	}
+}
+
+func TestNormalizeCodexSessionFallbackIdentity(t *testing.T) {
+	e := bench.CollectedEvent{
+		TS:    "2026-02-14T12:00:00Z",
+		Event: "codex.api_request",
+		Data: map[string]any{
+			"model":      "gpt-5-codex",
+			"session.id": "a595bc37-ba5a-4345-8fbe-bbdaab766b2d",
+		},
+	}
+
+	nodes, _ := NormalizeEvent(e)
+	var agentNode *NodeUpsert
+	for i := range nodes {
+		if nodes[i].Type == NodeAgent {
+			agentNode = &nodes[i]
+			break
+		}
+	}
+	if agentNode == nil {
+		t.Fatal("expected agent node")
+	}
+	if agentNode.ID != "agent:codex:a595bc37" {
+		t.Fatalf("agent ID = %q, want agent:codex:a595bc37", agentNode.ID)
+	}
+	if agentNode.Label != "Codex (a595bc37)" {
+		t.Fatalf("agent label = %q, want Codex (a595bc37)", agentNode.Label)
 	}
 }

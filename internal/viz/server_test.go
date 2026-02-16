@@ -52,7 +52,7 @@ func TestServerServesHTML(t *testing.T) {
 		t.Error("expected graph-container element in HTML")
 	}
 
-	if !strings.Contains(html, "AgentMind Viz") {
+	if !strings.Contains(html, "MindSpec AgentMind") {
 		t.Error("expected title in HTML")
 	}
 }

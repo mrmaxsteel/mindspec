@@ -70,6 +70,32 @@ For persistent configuration, add to `.claude/settings.local.json`:
 }
 ```
 
+#### Codex
+
+Use the built-in helper to configure `~/.codex/config.toml`:
+
+```bash
+./bin/mindspec agentmind setup codex
+```
+
+If Codex is already pointed at another OTEL collector, MindSpec prints a warning and leaves it unchanged. To replace an existing endpoint explicitly:
+
+```bash
+./bin/mindspec agentmind setup codex --force
+```
+
+Equivalent Codex settings:
+
+```toml
+[otel]
+exporter = { "otlp-http" = { endpoint = "http://localhost:4318/v1/logs", protocol = "json" } }
+trace_exporter = "none"
+log_user_prompt = false
+```
+
+By default, this keeps `otel.log_user_prompt = false` so prompt text is redacted in telemetry unless you explicitly opt in.
+Codex expects the full OTLP logs path, so the endpoint includes `/v1/logs`.
+
 #### Any OTLP-Compatible Agent
 
 Point the standard OpenTelemetry environment variables to `http://localhost:4318`. AgentMind accepts OTLP/HTTP JSON on that port.
@@ -128,6 +154,9 @@ AgentMind collects token and cost data from OTLP metrics:
 
 All metrics are aggregated per model, so you can see exactly how much each model variant contributes to token usage and cost in a multi-model session.
 
+Codex OTEL aliases such as `codex.api_request`, `codex.token.usage`, and `codex.cost.usage` are normalized into the same model/token pathways used by Claude telemetry.
+Codex `codex.sse_event` records with `event.kind=response.web_search_call.completed` are normalized into `WebSearch` tool-call edges.
+
 **Cache hit rate** is calculated as: `cache_read / (input + cache_read + cache_create)`
 
 ## Recording Sessions
@@ -162,6 +191,23 @@ Replay a recorded session:
 ```
 
 Replay accumulates the same metrics as live mode — token counts, cost, tool histograms — so you can analyze completed sessions after the fact.
+
+## Codex JSONL Fallback Import
+
+If Codex OTEL export is unavailable, you can convert a local Codex session JSONL file into AgentMind NDJSON and replay it.
+
+```bash
+# Convert a Codex session file
+./bin/mindspec agentmind setup codex --session ~/.codex/sessions/2026/02/16/rollout-2026-02-16T13-12-24-019c6694-aa05-76e0-98b1-46390fb71add.jsonl
+
+# Explicit output path
+./bin/mindspec agentmind setup codex --session /path/to/rollout.jsonl --output /tmp/codex-session.ndjson
+
+# Replay converted output
+./bin/mindspec agentmind replay /tmp/codex-session.ndjson
+```
+
+By default, output is written next to the input file as `<input-name>-agentmind.ndjson`.
 
 ## Benchmarking
 
@@ -201,6 +247,8 @@ Generates a comparative report with:
 | Per-model breakdown | Token and cost deltas for each model variant |
 
 Reports are available in table format (human-readable) and JSON (programmatic). N-way comparison supports 3+ sessions side-by-side.
+
+`mindspec bench report` now aggregates both Claude and Codex NDJSON event aliases in the same session summary pipeline.
 
 ## Customizing Agent Labels
 

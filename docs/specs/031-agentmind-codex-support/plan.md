@@ -29,7 +29,7 @@ work_chunks:
       scope: Codex OTEL configuration helper and warnings for endpoint conflicts
       title: Codex OTEL setup path
       verify:
-        - Helper output/config update sets otlp-http endpoint to localhost:4318
+        - Helper output/config update sets otlp-http endpoint to localhost:4318/v1/logs
         - Existing non-AgentMind endpoint is not silently overwritten
         - Unit tests cover merge and warning behavior
     - depends_on:
@@ -95,10 +95,10 @@ No ADR divergence detected. No superseding ADR is required for this plan.
 
 ## Bead 1: Codex OTEL Setup Path
 
-**Scope**: Add Codex-facing setup support so users can point Codex OTEL logs to `http://localhost:4318` safely and repeatably.
+**Scope**: Add Codex-facing setup support so users can point Codex OTEL logs to `http://localhost:4318/v1/logs` safely and repeatably.
 
 **Steps**:
-1. Define Codex OTEL defaults and expected endpoint for AgentMind (`otlp-http`, `localhost:4318`, prompt logging off by default).
+1. Define Codex OTEL defaults and expected endpoint for AgentMind (`otlp-http`, `localhost:4318/v1/logs`, prompt logging off by default).
 2. Implement a setup helper (command or guided output path) that can create/update Codex config with minimal edits.
 3. Add conflict detection when Codex OTEL endpoint is already set to another collector.
 4. Implement non-destructive behavior: warn by default; require explicit action to replace existing endpoint.
@@ -183,9 +183,17 @@ No ADR divergence detected. No superseding ADR is required for this plan.
 4. Run full test and targeted integration checks; record outcomes in plan/spec notes.
 
 **Verification**:
-- [ ] Codex guide and AgentMind guide are consistent and actionable.
-- [ ] OTEL-first live flow and fallback flow both reproduce expected visualization/replay behavior.
-- [ ] `make test` passes.
+- [x] Codex guide and AgentMind guide are consistent and actionable.
+- [x] OTEL-first live flow and fallback flow both reproduce expected visualization/replay behavior.
+- [x] `make test` passes.
+
+**Validation Notes (2026-02-16)**:
+- `go run ./cmd/mindspec agentmind setup codex --help` confirms single Codex setup command includes both OTEL setup and `--session` fallback conversion flags.
+- `go test ./internal/viz -run TestLiveReceiverCodexMetricsCreateModelEdge -count=1` passed (OTEL-first Codex live ingest path).
+- `go test ./internal/viz -run TestConvertCodexSessionFileProducesReplayableNDJSON -count=1` passed (fallback JSONL conversion + replayability).
+- `go test ./internal/recording -run Codex -count=1` passed (Codex setup helper coverage).
+- `go test ./internal/bench -run Codex -count=1` passed (Codex bench/report aggregation aliases).
+- `make test` passed.
 
 **Depends on**: Bead 1, Bead 2, Bead 3, Bead 4
 

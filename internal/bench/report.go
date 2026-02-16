@@ -7,21 +7,22 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
 // Session holds aggregated metrics from one collected trace file.
 type Session struct {
-	Label        string
-	APICallCount int
-	InputTokens  int64
-	OutputTokens int64
-	CacheRead    int64
-	CacheCreate  int64
-	CostUSD      float64
-	DurationMs   float64 // wall-clock: last event ts - first event ts
-	FirstEvent   time.Time
-	LastEvent    time.Time
+	Label          string
+	APICallCount   int
+	InputTokens    int64
+	OutputTokens   int64
+	CacheRead      int64
+	CacheCreate    int64
+	CostUSD        float64
+	DurationMs     float64 // wall-clock: last event ts - first event ts
+	FirstEvent     time.Time
+	LastEvent      time.Time
 	ModelBreakdown map[string]*ModelStats
 }
 
@@ -150,17 +151,17 @@ func aggregateEvent(s *Session, e *CollectedEvent) {
 		}
 	}
 
-	switch e.Event {
-	case "claude_code.api_request", "claude.api_request":
+	switch {
+	case isEventAlias(e.Event, "api_request"):
 		// Legacy log-based events with flat fields
 		s.APICallCount++
 
-		inputTok := toInt64(e.Data["input_tokens"])
-		outputTok := toInt64(e.Data["output_tokens"])
-		cacheRead := toInt64(e.Data["cache_read_tokens"])
-		cacheCreate := toInt64(e.Data["cache_creation_tokens"])
-		cost := toFloat64(e.Data["cost_usd"])
-		model, _ := e.Data["model"].(string)
+		inputTok := firstInt64Data(e.Data, "input_tokens", "gen_ai.usage.input_tokens")
+		outputTok := firstInt64Data(e.Data, "output_tokens", "gen_ai.usage.output_tokens")
+		cacheRead := firstInt64Data(e.Data, "cache_read_tokens", "cache_read_input_tokens", "gen_ai.usage.cache_read_input_tokens")
+		cacheCreate := firstInt64Data(e.Data, "cache_creation_tokens", "cache_creation_input_tokens", "gen_ai.usage.cache_creation_input_tokens")
+		cost := firstFloat64Data(e.Data, "cost_usd", "gen_ai.usage.cost_usd")
+		model := firstStringData(e.Data, "model", "gen_ai.request.model", "model_name")
 
 		s.InputTokens += inputTok
 		s.OutputTokens += outputTok
@@ -176,21 +177,21 @@ func aggregateEvent(s *Session, e *CollectedEvent) {
 			ms.CostUSD += cost
 		}
 
-	case "claude_code.token.usage":
+	case isEventAlias(e.Event, "token.usage"):
 		// OTLP metric events: data.type = input|output|cacheRead|cacheCreation, data.value = delta
-		tokType, _ := e.Data["type"].(string)
+		tokType := normalizeTokenType(firstStringData(e.Data, "type", "token_type", "usage_type", "kind"))
 		val := toInt64(e.Data["value"])
 		switch tokType {
 		case "input":
 			s.InputTokens += val
 		case "output":
 			s.OutputTokens += val
-		case "cacheRead":
+		case "cache_read":
 			s.CacheRead += val
-		case "cacheCreation":
+		case "cache_creation":
 			s.CacheCreate += val
 		}
-		if model, _ := e.Data["model"].(string); model != "" {
+		if model := firstStringData(e.Data, "model", "gen_ai.request.model", "model_name"); model != "" {
 			ms := getOrCreateModel(s, model)
 			switch tokType {
 			case "input":
@@ -200,15 +201,68 @@ func aggregateEvent(s *Session, e *CollectedEvent) {
 			}
 		}
 
-	case "claude_code.cost.usage":
+	case isEventAlias(e.Event, "cost.usage"):
 		// OTLP metric events: data.value = cost delta (USD)
 		cost := toFloat64(e.Data["value"])
 		s.CostUSD += cost
-		if model, _ := e.Data["model"].(string); model != "" {
+		if model := firstStringData(e.Data, "model", "gen_ai.request.model", "model_name"); model != "" {
 			ms := getOrCreateModel(s, model)
 			ms.CostUSD += cost
 		}
 	}
+}
+
+func isEventAlias(eventName, suffix string) bool {
+	return eventName == suffix || strings.HasSuffix(eventName, "."+suffix)
+}
+
+func normalizeTokenType(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	replacer := strings.NewReplacer("-", "_", ".", "_", " ", "_")
+	v = replacer.Replace(v)
+	switch v {
+	case "cache_read", "cacheread", "cache_read_input":
+		return "cache_read"
+	case "cache_creation", "cachecreate", "cache_creation_input", "cachecreation":
+		return "cache_creation"
+	case "output", "out":
+		return "output"
+	case "input", "in":
+		return "input"
+	default:
+		return v
+	}
+}
+
+func firstInt64Data(data map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		if v, ok := data[key]; ok {
+			return toInt64(v)
+		}
+	}
+	return 0
+}
+
+func firstFloat64Data(data map[string]any, keys ...string) float64 {
+	for _, key := range keys {
+		if v, ok := data[key]; ok {
+			return toFloat64(v)
+		}
+	}
+	return 0
+}
+
+func firstStringData(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		v, ok := data[key]
+		if !ok {
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // mergedModelNames returns the sorted union of model names from both sessions.
@@ -272,14 +326,14 @@ type Report struct {
 
 // SessionDelta holds the differences between two sessions.
 type SessionDelta struct {
-	APICallCount  int
-	InputTokens   int64
-	OutputTokens  int64
-	CacheRead     int64
-	CacheCreate   int64
-	CostUSD       float64
-	DurationMs    float64
-	TotalTokens   int64
+	APICallCount int
+	InputTokens  int64
+	OutputTokens int64
+	CacheRead    int64
+	CacheCreate  int64
+	CostUSD      float64
+	DurationMs   float64
+	TotalTokens  int64
 }
 
 // Compare computes the delta between two sessions. Positive delta means A > B.

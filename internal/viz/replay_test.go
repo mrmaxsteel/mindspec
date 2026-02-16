@@ -128,3 +128,49 @@ func TestReplayMaxSpeed(t *testing.T) {
 		t.Errorf("max speed replay too slow: %v", elapsed)
 	}
 }
+
+func TestReplayCodexMetricTotals(t *testing.T) {
+	fixture := `{"ts":"2026-02-14T12:00:00Z","event":"codex.token.usage","data":{"model":"gpt-5-codex","type":"input","value":1200}}
+{"ts":"2026-02-14T12:00:01Z","event":"codex.token.usage","data":{"model":"gpt-5-codex","type":"output","value":300}}
+{"ts":"2026-02-14T12:00:02Z","event":"codex.cost.usage","data":{"model":"gpt-5-codex","value":0.42}}
+`
+	tmpFile, err := os.CreateTemp("", "replay-codex-metric-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString(fixture)
+	tmpFile.Close()
+
+	graph := NewGraph(DefaultGraphConfig())
+	hub := NewHub()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+
+	replay := NewReplay(tmpFile.Name(), 0, graph, hub)
+	if err := replay.Run(ctx); err != nil {
+		t.Fatalf("replay failed: %v", err)
+	}
+
+	stats := graph.Stats()
+	if stats.TotalTokens != 1500 {
+		t.Fatalf("total tokens = %d, want 1500", stats.TotalTokens)
+	}
+	if stats.CostUSD < 0.419 || stats.CostUSD > 0.421 {
+		t.Fatalf("cost = %f, want ~0.42", stats.CostUSD)
+	}
+
+	snap := graph.Snapshot()
+	foundEdge := false
+	for _, edge := range snap.Edges {
+		if edge.Type == EdgeModelCall && edge.Src == "agent:codex" {
+			foundEdge = true
+			break
+		}
+	}
+	if !foundEdge {
+		t.Fatal("expected codex metric replay to emit model_call edge")
+	}
+}

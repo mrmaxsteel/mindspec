@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/mindspec/mindspec/internal/recording"
@@ -21,8 +23,9 @@ var agentmindCmd = &cobra.Command{
 3D force-directed graph with a starfield aesthetic.
 
 Subcommands:
-  serve   Start OTLP receiver + web UI for real-time visualization
-  replay  Replay a recorded NDJSON session file`,
+  serve         Start OTLP receiver + web UI for real-time visualization
+  replay        Replay a recorded NDJSON session file
+  setup         Configure agent telemetry export to AgentMind`,
 }
 
 var agentmindServeCmd = &cobra.Command{
@@ -99,6 +102,83 @@ var agentmindReplayCmd = &cobra.Command{
 	},
 }
 
+var agentmindSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Configure agent telemetry export for AgentMind",
+}
+
+var agentmindSetupCodexCmd = &cobra.Command{
+	Use:   "codex",
+	Short: "Configure Codex OTEL export, or convert a Codex session JSONL fallback",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionPath, _ := cmd.Flags().GetString("session")
+		outputPath, _ := cmd.Flags().GetString("output")
+		configPath, _ := cmd.Flags().GetString("config")
+		force, _ := cmd.Flags().GetBool("force")
+
+		if strings.TrimSpace(sessionPath) != "" {
+			if strings.TrimSpace(outputPath) == "" {
+				outputPath = defaultCodexImportOutputPath(sessionPath)
+			}
+
+			stats, err := viz.ConvertCodexSessionFile(sessionPath, outputPath)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Converted Codex session %s -> %s\n", sessionPath, outputPath)
+			fmt.Fprintf(os.Stderr, "events=%d tool_calls=%d tool_results=%d api_requests=%d\n",
+				stats.Events, stats.ToolCalls, stats.ToolResults, stats.APIRequests)
+			if skipped := stats.SkippedMalformed + stats.SkippedUnknown + stats.SkippedIgnored; skipped > 0 {
+				fmt.Fprintf(os.Stderr, "skipped malformed=%d unknown=%d ignored=%d\n",
+					stats.SkippedMalformed, stats.SkippedUnknown, stats.SkippedIgnored)
+			}
+			return nil
+		}
+
+		if configPath == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+			configPath = recording.DefaultCodexConfigPath(homeDir)
+		} else {
+			configPath = filepath.Clean(configPath)
+		}
+
+		result, err := recording.EnsureCodexOTLP(configPath, force)
+		if err != nil {
+			return err
+		}
+
+		if result.Conflict {
+			fmt.Fprintf(os.Stderr, "warning: Codex OTEL endpoint already set to %q (expected %q) — not overriding\n",
+				result.ExistingEndpoint, result.ExpectedEndpoint)
+			fmt.Fprintln(os.Stderr, "Re-run with --force to replace the existing endpoint.")
+			return nil
+		}
+
+		if result.Changed {
+			fmt.Printf("Configured Codex OTEL export for AgentMind in %s\n", result.ConfigPath)
+			return nil
+		}
+
+		fmt.Printf("Codex OTEL export already configured for AgentMind in %s\n", result.ConfigPath)
+		return nil
+	},
+}
+
+func defaultCodexImportOutputPath(inputPath string) string {
+	dir := filepath.Dir(inputPath)
+	base := filepath.Base(inputPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if name == "" {
+		name = "codex-session"
+	}
+	return filepath.Join(dir, name+"-agentmind.ndjson")
+}
+
 func init() {
 	agentmindServeCmd.Flags().Int("otlp-port", 4318, "Port for OTLP/HTTP receiver")
 	agentmindServeCmd.Flags().Int("ui-port", 8420, "Port for web UI")
@@ -109,6 +189,13 @@ func init() {
 	agentmindReplayCmd.Flags().String("spec", "", "Spec ID to replay (resolves to docs/specs/<id>/recording/events.ndjson)")
 	agentmindReplayCmd.Flags().String("phase", "", "Filter replay to a specific phase (e.g., plan, implement)")
 
+	agentmindSetupCodexCmd.Flags().String("config", "", "Path to Codex config.toml (default: ~/.codex/config.toml)")
+	agentmindSetupCodexCmd.Flags().Bool("force", false, "Replace an existing non-AgentMind OTEL endpoint")
+	agentmindSetupCodexCmd.Flags().String("session", "", "Path to Codex session JSONL to convert for fallback replay")
+	agentmindSetupCodexCmd.Flags().StringP("output", "o", "", "Output NDJSON file path for --session (default: <input>-agentmind.ndjson)")
+	agentmindSetupCmd.AddCommand(agentmindSetupCodexCmd)
+
 	agentmindCmd.AddCommand(agentmindServeCmd)
 	agentmindCmd.AddCommand(agentmindReplayCmd)
+	agentmindCmd.AddCommand(agentmindSetupCmd)
 }

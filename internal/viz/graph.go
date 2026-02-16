@@ -31,15 +31,15 @@ const (
 
 // Node represents a node in the visualization graph.
 type Node struct {
-	ID            string            `json:"id"`
-	Type          NodeType          `json:"type"`
-	Label         string            `json:"label"`
-	Attributes    map[string]any    `json:"attributes,omitempty"`
-	LastSeen         time.Time         `json:"lastSeen"`
-	ActivityCount    int               `json:"activityCount"`
-	Stale            bool              `json:"stale"`
-	CumulativeTokens int64             `json:"cumulativeTokens,omitempty"`
-	CumulativeCost   float64           `json:"cumulativeCost,omitempty"`
+	ID               string         `json:"id"`
+	Type             NodeType       `json:"type"`
+	Label            string         `json:"label"`
+	Attributes       map[string]any `json:"attributes,omitempty"`
+	LastSeen         time.Time      `json:"lastSeen"`
+	ActivityCount    int            `json:"activityCount"`
+	Stale            bool           `json:"stale"`
+	CumulativeTokens int64          `json:"cumulativeTokens,omitempty"`
+	CumulativeCost   float64        `json:"cumulativeCost,omitempty"`
 }
 
 // Edge represents an edge in the visualization graph.
@@ -80,9 +80,9 @@ type EdgeEvent struct {
 
 // GraphSnapshot is a serializable copy of the graph state.
 type GraphSnapshot struct {
-	Nodes   []Node `json:"nodes"`
-	Edges   []Edge `json:"edges"`
-	Capped  bool   `json:"capped"`
+	Nodes  []Node `json:"nodes"`
+	Edges  []Edge `json:"edges"`
+	Capped bool   `json:"capped"`
 }
 
 // GraphConfig holds configurable thresholds for the graph.
@@ -108,7 +108,7 @@ func DefaultGraphConfig() GraphConfig {
 // GraphStats holds cumulative statistics for the graph.
 type GraphStats struct {
 	APICalls    int     `json:"apiCalls"`
-	TotalTokens int64  `json:"totalTokens"`
+	TotalTokens int64   `json:"totalTokens"`
 	ErrorCount  int     `json:"errorCount"`
 	CostUSD     float64 `json:"costUSD"`
 }
@@ -119,7 +119,7 @@ type Graph struct {
 	nodes  map[string]*Node
 	edges  map[string]*Edge
 	config GraphConfig
-	eventN int // total events processed (for staleness tracking)
+	eventN int            // total events processed (for staleness tracking)
 	nodeN  map[string]int // node ID → last event number seen
 	capped bool
 
@@ -230,11 +230,17 @@ func (g *Graph) AddEdge(e EdgeEvent) {
 	defer g.mu.Unlock()
 
 	g.eventN++
+	metricOnly := false
+	if v, ok := e.Attributes["metric_only"].(bool); ok && v {
+		metricOnly = true
+	}
 
 	// Check for existing edge with same combo
 	comboKey := e.Src + "|" + e.Dst + "|" + string(e.Type)
 	if existing, ok := g.edges[comboKey]; ok {
-		existing.CallCount++
+		if !metricOnly {
+			existing.CallCount++
+		}
 		existing.Status = e.Status
 		existing.StartTime = e.StartTime
 		existing.EndTime = e.EndTime
@@ -253,6 +259,10 @@ func (g *Graph) AddEdge(e EdgeEvent) {
 	for k, v := range e.Attributes {
 		attrs[k] = v
 	}
+	callCount := 1
+	if metricOnly {
+		callCount = 0
+	}
 	g.edges[comboKey] = &Edge{
 		ID:         e.ID,
 		Src:        e.Src,
@@ -264,7 +274,7 @@ func (g *Graph) AddEdge(e EdgeEvent) {
 		Duration:   e.Duration,
 		Attributes: attrs,
 		Opacity:    1.0,
-		CallCount:  1,
+		CallCount:  callCount,
 	}
 }
 
@@ -440,6 +450,14 @@ func (g *Graph) RecordAPIStats(inputTokens, outputTokens int64, cost float64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.apiCalls++
+	g.totalTokens += inputTokens + outputTokens
+	g.costUSD += cost
+}
+
+// RecordTokenStats records token/cost totals without incrementing API request count.
+func (g *Graph) RecordTokenStats(inputTokens, outputTokens int64, cost float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.totalTokens += inputTokens + outputTokens
 	g.costUSD += cost
 }

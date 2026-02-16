@@ -141,6 +141,68 @@ func TestLiveReceiverMetrics(t *testing.T) {
 	}
 }
 
+func TestLiveReceiverCodexMetricsCreateModelEdge(t *testing.T) {
+	port := freePort()
+	graph := NewGraph(DefaultGraphConfig())
+	hub := NewHub()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+
+	receiver := NewLiveReceiver(port, graph, hub)
+	go receiver.Run(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+
+	body := `{
+		"resourceMetrics": [{
+			"scopeMetrics": [{
+				"metrics": [{
+					"name": "codex.token.usage",
+					"sum": {
+						"dataPoints": [{
+							"timeUnixNano": "1700000000000000000",
+							"asInt": 1500,
+							"attributes": [
+								{"key": "model", "value": {"stringValue": "gpt-5-codex"}},
+								{"key": "type", "value": {"stringValue": "input"}}
+							]
+						}]
+					}
+				}]
+			}]
+		}]
+	}`
+
+	resp, err := http.Post(
+		fmt.Sprintf("http://localhost:%d/v1/metrics", port),
+		"application/json",
+		bytes.NewBufferString(body),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/metrics failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	snap := graph.Snapshot()
+	foundModelCall := false
+	for _, edge := range snap.Edges {
+		if edge.Type == EdgeModelCall && edge.Src == "agent:codex" && edge.Dst == "llm:gpt-5-codex" {
+			foundModelCall = true
+			break
+		}
+	}
+	if !foundModelCall {
+		t.Fatal("expected codex metric to create/update agent->llm model_call edge")
+	}
+}
+
 func TestLiveReceiverMethodNotAllowed(t *testing.T) {
 	port := freePort()
 	graph := NewGraph(DefaultGraphConfig())

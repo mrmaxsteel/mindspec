@@ -110,6 +110,47 @@ func TestGraphAddEdge(t *testing.T) {
 	}
 }
 
+func TestGraphAddEdgeMetricOnlyDoesNotIncrementCallCount(t *testing.T) {
+	g := NewGraph(DefaultGraphConfig())
+	now := time.Now()
+
+	g.AddEdge(EdgeEvent{
+		ID:        "api-1",
+		Src:       "agent:codex",
+		Dst:       "llm:gpt-5-codex",
+		Type:      EdgeModelCall,
+		Status:    "ok",
+		StartTime: now,
+		Attributes: map[string]any{
+			"metric_only": false,
+		},
+	})
+
+	g.AddEdge(EdgeEvent{
+		ID:        "metric-1",
+		Src:       "agent:codex",
+		Dst:       "llm:gpt-5-codex",
+		Type:      EdgeModelCall,
+		Status:    "ok",
+		StartTime: now.Add(time.Second),
+		Attributes: map[string]any{
+			"metric_only":  true,
+			"input_tokens": float64(123),
+		},
+	})
+
+	snap := g.Snapshot()
+	if len(snap.Edges) != 1 {
+		t.Fatalf("expected 1 deduplicated edge, got %d", len(snap.Edges))
+	}
+	if snap.Edges[0].CallCount != 1 {
+		t.Fatalf("call count = %d, want 1", snap.Edges[0].CallCount)
+	}
+	if snap.Edges[0].Attributes["input_tokens"] != float64(123) {
+		t.Fatalf("expected metric attrs to be merged")
+	}
+}
+
 func TestGraphTick_Staleness(t *testing.T) {
 	cfg := DefaultGraphConfig()
 	cfg.StaleThreshold = 3

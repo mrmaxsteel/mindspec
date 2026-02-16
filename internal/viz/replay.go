@@ -49,7 +49,7 @@ func (r *Replay) Run(ctx context.Context) error {
 	sampleN := 1
 
 	// Phase filtering state
-	inPhase := r.phase == "" // if no filter, all events are "in phase"
+	inPhase := r.phase == ""                           // if no filter, all events are "in phase"
 	phaseStarted := r.phase == "" || r.phase == "spec" // spec phase starts at beginning
 
 	for scanner.Scan() {
@@ -145,11 +145,16 @@ func (r *Replay) Run(ctx context.Context) error {
 		}
 
 		// Record API-level stats from raw event data
-		if e.Event == "claude_code.api_request" {
-			inTok, _ := e.Data["input_tokens"].(float64)
-			outTok, _ := e.Data["output_tokens"].(float64)
-			cost, _ := e.Data["cost_usd"].(float64)
-			r.graph.RecordAPIStats(int64(inTok), int64(outTok), cost)
+		if isAPIRequestEvent(e.Event) {
+			inTok := toInt64(e.Data["input_tokens"])
+			outTok := toInt64(e.Data["output_tokens"])
+			cost := toFloat64(e.Data["cost_usd"])
+			r.graph.RecordAPIStats(inTok, outTok, cost)
+		}
+
+		// Codex token/cost metrics update totals without incrementing API call count.
+		if inTok, outTok, cost, ok := metricStatsDelta(e.Event, e.Data); ok {
+			r.graph.RecordTokenStats(inTok, outTok, cost)
 		}
 
 		// Broadcast update

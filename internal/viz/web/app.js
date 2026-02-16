@@ -892,13 +892,18 @@ function handleUpdate(data) {
         recording.totalEvents++;
         recording.edgesSeen.add(e.src + '|' + e.dst + '|' + e.type);
         if (e.type === 'model_call') {
-          recording.apiRequests++;
+          const metricOnly = !!(e.attributes && e.attributes.metric_only);
+          if (!metricOnly) {
+            recording.apiRequests++;
+          }
           if (e.attributes) {
             recording.inputTokens += Number(e.attributes.input_tokens) || 0;
             recording.outputTokens += Number(e.attributes.output_tokens) || 0;
             recording.cost += Number(e.attributes.cost_usd) || 0;
-            const model = e.attributes.model || 'unknown';
-            recording.models[model] = (recording.models[model] || 0) + 1;
+            if (!metricOnly) {
+              const model = e.attributes.model || 'unknown';
+              recording.models[model] = (recording.models[model] || 0) + 1;
+            }
           }
         } else if (e.type === 'tool_call') {
           const tool = (e.attributes && e.attributes.tool_name) || e.dst || 'unknown';
@@ -913,13 +918,18 @@ function handleUpdate(data) {
         replay.totalEvents++;
         replay.edgesSeen.add(e.src + '|' + e.dst + '|' + e.type);
         if (e.type === 'model_call') {
-          replay.apiRequests++;
+          const metricOnly = !!(e.attributes && e.attributes.metric_only);
+          if (!metricOnly) {
+            replay.apiRequests++;
+          }
           if (e.attributes) {
             replay.inputTokens += Number(e.attributes.input_tokens) || 0;
             replay.outputTokens += Number(e.attributes.output_tokens) || 0;
             replay.cost += Number(e.attributes.cost_usd) || 0;
-            const model = e.attributes.model || 'unknown';
-            replay.models[model] = (replay.models[model] || 0) + 1;
+            if (!metricOnly) {
+              const model = e.attributes.model || 'unknown';
+              replay.models[model] = (replay.models[model] || 0) + 1;
+            }
           }
         } else if (e.type === 'tool_call') {
           const tool = (e.attributes && e.attributes.tool_name) || e.dst || 'unknown';

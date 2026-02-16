@@ -28,7 +28,7 @@ Codex session JSONL files (`$CODEX_HOME/sessions/...`) remain a useful fallback 
 
 ### 1. OTEL-First Codex Integration
 
-1. Define Codex setup for AgentMind using OTLP/HTTP to `localhost:4318`.
+1. Define Codex setup for AgentMind using OTLP/HTTP to `localhost:4318/v1/logs`.
 2. Provide an explicit Codex OTEL configuration path with sane defaults:
    - `otel.exporter = "otlp-http"`
    - `otel.trace_exporter = "none"` (unless/until AgentMind trace ingestion is implemented)
@@ -100,7 +100,7 @@ Codex session JSONL files (`$CODEX_HOME/sessions/...`) remain a useful fallback 
 
 ## Validation Proofs
 
-- Configure Codex OTEL to `otlp-http` endpoint `http://localhost:4318` and run an interactive Codex session while `./bin/mindspec agentmind serve` is running: Codex activity appears live
+- Configure Codex OTEL to `otlp-http` endpoint `http://localhost:4318/v1/logs` and run an interactive Codex session while `./bin/mindspec agentmind serve` is running: Codex activity appears live
 - `./bin/mindspec agentmind serve --output /tmp/codex-live.ndjson` during Codex usage: output file grows with Codex-origin events
 - `./bin/mindspec agentmind replay /tmp/codex-live.ndjson`: Codex session replays with graph + metrics
 - JSONL fallback command on an existing Codex session file produces NDJSON that replays successfully

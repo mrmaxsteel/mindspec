@@ -44,6 +44,29 @@ Unlike Claude Code, Codex doesn't have SessionStart hooks. The agent reads `AGEN
 mindspec doctor
 ```
 
+### 5. Optional: Enable AgentMind Observability
+
+Start AgentMind:
+
+```bash
+./bin/mindspec agentmind serve
+```
+
+Configure Codex OTEL export for AgentMind:
+
+```bash
+./bin/mindspec agentmind setup codex
+```
+
+This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and keeps prompt logging redacted by default (`otel.log_user_prompt = false`).
+
+Fallback import (if OTEL was not enabled during a session):
+
+```bash
+./bin/mindspec agentmind setup codex --session ~/.codex/sessions/<...>/rollout-<...>.jsonl --output /tmp/codex-session.ndjson
+./bin/mindspec agentmind replay /tmp/codex-session.ndjson
+```
+
 ## The Workflow
 
 The same gated lifecycle applies — Spec, Plan, Implement, Review — but without custom slash commands. Use the CLI directly:
@@ -105,13 +128,13 @@ mindspec approve impl 001-my-feature
 |:--------|:-----------|:------|
 | Session guidance | Auto (SessionStart hook) | Manual (agent reads AGENTS.md) |
 | Custom commands | `/spec-approve` etc. | Direct CLI: `mindspec approve spec` |
-| OTLP telemetry | Built-in export | Not yet supported |
-| AgentMind viz | Full support | Not available (no OTLP) |
+| OTLP telemetry | Built-in export | Supported via `~/.codex/config.toml` |
+| AgentMind viz | Full support | Supported (OTEL-first + JSONL fallback) |
 
 ## Limitations
 
 - **No automatic SessionStart hook** — the agent must call `mindspec instruct` based on the AGENTS.md instruction
-- **No OTLP telemetry export** — AgentMind visualization is unavailable
+- **Telemetry is opt-in** — Codex OTEL export is disabled until configured
 - **No custom slash commands** — use CLI commands directly
 - **Worktree support** depends on Codex's ability to change directories
 
