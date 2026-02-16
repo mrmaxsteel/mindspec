@@ -55,7 +55,7 @@ Beads provides everything mindspec needs for work tracking:
 
 ## ADR Touchpoints
 
-Should produce a new ADR: "Compose with external CLIs, don't wrap them." This codifies the principle that mindspec delegates work tracking to beads via direct `exec.Command("bd", ...)` calls rather than maintaining a Go abstraction layer.
+- [ADR-0012](../../adr/ADR-0012.md): Compose with external CLIs, don't wrap them — this spec is the primary implementation of that decision
 
 ## Requirements
 
@@ -145,7 +145,7 @@ Should produce a new ADR: "Compose with external CLIs, don't wrap them." This co
 - [ ] `internal/bead/` exports fewer than 10 functions (down from 39)
 - [ ] Pre-032 specs without molecules still work through approve flow
 - [ ] `internal/adr/` is unchanged
-- [ ] New ADR exists documenting compose-don't-wrap principle
+- [ ] ADR-0012 (compose, don't wrap) is cited in plan frontmatter
 - [ ] `make test` passes with no new failures
 
 ## Validation Proofs
