@@ -68,6 +68,11 @@ func Run(root, specID, title string) error {
 		} else {
 			s.ActiveMolecule = molID
 			s.StepMapping = stepMap
+			// Rename the parent epic to follow [SPEC <id>] convention
+			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
+			if _, err := bead.RunBDCombined("update", molID, "--title="+epicTitle); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not rename parent epic: %v\n", err)
+			}
 			// Mark the spec step as in_progress
 			if stepID, ok := stepMap["spec"]; ok {
 				if _, err := bead.RunBDCombined("update", stepID, "--status=in_progress"); err != nil {
