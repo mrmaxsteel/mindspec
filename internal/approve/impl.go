@@ -30,13 +30,12 @@ func ApproveImpl(root, specID string) (*ImplResult, error) {
 		return nil, fmt.Errorf("active spec is %q, not %q", s.ActiveSpec, specID)
 	}
 
-	// Close the spec-level bead (best-effort)
-	specBeads, err := bead.SearchAny("[SPEC " + specID + "]")
-	if err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not search for spec bead: %v", err))
-	} else if len(specBeads) > 0 && specBeads[0].Status != "closed" {
-		if err := bead.Close(specBeads[0].ID); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not close spec bead %s: %v", specBeads[0].ID, err))
+	// Close the review step in molecule (best-effort)
+	if s.StepMapping != nil {
+		if stepID, ok := s.StepMapping["review"]; ok {
+			if _, err := bead.RunBDCombined("close", stepID); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close review step: %v", err))
+			}
 		}
 	}
 

@@ -10,80 +10,30 @@ import (
 
 var beadCmd = &cobra.Command{
 	Use:   "bead",
-	Short: "Beads integration commands for spec and implementation bead lifecycle",
-	Long:  `Create spec beads, plan beads, manage worktrees, and audit workset hygiene.`,
+	Short: "Beads integration commands for worktree management and workset hygiene",
+	Long:  `Manage worktrees and audit workset hygiene. Spec and plan beads are now created automatically via formulas (see mindspec spec-init).`,
 }
 
 var beadSpecCmd = &cobra.Command{
-	Use:   "spec [spec-id]",
-	Short: "Create a spec bead from an approved specification",
-	Long:  `Reads an approved spec, extracts metadata, and creates a Beads issue with a structured description. Idempotent: returns existing bead if already created.`,
-	Args:  cobra.ExactArgs(1),
+	Use:        "spec [spec-id]",
+	Short:      "Deprecated: spec beads are created via formula on spec-init",
+	Deprecated: "use 'mindspec spec-init' which creates a molecule via bd mol pour",
+	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		specID := args[0]
-
-		root, err := findRoot()
-		if err != nil {
-			return err
-		}
-
-		if err := bead.Preflight(root); err != nil {
-			fmt.Fprintf(os.Stderr, "preflight failed: %v\n", err)
-			os.Exit(1)
-		}
-
-		result, err := bead.CreateSpecBead(root, specID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Printf("Spec bead: %s\n", result.Bead.ID)
-		if result.GateID != "" {
-			fmt.Printf("Spec gate: %s (resolve via `mindspec approve spec %s`)\n", result.GateID, specID)
-		}
+		fmt.Fprintln(os.Stderr, "Spec beads are now created automatically by 'mindspec spec-init' via the spec-lifecycle formula.")
+		fmt.Fprintln(os.Stderr, "To create a molecule manually: bd mol pour spec-lifecycle --var spec_id=<id>")
 		return nil
 	},
 }
 
 var beadPlanCmd = &cobra.Command{
-	Use:   "plan [spec-id]",
-	Short: "Create implementation beads from an approved plan",
-	Long:  `Reads an approved plan with work_chunks, creates one bead per chunk, wires dependencies, and writes bead IDs into plan frontmatter. Also called automatically by 'mindspec approve plan'.`,
+	Use:        "plan [spec-id]",
+	Short:      "Deprecated: plan beads are created via formula on spec-init",
+	Deprecated: "use 'mindspec spec-init' which creates the full lifecycle via bd mol pour",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		specID := args[0]
-
-		root, err := findRoot()
-		if err != nil {
-			return err
-		}
-
-		if err := bead.Preflight(root); err != nil {
-			fmt.Fprintf(os.Stderr, "preflight failed: %v\n", err)
-			os.Exit(1)
-		}
-
-		result, err := bead.CreatePlanBeads(root, specID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Write bead IDs back to plan frontmatter
-		planPath := fmt.Sprintf("%s/docs/specs/%s/plan.md", root, specID)
-		if err := bead.WriteGeneratedBeadIDs(planPath, result); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write bead IDs to plan: %v\n", err)
-		}
-
-		fmt.Printf("Molecule parent: %s\n", result.MolParentID)
-		if result.PlanGateID != "" {
-			fmt.Printf("Plan gate: %s (resolve via `mindspec approve plan %s`)\n", result.PlanGateID, specID)
-		}
-		fmt.Println("Implementation beads created:")
-		for chunkID, beadID := range result.ChunkBeads {
-			fmt.Printf("  chunk %d → %s\n", chunkID, beadID)
-		}
+		fmt.Fprintln(os.Stderr, "Plan beads are now created automatically by 'mindspec spec-init' via the spec-lifecycle formula.")
+		fmt.Fprintln(os.Stderr, "To create a molecule manually: bd mol pour spec-lifecycle --var spec_id=<id>")
 		return nil
 	},
 }

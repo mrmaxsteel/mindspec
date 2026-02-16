@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	beadpkg "github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -44,10 +43,7 @@ var stateSetCmd = &cobra.Command{
 			return err
 		}
 
-		// Propagate bead status when entering implement mode
-		if mode == state.ModeImplement && spec != "" {
-			beadpkg.PropagateStart(spec)
-		}
+		// Note: parent status propagation handled natively by beads molecules
 
 		fmt.Printf("State updated: mode=%s", mode)
 		if spec != "" {

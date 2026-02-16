@@ -26,10 +26,12 @@ var ValidModes = []string{ModeIdle, ModeSpec, ModePlan, ModeImplement, ModeRevie
 
 // State represents the MindSpec workflow state persisted at .mindspec/state.json.
 type State struct {
-	Mode        string `json:"mode"`
-	ActiveSpec  string `json:"activeSpec"`
-	ActiveBead  string `json:"activeBead"`
-	LastUpdated string `json:"lastUpdated"`
+	Mode            string            `json:"mode"`
+	ActiveSpec      string            `json:"activeSpec"`
+	ActiveBead      string            `json:"activeBead"`
+	ActiveMolecule  string            `json:"activeMolecule,omitempty"`
+	StepMapping     map[string]string `json:"stepMapping,omitempty"`
+	LastUpdated     string            `json:"lastUpdated"`
 }
 
 // ErrNoState is returned when .mindspec/state.json does not exist.

@@ -14,6 +14,9 @@ import (
 	"github.com/mindspec/mindspec/internal/validate"
 )
 
+// runBDFn is a package-level variable for testability.
+var runBDCombinedFn = bead.RunBDCombined
+
 // SpecResult holds the result of spec approval.
 type SpecResult struct {
 	SpecID   string
@@ -37,30 +40,19 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
 	}
 
-	// Step 3: Create spec bead + gate (best-effort, idempotent)
-	beadResult, err := bead.CreateSpecBead(root, specID)
-	if err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not create spec bead: %v", err))
-	} else if beadResult.GateID != "" {
-		// Gate was created or already exists
-	}
-
-	// Step 4: Resolve spec gate (best-effort)
-	gateTitle := bead.SpecGateTitle(specID)
-	gate, _ := bead.FindGateAnyStatus(gateTitle)
-	if gate != nil {
-		if gate.Status != "closed" {
-			reason := fmt.Sprintf("Spec %s approved via mindspec approve spec", specID)
-			if err := bead.ResolveGate(gate.ID, reason); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not resolve spec gate: %v", err))
+	// Step 3: Close spec-approve step in molecule (best-effort)
+	s, err := state.Read(root)
+	if err == nil && s.StepMapping != nil {
+		if stepID, ok := s.StepMapping["spec-approve"]; ok {
+			if _, err := runBDCombinedFn("close", stepID); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close spec-approve step: %v", err))
 			} else {
-				result.GateID = gate.ID
+				result.GateID = stepID
 			}
-		} else {
-			result.GateID = gate.ID // already resolved
 		}
 	} else {
-		result.Warnings = append(result.Warnings, "no spec gate found (legacy beads — proceeding without gate)")
+		// Backward compat: pre-032 specs without molecules
+		result.Warnings = append(result.Warnings, "no molecule found — proceeding without beads step closure")
 	}
 
 	// Step 5: Generate context pack (best-effort)

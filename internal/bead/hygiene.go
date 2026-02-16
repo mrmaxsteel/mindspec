@@ -1,6 +1,7 @@
 package bead
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,9 +20,14 @@ type HygieneReport struct {
 
 // AuditWorkset analyzes open beads for hygiene issues.
 func AuditWorkset(staleDays int) (*HygieneReport, error) {
-	beads, err := ListOpen()
+	out, err := RunBD("list", "--status=open", "--json")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing open beads: %w", err)
+	}
+
+	var beads []BeadInfo
+	if err := json.Unmarshal(out, &beads); err != nil {
+		return nil, fmt.Errorf("parsing beads list: %w", err)
 	}
 
 	report := &HygieneReport{
@@ -101,9 +107,14 @@ func FormatReport(r *HygieneReport) string {
 // FixHygiene closes beads that have status "done".
 // If dryRun is true, returns what would be done without executing.
 func FixHygiene(dryRun bool) ([]string, error) {
-	beads, err := ListOpen()
+	out, err := RunBD("list", "--status=open", "--json")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing open beads: %w", err)
+	}
+
+	var beads []BeadInfo
+	if err := json.Unmarshal(out, &beads); err != nil {
+		return nil, fmt.Errorf("parsing beads list: %w", err)
 	}
 
 	var actions []string
@@ -113,7 +124,7 @@ func FixHygiene(dryRun bool) ([]string, error) {
 			if dryRun {
 				actions = append(actions, "[dry-run] would "+action)
 			} else {
-				if err := Update(b.ID, "closed"); err != nil {
+				if _, err := RunBDCombined("update", b.ID, "--status=closed"); err != nil {
 					return actions, fmt.Errorf("closing %s: %w", b.ID, err)
 				}
 				actions = append(actions, action)

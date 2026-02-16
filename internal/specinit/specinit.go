@@ -1,12 +1,14 @@
 package specinit
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -52,11 +54,30 @@ func Run(root, specID, title string) error {
 		return fmt.Errorf("writing spec file: %w", err)
 	}
 
-	// Set state to spec mode
+	// Pour the spec-lifecycle formula (best-effort — don't fail if beads not initialized)
 	s := &state.State{
 		Mode:       state.ModeSpec,
 		ActiveSpec: specID,
 	}
+	if err := bead.Preflight(root); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: beads not available, skipping molecule creation: %v\n", err)
+	} else {
+		molID, stepMap, err := pourFormula(specID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not pour formula: %v\n", err)
+		} else {
+			s.ActiveMolecule = molID
+			s.StepMapping = stepMap
+			// Mark the spec step as in_progress
+			if stepID, ok := stepMap["spec"]; ok {
+				if _, err := bead.RunBDCombined("update", stepID, "--status=in_progress"); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not start spec step: %v\n", err)
+				}
+			}
+		}
+	}
+
+	// Write state
 	if err := state.Write(root, s); err != nil {
 		return fmt.Errorf("setting state: %w", err)
 	}
@@ -73,6 +94,38 @@ func Run(root, specID, title string) error {
 	}
 
 	return nil
+}
+
+// pourResult represents the JSON output from `bd mol pour --json`.
+type pourResult struct {
+	NewEpicID string            `json:"new_epic_id"`
+	IDMapping map[string]string `json:"id_mapping"`
+}
+
+// pourFormula pours the spec-lifecycle formula and returns the molecule ID
+// and a step mapping (formula step ID → beads issue ID).
+func pourFormula(specID string) (string, map[string]string, error) {
+	out, err := bead.RunBD("mol", "pour", "spec-lifecycle",
+		"--var", "spec_id="+specID, "--json")
+	if err != nil {
+		return "", nil, fmt.Errorf("bd mol pour failed: %w", err)
+	}
+
+	var result pourResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", nil, fmt.Errorf("parsing pour output: %w", err)
+	}
+
+	// Build a clean step mapping: strip the formula prefix from keys
+	// id_mapping keys are like "spec-lifecycle.spec" → we want just "spec"
+	stepMap := make(map[string]string)
+	prefix := "spec-lifecycle."
+	for k, v := range result.IDMapping {
+		shortKey := strings.TrimPrefix(k, prefix)
+		stepMap[shortKey] = v
+	}
+
+	return result.NewEpicID, stepMap, nil
 }
 
 // titleFromSlug derives a title from a spec ID slug.

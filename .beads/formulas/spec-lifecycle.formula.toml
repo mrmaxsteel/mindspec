@@ -1,0 +1,38 @@
+version = 1
+formula = "spec-lifecycle"
+description = "MindSpec spec lifecycle: spec → approve → plan → approve → implement → review"
+
+[[steps]]
+id = "spec"
+title = "Write spec {{spec_id}}"
+type = "task"
+
+[[steps]]
+id = "spec-approve"
+title = "Approve spec {{spec_id}}"
+type = "human"
+needs = ["spec"]
+
+[[steps]]
+id = "plan"
+title = "Write plan {{spec_id}}"
+type = "task"
+needs = ["spec-approve"]
+
+[[steps]]
+id = "plan-approve"
+title = "Approve plan {{spec_id}}"
+type = "human"
+needs = ["plan"]
+
+[[steps]]
+id = "implement"
+title = "Implement {{spec_id}}"
+type = "task"
+needs = ["plan-approve"]
+
+[[steps]]
+id = "review"
+title = "Review {{spec_id}}"
+type = "human"
+needs = ["implement"]

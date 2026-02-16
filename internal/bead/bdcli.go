@@ -53,123 +53,17 @@ func Preflight(root string) error {
 	return nil
 }
 
-// Create creates a new bead via `bd create` and returns the created bead info.
-func Create(title, desc, issueType string, priority int, parent string) (*BeadInfo, error) {
-	args := []string{"create", title,
-		"--description=" + desc,
-		"--type=" + issueType,
-		fmt.Sprintf("--priority=%d", priority),
-		"--json",
-	}
-	if parent != "" {
-		args = append(args, "--parent="+parent)
-	}
-
-	out, err := tracedOutput("create", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd create failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd create failed: %w", err)
-	}
-
-	var info BeadInfo
-	if err := json.Unmarshal(out, &info); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-	return &info, nil
+// RunBD executes a bd command and returns stdout. Stderr is captured for error
+// messages but not mixed into the output (important for JSON parsing).
+// This is the primary interface for composing with bd per ADR-0012.
+func RunBD(args ...string) ([]byte, error) {
+	return tracedOutput("run", args)
 }
 
-// Search searches for beads matching query, returning only open beads.
-func Search(query string) ([]BeadInfo, error) {
-	args := []string{"search", query, "--json", "--status=open"}
-	out, err := tracedOutput("search", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd search failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd search failed: %w", err)
-	}
-
-	var items []BeadInfo
-	if err := json.Unmarshal(out, &items); err != nil {
-		return nil, fmt.Errorf("parsing bd search output: %w", err)
-	}
-	return items, nil
-}
-
-// SearchAny searches for beads matching query, returning beads of any status.
-func SearchAny(query string) ([]BeadInfo, error) {
-	args := []string{"search", query, "--json"}
-	out, err := tracedOutput("search-any", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd search failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd search failed: %w", err)
-	}
-
-	var items []BeadInfo
-	if err := json.Unmarshal(out, &items); err != nil {
-		return nil, fmt.Errorf("parsing bd search output: %w", err)
-	}
-	return items, nil
-}
-
-// Show returns details for a single bead by ID.
-func Show(id string) (*BeadInfo, error) {
-	args := []string{"show", id, "--json"}
-	out, err := tracedOutput("show", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd show failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd show failed: %w", err)
-	}
-
-	var info BeadInfo
-	if err := json.Unmarshal(out, &info); err != nil {
-		return nil, fmt.Errorf("parsing bd show output: %w", err)
-	}
-	return &info, nil
-}
-
-// ListOpen returns all open beads.
-func ListOpen() ([]BeadInfo, error) {
-	args := []string{"list", "--status=open", "--json"}
-	out, err := tracedOutput("list-open", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd list failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd list failed: %w", err)
-	}
-
-	var items []BeadInfo
-	if err := json.Unmarshal(out, &items); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
-	}
-	return items, nil
-}
-
-// DepAdd adds a dependency: blocked depends on blocker.
-func DepAdd(blocked, blocker string) error {
-	args := []string{"dep", "add", blocked, blocker}
-	out, err := tracedCombined("dep-add", args)
-	if err != nil {
-		return fmt.Errorf("bd dep add failed: %s", string(out))
-	}
-	return nil
-}
-
-// Update changes a bead's status.
-func Update(id, status string) error {
-	args := []string{"update", id, "--status=" + status}
-	out, err := tracedCombined("update", args)
-	if err != nil {
-		return fmt.Errorf("bd update failed: %s", string(out))
-	}
-	return nil
+// RunBDCombined executes a bd command and returns combined stdout+stderr.
+// Use for commands that don't return JSON where stderr output is useful.
+func RunBDCombined(args ...string) ([]byte, error) {
+	return tracedCombined("run", args)
 }
 
 // Close closes one or more beads via `bd close`.
@@ -185,7 +79,7 @@ func Close(ids ...string) error {
 	return nil
 }
 
-// --- Worktree wrappers (delegate to bd worktree) ---
+// --- Worktree wrappers (genuine multi-step helpers per ADR-0012) ---
 
 // WorktreeListEntry represents a worktree from `bd worktree list --json`.
 type WorktreeListEntry struct {
@@ -194,16 +88,6 @@ type WorktreeListEntry struct {
 	Branch     string `json:"branch"`
 	IsMain     bool   `json:"is_main"`
 	BeadsState string `json:"beads_state"`
-}
-
-// WorktreeInfoResult represents `bd worktree info --json` output.
-type WorktreeInfoResult struct {
-	IsWorktree bool   `json:"is_worktree"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Branch     string `json:"branch"`
-	BeadsState string `json:"beads_state"`
-	MainRepo   string `json:"main_repo"`
 }
 
 // WorktreeCreate creates a worktree via `bd worktree create`.
@@ -264,60 +148,6 @@ func hasGitRemote() bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
-// WorktreeInfo returns info about the current worktree via `bd worktree info --json`.
-func WorktreeInfo() (*WorktreeInfoResult, error) {
-	args := []string{"worktree", "info", "--json"}
-	out, err := tracedOutput("worktree-info", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd worktree info failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd worktree info failed: %w", err)
-	}
-
-	var info WorktreeInfoResult
-	if err := json.Unmarshal(out, &info); err != nil {
-		return nil, fmt.Errorf("parsing bd worktree info output: %w", err)
-	}
-	return &info, nil
-}
-
-// --- Molecule wrappers (delegate to bd mol / bd ready) ---
-
-// MolReady returns ready (unblocked) children within a molecule.
-// Uses `bd ready --parent <parentID> --json` to find work items
-// whose dependencies are satisfied within the molecule.
-func MolReady(parentID string) ([]BeadInfo, error) {
-	args := []string{"ready", "--parent", parentID, "--json"}
-	out, err := tracedOutput("mol-ready", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd ready --parent failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd ready --parent failed: %w", err)
-	}
-
-	var items []BeadInfo
-	if err := json.Unmarshal(out, &items); err != nil {
-		return nil, fmt.Errorf("parsing bd ready --parent output: %w", err)
-	}
-	return items, nil
-}
-
-// MolShow returns the molecule structure as raw JSON bytes.
-// Uses `bd mol show <id> --json`.
-func MolShow(id string) ([]byte, error) {
-	args := []string{"mol", "show", id, "--json"}
-	out, err := tracedOutput("mol-show", args)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd mol show failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("bd mol show failed: %w", err)
-	}
-	return out, nil
-}
-
 // tracedOutput runs a bd command via cmd.Output() with trace instrumentation.
 func tracedOutput(op string, args []string) ([]byte, error) {
 	start := time.Now()
@@ -346,18 +176,4 @@ func tracedCombined(op string, args []string) ([]byte, error) {
 			"ok":   err == nil,
 		}))
 	return out, err
-}
-
-// parseBeadList parses JSON output containing a list of BeadInfo.
-func parseBeadList(data []byte) ([]BeadInfo, error) {
-	var items []BeadInfo
-	if err := json.Unmarshal(data, &items); err != nil {
-		return nil, fmt.Errorf("parsing beads JSON: %w", err)
-	}
-	return items, nil
-}
-
-// parseJSON unmarshals JSON data into the given target.
-func parseJSON(data []byte, target interface{}) error {
-	return json.Unmarshal(data, target)
 }

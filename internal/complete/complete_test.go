@@ -1,6 +1,7 @@
 package complete
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,32 +19,23 @@ func saveAndRestore(t *testing.T) {
 	origReadState := readStateFn
 	origSetMode := setModeFn
 	origClose := closeBeadFn
-	origPropagate := propagateCloseFn
 	origWtList := worktreeListFn
 	origWtRemove := worktreeRemoveFn
-	origMolReady := molReadyFn
-	origSearch := searchBeadsFn
-	origParsePlan := parsePlanMetaFn
+	origRunBD := runBDFn
 	origExec := execCommandFn
 
 	t.Cleanup(func() {
 		readStateFn = origReadState
 		setModeFn = origSetMode
 		closeBeadFn = origClose
-		propagateCloseFn = origPropagate
 		worktreeListFn = origWtList
 		worktreeRemoveFn = origWtRemove
-		molReadyFn = origMolReady
-		searchBeadsFn = origSearch
-		parsePlanMetaFn = origParsePlan
+		runBDFn = origRunBD
 		execCommandFn = origExec
 	})
-
-	// Default propagateCloseFn to no-op so tests don't call real bd commands
-	propagateCloseFn = func(specID string) {}
 }
 
-// setupTempRoot creates a temp dir with a plan.md containing a mol_parent_id.
+// setupTempRoot creates a temp dir with state containing a molecule ID.
 func setupTempRoot(t *testing.T, specID, molParentID string) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -51,22 +43,9 @@ func setupTempRoot(t *testing.T, specID, molParentID string) string {
 	// Create .mindspec/
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	// Create spec dir with plan
+	// Create spec dir
 	specDir := filepath.Join(tmp, "docs", "specs", specID)
 	os.MkdirAll(specDir, 0755)
-
-	planContent := fmt.Sprintf(`---
-status: Approved
-spec_id: %s
-generated:
-  mol_parent_id: %s
-  bead_ids:
-    "1": "chunk-1"
----
-
-# Plan
-`, specID, molParentID)
-	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644)
 
 	return tmp
 }
@@ -76,11 +55,12 @@ func TestRun_HappyPath(t *testing.T) {
 
 	root := setupTempRoot(t, "008-test", "mol-parent-1")
 
-	// Write initial state
+	// Write initial state with molecule
 	state.Write(root, &state.State{
-		Mode:       state.ModeImplement,
-		ActiveSpec: "008-test",
-		ActiveBead: "bead-1",
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "008-test",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-parent-1",
 	})
 
 	readStateFn = state.Read // use real state (written above)
@@ -109,10 +89,14 @@ func TestRun_HappyPath(t *testing.T) {
 	}
 
 	// Next ready bead exists
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) {
-		return []bead.BeadInfo{
-			{ID: "bead-2", Title: "[IMPL 008-test.2] Next chunk"},
-		}, nil
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			items := []bead.BeadInfo{
+				{ID: "bead-2", Title: "[IMPL 008-test.2] Next chunk"},
+			}
+			return json.Marshal(items)
+		}
+		return nil, fmt.Errorf("unexpected args: %v", args)
 	}
 
 	result, err := Run(root, "")
@@ -207,8 +191,7 @@ func TestRun_DefaultsToActiveBead(t *testing.T) {
 		return nil
 	}
 	worktreeRemoveFn = func(name string) error { return nil }
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) { return nil, nil }
-	searchBeadsFn = func(query string) ([]bead.BeadInfo, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
 	_, err := Run(root, "") // no explicit bead ID
 	if err != nil {
@@ -246,8 +229,7 @@ func TestRun_NoWorktree(t *testing.T) {
 		t.Error("should not try to remove worktree when none exists")
 		return nil
 	}
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) { return nil, nil }
-	searchBeadsFn = func(query string) ([]bead.BeadInfo, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
 	result, err := Run(root, "bead-1")
 	if err != nil {
@@ -265,16 +247,22 @@ func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t, "test-spec", "mol-123")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "test-spec",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-123",
+	})
+	readStateFn = state.Read
 
-	parsePlanMetaFn = bead.ParsePlanMeta // use real parser (reads from temp dir)
-
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) {
-		if parentID != "mol-123" {
-			t.Errorf("unexpected parentID: %s", parentID)
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			items := []bead.BeadInfo{
+				{ID: "next-bead", Title: "[IMPL test-spec.2] Next"},
+			}
+			return json.Marshal(items)
 		}
-		return []bead.BeadInfo{
-			{ID: "next-bead", Title: "[IMPL test-spec.2] Next"},
-		}, nil
+		return nil, fmt.Errorf("unexpected")
 	}
 
 	mode, nextBead := advanceState(root, "test-spec")
@@ -290,18 +278,25 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t, "test-spec", "mol-123")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "test-spec",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-123",
+	})
+	readStateFn = state.Read
 
-	parsePlanMetaFn = bead.ParsePlanMeta
-
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) {
-		return nil, nil // nothing ready
-	}
-
-	searchBeadsFn = func(query string) ([]bead.BeadInfo, error) {
-		// Some open children exist (blocked)
-		return []bead.BeadInfo{
-			{ID: "blocked-bead", Title: "[IMPL test-spec.3] Blocked"},
-		}, nil
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return json.Marshal([]bead.BeadInfo{}) // nothing ready
+		}
+		if len(args) > 0 && args[0] == "search" {
+			items := []bead.BeadInfo{
+				{ID: "blocked-bead", Title: "[IMPL test-spec.3] Blocked"},
+			}
+			return json.Marshal(items)
+		}
+		return nil, fmt.Errorf("unexpected")
 	}
 
 	mode, nextBead := advanceState(root, "test-spec")
@@ -317,14 +312,16 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t, "test-spec", "mol-123")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "test-spec",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-123",
+	})
+	readStateFn = state.Read
 
-	parsePlanMetaFn = bead.ParsePlanMeta
-
-	molReadyFn = func(parentID string) ([]bead.BeadInfo, error) {
-		return nil, nil
-	}
-	searchBeadsFn = func(query string) ([]bead.BeadInfo, error) {
-		return nil, nil // no open children
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{}) // nothing ready, nothing open
 	}
 
 	mode, nextBead := advanceState(root, "test-spec")
@@ -336,14 +333,18 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 }
 
-func TestAdvanceState_NoMolParent(t *testing.T) {
+func TestAdvanceState_NoMolecule(t *testing.T) {
 	saveAndRestore(t)
 
 	tmp := t.TempDir()
-	// No plan file at all
-	os.MkdirAll(filepath.Join(tmp, "docs", "specs", "test"), 0755)
-
-	parsePlanMetaFn = bead.ParsePlanMeta
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+	// State without molecule
+	state.Write(tmp, &state.State{
+		Mode:       state.ModeImplement,
+		ActiveSpec: "test",
+		ActiveBead: "bead-1",
+	})
+	readStateFn = state.Read
 
 	mode, nextBead := advanceState(tmp, "test")
 	if mode != state.ModeIdle {

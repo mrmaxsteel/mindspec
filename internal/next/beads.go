@@ -3,10 +3,10 @@ package next
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/state"
 )
 
 // BeadInfo represents a work item from Beads.
@@ -22,72 +22,56 @@ type BeadInfo struct {
 }
 
 // Package-level function variables for testability.
-// Tests override these to avoid calling real bd commands.
 var (
-	searchBeads    = bead.Search
-	molReady       = bead.MolReady
-	updateBead     = bead.Update
+	runBDFn        = bead.RunBD
+	runBDCombFn    = bead.RunBDCombined
 	worktreeList   = bead.WorktreeList
 	worktreeCreate = bead.WorktreeCreate
-	execCommand    = exec.Command
+	readStateFn    = state.Read
 )
 
-// QueryReady discovers ready work, preferring molecule children when available.
-// Searches for molecule parents ([PLAN prefix), queries their ready children,
-// and falls back to `bd ready --json` for standalone beads.
+// QueryReady discovers ready work. If an active molecule exists in state,
+// queries its ready children. Otherwise falls back to global bd ready.
 func QueryReady() ([]BeadInfo, error) {
-	// Try molecule-aware discovery first
-	molItems := queryMolChildren()
-	if len(molItems) > 0 {
-		return molItems, nil
+	// Check state for active molecule
+	root, err := findRoot()
+	if err == nil {
+		s, err := readStateFn(root)
+		if err == nil && s.ActiveMolecule != "" {
+			out, err := runBDFn("ready", "--parent", s.ActiveMolecule, "--json")
+			if err == nil {
+				items, err := ParseBeadsJSON(out)
+				if err == nil && len(items) > 0 {
+					return items, nil
+				}
+			}
+		}
 	}
 
-	// Fall back to regular bd ready
-	out, err := execCommand("bd", "ready", "--json").Output()
+	// Fall back to global bd ready
+	out, err := runBDFn("ready", "--json")
 	if err != nil {
-		if execErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("bd ready failed: %s", string(execErr.Stderr))
-		}
-		return nil, fmt.Errorf("running bd ready: %w", err)
+		return nil, fmt.Errorf("bd ready failed: %w", err)
 	}
 
 	return ParseBeadsJSON(out)
 }
 
-// queryMolChildren searches for molecule parents and returns their ready children.
-func queryMolChildren() []BeadInfo {
-	parents, err := searchBeads("[PLAN ")
-	if err != nil || len(parents) == 0 {
-		return nil
+// findRoot attempts to find the workspace root for state reading.
+func findRoot() (string, error) {
+	out, err := runBDFn("worktree", "info", "--json")
+	if err != nil {
+		// Not in a worktree — try current directory
+		return ".", nil
 	}
-
-	var items []BeadInfo
-	for _, parent := range parents {
-		children, err := molReady(parent.ID)
-		if err != nil {
-			continue
-		}
-		items = append(items, convertBeadInfos(children)...)
+	var info struct {
+		MainRepo string `json:"main_repo"`
+		Path     string `json:"path"`
 	}
-	return items
-}
-
-// convertBeadInfos converts bead.BeadInfo slice to next.BeadInfo slice.
-func convertBeadInfos(src []bead.BeadInfo) []BeadInfo {
-	result := make([]BeadInfo, len(src))
-	for i, s := range src {
-		result[i] = BeadInfo{
-			ID:        s.ID,
-			Title:     s.Title,
-			Status:    s.Status,
-			Priority:  s.Priority,
-			IssueType: s.IssueType,
-			Owner:     s.Owner,
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.UpdatedAt,
-		}
+	if json.Unmarshal(out, &info) == nil && info.MainRepo != "" {
+		return info.MainRepo, nil
 	}
-	return result
+	return ".", nil
 }
 
 // ParseBeadsJSON parses the JSON output from bd commands into BeadInfo slices.
@@ -99,9 +83,10 @@ func ParseBeadsJSON(data []byte) ([]BeadInfo, error) {
 	return items, nil
 }
 
-// ClaimBead marks a bead as in_progress via bead.Update().
+// ClaimBead marks a bead as in_progress via bd update.
 func ClaimBead(id string) error {
-	return updateBead(id, "in_progress")
+	_, err := runBDCombFn("update", id, "--status=in_progress")
+	return err
 }
 
 // EnsureWorktree checks for an existing worktree for the bead, or creates one.

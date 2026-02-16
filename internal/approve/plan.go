@@ -15,6 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// planRunBDCombinedFn is a package-level variable for testability.
+var planRunBDCombinedFn = bead.RunBDCombined
+
 // PlanResult holds the result of plan approval.
 type PlanResult struct {
 	SpecID   string
@@ -38,33 +41,19 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		return nil, fmt.Errorf("updating plan approval: %w", err)
 	}
 
-	// Step 3: Create plan beads (best-effort, idempotent)
-	beadResult, err := bead.CreatePlanBeads(root, specID)
-	if err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not create plan beads: %v", err))
-	} else {
-		// Write bead IDs back to plan frontmatter
-		if err := bead.WriteGeneratedBeadIDs(planPath, beadResult); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write bead IDs to plan: %v", err))
-		}
-	}
-
-	// Step 4: Resolve plan gate (best-effort)
-	gateTitle := bead.PlanGateTitle(specID)
-	gate, _ := bead.FindGateAnyStatus(gateTitle)
-	if gate != nil {
-		if gate.Status != "closed" {
-			reason := fmt.Sprintf("Plan %s approved via mindspec approve plan", specID)
-			if err := bead.ResolveGate(gate.ID, reason); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not resolve plan gate: %v", err))
+	// Step 3: Close plan-approve step in molecule (best-effort)
+	s, err := state.Read(root)
+	if err == nil && s.StepMapping != nil {
+		if stepID, ok := s.StepMapping["plan-approve"]; ok {
+			if _, err := planRunBDCombinedFn("close", stepID); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close plan-approve step: %v", err))
 			} else {
-				result.GateID = gate.ID
+				result.GateID = stepID
 			}
-		} else {
-			result.GateID = gate.ID // already resolved
 		}
 	} else {
-		result.Warnings = append(result.Warnings, "no plan gate found (legacy beads — proceeding without gate)")
+		// Backward compat: pre-032 specs without molecules
+		result.Warnings = append(result.Warnings, "no molecule found — proceeding without beads step closure")
 	}
 
 	// Step 5: Set state to plan mode (approved)

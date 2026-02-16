@@ -1,7 +1,7 @@
 {
   "spec_id": "032-beads-formula-gates",
   "started_at": "2026-02-16T16:13:15Z",
-  "collector_pid": 23722,
+  "collector_pid": 0,
   "collector_port": 4318,
   "status": "recording",
   "phases": [
@@ -17,7 +17,10 @@
     },
     {
       "phase": "plan-approved",
-      "started_at": "2026-02-16T16:58:54Z"
+      "started_at": "2026-02-16T16:58:54Z",
+      "beads": [
+        "mindspec-2fy"
+      ]
     }
   ]
 }

@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
 // --- AuditWorkset tests ---
 
 func TestAuditWorkset_StaleDetection(t *testing.T) {

@@ -1,9 +1,9 @@
 package complete
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
@@ -15,13 +15,10 @@ import (
 var (
 	readStateFn      = state.Read
 	setModeFn        = state.SetMode
-	closeBeadFn        = bead.Close
-	propagateCloseFn   = bead.PropagateClose
-	worktreeListFn     = bead.WorktreeList
+	closeBeadFn      = bead.Close
+	worktreeListFn   = bead.WorktreeList
 	worktreeRemoveFn = bead.WorktreeRemove
-	molReadyFn       = bead.MolReady
-	searchBeadsFn    = bead.Search
-	parsePlanMetaFn  = bead.ParsePlanMeta
+	runBDFn          = bead.RunBD
 	execCommandFn    = exec.Command
 )
 
@@ -84,10 +81,7 @@ func Run(root, beadID string) (*Result, error) {
 		_ = recording.EmitBeadMarker(root, specID, "complete", beadID)
 	}
 
-	// 4.6. Propagate close to parent beads if all impl beads are done
-	if specID != "" {
-		propagateCloseFn(specID)
-	}
+	// Note: parent status propagation is handled natively by beads molecules
 
 	result := &Result{
 		BeadID:     beadID,
@@ -176,35 +170,35 @@ func advanceState(root, specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// Find molecule parent from plan
-	molParentID := getMolParentID(root, specID)
+	// Read molecule ID from state
+	s, err := readStateFn(root)
+	if err != nil {
+		return state.ModeIdle, ""
+	}
+	molParentID := s.ActiveMolecule
 	if molParentID == "" {
 		return state.ModeIdle, ""
 	}
 
 	// Check for ready children in the molecule
-	ready, err := molReadyFn(molParentID)
-	if err == nil && len(ready) > 0 {
-		return state.ModeImplement, ready[0].ID
+	out, err := runBDFn("ready", "--parent", molParentID, "--json")
+	if err == nil {
+		var ready []bead.BeadInfo
+		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+			return state.ModeImplement, ready[0].ID
+		}
 	}
 
 	// Check for open (but blocked) children
 	implPrefix := "[IMPL " + specID + "."
-	open, err := searchBeadsFn(implPrefix)
-	if err == nil && len(open) > 0 {
-		return state.ModePlan, ""
+	out, err = runBDFn("search", implPrefix, "--json", "--status=open")
+	if err == nil {
+		var open []bead.BeadInfo
+		if json.Unmarshal(out, &open) == nil && len(open) > 0 {
+			return state.ModePlan, ""
+		}
 	}
 
 	// All beads done → review gate (human must approve before idle)
 	return state.ModeReview, ""
-}
-
-// getMolParentID reads the molecule parent ID from the plan's generated block.
-func getMolParentID(root, specID string) string {
-	planPath := filepath.Join(root, "docs", "specs", specID, "plan.md")
-	meta, err := parsePlanMetaFn(planPath)
-	if err != nil || meta.Generated == nil {
-		return ""
-	}
-	return meta.Generated.MolParentID
 }
