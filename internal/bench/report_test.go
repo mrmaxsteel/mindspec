@@ -36,8 +36,8 @@ func TestParseSession(t *testing.T) {
 				"output_tokens":         float64(1000),
 				"cache_read_tokens":     float64(2000),
 				"cache_creation_tokens": float64(500),
-				"cost_usd":             float64(0.03),
-				"model":                "claude-opus-4-6",
+				"cost_usd":              float64(0.03),
+				"model":                 "claude-opus-4-6",
 			},
 		},
 		{
@@ -46,8 +46,8 @@ func TestParseSession(t *testing.T) {
 			Data: map[string]any{
 				"input_tokens":  float64(3000),
 				"output_tokens": float64(800),
-				"cost_usd":     float64(0.02),
-				"model":        "claude-opus-4-6",
+				"cost_usd":      float64(0.02),
+				"model":         "claude-opus-4-6",
 			},
 		},
 	}
@@ -163,6 +163,119 @@ func TestParseSessionMetricEvents(t *testing.T) {
 	}
 	if ms.OutputTokens != 1800 {
 		t.Errorf("model OutputTokens = %d, want 1800", ms.OutputTokens)
+	}
+}
+
+func TestParseSessionCodexMetricEvents(t *testing.T) {
+	dir := t.TempDir()
+	events := []CollectedEvent{
+		{
+			TS:    "2026-02-13T10:00:00.000000000Z",
+			Event: "codex.token.usage",
+			Data:  map[string]any{"type": "input", "value": float64(4000), "model": "gpt-5-codex"},
+		},
+		{
+			TS:    "2026-02-13T10:00:00.000000000Z",
+			Event: "codex.token.usage",
+			Data:  map[string]any{"type": "output", "value": float64(900), "model": "gpt-5-codex"},
+		},
+		{
+			TS:    "2026-02-13T10:00:00.000000000Z",
+			Event: "codex.cost.usage",
+			Data:  map[string]any{"value": float64(0.04), "model": "gpt-5-codex"},
+		},
+	}
+
+	path := writeFixture(t, dir, "session-codex-metrics.jsonl", events)
+	s, err := ParseSession(path, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.InputTokens != 4000 {
+		t.Errorf("InputTokens = %d, want 4000", s.InputTokens)
+	}
+	if s.OutputTokens != 900 {
+		t.Errorf("OutputTokens = %d, want 900", s.OutputTokens)
+	}
+	if s.TotalTokens() != 4900 {
+		t.Errorf("TotalTokens = %d, want 4900", s.TotalTokens())
+	}
+	if diff := s.CostUSD - 0.04; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("CostUSD = %f, want 0.04", s.CostUSD)
+	}
+	ms, ok := s.ModelBreakdown["gpt-5-codex"]
+	if !ok {
+		t.Fatal("missing model breakdown for gpt-5-codex")
+	}
+	if ms.InputTokens != 4000 {
+		t.Errorf("model InputTokens = %d, want 4000", ms.InputTokens)
+	}
+	if ms.OutputTokens != 900 {
+		t.Errorf("model OutputTokens = %d, want 900", ms.OutputTokens)
+	}
+}
+
+func TestParseSessionMixedClaudeAndCodex(t *testing.T) {
+	dir := t.TempDir()
+	events := []CollectedEvent{
+		{
+			TS:    "2026-02-13T10:00:00.000000000Z",
+			Event: "claude_code.api_request",
+			Data: map[string]any{
+				"input_tokens":  float64(1000),
+				"output_tokens": float64(200),
+				"cost_usd":      float64(0.01),
+				"model":         "claude-opus-4-6",
+			},
+		},
+		{
+			TS:    "2026-02-13T10:00:01.000000000Z",
+			Event: "codex.api_request",
+			Data: map[string]any{
+				"input_tokens":  float64(1200),
+				"output_tokens": float64(300),
+				"cost_usd":      float64(0.02),
+				"model":         "gpt-5-codex",
+			},
+		},
+		{
+			TS:    "2026-02-13T10:00:02.000000000Z",
+			Event: "codex.token.usage",
+			Data: map[string]any{
+				"type":  "cacheRead",
+				"value": float64(500),
+				"model": "gpt-5-codex",
+			},
+		},
+	}
+
+	path := writeFixture(t, dir, "session-mixed.jsonl", events)
+	s, err := ParseSession(path, "mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.APICallCount != 2 {
+		t.Errorf("APICallCount = %d, want 2", s.APICallCount)
+	}
+	if s.InputTokens != 2200 {
+		t.Errorf("InputTokens = %d, want 2200", s.InputTokens)
+	}
+	if s.OutputTokens != 500 {
+		t.Errorf("OutputTokens = %d, want 500", s.OutputTokens)
+	}
+	if s.CacheRead != 500 {
+		t.Errorf("CacheRead = %d, want 500", s.CacheRead)
+	}
+	if diff := s.CostUSD - 0.03; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("CostUSD = %f, want 0.03", s.CostUSD)
+	}
+	if _, ok := s.ModelBreakdown["claude-opus-4-6"]; !ok {
+		t.Error("expected claude model breakdown")
+	}
+	if _, ok := s.ModelBreakdown["gpt-5-codex"]; !ok {
+		t.Error("expected codex model breakdown")
 	}
 }
 

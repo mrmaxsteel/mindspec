@@ -230,6 +230,8 @@ Generates a comparative report with:
 
 Reports are available in table format (human-readable) and JSON (programmatic). N-way comparison supports 3+ sessions side-by-side.
 
+`mindspec bench report` now aggregates both Claude and Codex NDJSON event aliases in the same session summary pipeline.
+
 ## Customizing Agent Labels
 
 Set the `agent.name` resource attribute to label your agent in the graph:
