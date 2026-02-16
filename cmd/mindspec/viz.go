@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/mindspec/mindspec/internal/recording"
@@ -22,7 +23,8 @@ var agentmindCmd = &cobra.Command{
 
 Subcommands:
   serve   Start OTLP receiver + web UI for real-time visualization
-  replay  Replay a recorded NDJSON session file`,
+  replay  Replay a recorded NDJSON session file
+  setup   Configure agent telemetry export to AgentMind`,
 }
 
 var agentmindServeCmd = &cobra.Command{
@@ -99,6 +101,50 @@ var agentmindReplayCmd = &cobra.Command{
 	},
 }
 
+var agentmindSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Configure agent telemetry export for AgentMind",
+}
+
+var agentmindSetupCodexCmd = &cobra.Command{
+	Use:   "codex",
+	Short: "Configure Codex OTEL export to AgentMind (OTLP/HTTP localhost:4318)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configPath, _ := cmd.Flags().GetString("config")
+		force, _ := cmd.Flags().GetBool("force")
+
+		if configPath == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+			configPath = recording.DefaultCodexConfigPath(homeDir)
+		} else {
+			configPath = filepath.Clean(configPath)
+		}
+
+		result, err := recording.EnsureCodexOTLP(configPath, force)
+		if err != nil {
+			return err
+		}
+
+		if result.Conflict {
+			fmt.Fprintf(os.Stderr, "warning: Codex OTEL endpoint already set to %q (expected %q) — not overriding\n",
+				result.ExistingEndpoint, result.ExpectedEndpoint)
+			fmt.Fprintln(os.Stderr, "Re-run with --force to replace the existing endpoint.")
+			return nil
+		}
+
+		if result.Changed {
+			fmt.Printf("Configured Codex OTEL export for AgentMind in %s\n", result.ConfigPath)
+			return nil
+		}
+
+		fmt.Printf("Codex OTEL export already configured for AgentMind in %s\n", result.ConfigPath)
+		return nil
+	},
+}
+
 func init() {
 	agentmindServeCmd.Flags().Int("otlp-port", 4318, "Port for OTLP/HTTP receiver")
 	agentmindServeCmd.Flags().Int("ui-port", 8420, "Port for web UI")
@@ -109,6 +155,11 @@ func init() {
 	agentmindReplayCmd.Flags().String("spec", "", "Spec ID to replay (resolves to docs/specs/<id>/recording/events.ndjson)")
 	agentmindReplayCmd.Flags().String("phase", "", "Filter replay to a specific phase (e.g., plan, implement)")
 
+	agentmindSetupCodexCmd.Flags().String("config", "", "Path to Codex config.toml (default: ~/.codex/config.toml)")
+	agentmindSetupCodexCmd.Flags().Bool("force", false, "Replace an existing non-AgentMind OTEL endpoint")
+	agentmindSetupCmd.AddCommand(agentmindSetupCodexCmd)
+
 	agentmindCmd.AddCommand(agentmindServeCmd)
 	agentmindCmd.AddCommand(agentmindReplayCmd)
+	agentmindCmd.AddCommand(agentmindSetupCmd)
 }

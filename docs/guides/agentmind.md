@@ -70,6 +70,32 @@ For persistent configuration, add to `.claude/settings.local.json`:
 }
 ```
 
+#### Codex
+
+Use the built-in helper to configure `~/.codex/config.toml`:
+
+```bash
+./bin/mindspec agentmind setup codex
+```
+
+If Codex is already pointed at another OTEL collector, MindSpec prints a warning and leaves it unchanged. To replace an existing endpoint explicitly:
+
+```bash
+./bin/mindspec agentmind setup codex --force
+```
+
+Equivalent Codex settings:
+
+```toml
+[otel]
+exporter = "otlp-http"
+trace_exporter = "none"
+log_user_prompt = false
+
+[otel.exporter."otlp-http"]
+endpoint = "http://localhost:4318"
+```
+
 #### Any OTLP-Compatible Agent
 
 Point the standard OpenTelemetry environment variables to `http://localhost:4318`. AgentMind accepts OTLP/HTTP JSON on that port.
