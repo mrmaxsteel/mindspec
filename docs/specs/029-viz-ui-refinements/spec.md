@@ -12,7 +12,7 @@ Spec 026 (Visual Polish) delivered star-point nodes, constellation edges, bloom,
 
 2. **Node activity growth is subtle** — the current core size formula `4 + log₂(activity+1) * 2` produces a narrow range (4–20px). A node with 100 events is only ~3.3x the size of a fresh node. Combined with the halo opacity range (0.15–0.8), high-activity nodes don't pop enough against medium-activity ones.
 
-3. **Edge glow decays too fast** — the current decay rate of `0.985` per 50ms tick gives a half-life of ~2.3 seconds. Constellation lines flash and fade before the eye can trace them, especially during bursts of activity. A longer linger would make the graph feel more alive.
+3. **Edge glow decays too fast and only fires once** — the current decay rate of `0.985` per 50ms tick gives a half-life of ~2.3 seconds. Constellation lines flash and fade before the eye can trace them, especially during bursts of activity. A longer linger would make the graph feel more alive. Also edge glow appears to only first first traversing pulse, subsequent pulses dont appear to make the edge glow again. I really wanted glow to be cumulative (to a point) so you can visually see the hot spot edges.
 
 ## Impacted Domains
 
@@ -79,10 +79,12 @@ Spec 026 (Visual Polish) delivered star-point nodes, constellation edges, bloom,
 
 - [ ] Pressing `H` hides all UI panels (HUD, legend, controls, detail card, recording dashboard); pressing `H` again restores them
 - [ ] `H` is suppressed when the search input has focus
+- [ ] When UI panels are hidden, there is small subtle text in footer that lets the user know they can press `H` again to re-show the UI 
 - [ ] A toast notification appears for 2 seconds when entering immersive mode
 - [ ] A node with 100 events is visibly larger and brighter than a node with 5 events (core size ratio > 2x, halo opacity ratio > 1.5x)
 - [ ] Node max core size is 28px (up from 20px)
 - [ ] Edge glow persists for ~5 seconds after firing (vs ~2.3s previously)
+- [ ] Edge glow increases for every firing pulse for ~5
 - [ ] Glow particles traverse edges in ~2.5 seconds (vs 1.5s previously)
 - [ ] Rapid edge firing does not cause runaway energy stacking (FIRE_BOOST reduced to 0.6)
 - [ ] `make test` passes with no regressions
