@@ -6,6 +6,7 @@ import (
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/next"
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -102,6 +103,16 @@ to "here's your bead, here's the mode, here are your rules" in one step.`,
 
 		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)
 		fmt.Println()
+
+		// Step 7.5: Emit recording bead marker (best-effort)
+		if resolved.SpecID != "" {
+			if err := recording.EmitBeadMarker(root, resolved.SpecID, "start", selected.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not emit recording marker: %v\n", err)
+			}
+			if err := recording.AddBeadToPhase(root, resolved.SpecID, selected.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not update recording manifest: %v\n", err)
+			}
+		}
 
 		// Step 8: Emit guidance (instruct-tail convention)
 		if err := emitInstruct(root); err != nil {

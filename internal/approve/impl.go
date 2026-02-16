@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -37,6 +38,11 @@ func ApproveImpl(root, specID string) (*ImplResult, error) {
 		if err := bead.Close(specBeads[0].ID); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not close spec bead %s: %v", specBeads[0].ID, err))
 		}
+	}
+
+	// Stop recording (best-effort — before transitioning to idle)
+	if err := recording.StopRecording(root, specID); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not stop recording: %v", err))
 	}
 
 	// Transition to idle

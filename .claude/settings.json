@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./bin/mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+            "command": "./bin/mindspec record health 2>/dev/null; ./bin/mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
             "statusMessage": "Loading mode guidance..."
           }
         ]

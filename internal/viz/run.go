@@ -26,7 +26,8 @@ func RunLive(ctx context.Context, otlpPort, uiPort int) error {
 }
 
 // RunReplay creates the full replay visualization pipeline and blocks until ctx is cancelled.
-func RunReplay(ctx context.Context, path string, speed float64, uiPort int) error {
+// If phase is non-empty, only events within that lifecycle phase are replayed.
+func RunReplay(ctx context.Context, path string, speed float64, uiPort int, phase string) error {
 	graph := NewGraph(DefaultGraphConfig())
 	hub := NewHub()
 	go hub.Run(ctx)
@@ -39,6 +40,7 @@ func RunReplay(ctx context.Context, path string, speed float64, uiPort int) erro
 	}()
 
 	replay := NewReplay(path, speed, graph, hub)
+	replay.phase = phase
 	if err := replay.Run(ctx); err != nil {
 		return err
 	}

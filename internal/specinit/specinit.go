@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
@@ -50,6 +51,17 @@ func Run(root, specID, title string) error {
 	}
 	if err := state.Write(root, s); err != nil {
 		return fmt.Errorf("setting state: %w", err)
+	}
+
+	// Start recording (best-effort)
+	if wrote, err := recording.EnsureOTLP(root); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not configure OTLP: %v\n", err)
+	} else if wrote {
+		fmt.Fprintln(os.Stderr, "OTLP telemetry enabled. Restart Claude Code to begin recording.")
+	}
+
+	if err := recording.StartRecording(root, specID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not start recording: %v\n", err)
 	}
 
 	return nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -78,7 +79,12 @@ func Run(root, beadID string) (*Result, error) {
 		return nil, fmt.Errorf("closing bead: %w", err)
 	}
 
-	// 4.5. Propagate close to parent beads if all impl beads are done
+	// 4.5. Emit recording bead marker (best-effort)
+	if specID != "" {
+		_ = recording.EmitBeadMarker(root, specID, "complete", beadID)
+	}
+
+	// 4.6. Propagate close to parent beads if all impl beads are done
 	if specID != "" {
 		propagateCloseFn(specID)
 	}

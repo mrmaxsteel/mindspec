@@ -14,25 +14,38 @@ import (
 // Collector is a lightweight OTLP/HTTP JSON receiver that extracts
 // Claude Code telemetry events and writes them as NDJSON.
 type Collector struct {
-	port   int
-	output string
-	mu     sync.Mutex
-	w      io.WriteCloser
-	server *http.Server
-	count  int
+	port       int
+	output     string
+	appendMode bool
+	mu         sync.Mutex
+	w          io.WriteCloser
+	server     *http.Server
+	count      int
 }
 
 // NewCollector creates a collector that listens on the given port
-// and writes NDJSON to the output path.
+// and writes NDJSON to the output path (truncates existing file).
 func NewCollector(port int, output string) *Collector {
 	return &Collector{port: port, output: output}
 }
 
+// NewCollectorAppend creates a collector that appends to an existing output file
+// instead of truncating it. Used for recording restarts.
+func NewCollectorAppend(port int, output string) *Collector {
+	return &Collector{port: port, output: output, appendMode: true}
+}
+
 // Run starts the HTTP server and blocks until ctx is cancelled.
 func (c *Collector) Run(ctx context.Context) error {
-	f, err := os.Create(c.output)
+	var f *os.File
+	var err error
+	if c.appendMode {
+		f, err = os.OpenFile(c.output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	} else {
+		f, err = os.Create(c.output)
+	}
 	if err != nil {
-		return fmt.Errorf("creating output file: %w", err)
+		return fmt.Errorf("opening output file: %w", err)
 	}
 	c.w = f
 

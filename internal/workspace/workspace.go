@@ -70,6 +70,11 @@ func DomainDir(root, domain string) string {
 	return filepath.Join(root, "docs", "domains", domain)
 }
 
+// RecordingDir returns the path to a spec's recording directory.
+func RecordingDir(root, specID string) string {
+	return filepath.Join(root, "docs", "specs", specID, "recording")
+}
+
 // MindspecDir returns the path to the .mindspec directory under root.
 func MindspecDir(root string) string {
 	return filepath.Join(root, ".mindspec")

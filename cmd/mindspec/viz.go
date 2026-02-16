@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/viz"
+	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -46,13 +49,36 @@ var agentmindServeCmd = &cobra.Command{
 }
 
 var agentmindReplayCmd = &cobra.Command{
-	Use:   "replay <file.jsonl>",
+	Use:   "replay [file.jsonl]",
 	Short: "Replay a recorded NDJSON session file",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filePath := args[0]
+		specID, _ := cmd.Flags().GetString("spec")
+		phase, _ := cmd.Flags().GetString("phase")
 		speed, _ := cmd.Flags().GetFloat64("speed")
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
+
+		// Resolve file path
+		var filePath string
+		if len(args) > 0 {
+			filePath = args[0]
+		} else if specID != "" {
+			root, err := findRoot()
+			if err != nil {
+				return fmt.Errorf("finding project root: %w", err)
+			}
+			filePath = recording.EventsPath(root, specID)
+			if _, err := os.Stat(filePath); err != nil {
+				// Also try resolving via workspace
+				specDir := workspace.SpecDir(root, specID)
+				filePath = specDir + "/recording/events.ndjson"
+				if _, err := os.Stat(filePath); err != nil {
+					return fmt.Errorf("no recording found for spec %s", specID)
+				}
+			}
+		} else {
+			return fmt.Errorf("provide a file path or use --spec <id>")
+		}
 
 		if speed <= 0 {
 			speed = 0
@@ -68,7 +94,7 @@ var agentmindReplayCmd = &cobra.Command{
 			cancel()
 		}()
 
-		return viz.RunReplay(ctx, filePath, speed, uiPort)
+		return viz.RunReplay(ctx, filePath, speed, uiPort, phase)
 	},
 }
 
@@ -78,6 +104,8 @@ func init() {
 
 	agentmindReplayCmd.Flags().Float64("speed", 1, "Replay speed multiplier (1, 5, 10, or 0 for max)")
 	agentmindReplayCmd.Flags().Int("ui-port", 8420, "Port for web UI")
+	agentmindReplayCmd.Flags().String("spec", "", "Spec ID to replay (resolves to docs/specs/<id>/recording/events.ndjson)")
+	agentmindReplayCmd.Flags().String("phase", "", "Filter replay to a specific phase (e.g., plan, implement)")
 
 	agentmindCmd.AddCommand(agentmindServeCmd)
 	agentmindCmd.AddCommand(agentmindReplayCmd)

@@ -15,6 +15,7 @@ import (
 type Replay struct {
 	path     string
 	speed    float64 // 0 = max speed
+	phase    string  // if set, filter to events within this lifecycle phase
 	graph    *Graph
 	hub      *Hub
 	sampling bool
@@ -47,6 +48,10 @@ func (r *Replay) Run(ctx context.Context) error {
 	startTime := time.Now()
 	sampleN := 1
 
+	// Phase filtering state
+	inPhase := r.phase == "" // if no filter, all events are "in phase"
+	phaseStarted := r.phase == "" || r.phase == "spec" // spec phase starts at beginning
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -57,6 +62,35 @@ func (r *Replay) Run(ctx context.Context) error {
 		var e bench.CollectedEvent
 		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
 			continue
+		}
+
+		// Phase filtering
+		if r.phase != "" {
+			switch e.Event {
+			case "lifecycle.start":
+				if r.phase == "spec" {
+					inPhase = true
+					phaseStarted = true
+				}
+			case "lifecycle.phase":
+				to, _ := e.Data["to"].(string)
+				if inPhase && phaseStarted {
+					// We were in our phase, now leaving it
+					inPhase = false
+				}
+				if to == r.phase {
+					inPhase = true
+					phaseStarted = true
+				}
+			case "lifecycle.end":
+				if inPhase {
+					inPhase = false
+				}
+			default:
+				if !inPhase || !phaseStarted {
+					continue
+				}
+			}
 		}
 
 		eventCount++

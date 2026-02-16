@@ -9,6 +9,7 @@ import (
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/contextpack"
+	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 )
@@ -75,6 +76,14 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 	// Step 6: Set state to plan mode
 	if err := state.SetMode(root, state.ModePlan, specID, ""); err != nil {
 		return nil, fmt.Errorf("setting state: %w", err)
+	}
+
+	// Step 7: Emit recording phase marker (best-effort)
+	if err := recording.EmitPhaseMarker(root, specID, "spec", "plan"); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
+	}
+	if err := recording.UpdatePhase(root, specID, "spec", "plan"); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not update recording phase: %v", err))
 	}
 
 	return result, nil
