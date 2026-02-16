@@ -121,3 +121,4 @@
 {"ts":"2026-02-16T11:21:06.385225Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"028-bench-single-collector","to":"plan"}}
 {"ts":"2026-02-16T11:27:18.322456Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"028-bench-single-collector","to":"plan-approved"}}
 {"ts":"2026-02-16T11:27:42.216551Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-wjm","spec_id":"028-bench-single-collector"}}
+{"ts":"2026-02-16T11:37:02.077959Z","event":"lifecycle.end","data":{"spec_id":"028-bench-single-collector"}}
