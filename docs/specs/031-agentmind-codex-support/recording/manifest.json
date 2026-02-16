@@ -17,7 +17,10 @@
     },
     {
       "phase": "plan-approved",
-      "started_at": "2026-02-16T13:40:41Z"
+      "started_at": "2026-02-16T13:40:41Z",
+      "beads": [
+        "mindspec-69y.2.2"
+      ]
     }
   ]
 }
