@@ -96,6 +96,8 @@ log_user_prompt = false
 endpoint = "http://localhost:4318"
 ```
 
+By default, this keeps `otel.log_user_prompt = false` so prompt text is redacted in telemetry unless you explicitly opt in.
+
 #### Any OTLP-Compatible Agent
 
 Point the standard OpenTelemetry environment variables to `http://localhost:4318`. AgentMind accepts OTLP/HTTP JSON on that port.
@@ -197,10 +199,10 @@ If Codex OTEL export is unavailable, you can convert a local Codex session JSONL
 
 ```bash
 # Convert a Codex session file
-./bin/mindspec agentmind import-codex ~/.codex/sessions/2026/02/16/rollout-2026-02-16T13-12-24-019c6694-aa05-76e0-98b1-46390fb71add.jsonl
+./bin/mindspec agentmind setup codex --session ~/.codex/sessions/2026/02/16/rollout-2026-02-16T13-12-24-019c6694-aa05-76e0-98b1-46390fb71add.jsonl
 
 # Explicit output path
-./bin/mindspec agentmind import-codex /path/to/rollout.jsonl --output /tmp/codex-session.ndjson
+./bin/mindspec agentmind setup codex --session /path/to/rollout.jsonl --output /tmp/codex-session.ndjson
 
 # Replay converted output
 ./bin/mindspec agentmind replay /tmp/codex-session.ndjson
