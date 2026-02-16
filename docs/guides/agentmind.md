@@ -191,6 +191,23 @@ Replay a recorded session:
 
 Replay accumulates the same metrics as live mode — token counts, cost, tool histograms — so you can analyze completed sessions after the fact.
 
+## Codex JSONL Fallback Import
+
+If Codex OTEL export is unavailable, you can convert a local Codex session JSONL file into AgentMind NDJSON and replay it.
+
+```bash
+# Convert a Codex session file
+./bin/mindspec agentmind import-codex ~/.codex/sessions/2026/02/16/rollout-2026-02-16T13-12-24-019c6694-aa05-76e0-98b1-46390fb71add.jsonl
+
+# Explicit output path
+./bin/mindspec agentmind import-codex /path/to/rollout.jsonl --output /tmp/codex-session.ndjson
+
+# Replay converted output
+./bin/mindspec agentmind replay /tmp/codex-session.ndjson
+```
+
+By default, output is written next to the input file as `<input-name>-agentmind.ndjson`.
+
 ## Benchmarking
 
 AgentMind includes a benchmarking framework for comparing agentic workflows against each other.
