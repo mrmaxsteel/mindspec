@@ -1,12 +1,38 @@
 # MindSpec
 
-**See what your AI agent is thinking. Then structure how it works.**
+**Spec-driven development and real-time observability for AI coding agents.**
 
-MindSpec is a CLI framework with two capabilities: **AgentMind**, a real-time observability dashboard for AI agent activity, and a **spec-driven development workflow** that structures how agents move from idea to implementation.
+AI coding agents are powerful but unstructured. Without guardrails they:
+
+- **Drift from intent** — the agent builds what it infers, not what you specified
+- **Ignore architecture** — existing design decisions and ADRs get steamrolled
+- **Lose context between sessions** — every conversation starts from scratch
+- **Skip documentation** — code ships, docs rot
+- **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
+
+MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+
+## The Workflow
+
+Every phase transition requires explicit human approval:
+
+```
+Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate──→ Implementation ──→ Review ──human gate──→ Idle
+```
+
+**Spec Mode** — Define what "done" looks like. Problem statement, acceptance criteria, impacted domains, ADR touchpoints. No code allowed.
+
+**Plan Mode** — Decompose the spec into bounded work chunks. Review applicable ADRs. Check architectural fitness. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a superseding ADR or reject the divergence.
+
+**Implementation Mode** — Execute in an isolated git worktree. One bead per worktree, scoped to exactly what the plan defined. Doc-sync is mandatory. Discovered work becomes new beads, not scope creep.
+
+**Review Mode** — Validate against the original spec's acceptance criteria. Human approves to return to idle.
+
+---
 
 ## AgentMind — AI Agent Observability
 
-AgentMind gives you real-time visibility into what your AI agent is doing, what it's spending, and how efficiently it's working.
+AgentMind gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working.
 
 - **3D Activity Graph** — Agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
 - **Token & Cost Tracking** — Input tokens, output tokens, cache reads, cache creation tokens, and estimated USD cost — broken down per model
@@ -43,31 +69,13 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 
 ---
 
-## Spec-Driven Development
-
-AI coding agents are powerful but unstructured. Without guardrails they drift from intent, ignore existing architecture, lose context between sessions, skip documentation, and resist scope discipline.
-
-MindSpec treats these as system design problems, not prompting problems. It enforces a gated lifecycle where each transition requires explicit human approval:
-
-```
-Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate──→ Implementation ──→ Review ──human gate──→ Idle
-```
-
-**Spec Mode** — Define what "done" looks like. Problem statement, acceptance criteria, impacted domains, ADR touchpoints. No code allowed.
-
-**Plan Mode** — Decompose the spec into bounded work chunks. Review applicable ADRs. Check architectural fitness. Wire up dependencies.
-
-**Implementation Mode** — Execute in an isolated git worktree. One bead per worktree, scoped to exactly what the plan defined. Doc-sync is mandatory.
-
-**Review Mode** — Validate against the original spec's acceptance criteria. Human approves to return to idle.
-
 ### Getting Started
 
 | Goal | Guide |
 |:-----|:------|
-| **Just visualize agent activity** | [AgentMind guide](docs/guides/agentmind.md) |
 | **Full workflow with Claude Code** | [Claude Code guide](docs/guides/claude-code.md) |
 | **Full workflow with Codex** | [Codex guide](docs/guides/codex.md) |
+| **Visualize & benchmark agent activity** | [AgentMind guide](docs/guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](docs/core/USAGE.md) |
 
 ---
