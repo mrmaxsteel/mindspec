@@ -118,6 +118,14 @@ func (l *LiveReceiver) processEvents(events []bench.CollectedEvent) {
 	l.eventBuf = append(l.eventBuf, events...)
 	l.eventBufMu.Unlock()
 
+	// Debug: log event details to stderr for tool_result events
+	for _, e := range events {
+		if e.Event == "claude_code.tool_result" {
+			data, _ := json.Marshal(e.Data)
+			fmt.Fprintf(os.Stderr, "[otlp] event=%q data=%s\n", e.Event, data)
+		}
+	}
+
 	count := l.eventCount.Load()
 	elapsed := time.Since(l.startTime)
 	sampleN := int64(1)

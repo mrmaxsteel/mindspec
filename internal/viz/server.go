@@ -59,6 +59,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/replay", s.handleReplayUpload)
 	mux.HandleFunc("/api/reset", s.handleReset)
 	mux.HandleFunc("/api/save-recording", s.handleSaveRecording)
+	mux.HandleFunc("/api/debug-events", s.handleDebugEvents)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
@@ -208,6 +209,27 @@ func (s *Server) handleReplayUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"}) //nolint:errcheck
+}
+
+func (s *Server) handleDebugEvents(w http.ResponseWriter, r *http.Request) {
+	if s.live == nil {
+		http.Error(w, "only available in live mode", http.StatusBadRequest)
+		return
+	}
+
+	s.live.eventBufMu.Lock()
+	counts := make(map[string]int)
+	for _, e := range s.live.eventBuf {
+		counts[e.Event]++
+	}
+	total := len(s.live.eventBuf)
+	s.live.eventBufMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"total":  total,
+		"counts": counts,
+	}) //nolint:errcheck
 }
 
 func (s *Server) handleSaveRecording(w http.ResponseWriter, r *http.Request) {
