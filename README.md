@@ -10,7 +10,7 @@ AI coding agents are powerful but unstructured. Without guardrails they:
 - **Skip documentation** — code ships, docs rot
 - **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
 
-MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** from domain-driven design to scope what the agent sees and touches, and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
 
 ## The Workflow
 
