@@ -88,12 +88,9 @@ Equivalent Codex settings:
 
 ```toml
 [otel]
-exporter = "otlp-http"
+exporter = { "otlp-http" = { endpoint = "http://localhost:4318", protocol = "json" } }
 trace_exporter = "none"
 log_user_prompt = false
-
-[otel.exporter."otlp-http"]
-endpoint = "http://localhost:4318"
 ```
 
 By default, this keeps `otel.log_user_prompt = false` so prompt text is redacted in telemetry unless you explicitly opt in.

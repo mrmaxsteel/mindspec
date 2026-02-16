@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -37,11 +38,7 @@ func EnsureCodexOTLP(configPath string, force bool) (CodexOTLPResult, error) {
 		return result, fmt.Errorf("reading codex config: %w", err)
 	}
 
-	existingEndpoint, ok := tomlStringValue(content, `otel.exporter."otlp-http"`, "endpoint")
-	if !ok {
-		// Accept the unquoted section form as well.
-		existingEndpoint, ok = tomlStringValue(content, "otel.exporter.otlp-http", "endpoint")
-	}
+	existingEndpoint, ok := existingCodexOTLPEndpoint(content)
 	if ok && normalizeEndpoint(existingEndpoint) != normalizeEndpoint(result.ExpectedEndpoint) && !force {
 		result.Conflict = true
 		result.ExistingEndpoint = existingEndpoint
@@ -51,13 +48,22 @@ func EnsureCodexOTLP(configPath string, force bool) (CodexOTLPResult, error) {
 	updated := content
 	changed := false
 
-	updated, c := upsertTomlValue(updated, "otel", "exporter", `"otlp-http"`)
+	// Codex expects exporter as a struct variant, not a unit string variant.
+	// Keep protocol explicit to avoid ambiguity and match AgentMind OTLP/HTTP JSON ingestion.
+	exporterLiteral := fmt.Sprintf(`{ "otlp-http" = { endpoint = %q, protocol = "json" } }`, result.ExpectedEndpoint)
+	updated, c := upsertTomlValue(updated, "otel", "exporter", exporterLiteral)
 	changed = changed || c
 	updated, c = upsertTomlValue(updated, "otel", "trace_exporter", `"none"`)
 	changed = changed || c
 	updated, c = upsertTomlValue(updated, "otel", "log_user_prompt", "false")
 	changed = changed || c
-	updated, c = upsertTomlValue(updated, `otel.exporter."otlp-http"`, "endpoint", fmt.Sprintf("%q", result.ExpectedEndpoint))
+
+	// Migrate legacy invalid format written by older MindSpec versions.
+	updated, c = removeTomlSection(updated, `otel.exporter."otlp-http"`)
+	changed = changed || c
+	updated, c = removeTomlSection(updated, "otel.exporter.otlp-http")
+	changed = changed || c
+	updated, c = removeTomlSection(updated, "otel.exporter")
 	changed = changed || c
 
 	if !changed {
@@ -149,6 +155,43 @@ func tomlStringValue(content, section, key string) (string, bool) {
 	return "", false
 }
 
+var inlineExporterEndpointPattern = regexp.MustCompile(`endpoint\s*=\s*("[^"\\]*(?:\\.[^"\\]*)*"|'[^']*')`)
+
+func existingCodexOTLPEndpoint(content string) (string, bool) {
+	if endpoint, ok := tomlInlineExporterEndpoint(content); ok {
+		return endpoint, true
+	}
+	if endpoint, ok := tomlStringValue(content, `otel.exporter."otlp-http"`, "endpoint"); ok {
+		return endpoint, true
+	}
+	// Accept unquoted legacy section form.
+	return tomlStringValue(content, "otel.exporter.otlp-http", "endpoint")
+}
+
+func tomlInlineExporterEndpoint(content string) (string, bool) {
+	lines := splitTomlLines(content)
+	sectionStart, sectionEnd, hasSection := tomlSectionRange(lines, "otel")
+	if !hasSection {
+		return "", false
+	}
+	for i := sectionStart; i < sectionEnd; i++ {
+		k, v, ok := tomlKeyValue(lines[i])
+		if !ok || k != "exporter" {
+			continue
+		}
+		match := inlineExporterEndpointPattern.FindStringSubmatch(v)
+		if len(match) < 2 {
+			continue
+		}
+		parsed, ok := parseSimpleTomlValue(match[1])
+		if !ok || parsed.kind != tomlKindString {
+			continue
+		}
+		return parsed.s, true
+	}
+	return "", false
+}
+
 func splitTomlLines(content string) []string {
 	if content == "" {
 		return []string{}
@@ -158,6 +201,20 @@ func splitTomlLines(content string) []string {
 		return lines[:len(lines)-1]
 	}
 	return lines
+}
+
+func removeTomlSection(content, section string) (string, bool) {
+	lines := splitTomlLines(content)
+	sectionStart, sectionEnd, hasSection := tomlSectionRange(lines, section)
+	if !hasSection {
+		return content, false
+	}
+	header := sectionStart - 1
+	if header < 0 || header >= len(lines) {
+		return content, false
+	}
+	lines = append(lines[:header], lines[sectionEnd:]...)
+	return strings.Join(lines, "\n"), true
 }
 
 func tomlSectionRange(lines []string, section string) (int, int, bool) {

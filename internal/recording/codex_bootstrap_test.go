@@ -29,11 +29,10 @@ func TestEnsureCodexOTLPFreshAndIdempotent(t *testing.T) {
 	got := string(raw)
 
 	assertContainsLine(t, got, `[otel]`)
-	assertContainsLine(t, got, `exporter = "otlp-http"`)
+	assertContainsLine(t, got, `exporter = { "otlp-http" = { endpoint = "http://localhost:4318", protocol = "json" } }`)
 	assertContainsLine(t, got, `trace_exporter = "none"`)
 	assertContainsLine(t, got, `log_user_prompt = false`)
-	assertContainsLine(t, got, `[otel.exporter."otlp-http"]`)
-	assertContainsLine(t, got, `endpoint = "http://localhost:4318"`)
+	assertNotContainsLine(t, got, `[otel.exporter."otlp-http"]`)
 
 	result, err = EnsureCodexOTLP(configPath, false)
 	if err != nil {
@@ -84,10 +83,9 @@ func TestEnsureCodexOTLPMergesExistingConfig(t *testing.T) {
 	assertContainsLine(t, got, `[model]`)
 	assertContainsLine(t, got, `provider = "openai"`)
 	assertContainsLine(t, got, `environment = "prod"`)
-	assertContainsLine(t, got, `exporter = "otlp-http"`)
+	assertContainsLine(t, got, `exporter = { "otlp-http" = { endpoint = "http://localhost:4318", protocol = "json" } }`)
 	assertContainsLine(t, got, `trace_exporter = "none"`)
 	assertContainsLine(t, got, `log_user_prompt = false`)
-	assertContainsLine(t, got, `endpoint = "http://localhost:4318"`)
 }
 
 func TestEnsureCodexOTLPConflictNoForce(t *testing.T) {
@@ -95,10 +93,7 @@ func TestEnsureCodexOTLPConflictNoForce(t *testing.T) {
 	configPath := filepath.Join(root, ".codex", "config.toml")
 	existing := strings.Join([]string{
 		`[otel]`,
-		`exporter = "otlp-http"`,
-		``,
-		`[otel.exporter."otlp-http"]`,
-		`endpoint = "https://otel.example.com:4318"`,
+		`exporter = { "otlp-http" = { endpoint = "https://otel.example.com:4318", protocol = "json" } }`,
 		``,
 	}, "\n")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -136,10 +131,7 @@ func TestEnsureCodexOTLPConflictWithForce(t *testing.T) {
 	configPath := filepath.Join(root, ".codex", "config.toml")
 	existing := strings.Join([]string{
 		`[otel]`,
-		`exporter = "otlp-http"`,
-		``,
-		`[otel.exporter."otlp-http"]`,
-		`endpoint = "https://otel.example.com:4318"`,
+		`exporter = { "otlp-http" = { endpoint = "https://otel.example.com:4318", protocol = "json" } }`,
 		``,
 	}, "\n")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -164,12 +156,59 @@ func TestEnsureCodexOTLPConflictWithForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertContainsLine(t, string(raw), `endpoint = "http://localhost:4318"`)
+	assertContainsLine(t, string(raw), `exporter = { "otlp-http" = { endpoint = "http://localhost:4318", protocol = "json" } }`)
+}
+
+func TestEnsureCodexOTLPMigratesLegacyExporterSection(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, ".codex", "config.toml")
+	legacy := strings.Join([]string{
+		`[otel]`,
+		`exporter = "otlp-http"`,
+		`trace_exporter = "none"`,
+		`log_user_prompt = false`,
+		``,
+		`[otel.exporter."otlp-http"]`,
+		`endpoint = "http://localhost:4318"`,
+		``,
+	}, "\n")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := EnsureCodexOTLP(configPath, false)
+	if err != nil {
+		t.Fatalf("EnsureCodexOTLP: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("expected migration to rewrite legacy exporter format")
+	}
+	if result.Conflict {
+		t.Fatal("unexpected conflict during legacy migration")
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	assertContainsLine(t, got, `exporter = { "otlp-http" = { endpoint = "http://localhost:4318", protocol = "json" } }`)
+	assertNotContainsLine(t, got, `[otel.exporter."otlp-http"]`)
 }
 
 func assertContainsLine(t *testing.T, s, needle string) {
 	t.Helper()
 	if !strings.Contains(s, needle) {
 		t.Fatalf("expected config to contain %q\n\n%s", needle, s)
+	}
+}
+
+func assertNotContainsLine(t *testing.T, s, needle string) {
+	t.Helper()
+	if strings.Contains(s, needle) {
+		t.Fatalf("expected config to NOT contain %q\n\n%s", needle, s)
 	}
 }
