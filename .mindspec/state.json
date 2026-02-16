@@ -1,6 +1,6 @@
 {
-  "mode": "idle",
-  "activeSpec": "",
+  "mode": "plan",
+  "activeSpec": "030-bench-fanout",
   "activeBead": "",
-  "lastUpdated": "2026-02-16T11:37:02Z"
+  "lastUpdated": "2026-02-16T12:10:09Z"
 }

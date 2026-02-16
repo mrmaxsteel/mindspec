@@ -1,0 +1,13 @@
+{
+  "spec_id": "029-viz-ui-refinements",
+  "started_at": "2026-02-16T11:42:51Z",
+  "collector_pid": 6151,
+  "collector_port": 4319,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-16T11:42:51Z"
+    }
+  ]
+}
