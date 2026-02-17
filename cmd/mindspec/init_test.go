@@ -11,6 +11,7 @@ func TestResolveInitMode(t *testing.T) {
 		reportOnly  bool
 		apply       bool
 		archive     string
+		resume      string
 		wantMode    initMode
 		wantArchive string
 		expectErr   bool
@@ -80,13 +81,18 @@ func TestResolveInitMode(t *testing.T) {
 			archive:    "zip",
 			expectErr:  true,
 		},
+		{
+			name:      "reject resume without brownfield",
+			resume:    "run-1",
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mode, archive, err := resolveInitMode(tc.brownfield, tc.reportOnly, tc.apply, tc.archive)
+			mode, archive, err := resolveInitMode(tc.brownfield, tc.reportOnly, tc.apply, tc.archive, tc.resume)
 			if tc.expectErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (mode=%s archive=%s)", mode, archive)

@@ -17,7 +17,11 @@ const (
 	initModeBrownfieldApply  initMode = "brownfield-apply"
 )
 
-func resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag bool, archiveMode string) (initMode, string, error) {
+func resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag bool, archiveMode, resumeRunID string) (initMode, string, error) {
+	if resumeRunID != "" && !brownfieldFlag {
+		return "", "", fmt.Errorf("--resume requires --brownfield")
+	}
+
 	if !brownfieldFlag {
 		if reportOnlyFlag || applyFlag || archiveMode != "" {
 			return "", "", fmt.Errorf("--report-only, --apply, and --archive require --brownfield")
@@ -59,34 +63,65 @@ All file creation is additive — existing files are never overwritten.`,
 		brownfieldFlag, _ := cmd.Flags().GetBool("brownfield")
 		reportOnlyFlag, _ := cmd.Flags().GetBool("report-only")
 		applyFlag, _ := cmd.Flags().GetBool("apply")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
 		archiveMode, _ := cmd.Flags().GetString("archive")
+		resumeRunID, _ := cmd.Flags().GetString("resume")
 
 		root, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		mode, archive, err := resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag, archiveMode)
+		if dryRun && brownfieldFlag {
+			return fmt.Errorf("--dry-run is only valid for greenfield init; use --brownfield --report-only for no-write brownfield mode")
+		}
+
+		mode, archive, err := resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag, archiveMode, resumeRunID)
 		if err != nil {
 			return err
 		}
 
 		switch mode {
 		case initModeBrownfieldReport:
-			report, err := brownfield.DiscoverMarkdown(root)
-			if err != nil {
-				return fmt.Errorf("running brownfield discovery: %w", err)
+			report, err := brownfield.Run(root, brownfield.RunOptions{
+				Apply: false,
+				RunID: resumeRunID,
+			})
+			if report != nil {
+				if jsonFlag {
+					out, jsonErr := report.ToJSON()
+					if jsonErr != nil {
+						return jsonErr
+					}
+					fmt.Println(out)
+				} else {
+					fmt.Println(report.FormatSummary())
+					fmt.Println()
+					fmt.Println("Mode: report-only (default for --brownfield)")
+					fmt.Println("No files were modified.")
+				}
 			}
-			fmt.Println(report.FormatSummary())
-			fmt.Println()
-			fmt.Println("Mode: report-only (default for --brownfield)")
-			fmt.Println("No files were modified.")
+			if err != nil {
+				return err
+			}
 			return nil
 		case initModeBrownfieldApply:
-			report, err := brownfield.RunApply(root, archive)
+			report, err := brownfield.Run(root, brownfield.RunOptions{
+				Apply:       true,
+				ArchiveMode: archive,
+				RunID:       resumeRunID,
+			})
 			if report != nil {
-				fmt.Println(report.FormatSummary())
-				fmt.Println()
+				if jsonFlag {
+					out, jsonErr := report.ToJSON()
+					if jsonErr != nil {
+						return jsonErr
+					}
+					fmt.Println(out)
+				} else {
+					fmt.Println(report.FormatSummary())
+					fmt.Println()
+				}
 			}
 			if err != nil {
 				return err
@@ -121,4 +156,6 @@ func init() {
 	initCmd.Flags().Bool("report-only", false, "Report-only brownfield analysis (no writes)")
 	initCmd.Flags().Bool("apply", false, "Apply brownfield migration changes")
 	initCmd.Flags().String("archive", "", "Archive mode for --apply: copy or move")
+	initCmd.Flags().String("resume", "", "Resume or reuse a brownfield run ID")
+	initCmd.Flags().Bool("json", false, "Output brownfield report as JSON")
 }
