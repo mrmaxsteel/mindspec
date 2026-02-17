@@ -6,22 +6,24 @@ This document outlines the file organization, naming, and structural conventions
 
 | Path | Purpose |
 |:-----|:--------|
-| `docs/core/` | Permanent architectural and convention documents |
-| `docs/domains/<domain>/` | Domain-scoped documentation (overview, architecture, interfaces, runbook, ADRs) |
-| `docs/specs/` | Historical and active specifications |
-| `docs/context-map.md` | Bounded context relationships and integration contracts |
-| `docs/adr/` | Cross-cutting architecture decision records |
-| `architecture/` | Machine-readable policies |
+| `.mindspec/docs/core/` | Permanent architectural and convention documents |
+| `.mindspec/docs/domains/<domain>/` | Domain-scoped documentation (overview, architecture, interfaces, runbook, ADRs) |
+| `.mindspec/docs/specs/` | Historical and active specifications |
+| `.mindspec/docs/context-map.md` | Bounded context relationships and integration contracts |
+| `.mindspec/docs/adr/` | Cross-cutting architecture decision records |
+| `.mindspec/policies.yml` | Machine-readable policies |
 | `GLOSSARY.md` | Concept-to-doc-section mapping for context injection |
-| `docs/templates/` | Templates for specs, ADRs, domain docs |
+| `(binary-internal templates)` | Templates for specs, ADRs, and domain docs are embedded in the `mindspec` binary |
 | `AGENTS.md` | Agent behavioral instructions |
 | `CLAUDE.md` | Claude Code project instructions |
 | `docs/archive/mindspec-v1-spec.md` | Original product specification (archived) |
 | `.mindspec/state.json` | Workflow state: current mode, active spec/bead (ADR-0005) |
 
+Canonical docs live under `.mindspec/docs/`. Legacy `docs/` paths remain compatibility fallbacks for older repositories until migrated.
+
 ## Domain Doc Structure
 
-Each domain lives at `/docs/domains/<domain>/` with:
+Each domain lives at `/.mindspec/docs/domains/<domain>/` with:
 
 | File | Purpose |
 |:-----|:--------|
@@ -36,7 +38,7 @@ Each domain lives at `/docs/domains/<domain>/` with:
 All artifacts for a feature are co-located in a single spec folder:
 
 ```
-docs/specs/NNN-slug/
+.mindspec/docs/specs/NNN-slug/
   spec.md                  # canonical specification
   plan.md                  # plan (live draft → approved)
   context-pack.md          # generated context pack
@@ -47,7 +49,7 @@ docs/specs/NNN-slug/
 If multiple plan iterations are needed, use a subfolder:
 
 ```
-docs/specs/NNN-slug/
+.mindspec/docs/specs/NNN-slug/
   spec.md
   plan/
     plan-v1.md
@@ -90,8 +92,8 @@ Specs follow the pattern `NNN-slug-name`:
 ## ADR Naming
 
 ADRs follow the pattern `ADR-NNNN.md`:
-- Cross-cutting: `docs/adr/ADR-NNNN.md`
-- Domain-scoped: `docs/domains/<domain>/adr/ADR-NNNN.md`
+- Cross-cutting: `.mindspec/docs/adr/ADR-NNNN.md`
+- Domain-scoped: `.mindspec/docs/domains/<domain>/adr/ADR-NNNN.md`
 
 ADR metadata must include: domain(s), status (proposed/accepted/superseded), supersedes/superseded-by links, decision + rationale + consequences.
 
@@ -113,8 +115,8 @@ The bracket prefix enables reliable search-based idempotency. Beads are created 
 
 ### Structured Descriptions
 
-- **Spec bead descriptions** (≤400 chars): `Summary: <goal>\nSpec: docs/specs/<id>/spec.md\nDomains: <list>`
-- **Impl bead descriptions** (≤800 chars): `Scope: <scope>\nVerify:\n- <step>\nPlan: docs/specs/<id>/plan.md`
+- **Spec bead descriptions** (≤400 chars): `Summary: <goal>\nSpec: .mindspec/docs/specs/<id>/spec.md\nDomains: <list>`
+- **Impl bead descriptions** (≤800 chars): `Scope: <scope>\nVerify:\n- <step>\nPlan: .mindspec/docs/specs/<id>/plan.md`
 
 ### Plan `work_chunks` Format
 
@@ -230,7 +232,7 @@ Always commit `.beads/` and `.mindspec/state.json` changes alongside the relevan
 
 ## Glossary Conventions
 
-- **Pathing**: Always use **relative paths** from the project root for glossary targets (e.g., `docs/core/ARCHITECTURE.md#section-id`). Do not use absolute paths.
+- **Pathing**: Always use **relative paths** from the project root for glossary targets (e.g., `.mindspec/docs/core/ARCHITECTURE.md#section-id`). Do not use absolute paths.
 - **Format**: Use the standard table format: `| **Term** | [label](relative/path#anchor) |`.
 - **Coverage**: Every new concept introduced in a spec or domain doc should have a glossary entry.
 

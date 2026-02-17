@@ -27,13 +27,15 @@ MindSpec is a **spec-driven development and context management framework** (Clau
 | Concern | System of Record |
 |:--------|:-----------------|
 | Execution tracking (epics, issues, dependencies) | Beads |
-| Long-form specifications | `/docs/specs/` |
-| Domain architecture and documentation | `/docs/domains/<domain>/` |
-| ADR lifecycle | `/docs/adr/` and `/docs/domains/<domain>/adr/` |
+| Long-form specifications | `/.mindspec/docs/specs/` |
+| Domain architecture and documentation | `/.mindspec/docs/domains/<domain>/` |
+| ADR lifecycle | `/.mindspec/docs/adr/` and `/.mindspec/docs/domains/<domain>/adr/` |
 | Deterministic context assembly | MindSpec Context Pack builder |
 | Workflow orchestration (modes, approvals) | MindSpec mode system + spec-lifecycle formula |
 | Roadmap hierarchy | Beads (release/milestone → spec beads → implementation beads) |
 | Isolated execution | Git worktrees |
+
+Canonical MindSpec docs live under `/.mindspec/docs/`. Legacy `docs/` paths are read-only compatibility fallbacks for pre-migration repositories.
 
 Beads is a **passive, execution-oriented tracking substrate** (see [ADR-0002](../adr/ADR-0002.md)). It is not responsible for planning, spec authoring, context routing, or architectural governance.
 
@@ -86,7 +88,7 @@ ADR metadata: domain(s), status, supersedes/superseded-by links, decision + rati
 
 Domains are first-class primitives that govern where docs/specs live, how context packs are assembled, and which ADRs are relevant.
 
-**Domain doc structure** (`/docs/domains/<domain>/`):
+**Domain doc structure** (`/.mindspec/docs/domains/<domain>/`):
 
 | File | Purpose |
 |:-----|:--------|
@@ -102,7 +104,7 @@ See [ADR-0001](../adr/ADR-0001.md) for full DDD enablement decision.
 
 ### 6. Context Map {#context-map}
 
-Location: `/docs/context-map.md`
+Location: `/.mindspec/docs/context-map.md`
 
 The Context Map declares bounded contexts, ownership, upstream/downstream relationships, integration contracts, and source-of-truth notes. Any change that introduces a new context, changes ownership, or adds a new integration contract must update the Context Map.
 
@@ -168,5 +170,6 @@ v1 emits structured events (minimal) for future "Agent Mind Visualization":
 - [MODES.md](MODES.md) — Mode definitions and transitions
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
 - [ADR-0001](../adr/ADR-0001.md) — DDD enablement + context packs
+- [ADR-0014](../adr/ADR-0014.md) — Canonical docs/policies path supersession scope
 - [ADR-0002](../adr/ADR-0002.md) — Beads integration strategy
-- [policies.yml](../../architecture/policies.yml) — Machine-checkable policies
+- [policies.yml](../../.mindspec/policies.yml) — Machine-checkable policies
