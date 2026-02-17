@@ -1,0 +1,3 @@
+{"ts":"2026-02-17T22:38:04.685025Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"036-init-migrate-plan-apply"}}
+{"ts":"2026-02-17T22:50:44.654268Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"036-init-migrate-plan-apply","to":"plan-approved"}}
+{"ts":"2026-02-17T22:50:44.660526Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"036-init-migrate-plan-apply","to":"plan"}}

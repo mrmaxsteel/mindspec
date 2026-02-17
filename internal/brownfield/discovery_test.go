@@ -69,7 +69,7 @@ func TestRun_ReportArtifactsAreDeterministic(t *testing.T) {
 
 	first, err := Run(root, RunOptions{RunID: "run-a"})
 	if err == nil {
-		// report-only should succeed
+		// dry-run should succeed
 	} else {
 		t.Fatalf("run first: %v", err)
 	}

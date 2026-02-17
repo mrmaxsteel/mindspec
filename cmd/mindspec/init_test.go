@@ -8,7 +8,7 @@ func TestResolveInitMode(t *testing.T) {
 	tests := []struct {
 		name        string
 		brownfield  bool
-		reportOnly  bool
+		dryRun      bool
 		apply       bool
 		archive     string
 		resume      string
@@ -21,14 +21,19 @@ func TestResolveInitMode(t *testing.T) {
 			wantMode: initModeGreenfield,
 		},
 		{
-			name:       "brownfield default report-only",
+			name:     "greenfield dry-run",
+			dryRun:   true,
+			wantMode: initModeGreenfield,
+		},
+		{
+			name:       "brownfield default dry-run",
 			brownfield: true,
 			wantMode:   initModeBrownfieldReport,
 		},
 		{
-			name:       "brownfield explicit report-only",
+			name:       "brownfield explicit dry-run",
 			brownfield: true,
-			reportOnly: true,
+			dryRun:     true,
 			wantMode:   initModeBrownfieldReport,
 		},
 		{
@@ -47,11 +52,6 @@ func TestResolveInitMode(t *testing.T) {
 			wantArchive: "move",
 		},
 		{
-			name:       "reject report-only without brownfield",
-			reportOnly: true,
-			expectErr:  true,
-		},
-		{
 			name:      "reject apply without brownfield",
 			apply:     true,
 			expectErr: true,
@@ -62,14 +62,14 @@ func TestResolveInitMode(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			name:       "reject report-only and apply together",
+			name:       "reject dry-run and apply together in brownfield",
 			brownfield: true,
-			reportOnly: true,
+			dryRun:     true,
 			apply:      true,
 			expectErr:  true,
 		},
 		{
-			name:       "brownfield resume report-only",
+			name:       "brownfield resume dry-run",
 			brownfield: true,
 			resume:     "run-1",
 			wantMode:   initModeBrownfieldReport,
@@ -106,7 +106,7 @@ func TestResolveInitMode(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mode, archive, err := resolveInitMode(tc.brownfield, tc.reportOnly, tc.apply, tc.archive, tc.resume)
+			mode, archive, err := resolveInitMode(tc.brownfield, tc.dryRun, tc.apply, tc.archive, tc.resume)
 			if tc.expectErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (mode=%s archive=%s)", mode, archive)

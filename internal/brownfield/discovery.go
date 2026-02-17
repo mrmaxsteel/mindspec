@@ -233,7 +233,7 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	if opts.Apply {
 		report.Mode = "apply"
 	} else {
-		report.Mode = "report-only"
+		report.Mode = "dry-run"
 	}
 	report.LLM = ResolveLLMConfig()
 	report.Unresolved = unresolvedPaths(report.Classification)
@@ -251,7 +251,7 @@ func Run(root string, opts RunOptions) (*Report, error) {
 
 	if len(report.Unresolved) > 0 && !report.LLM.Available {
 		return report, fmt.Errorf(
-			"brownfield apply blocked: %d low-confidence docs require LLM classification, but no provider is configured (set MINDSPEC_LLM_PROVIDER and MINDSPEC_LLM_MODEL or re-run with --report-only)",
+			"brownfield apply blocked: %d low-confidence docs require LLM classification, but no provider is configured (set MINDSPEC_LLM_PROVIDER and MINDSPEC_LLM_MODEL or re-run with --brownfield --dry-run)",
 			len(report.Unresolved),
 		)
 	}

@@ -17,20 +17,20 @@ const (
 	initModeBrownfieldApply  initMode = "brownfield-apply"
 )
 
-func resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag bool, archiveMode, resumeRunID string) (initMode, string, error) {
+func resolveInitMode(brownfieldFlag, dryRunFlag, applyFlag bool, archiveMode, resumeRunID string) (initMode, string, error) {
 	if resumeRunID != "" && !brownfieldFlag {
 		return "", "", fmt.Errorf("--resume requires --brownfield")
 	}
 
 	if !brownfieldFlag {
-		if reportOnlyFlag || applyFlag || archiveMode != "" {
-			return "", "", fmt.Errorf("--report-only, --apply, and --archive require --brownfield")
+		if applyFlag || archiveMode != "" {
+			return "", "", fmt.Errorf("--apply and --archive require --brownfield")
 		}
 		return initModeGreenfield, "", nil
 	}
 
-	if reportOnlyFlag && applyFlag {
-		return "", "", fmt.Errorf("--report-only and --apply are mutually exclusive")
+	if dryRunFlag && applyFlag {
+		return "", "", fmt.Errorf("--dry-run and --apply are mutually exclusive in --brownfield mode")
 	}
 	if archiveMode != "" && !applyFlag {
 		return "", "", fmt.Errorf("--archive requires --apply")
@@ -46,7 +46,7 @@ func resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag bool, archiveMode
 		return initModeBrownfieldApply, archiveMode, nil
 	}
 
-	// Default brownfield mode is report-only.
+	// Default brownfield mode is dry-run (no writes).
 	return initModeBrownfieldReport, "", nil
 }
 
@@ -61,7 +61,6 @@ All file creation is additive — existing files are never overwritten.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		brownfieldFlag, _ := cmd.Flags().GetBool("brownfield")
-		reportOnlyFlag, _ := cmd.Flags().GetBool("report-only")
 		applyFlag, _ := cmd.Flags().GetBool("apply")
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		archiveMode, _ := cmd.Flags().GetString("archive")
@@ -72,11 +71,7 @@ All file creation is additive — existing files are never overwritten.`,
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		if dryRun && brownfieldFlag {
-			return fmt.Errorf("--dry-run is only valid for greenfield init; use --brownfield --report-only for no-write brownfield mode")
-		}
-
-		mode, archive, err := resolveInitMode(brownfieldFlag, reportOnlyFlag, applyFlag, archiveMode, resumeRunID)
+		mode, archive, err := resolveInitMode(brownfieldFlag, dryRun, applyFlag, archiveMode, resumeRunID)
 		if err != nil {
 			return err
 		}
@@ -98,7 +93,7 @@ All file creation is additive — existing files are never overwritten.`,
 				} else {
 					fmt.Println(report.FormatSummary())
 					fmt.Println()
-					fmt.Println("Mode: report-only (default for --brownfield)")
+					fmt.Println("Mode: dry-run brownfield analysis (no writes)")
 					fmt.Println("No files were modified.")
 				}
 			}
@@ -153,9 +148,8 @@ All file creation is additive — existing files are never overwritten.`,
 }
 
 func init() {
-	initCmd.Flags().Bool("dry-run", false, "Print what would be created without writing anything")
+	initCmd.Flags().Bool("dry-run", false, "Run without writing changes")
 	initCmd.Flags().Bool("brownfield", false, "Run brownfield onboarding for existing repositories")
-	initCmd.Flags().Bool("report-only", false, "Report-only brownfield analysis (no writes)")
 	initCmd.Flags().Bool("apply", false, "Apply brownfield migration changes")
 	initCmd.Flags().String("archive", "", "Archive mode for --apply: copy or move")
 	initCmd.Flags().String("resume", "", "Resume or reuse a brownfield run ID")
