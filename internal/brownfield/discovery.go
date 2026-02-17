@@ -359,6 +359,9 @@ func Run(root string, opts RunOptions) (*Report, error) {
 		report.Classification = updated
 		report.Unresolved = unresolvedPaths(report.Classification)
 	}
+	if opts.Apply && stage == stageApplied {
+		return report, nil
+	}
 
 	if err := writeRunArtifacts(root, report, opts, stage, resumed); err != nil {
 		return nil, err
@@ -367,10 +370,8 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	if !opts.Apply {
 		return report, nil
 	}
-	if stage == stageApplied {
-		return report, nil
-	}
-	if err := verifyApplyPlanAndSourceDrift(root, report); err != nil {
+	plan, err := verifyApplyPlanAndSourceDrift(root, report)
+	if err != nil {
 		return report, err
 	}
 
@@ -391,7 +392,7 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	if err := writeRunState(root, report, opts, stageApplying, resumed); err != nil {
 		return nil, err
 	}
-	if err := applyTransactional(root, report, opts); err != nil {
+	if err := applyTransactional(root, report, opts, plan); err != nil {
 		return report, err
 	}
 	if err := writeRunState(root, report, opts, stageApplied, resumed); err != nil {

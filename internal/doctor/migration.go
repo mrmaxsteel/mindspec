@@ -84,7 +84,7 @@ func checkMigrationMetadata(r *Report, root string) {
 	})
 
 	runDir := filepath.Join(root, ".mindspec", "migrations", manifest.RunID)
-	required := []string{"inventory.json", "classification.json", "plan.json", "plan.md", "state.json", "lineage.json"}
+	required := []string{"inventory.json", "classification.json", "extraction.json", "plan.json", "plan.md", "validation.json", "state.json", "lineage.json", "apply.json"}
 	for _, name := range required {
 		path := filepath.Join(runDir, name)
 		checkName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", manifest.RunID, name))

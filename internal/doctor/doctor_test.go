@@ -324,6 +324,18 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
   }
 ]
 `)
+	write(".mindspec/migrations/run-1/extraction.json", `[
+  {
+    "path":"docs/core/ARCHITECTURE.md",
+    "sha256":"abc",
+    "category":"core",
+    "rule":"path-contains-core",
+    "confidence":0.92,
+    "requires_llm":false,
+    "candidate_targets":[".mindspec/docs/core/ARCHITECTURE.md"]
+  }
+]
+`)
 	write(".mindspec/migrations/run-1/plan.json", `{
   "run_id":"run-1",
   "generated_at":"2026-02-17T00:00:00Z",
@@ -350,6 +362,12 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
   ]
 }
 `)
+	write(".mindspec/migrations/run-1/validation.json", `{
+  "run_id":"run-1",
+  "valid":true,
+  "checks":[{"name":"integrity","status":"ok","message":"plan validation passed"}]
+}
+`)
 	write(".mindspec/migrations/run-1/plan.md", "# Migration Plan\n")
 	write(".mindspec/migrations/run-1/lineage.json", `[
   {
@@ -364,6 +382,18 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
 	write(".mindspec/migrations/run-1/state.json", `{
   "run_id":"run-1",
   "stage":"applied"
+}
+`)
+	write(".mindspec/migrations/run-1/apply.json", `{
+  "run_id":"run-1",
+  "applied_at":"2026-02-17T00:00:00Z",
+  "archive_mode":"copy",
+  "operations_applied":1,
+  "canonical_operations_applied":1,
+  "archived_sources":1,
+  "lineage_entries":1,
+  "source_drift_checked":1,
+  "plan_sha256":"deadbeef"
 }
 `)
 

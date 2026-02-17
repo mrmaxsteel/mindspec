@@ -216,7 +216,7 @@ func TestRun_ReportArtifactsAreDeterministic(t *testing.T) {
 	}
 
 	for _, runID := range []string{"run-a", "run-b"} {
-		for _, name := range []string{"inventory.json", "classification.json", "plan.json", "plan.md", "state.json"} {
+		for _, name := range []string{"inventory.json", "classification.json", "extraction.json", "plan.json", "plan.md", "validation.json", "state.json"} {
 			if _, err := os.Stat(filepath.Join(root, ".mindspec", "migrations", runID, name)); err != nil {
 				t.Fatalf("expected artifact %s for %s: %v", name, runID, err)
 			}
@@ -463,6 +463,9 @@ func TestRun_ApplyPromotesCanonicalAndArchivesSources(t *testing.T) {
 	if state.Stage != stageApplied {
 		t.Fatalf("expected stage %q, got %q", stageApplied, state.Stage)
 	}
+	if _, err := os.Stat(filepath.Join(root, ".mindspec", "migrations", "run-ok", "apply.json")); err != nil {
+		t.Fatalf("expected apply summary artifact: %v", err)
+	}
 }
 
 func TestRun_ApplyPromotesUserDocsCategory(t *testing.T) {
@@ -695,6 +698,54 @@ func TestRun_ApplyIdempotentCanonicalOutput(t *testing.T) {
 
 	if firstHash != secondHash {
 		t.Fatalf("canonical docs hash mismatch across unchanged apply runs\nfirst=%s\nsecond=%s", firstHash, secondHash)
+	}
+}
+
+func TestRun_ApplySameRunIDIsNoOp(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
+	t.Setenv("MINDSPEC_LLM_MODEL", "")
+
+	root := t.TempDir()
+	mk := func(rel, content string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	mk("docs/core/ARCHITECTURE.md", "# arch\n")
+	mk("docs/context-map.md", "# context\n")
+	mk("GLOSSARY.md", "# glossary\n")
+
+	runID := "same-run"
+	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: runID}); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+
+	runDir := filepath.Join(root, ".mindspec", "migrations", runID)
+	beforeRunHash := treeHash(t, runDir)
+	beforeDocsHash := treeHash(t, filepath.Join(root, ".mindspec", "docs"))
+	beforeArchiveHash := treeHash(t, filepath.Join(root, "docs_archive", runID))
+
+	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: runID}); err != nil {
+		t.Fatalf("second apply with same run-id: %v", err)
+	}
+
+	afterRunHash := treeHash(t, runDir)
+	afterDocsHash := treeHash(t, filepath.Join(root, ".mindspec", "docs"))
+	afterArchiveHash := treeHash(t, filepath.Join(root, "docs_archive", runID))
+
+	if beforeRunHash != afterRunHash {
+		t.Fatalf("migration run artifacts changed on same run-id apply rerun\nbefore=%s\nafter=%s", beforeRunHash, afterRunHash)
+	}
+	if beforeDocsHash != afterDocsHash {
+		t.Fatalf("canonical docs changed on same run-id apply rerun\nbefore=%s\nafter=%s", beforeDocsHash, afterDocsHash)
+	}
+	if beforeArchiveHash != afterArchiveHash {
+		t.Fatalf("archive outputs changed on same run-id apply rerun\nbefore=%s\nafter=%s", beforeArchiveHash, afterArchiveHash)
 	}
 }
 

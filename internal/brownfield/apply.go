@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // LineageEntry maps one source file to canonical and archive targets.
@@ -22,77 +23,175 @@ type LineageEntry struct {
 	Archive   string `json:"archive"`
 }
 
-func applyTransactional(root string, report *Report, opts RunOptions) error {
+type applySummary struct {
+	RunID              string `json:"run_id"`
+	AppliedAt          string `json:"applied_at"`
+	ArchiveMode        string `json:"archive_mode"`
+	OperationsApplied  int    `json:"operations_applied"`
+	CanonicalApplied   int    `json:"canonical_operations_applied"`
+	ArchivedSources    int    `json:"archived_sources"`
+	LineageEntries     int    `json:"lineage_entries"`
+	SourceDriftChecked int    `json:"source_drift_checked"`
+	PlanSHA256         string `json:"plan_sha256"`
+}
+
+func applyTransactional(root string, report *Report, opts RunOptions, plan *MigrationPlan) error {
 	runDir := filepath.Join(root, ".mindspec", "migrations", report.RunID)
 	stagingRoot := filepath.Join(runDir, "staging")
-	stagingMindspec := filepath.Join(stagingRoot, ".mindspec")
-	stagingDocs := filepath.Join(stagingMindspec, "docs")
+	stagingDocs := filepath.Join(stagingRoot, ".mindspec", "docs")
 	if err := os.MkdirAll(stagingDocs, 0o755); err != nil {
 		return fmt.Errorf("create staging docs dir: %w", err)
 	}
 
-	shaByPath := make(map[string]string, len(report.Inventory))
-	for _, inv := range report.Inventory {
-		shaByPath[inv.Path] = inv.SHA256
-	}
+	lineage := make([]LineageEntry, 0, len(plan.Operations))
+	canonicalApplied := 0
+	operationsApplied := 0
 
-	var lineage []LineageEntry
-	for _, c := range report.Classification {
-		canonical, ok := canonicalTarget(c.Path, c.Category)
-		if !ok {
-			continue
+	for _, op := range plan.Operations {
+		switch op.Action {
+		case planActionCreate, planActionUpdate, planActionMerge, planActionSplit:
+			if strings.TrimSpace(op.Target) == "" {
+				return fmt.Errorf("apply %s: target is required for action %q", op.ID, op.Action)
+			}
+			if len(op.Sources) == 0 {
+				return fmt.Errorf("apply %s: sources are required for action %q", op.ID, op.Action)
+			}
+			dstAbs := filepath.Join(stagingRoot, filepath.FromSlash(op.Target))
+			if op.Action == planActionMerge && len(op.Sources) > 1 {
+				if err := stageMergedSources(root, op, dstAbs); err != nil {
+					return fmt.Errorf("apply %s: stage merge %s: %w", op.ID, op.Target, err)
+				}
+			} else {
+				if err := stageSourceToTarget(root, op.Sources[0], op.Target, dstAbs); err != nil {
+					return fmt.Errorf("apply %s: stage %s: %w", op.ID, op.Target, err)
+				}
+			}
+			canonicalApplied++
+		case planActionArchiveOnly:
+			if len(op.Sources) == 0 {
+				return fmt.Errorf("apply %s: archive-only operation has no sources", op.ID)
+			}
+		default:
+			return fmt.Errorf("apply %s: unsupported action %q", op.ID, op.Action)
 		}
 
-		srcAbs := filepath.Join(root, filepath.FromSlash(c.Path))
-		dstAbs := filepath.Join(stagingRoot, filepath.FromSlash(canonical))
-		if c.Category == "glossary" {
-			if err := stageGlossary(srcAbs, dstAbs); err != nil {
-				return fmt.Errorf("stage glossary %s -> %s: %w", c.Path, canonical, err)
-			}
-		} else {
-			if err := copyFile(srcAbs, dstAbs); err != nil {
-				return fmt.Errorf("stage %s -> %s: %w", c.Path, canonical, err)
-			}
+		for _, src := range op.Sources {
+			archive := filepath.ToSlash(filepath.Join("docs_archive", report.RunID, src.Path))
+			lineage = append(lineage, LineageEntry{
+				Source:    src.Path,
+				SourceSHA: src.SHA256,
+				Category:  src.Category,
+				Canonical: op.Target,
+				Archive:   archive,
+			})
 		}
-
-		lineage = append(lineage, LineageEntry{
-			Source:    c.Path,
-			SourceSHA: shaByPath[c.Path],
-			Category:  c.Category,
-			Canonical: canonical,
-			Archive:   filepath.ToSlash(filepath.Join("docs_archive", report.RunID, c.Path)),
-		})
-	}
-
-	// Policies are migrated outside markdown discovery.
-	policyLineage, err := stagePolicyMigration(root, stagingRoot, report.RunID)
-	if err != nil {
-		return err
-	}
-	if policyLineage != nil {
-		lineage = append(lineage, *policyLineage)
+		operationsApplied++
 	}
 
 	if len(lineage) == 0 {
-		return fmt.Errorf("migrate apply produced no canonical targets from discovered markdown files")
+		return fmt.Errorf("migrate apply produced no lineage entries")
 	}
 
-	sort.Slice(lineage, func(i, j int) bool { return lineage[i].Source < lineage[j].Source })
+	sort.Slice(lineage, func(i, j int) bool {
+		if lineage[i].Source == lineage[j].Source {
+			return lineage[i].Canonical < lineage[j].Canonical
+		}
+		return lineage[i].Source < lineage[j].Source
+	})
 	report.Lineage = lineage
 	if err := writeJSON(filepath.Join(runDir, "lineage.json"), lineage); err != nil {
 		return err
 	}
 
-	if err := promoteCanonical(root, stagingRoot, report.RunID); err != nil {
-		return err
+	if canonicalApplied > 0 {
+		if err := promoteCanonical(root, stagingRoot, report.RunID); err != nil {
+			return err
+		}
 	}
-	if err := archiveSources(root, lineage, opts.ArchiveMode, report.RunID); err != nil {
+	archived, err := archiveSources(root, lineage, opts.ArchiveMode, report.RunID)
+	if err != nil {
 		return err
 	}
 	if err := writeLineageManifest(root, report.RunID, lineage); err != nil {
 		return err
 	}
+
+	planHash, err := hashPlan(plan)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(runDir, "apply.json"), applySummary{
+		RunID:              report.RunID,
+		AppliedAt:          time.Now().UTC().Format(time.RFC3339),
+		ArchiveMode:        opts.ArchiveMode,
+		OperationsApplied:  operationsApplied,
+		CanonicalApplied:   canonicalApplied,
+		ArchivedSources:    archived,
+		LineageEntries:     len(lineage),
+		SourceDriftChecked: countUniqueSources(lineage),
+		PlanSHA256:         planHash,
+	}); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func stageSourceToTarget(root string, src PlanSource, target, dstAbs string) error {
+	srcAbs := filepath.Join(root, filepath.FromSlash(src.Path))
+	data, err := os.ReadFile(srcAbs)
+	if err != nil {
+		return err
+	}
+	transformed := transformContentForTarget(string(data), target)
+
+	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dstAbs, []byte(transformed), 0o644)
+}
+
+func stageMergedSources(root string, op PlanOperation, dstAbs string) error {
+	if len(op.Sources) == 0 {
+		return fmt.Errorf("merge op has no sources")
+	}
+	if len(op.Sources) == 1 {
+		return stageSourceToTarget(root, op.Sources[0], op.Target, dstAbs)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Consolidated Migration Document\n\n")
+	for i, src := range op.Sources {
+		srcAbs := filepath.Join(root, filepath.FromSlash(src.Path))
+		data, err := os.ReadFile(srcAbs)
+		if err != nil {
+			return fmt.Errorf("read merge source %s: %w", src.Path, err)
+		}
+		content := transformContentForTarget(string(data), op.Target)
+		fmt.Fprintf(&b, "## Source %d: %s\n\n", i+1, src.Path)
+		b.WriteString(content)
+		if !strings.HasSuffix(content, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dstAbs, []byte(b.String()), 0o644)
+}
+
+func transformContentForTarget(content, target string) string {
+	if strings.HasSuffix(strings.ToLower(target), "/glossary.md") {
+		content = strings.ReplaceAll(content, "(docs/", "(.mindspec/docs/")
+		content = strings.ReplaceAll(content, "(./docs/", "(.mindspec/docs/")
+	}
+	if target == filepath.ToSlash(filepath.Join(".mindspec", "policies.yml")) {
+		content = strings.ReplaceAll(content, "reference: \"docs/", "reference: \".mindspec/docs/")
+		content = strings.ReplaceAll(content, "reference: 'docs/", "reference: '.mindspec/docs/")
+	}
+	return content
 }
 
 func canonicalTarget(path, category string) (string, bool) {
@@ -128,53 +227,10 @@ func canonicalTarget(path, category string) (string, bool) {
 			rel = path[len("docs/"):]
 		}
 		return filepath.ToSlash(filepath.Join(".mindspec", "docs", "user", rel)), true
+	case "policy":
+		return filepath.ToSlash(filepath.Join(".mindspec", "policies.yml")), true
 	}
 	return "", false
-}
-
-func stagePolicyMigration(root, stagingRoot, runID string) (*LineageEntry, error) {
-	legacyPolicy := filepath.Join(root, "architecture", "policies.yml")
-	data, err := os.ReadFile(legacyPolicy)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read legacy policies: %w", err)
-	}
-
-	rewritten := strings.ReplaceAll(string(data), "reference: \"docs/", "reference: \".mindspec/docs/")
-	rewritten = strings.ReplaceAll(rewritten, "reference: 'docs/", "reference: '.mindspec/docs/")
-
-	dst := filepath.Join(stagingRoot, ".mindspec", "policies.yml")
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return nil, fmt.Errorf("create policy staging dir: %w", err)
-	}
-	if err := os.WriteFile(dst, []byte(rewritten), 0o644); err != nil {
-		return nil, fmt.Errorf("write staged policy: %w", err)
-	}
-
-	sum := sha256.Sum256(data)
-	return &LineageEntry{
-		Source:    filepath.ToSlash(filepath.Join("architecture", "policies.yml")),
-		SourceSHA: hex.EncodeToString(sum[:]),
-		Category:  "policy",
-		Canonical: filepath.ToSlash(filepath.Join(".mindspec", "policies.yml")),
-		Archive:   filepath.ToSlash(filepath.Join("docs_archive", runID, "architecture", "policies.yml")),
-	}, nil
-}
-
-func stageGlossary(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	rewritten := strings.ReplaceAll(string(data), "(docs/", "(.mindspec/docs/")
-	rewritten = strings.ReplaceAll(rewritten, "(./docs/", "(.mindspec/docs/")
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, []byte(rewritten), 0o644)
 }
 
 func promoteCanonical(root, stagingRoot, runID string) error {
@@ -212,44 +268,50 @@ func promoteCanonical(root, stagingRoot, runID string) error {
 	return nil
 }
 
-func archiveSources(root string, lineage []LineageEntry, archiveMode, runID string) error {
+func archiveSources(root string, lineage []LineageEntry, archiveMode, runID string) (int, error) {
 	moveMode := archiveMode == "move"
+	archivedCount := 0
+	seen := map[string]struct{}{}
 
 	for _, entry := range lineage {
+		if _, ok := seen[entry.Source]; ok {
+			continue
+		}
+		seen[entry.Source] = struct{}{}
+
 		src := filepath.Join(root, filepath.FromSlash(entry.Source))
 		dst := filepath.Join(root, filepath.FromSlash(entry.Archive))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return fmt.Errorf("create archive dir for %s: %w", entry.Source, err)
+			return archivedCount, fmt.Errorf("create archive dir for %s: %w", entry.Source, err)
 		}
 
 		if moveMode && shouldMoveSource(entry.Source) {
 			if err := os.Rename(src, dst); err != nil {
-				return fmt.Errorf("archive move %s -> %s: %w", entry.Source, entry.Archive, err)
+				return archivedCount, fmt.Errorf("archive move %s -> %s: %w", entry.Source, entry.Archive, err)
 			}
+			archivedCount++
 			continue
 		}
 
-		switch archiveMode {
-		default:
-			if err := copyFile(src, dst); err != nil {
-				return fmt.Errorf("archive copy %s -> %s: %w", entry.Source, entry.Archive, err)
-			}
+		if err := copyFile(src, dst); err != nil {
+			return archivedCount, fmt.Errorf("archive copy %s -> %s: %w", entry.Source, entry.Archive, err)
 		}
+		archivedCount++
 	}
 
 	if moveMode {
 		if err := relocateRemainingLegacyDocs(root, runID); err != nil {
-			return err
+			return archivedCount, err
 		}
 		if err := pruneLegacyPath(filepath.Join(root, "docs")); err != nil {
-			return err
+			return archivedCount, err
 		}
 		if err := pruneLegacyPath(filepath.Join(root, "architecture")); err != nil {
-			return err
+			return archivedCount, err
 		}
 	}
 
-	return nil
+	return archivedCount, nil
 }
 
 func relocateRemainingLegacyDocs(root, runID string) error {
@@ -407,6 +469,23 @@ func writeLineageManifest(root, runID string, entries []LineageEntry) error {
 		return fmt.Errorf("write lineage manifest: %w", err)
 	}
 	return nil
+}
+
+func hashPlan(plan *MigrationPlan) (string, error) {
+	data, err := json.Marshal(plan)
+	if err != nil {
+		return "", fmt.Errorf("marshal plan hash: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func countUniqueSources(entries []LineageEntry) int {
+	seen := map[string]struct{}{}
+	for _, e := range entries {
+		seen[e.Source] = struct{}{}
+	}
+	return len(seen)
 }
 
 func copyFile(src, dst string) error {
