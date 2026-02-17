@@ -684,12 +684,26 @@ function syncGraphData() {
 setInterval(syncGraphData, 200);
 
 // ─── Node/Edge Management ───────────────────────────────────
+function graphCenterOfMass() {
+  let cx = 0, cy = 0, cz = 0, n = 0;
+  for (const nd of state.nodes.values()) {
+    if (nd.x != null) { cx += nd.x; cy += nd.y; cz += nd.z; n++; }
+  }
+  return n > 0 ? { x: cx / n, y: cy / n, z: cz / n } : { x: 0, y: 0, z: 0 };
+}
+
 function addOrUpdateNode(data) {
   const isNew = !state.nodes.has(data.id);
   const existing = state.nodes.get(data.id);
   if (existing) {
     Object.assign(existing, data);
   } else {
+    // Seed new nodes near center of mass so disconnected clusters don't fly apart
+    const cm = graphCenterOfMass();
+    const jitter = 20;  // small random offset to avoid overlap
+    data.x = cm.x + (Math.random() - 0.5) * jitter;
+    data.y = cm.y + (Math.random() - 0.5) * jitter;
+    data.z = cm.z + (Math.random() - 0.5) * jitter;
     state.nodes.set(data.id, { ...data });
   }
   state.graphDirty = true;
@@ -957,7 +971,14 @@ document.getElementById('btn-pause').addEventListener('click', function() {
 });
 
 document.getElementById('btn-reset').addEventListener('click', () => {
-  Graph.cameraPosition({ x: 0, y: 0, z: 300 });
+  // Target center of mass of all nodes, not hardcoded origin
+  const nodes = Graph.graphData().nodes;
+  let cx = 0, cy = 0, cz = 0;
+  if (nodes.length > 0) {
+    for (const n of nodes) { cx += n.x || 0; cy += n.y || 0; cz += n.z || 0; }
+    cx /= nodes.length; cy /= nodes.length; cz /= nodes.length;
+  }
+  Graph.cameraPosition({ x: cx, y: cy, z: cz + 300 }, { x: cx, y: cy, z: cz }, 1000);
 });
 
 document.getElementById('btn-clear').addEventListener('click', () => {
