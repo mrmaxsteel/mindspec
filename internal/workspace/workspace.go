@@ -54,8 +54,12 @@ func LegacyDocsDir(root string) string {
 	return filepath.Join(root, "docs")
 }
 
-// GlossaryPath returns the path to GLOSSARY.md under root.
+// GlossaryPath returns the canonical glossary path with legacy fallback.
 func GlossaryPath(root string) string {
+	canonical := filepath.Join(CanonicalDocsDir(root), "glossary.md")
+	if exists(canonical) {
+		return canonical
+	}
 	return filepath.Join(root, "GLOSSARY.md")
 }
 

@@ -58,21 +58,25 @@ func checkDocs(r *Report, root string) {
 
 	// Domain subdirectory checks
 	checkDomains(r, root, docsRel)
+
+	// Migration metadata checks (only when brownfield artifacts are present).
+	checkMigrationMetadata(r, root)
 }
 
 func checkGlossary(r *Report, root string) {
+	glossaryName := relSlash(root, workspace.GlossaryPath(root))
 	entries, err := glossary.Parse(root)
 	if err != nil {
 		r.Checks = append(r.Checks, Check{
-			Name:    "GLOSSARY.md",
+			Name:    glossaryName,
 			Status:  Missing,
-			Message: "create GLOSSARY.md in project root",
+			Message: fmt.Sprintf("create %s", glossaryName),
 		})
 		return
 	}
 
 	r.Checks = append(r.Checks, Check{
-		Name:    "GLOSSARY.md",
+		Name:    glossaryName,
 		Status:  OK,
 		Message: fmt.Sprintf("(%d terms)", len(entries)),
 	})
@@ -151,6 +155,14 @@ func docsRootRel(root string) string {
 	rel, err := filepath.Rel(root, workspace.DocsDir(root))
 	if err != nil {
 		return "docs"
+	}
+	return filepath.ToSlash(rel)
+}
+
+func relSlash(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(rel)
 }

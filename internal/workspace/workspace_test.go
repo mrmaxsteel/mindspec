@@ -184,10 +184,28 @@ func TestRecordingDir_UsesSpecDir(t *testing.T) {
 }
 
 func TestGlossaryPath(t *testing.T) {
-	got := GlossaryPath("/project")
-	want := filepath.Join("/project", "GLOSSARY.md")
+	root := "/project"
+	got := GlossaryPath(root)
+	want := filepath.Join(root, "GLOSSARY.md")
 	if got != want {
 		t.Errorf("GlossaryPath: got %q, want %q", got, want)
+	}
+}
+
+func TestGlossaryPath_CanonicalPreferred(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	glossary := filepath.Join(canonical, "glossary.md")
+	if err := os.WriteFile(glossary, []byte("# glossary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := GlossaryPath(root)
+	if got != glossary {
+		t.Errorf("GlossaryPath canonical: got %q, want %q", got, glossary)
 	}
 }
 

@@ -208,3 +208,137 @@ func TestIsRuntimeArtifact(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckDocs_CanonicalMigratedLayoutPasses(t *testing.T) {
+	root := setupCanonicalMigratedFixture(t)
+
+	r := &Report{}
+	checkDocs(r, root)
+
+	for _, c := range r.Checks {
+		if c.Status == Missing || c.Status == Error {
+			t.Fatalf("check %q: unexpected status %d (%s)", c.Name, c.Status, c.Message)
+		}
+	}
+}
+
+func TestCheckMigrationMetadata_MissingLineageManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs_archive", "run-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Report{}
+	checkMigrationMetadata(r, root)
+
+	foundMissing := false
+	for _, c := range r.Checks {
+		if c.Name == ".mindspec/lineage/manifest.json" && c.Status == Missing {
+			foundMissing = true
+		}
+	}
+	if !foundMissing {
+		t.Fatal("expected missing lineage manifest check")
+	}
+}
+
+func setupCanonicalMigratedFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	dirs := []string{
+		".mindspec/docs/core",
+		".mindspec/docs/domains/core",
+		".mindspec/docs/domains/context-system",
+		".mindspec/docs/domains/workflow",
+		".mindspec/docs/specs",
+		".mindspec/lineage",
+		".mindspec/migrations/run-1",
+		"docs_archive/run-1/docs/core",
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write := func(rel, content string) {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(".mindspec/docs/core/ARCHITECTURE.md", "# Architecture")
+	write(".mindspec/docs/context-map.md", "# Context Map")
+	write(".mindspec/docs/glossary.md", `| Term | Target |
+|:-----|:-------|
+| **Bead** | [.mindspec/docs/core/ARCHITECTURE.md](.mindspec/docs/core/ARCHITECTURE.md) |
+`)
+
+	domainFiles := []string{
+		".mindspec/docs/domains/core/overview.md",
+		".mindspec/docs/domains/core/architecture.md",
+		".mindspec/docs/domains/core/interfaces.md",
+		".mindspec/docs/domains/core/runbook.md",
+		".mindspec/docs/domains/context-system/overview.md",
+		".mindspec/docs/domains/context-system/architecture.md",
+		".mindspec/docs/domains/context-system/interfaces.md",
+		".mindspec/docs/domains/context-system/runbook.md",
+		".mindspec/docs/domains/workflow/overview.md",
+		".mindspec/docs/domains/workflow/architecture.md",
+		".mindspec/docs/domains/workflow/interfaces.md",
+		".mindspec/docs/domains/workflow/runbook.md",
+	}
+	for _, f := range domainFiles {
+		write(f, "# placeholder")
+	}
+
+	write("docs_archive/run-1/docs/core/ARCHITECTURE.md", "# archived")
+	write(".mindspec/lineage/manifest.json", `{
+  "run_id": "run-1",
+  "entries": [
+    {
+      "source": "docs/core/ARCHITECTURE.md",
+      "canonical": ".mindspec/docs/core/ARCHITECTURE.md",
+      "archive": "docs_archive/run-1/docs/core/ARCHITECTURE.md"
+    }
+  ]
+}
+`)
+	write(".mindspec/migrations/run-1/inventory.json", `[
+  {"path":"docs/core/ARCHITECTURE.md","sha256":"abc"}
+]
+`)
+	write(".mindspec/migrations/run-1/classification.json", `[
+  {
+    "path":"docs/core/ARCHITECTURE.md",
+    "sha256":"abc",
+    "category":"core",
+    "confidence":0.92,
+    "rule":"path-contains-core",
+    "requires_llm":false
+  }
+]
+`)
+	write(".mindspec/migrations/run-1/lineage.json", `[
+  {
+    "source":"docs/core/ARCHITECTURE.md",
+    "source_sha256":"abc",
+    "category":"core",
+    "canonical":".mindspec/docs/core/ARCHITECTURE.md",
+    "archive":"docs_archive/run-1/docs/core/ARCHITECTURE.md"
+  }
+]
+`)
+	write(".mindspec/migrations/run-1/state.json", `{
+  "run_id":"run-1",
+  "stage":"applied"
+}
+`)
+
+	return root
+}

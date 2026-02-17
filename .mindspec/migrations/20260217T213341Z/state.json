@@ -1,0 +1,12 @@
+{
+  "run_id": "20260217T213341Z",
+  "mode": "apply",
+  "archive_mode": "copy",
+  "llm_provider": "off",
+  "llm_model": "default",
+  "llm_available": false,
+  "unresolved_count": 0,
+  "stage": "applied",
+  "resumed": true,
+  "updated_at": "2026-02-17T21:33:48Z"
+}
