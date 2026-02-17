@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // Manifest tracks recording state for a spec.
@@ -27,7 +29,7 @@ type Phase struct {
 
 // RecordingDir returns the recording directory for a spec.
 func RecordingDir(root, specID string) string {
-	return filepath.Join(root, "docs", "specs", specID, "recording")
+	return workspace.RecordingDir(root, specID)
 }
 
 // ManifestPath returns the path to manifest.json for a spec.

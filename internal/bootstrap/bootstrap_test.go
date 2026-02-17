@@ -26,7 +26,7 @@ func TestRun_EmptyDir(t *testing.T) {
 		"GLOSSARY.md",
 		"CLAUDE.md",
 		"docs/context-map.md",
-		"architecture/policies.yml",
+		".mindspec/policies.yml",
 		".mindspec/state.json",
 		"docs/templates/spec.md",
 		"docs/templates/plan.md",
@@ -51,7 +51,6 @@ func TestRun_EmptyDir(t *testing.T) {
 		"docs/domains",
 		"docs/specs",
 		"docs/adr",
-		"architecture",
 		".mindspec",
 	}
 	for _, d := range requiredDirs {

@@ -117,14 +117,13 @@ func manifest() []manifestItem {
 		{path: "docs/adr", isDir: true},
 		{path: "docs/templates", isDir: true},
 		{path: "docs/templates/domain", isDir: true},
-		{path: "architecture", isDir: true},
 		{path: ".mindspec", isDir: true},
 
 		// Root files
 		{path: "GLOSSARY.md", content: starterGlossary},
 		{path: "CLAUDE.md", content: starterClaudeMD},
 		{path: "docs/context-map.md", content: starterContextMap},
-		{path: "architecture/policies.yml", content: starterPolicies},
+		{path: ".mindspec/policies.yml", content: starterPolicies},
 		{path: ".mindspec/state.json", contentFunc: starterState},
 
 		// Templates
@@ -280,7 +279,7 @@ Core <--- Context-System ---> Workflow
 | Long-form specifications | ` + "`docs/specs/`" + ` |
 | Domain architecture | ` + "`docs/domains/<domain>/`" + ` |
 | ADR lifecycle | ` + "`docs/adr/`" + ` |
-| Machine-checkable policies | ` + "`architecture/policies.yml`" + ` |
+| Machine-checkable policies | ` + "`.mindspec/policies.yml`" + ` |
 `
 
 const starterPolicies = `# Architecture Policies

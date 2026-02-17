@@ -36,6 +36,8 @@ func TestIsDocFile(t *testing.T) {
 		{"CLAUDE.md", true},
 		{"AGENTS.md", true},
 		{"GLOSSARY.md", true},
+		{".mindspec/docs/core/ARCHITECTURE.md", true},
+		{".mindspec/policies.yml", true},
 		{"architecture/policies.yml", true},
 		{"internal/validate/spec.go", false},
 		{"cmd/mindspec/validate.go", false},

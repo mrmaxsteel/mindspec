@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // ADR represents a parsed Architecture Decision Record.
@@ -95,7 +97,7 @@ func extractValue(line, key string) string {
 
 // ScanADRs reads all ADR-*.md files from the ADR directory, sorted by ID.
 func ScanADRs(root string) ([]ADR, error) {
-	adrDir := filepath.Join(root, "docs", "adr")
+	adrDir := workspace.ADRDir(root)
 	pattern := filepath.Join(adrDir, "ADR-*.md")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
@@ -143,7 +145,7 @@ func FilterADRs(adrs []ADR, domains []string) []ADR {
 
 // NextID scans existing ADRs and returns the next available ID (zero-padded to 4 digits).
 func NextID(root string) (string, error) {
-	adrDir := filepath.Join(root, "docs", "adr")
+	adrDir := workspace.ADRDir(root)
 	pattern := filepath.Join(adrDir, "ADR-*.md")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {

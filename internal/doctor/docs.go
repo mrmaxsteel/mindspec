@@ -17,7 +17,6 @@ var requiredDirs = []struct {
 	{"docs/core", "docs/core/"},
 	{"docs/domains", "docs/domains/"},
 	{"docs/specs", "docs/specs/"},
-	{"architecture", "architecture/"},
 }
 
 // expectedDomains and their expected files.

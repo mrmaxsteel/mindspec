@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // Supersede updates the old ADR's Superseded-by field to point to newID.
 func Supersede(root, oldID, newID string) error {
-	oldPath := filepath.Join(root, "docs", "adr", oldID+".md")
+	oldPath := filepath.Join(workspace.ADRDir(root), oldID+".md")
 	data, err := os.ReadFile(oldPath)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", oldID, err)
@@ -37,7 +39,7 @@ func Supersede(root, oldID, newID string) error {
 
 // CopyDomains reads an ADR and returns its domain list.
 func CopyDomains(root, id string) ([]string, error) {
-	path := filepath.Join(root, "docs", "adr", id+".md")
+	path := filepath.Join(workspace.ADRDir(root), id+".md")
 	a, err := ParseADR(path)
 	if err != nil {
 		return nil, err

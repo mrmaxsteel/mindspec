@@ -37,6 +37,20 @@ func FindRoot(startDir string) (string, error) {
 
 // DocsDir returns the path to the docs directory under root.
 func DocsDir(root string) string {
+	canonical := CanonicalDocsDir(root)
+	if exists(canonical) {
+		return canonical
+	}
+	return LegacyDocsDir(root)
+}
+
+// CanonicalDocsDir returns the canonical docs root under .mindspec.
+func CanonicalDocsDir(root string) string {
+	return filepath.Join(root, ".mindspec", "docs")
+}
+
+// LegacyDocsDir returns the legacy docs root under project root.
+func LegacyDocsDir(root string) string {
 	return filepath.Join(root, "docs")
 }
 
@@ -47,32 +61,38 @@ func GlossaryPath(root string) string {
 
 // SpecDir returns the path to a specific spec directory under root.
 func SpecDir(root, specID string) string {
-	return filepath.Join(root, "docs", "specs", specID)
+	return filepath.Join(DocsDir(root), "specs", specID)
 }
 
 // ContextMapPath returns the path to docs/context-map.md under root.
 func ContextMapPath(root string) string {
-	return filepath.Join(root, "docs", "context-map.md")
+	return filepath.Join(DocsDir(root), "context-map.md")
 }
 
 // ADRDir returns the path to docs/adr/ under root.
 func ADRDir(root string) string {
-	return filepath.Join(root, "docs", "adr")
+	return filepath.Join(DocsDir(root), "adr")
 }
 
-// PoliciesPath returns the path to architecture/policies.yml under root.
+// PoliciesPath returns the canonical path to .mindspec/policies.yml under root.
 func PoliciesPath(root string) string {
+	return filepath.Join(root, ".mindspec", "policies.yml")
+}
+
+// LegacyPoliciesPath returns the legacy path to architecture/policies.yml under root.
+// Kept for brownfield read fallback during migration.
+func LegacyPoliciesPath(root string) string {
 	return filepath.Join(root, "architecture", "policies.yml")
 }
 
 // DomainDir returns the path to a specific domain's doc directory under root.
 func DomainDir(root, domain string) string {
-	return filepath.Join(root, "docs", "domains", domain)
+	return filepath.Join(DocsDir(root), "domains", domain)
 }
 
 // RecordingDir returns the path to a spec's recording directory.
 func RecordingDir(root, specID string) string {
-	return filepath.Join(root, "docs", "specs", specID, "recording")
+	return filepath.Join(SpecDir(root, specID), "recording")
 }
 
 // MindspecDir returns the path to the .mindspec directory under root.

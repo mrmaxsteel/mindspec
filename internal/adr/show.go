@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // Show reads and returns a single ADR by ID.
 func Show(root, id string) (*ADR, error) {
-	path := filepath.Join(root, "docs", "adr", id+".md")
+	path := filepath.Join(workspace.ADRDir(root), id+".md")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("%s not found", id)
 	}

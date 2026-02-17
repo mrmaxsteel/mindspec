@@ -1,12 +1,15 @@
 package contextpack
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // Mode constants for context pack generation.
@@ -25,15 +28,15 @@ type ProvenanceEntry struct {
 
 // ContextPack is the assembled context for a spec.
 type ContextPack struct {
-	SpecID     string
-	Mode       string
-	CommitSHA  string
+	SpecID      string
+	Mode        string
+	CommitSHA   string
 	GeneratedAt string
-	Goal       string
-	Domains    []string
-	Neighbors  []string
-	Sections   []PackSection
-	Provenance []ProvenanceEntry
+	Goal        string
+	Domains     []string
+	Neighbors   []string
+	Sections    []PackSection
+	Provenance  []ProvenanceEntry
 }
 
 // PackSection represents a titled section within a context pack.
@@ -44,7 +47,7 @@ type PackSection struct {
 
 // Build assembles a context pack for the given spec and mode.
 func Build(root, specID, mode string) (*ContextPack, error) {
-	specDir := filepath.Join(root, "docs", "specs", specID)
+	specDir := workspace.SpecDir(root, specID)
 
 	// Parse spec
 	meta, err := ParseSpec(specDir)
@@ -71,7 +74,7 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 	}
 
 	// Parse context map and resolve neighbors
-	cmPath := filepath.Join(root, "docs", "context-map.md")
+	cmPath := workspace.ContextMapPath(root)
 	rels, err := ParseContextMap(cmPath)
 	if err != nil {
 		// Context map is optional; log but don't fail
@@ -94,7 +97,7 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 						Content: doc.Interfaces,
 					})
 					pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-						Source:  fmt.Sprintf("docs/domains/%s/interfaces.md", neighbor),
+						Source:  doc.InterfacesPath,
 						Section: "Neighbor Interfaces",
 						Reason:  "1-hop neighbor via Context Map",
 					})
@@ -120,28 +123,40 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 			Content: adr.Content,
 		})
 		pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-			Source:  fmt.Sprintf("docs/adr/%s.md", adr.ID),
+			Source:  filepath.ToSlash(relPath(root, adr.Path)),
 			Section: adr.ID,
 			Reason:  fmt.Sprintf("Accepted ADR for domains: %s", strings.Join(adr.Domains, ", ")),
 		})
 	}
 
-	// Parse and filter policies
-	polPath := filepath.Join(root, "architecture", "policies.yml")
+	// Parse and filter policies (canonical path, then legacy fallback)
+	polPath := workspace.PoliciesPath(root)
 	policies, err := ParsePolicies(polPath)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
+			legacyPath := workspace.LegacyPoliciesPath(root)
+			if legacyPath != polPath {
+				policies, err = ParsePolicies(legacyPath)
+				if err == nil {
+					polPath = legacyPath
+				}
+			}
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("parsing policies: %w", err)
 		}
-	} else {
+	}
+
+	if err == nil {
 		filteredPolicies := FilterPolicies(policies, mode)
 		if len(filteredPolicies) > 0 {
+			source := filepath.ToSlash(relPath(root, polPath))
 			pack.Sections = append(pack.Sections, PackSection{
 				Heading: "Applicable Policies",
 				Content: renderPoliciesTable(filteredPolicies),
 			})
 			pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-				Source:  "architecture/policies.yml",
+				Source:  source,
 				Section: "Policies",
 				Reason:  fmt.Sprintf("Policies applicable to mode %q", mode),
 			})
@@ -162,7 +177,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 			Content: doc.Overview,
 		})
 		pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-			Source:  fmt.Sprintf("docs/domains/%s/overview.md", domain),
+			Source:  doc.OverviewPath,
 			Section: "Overview",
 			Reason:  "Impacted domain overview",
 		})
@@ -175,7 +190,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 			Content: doc.Architecture,
 		})
 		pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-			Source:  fmt.Sprintf("docs/domains/%s/architecture.md", domain),
+			Source:  doc.ArchitecturePath,
 			Section: "Architecture",
 			Reason:  "Impacted domain architecture (plan/implement tier)",
 		})
@@ -189,7 +204,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 				Content: doc.Interfaces,
 			})
 			pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-				Source:  fmt.Sprintf("docs/domains/%s/interfaces.md", domain),
+				Source:  doc.InterfacesPath,
 				Section: "Interfaces",
 				Reason:  "Impacted domain interfaces (implement tier)",
 			})
@@ -200,7 +215,7 @@ func addDomainSections(pack *ContextPack, doc *DomainDoc, mode string, isNeighbo
 				Content: doc.Runbook,
 			})
 			pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-				Source:  fmt.Sprintf("docs/domains/%s/runbook.md", domain),
+				Source:  doc.RunbookPath,
 				Section: "Runbook",
 				Reason:  "Impacted domain runbook (implement tier)",
 			})
@@ -263,7 +278,7 @@ func (cp *ContextPack) Render() string {
 
 // WriteToFile writes the rendered context pack to the spec directory.
 func (cp *ContextPack) WriteToFile(root, specID string) error {
-	outDir := filepath.Join(root, "docs", "specs", specID)
+	outDir := workspace.SpecDir(root, specID)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
@@ -293,4 +308,12 @@ func gitCommitSHA(root string) string {
 		return "unknown"
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func relPath(root, p string) string {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return p
+	}
+	return rel
 }

@@ -100,10 +100,119 @@ func TestDocsDir(t *testing.T) {
 	}
 }
 
+func TestDocsDir_CanonicalPreferred(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := DocsDir(root)
+	if got != canonical {
+		t.Errorf("DocsDir canonical: got %q, want %q", got, canonical)
+	}
+}
+
+func TestSpecDir_UsesDocsDir(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := SpecDir(root, "001-test")
+	want := filepath.Join(canonical, "specs", "001-test")
+	if got != want {
+		t.Errorf("SpecDir canonical: got %q, want %q", got, want)
+	}
+}
+
+func TestContextMapPath_UsesDocsDir(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ContextMapPath(root)
+	want := filepath.Join(canonical, "context-map.md")
+	if got != want {
+		t.Errorf("ContextMapPath canonical: got %q, want %q", got, want)
+	}
+}
+
+func TestADRDir_UsesDocsDir(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ADRDir(root)
+	want := filepath.Join(canonical, "adr")
+	if got != want {
+		t.Errorf("ADRDir canonical: got %q, want %q", got, want)
+	}
+}
+
+func TestDomainDir_UsesDocsDir(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := DomainDir(root, "core")
+	want := filepath.Join(canonical, "domains", "core")
+	if got != want {
+		t.Errorf("DomainDir canonical: got %q, want %q", got, want)
+	}
+}
+
+func TestRecordingDir_UsesSpecDir(t *testing.T) {
+	root := t.TempDir()
+	canonical := filepath.Join(root, ".mindspec", "docs")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := RecordingDir(root, "001-test")
+	want := filepath.Join(canonical, "specs", "001-test", "recording")
+	if got != want {
+		t.Errorf("RecordingDir canonical: got %q, want %q", got, want)
+	}
+}
+
 func TestGlossaryPath(t *testing.T) {
 	got := GlossaryPath("/project")
 	want := filepath.Join("/project", "GLOSSARY.md")
 	if got != want {
 		t.Errorf("GlossaryPath: got %q, want %q", got, want)
+	}
+}
+
+func TestPoliciesPath(t *testing.T) {
+	got := PoliciesPath("/project")
+	want := filepath.Join("/project", ".mindspec", "policies.yml")
+	if got != want {
+		t.Errorf("PoliciesPath: got %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalAndLegacyDocsDir(t *testing.T) {
+	root := "/project"
+	if got := CanonicalDocsDir(root); got != filepath.Join(root, ".mindspec", "docs") {
+		t.Errorf("CanonicalDocsDir: got %q", got)
+	}
+	if got := LegacyDocsDir(root); got != filepath.Join(root, "docs") {
+		t.Errorf("LegacyDocsDir: got %q", got)
+	}
+}
+
+func TestLegacyPoliciesPath(t *testing.T) {
+	got := LegacyPoliciesPath("/project")
+	want := filepath.Join("/project", "architecture", "policies.yml")
+	if got != want {
+		t.Errorf("LegacyPoliciesPath: got %q, want %q", got, want)
 	}
 }

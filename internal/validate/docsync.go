@@ -86,6 +86,8 @@ func classifyChanges(files []string) (source, docs []string) {
 // isDocFile returns true for documentation files.
 func isDocFile(path string) bool {
 	return strings.HasPrefix(path, "docs/") ||
+		strings.HasPrefix(path, ".mindspec/docs/") ||
+		path == ".mindspec/policies.yml" ||
 		strings.HasPrefix(path, "CLAUDE.md") ||
 		strings.HasPrefix(path, "AGENTS.md") ||
 		strings.HasPrefix(path, "GLOSSARY.md") ||

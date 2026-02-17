@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // CreateOpts configures ADR creation.
@@ -23,7 +25,7 @@ func Create(root, title string, opts CreateOpts) (string, error) {
 
 	// If superseding, verify old ADR exists and optionally copy domains
 	if opts.Supersedes != "" {
-		oldPath := filepath.Join(root, "docs", "adr", opts.Supersedes+".md")
+		oldPath := filepath.Join(workspace.ADRDir(root), opts.Supersedes+".md")
 		if _, err := os.Stat(oldPath); os.IsNotExist(err) {
 			return "", fmt.Errorf("%s not found", opts.Supersedes)
 		}
@@ -60,7 +62,7 @@ func Create(root, title string, opts CreateOpts) (string, error) {
 		content = strings.Replace(content, "**Supersedes**: n/a", fmt.Sprintf("**Supersedes**: %s", opts.Supersedes), 1)
 	}
 
-	adrDir := filepath.Join(root, "docs", "adr")
+	adrDir := workspace.ADRDir(root)
 	if err := os.MkdirAll(adrDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating ADR directory: %w", err)
 	}
