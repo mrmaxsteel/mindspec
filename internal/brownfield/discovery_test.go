@@ -3,6 +3,7 @@ package brownfield
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -182,6 +183,9 @@ func TestDiscoverMarkdown_RespectsGitIgnore(t *testing.T) {
 }
 
 func TestRun_ReportArtifactsAreDeterministic(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
+	t.Setenv("MINDSPEC_LLM_MODEL", "")
+
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs", "adr"), 0o755); err != nil {
 		t.Fatalf("mkdir docs/adr: %v", err)
@@ -217,6 +221,91 @@ func TestRun_ReportArtifactsAreDeterministic(t *testing.T) {
 				t.Fatalf("expected artifact %s for %s: %v", name, runID, err)
 			}
 		}
+	}
+}
+
+func TestRun_PlanUsesLLMClassificationWhenAvailable(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "claude-cli")
+	t.Setenv("MINDSPEC_LLM_MODEL", "claude-sonnet")
+
+	oldClassify := llmClassifyFn
+	llmClassifyFn = func(root string, report *Report) ([]ClassificationEntry, error) {
+		out := make([]ClassificationEntry, len(report.Classification))
+		copy(out, report.Classification)
+		for i := range out {
+			if !out[i].RequiresLLM {
+				continue
+			}
+			out[i].Category = "user-docs"
+			out[i].Confidence = 0.91
+			out[i].Rule = "llm:test"
+			out[i].Rationale = "Document is operational guidance for users."
+			out[i].RequiresLLM = false
+		}
+		return out, nil
+	}
+	defer func() { llmClassifyFn = oldClassify }()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "misc"), 0o755); err != nil {
+		t.Fatalf("mkdir misc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "misc", "notes.md"), []byte("# notes\n"), 0o644); err != nil {
+		t.Fatalf("write notes.md: %v", err)
+	}
+
+	report, err := Run(root, RunOptions{RunID: "run-llm"})
+	if err != nil {
+		t.Fatalf("plan run failed: %v", err)
+	}
+	if len(report.Unresolved) != 0 {
+		t.Fatalf("expected unresolved to be cleared by LLM classification, got %d", len(report.Unresolved))
+	}
+
+	found := false
+	for _, c := range report.Classification {
+		if c.Path == "misc/notes.md" {
+			found = true
+			if c.Rule != "llm:test" {
+				t.Fatalf("expected llm rule for misc/notes.md, got %q", c.Rule)
+			}
+			if c.Rationale == "" {
+				t.Fatal("expected llm rationale for misc/notes.md")
+			}
+			if c.RequiresLLM {
+				t.Fatal("expected llm classified entry to clear RequiresLLM")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected classified entry for misc/notes.md")
+	}
+}
+
+func TestRun_PlanFailsWhenLLMClassifierErrors(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "claude-cli")
+	t.Setenv("MINDSPEC_LLM_MODEL", "claude-sonnet")
+
+	oldClassify := llmClassifyFn
+	llmClassifyFn = func(root string, report *Report) ([]ClassificationEntry, error) {
+		return nil, fmt.Errorf("simulated classifier failure")
+	}
+	defer func() { llmClassifyFn = oldClassify }()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "misc"), 0o755); err != nil {
+		t.Fatalf("mkdir misc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "misc", "notes.md"), []byte("# notes\n"), 0o644); err != nil {
+		t.Fatalf("write notes.md: %v", err)
+	}
+
+	_, err := Run(root, RunOptions{RunID: "run-llm-fail"})
+	if err == nil {
+		t.Fatal("expected plan failure when llm classifier errors")
+	}
+	if !strings.Contains(err.Error(), "migrate plan LLM classification failed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

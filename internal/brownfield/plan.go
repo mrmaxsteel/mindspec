@@ -17,6 +17,7 @@ type PlanSource struct {
 	SHA256      string  `json:"sha256"`
 	Category    string  `json:"category"`
 	Rule        string  `json:"rule"`
+	Rationale   string  `json:"rationale,omitempty"`
 	Confidence  float64 `json:"confidence"`
 	RequiresLLM bool    `json:"requires_llm"`
 }
@@ -78,6 +79,7 @@ func buildMigrationPlan(root string, report *Report) (*MigrationPlan, error) {
 				SHA256:      shaByPath[e.Path],
 				Category:    e.Category,
 				Rule:        e.Rule,
+				Rationale:   e.Rationale,
 				Confidence:  e.Confidence,
 				RequiresLLM: e.RequiresLLM,
 			})
@@ -85,7 +87,7 @@ func buildMigrationPlan(root string, report *Report) (*MigrationPlan, error) {
 			if e.Confidence < minConfidence {
 				minConfidence = e.Confidence
 			}
-			llmUsed = llmUsed || e.RequiresLLM
+			llmUsed = llmUsed || strings.HasPrefix(e.Rule, "llm:")
 		}
 
 		action := "create"
@@ -93,6 +95,9 @@ func buildMigrationPlan(root string, report *Report) (*MigrationPlan, error) {
 			action = "update"
 		}
 		rationale := fmt.Sprintf("%s maps to %s via rule %q.", entries[0].Path, target, entries[0].Rule)
+		if entries[0].Rationale != "" {
+			rationale = fmt.Sprintf("%s LLM rationale: %s", rationale, entries[0].Rationale)
+		}
 		if len(entries) > 1 {
 			action = "merge"
 			rationale = fmt.Sprintf(
@@ -100,6 +105,9 @@ func buildMigrationPlan(root string, report *Report) (*MigrationPlan, error) {
 				len(entries),
 				target,
 			)
+			if entries[0].Rationale != "" {
+				rationale = fmt.Sprintf("%s Example LLM rationale: %s", rationale, entries[0].Rationale)
+			}
 		}
 
 		operations = append(operations, PlanOperation{
@@ -122,13 +130,14 @@ func buildMigrationPlan(root string, report *Report) (*MigrationPlan, error) {
 				SHA256:      shaByPath[e.Path],
 				Category:    e.Category,
 				Rule:        e.Rule,
+				Rationale:   e.Rationale,
 				Confidence:  e.Confidence,
 				RequiresLLM: e.RequiresLLM,
 			}},
 			ArchiveTargets: []string{filepath.ToSlash(filepath.Join("docs_archive", report.RunID, e.Path))},
 			Rationale:      fmt.Sprintf("No canonical target mapping exists for category %q.", e.Category),
 			Confidence:     e.Confidence,
-			LLMUsed:        e.RequiresLLM,
+			LLMUsed:        strings.HasPrefix(e.Rule, "llm:"),
 		})
 	}
 
@@ -165,6 +174,9 @@ func renderPlanMarkdown(plan *MigrationPlan) string {
 		fmt.Fprintf(&b, "- Sources:\n")
 		for _, src := range op.Sources {
 			fmt.Fprintf(&b, "  - `%s` (sha256=%s, category=%s, rule=%s)\n", src.Path, src.SHA256, src.Category, src.Rule)
+			if src.Rationale != "" {
+				fmt.Fprintf(&b, "    - rationale: %s\n", src.Rationale)
+			}
 		}
 		if len(op.ArchiveTargets) > 0 {
 			fmt.Fprintf(&b, "- Archive Targets:\n")

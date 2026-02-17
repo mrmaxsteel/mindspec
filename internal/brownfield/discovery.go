@@ -29,6 +29,7 @@ type ClassificationEntry struct {
 	Category    string  `json:"category"`
 	Confidence  float64 `json:"confidence"`
 	Rule        string  `json:"rule"`
+	Rationale   string  `json:"rationale,omitempty"`
 	RequiresLLM bool    `json:"requires_llm"`
 }
 
@@ -40,6 +41,7 @@ type LLMConfig struct {
 }
 
 var claudeProbeFn = probeClaudeCLI
+var llmClassifyFn = classifyWithLLM
 
 type gitIgnoreChecker struct {
 	root    string
@@ -349,6 +351,14 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	}
 	report.LLM = ResolveLLMConfig()
 	report.Unresolved = unresolvedPaths(report.Classification)
+	if !opts.Apply && len(report.Unresolved) > 0 && report.LLM.Available {
+		updated, classifyErr := llmClassifyFn(root, report)
+		if classifyErr != nil {
+			return report, fmt.Errorf("migrate plan LLM classification failed: %w", classifyErr)
+		}
+		report.Classification = updated
+		report.Unresolved = unresolvedPaths(report.Classification)
+	}
 
 	if err := writeRunArtifacts(root, report, opts, stage, resumed); err != nil {
 		return nil, err
@@ -372,7 +382,7 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	}
 	if len(report.Unresolved) > 0 {
 		return report, fmt.Errorf(
-			"migrate apply blocked: %d low-confidence docs still require LLM classification; provider %q is configured but LLM classification calls are not implemented yet",
+			"migrate apply blocked: %d low-confidence docs remain unresolved in this plan (provider=%q); rerun 'mindspec migrate plan' after fixing LLM classification or reclassifying docs",
 			len(report.Unresolved),
 			report.LLM.Provider,
 		)
