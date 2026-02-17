@@ -1,0 +1,21 @@
+{
+  "run_id": "20260217T234919Z",
+  "valid": true,
+  "checks": [
+    {
+      "name": "extraction",
+      "status": "ok",
+      "message": "entries=3"
+    },
+    {
+      "name": "operations",
+      "status": "ok",
+      "message": "count=3"
+    },
+    {
+      "name": "integrity",
+      "status": "ok",
+      "message": "plan validation passed"
+    }
+  ]
+}

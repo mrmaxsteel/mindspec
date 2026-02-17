@@ -69,7 +69,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 
 Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4318`.
 
-**Full guide:** [docs/guides/agentmind.md](docs/guides/agentmind.md)
+**Full guide:** [.mindspec/docs/guides/agentmind.md](.mindspec/docs/guides/agentmind.md)
 
 ---
 
@@ -77,10 +77,10 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 
 | Goal | Guide |
 |:-----|:------|
-| **Full workflow with Claude Code** | [Claude Code guide](docs/guides/claude-code.md) |
-| **Full workflow with Codex** | [Codex guide](docs/guides/codex.md) |
-| **Visualize & benchmark agent activity** | [AgentMind guide](docs/guides/agentmind.md) |
-| **Complete reference** | [USAGE.md](docs/core/USAGE.md) |
+| **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/guides/claude-code.md) |
+| **Full workflow with Codex** | [Codex guide](.mindspec/docs/guides/codex.md) |
+| **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/guides/agentmind.md) |
+| **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
 
 ---
 
@@ -164,19 +164,12 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 ```
 your-project/
 ├── .mindspec/
+│   ├── docs/                   # Canonical docs (core, domains, adr, specs, guides)
+│   ├── policies.yml            # Canonical architecture policies
 │   └── state.json              # Current mode, active spec/bead (committed)
 ├── .beads/                     # Beads work graph (committed)
-├── docs/
-│   ├── core/                   # Architecture, modes, conventions, usage
-│   ├── domains/<name>/         # Domain-scoped documentation
-│   ├── adr/                    # Cross-cutting architecture decisions
-│   ├── specs/<id>/             # Specifications with plans and context packs
-│   ├── guides/                 # Quick start guides
-│   ├── context-map.md          # Bounded context relationships
-│   └── templates/              # Templates for specs, plans, ADRs
-├── architecture/
-│   └── policies.yml            # Machine-checkable architectural policies
-├── GLOSSARY.md                 # Term → doc section mapping
+├── docs_archive/               # Migration archive outputs by run-id
+├── AGENTS.md                   # Minimal bootstrap (points to CLI)
 └── CLAUDE.md                   # Minimal bootstrap (points to CLI)
 ```
 

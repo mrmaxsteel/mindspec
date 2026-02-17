@@ -1,0 +1,14 @@
+[
+  {
+    "path": "AGENTS.md",
+    "sha256": "6f37b4fee553670e7fd0e6eec8c20fd7592e133a89cdaae25de1545e03cfc1fa"
+  },
+  {
+    "path": "CLAUDE.md",
+    "sha256": "5c0e62d318d2a8cecb801c675cef8b7abca29d22fa035c82f385f2e3b77ca806"
+  },
+  {
+    "path": "README.md",
+    "sha256": "2d133b83ee7e3aae56ef57923130421ee9e2cf0943e8b9bb50b7b31c62ad8901"
+  }
+]

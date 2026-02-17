@@ -1,0 +1,74 @@
+{
+  "run_id": "20260217T234919Z",
+  "generated_at": "2026-02-17T23:49:19Z",
+  "llm": {
+    "provider": "claude-cli",
+    "model": "default",
+    "available": true
+  },
+  "operations": [
+    {
+      "id": "op-001",
+      "action": "update",
+      "target": ".mindspec/docs/user/AGENTS.md",
+      "sources": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "6f37b4fee553670e7fd0e6eec8c20fd7592e133a89cdaae25de1545e03cfc1fa",
+          "category": "user-docs",
+          "rule": "path-user-docs-operational",
+          "confidence": 0.85,
+          "requires_llm": false
+        }
+      ],
+      "archive_targets": [
+        "docs_archive/20260217T234919Z/AGENTS.md"
+      ],
+      "rationale": "AGENTS.md maps to .mindspec/docs/user/AGENTS.md via rule \"path-user-docs-operational\"; rationale: Deterministic classification rule matched source path/content.",
+      "confidence": 0.85,
+      "llm_used": false
+    },
+    {
+      "id": "op-002",
+      "action": "update",
+      "target": ".mindspec/docs/user/CLAUDE.md",
+      "sources": [
+        {
+          "path": "CLAUDE.md",
+          "sha256": "5c0e62d318d2a8cecb801c675cef8b7abca29d22fa035c82f385f2e3b77ca806",
+          "category": "user-docs",
+          "rule": "path-user-docs-operational",
+          "confidence": 0.85,
+          "requires_llm": false
+        }
+      ],
+      "archive_targets": [
+        "docs_archive/20260217T234919Z/CLAUDE.md"
+      ],
+      "rationale": "CLAUDE.md maps to .mindspec/docs/user/CLAUDE.md via rule \"path-user-docs-operational\"; rationale: Deterministic classification rule matched source path/content.",
+      "confidence": 0.85,
+      "llm_used": false
+    },
+    {
+      "id": "op-003",
+      "action": "update",
+      "target": ".mindspec/docs/user/README.md",
+      "sources": [
+        {
+          "path": "README.md",
+          "sha256": "2d133b83ee7e3aae56ef57923130421ee9e2cf0943e8b9bb50b7b31c62ad8901",
+          "category": "user-docs",
+          "rule": "path-user-docs-heuristic",
+          "confidence": 0.8,
+          "requires_llm": false
+        }
+      ],
+      "archive_targets": [
+        "docs_archive/20260217T234919Z/README.md"
+      ],
+      "rationale": "README.md maps to .mindspec/docs/user/README.md via rule \"path-user-docs-heuristic\"; rationale: Deterministic classification rule matched source path/content.",
+      "confidence": 0.8,
+      "llm_used": false
+    }
+  ]
+}
