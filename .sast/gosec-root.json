@@ -1,0 +1,5570 @@
+{
+	"Golang errors": {
+		"/Users/Max/Documents/mindspec/beads/beads.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			},
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/agent.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			},
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/ui (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/audit.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/audit (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/bootstrap.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/routing (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/close.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/hooks (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/compact.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			},
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/compact (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/config.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/spf13/viper (invalid package name: \"\")"
+			},
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/cmd/bd/doctor (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/syncbranch (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/cook.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/formula (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/create.go": [
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/debug (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/timeparsing (invalid package name: \"\")"
+			},
+			{
+				"line": 21,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/validation (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/create_form.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/charmbracelet/huh (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/backend.go": [
+			{
+				"line": 6,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/configfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/config_values.go": [
+			{
+				"line": 13,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/driver (invalid package name: \"\")"
+			},
+			{
+				"line": 14,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/embed (invalid package name: \"\")"
+			},
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/spf13/viper (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/database.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/cmd/bd/doctor/fix (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/deep.go": [
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/dolt.go": [
+			{
+				"line": 14,
+				"column": 4,
+				"error": "could not import github.com/dolthub/driver (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/doltutil (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/common.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/database_config.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/configfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/hooks.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/BurntSushi/toml (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/jsonl_integrity.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/locks.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/lockfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/maintenance.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/validation.go": [
+			{
+				"line": 11,
+				"column": 4,
+				"error": "could not import github.com/go-sql-driver/mysql (invalid package name: \"\")"
+			},
+			{
+				"line": 12,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/driver (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/embed (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/git.go": [
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/git (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/syncbranch (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/jsonl_integrity.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/kv.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/locks.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/lockfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/perf_dolt.go": [
+			{
+				"line": 17,
+				"column": 4,
+				"error": "could not import github.com/go-sql-driver/mysql (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor_artifacts.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/cmd/bd/doctor/fix (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor_fix.go": [
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import golang.org/x/term (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/doctor_health.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/configfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/find_duplicates.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/anthropics/anthropic-sdk-go (invalid package name: \"\")"
+			},
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/anthropics/anthropic-sdk-go/option (invalid package name: \"\")"
+			},
+			{
+				"line": 364,
+				"column": 12,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 377,
+				"column": 41,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 389,
+				"column": 48,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 389,
+				"column": 72,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 426,
+				"column": 43,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 429,
+				"column": 15,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 430,
+				"column": 4,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 430,
+				"column": 29,
+				"error": "undefined: anthropic"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/git (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/formula.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/BurntSushi/toml (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/gitlab.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/gitlab (invalid package name: \"\")"
+			},
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/tracker (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/jira.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/jira (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/linear.go": [
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/linear (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/list.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/fsnotify/fsnotify (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/main.go": [
+			{
+				"line": 25,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/molecules (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/migrate_dolt.go": [
+			{
+				"line": 21,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/driver (invalid package name: \"\")"
+			},
+			{
+				"line": 22,
+				"column": 4,
+				"error": "could not import github.com/ncruces/go-sqlite3/embed (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/prime.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/query.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/query (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/setup.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/cmd/bd/setup (invalid package name: \"\")"
+			},
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/recipes (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/setup/utils.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/cmd/bd/thanks.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/charmbracelet/lipgloss (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/examples/library-usage/main.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/gorilla/websocket (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads (invalid package name: \"\")"
+			},
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/rpc (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/audit/audit.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/beads/beads.go": [
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/configfile (invalid package name: \"\")"
+			},
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/git (invalid package name: \"\")"
+			},
+			{
+				"line": 18,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage (invalid package name: \"\")"
+			},
+			{
+				"line": 19,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 20,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/compact/compactor.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/compact/git.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/compact/haiku.go": [
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/anthropics/anthropic-sdk-go (invalid package name: \"\")"
+			},
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/anthropics/anthropic-sdk-go/option (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/audit (invalid package name: \"\")"
+			},
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			},
+			{
+				"line": 31,
+				"column": 17,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 32,
+				"column": 17,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 50,
+				"column": 12,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 59,
+				"column": 19,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 94,
+				"column": 12,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 97,
+				"column": 15,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 98,
+				"column": 4,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 98,
+				"column": 29,
+				"error": "undefined: anthropic"
+			},
+			{
+				"line": 153,
+				"column": 14,
+				"error": "undefined: anthropic"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/config/config.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/spf13/viper (invalid package name: \"\")"
+			},
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/debug (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/export/config.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/formula/parser.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/BurntSushi/toml (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/git/worktree.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/gitlab/fieldmapper.go": [
+			{
+				"line": 6,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/tracker (invalid package name: \"\")"
+			},
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/gitlab/tracker.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/hooks/hooks.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/jira/fieldmapper.go": [
+			{
+				"line": 6,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/tracker (invalid package name: \"\")"
+			},
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/jira/tracker.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/linear/client.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/linear/fieldmapper.go": [
+			{
+				"line": 4,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/tracker (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/linear/mapping.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/idgen (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/linear/tracker.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/lockfile/lock_shared_unix.go": [
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import golang.org/x/sys/unix (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/molecules/molecules.go": [
+			{
+				"line": 32,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/debug (invalid package name: \"\")"
+			},
+			{
+				"line": 33,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage (invalid package name: \"\")"
+			},
+			{
+				"line": 34,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 35,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/query/evaluator.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/timeparsing (invalid package name: \"\")"
+			},
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/recipes/recipes.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/BurntSushi/toml (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/routing/routes.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/access_lock.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/lockfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/bootstrap.go": [
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/config.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/credentials.go": [
+			{
+				"line": 19,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/embedded_uow.go": [
+			{
+				"line": 10,
+				"column": 11,
+				"error": "could not import github.com/dolthub/driver (invalid package name: \"\")"
+			},
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/doltutil (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/issues.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/idgen (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/migrations.go": [
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt/migrations (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/open.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/configfile (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/dolt/store.go": [
+			{
+				"line": 34,
+				"column": 2,
+				"error": "could not import github.com/cenkalti/backoff/v4 (invalid package name: \"\")"
+			},
+			{
+				"line": 37,
+				"column": 4,
+				"error": "could not import github.com/go-sql-driver/mysql (invalid package name: \"\")"
+			},
+			{
+				"line": 92,
+				"column": 31,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 94,
+				"column": 8,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 105,
+				"column": 30,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 106,
+				"column": 8,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 167,
+				"column": 9,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 173,
+				"column": 11,
+				"error": "undefined: backoff"
+			},
+			{
+				"line": 176,
+				"column": 5,
+				"error": "undefined: backoff"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/storage/storage.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/syncbranch/integrity.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/syncbranch/syncbranch.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/beads (invalid package name: \"\")"
+			},
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/config (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/git (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/testutil/fixtures/fixtures.go": [
+			{
+				"line": 14,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/timeparsing/parser.go": [
+			{
+				"line": 15,
+				"column": 2,
+				"error": "could not import github.com/olebedev/when (invalid package name: \"\")"
+			},
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/olebedev/when/rules/common (invalid package name: \"\")"
+			},
+			{
+				"line": 17,
+				"column": 2,
+				"error": "could not import github.com/olebedev/when/rules/en (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/tracker/engine.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/ui/markdown.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/charmbracelet/glamour (invalid package name: \"\")"
+			},
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import golang.org/x/term (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/ui/styles.go": [
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/charmbracelet/lipgloss (invalid package name: \"\")"
+			},
+			{
+				"line": 11,
+				"column": 2,
+				"error": "could not import github.com/muesli/termenv (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/utils/id_parser.go": [
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/storage/dolt (invalid package name: \"\")"
+			},
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			}
+		],
+		"/Users/Max/Documents/mindspec/beads/internal/validation/bead.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/types (invalid package name: \"\")"
+			},
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/steveyegge/beads/internal/utils (invalid package name: \"\")"
+			}
+		]
+	},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "338",
+				"url": "https://cwe.mitre.org/data/definitions/338.html"
+			},
+			"rule_id": "G404",
+			"details": "Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/tips.go",
+			"code": "56: \t\t// nolint:gosec,staticcheck // G404: deterministic seed via env var is intentional for testing\n57: \t\ttipRand = rand.New(rand.NewSource(seed))\n58: \t})\n",
+			"line": "57",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": null,
+			"rule_id": "G703",
+			"details": "Path traversal via taint analysis",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "164: \t\ttmpFile.Close()\n165: \t\tos.Remove(tmpFile.Name())\n166: \t\thttp.Error(w, \"failed to write temp file\", http.StatusInternalServerError)\n",
+			"line": "165",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "676",
+				"url": "https://cwe.mitre.org/data/definitions/676.html"
+			},
+			"rule_id": "G114",
+			"details": "Use of net/http serve function that has no support for setting timeouts",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "124: \n125: \tif err := http.ListenAndServe(addr, nil); err != nil {\n126: \t\tfmt.Fprintf(os.Stderr, \"Error starting server: %v\\n\", err)\n",
+			"line": "125",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/validate/docsync.go",
+			"code": "47: func getChangedFiles(ref string) ([]string, error) {\n48: \tout, err := exec.Command(\"git\", \"diff\", \"--name-only\", ref).Output()\n49: \tif err != nil {\n",
+			"line": "48",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/validate/beads.go",
+			"code": "9: func CheckBeadExists(id string) (bool, error) {\n10: \terr := exec.Command(\"bd\", \"show\", id, \"--json\").Run()\n11: \tif err != nil {\n",
+			"line": "10",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/state/validate.go",
+			"code": "204: func checkBeadStatus(beadID string) string {\n205: \tcmd := exec.Command(\"bd\", \"show\", beadID)\n206: \toutput, err := cmd.Output()\n",
+			"line": "205",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "36: func RemoveWorktree(repoRoot, wtPath string) error {\n37: \tcmd := exec.Command(\"git\", \"-C\", repoRoot, \"worktree\", \"remove\", \"--force\", wtPath)\n38: \tif out, err := cmd.CombinedOutput(); err != nil {\n",
+			"line": "37",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "27: func CheckoutWorktree(repoRoot, branch, wtPath string) error {\n28: \tcmd := exec.Command(\"git\", \"-C\", repoRoot, \"worktree\", \"add\", wtPath, branch)\n29: \tif out, err := cmd.CombinedOutput(); err != nil {\n",
+			"line": "28",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "18: \n19: \tcmd = exec.Command(\"git\", \"-C\", wtPath, \"checkout\", \"-b\", branch)\n20: \tif out, err := cmd.CombinedOutput(); err != nil {\n",
+			"line": "19",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "13: func CreateWorktree(repoRoot, branch, wtPath, commit string) error {\n14: \tcmd := exec.Command(\"git\", \"-C\", repoRoot, \"worktree\", \"add\", \"--detach\", wtPath, commit)\n15: \tif out, err := cmd.CombinedOutput(); err != nil {\n",
+			"line": "14",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "243: func hasCodeChanges(wtPath, baseCommit string) bool {\n244: \tcmd := exec.Command(\"git\", \"-C\", wtPath, \"diff\", \"--name-only\", baseCommit+\"..HEAD\")\n245: \tout, err := cmd.Output()\n",
+			"line": "244",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "233: func getCurrentCommit(wtPath string) string {\n234: \tcmd := exec.Command(\"git\", \"-C\", wtPath, \"rev-parse\", \"HEAD\")\n235: \tout, err := cmd.Output()\n",
+			"line": "234",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "165: \n166: \tcmd := exec.CommandContext(sessionCtx, \"claude\", args...)\n167: \tcmd.Dir = wtPath\n",
+			"line": "166",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "119: \texec.Command(\"git\", \"-C\", wtPath, \"add\", \"-A\").Run()                                                      //nolint:errcheck\n120: \texec.Command(\"git\", \"-C\", wtPath, \"commit\", \"-m\", \"bench: Session \"+label+\" output\", \"--no-verify\").Run() //nolint:errcheck\n121: }\n",
+			"line": "120",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "118: \n119: \texec.Command(\"git\", \"-C\", wtPath, \"add\", \"-A\").Run()                                                      //nolint:errcheck\n120: \texec.Command(\"git\", \"-C\", wtPath, \"commit\", \"-m\", \"bench: Session \"+label+\" output\", \"--no-verify\").Run() //nolint:errcheck\n",
+			"line": "119",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "112: \t// Check if there are changes\n113: \tcmd := exec.Command(\"git\", \"-C\", wtPath, \"status\", \"--porcelain\")\n114: \tout, err := cmd.Output()\n",
+			"line": "113",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "234: \t\tms := filepath.Join(cfg.RepoRoot, \"bin\", \"mindspec\")\n235: \t\tout, err := exec.Command(ms, \"trace\", \"summary\", tracePath).Output()\n236: \t\tif err == nil {\n",
+			"line": "235",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/qualitative.go",
+			"code": "86: \t\twtPath := filepath.Join(cfg.WorkDir, \"wt-\"+label)\n87: \t\tcmd := exec.Command(\"git\", \"-C\", wtPath, \"diff\", benchCommit, \"HEAD\",\n88: \t\t\t\"--\", \":(exclude).beads\", \":(exclude).mindspec\", \":(exclude)docs/specs\")\n89: \t\tout, err := cmd.Output()\n",
+			"line": "87-88",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/internal/agentmind/autostart.go",
+			"code": "52: \n53: \tcmd := exec.Command(binPath, args...)\n54: \tcmd.SysProcAttr = \u0026syscall.SysProcAttr{Setsid: true}\n",
+			"line": "53",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/utils/path.go",
+			"code": "139: \t\t// realpath on macOS returns the true filesystem case\n140: \t\tcmd := exec.Command(\"realpath\", path)\n141: \t\toutput, err := cmd.Output()\n",
+			"line": "140",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "969: func getRemoteForBranch(ctx context.Context, worktreePath, branch string) string {\n970: \tremoteCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"config\", \"--get\", fmt.Sprintf(\"branch.%s.remote\", branch))\n971: \tremoteOutput, err := remoteCmd.Output()\n",
+			"line": "970",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "952: \t// This handles all cases: regular repos, worktrees, bare repos\n953: \tcmd := exec.CommandContext(ctx, \"git\", \"-C\", repoRoot, \"rev-parse\", \"--git-common-dir\")\n954: \toutput, err := cmd.Output()\n",
+			"line": "953",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "861: \t\t// Push with explicit remote and branch, set upstream if not set\n862: \t\tcmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"push\", \"--set-upstream\", remote, branch)\n863: \t\t// Set BD_SYNC_IN_PROGRESS so pre-push hook knows to skip checks (GH#532)\n",
+			"line": "862",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "791: \t// Step 3: Reset worktree to remote's history (adopt their commit graph)\n792: \tresetCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"reset\", \"--hard\",\n793: \t\tfmt.Sprintf(\"%s/%s\", remote, branch))\n794: \tif output, err := resetCmd.CombinedOutput(); err != nil {\n",
+			"line": "792-793",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "782: \t// Step 1: Fetch latest from remote\n783: \tfetchCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"fetch\", remote, branch)\n784: \tif output, err := fetchCmd.CombinedOutput(); err != nil {\n",
+			"line": "783",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "747: \t// The worktree is internal to bd sync, so we don't need to run bd's pre-commit hook\n748: \tcommitCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"commit\", \"--no-verify\", \"-m\", message)\n749: \toutput, err := commitCmd.CombinedOutput()\n",
+			"line": "748",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "740: \t// Use --sparse to work correctly with sparse-checkout enabled worktrees (fixes #1076)\n741: \taddCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"add\", \"-f\", \"--sparse\", beadsRelDir)\n742: \tif err := addCmd.Run(); err != nil {\n",
+			"line": "741",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "724: \n725: \tcmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"status\", \"--porcelain\", relBeadsDir)\n726: \toutput, err := cmd.Output()\n",
+			"line": "725",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "716: \t\t}\n717: \t\tcmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"status\", \"--porcelain\", relPath)\n718: \t\toutput, err := cmd.Output()\n",
+			"line": "717",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "628: func extractJSONLFromCommit(ctx context.Context, worktreePath, commit, filePath string) ([]byte, error) {\n629: \tcmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"show\",\n630: \t\tfmt.Sprintf(\"%s:%s\", commit, filePath))\n631: \toutput, err := cmd.Output()\n",
+			"line": "629-630",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "593: \t// Reset worktree to remote's state\n594: \tresetCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"reset\", \"--hard\",\n595: \t\tfmt.Sprintf(\"%s/%s\", remote, syncBranch))\n596: \tif output, err := resetCmd.CombinedOutput(); err != nil {\n",
+			"line": "594-595",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "587: \t// Fetch from remote to get latest state\n588: \tfetchCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"fetch\", remote, syncBranch)\n589: \tif output, err := fetchCmd.CombinedOutput(); err != nil {\n",
+			"line": "588",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "531: \t// Fetch from remote to get latest state\n532: \tfetchCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"fetch\", remote, syncBranch)\n533: \tif output, err := fetchCmd.CombinedOutput(); err != nil {\n",
+			"line": "532",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "471: \t// --left-right --count gives us \"local\\tremote\"\n472: \tcmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"rev-list\",\n473: \t\t\"--left-right\", \"--count\",\n474: \t\tfmt.Sprintf(\"HEAD...%s/%s\", remote, branch))\n475: \toutput, err := cmd.Output()\n",
+			"line": "472-474",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "373: \t// Reset worktree to remote's history (adopt their commit graph)\n374: \tresetCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"reset\", \"--hard\",\n375: \t\tfmt.Sprintf(\"%s/%s\", remote, syncBranch))\n376: \tif output, err := resetCmd.CombinedOutput(); err != nil {\n",
+			"line": "374-375",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "340: \t\t// Simple fast-forward merge\n341: \t\tmergeCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"merge\", \"--ff-only\",\n342: \t\t\tfmt.Sprintf(\"%s/%s\", remote, syncBranch))\n343: \t\tif output, err := mergeCmd.CombinedOutput(); err != nil {\n",
+			"line": "341-342",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "306: \t// Step 1: Fetch from remote (don't pull - we handle merge ourselves)\n307: \tfetchCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"fetch\", remote, syncBranch)\n308: \tif output, err := fetchCmd.CombinedOutput(); err != nil {\n",
+			"line": "307",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "230: \tif remoteAhead \u003e 0 \u0026\u0026 localAhead == 0 {\n231: \t\tmergeCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"merge\", \"--ff-only\",\n232: \t\t\tfmt.Sprintf(\"%s/%s\", remote, branch))\n233: \t\tif output, err := mergeCmd.CombinedOutput(); err != nil {\n",
+			"line": "231-232",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "213: \t// Fetch from remote\n214: \tfetchCmd := exec.CommandContext(ctx, \"git\", \"-C\", worktreePath, \"fetch\", remote, branch)\n215: \tif output, err := fetchCmd.CombinedOutput(); err != nil {\n",
+			"line": "214",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/routing/routing.go",
+			"code": "11: var gitCommandRunner = func(repoPath string, args ...string) ([]byte, error) {\n12: \tcmd := exec.Command(\"git\", args...)\n13: \tif repoPath != \"\" {\n",
+			"line": "12",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/git/worktree.go",
+			"code": "109: \t// First, try to remove via git worktree remove\n110: \tcmd := exec.Command(\"git\", \"worktree\", \"remove\", worktreePath, \"--force\")\n111: \tcmd.Dir = wm.repoPath\n",
+			"line": "110",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/git/worktree.go",
+			"code": "88: \t// Now checkout the branch with sparse checkout active\n89: \tcheckoutCmd := exec.Command(\"git\", \"checkout\", branch)\n90: \tcheckoutCmd.Dir = worktreePath\n",
+			"line": "89",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/git/worktree.go",
+			"code": "71: \t\t// Create new branch\n72: \t\tcmd = exec.Command(\"git\", \"worktree\", \"add\", \"-f\", \"--no-checkout\", \"-b\", branch, worktreePath)\n73: \t}\n",
+			"line": "72",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/git/worktree.go",
+			"code": "68: \t\t// Checkout existing branch\n69: \t\tcmd = exec.Command(\"git\", \"worktree\", \"add\", \"-f\", \"--no-checkout\", worktreePath, branch)\n70: \t} else {\n",
+			"line": "69",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/git/gitdir.go",
+			"code": "234: \t\t// Use realpath to get canonical path with correct case\n235: \t\tcmd := exec.Command(\"realpath\", path)\n236: \t\toutput, err := cmd.Output()\n",
+			"line": "235",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/beads/context.go",
+			"code": "260: func (rc *RepoContext) GitCmdCWD(ctx context.Context, args ...string) *exec.Cmd {\n261: \tcmd := exec.CommandContext(ctx, \"git\", args...)\n262: \tif rc.CWDRepoRoot != \"\" {\n",
+			"line": "261",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/beads/context.go",
+			"code": "235: func (rc *RepoContext) GitCmd(ctx context.Context, args ...string) *exec.Cmd {\n236: \tcmd := exec.CommandContext(ctx, \"git\", args...)\n237: \tcmd.Dir = rc.RepoRoot\n",
+			"line": "236",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/beads/context.go",
+			"code": "207: func getRepoRootFromPath(path string) (string, error) {\n208: \tcmd := exec.Command(\"git\", \"-C\", path, \"rev-parse\", \"--show-toplevel\")\n209: \toutput, err := cmd.Output()\n",
+			"line": "208",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/beads/context.go",
+			"code": "172: func getGitCommonDirForPath(path string) (string, error) {\n173: \tcmd := exec.Command(\"git\", \"-C\", path, \"rev-parse\", \"--git-common-dir\")\n174: \toutput, err := cmd.Output()\n",
+			"line": "173",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "478: func gitCmdInDir(ctx context.Context, dir string, args ...string) *exec.Cmd {\n479: \tcmd := exec.CommandContext(ctx, \"git\", args...)\n480: \tcmd.Dir = dir\n",
+			"line": "479",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree.go",
+			"code": "21: func gitRevParse(flag string) string {\n22: \tout, err := exec.Command(\"git\", \"rev-parse\", flag).Output()\n23: \tif err != nil {\n",
+			"line": "22",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/restore.go",
+			"code": "151: func gitCheckout(ref string) error {\n152: \tcmd := exec.Command(\"git\", \"checkout\", ref)\n153: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "152",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/orphans.go",
+			"code": "22: var closeIssueRunner = func(issueID string) error {\n23: \tcmd := exec.Command(\"bd\", \"close\", issueID, \"--reason\", \"Implemented\")\n24: \treturn cmd.Run()\n",
+			"line": "23",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init.go",
+			"code": "1039: func setBeadsRole(role string) error {\n1040: \tcmd := exec.Command(\"git\", \"config\", \"beads.role\", role)\n1041: \treturn cmd.Run()\n",
+			"line": "1040",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/import.go",
+			"code": "562: \t// Use git diff to check if working tree differs from HEAD\n563: \tgitCmd := exec.Command(\"git\", \"diff\", \"--quiet\", \"HEAD\", \"--\", filePath)\n564: \tgitCmd.Dir = workDir\n",
+			"line": "563",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/gate_discover.go",
+			"code": "275: \n276: \tcmd := exec.Command(\"gh\", args...)\n277: \toutput, err := cmd.Output()\n",
+			"line": "276",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/gate.go",
+			"code": "790: \t// Call gt escalate if available\n791: \tescalateCmd := exec.Command(\"gt\", \"escalate\", topic, \"-s\", \"HIGH\", \"-m\", message)\n792: \tescalateCmd.Stdout = os.Stdout\n",
+			"line": "791",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/gate.go",
+			"code": "557: \n558: \tcmd := exec.Command(\"gh\", args...)\n559: \toutput, err := cmd.Output()\n",
+			"line": "558",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "111: func isForkProtectionDisabled(gitRoot string) bool {\n112: \tcmd := exec.Command(\"git\", \"-C\", gitRoot, \"config\", \"--get\", \"beads.fork-protection\")\n113: \tout, err := cmd.Output()\n",
+			"line": "112",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "97: func isForkOfBeads(gitRoot string) bool {\n98: \tcmd := exec.Command(\"git\", \"-C\", gitRoot, \"remote\", \"-v\")\n99: \tout, err := cmd.Output()\n",
+			"line": "98",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "69: func isUpstreamRepo(gitRoot string) bool {\n70: \tcmd := exec.Command(\"git\", \"-C\", gitRoot, \"remote\", \"get-url\", \"origin\")\n71: \tout, err := cmd.Output()\n",
+			"line": "70",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "273: \t// 's' = skip-worktree + assume-unchanged (lowercase due to assume-unchanged)\n274: \tcmd := exec.Command(\"git\", \"ls-files\", \"-v\", jsonlPath)\n275: \tcmd.Dir = path\n",
+			"line": "274",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "232: \t\t// Revert assume-unchanged if skip-worktree fails\n233: \t\trevertCmd := exec.Command(\"git\", \"update-index\", \"--no-assume-unchanged\", filePath)\n234: \t\trevertCmd.Dir = repoPath\n",
+			"line": "233",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "228: \n229: \tcmd = exec.Command(\"git\", \"update-index\", \"--skip-worktree\", filePath)\n230: \tcmd.Dir = repoPath\n",
+			"line": "229",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "222: \t// Set both git index flags (must be separate commands - git quirk)\n223: \tcmd = exec.Command(\"git\", \"update-index\", \"--assume-unchanged\", filePath)\n224: \tcmd.Dir = repoPath\n",
+			"line": "223",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "207: \t// Check if flags are already set (skip-worktree takes precedence in ls-files -v output)\n208: \tcmd = exec.Command(\"git\", \"ls-files\", \"-v\", filePath)\n209: \tcmd.Dir = repoPath\n",
+			"line": "208",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "199: \t// Check if file is tracked by git\n200: \tcmd := exec.Command(\"git\", \"ls-files\", \"--error-unmatch\", filePath)\n201: \tcmd.Dir = repoPath\n",
+			"line": "200",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "142: \t// Push the new branch\n143: \tcmd = exec.Command(\"git\", \"push\", \"--force-with-lease\", \"origin\", syncBranch)\n144: \tcmd.Dir = path\n",
+			"line": "143",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "135: \n136: \tcmd = exec.Command(\"git\", \"branch\", syncBranch, fmt.Sprintf(\"origin/%s\", mainBranch))\n137: \tcmd.Dir = path\n",
+			"line": "136",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "124: \tfmt.Printf(\"  Deleting local %s branch...\\n\", syncBranch)\n125: \tcmd = exec.Command(\"git\", \"branch\", \"-D\", syncBranch)\n126: \tcmd.Dir = path\n",
+			"line": "125",
+			"column": "8",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "103: \t\t// Push the reset branch\n104: \t\tcmd = exec.Command(\"git\", \"push\", \"--force-with-lease\", \"origin\", syncBranch)\n105: \t\tcmd.Dir = worktreePath\n",
+			"line": "104",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/config.go",
+			"code": "92: \t\t\t}\n93: \t\t\tcmd := exec.Command(\"git\", \"config\", \"beads.role\", value) //nolint:gosec // value is validated against allowlist above\n94: \t\t\tif err := cmd.Run(); err != nil {\n",
+			"line": "93",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "320: \t}\n321: \texec.Command(\"git\", \"-C\", cfg.RepoRoot, \"worktree\", \"prune\").Run() //nolint:errcheck\n322: }\n",
+			"line": "321",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "294: \t} else {\n295: \t\tcmd = exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"diff\", \"--cached\", \"--quiet\")\n296: \t\tif err := cmd.Run(); err != nil {\n",
+			"line": "295",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "290: \t// Check clean git tree\n291: \tcmd := exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"diff\", \"--quiet\")\n292: \tif err := cmd.Run(); err != nil {\n",
+			"line": "291",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "259: \t\tcommitMsg := fmt.Sprintf(\"bench(%s): add e2e benchmark results\", cfg.SpecID)\n260: \t\tcmd = exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"commit\", \"-m\", commitMsg, \"--no-verify\")\n261: \t\tcmd.Run() //nolint:errcheck\n",
+			"line": "260",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "256: \t\tbenchDir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)\n257: \t\tcmd := exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"add\", benchDir)\n258: \t\tcmd.Run() //nolint:errcheck\n",
+			"line": "257",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "54: \tif cfg.BenchCommit == \"\" {\n55: \t\tout, err := exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"rev-parse\", \"HEAD\").Output()\n56: \t\tif err != nil {\n",
+			"line": "55",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/import.go",
+			"code": "623: \t// Get file content from git HEAD and count lines in Go (no shell pipe)\n624: \tgitShowCmd := exec.Command(\"git\", \"show\", \"HEAD:\"+relPath) //nolint:gosec // relPath is from filepath.Rel, not user input\n625: \tgitShowCmd.Dir = workDir\n",
+			"line": "624",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/edit.go",
+			"code": "112: \t\teditorArgs := append(editorParts[1:], tmpPath)\n113: \t\teditorCmd := exec.Command(editorParts[0], editorArgs...) //nolint:gosec // G204: editor from trusted $EDITOR/$VISUAL env or known defaults\n114: \t\teditorCmd.Stdin = os.Stdin\n",
+			"line": "113",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "96: \n97: \t\tcmd = exec.Command(\"git\", \"reset\", \"--hard\", fmt.Sprintf(\"origin/%s\", mainBranch))\n98: \t\tcmd.Dir = worktreePath\n",
+			"line": "97",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G201",
+			"details": "SQL string formatting",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/storage/dolt/transaction.go",
+			"code": "204: \t// nolint:gosec // G201: setClauses contains only column names (e.g. \"status = ?\"), actual values passed via args\n205: \tquery := fmt.Sprintf(\"UPDATE issues SET %s WHERE id = ?\", strings.Join(setClauses, \", \"))\n206: \t_, err := t.tx.ExecContext(ctx, query, args...)\n",
+			"line": "205",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G201",
+			"details": "SQL string formatting",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/storage/dolt/issues.go",
+			"code": "341: \t// nolint:gosec // G201: setClauses contains only column names (e.g. \"status = ?\"), actual values passed via args\n342: \tquery := fmt.Sprintf(\"UPDATE issues SET %s WHERE id = ?\", strings.Join(setClauses, \", \"))\n343: \tif _, err := tx.ExecContext(ctx, query, args...); err != nil {\n",
+			"line": "342",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G201",
+			"details": "SQL string formatting",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/storage/dolt/history.go",
+			"code": "167: \t// nolint:gosec // G201: ref is validated by validateRef() above - AS OF requires literal\n168: \tquery := fmt.Sprintf(`\n169: \t\tSELECT id, content_hash, title, description, status, priority, issue_type, assignee, estimated_minutes,\n170: \t\t       created_at, created_by, owner, updated_at, closed_at\n171: \t\tFROM issues AS OF '%s'\n172: \t\tWHERE id = ?\n173: \t`, ref)\n174: \n",
+			"line": "168-173",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/codex_fallback.go",
+			"code": "45: \t}\n46: \tout, err := os.Create(outputPath)\n47: \tif err != nil {\n",
+			"line": "46",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/codex_fallback.go",
+			"code": "31: func ConvertCodexSessionFile(inputPath, outputPath string) (*CodexFallbackStats, error) {\n32: \tin, err := os.Open(inputPath)\n33: \tif err != nil {\n",
+			"line": "32",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/validate/spec.go",
+			"code": "25: \tspecPath := filepath.Join(root, \"docs\", \"specs\", specID, \"spec.md\")\n26: \tdata, err := os.ReadFile(specPath)\n27: \tif err != nil {\n",
+			"line": "26",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/validate/plan.go",
+			"code": "35: \tplanPath := filepath.Join(root, \"docs\", \"specs\", specID, \"plan.md\")\n36: \tdata, err := os.ReadFile(planPath)\n37: \tif err != nil {\n",
+			"line": "36",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/trace/tracer.go",
+			"code": "42: \t} else {\n43: \t\tf, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)\n44: \t\tif err != nil {\n",
+			"line": "43",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/state/validate.go",
+			"code": "178: func readPlanFrontmatterStatus(planPath string) string {\n179: \tf, err := os.Open(planPath)\n180: \tif err != nil {\n",
+			"line": "179",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/state/validate.go",
+			"code": "149: func readSpecApprovalStatus(specPath string) string {\n150: \tf, err := os.Open(specPath)\n151: \tif err != nil {\n",
+			"line": "150",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/state/state.go",
+			"code": "42: \tpath := workspace.StatePath(root)\n43: \tdata, err := os.ReadFile(path)\n44: \tif err != nil {\n",
+			"line": "43",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/specinit/specinit.go",
+			"code": "38: \ttemplatePath := filepath.Join(root, \"docs\", \"templates\", \"spec.md\")\n39: \ttmpl, err := os.ReadFile(templatePath)\n40: \tif err != nil {\n",
+			"line": "39",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/codex_bootstrap.go",
+			"code": "88: func readIfExists(path string) (string, error) {\n89: \tb, err := os.ReadFile(path)\n90: \tif err != nil {\n",
+			"line": "89",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/bootstrap.go",
+			"code": "20: \tvar settings map[string]any\n21: \tdata, err := os.ReadFile(settingsPath)\n22: \tif err != nil {\n",
+			"line": "21",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/next/mode.go",
+			"code": "106: \tspecPath := filepath.Join(root, \"docs\", \"specs\", specID, \"spec.md\")\n107: \tdata, err := os.ReadFile(specPath)\n108: \tif err != nil {\n",
+			"line": "107",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/instruct/instruct.go",
+			"code": "198: \tspecPath := filepath.Join(root, \"docs\", \"specs\", specID, \"spec.md\")\n199: \tdata, err := os.ReadFile(specPath)\n200: \tif err != nil {\n",
+			"line": "199",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/instruct/instruct.go",
+			"code": "172: \tplanPath := filepath.Join(root, \"docs\", \"specs\", specID, \"plan.md\")\n173: \tdata, err := os.ReadFile(planPath)\n174: \tif err != nil {\n",
+			"line": "173",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/glossary/section.go",
+			"code": "19: \tfullPath := filepath.Join(root, filePath)\n20: \tdata, err := os.ReadFile(fullPath)\n21: \tif err != nil {\n",
+			"line": "20",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/glossary/glossary.go",
+			"code": "29: \tglossaryPath := workspace.GlossaryPath(root)\n30: \tdata, err := os.ReadFile(glossaryPath)\n31: \tif err != nil {\n",
+			"line": "30",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/show.go",
+			"code": "40: \toverviewPath := filepath.Join(domainDir, \"overview.md\")\n41: \tif data, err := os.ReadFile(overviewPath); err == nil {\n42: \t\tcontent := string(data)\n",
+			"line": "41",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/scaffold.go",
+			"code": "68: \tcmPath := workspace.ContextMapPath(root)\n69: \tdata, err := os.ReadFile(cmPath)\n70: \tif err != nil {\n",
+			"line": "69",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/list.go",
+			"code": "29: func ParseBoundedContexts(path string) ([]BoundedContext, error) {\n30: \tf, err := os.Open(path)\n31: \tif err != nil {\n",
+			"line": "30",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/spec.go",
+			"code": "20: \tspecPath := filepath.Join(specDir, \"spec.md\")\n21: \tf, err := os.Open(specPath)\n22: \tif err != nil {\n",
+			"line": "21",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/policy.go",
+			"code": "26: func ParsePolicies(path string) ([]Policy, error) {\n27: \tdata, err := os.ReadFile(path)\n28: \tif err != nil {\n",
+			"line": "27",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/domaindoc.go",
+			"code": "31: func readFileOrEmpty(path string) string {\n32: \tdata, err := os.ReadFile(path)\n33: \tif err != nil {\n",
+			"line": "32",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/contextmap.go",
+			"code": "27: func ParseContextMap(path string) ([]Relationship, error) {\n28: \tf, err := os.Open(path)\n29: \tif err != nil {\n",
+			"line": "28",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "83: func stripHooks(settingsPath string) error {\n84: \tdata, err := os.ReadFile(settingsPath)\n85: \tif err != nil {\n",
+			"line": "84",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "360: func updateFrontmatterApproval(filePath string) {\n361: \tdata, err := os.ReadFile(filePath)\n362: \tif err != nil {\n",
+			"line": "361",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "321: \t// Session C: check MindSpec state and give workflow-appropriate prompt\n322: \tstateData, err := os.ReadFile(filepath.Join(wtPath, \".mindspec\", \"state.json\"))\n323: \tif err != nil {\n",
+			"line": "322",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "281: \t// Read MindSpec state\n282: \tstateData, err := os.ReadFile(filepath.Join(wtPath, \".mindspec\", \"state.json\"))\n283: \tif err != nil {\n",
+			"line": "282",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "210: func countEventsByLabel(path, label string) int {\n211: \tf, err := os.Open(path)\n212: \tif err != nil {\n",
+			"line": "211",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "57: \t// Create output file (append across retries)\n58: \toutFile, err := os.Create(outputPath)\n59: \tif err != nil {\n",
+			"line": "58",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/report.go",
+			"code": "110: func ExtractSessionIDs(path, label string) []string {\n111: \tf, err := os.Open(path)\n112: \tif err != nil {\n",
+			"line": "111",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/report.go",
+			"code": "67: func parseSessionFiltered(path, label, filterLabel string) (*Session, error) {\n68: \tf, err := os.Open(path)\n69: \tif err != nil {\n",
+			"line": "68",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/qualitative.go",
+			"code": "63: \t\t\tif !e.IsDir() \u0026\u0026 strings.HasSuffix(e.Name(), \".md\") {\n64: \t\t\t\tdata, err := os.ReadFile(filepath.Join(planDir, e.Name()))\n65: \t\t\t\tif err == nil {\n",
+			"line": "64",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/qualitative.go",
+			"code": "48: \tplanC := filepath.Join(cfg.WorkDir, \"wt-c\", \"docs\", \"specs\", specID, \"plan.md\")\n49: \tif data, err := os.ReadFile(planC); err == nil {\n50: \t\tplans[\"c\"] = string(data)\n",
+			"line": "49",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "166: \n167: \tout, err := os.Create(dst)\n168: \tif err != nil {\n",
+			"line": "167",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "160: func copyFile(src, dst string) {\n161: \tin, err := os.Open(src)\n162: \tif err != nil {\n",
+			"line": "161",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/approve/spec.go",
+			"code": "85: func updateSpecApproval(specPath, approvedBy string) error {\n86: \tdata, err := os.ReadFile(specPath)\n87: \tif err != nil {\n",
+			"line": "86",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/approve/plan.go",
+			"code": "78: func updatePlanApproval(planPath, approvedBy string) error {\n79: \tdata, err := os.ReadFile(planPath)\n80: \tif err != nil {\n",
+			"line": "79",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/supersede.go",
+			"code": "12: \toldPath := filepath.Join(root, \"docs\", \"adr\", oldID+\".md\")\n13: \tdata, err := os.ReadFile(oldPath)\n14: \tif err != nil {\n",
+			"line": "13",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/parse.go",
+			"code": "27: func ParseADR(path string) (ADR, error) {\n28: \tdata, err := os.ReadFile(path)\n29: \tif err != nil {\n",
+			"line": "28",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/create.go",
+			"code": "44: \ttmplPath := filepath.Join(root, \"docs\", \"templates\", \"adr.md\")\n45: \ttmplData, err := os.ReadFile(tmplPath)\n46: \tif err != nil {\n",
+			"line": "45",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/cmd/mindspec/record.go",
+			"code": "183: func countLines(path string) int {\n184: \tf, err := os.Open(path)\n185: \tif err != nil {\n",
+			"line": "184",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/cmd/mindspec/bench.go",
+			"code": "155: \t\tif promptFile != \"\" {\n156: \t\t\tdata, err := os.ReadFile(promptFile)\n157: \t\t\tif err != nil {\n",
+			"line": "156",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "696: \t\tworktreeSrcPath := filepath.Join(worktreeBeadsDir, filename)\n697: \t\tif fileData, err := os.ReadFile(worktreeSrcPath); err == nil {\n698: \t\t\tdstPath := filepath.Join(beadsDir, filename)\n",
+			"line": "697",
+			"column": "23",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/syncbranch/worktree.go",
+			"code": "682: \t// Copy JSONL from worktree to main repo\n683: \tdata, err := os.ReadFile(worktreeJSONLPath)\n684: \tif err != nil {\n",
+			"line": "683",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/routing/routes.go",
+			"code": "28: \troutesPath := filepath.Join(beadsDir, RoutesFileName)\n29: \tfile, err := os.Open(routesPath) //nolint:gosec // routesPath is constructed from known beadsDir\n30: \tif err != nil {\n",
+			"line": "29",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/config/yaml_config.go",
+			"code": "115: \t// Read existing config\n116: \tcontent, err := os.ReadFile(configPath) //nolint:gosec // configPath is from findProjectConfigYaml\n117: \tif err != nil {\n",
+			"line": "116",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/beads/beads.go",
+			"code": "40: \tredirectFile := filepath.Join(beadsDir, RedirectFileName)\n41: \tdata, err := os.ReadFile(redirectFile)\n42: \tif err != nil {\n",
+			"line": "41",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/audit/audit.go",
+			"code": "108: \n109: \tf, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) // nolint:gosec // intended permissions\n110: \tif err != nil {\n",
+			"line": "109",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "719: \n720: \tcontent, err := os.ReadFile(gitignorePath) //nolint:gosec // G304: gitignorePath from known repoRoot\n721: \tif err != nil {\n",
+			"line": "720",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "695: \t// Append entry\n696: \tf, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: .gitignore should be world-readable\n697: \tif err != nil {\n",
+			"line": "696",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "681: \t// Read existing content\n682: \tcontent, err := os.ReadFile(gitignorePath) //nolint:gosec // G304: gitignorePath from known repoRoot\n683: \tif err != nil \u0026\u0026 !os.IsNotExist(err) {\n",
+			"line": "682",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/mol_distill.go",
+			"code": "251: \t\t\ttestPath := filepath.Join(dir, \".write-test\")\n252: \t\t\tif f, err := os.Create(testPath); err == nil { //nolint:gosec // testPath is constructed from known search paths\n253: \t\t\t\t_ = f.Close()           // Best effort cleanup\n",
+			"line": "252",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/migrate.go",
+			"code": "761: \t// nolint:gosec // G304: src is validated migration backup path\n762: \tdata, err := os.ReadFile(src)\n763: \tif err != nil {\n",
+			"line": "762",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init_agent.go",
+			"code": "59: \t//nolint:gosec // G304: filename comes from hardcoded list in addLandingThePlaneInstructions\n60: \tcontent, err := os.ReadFile(filename)\n61: \tif os.IsNotExist(err) {\n",
+			"line": "60",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "138: \t// Open for append (create if doesn't exist)\n139: \tf, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: .git/info/exclude should be world-readable\n140: \tif err != nil {\n",
+			"line": "139",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "121: func isAlreadyExcluded(excludePath string) bool {\n122: \tcontent, err := os.ReadFile(excludePath) //nolint:gosec // G304: path is constructed from git root, not user input\n123: \tif err != nil {\n",
+			"line": "122",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/dolt.go",
+			"code": "358: \t\ttime.Now().UTC().Format(time.RFC3339), actor, key, value)\n359: \tf, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)\n360: \tif err != nil {\n",
+			"line": "359",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/sync_branch_jsonl.go",
+			"code": "118: func getSyncBranchFromYAML(beadsDir string) string {\n119: \tdata, err := os.ReadFile(filepath.Join(beadsDir, \"config.yaml\"))\n120: \tif err != nil {\n",
+			"line": "119",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/migration_validation.go",
+			"code": "397: func validateJSONLForMigration(jsonlPath string) (int, int, map[string]bool, error) {\n398: \tfile, err := os.Open(jsonlPath) //nolint:gosec\n399: \tif err != nil {\n",
+			"line": "398",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/legacy.go",
+			"code": "394: func countJSONLIssuesAndPrefix(jsonlPath string) (int, string) {\n395: \tfile, err := os.Open(jsonlPath) //nolint:gosec\n396: \tif err != nil {\n",
+			"line": "395",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/git.go",
+			"code": "868: \tpostMergePath := filepath.Join(hooksDir, \"post-merge\")\n869: \tcontent, err := os.ReadFile(postMergePath)\n870: \tif err != nil {\n",
+			"line": "869",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/git.go",
+			"code": "249: \t\thookPath := filepath.Join(hooksDir, hookName)\n250: \t\tcontent, err := os.ReadFile(hookPath)\n251: \t\tif err != nil {\n",
+			"line": "250",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/git.go",
+			"code": "199: \t\thookPath := filepath.Join(hooksDir, hookName)\n200: \t\tcontent, err := os.ReadFile(hookPath)\n201: \t\tif err != nil {\n",
+			"line": "200",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "321: \t// Append pattern\n322: \tf, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) // #nosec G302 -- .git/info/exclude needs to be readable\n323: \tif err != nil {\n",
+			"line": "322",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "312: \t// Check if pattern already exists (exact line match)\n313: \tcontent, _ := os.ReadFile(excludePath)\n314: \tlines := strings.Split(string(content), \"\\n\")\n",
+			"line": "313",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync.go",
+			"code": "179: \t// jsonlPath is safe: constructed from filepath.Join(beadsDir, hardcoded name)\n180: \tfile, err := os.Open(jsonlPath) //nolint:gosec\n181: \tif err != nil {\n",
+			"line": "180",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/database.go",
+			"code": "599: \t// jsonlPath is safe: constructed from filepath.Join(beadsDir, hardcoded name)\n600: \tfile, err := os.Open(jsonlPath) //nolint:gosec\n601: \tif err != nil {\n",
+			"line": "600",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/detect_pollution.go",
+			"code": "260: \t// nolint:gosec // G304: path is provided by user as explicit backup location\n261: \tfile, err := os.Create(path)\n262: \tif err != nil {\n",
+			"line": "261",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/create.go",
+			"code": "750: \t// Open temp file for writing\n751: \ttempFile, err := os.Create(tempPath) //nolint:gosec // tempPath is safely constructed from jsonlPath\n752: \tif err != nil {\n",
+			"line": "751",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "63: \n64: \ts.server = \u0026http.Server{\n65: \t\tAddr:    fmt.Sprintf(\":%d\", s.port),\n66: \t\tHandler: mux,\n67: \t}\n68: \n",
+			"line": "64-67",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/live.go",
+			"code": "65: \n66: \tl.server = \u0026http.Server{\n67: \t\tAddr:    fmt.Sprintf(\":%d\", l.otlpPort),\n68: \t\tHandler: mux,\n69: \t}\n70: \n",
+			"line": "66-69",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "55: \n56: \tc.server = \u0026http.Server{\n57: \t\tAddr:    fmt.Sprintf(\":%d\", c.port),\n58: \t\tHandler: mux,\n59: \t}\n60: \n",
+			"line": "56-59",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Exported struct field \"Password\" (JSON key \"Password\") matches secret pattern",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/storage/versioned.go",
+			"code": "54: \tUsername    string     // SQL username for authentication\n55: \tPassword    string     // Password (decrypted, not stored directly)\n56: \tSovereignty string     // Sovereignty tier: T1, T2, T3, T4\n",
+			"line": "55",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Exported struct field \"APIToken\" (JSON key \"APIToken\") matches secret pattern",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/jira/client.go",
+			"code": "87: \tUsername   string\n88: \tAPIToken   string\n89: \tHTTPClient *http.Client\n",
+			"line": "88",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Exported struct field \"APIKey\" (JSON key \"APIKey\") matches secret pattern",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/linear/types.go",
+			"code": "32: type Client struct {\n33: \tAPIKey     string\n34: \tTeamID     string\n",
+			"line": "33",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Exported struct field \"APIKey\" (JSON key \"APIKey\") matches secret pattern",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/compact/compactor.go",
+			"code": "17: type Config struct {\n18: \tAPIKey       string\n19: \tConcurrency  int\n",
+			"line": "18",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/live.go",
+			"code": "55: \tif l.outputPath != \"\" {\n56: \t\tf, err := os.OpenFile(l.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)\n57: \t\tif err != nil {\n",
+			"line": "56",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/trace/tracer.go",
+			"code": "42: \t} else {\n43: \t\tf, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)\n44: \t\tif err != nil {\n",
+			"line": "43",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/markers.go",
+			"code": "34: \n35: \tf, err := os.OpenFile(EventsPath(root, specID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)\n36: \tif err != nil {\n",
+			"line": "35",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "42: \tif c.appendMode {\n43: \t\tf, err = os.OpenFile(c.output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)\n44: \t} else {\n",
+			"line": "43",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/audit/audit.go",
+			"code": "108: \n109: \tf, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) // nolint:gosec // intended permissions\n110: \tif err != nil {\n",
+			"line": "109",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "695: \t// Append entry\n696: \tf, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: .gitignore should be world-readable\n697: \tif err != nil {\n",
+			"line": "696",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "138: \t// Open for append (create if doesn't exist)\n139: \tf, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: .git/info/exclude should be world-readable\n140: \tif err != nil {\n",
+			"line": "139",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/codex_fallback.go",
+			"code": "42: \n43: \tif err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {\n44: \t\treturn nil, fmt.Errorf(\"creating output dir: %w\", err)\n",
+			"line": "43",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/state/state.go",
+			"code": "61: \tdir := workspace.MindspecDir(root)\n62: \tif err := os.MkdirAll(dir, 0755); err != nil {\n63: \t\treturn fmt.Errorf(\"creating .mindspec directory: %w\", err)\n",
+			"line": "62",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/specinit/specinit.go",
+			"code": "48: \t// Create directory and write spec\n49: \tif err := os.MkdirAll(specDir, 0755); err != nil {\n50: \t\treturn fmt.Errorf(\"creating spec directory: %w\", err)\n",
+			"line": "49",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/recording.go",
+			"code": "12: \tdir := RecordingDir(root, specID)\n13: \tif err := os.MkdirAll(dir, 0755); err != nil {\n14: \t\treturn fmt.Errorf(\"creating recording dir: %w\", err)\n",
+			"line": "13",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/manifest.go",
+			"code": "64: \tdir := RecordingDir(root, specID)\n65: \tif err := os.MkdirAll(dir, 0755); err != nil {\n66: \t\treturn fmt.Errorf(\"creating recording dir: %w\", err)\n",
+			"line": "65",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/codex_bootstrap.go",
+			"code": "72: \n73: \tif err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {\n74: \t\treturn result, fmt.Errorf(\"creating codex config dir: %w\", err)\n",
+			"line": "73",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/bootstrap.go",
+			"code": "62: \t// Write back\n63: \tif err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {\n64: \t\treturn false, fmt.Errorf(\"creating .claude dir: %w\", err)\n",
+			"line": "63",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/scaffold.go",
+			"code": "27: \n28: \tif err := os.MkdirAll(domainDir, 0755); err != nil {\n29: \t\treturn fmt.Errorf(\"creating domain directory: %w\", err)\n",
+			"line": "28",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/builder.go",
+			"code": "266: \toutDir := filepath.Join(root, \"docs\", \"specs\", specID)\n267: \tif err := os.MkdirAll(outDir, 0o755); err != nil {\n268: \t\treturn fmt.Errorf(\"creating output dir: %w\", err)\n",
+			"line": "267",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bootstrap/bootstrap.go",
+			"code": "83: \t\t\t\t// Ensure parent dir exists\n84: \t\t\t\tif err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {\n85: \t\t\t\t\treturn nil, fmt.Errorf(\"creating parent for %s: %w\", item.path, err)\n",
+			"line": "84",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bootstrap/bootstrap.go",
+			"code": "71: \t\t\tif !dryRun {\n72: \t\t\t\tif err := os.MkdirAll(target, 0755); err != nil {\n73: \t\t\t\t\treturn nil, fmt.Errorf(\"creating %s: %w\", item.path, err)\n",
+			"line": "72",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "407: \tstateDir := filepath.Join(wtPath, \".mindspec\")\n408: \tos.MkdirAll(stateDir, 0755) //nolint:errcheck\n409: \n",
+			"line": "408",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "343: \tstateDir := filepath.Join(wtPath, \".mindspec\")\n344: \tos.MkdirAll(stateDir, 0755) //nolint:errcheck\n345: \n",
+			"line": "344",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "82: \n83: \tif err := os.MkdirAll(cfg.WorkDir, 0755); err != nil {\n84: \t\treturn fmt.Errorf(\"creating work dir: %w\", err)\n",
+			"line": "83",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "21: \tdir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)\n22: \tif err := os.MkdirAll(dir, 0755); err != nil {\n23: \t\treturn fmt.Errorf(\"creating benchmark dir: %w\", err)\n",
+			"line": "22",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/create.go",
+			"code": "63: \tadrDir := filepath.Join(root, \"docs\", \"adr\")\n64: \tif err := os.MkdirAll(adrDir, 0o755); err != nil {\n65: \t\treturn \"\", fmt.Errorf(\"creating ADR directory: %w\", err)\n",
+			"line": "64",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/testutil/tmpfs.go",
+			"code": "29: \t\t\ttmpBase := filepath.Join(\"/dev/shm\", \"beads-test\")\n30: \t\t\tif err := os.MkdirAll(tmpBase, 0755); err == nil {\n31: \t\t\t\tbaseDir = tmpBase\n",
+			"line": "30",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/recipes/recipes.go",
+			"code": "208: \t// Ensure directory exists\n209: \tif err := os.MkdirAll(beadsDir, 0o755); err != nil {\n210: \t\treturn fmt.Errorf(\"create beads dir: %w\", err)\n",
+			"line": "209",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "199: \tworktreeBeadsDir := filepath.Join(worktreePath, \".beads\")\n200: \tif err := os.MkdirAll(worktreeBeadsDir, 0755); err != nil {\n201: \t\tcleanupWorktree()\n",
+			"line": "200",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/setup.go",
+			"code": "227: \tif dir != \".\" \u0026\u0026 dir != \"\" {\n228: \t\tif err := os.MkdirAll(dir, 0o755); err != nil {\n229: \t\t\tfmt.Fprintf(os.Stderr, \"Error: create directory: %v\\n\", err)\n",
+			"line": "228",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/setup.go",
+			"code": "128: \tif dir != \".\" \u0026\u0026 dir != \"\" {\n129: \t\tif err := os.MkdirAll(dir, 0o755); err != nil {\n130: \t\t\treturn fmt.Errorf(\"create directory: %w\", err)\n",
+			"line": "129",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/mol_distill.go",
+			"code": "248: \t\t// Try to create the directory if it doesn't exist\n249: \t\tif err := os.MkdirAll(dir, 0755); err == nil {\n250: \t\t\t// Check if we can write to it\n",
+			"line": "249",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/mol_distill.go",
+			"code": "185: \tdir := filepath.Dir(outputPath)\n186: \tif err := os.MkdirAll(dir, 0755); err != nil {\n187: \t\tfmt.Fprintf(os.Stderr, \"Error creating directory %s: %v\\n\", dir, err)\n",
+			"line": "186",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/main_daemon.go",
+			"code": "33: \tdaemonDir := filepath.Join(townRoot, \"daemon\")\n34: \tif err := os.MkdirAll(daemonDir, 0755); err != nil {\n35: \t\treturn\n",
+			"line": "34",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init_stealth.go",
+			"code": "257: \t\t\t// Ensure config directory exists\n258: \t\t\tif err := os.MkdirAll(configDir, 0755); err != nil {\n259: \t\t\t\treturn fmt.Errorf(\"failed to create git config directory: %w\", err)\n",
+			"line": "258",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init_stealth.go",
+			"code": "125: \t// Ensure info directory exists\n126: \tif err := os.MkdirAll(filepath.Join(gitDirPath, \"info\"), 0755); err != nil {\n127: \t\treturn fmt.Errorf(\"failed to create git info directory: %w\", err)\n",
+			"line": "126",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init_stealth.go",
+			"code": "56: \tinfoDir := filepath.Join(gitDirPath, \"info\")\n57: \tif err := os.MkdirAll(infoDir, 0755); err != nil {\n58: \t\treturn fmt.Errorf(\"failed to create git info directory: %w\", err)\n",
+			"line": "57",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init_agent.go",
+			"code": "121: \t// Create .claude directory if it doesn't exist\n122: \tif err := os.MkdirAll(claudeDir, 0755); err != nil {\n123: \t\treturn fmt.Errorf(\"failed to create .claude directory: %w\", err)\n",
+			"line": "122",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/hooks.go",
+			"code": "367: \t// Create hooks directory if it doesn't exist\n368: \tif err := os.MkdirAll(hooksDir, 0755); err != nil {\n369: \t\treturn fmt.Errorf(\"failed to create hooks directory: %w\", err)\n",
+			"line": "368",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/fork_protection.go",
+			"code": "133: \tdir := filepath.Dir(excludePath)\n134: \tif err := os.MkdirAll(dir, 0755); err != nil {\n135: \t\treturn err\n",
+			"line": "134",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/export.go",
+			"code": "480: \t\t\t// Ensure output directory exists\n481: \t\t\tif err := os.MkdirAll(dir, 0755); err != nil {\n482: \t\t\t\tfmt.Fprintf(os.Stderr, \"Error creating output directory: %v\\n\", err)\n",
+			"line": "481",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/fix/sync_branch.go",
+			"code": "307: \t// Create info directory if needed\n308: \tif err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {\n309: \t\treturn fmt.Errorf(\"failed to create info directory: %w\", err)\n",
+			"line": "308",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/state/state.go",
+			"code": "74: \tpath := workspace.StatePath(root)\n75: \tif err := os.WriteFile(path, data, 0644); err != nil {\n76: \t\treturn fmt.Errorf(\"writing state file: %w\", err)\n",
+			"line": "75",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/specinit/specinit.go",
+			"code": "52: \tspecPath := filepath.Join(specDir, \"spec.md\")\n53: \tif err := os.WriteFile(specPath, []byte(content), 0644); err != nil {\n54: \t\treturn fmt.Errorf(\"writing spec file: %w\", err)\n",
+			"line": "53",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/manifest.go",
+			"code": "72: \tdata = append(data, '\\n')\n73: \treturn os.WriteFile(ManifestPath(root, specID), data, 0644)\n74: }\n",
+			"line": "73",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/codex_bootstrap.go",
+			"code": "79: \t}\n80: \tif err := os.WriteFile(configPath, []byte(updated), 0644); err != nil {\n81: \t\treturn result, fmt.Errorf(\"writing codex config: %w\", err)\n",
+			"line": "80",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/recording/bootstrap.go",
+			"code": "70: \tout = append(out, '\\n')\n71: \tif err := os.WriteFile(settingsPath, out, 0644); err != nil {\n72: \t\treturn false, fmt.Errorf(\"writing settings.local.json: %w\", err)\n",
+			"line": "71",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/scaffold.go",
+			"code": "122: \n123: \tif err := os.WriteFile(cmPath, []byte(content), 0644); err != nil {\n124: \t\treturn fmt.Errorf(\"writing context map: %w\", err)\n",
+			"line": "123",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/domain/scaffold.go",
+			"code": "42: \t\tpath := filepath.Join(domainDir, filename)\n43: \t\tif err := os.WriteFile(path, []byte(content), 0644); err != nil {\n44: \t\t\treturn fmt.Errorf(\"writing %s: %w\", filename, err)\n",
+			"line": "43",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/contextpack/builder.go",
+			"code": "270: \toutPath := filepath.Join(outDir, \"context-pack.md\")\n271: \treturn os.WriteFile(outPath, []byte(cp.Render()), 0o644)\n272: }\n",
+			"line": "271",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bootstrap/bootstrap.go",
+			"code": "90: \t\t\t\t}\n91: \t\t\t\tif err := os.WriteFile(target, []byte(content), 0644); err != nil {\n92: \t\t\t\t\treturn nil, fmt.Errorf(\"writing %s: %w\", item.path, err)\n",
+			"line": "91",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "101: \n102: \treturn os.WriteFile(settingsPath, out, 0644)\n103: }\n",
+			"line": "102",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "418: \tdata = append(data, '\\n')\n419: \tos.WriteFile(filepath.Join(stateDir, \"state.json\"), data, 0644) //nolint:errcheck\n420: }\n",
+			"line": "419",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "401: \n402: \tos.WriteFile(filePath, []byte(content), 0644) //nolint:errcheck\n403: }\n",
+			"line": "402",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "354: \tdata = append(data, '\\n')\n355: \tos.WriteFile(filepath.Join(stateDir, \"state.json\"), data, 0644) //nolint:errcheck\n356: }\n",
+			"line": "355",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "70: \t\tname := fmt.Sprintf(\"diff-%s.patch\", label)\n71: \t\tos.WriteFile(filepath.Join(dir, name), []byte(content), 0644) //nolint:errcheck\n72: \t}\n",
+			"line": "71",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "60: \t\tname := fmt.Sprintf(\"plan-%s.md\", label)\n61: \t\tos.WriteFile(filepath.Join(dir, name), []byte(content), 0644) //nolint:errcheck\n62: \t}\n",
+			"line": "61",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "33: \tif qual != nil \u0026\u0026 qual.Improvements != \"\" {\n34: \t\tif err := os.WriteFile(filepath.Join(dir, \"improvements.md\"), []byte(qual.Improvements+\"\\n\"), 0644); err != nil {\n35: \t\t\treturn fmt.Errorf(\"writing improvements.md: %w\", err)\n",
+			"line": "34",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "27: \treport := assembleReportMD(cfg, results, quantReport, qual, traceSummary)\n28: \tif err := os.WriteFile(filepath.Join(dir, \"report.md\"), []byte(report), 0644); err != nil {\n29: \t\treturn fmt.Errorf(\"writing report.md: %w\", err)\n",
+			"line": "28",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/approve/spec.go",
+			"code": "129: \toutput := strings.Join(result, \"\\n\")\n130: \treturn os.WriteFile(specPath, []byte(output), 0644)\n131: }\n",
+			"line": "130",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/approve/plan.go",
+			"code": "137: \n138: \treturn os.WriteFile(planPath, []byte(output), 0644)\n139: }\n",
+			"line": "138",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/supersede.go",
+			"code": "34: \n35: \treturn os.WriteFile(oldPath, []byte(updated), 0o644)\n36: }\n",
+			"line": "35",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/internal/adr/create.go",
+			"code": "68: \toutPath := filepath.Join(adrDir, fmt.Sprintf(\"ADR-%s.md\", id))\n69: \tif err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {\n70: \t\treturn \"\", fmt.Errorf(\"writing ADR file: %w\", err)\n",
+			"line": "69",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/internal/audit/audit.go",
+			"code": "75: \t// nolint:gosec // JSONL is intended to be shared via git across clones/tools.\n76: \tif err := os.WriteFile(p, []byte{}, 0644); err != nil {\n77: \t\treturn \"\", fmt.Errorf(\"failed to create interactions log: %w\", err)\n",
+			"line": "76",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/worktree_cmd.go",
+			"code": "745: \n746: \treturn os.WriteFile(gitignorePath, []byte(strings.Join(newLines, \"\\n\")), 0644) //nolint:gosec // G306: .gitignore should be world-readable\n747: }\n",
+			"line": "746",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/reset.go",
+			"code": "337: \t//nolint:gosec // G306: .gitattributes must be world-readable (0644)\n338: \treturn os.WriteFile(\".gitattributes\", []byte(newContent), 0644)\n339: }\n",
+			"line": "338",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/migrate.go",
+			"code": "766: \t// nolint:gosec // G306: backup file needs to be readable by other tools\n767: \treturn os.WriteFile(dst, data, 0644)\n768: }\n",
+			"line": "767",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/main_daemon.go",
+			"code": "63: \t// nolint:gosec // G306: 0644 is appropriate for a status file\n64: \tif err := os.WriteFile(tmpPath, data, 0644); err != nil {\n65: \t\treturn\n",
+			"line": "64",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init.go",
+			"code": "325: \t\t\t\t\t// nolint:gosec // G306: JSONL file needs to be readable by other tools\n326: \t\t\t\t\tif writeErr := os.WriteFile(jsonlPath, []byte{}, 0644); writeErr != nil {\n327: \t\t\t\t\t\tfmt.Fprintf(os.Stderr, \"Error: failed to create issues.jsonl: %v\\n\", writeErr)\n",
+			"line": "326",
+			"column": "21",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init.go",
+			"code": "288: \t\t\t\t// nolint:gosec // G306: JSONL file needs to be readable by other tools\n289: \t\t\t\tif err := os.WriteFile(interactionsPath, []byte{}, 0644); err != nil {\n290: \t\t\t\t\tfmt.Fprintf(os.Stderr, \"Warning: failed to create interactions.jsonl: %v\\n\", err)\n",
+			"line": "289",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init.go",
+			"code": "238: \t\t\t\t\t// nolint:gosec // G306: JSONL file needs to be readable by other tools\n239: \t\t\t\t\tif err := os.WriteFile(interactionsPath, []byte{}, 0644); err != nil {\n240: \t\t\t\t\t\tfmt.Fprintf(os.Stderr, \"Error: failed to create interactions.jsonl: %v\\n\", err)\n",
+			"line": "239",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/init.go",
+			"code": "228: \t\t\t\t\t// nolint:gosec // G306: JSONL file needs to be readable by other tools\n229: \t\t\t\t\tif err := os.WriteFile(jsonlPath, []byte{}, 0644); err != nil {\n230: \t\t\t\t\t\tfmt.Fprintf(os.Stderr, \"Error: failed to create issues.jsonl: %v\\n\", err)\n",
+			"line": "229",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "255: \tw.Header().Set(\"Content-Length\", strconv.Itoa(len(data)))\n256: \tw.Write(data) //nolint:errcheck\n257: }\n",
+			"line": "256",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "228: \tw.Header().Set(\"Content-Type\", \"application/json\")\n229: \tjson.NewEncoder(w).Encode(map[string]any{\n230: \t\t\"total\":  total,\n231: \t\t\"counts\": counts,\n232: \t}) //nolint:errcheck\n233: }\n",
+			"line": "229-232",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "210: \tw.WriteHeader(http.StatusOK)\n211: \tjson.NewEncoder(w).Encode(map[string]string{\"status\": \"started\"}) //nolint:errcheck\n212: }\n",
+			"line": "211",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "168: \t}\n169: \ttmpFile.Close()\n170: \ttmpPath := tmpFile.Name()\n",
+			"line": "169",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "164: \t\ttmpFile.Close()\n165: \t\tos.Remove(tmpFile.Name())\n166: \t\thttp.Error(w, \"failed to write temp file\", http.StatusInternalServerError)\n",
+			"line": "165",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "163: \tif _, err := tmpFile.Write(body); err != nil {\n164: \t\ttmpFile.Close()\n165: \t\tos.Remove(tmpFile.Name())\n",
+			"line": "164",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/server.go",
+			"code": "128: \tw.Header().Set(\"Content-Type\", \"application/json\")\n129: \tjson.NewEncoder(w).Encode(map[string]string{\"status\": \"ok\"}) //nolint:errcheck\n130: }\n",
+			"line": "129",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/live.go",
+			"code": "156: \t\t\tdata = append(data, '\\n')\n157: \t\t\tl.outputFile.Write(data) //nolint:errcheck\n158: \t\t}\n",
+			"line": "157",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/live.go",
+			"code": "138: \tw.WriteHeader(http.StatusOK)\n139: \tw.Write([]byte(\"{}\")) //nolint:errcheck\n140: }\n",
+			"line": "139",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/live.go",
+			"code": "119: \tw.WriteHeader(http.StatusOK)\n120: \tw.Write([]byte(\"{}\")) //nolint:errcheck\n121: }\n",
+			"line": "120",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/viz/hub.go",
+			"code": "147: \t\tc.hub.unregister \u003c- c\n148: \t\tc.conn.Close(websocket.StatusNormalClosure, \"\")\n149: \t}()\n",
+			"line": "148",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/trace/tracer.go",
+			"code": "81: \tdefer t.mu.Unlock()\n82: \tt.w.Write(data) //nolint:errcheck\n83: }\n",
+			"line": "82",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "76: \t}\n77: \tos.RemoveAll(filepath.Join(wtPath, \"docs\"))\n78: \treturn nil\n",
+			"line": "77",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "58: \tfor _, cmd := range commands {\n59: \t\tos.Remove(filepath.Join(wtPath, \".claude\", \"commands\", cmd))\n60: \t}\n",
+			"line": "59",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "50: \t// Remove .mindspec/\n51: \tos.RemoveAll(filepath.Join(wtPath, \".mindspec\"))\n52: \n",
+			"line": "51",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/worktree.go",
+			"code": "47: \t// Remove CLAUDE.md\n48: \tos.Remove(filepath.Join(wtPath, \"CLAUDE.md\"))\n49: \n",
+			"line": "48",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "418: \tdata = append(data, '\\n')\n419: \tos.WriteFile(filepath.Join(stateDir, \"state.json\"), data, 0644) //nolint:errcheck\n420: }\n",
+			"line": "419",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "407: \tstateDir := filepath.Join(wtPath, \".mindspec\")\n408: \tos.MkdirAll(stateDir, 0755) //nolint:errcheck\n409: \n",
+			"line": "408",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "401: \n402: \tos.WriteFile(filePath, []byte(content), 0644) //nolint:errcheck\n403: }\n",
+			"line": "402",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "354: \tdata = append(data, '\\n')\n355: \tos.WriteFile(filepath.Join(stateDir, \"state.json\"), data, 0644) //nolint:errcheck\n356: }\n",
+			"line": "355",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "343: \tstateDir := filepath.Join(wtPath, \".mindspec\")\n344: \tos.MkdirAll(stateDir, 0755) //nolint:errcheck\n345: \n",
+			"line": "344",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "144: \t}\n145: \tconn.Close()\n146: \treturn fmt.Errorf(\"port %d is already in use\", port)\n",
+			"line": "145",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "130: \t\tif err == nil {\n131: \t\t\tconn.Close()\n132: \t\t\treturn nil\n",
+			"line": "131",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "119: \texec.Command(\"git\", \"-C\", wtPath, \"add\", \"-A\").Run()                                                      //nolint:errcheck\n120: \texec.Command(\"git\", \"-C\", wtPath, \"commit\", \"-m\", \"bench: Session \"+label+\" output\", \"--no-verify\").Run() //nolint:errcheck\n121: }\n",
+			"line": "120",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/session.go",
+			"code": "118: \n119: \texec.Command(\"git\", \"-C\", wtPath, \"add\", \"-A\").Run()                                                      //nolint:errcheck\n120: \texec.Command(\"git\", \"-C\", wtPath, \"commit\", \"-m\", \"bench: Session \"+label+\" output\", \"--no-verify\").Run() //nolint:errcheck\n",
+			"line": "119",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "320: \t}\n321: \texec.Command(\"git\", \"-C\", cfg.RepoRoot, \"worktree\", \"prune\").Run() //nolint:errcheck\n322: }\n",
+			"line": "321",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "317: \t\tif _, err := os.Stat(wtPath); err == nil {\n318: \t\t\tRemoveWorktree(cfg.RepoRoot, wtPath) //nolint:errcheck\n319: \t\t}\n",
+			"line": "318",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "260: \t\tcmd = exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"commit\", \"-m\", commitMsg, \"--no-verify\")\n261: \t\tcmd.Run() //nolint:errcheck\n262: \t}\n",
+			"line": "261",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/runner.go",
+			"code": "257: \t\tcmd := exec.Command(\"git\", \"-C\", cfg.RepoRoot, \"add\", benchDir)\n258: \t\tcmd.Run() //nolint:errcheck\n259: \t\tcommitMsg := fmt.Sprintf(\"bench(%s): add e2e benchmark results\", cfg.SpecID)\n",
+			"line": "258",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "172: \n173: \tio.Copy(out, in) //nolint:errcheck\n174: }\n",
+			"line": "173",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "70: \t\tname := fmt.Sprintf(\"diff-%s.patch\", label)\n71: \t\tos.WriteFile(filepath.Join(dir, name), []byte(content), 0644) //nolint:errcheck\n72: \t}\n",
+			"line": "71",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/markdown.go",
+			"code": "60: \t\tname := fmt.Sprintf(\"plan-%s.md\", label)\n61: \t\tos.WriteFile(filepath.Join(dir, name), []byte(content), 0644) //nolint:errcheck\n62: \t}\n",
+			"line": "61",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "337: \tvar n int64\n338: \tfmt.Sscanf(nanos, \"%d\", \u0026n)\n339: \tif n == 0 {\n",
+			"line": "338",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "325: \t\t\t}\n326: \t\t\tfmt.Sscanf(s, \"%d\", \u0026v)\n327: \t\t\tm[a.Key] = v\n",
+			"line": "326",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "142: \t\tdata = append(data, '\\n')\n143: \t\tc.w.Write(data) //nolint:errcheck\n144: \t\tc.count++\n",
+			"line": "143",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "125: \tw.WriteHeader(http.StatusOK)\n126: \tw.Write([]byte(\"{}\")) //nolint:errcheck\n127: }\n",
+			"line": "126",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "104: \tw.WriteHeader(http.StatusOK)\n105: \tw.Write([]byte(\"{}\")) //nolint:errcheck\n106: }\n",
+			"line": "105",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/bench/collector.go",
+			"code": "78: \tdefer cancel()\n79: \tc.server.Shutdown(shutCtx) //nolint:errcheck\n80: \n",
+			"line": "79",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/agentmind/autostart.go",
+			"code": "94: \t}\n95: \tresp.Body.Close()\n96: \t// Any response (even 405 Method Not Allowed) means the server is up\n",
+			"line": "95",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/agentmind/autostart.go",
+			"code": "79: \t\tif err == nil {\n80: \t\t\tconn.Close()\n81: \t\t\treturn nil\n",
+			"line": "80",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/agentmind/autostart.go",
+			"code": "63: \tpid := cmd.Process.Pid\n64: \tcmd.Process.Release() //nolint:errcheck\n65: \n",
+			"line": "64",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/internal/agentmind/autostart.go",
+			"code": "27: \t}\n28: \tconn.Close()\n29: \treturn true\n",
+			"line": "28",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "295: \tw.Header().Set(\"Content-Type\", \"application/json\")\n296: \tjson.NewEncoder(w).Encode(stats)\n297: }\n",
+			"line": "296",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "270: \tw.Header().Set(\"Content-Type\", \"application/json\")\n271: \tjson.NewEncoder(w).Encode(issues)\n272: }\n",
+			"line": "271",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "245: \tw.Header().Set(\"Content-Type\", \"application/json\")\n246: \tjson.NewEncoder(w).Encode(issue)\n247: }\n",
+			"line": "246",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "213: \tw.Header().Set(\"Content-Type\", \"application/json\")\n214: \tjson.NewEncoder(w).Encode(issues)\n215: }\n",
+			"line": "214",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/monitor-webui/main.go",
+			"code": "188: \tw.Header().Set(\"Content-Type\", \"text/html; charset=utf-8\")\n189: \tw.Write(data)\n190: }\n",
+			"line": "189",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "85: \t\tvar checkpoints int\n86: \t\trows.Scan(\u0026id, \u0026title, \u0026status, \u0026agent, \u0026checkpoints)\n87: \t\tagentStr := \"-\"\n",
+			"line": "86",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "66: \t// Complete\n67: \tdb.Exec(`UPDATE example_executions SET status='completed', completed_at=? WHERE id=?`, time.Now(), execID)\n68: \tstore.CloseIssue(ctx, issue.ID, \"Done\", \"demo-agent\", \"\")\n",
+			"line": "67",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "60: \t\tdata, _ := json.Marshal(map[string]interface{}{\"phase\": phase, \"time\": time.Now()})\n61: \t\tdb.Exec(`INSERT INTO example_checkpoints (execution_id, phase, checkpoint_data) VALUES (?, ?, ?)`,\n62: \t\t\texecID, phase, string(data))\n63: \t\tfmt.Printf(\"  ✓ %s\\n\", phase)\n",
+			"line": "61-62",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "37: \tdb.Exec(\"PRAGMA busy_timeout=5000\")\n38: \tdb.Exec(schema) // Initialize extension schema\n39: \n",
+			"line": "38",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "36: \tdb.Exec(\"PRAGMA journal_mode=WAL\")\n37: \tdb.Exec(\"PRAGMA busy_timeout=5000\")\n38: \tdb.Exec(schema) // Initialize extension schema\n",
+			"line": "37",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/examples/bd-example-extension-go/main.go",
+			"code": "35: \tdefer db.Close()\n36: \tdb.Exec(\"PRAGMA journal_mode=WAL\")\n37: \tdb.Exec(\"PRAGMA busy_timeout=5000\")\n",
+			"line": "36",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/Max/Documents/mindspec/beads/cmd/bd/doctor/dolt.go",
+			"code": "99: \tif _, err := db.ExecContext(ctx, \"USE beads\"); err != nil {\n100: \t\tdb.Close()\n101: \t\treturn nil, fmt.Errorf(\"failed to switch to beads database: %w\", err)\n",
+			"line": "100",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 444,
+		"lines": 117767,
+		"nosec": 207,
+		"found": 283
+	},
+	"GosecVersion": "dev"
+}
