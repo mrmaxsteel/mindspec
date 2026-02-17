@@ -84,6 +84,49 @@ func TestRun_ReportArtifactsAreDeterministic(t *testing.T) {
 	if !reflect.DeepEqual(first.Classification, second.Classification) {
 		t.Fatalf("classification mismatch across runs")
 	}
+
+	for _, runID := range []string{"run-a", "run-b"} {
+		for _, name := range []string{"inventory.json", "classification.json", "plan.json", "plan.md", "state.json"} {
+			if _, err := os.Stat(filepath.Join(root, ".mindspec", "migrations", runID, name)); err != nil {
+				t.Fatalf("expected artifact %s for %s: %v", name, runID, err)
+			}
+		}
+	}
+}
+
+func TestRun_ApplyFailsOnSourceDrift(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
+	t.Setenv("MINDSPEC_LLM_MODEL", "")
+
+	root := t.TempDir()
+	mk := func(rel, content string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	mk("docs/core/ARCHITECTURE.md", "# v1\n")
+	if _, err := Run(root, RunOptions{RunID: "drift-run"}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
+
+	mk("docs/core/ARCHITECTURE.md", "# v2\n")
+	_, err := Run(root, RunOptions{
+		Apply:       true,
+		ArchiveMode: "copy",
+		RunID:       "drift-run",
+		Resume:      true,
+	})
+	if err == nil {
+		t.Fatal("expected drift failure")
+	}
+	if !strings.Contains(err.Error(), "source drift detected") {
+		t.Fatalf("unexpected drift error: %v", err)
+	}
 }
 
 func TestRun_ApplyFailsWithoutLLMWhenUnresolvedExists(t *testing.T) {

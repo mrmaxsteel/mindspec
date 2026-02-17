@@ -324,6 +324,33 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
   }
 ]
 `)
+	write(".mindspec/migrations/run-1/plan.json", `{
+  "run_id":"run-1",
+  "generated_at":"2026-02-17T00:00:00Z",
+  "llm":{"provider":"off","model":"default","available":false},
+  "operations":[
+    {
+      "action":"create",
+      "target":".mindspec/docs/core/ARCHITECTURE.md",
+      "sources":[
+        {
+          "path":"docs/core/ARCHITECTURE.md",
+          "sha256":"abc",
+          "category":"core",
+          "rule":"path-contains-core",
+          "confidence":0.92,
+          "requires_llm":false
+        }
+      ],
+      "archive_targets":["docs_archive/run-1/docs/core/ARCHITECTURE.md"],
+      "rationale":"docs/core/ARCHITECTURE.md maps to .mindspec/docs/core/ARCHITECTURE.md via rule path-contains-core.",
+      "confidence":0.92,
+      "llm_used":false
+    }
+  ]
+}
+`)
+	write(".mindspec/migrations/run-1/plan.md", "# Migration Plan\n")
 	write(".mindspec/migrations/run-1/lineage.json", `[
   {
     "source":"docs/core/ARCHITECTURE.md",

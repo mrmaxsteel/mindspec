@@ -38,7 +38,7 @@ func checkMigrationMetadata(r *Report, root string) {
 		r.Checks = append(r.Checks, Check{
 			Name:    "docs_archive/",
 			Status:  Missing,
-			Message: "create docs_archive/<run-id>/... from brownfield apply",
+			Message: "create docs_archive/<run-id>/... from migrate apply",
 		})
 	}
 
@@ -47,7 +47,7 @@ func checkMigrationMetadata(r *Report, root string) {
 		r.Checks = append(r.Checks, Check{
 			Name:    manifestName,
 			Status:  Missing,
-			Message: "run brownfield apply to emit lineage manifest",
+			Message: "run migrate apply to emit lineage manifest",
 		})
 		return
 	}
@@ -84,7 +84,7 @@ func checkMigrationMetadata(r *Report, root string) {
 	})
 
 	runDir := filepath.Join(root, ".mindspec", "migrations", manifest.RunID)
-	required := []string{"inventory.json", "classification.json", "state.json", "lineage.json"}
+	required := []string{"inventory.json", "classification.json", "plan.json", "plan.md", "state.json", "lineage.json"}
 	for _, name := range required {
 		path := filepath.Join(runDir, name)
 		checkName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", manifest.RunID, name))

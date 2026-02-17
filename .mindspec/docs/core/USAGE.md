@@ -18,6 +18,10 @@ All agent operating guidance is emitted dynamically by `mindspec instruct` (run 
 
 If the project has not been set up yet, run `mindspec init` to scaffold the full directory structure, starter files (GLOSSARY.md, CLAUDE.md, context-map, policies, state), and domain templates. All creation is additive — existing files are never overwritten. After init, `mindspec doctor` should report zero errors.
 
+If the repository already contains docs and needs onboarding, use:
+1. `mindspec migrate plan` (analyze and generate reviewable migration plan artifacts)
+2. `mindspec migrate apply --run-id <id>` (apply that reviewed plan)
+
 ## Phase 0.5: Idle
 
 **State**: `mode: idle` (or no `.mindspec/state.json`)
@@ -277,6 +281,8 @@ Work is not complete until changes are committed.
 | Command | When to Use |
 |---------|-------------|
 | `mindspec init` | Bootstrap a new MindSpec project |
+| `mindspec migrate plan` | Generate migration plan artifacts for an existing repository |
+| `mindspec migrate apply --run-id <id>` | Apply a reviewed migration plan |
 | `mindspec instruct` | See current mode guidance (auto-runs on session start) |
 | `mindspec state show` | Check current mode, spec, and bead |
 | `mindspec validate spec <id>` | Pre-check spec quality before approval |

@@ -36,7 +36,7 @@ type LLMConfig struct {
 	Available bool   `json:"available"`
 }
 
-// RunOptions controls brownfield run behavior.
+// RunOptions controls migration run behavior.
 type RunOptions struct {
 	Apply       bool
 	ArchiveMode string
@@ -63,7 +63,7 @@ type migrationState struct {
 	UpdatedAt       string `json:"updated_at"`
 }
 
-// Report captures deterministic brownfield discovery output.
+// Report captures deterministic migration discovery output.
 type Report struct {
 	RunID          string                `json:"run_id"`
 	Mode           string                `json:"mode"`
@@ -89,7 +89,7 @@ func DiscoverMarkdown(root string) (*Report, error) {
 
 		if d.IsDir() {
 			name := d.Name()
-			// Skip VCS and bead internals from brownfield corpus discovery.
+			// Skip VCS and bead internals from migration corpus discovery.
 			if name == ".git" || name == ".beads" || name == ".claude" || name == "docs_archive" {
 				return filepath.SkipDir
 			}
@@ -153,7 +153,7 @@ func DiscoverMarkdown(root string) (*Report, error) {
 // FormatSummary renders a compact report summary.
 func (r *Report) FormatSummary() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Brownfield discovery report (run-id: %s)\n", r.RunID)
+	fmt.Fprintf(&b, "Migration report (run-id: %s)\n", r.RunID)
 	fmt.Fprintf(&b, "  Markdown files discovered: %d\n", len(r.MarkdownFiles))
 	if len(r.Classification) > 0 {
 		fmt.Fprintf(&b, "  Classified entries: %d\n", len(r.Classification))
@@ -233,7 +233,7 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	if opts.Apply {
 		report.Mode = "apply"
 	} else {
-		report.Mode = "dry-run"
+		report.Mode = "plan"
 	}
 	report.LLM = ResolveLLMConfig()
 	report.Unresolved = unresolvedPaths(report.Classification)
@@ -248,16 +248,19 @@ func Run(root string, opts RunOptions) (*Report, error) {
 	if stage == stageApplied {
 		return report, nil
 	}
+	if err := verifyApplyPlanAndSourceDrift(root, report); err != nil {
+		return report, err
+	}
 
 	if len(report.Unresolved) > 0 && !report.LLM.Available {
 		return report, fmt.Errorf(
-			"brownfield apply blocked: %d low-confidence docs require LLM classification, but no provider is configured (set MINDSPEC_LLM_PROVIDER and MINDSPEC_LLM_MODEL or re-run with --brownfield --dry-run)",
+			"migrate apply blocked: %d low-confidence docs require LLM classification, but no provider is configured (set MINDSPEC_LLM_PROVIDER and MINDSPEC_LLM_MODEL, rerun 'mindspec migrate plan', then apply)",
 			len(report.Unresolved),
 		)
 	}
 	if len(report.Unresolved) > 0 {
 		return report, fmt.Errorf(
-			"brownfield apply blocked: %d low-confidence docs still require LLM classification; provider %q is configured but LLM classification calls are not implemented yet",
+			"migrate apply blocked: %d low-confidence docs still require LLM classification; provider %q is configured but LLM classification calls are not implemented yet",
 			len(report.Unresolved),
 			report.LLM.Provider,
 		)
@@ -404,6 +407,9 @@ func writeRunArtifacts(root string, report *Report, opts RunOptions, stage strin
 		return err
 	}
 	if err := writeJSON(filepath.Join(runPath, "classification.json"), report.Classification); err != nil {
+		return err
+	}
+	if err := writePlanArtifacts(root, report); err != nil {
 		return err
 	}
 

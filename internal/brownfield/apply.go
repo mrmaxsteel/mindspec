@@ -74,7 +74,7 @@ func applyTransactional(root string, report *Report, opts RunOptions) error {
 	}
 
 	if len(lineage) == 0 {
-		return fmt.Errorf("brownfield apply produced no canonical targets from discovered markdown files")
+		return fmt.Errorf("migrate apply produced no canonical targets from discovered markdown files")
 	}
 
 	sort.Slice(lineage, func(i, j int) bool { return lineage[i].Source < lineage[j].Source })

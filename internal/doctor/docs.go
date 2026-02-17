@@ -59,7 +59,7 @@ func checkDocs(r *Report, root string) {
 	// Domain subdirectory checks
 	checkDomains(r, root, docsRel)
 
-	// Migration metadata checks (only when brownfield artifacts are present).
+	// Migration metadata checks (only when migration artifacts are present).
 	checkMigrationMetadata(r, root)
 }
 
