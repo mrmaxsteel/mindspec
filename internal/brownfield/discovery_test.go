@@ -31,8 +31,14 @@ func TestDiscoverMarkdown_DeterministicAndFiltered(t *testing.T) {
 	mk("notes/todo.txt")
 	mk(".git/ignored.md")
 	mk(".beads/internal.md")
+	mk("beads/README.md")
+	mk("worktree-demo/README.md")
+	mk("nested-repo/README.md")
 	mk(".claude/commands/spec-init.md")
 	mk("internal/instruct/templates/spec.md")
+	if err := os.WriteFile(filepath.Join(root, "nested-repo", ".git"), []byte("gitdir: /tmp/nested\n"), 0o644); err != nil {
+		t.Fatalf("write nested repo .git marker: %v", err)
+	}
 
 	got, err := DiscoverMarkdown(root)
 	if err != nil {
@@ -127,7 +133,7 @@ func TestRun_ApplyPromotesCanonicalAndArchivesSources(t *testing.T) {
 	mk("docs/specs/001-demo/spec.md", "# spec\n")
 	mk("docs/domains/core/overview.md", "# domain\n")
 	mk("docs/context-map.md", "# context map\n")
-	mk("GLOSSARY.md", "# glossary\n")
+	mk("GLOSSARY.md", "| Term | Target |\n|:-----|:-------|\n| **Arch** | [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md) |\n")
 	mk("architecture/policies.yml", "policies:\n  - id: x\n    reference: \"docs/core/ARCHITECTURE.md\"\n")
 
 	report, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "run-ok"})
@@ -162,12 +168,13 @@ func TestRun_ApplyPromotesCanonicalAndArchivesSources(t *testing.T) {
 		"docs/domains/core/overview.md",
 		"docs/context-map.md",
 		"GLOSSARY.md",
+		"architecture/policies.yml",
 	} {
 		archived := filepath.Join(root, "docs_archive", "run-ok", filepath.FromSlash(rel))
 		if _, statErr := os.Stat(archived); statErr != nil {
 			t.Fatalf("expected archived source %s: %v", rel, statErr)
 		}
-		// Copy mode keeps source.
+		// Copy mode keeps source files in place.
 		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); statErr != nil {
 			t.Fatalf("expected source to remain in copy mode %s: %v", rel, statErr)
 		}
@@ -179,6 +186,13 @@ func TestRun_ApplyPromotesCanonicalAndArchivesSources(t *testing.T) {
 	}
 	if !strings.Contains(string(policyBytes), "reference: \".mindspec/docs/core/ARCHITECTURE.md\"") {
 		t.Fatalf("expected canonicalized policy reference, got:\n%s", string(policyBytes))
+	}
+	glossaryBytes, err := os.ReadFile(filepath.Join(root, ".mindspec", "docs", "glossary.md"))
+	if err != nil {
+		t.Fatalf("read canonical glossary: %v", err)
+	}
+	if !strings.Contains(string(glossaryBytes), "(.mindspec/docs/core/ARCHITECTURE.md)") {
+		t.Fatalf("expected canonicalized glossary links, got:\n%s", string(glossaryBytes))
 	}
 
 	statePath := filepath.Join(root, ".mindspec", "migrations", "run-ok", "state.json")
@@ -240,6 +254,82 @@ func TestRun_ApplyPromotesUserDocsCategory(t *testing.T) {
 		if _, statErr := os.Stat(archived); statErr != nil {
 			t.Fatalf("expected archived user-doc source %s: %v", rel, statErr)
 		}
+	}
+}
+
+func TestRun_ApplyMoveRemovesLegacyDocsTree(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
+	t.Setenv("MINDSPEC_LLM_MODEL", "")
+
+	root := t.TempDir()
+	mk := func(rel, content string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	mk("docs/core/ARCHITECTURE.md", "# arch\n")
+	mk("docs/context-map.md", "# map\n")
+	mk("docs/specs/001-demo/spec.md", "# spec\n")
+	mk("docs/specs/001-demo/recording/manifest.json", "{\"ok\":true}\n")
+	mk("GLOSSARY.md", "# glossary\n")
+	mk("AGENTS.md", "# agent\n")
+	mk("architecture/policies.yml", "policies:\n  - id: x\n    reference: \"docs/core/ARCHITECTURE.md\"\n")
+
+	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "move", RunID: "run-move"}); err != nil {
+		t.Fatalf("apply move failed: %v", err)
+	}
+
+	// Legacy docs were moved out of place.
+	for _, rel := range []string{
+		"docs/core/ARCHITECTURE.md",
+		"docs/context-map.md",
+		"docs/specs/001-demo/spec.md",
+		"docs/specs/001-demo/recording/manifest.json",
+		"GLOSSARY.md",
+		"architecture/policies.yml",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("expected moved source %s to be absent, got err=%v", rel, err)
+		}
+	}
+
+	// Operational root docs are copied, not moved.
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("expected AGENTS.md to remain in place: %v", err)
+	}
+
+	// Legacy roots are pruned when emptied.
+	if _, err := os.Stat(filepath.Join(root, "docs")); !os.IsNotExist(err) {
+		t.Fatalf("expected docs/ root to be pruned, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "architecture")); !os.IsNotExist(err) {
+		t.Fatalf("expected architecture/ root to be pruned, got err=%v", err)
+	}
+
+	// Archive contains moved and copied sources.
+	for _, rel := range []string{
+		"docs/core/ARCHITECTURE.md",
+		"docs/context-map.md",
+		"docs/specs/001-demo/spec.md",
+		"docs/specs/001-demo/recording/manifest.json",
+		"GLOSSARY.md",
+		"AGENTS.md",
+		"architecture/policies.yml",
+	} {
+		archived := filepath.Join(root, "docs_archive", "run-move", filepath.FromSlash(rel))
+		if _, err := os.Stat(archived); err != nil {
+			t.Fatalf("expected archived source %s: %v", rel, err)
+		}
+	}
+
+	// Spec residual artifacts are migrated into canonical spec tree.
+	if _, err := os.Stat(filepath.Join(root, ".mindspec", "docs", "specs", "001-demo", "recording", "manifest.json")); err != nil {
+		t.Fatalf("expected canonical spec recording artifact: %v", err)
 	}
 }
 

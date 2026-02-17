@@ -99,6 +99,16 @@ func DiscoverMarkdown(root string) (*Report, error) {
 			if name == "docs" && filepath.Base(filepath.Dir(path)) == ".mindspec" {
 				return filepath.SkipDir
 			}
+			// Skip vendored/dependency repos and sibling worktree clones.
+			if name == "beads" || strings.HasPrefix(name, "worktree-") {
+				return filepath.SkipDir
+			}
+			if path != root {
+				gitMarker := filepath.Join(path, ".git")
+				if _, err := os.Stat(gitMarker); err == nil {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 

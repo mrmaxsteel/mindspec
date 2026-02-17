@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -44,8 +45,14 @@ func applyTransactional(root string, report *Report, opts RunOptions) error {
 
 		srcAbs := filepath.Join(root, filepath.FromSlash(c.Path))
 		dstAbs := filepath.Join(stagingRoot, filepath.FromSlash(canonical))
-		if err := copyFile(srcAbs, dstAbs); err != nil {
-			return fmt.Errorf("stage %s -> %s: %w", c.Path, canonical, err)
+		if c.Category == "glossary" {
+			if err := stageGlossary(srcAbs, dstAbs); err != nil {
+				return fmt.Errorf("stage glossary %s -> %s: %w", c.Path, canonical, err)
+			}
+		} else {
+			if err := copyFile(srcAbs, dstAbs); err != nil {
+				return fmt.Errorf("stage %s -> %s: %w", c.Path, canonical, err)
+			}
 		}
 
 		lineage = append(lineage, LineageEntry{
@@ -79,7 +86,7 @@ func applyTransactional(root string, report *Report, opts RunOptions) error {
 	if err := promoteCanonical(root, stagingRoot, report.RunID); err != nil {
 		return err
 	}
-	if err := archiveSources(root, lineage, opts.ArchiveMode); err != nil {
+	if err := archiveSources(root, lineage, opts.ArchiveMode, report.RunID); err != nil {
 		return err
 	}
 	if err := writeLineageManifest(root, report.RunID, lineage); err != nil {
@@ -156,6 +163,20 @@ func stagePolicyMigration(root, stagingRoot, runID string) (*LineageEntry, error
 	}, nil
 }
 
+func stageGlossary(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	rewritten := strings.ReplaceAll(string(data), "(docs/", "(.mindspec/docs/")
+	rewritten = strings.ReplaceAll(rewritten, "(./docs/", "(.mindspec/docs/")
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, []byte(rewritten), 0o644)
+}
+
 func promoteCanonical(root, stagingRoot, runID string) error {
 	targetMindspec := filepath.Join(root, ".mindspec")
 	targetDocs := filepath.Join(targetMindspec, "docs")
@@ -191,28 +212,175 @@ func promoteCanonical(root, stagingRoot, runID string) error {
 	return nil
 }
 
-func archiveSources(root string, lineage []LineageEntry, archiveMode string) error {
-	for _, entry := range lineage {
-		if entry.Category == "policy" {
-			// Policy is not part of markdown archive handling in this phase.
-			continue
-		}
+func archiveSources(root string, lineage []LineageEntry, archiveMode, runID string) error {
+	moveMode := archiveMode == "move"
 
+	for _, entry := range lineage {
 		src := filepath.Join(root, filepath.FromSlash(entry.Source))
 		dst := filepath.Join(root, filepath.FromSlash(entry.Archive))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("create archive dir for %s: %w", entry.Source, err)
 		}
 
-		switch archiveMode {
-		case "move":
+		if moveMode && shouldMoveSource(entry.Source) {
 			if err := os.Rename(src, dst); err != nil {
 				return fmt.Errorf("archive move %s -> %s: %w", entry.Source, entry.Archive, err)
 			}
+			continue
+		}
+
+		switch archiveMode {
 		default:
 			if err := copyFile(src, dst); err != nil {
 				return fmt.Errorf("archive copy %s -> %s: %w", entry.Source, entry.Archive, err)
 			}
+		}
+	}
+
+	if moveMode {
+		if err := relocateRemainingLegacyDocs(root, runID); err != nil {
+			return err
+		}
+		if err := pruneLegacyPath(filepath.Join(root, "docs")); err != nil {
+			return err
+		}
+		if err := pruneLegacyPath(filepath.Join(root, "architecture")); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func relocateRemainingLegacyDocs(root, runID string) error {
+	legacyDocs := filepath.Join(root, "docs")
+	if _, err := os.Stat(legacyDocs); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("stat legacy docs root: %w", err)
+	}
+
+	return filepath.WalkDir(legacyDocs, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		relFromRoot, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("legacy rel path: %w", err)
+		}
+		relFromRoot = filepath.ToSlash(relFromRoot)
+
+		archiveDst := filepath.Join(root, "docs_archive", runID, filepath.FromSlash(relFromRoot))
+		if err := copyFile(path, archiveDst); err != nil {
+			return fmt.Errorf("archive legacy residual %s: %w", relFromRoot, err)
+		}
+
+		// Keep spec recordings/bench artifacts with their canonical spec directories.
+		if strings.HasPrefix(relFromRoot, "docs/specs/") {
+			relUnderDocs := strings.TrimPrefix(relFromRoot, "docs/")
+			canonicalDst := filepath.Join(root, ".mindspec", "docs", filepath.FromSlash(relUnderDocs))
+			if err := moveFile(path, canonicalDst); err != nil {
+				return fmt.Errorf("move legacy spec residual %s: %w", relFromRoot, err)
+			}
+			return nil
+		}
+
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove legacy residual %s: %w", relFromRoot, err)
+		}
+		return nil
+	})
+}
+
+func shouldMoveSource(source string) bool {
+	switch {
+	case strings.HasPrefix(source, "docs/"):
+		return true
+	case source == "GLOSSARY.md":
+		return true
+	case source == filepath.ToSlash(filepath.Join("architecture", "policies.yml")):
+		return true
+	default:
+		return false
+	}
+}
+
+func pruneLegacyPath(root string) error {
+	if err := removeDSStore(root); err != nil {
+		return err
+	}
+	return removeEmptyDirs(root)
+}
+
+func removeDSStore(root string) error {
+	info, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", filepath.ToSlash(root), err)
+	}
+	if !info.IsDir() {
+		return nil
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", filepath.ToSlash(root), err)
+	}
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		if entry.IsDir() {
+			if err := removeDSStore(path); err != nil {
+				return err
+			}
+			continue
+		}
+		if entry.Name() == ".DS_Store" {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove %s: %w", filepath.ToSlash(path), err)
+			}
+		}
+	}
+	return nil
+}
+
+func removeEmptyDirs(root string) error {
+	info, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", filepath.ToSlash(root), err)
+	}
+	if !info.IsDir() {
+		return nil
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", filepath.ToSlash(root), err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := removeEmptyDirs(filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+
+	entries, err = os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("re-read dir %s: %w", filepath.ToSlash(root), err)
+	}
+	if len(entries) == 0 {
+		if err := os.Remove(root); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove empty dir %s: %w", filepath.ToSlash(root), err)
 		}
 	}
 	return nil
@@ -261,4 +429,23 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func moveFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// Best-effort fallback for cross-device renames.
+		if copyErr := copyFile(src, dst); copyErr != nil {
+			return err
+		}
+		if rmErr := os.Remove(src); rmErr != nil && !os.IsNotExist(rmErr) {
+			return rmErr
+		}
+		return nil
+	}
+	return os.ErrNotExist
 }
