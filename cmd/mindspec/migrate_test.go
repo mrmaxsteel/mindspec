@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestResolveArchiveMode(t *testing.T) {
 	t.Parallel()
@@ -97,5 +101,37 @@ func TestValidateMigrateApplyFlags(t *testing.T) {
 				t.Fatalf("archive mismatch: got %q want %q", gotArchive, tc.wantArchive)
 			}
 		})
+	}
+}
+
+func TestReadMigrationArtifactJSON(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	runID := "run-1"
+	path := filepath.Join(root, ".mindspec", "migrations", runID, "plan.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{\"run_id\":\"run-1\"}\n"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	got, err := readMigrationArtifactJSON(root, runID, "plan.json")
+	if err != nil {
+		t.Fatalf("readMigrationArtifactJSON: %v", err)
+	}
+	if got != "{\"run_id\":\"run-1\"}" {
+		t.Fatalf("artifact mismatch: got %q", got)
+	}
+}
+
+func TestReadMigrationArtifactJSON_Missing(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	_, err := readMigrationArtifactJSON(root, "run-404", "plan.json")
+	if err == nil {
+		t.Fatal("expected missing artifact error")
 	}
 }

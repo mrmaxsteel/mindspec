@@ -320,6 +320,12 @@ func (c *gitIgnoreChecker) IsIgnored(relPath string) bool {
 
 // Run executes deterministic discovery + classification and writes run artifacts.
 func Run(root string, opts RunOptions) (*Report, error) {
+	if opts.Apply {
+		opts.Resume = true
+		if strings.TrimSpace(opts.RunID) == "" {
+			return nil, fmt.Errorf("--run-id is required (generate one with 'mindspec migrate plan')")
+		}
+	}
 	if opts.Resume && opts.RunID == "" {
 		return nil, fmt.Errorf("--resume requires a run ID")
 	}
@@ -327,11 +333,17 @@ func Run(root string, opts RunOptions) (*Report, error) {
 		opts.RunID = time.Now().UTC().Format("20060102T150405Z")
 	}
 
-	report, stage, resumed, err := loadResumeArtifacts(root, opts.RunID, opts.Resume)
+	report, stage, resumed, err := loadResumeArtifacts(root, opts.RunID, opts.Resume || opts.Apply)
 	if err != nil {
+		if opts.Apply {
+			return nil, fmt.Errorf("migrate apply blocked: missing migration artifacts for run-id %s (run 'mindspec migrate plan --run-id %s' first): %w", opts.RunID, opts.RunID, err)
+		}
 		return nil, err
 	}
 	if !resumed {
+		if opts.Apply {
+			return nil, fmt.Errorf("migrate apply blocked: missing migration artifacts for run-id %s (run 'mindspec migrate plan --run-id %s' first)", opts.RunID, opts.RunID)
+		}
 		report, err = DiscoverMarkdown(root)
 		if err != nil {
 			return nil, err

@@ -60,7 +60,7 @@ var migratePlanCmd = &cobra.Command{
 		})
 		if report != nil {
 			if jsonFlag {
-				out, jsonErr := report.ToJSON()
+				out, jsonErr := readMigrationArtifactJSON(root, report.RunID, "plan.json")
 				if jsonErr != nil {
 					return jsonErr
 				}
@@ -68,12 +68,12 @@ var migratePlanCmd = &cobra.Command{
 			} else {
 				fmt.Println(report.FormatSummary())
 				fmt.Println()
+				fmt.Printf("Plan artifacts:\n  - %s\n  - %s\n",
+					filepath.ToSlash(filepath.Join(".mindspec", "migrations", report.RunID, "plan.json")),
+					filepath.ToSlash(filepath.Join(".mindspec", "migrations", report.RunID, "plan.md")),
+				)
+				fmt.Printf("Apply with: mindspec migrate apply --run-id %s\n", report.RunID)
 			}
-			fmt.Printf("Plan artifacts:\n  - %s\n  - %s\n",
-				filepath.ToSlash(filepath.Join(".mindspec", "migrations", report.RunID, "plan.json")),
-				filepath.ToSlash(filepath.Join(".mindspec", "migrations", report.RunID, "plan.md")),
-			)
-			fmt.Printf("Apply with: mindspec migrate apply --run-id %s\n", report.RunID)
 		}
 		return err
 	},
@@ -105,7 +105,7 @@ var migrateApplyCmd = &cobra.Command{
 		})
 		if report != nil {
 			if jsonFlag {
-				out, jsonErr := report.ToJSON()
+				out, jsonErr := readMigrationArtifactJSON(root, report.RunID, "apply.json")
 				if jsonErr != nil {
 					return jsonErr
 				}
@@ -113,11 +113,20 @@ var migrateApplyCmd = &cobra.Command{
 			} else {
 				fmt.Println(report.FormatSummary())
 				fmt.Println()
+				fmt.Printf("Migration apply completed (run-id=%s, archive=%s).\n", runID, archive)
 			}
-			fmt.Printf("Migration apply completed (run-id=%s, archive=%s).\n", runID, archive)
 		}
 		return err
 	},
+}
+
+func readMigrationArtifactJSON(root, runID, name string) (string, error) {
+	path := filepath.Join(root, ".mindspec", "migrations", runID, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read migration artifact %s: %w", filepath.ToSlash(path), err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func init() {

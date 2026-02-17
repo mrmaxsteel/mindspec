@@ -344,6 +344,27 @@ func TestRun_ApplyFailsOnSourceDrift(t *testing.T) {
 	}
 }
 
+func TestRun_ApplyRequiresExistingPlanArtifacts(t *testing.T) {
+	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
+	t.Setenv("MINDSPEC_LLM_MODEL", "")
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "core"), 0o755); err != nil {
+		t.Fatalf("mkdir docs/core: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "core", "ARCHITECTURE.md"), []byte("# arch\n"), 0o644); err != nil {
+		t.Fatalf("write architecture doc: %v", err)
+	}
+
+	_, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "missing-plan"})
+	if err == nil {
+		t.Fatal("expected apply failure without prior plan artifacts")
+	}
+	if !strings.Contains(err.Error(), "run 'mindspec migrate plan --run-id missing-plan' first") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRun_ApplyFailsWithoutLLMWhenUnresolvedExists(t *testing.T) {
 	t.Setenv("MINDSPEC_LLM_PROVIDER", "off")
 	t.Setenv("MINDSPEC_LLM_MODEL", "")
@@ -356,6 +377,9 @@ func TestRun_ApplyFailsWithoutLLMWhenUnresolvedExists(t *testing.T) {
 		t.Fatalf("write notes.md: %v", err)
 	}
 
+	if _, err := Run(root, RunOptions{RunID: "run-apply"}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
 	report, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "run-apply"})
 	if err == nil {
 		t.Fatal("expected apply failure when LLM unavailable and unresolved docs exist")
@@ -394,6 +418,9 @@ func TestRun_ApplyPromotesCanonicalAndArchivesSources(t *testing.T) {
 	mk("GLOSSARY.md", "| Term | Target |\n|:-----|:-------|\n| **Arch** | [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md) |\n")
 	mk("architecture/policies.yml", "policies:\n  - id: x\n    reference: \"docs/core/ARCHITECTURE.md\"\n")
 
+	if _, err := Run(root, RunOptions{RunID: "run-ok"}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
 	report, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "run-ok"})
 	if err != nil {
 		t.Fatalf("apply run failed: %v", err)
@@ -488,6 +515,9 @@ func TestRun_ApplyPromotesUserDocsCategory(t *testing.T) {
 	mk("docs/archive/legacy.md", "# old doc\n")
 	mk("docs/templates/plan.md", "# old template\n")
 
+	if _, err := Run(root, RunOptions{RunID: "run-user"}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
 	report, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "run-user"})
 	if err != nil {
 		t.Fatalf("apply run failed: %v", err)
@@ -541,6 +571,9 @@ func TestRun_ApplyMoveRemovesLegacyDocsTree(t *testing.T) {
 	mk("AGENTS.md", "# agent\n")
 	mk("architecture/policies.yml", "policies:\n  - id: x\n    reference: \"docs/core/ARCHITECTURE.md\"\n")
 
+	if _, err := Run(root, RunOptions{RunID: "run-move"}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
 	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "move", RunID: "run-move"}); err != nil {
 		t.Fatalf("apply move failed: %v", err)
 	}
@@ -686,11 +719,17 @@ func TestRun_ApplyIdempotentCanonicalOutput(t *testing.T) {
 	mk("docs/context-map.md", "# context\n")
 	mk("GLOSSARY.md", "# glossary\n")
 
+	if _, err := Run(root, RunOptions{RunID: "first"}); err != nil {
+		t.Fatalf("first plan: %v", err)
+	}
 	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "first"}); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
 	firstHash := treeHash(t, filepath.Join(root, ".mindspec", "docs"))
 
+	if _, err := Run(root, RunOptions{RunID: "second"}); err != nil {
+		t.Fatalf("second plan: %v", err)
+	}
 	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: "second"}); err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
@@ -721,6 +760,9 @@ func TestRun_ApplySameRunIDIsNoOp(t *testing.T) {
 	mk("GLOSSARY.md", "# glossary\n")
 
 	runID := "same-run"
+	if _, err := Run(root, RunOptions{RunID: runID}); err != nil {
+		t.Fatalf("plan run: %v", err)
+	}
 	if _, err := Run(root, RunOptions{Apply: true, ArchiveMode: "copy", RunID: runID}); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
