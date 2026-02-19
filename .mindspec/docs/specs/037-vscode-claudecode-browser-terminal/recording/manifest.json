@@ -1,0 +1,13 @@
+{
+  "spec_id": "037-vscode-claudecode-browser-terminal",
+  "started_at": "2026-02-19T13:37:16Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-19T13:37:16Z"
+    }
+  ]
+}
