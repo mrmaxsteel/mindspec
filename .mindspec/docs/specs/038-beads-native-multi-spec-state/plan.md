@@ -19,6 +19,13 @@ adr_citations:
         - Summary
 approved_at: "2026-02-19T16:49:06Z"
 approved_by: user
+bead_ids:
+    - mindspec-i1b8
+    - mindspec-6s2i
+    - mindspec-to0s
+    - mindspec-4aei
+    - mindspec-a9u4
+    - mindspec-f96z
 last_updated: 2026-02-19T00:00:00Z
 spec_id: 038-beads-native-multi-spec-state
 status: Approved
