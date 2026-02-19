@@ -1,3 +1,6 @@
+---
+molecule_id: mindspec-mol-nlf
+---
 # Spec 038-beads-native-multi-spec-state: Beads-Native Multi-Spec State
 
 ## Goal
