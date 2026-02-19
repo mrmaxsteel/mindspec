@@ -24,7 +24,7 @@ If the repository already contains docs and needs onboarding, use:
 
 ## Phase 0.5: Idle
 
-**State**: `mode: idle` (or no `.mindspec/state.json`)
+**State**: No active spec molecules, or all molecules fully closed. (`state.json` may show `mode: idle` as a convenience cursor.)
 
 On session start, the SessionStart hook runs `mindspec instruct`, which emits idle-mode guidance. The agent is directed to greet the user, list available specs, and suggest next steps:
 - `/spec-init` to draft a new specification
@@ -42,7 +42,7 @@ On session start, the SessionStart hook runs `mindspec instruct`, which emits id
 1. Asks for spec ID (e.g. `009-feature-name`), title, and context
 2. Creates `.mindspec/docs/specs/009-feature-name/spec.md` from template
 3. Creates placeholder `context-pack.md`
-4. Runs `mindspec state set --mode=spec --spec=009-feature-name`
+4. The spec-lifecycle molecule tracks the spec's mode (derived from step statuses, ADR-0015). `state.json` is updated as a convenience cursor.
 5. Tells the human they're in Spec Mode
 
 ### Iterative collaboration
@@ -70,7 +70,7 @@ Runs `mindspec approve spec <id>`
 2. **Updates frontmatter** — sets `Status: APPROVED` in spec.md
 3. **Closes molecule step** — closes the `spec-approve` step in the spec-lifecycle molecule (created at `spec-init`), which unblocks the `plan` step
 4. **Generates context pack** — runs `contextpack.Build()` automatically (best-effort)
-5. **Sets state** — `{mode: "plan", activeSpec: "<id>"}`
+5. **Updates cursor** — `state.json` updated to point at the spec (mode is derived from molecule, ADR-0015)
 6. **Instruct-tail** — emits Plan Mode guidance
 
 ### Agent immediately begins planning
@@ -145,7 +145,7 @@ Runs `mindspec approve plan <id>`
 1. **Validates** — `validate.ValidatePlan()` checks frontmatter, bead sections, verification steps
 2. **Updates frontmatter** — sets `status: Approved`, `approved_at`, `approved_by`
 3. **Closes molecule step** — closes the `plan-approve` step in the spec-lifecycle molecule, which unblocks the `implement` step
-4. **Sets state** — stays `plan` mode (deliberately NOT implement — need to claim a bead first)
+4. **Updates cursor** — `state.json` cursor updated; mode is derived from molecule step statuses (ADR-0015)
 5. **Instruct-tail** — emits guidance telling user to run `mindspec next`
 
 ### The agent then tells the human
@@ -165,7 +165,7 @@ Runs `mindspec approve plan <id>`
 4. **Claim** — `bd update <id> in_progress`
 5. **Create worktree** — `bd worktree create worktree-<beadID> bead/<beadID>`
 6. **Resolve mode** — maps bead type to MindSpec mode (extracts spec ID from bracket-prefix titles like `[IMPL 009-feature.1] Chunk title`)
-7. **Set state** — `{mode: "implement", activeSpec: "<id>", activeBead: "<beadID>"}`
+7. **Update cursor** — `state.json` cursor updated to point at the claimed bead (mode derived from molecule, ADR-0015)
 8. **Instruct-tail** — emits Implementation Mode guidance with bead scope and obligations
 
 The instruct-tail checks if a worktree exists for the active bead and tells the agent to switch to it if needed.
@@ -237,7 +237,7 @@ Runs `mindspec approve impl <id>`
 ### What the CLI does
 1. **Verifies** review mode is active for the given spec
 2. **Closes molecule step** — closes the `review` step in the spec-lifecycle molecule, completing the entire lifecycle
-3. **Sets state** → `idle`
+3. **Updates cursor** — `state.json` cursor cleared; mode derived from molecule (all steps closed = done, ADR-0015)
 4. **Instruct-tail** — emits idle mode guidance
 
 The feature is now complete.
@@ -262,7 +262,7 @@ Work is not complete until changes are committed.
 
 | Step | Human | Agent | CLI Command |
 |------|-------|-------|-------------|
-| Start feature | "Build X" | Creates spec, sets state | `mindspec state set --mode=spec` |
+| Start feature | "Build X" | Creates spec, pours molecule | `mindspec spec-init` |
 | Write spec | Reviews, guides | Writes markdown | — |
 | Approve spec | `/spec-approve` | Runs approval | `mindspec approve spec <id>` |
 | Write plan | Reviews plan | Decomposes into beads | — |
@@ -284,7 +284,7 @@ Work is not complete until changes are committed.
 | `mindspec migrate plan` | Generate migration plan artifacts for an existing repository |
 | `mindspec migrate apply --run-id <id>` | Apply a reviewed migration plan |
 | `mindspec instruct` | See current mode guidance (auto-runs on session start) |
-| `mindspec state show` | Check current mode, spec, and bead |
+| `mindspec state show` | Check focused spec cursor and derived mode |
 | `mindspec validate spec <id>` | Pre-check spec quality before approval |
 | `mindspec validate plan <id>` | Pre-check plan quality before approval |
 | `mindspec doctor` | Project health check |

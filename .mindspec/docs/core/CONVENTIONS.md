@@ -17,7 +17,7 @@ This document outlines the file organization, naming, and structural conventions
 | `AGENTS.md` | Agent behavioral instructions |
 | `CLAUDE.md` | Claude Code project instructions |
 | `docs/archive/mindspec-v1-spec.md` | Original product specification (archived) |
-| `.mindspec/state.json` | Workflow state: current mode, active spec/bead (ADR-0005) |
+| `.mindspec/state.json` | Convenience cursor: last focused spec/bead (ADR-0015; not authoritative for mode — see [Lifecycle State](#lifecycle-state)) |
 
 Canonical docs live under `.mindspec/docs/`. Legacy `docs/` paths remain compatibility fallbacks for older repositories until migrated.
 
@@ -214,7 +214,7 @@ chore(<bead-id>): <summary>
 
 ### Co-committing `.beads/` and `.mindspec/`
 
-Always commit `.beads/` and `.mindspec/state.json` changes alongside the relevant work in the same commit. State writes (`mindspec state set`) must happen **before** the milestone commit so state is co-committed with transition artifacts (ADR-0005).
+Always commit `.beads/` and `.mindspec/state.json` changes alongside the relevant work in the same commit. Cursor updates happen as a side-effect of lifecycle commands and should be co-committed with transition artifacts.
 
 ### Preflight (before starting any forward-progress work)
 
@@ -241,14 +241,22 @@ Always commit `.beads/` and `.mindspec/state.json` changes alongside the relevan
 Use stable Markdown header anchors for deterministic section retrieval:
 `## Component X {#component-x}`
 
-## State File Convention {#state-file}
+## Lifecycle State: Per-Spec Molecule-Derived {#lifecycle-state}
 
-`.mindspec/state.json` is the **primary source of truth** for current mode and active work (ADR-0005).
+Lifecycle state is **derived per-spec from the spec-lifecycle molecule's step statuses** (ADR-0015). Each spec's molecule (created at `spec-init` via `bd mol pour`) is the single source of truth for that spec's lifecycle position.
 
-- **Committed to git** — project-level workflow state, not personal
-- **Written via CLI only** — `mindspec state set --mode=X --spec=Y [--bead=Z]`
-- **Co-committed with transitions** — state writes happen before milestone commits
-- **Cross-validated** — `mindspec instruct` checks state against artifact state and warns on drift
+- **Mode derivation** — the current mode for a spec is computed from which molecule steps are complete, in-progress, or blocked. It is never read from `state.json`.
+- **Multiple specs can progress independently** — there is no global mode lock.
+- **Spec-to-molecule binding** — each spec's `spec.md` frontmatter includes a `molecule_id` field linking it to its lifecycle molecule.
+
+### state.json (convenience cursor only) {#state-file}
+
+`.mindspec/state.json` is a **non-canonical "last focused spec" cursor** for UX convenience (ADR-0015). It is NOT the source of truth for mode.
+
+- **Committed to git** — project-level cursor, not personal
+- **Written via CLI only** — updated as a side-effect of lifecycle commands
+- **`activeSpec`** — tracks which spec the user was last working on (used as default for `--spec` flag)
+- **`mode` field** — advisory only; if it disagrees with molecule state, molecule wins silently
 
 Schema:
 ```json
@@ -276,7 +284,7 @@ The primary interface is the Go CLI binary. Key commands:
 - `mindspec doctor`: Project structure health check
 - `mindspec glossary list|match|show`: Glossary-based context injection
 - `mindspec context pack <spec-id>`: Generate context for an agent session
-- `mindspec state set|show`: Manage workflow state (ADR-0005)
+- `mindspec state set|show`: Manage focused-spec cursor (ADR-0015; mode is derived from molecule)
 - `mindspec instruct`: Emit mode-appropriate operating guidance (ADR-0003)
 - `mindspec bead hygiene`: Workset hygiene audit (Spec 007)
 - `mindspec validate spec|plan|docs`: Check artifact quality (Spec 006)

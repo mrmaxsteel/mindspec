@@ -224,7 +224,9 @@ Mode enforcement policies are defined in [`architecture/policies.yml`](../../arc
 
 ### State Tracking
 
-Active mode and bead are tracked via Beads status. The spec file and bead state are the sources of truth for approval status.
+Lifecycle state is **derived per-spec from the spec-lifecycle molecule's step statuses** (ADR-0015). Each spec's molecule encodes which steps are complete, in-progress, or blocked — the current mode is computed from this, not from `state.json`.
+
+`.mindspec/state.json` serves only as a convenience cursor tracking the last focused spec. It is not consulted for mode derivation. Multiple specs can progress through different lifecycle phases independently.
 
 ---
 
