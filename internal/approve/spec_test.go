@@ -9,7 +9,10 @@ import (
 
 func TestUpdateSpecApproval_UpdatesSection(t *testing.T) {
 	tmp := t.TempDir()
-	specContent := `# Spec 010: Test Feature
+	specContent := `---
+molecule_id: mol-123
+---
+# Spec 010: Test Feature
 
 ## Goal
 
@@ -62,6 +65,15 @@ None
 	data, _ := os.ReadFile(specPath)
 	content := string(data)
 
+	if !strings.Contains(content, "status: Approved") {
+		t.Error("expected status: Approved in frontmatter")
+	}
+	if !strings.Contains(content, "approved_at:") {
+		t.Error("expected approved_at in frontmatter")
+	}
+	if !strings.Contains(content, "approved_by: user") {
+		t.Error("expected approved_by in frontmatter")
+	}
 	if !strings.Contains(content, "**Status**: APPROVED") {
 		t.Error("expected Status: APPROVED in output")
 	}
@@ -84,18 +96,24 @@ None
 	}
 }
 
-func TestUpdateSpecApproval_NoApprovalSection(t *testing.T) {
+func TestUpdateSpecApproval_AddsApprovalSectionWhenMissing(t *testing.T) {
 	tmp := t.TempDir()
 	specContent := "# Spec\n\n## Goal\n\nSomething.\n"
 	specPath := filepath.Join(tmp, "spec.md")
 	os.WriteFile(specPath, []byte(specContent), 0644)
 
 	err := updateSpecApproval(specPath, "user")
-	if err == nil {
-		t.Fatal("expected error for missing Approval section")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "Approval") {
-		t.Errorf("error should mention Approval section: %v", err)
+
+	data, _ := os.ReadFile(specPath)
+	content := string(data)
+	if !strings.Contains(content, "## Approval") {
+		t.Fatal("expected Approval section to be added")
+	}
+	if !strings.Contains(content, "status: Approved") {
+		t.Error("expected approved status frontmatter")
 	}
 }
 
@@ -128,6 +146,9 @@ Extra stuff here.
 	}
 	if !strings.Contains(content, "Extra stuff here.") {
 		t.Error("Appendix content lost")
+	}
+	if !strings.Contains(content, "status: Approved") {
+		t.Error("expected approved status frontmatter")
 	}
 	if !strings.Contains(content, "APPROVED") {
 		t.Error("expected APPROVED in output")

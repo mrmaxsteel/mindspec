@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,6 +146,66 @@ func TestValidatePlan_NonexistentPlan(t *testing.T) {
 	r := ValidatePlan("/nonexistent", "does-not-exist")
 	if !r.HasFailures() {
 		t.Error("expected failure for nonexistent plan")
+	}
+}
+
+func TestValidatePlan_ApprovedFrontmatterOpenGateWarns(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0755)
+
+	spec := `---
+molecule_id: mol-1
+step_mapping:
+  plan-approve: gate-plan
+---
+# Spec
+`
+	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644)
+
+	plan := `---
+status: Approved
+spec_id: "999-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 999-A: Test
+
+**Steps**:
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**:
+- [ ] ` + "`go test ./...` passes" + `
+
+**Depends on**: nothing
+`
+	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
+
+	orig := runBDGateStatusFn
+	defer func() { runBDGateStatusFn = orig }()
+	runBDGateStatusFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 3 && args[0] == "show" && args[1] == "gate-plan" {
+			return []byte(`[{"status":"open"}]`), nil
+		}
+		return nil, fmt.Errorf("unexpected args: %v", args)
+	}
+
+	r := ValidatePlan(tmp, "999-test")
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "plan-gate-consistency" {
+			found = true
+			if issue.Severity != SevWarning {
+				t.Errorf("expected warning severity, got %s", issue.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected plan-gate-consistency warning")
 	}
 }
 

@@ -18,7 +18,14 @@ import (
 type Meta struct {
 	MoleculeID  string            `yaml:"molecule_id,omitempty"`
 	StepMapping map[string]string `yaml:"step_mapping,omitempty"`
+	Status      string            `yaml:"status,omitempty"`
+	ApprovedAt  string            `yaml:"approved_at,omitempty"`
+	ApprovedBy  string            `yaml:"approved_by,omitempty"`
 }
+
+var runBDFn = bead.RunBD
+
+var lifecycleStepOrder = []string{"spec", "spec-approve", "plan", "plan-approve", "implement", "review"}
 
 // Read parses the YAML frontmatter from a spec.md file under specDir.
 // Returns a zero Meta (no error) if the spec has no frontmatter.
@@ -66,6 +73,15 @@ func Write(specDir string, m *Meta) error {
 	}
 	if len(m.StepMapping) > 0 {
 		merged["step_mapping"] = m.StepMapping
+	}
+	if strings.TrimSpace(m.Status) != "" {
+		merged["status"] = m.Status
+	}
+	if strings.TrimSpace(m.ApprovedAt) != "" {
+		merged["approved_at"] = m.ApprovedAt
+	}
+	if strings.TrimSpace(m.ApprovedBy) != "" {
+		merged["approved_by"] = m.ApprovedBy
 	}
 
 	fmBytes, err := yaml.Marshal(merged)
@@ -132,10 +148,52 @@ func EnsureBound(root, specID string) (*Meta, error) {
 	return Backfill(root, specID)
 }
 
+// EnsureFullyBound returns a spec's molecule binding, recovering missing fields when possible.
+// It guarantees both molecule_id and step_mapping are present and internally consistent.
+func EnsureFullyBound(root, specID string) (*Meta, error) {
+	m, err := EnsureBound(root, specID)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil || m.MoleculeID == "" {
+		return nil, fmt.Errorf("spec %s has no molecule binding; run `mindspec spec-init %s` or restore spec frontmatter molecule_id", specID, specID)
+	}
+
+	needsRecovery := len(m.StepMapping) == 0
+	if !needsRecovery {
+		for _, key := range lifecycleStepOrder {
+			if strings.TrimSpace(m.StepMapping[key]) == "" {
+				needsRecovery = true
+				break
+			}
+		}
+	}
+
+	if needsRecovery {
+		recovered, err := recoverStepMapping(m.MoleculeID, specID)
+		if err != nil {
+			return nil, fmt.Errorf("recovering step mapping for %s (%s): %w", specID, m.MoleculeID, err)
+		}
+		m.StepMapping = recovered
+	}
+
+	// Keep the parent molecule ID mirrored in step_mapping for compatibility.
+	if m.StepMapping == nil {
+		m.StepMapping = map[string]string{}
+	}
+	m.StepMapping["spec-lifecycle"] = m.MoleculeID
+
+	if err := WriteForSpec(root, specID, m); err != nil {
+		return nil, fmt.Errorf("persisting molecule binding for %s: %w", specID, err)
+	}
+
+	return m, nil
+}
+
 // findMoleculeByConvention searches Beads for an epic titled "[SPEC <specID>]".
 func findMoleculeByConvention(specID string) (string, error) {
 	prefix := "[SPEC " + specID + "]"
-	out, err := bead.RunBD("search", prefix, "--json")
+	out, err := runBDFn("search", prefix, "--json")
 	if err != nil {
 		return "", fmt.Errorf("bd search failed: %w", err)
 	}
@@ -151,6 +209,52 @@ func findMoleculeByConvention(specID string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func recoverStepMapping(moleculeID, specID string) (map[string]string, error) {
+	out, err := runBDFn("mol", "show", moleculeID, "--json")
+	if err != nil {
+		return nil, fmt.Errorf("bd mol show failed: %w", err)
+	}
+
+	var payload struct {
+		Issues []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return nil, fmt.Errorf("parsing mol show output: %w", err)
+	}
+
+	titleToStep := map[string]string{
+		"Write spec " + specID:   "spec",
+		"Approve spec " + specID: "spec-approve",
+		"Write plan " + specID:   "plan",
+		"Approve plan " + specID: "plan-approve",
+		"Implement " + specID:    "implement",
+		"Review " + specID:       "review",
+	}
+
+	stepMap := make(map[string]string, len(lifecycleStepOrder)+1)
+	for _, issue := range payload.Issues {
+		if step, ok := titleToStep[issue.Title]; ok {
+			stepMap[step] = issue.ID
+		}
+	}
+	stepMap["spec-lifecycle"] = moleculeID
+
+	var missing []string
+	for _, key := range lifecycleStepOrder {
+		if strings.TrimSpace(stepMap[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("could not resolve molecule steps %v from molecule %s", missing, moleculeID)
+	}
+
+	return stepMap, nil
 }
 
 // extractFrontmatter splits a markdown file into frontmatter (without delimiters)

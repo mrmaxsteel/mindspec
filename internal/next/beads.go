@@ -38,12 +38,9 @@ func QueryReady() ([]BeadInfo, error) {
 	if err == nil {
 		s, err := readStateFn(root)
 		if err == nil && s.ActiveMolecule != "" {
-			out, err := runBDFn("ready", "--parent", s.ActiveMolecule, "--json")
-			if err == nil {
-				items, err := ParseBeadsJSON(out)
-				if err == nil && len(items) > 0 {
-					return items, nil
-				}
+			items, err := QueryReadyForMolecule(s.ActiveMolecule)
+			if err == nil && len(items) > 0 {
+				return items, nil
 			}
 		}
 	}
@@ -52,6 +49,20 @@ func QueryReady() ([]BeadInfo, error) {
 	out, err := runBDFn("ready", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd ready failed: %w", err)
+	}
+
+	return ParseBeadsJSON(out)
+}
+
+// QueryReadyForMolecule queries ready work for a specific molecule.
+func QueryReadyForMolecule(moleculeID string) ([]BeadInfo, error) {
+	out, err := runBDFn("ready", "--mol", moleculeID, "--json")
+	if err != nil {
+		// Compatibility fallback for older beads versions.
+		out, err = runBDFn("ready", "--parent", moleculeID, "--json")
+		if err != nil {
+			return nil, fmt.Errorf("bd ready for molecule %s failed: %w", moleculeID, err)
+		}
 	}
 
 	return ParseBeadsJSON(out)
@@ -76,11 +87,63 @@ func findRoot() (string, error) {
 
 // ParseBeadsJSON parses the JSON output from bd commands into BeadInfo slices.
 func ParseBeadsJSON(data []byte) ([]BeadInfo, error) {
-	var items []BeadInfo
-	if err := json.Unmarshal(data, &items); err != nil {
-		return nil, fmt.Errorf("parsing beads JSON: %w", err)
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, nil
 	}
-	return items, nil
+
+	if strings.HasPrefix(trimmed, "[") {
+		var items []BeadInfo
+		if err := json.Unmarshal(data, &items); err != nil {
+			return nil, fmt.Errorf("parsing beads JSON: %w", err)
+		}
+		return filterReadyItems(items), nil
+	}
+
+	if strings.HasPrefix(trimmed, "{") {
+		var payload struct {
+			Steps []struct {
+				Issue BeadInfo `json:"issue"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return nil, fmt.Errorf("parsing molecule-ready JSON: %w", err)
+		}
+		items := make([]BeadInfo, 0, len(payload.Steps))
+		for _, step := range payload.Steps {
+			items = append(items, step.Issue)
+		}
+		return filterReadyItems(items), nil
+	}
+
+	return nil, fmt.Errorf("parsing beads JSON: unsupported payload shape")
+}
+
+func filterReadyItems(items []BeadInfo) []BeadInfo {
+	seen := map[string]struct{}{}
+	var filtered []BeadInfo
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(item.IssueType), "epic") {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(item.Status))
+		if status == "closed" {
+			continue
+		}
+		if status != "" && status != "open" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 // ClaimBead marks a bead as in_progress via bd update.

@@ -150,3 +150,91 @@ func TestSetModeWritesState(t *testing.T) {
 		t.Errorf("activeSpec: got %q, want %q", s.ActiveSpec, "004-instruct")
 	}
 }
+
+func TestSetMode_PreservesMoleculeMetadataForSameSpec(t *testing.T) {
+	tmp := setupTestProject(t)
+
+	if err := Write(tmp, &State{
+		Mode:           ModeSpec,
+		ActiveSpec:     "004-instruct",
+		ActiveMolecule: "mol-123",
+		StepMapping: map[string]string{
+			"spec":         "step-1",
+			"spec-approve": "step-2",
+		},
+	}); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if err := SetMode(tmp, ModePlan, "004-instruct", ""); err != nil {
+		t.Fatalf("SetMode failed: %v", err)
+	}
+
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got.ActiveMolecule != "mol-123" {
+		t.Errorf("activeMolecule: got %q, want %q", got.ActiveMolecule, "mol-123")
+	}
+	if got.StepMapping["spec"] != "step-1" {
+		t.Errorf("stepMapping[spec]: got %q, want %q", got.StepMapping["spec"], "step-1")
+	}
+}
+
+func TestSetMode_DifferentSpecDoesNotCarryMoleculeMetadata(t *testing.T) {
+	tmp := setupTestProject(t)
+	os.MkdirAll(filepath.Join(tmp, "docs", "specs", "005-other"), 0755)
+	os.WriteFile(filepath.Join(tmp, "docs", "specs", "005-other", "spec.md"), []byte("# Spec 005"), 0644)
+
+	if err := Write(tmp, &State{
+		Mode:           ModeSpec,
+		ActiveSpec:     "004-instruct",
+		ActiveMolecule: "mol-123",
+		StepMapping: map[string]string{
+			"spec": "step-1",
+		},
+	}); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if err := SetMode(tmp, ModePlan, "005-other", ""); err != nil {
+		t.Fatalf("SetMode failed: %v", err)
+	}
+
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got.ActiveMolecule != "" {
+		t.Errorf("activeMolecule: got %q, want empty", got.ActiveMolecule)
+	}
+	if len(got.StepMapping) != 0 {
+		t.Errorf("expected empty stepMapping, got %v", got.StepMapping)
+	}
+}
+
+func TestSetModeWithMetadata_UsesProvidedValues(t *testing.T) {
+	tmp := setupTestProject(t)
+
+	steps := map[string]string{
+		"plan":         "step-1",
+		"plan-approve": "step-2",
+	}
+	if err := SetModeWithMetadata(tmp, ModePlan, "004-instruct", "", "mol-xyz", steps); err != nil {
+		t.Fatalf("SetModeWithMetadata failed: %v", err)
+	}
+
+	steps["plan"] = "mutated"
+
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got.ActiveMolecule != "mol-xyz" {
+		t.Errorf("activeMolecule: got %q, want %q", got.ActiveMolecule, "mol-xyz")
+	}
+	if got.StepMapping["plan"] != "step-1" {
+		t.Errorf("stepMapping[plan]: got %q, want %q", got.StepMapping["plan"], "step-1")
+	}
+}

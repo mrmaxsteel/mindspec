@@ -52,6 +52,10 @@ sets state to plan mode, and emits plan mode guidance.`,
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}
 		fmt.Println()
+		fmt.Println("Next steps:")
+		fmt.Println("  1. Commit approval artifacts before continuing (required for clean-tree gates).")
+		fmt.Printf("  2. Continue planning for %s.\n", specID)
+		fmt.Println()
 
 		// Instruct-tail: emit guidance for plan mode
 		if err := emitInstruct(root); err != nil {
@@ -99,7 +103,10 @@ Run 'mindspec next' after this to claim work and enter Implementation Mode.`,
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}
 		fmt.Println()
-		fmt.Println("Run `mindspec next` to claim work and enter Implementation Mode.")
+		fmt.Println("Next steps:")
+		fmt.Println("  1. Commit approval artifacts now.")
+		fmt.Println("  2. Run `mindspec next` to claim work and enter Implementation Mode.")
+		fmt.Println("     `mindspec next` requires a clean working tree and will fail if approval changes are uncommitted.")
 		fmt.Println()
 
 		// Instruct-tail: emit guidance for current mode

@@ -52,7 +52,7 @@ Required plan sections:
 ## Next Action
 {{- if .PlanApproved}}
 
-Plan is approved. Run `mindspec next` to claim the first bead and enter Implementation Mode. Do NOT manually set state to implement — `mindspec next` handles bead selection and state transition together.
+Plan is approved. Commit approval artifacts first, then run `mindspec next` to claim the first bead and enter Implementation Mode. `mindspec next` requires a clean working tree and will fail on uncommitted changes. Do NOT manually set state to implement — `mindspec next` handles bead selection and state transition together.
 {{- else}}
 
 Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec approve plan {{.ActiveSpec}}`.

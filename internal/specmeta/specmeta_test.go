@@ -1,6 +1,8 @@
 package specmeta
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,5 +169,89 @@ func TestRead_MissingFile(t *testing.T) {
 	_, err := Read("/nonexistent")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestWrite_WritesApprovalFields(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	os.WriteFile(specPath, []byte("# Spec 001\n"), 0644)
+
+	meta := &Meta{
+		Status:     "Approved",
+		ApprovedAt: "2026-02-20T15:00:00Z",
+		ApprovedBy: "user",
+	}
+	if err := Write(dir, meta); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("reading spec: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "status: Approved") {
+		t.Error("expected status field in frontmatter")
+	}
+	if !strings.Contains(content, "approved_at: \"2026-02-20T15:00:00Z\"") {
+		t.Error("expected approved_at field in frontmatter")
+	}
+	if !strings.Contains(content, "approved_by: user") {
+		t.Error("expected approved_by field in frontmatter")
+	}
+}
+
+func TestEnsureFullyBound_RecoversMissingStepMapping(t *testing.T) {
+	root := t.TempDir()
+	specID := "010-test"
+	specDir := filepath.Join(root, "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	spec := `---
+molecule_id: mol-abc
+---
+# Spec 010
+`
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	origRunBD := runBDFn
+	defer func() { runBDFn = origRunBD }()
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "mol" && args[1] == "show" && args[2] == "mol-abc" {
+			payload := map[string]any{
+				"issues": []map[string]string{
+					{"id": "step-spec", "title": "Write spec 010-test"},
+					{"id": "step-spec-approve", "title": "Approve spec 010-test"},
+					{"id": "step-plan", "title": "Write plan 010-test"},
+					{"id": "step-plan-approve", "title": "Approve plan 010-test"},
+					{"id": "step-implement", "title": "Implement 010-test"},
+					{"id": "step-review", "title": "Review 010-test"},
+				},
+			}
+			return json.Marshal(payload)
+		}
+		return nil, fmt.Errorf("unexpected bd args: %v", args)
+	}
+
+	meta, err := EnsureFullyBound(root, specID)
+	if err != nil {
+		t.Fatalf("EnsureFullyBound() error: %v", err)
+	}
+	if meta.MoleculeID != "mol-abc" {
+		t.Errorf("MoleculeID: got %q, want %q", meta.MoleculeID, "mol-abc")
+	}
+	if meta.StepMapping["spec"] != "step-spec" {
+		t.Errorf("spec step not recovered: %v", meta.StepMapping)
+	}
+	if meta.StepMapping["review"] != "step-review" {
+		t.Errorf("review step not recovered: %v", meta.StepMapping)
+	}
+	if meta.StepMapping["spec-lifecycle"] != "mol-abc" {
+		t.Errorf("spec-lifecycle mapping: got %q, want %q", meta.StepMapping["spec-lifecycle"], "mol-abc")
 	}
 }

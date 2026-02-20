@@ -19,6 +19,13 @@ import (
 // specIDPattern matches NNN-kebab-case where NNN is 3+ digits.
 var specIDPattern = regexp.MustCompile(`^\d{3,}-[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
+var (
+	preflightFn   = bead.Preflight
+	pourFormulaFn = pourFormula
+	runBDCombined = bead.RunBDCombined
+	writeSpecMeta = specmeta.Write
+)
+
 // Run creates a new spec directory with a spec.md from the template,
 // then sets state to spec mode. If title is empty, it is derived from
 // the slug portion of specID (e.g. "010-spec-init-cmd" → "Spec Init Cmd").
@@ -49,40 +56,41 @@ func Run(root, specID, title string) error {
 		return fmt.Errorf("writing spec file: %w", err)
 	}
 
-	// Pour the spec-lifecycle formula (best-effort — don't fail if beads not initialized)
+	// Pour and bind the spec-lifecycle molecule (required).
 	s := &state.State{
 		Mode:       state.ModeSpec,
 		ActiveSpec: specID,
 	}
-	if err := bead.Preflight(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: beads not available, skipping molecule creation: %v\n", err)
-	} else {
-		molID, stepMap, err := pourFormula(specID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not pour formula: %v\n", err)
-		} else {
-			s.ActiveMolecule = molID
-			s.StepMapping = stepMap
-			// Rename the parent epic to follow [SPEC <id>] convention
-			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
-			if _, err := bead.RunBDCombined("update", molID, "--title="+epicTitle); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not rename parent epic: %v\n", err)
-			}
-			// Mark the spec step as in_progress
-			if stepID, ok := stepMap["spec"]; ok {
-				if _, err := bead.RunBDCombined("update", stepID, "--status=in_progress"); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not start spec step: %v\n", err)
-				}
-			}
-			// Write molecule binding into spec frontmatter (ADR-0015)
-			meta := &specmeta.Meta{
-				MoleculeID:  molID,
-				StepMapping: stepMap,
-			}
-			if err := specmeta.Write(specDir, meta); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not write molecule binding to spec frontmatter: %v\n", err)
-			}
+	if err := preflightFn(root); err != nil {
+		return fmt.Errorf("creating lifecycle molecule requires beads to be available: %w", err)
+	}
+
+	molID, stepMap, err := pourFormulaFn(specID)
+	if err != nil {
+		return fmt.Errorf("pouring spec-lifecycle molecule: %w", err)
+	}
+
+	s.ActiveMolecule = molID
+	s.StepMapping = stepMap
+
+	// Rename the parent epic to follow [SPEC <id>] convention.
+	epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
+	if _, err := runBDCombined("update", molID, "--title="+epicTitle); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not rename parent epic: %v\n", err)
+	}
+	// Mark the spec step as in_progress.
+	if stepID, ok := stepMap["spec"]; ok {
+		if _, err := runBDCombined("update", stepID, "--status=in_progress"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not start spec step: %v\n", err)
 		}
+	}
+	// Write molecule binding into spec frontmatter (ADR-0015).
+	meta := &specmeta.Meta{
+		MoleculeID:  molID,
+		StepMapping: stepMap,
+	}
+	if err := writeSpecMeta(specDir, meta); err != nil {
+		return fmt.Errorf("writing molecule binding to spec frontmatter: %w", err)
 	}
 
 	// Write state

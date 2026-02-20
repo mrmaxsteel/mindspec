@@ -91,6 +91,9 @@ func Domain(filename string) string {
 
 const specTemplate = `---
 molecule_id: ""
+status: Draft
+approved_at: ""
+approved_by: ""
 ---
 # Spec <ID>: <Title>
 

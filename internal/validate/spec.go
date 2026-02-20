@@ -62,6 +62,7 @@ func ValidateSpec(root, specID string) *Result {
 
 	// Check molecule binding (ADR-0015) — warning only, not blocking
 	checkMoleculeBinding(r, root, specID)
+	checkSpecApprovalGateConsistency(r, root, specID)
 
 	return r
 }
@@ -186,6 +187,31 @@ func checkMoleculeBinding(r *Result, root, specID string) {
 	}
 	if m.MoleculeID == "" {
 		r.AddWarning("molecule-binding", "spec has no molecule_id in frontmatter; run backfill or re-init")
+	}
+}
+
+func checkSpecApprovalGateConsistency(r *Result, root, specID string) {
+	m, err := specmeta.ReadForSpec(root, specID)
+	if err != nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(m.Status), "Approved") {
+		return
+	}
+
+	gateID := strings.TrimSpace(m.StepMapping["spec-approve"])
+	if gateID == "" {
+		r.AddWarning("spec-gate-consistency", "spec frontmatter status is Approved but step_mapping.spec-approve is missing")
+		return
+	}
+
+	status, err := readGateStatus(gateID)
+	if err != nil {
+		r.AddWarning("spec-gate-consistency", fmt.Sprintf("spec frontmatter status is Approved but gate %s could not be verified: %v", gateID, err))
+		return
+	}
+	if status != "closed" {
+		r.AddWarning("spec-gate-consistency", fmt.Sprintf("spec frontmatter status is Approved but gate %s is %s", gateID, status))
 	}
 }
 

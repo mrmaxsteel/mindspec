@@ -146,10 +146,10 @@ Runs `mindspec approve plan <id>`
 2. **Updates frontmatter** — sets `status: Approved`, `approved_at`, `approved_by`
 3. **Closes molecule step** — closes the `plan-approve` step in the spec-lifecycle molecule, which unblocks the `implement` step
 4. **Updates cursor** — `state.json` cursor updated; mode is derived from molecule step statuses (ADR-0015)
-5. **Instruct-tail** — emits guidance telling user to run `mindspec next`
+5. **Instruct-tail** — emits guidance to commit approval artifacts first, then run `mindspec next`
 
 ### The agent then tells the human
-> Run `mindspec next` to claim the first ready bead and enter Implementation Mode.
+> Commit approval artifacts first, then run `mindspec next` to claim the first ready bead and enter Implementation Mode (`next` requires a clean tree).
 
 ---
 
@@ -160,7 +160,7 @@ Runs `mindspec approve plan <id>`
 
 ### What the CLI does
 1. **Clean tree check** — fails if uncommitted changes
-2. **Query ready work** — reads `ActiveMolecule` from state, queries `bd ready --parent <mol-id>` for molecule children, falls back to `bd ready` if no molecule
+2. **Query ready work** — requires a valid molecule binding for `--spec` targets, then queries `bd ready --mol <mol-id>` for molecule-ready steps (fallbacks to global `bd ready` when no active molecule context exists)
 3. **Display & select** — shows available beads, picks first (or `--pick=N`)
 4. **Claim** — `bd update <id> in_progress`
 5. **Create worktree** — `bd worktree create worktree-<beadID> bead/<beadID>`
@@ -236,11 +236,13 @@ Runs `mindspec approve impl <id>`
 
 ### What the CLI does
 1. **Verifies** review mode is active for the given spec
-2. **Closes molecule step** — closes the `review` step in the spec-lifecycle molecule, completing the entire lifecycle
+2. **Reconciles molecule close-out** — closes the parent molecule epic (`molecule_id`) and all unique step IDs from `step_mapping` (including gates and work steps), treating already-closed members as success
 3. **Updates cursor** — `state.json` cursor cleared; mode derived from molecule (all steps closed = done, ADR-0015)
 4. **Instruct-tail** — emits idle mode guidance
 
 The feature is now complete.
+
+`mindspec complete` remains the per-bead close-out command. `mindspec approve impl <id>` is the lifecycle close-out gate for the full spec molecule.
 
 ---
 

@@ -1,6 +1,7 @@
 package specinit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,32 @@ import (
 
 	"github.com/mindspec/mindspec/internal/state"
 )
+
+func mockMoleculeSuccess(t *testing.T) {
+	t.Helper()
+	origPreflight := preflightFn
+	origPour := pourFormulaFn
+	origRunBDCombined := runBDCombined
+	t.Cleanup(func() {
+		preflightFn = origPreflight
+		pourFormulaFn = origPour
+		runBDCombined = origRunBDCombined
+	})
+
+	preflightFn = func(root string) error { return nil }
+	pourFormulaFn = func(specID string) (string, map[string]string, error) {
+		return "mol-123", map[string]string{
+			"spec":           "step-spec",
+			"spec-approve":   "step-spec-approve",
+			"plan":           "step-plan",
+			"plan-approve":   "step-plan-approve",
+			"implement":      "step-impl",
+			"review":         "step-review",
+			"spec-lifecycle": "mol-123",
+		}, nil
+	}
+	runBDCombined = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+}
 
 // setupTestRoot creates a minimal project root with the spec template.
 func setupTestRoot(t *testing.T) string {
@@ -27,6 +54,7 @@ func setupTestRoot(t *testing.T) string {
 
 func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	root := setupTestRoot(t)
+	mockMoleculeSuccess(t)
 
 	err := Run(root, "010-my-feature", "")
 	if err != nil {
@@ -47,6 +75,7 @@ func TestRunCreatesSpecFromTemplate(t *testing.T) {
 
 func TestRunWithExplicitTitle(t *testing.T) {
 	root := setupTestRoot(t)
+	mockMoleculeSuccess(t)
 
 	err := Run(root, "011-custom", "Custom Title")
 	if err != nil {
@@ -83,6 +112,7 @@ func TestRunErrorsOnExistingDirectory(t *testing.T) {
 
 func TestRunSetsState(t *testing.T) {
 	root := setupTestRoot(t)
+	mockMoleculeSuccess(t)
 
 	err := Run(root, "012-state-test", "")
 	if err != nil {
@@ -104,6 +134,7 @@ func TestRunSetsState(t *testing.T) {
 
 func TestRunRejectsInvalidSpecID(t *testing.T) {
 	root := setupTestRoot(t)
+	mockMoleculeSuccess(t)
 
 	tests := []struct {
 		id      string
@@ -162,5 +193,21 @@ func TestTitleFromSlug(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("titleFromSlug(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestRunFailsWhenMoleculeUnavailable(t *testing.T) {
+	root := setupTestRoot(t)
+
+	origPreflight := preflightFn
+	defer func() { preflightFn = origPreflight }()
+	preflightFn = func(root string) error { return fmt.Errorf("bd unavailable") }
+
+	err := Run(root, "013-molecule-required", "")
+	if err == nil {
+		t.Fatal("expected error when molecule setup is unavailable")
+	}
+	if !strings.Contains(err.Error(), "lifecycle molecule") {
+		t.Errorf("expected lifecycle molecule error, got: %v", err)
 	}
 }

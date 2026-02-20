@@ -191,9 +191,11 @@ A bead is complete when:
 1. All verification steps pass with captured evidence
 2. Documentation is updated
 3. Bead status is updated in Beads with closure notes
-4. **Advance state**: If more beads remain for the spec, set state to the next bead or back to `plan`; if all beads are done, reset state to `idle` (`mindspec state set --mode=idle`)
+4. **Advance state**: run `mindspec complete` to close the bead and advance state (next bead, `plan`, or `review` depending on remaining work)
 5. **Milestone commit**: Commit code, tests, docs, bead closure, **and state file** (message: `impl(<bead-id>): ...`)
 6. Worktree changes are ready for review
+
+`mindspec complete` is per-bead progress. Final lifecycle close-out happens at review via `mindspec approve impl <spec-id>`, which reconciles the full molecule (parent + all mapped steps) and returns to idle.
 
 ---
 

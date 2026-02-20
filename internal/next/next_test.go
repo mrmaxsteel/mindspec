@@ -78,6 +78,28 @@ func TestParseBeadsJSON_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestParseBeadsJSON_MoleculeReadyPayload(t *testing.T) {
+	input := `{
+		"molecule_id": "mol-123",
+		"steps": [
+			{"issue": {"id":"mol-123","title":"Parent","status":"in_progress","issue_type":"epic"}},
+			{"issue": {"id":"impl-1","title":"Implement","status":"open","issue_type":"task"}},
+			{"issue": {"id":"closed-1","title":"Closed","status":"closed","issue_type":"task"}}
+		]
+	}`
+
+	items, err := ParseBeadsJSON([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].ID != "impl-1" {
+		t.Errorf("expected impl-1, got %s", items[0].ID)
+	}
+}
+
 // --- SelectWork tests ---
 
 func TestSelectWork_SingleItem(t *testing.T) {
@@ -283,7 +305,7 @@ func TestQueryReady_UsesMoleculeFromState(t *testing.T) {
 	}
 
 	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[0] == "ready" && args[1] == "--parent" && args[2] == "mol-123" {
+		if len(args) >= 3 && args[0] == "ready" && args[1] == "--mol" && args[2] == "mol-123" {
 			items := []BeadInfo{
 				{ID: "child-1", Title: "[IMPL test.1] First chunk"},
 				{ID: "child-2", Title: "[IMPL test.2] Second chunk"},

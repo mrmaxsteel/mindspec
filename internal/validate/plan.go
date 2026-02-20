@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/adr"
+	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -87,6 +88,7 @@ func ValidatePlan(root, specID string) *Result {
 
 	// Check bead IDs exist in Beads
 	checkBeadIDs(r, fm.BeadIDs)
+	checkPlanApprovalGateConsistency(r, root, specID, fm)
 
 	// Parse and check bead sections
 	beadSections := parseBeadSections(content)
@@ -100,6 +102,33 @@ func ValidatePlan(root, specID string) *Result {
 	}
 
 	return r
+}
+
+func checkPlanApprovalGateConsistency(r *Result, root, specID string, fm *PlanFrontmatter) {
+	if !strings.EqualFold(strings.TrimSpace(fm.Status), "Approved") {
+		return
+	}
+
+	meta, err := specmeta.ReadForSpec(root, specID)
+	if err != nil {
+		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but molecule metadata could not be read: %v", err))
+		return
+	}
+
+	gateID := strings.TrimSpace(meta.StepMapping["plan-approve"])
+	if gateID == "" {
+		r.AddWarning("plan-gate-consistency", "plan frontmatter status is Approved but step_mapping.plan-approve is missing")
+		return
+	}
+
+	status, err := readGateStatus(gateID)
+	if err != nil {
+		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but gate %s could not be verified: %v", gateID, err))
+		return
+	}
+	if status != "closed" {
+		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but gate %s is %s", gateID, status))
+	}
 }
 
 // parsePlanFrontmatter extracts and parses YAML frontmatter from plan content.

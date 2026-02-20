@@ -9,6 +9,7 @@ import (
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/recording"
+	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -36,6 +37,12 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
 	}
 
+	// Step 2: Resolve and enforce molecule binding before mutating artifacts.
+	meta, err := specmeta.EnsureFullyBound(root, specID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
+	}
+
 	// Step 2: Update plan frontmatter
 	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
 	if err := updatePlanApproval(planPath, approvedBy); err != nil {
@@ -43,24 +50,20 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	}
 
 	// Step 3: Close plan-approve step in molecule (best-effort)
-	s, err := state.Read(root)
-	if err == nil && s.StepMapping != nil {
-		if stepID, ok := s.StepMapping["plan-approve"]; ok {
-			if _, err := planRunBDCombinedFn("close", stepID); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close plan-approve step: %v", err))
-			} else {
-				result.GateID = stepID
-			}
-		}
+	stepID := strings.TrimSpace(meta.StepMapping["plan-approve"])
+	if stepID == "" {
+		return nil, fmt.Errorf("spec %s is missing step_mapping.plan-approve; re-run `mindspec spec-init %s` or repair frontmatter", specID, specID)
+	}
+	if _, err := planRunBDCombinedFn("close", stepID); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not close plan-approve step: %v", err))
 	} else {
-		// Backward compat: pre-032 specs without molecules
-		result.Warnings = append(result.Warnings, "no molecule found — proceeding without beads step closure")
+		result.GateID = stepID
 	}
 
 	// Step 5: Set state to plan mode (approved)
 	// Note: implement mode requires a bead ID. The user runs `mindspec next`
 	// to claim work and transition to implement mode.
-	if err := state.SetMode(root, state.ModePlan, specID, ""); err != nil {
+	if err := state.SetModeWithMetadata(root, state.ModePlan, specID, "", meta.MoleculeID, meta.StepMapping); err != nil {
 		return nil, fmt.Errorf("setting state: %w", err)
 	}
 

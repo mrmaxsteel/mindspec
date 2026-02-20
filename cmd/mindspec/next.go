@@ -8,6 +8,7 @@ import (
 	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/resolve"
+	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -59,8 +60,21 @@ exist and no --spec is given, the command fails with a list of candidates.`,
 			}
 		}
 
+		var boundMeta *specmeta.Meta
+		if specFlag != "" {
+			boundMeta, err = specmeta.EnsureFullyBound(root, specFlag)
+			if err != nil {
+				return fmt.Errorf("spec %s requires a valid molecule binding before claiming work: %w", specFlag, err)
+			}
+		}
+
 		// Step 2: Query ready work
-		items, err := next.QueryReady()
+		var items []next.BeadInfo
+		if boundMeta != nil && boundMeta.MoleculeID != "" {
+			items, err = next.QueryReadyForMolecule(boundMeta.MoleculeID)
+		} else {
+			items, err = next.QueryReady()
+		}
 		if err != nil {
 			return fmt.Errorf("querying ready work: %w", err)
 		}
@@ -122,11 +136,19 @@ exist and no --spec is given, the command fails with a list of candidates.`,
 
 		// Step 6: Resolve mode and spec ID
 		resolved := next.ResolveMode(root, selected)
+		if resolved.SpecID == "" && specFlag != "" {
+			resolved.SpecID = specFlag
+		}
 
 		// Note: parent status propagation handled natively by beads molecules
 
 		// Step 7: Update state (cursor)
-		if err := state.SetMode(root, resolved.Mode, resolved.SpecID, selected.ID); err != nil {
+		if boundMeta != nil && resolved.SpecID == specFlag {
+			err = state.SetModeWithMetadata(root, resolved.Mode, resolved.SpecID, selected.ID, boundMeta.MoleculeID, boundMeta.StepMapping)
+		} else {
+			err = state.SetMode(root, resolved.Mode, resolved.SpecID, selected.ID)
+		}
+		if err != nil {
 			return fmt.Errorf("updating state: %w", err)
 		}
 

@@ -80,10 +80,19 @@ func Write(root string, s *State) error {
 
 // SetMode validates inputs and writes a new state. Emits a trace event on transition.
 func SetMode(root, mode, spec, bead string) error {
+	return SetModeWithMetadata(root, mode, spec, bead, "", nil)
+}
+
+// SetModeWithMetadata validates inputs and writes a new state.
+// If molecule metadata is provided, it is written into state.
+// Otherwise, metadata is preserved across transitions for the same active spec.
+func SetModeWithMetadata(root, mode, spec, bead, moleculeID string, stepMapping map[string]string) error {
 	// Read previous state for trace event
 	prevMode := "none"
-	if prev, err := Read(root); err == nil {
-		prevMode = prev.Mode
+	var prev *State
+	if p, err := Read(root); err == nil {
+		prev = p
+		prevMode = p.Mode
 	}
 	trace.Emit(trace.NewEvent("state.transition").
 		WithSpec(spec).
@@ -115,7 +124,28 @@ func SetMode(root, mode, spec, bead string) error {
 		ActiveSpec: spec,
 		ActiveBead: bead,
 	}
+	if spec != "" && mode != ModeIdle {
+		if moleculeID != "" {
+			s.ActiveMolecule = moleculeID
+			s.StepMapping = copyStepMapping(stepMapping)
+		} else if prev != nil && prev.ActiveSpec == spec {
+			s.ActiveMolecule = prev.ActiveMolecule
+			s.StepMapping = copyStepMapping(prev.StepMapping)
+		}
+	}
+
 	return Write(root, s)
+}
+
+func copyStepMapping(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func isValidMode(mode string) bool {

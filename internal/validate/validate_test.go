@@ -2,6 +2,7 @@ package validate
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -319,6 +320,84 @@ func TestValidateSpec_PlaceholderContent(t *testing.T) {
 	r := ValidateSpec(tmp, "999-test")
 	if !r.HasFailures() {
 		t.Error("expected failures for placeholder-only spec")
+	}
+}
+
+func TestValidateSpec_ApprovedFrontmatterOpenGateWarns(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0755)
+
+	spec := `---
+molecule_id: mol-1
+status: Approved
+step_mapping:
+  spec-approve: gate-spec
+---
+# Spec 999: Test
+
+## Goal
+
+Do something useful.
+
+## Impacted Domains
+
+- **core**: something
+
+## ADR Touchpoints
+
+- [ADR-0001](../../adr/ADR-0001.md): relevant
+
+## Requirements
+
+1. First requirement
+2. Second requirement
+
+## Scope
+
+### In Scope
+- something
+
+### Out of Scope
+- something else
+
+## Acceptance Criteria
+
+- [ ] First criterion
+- [ ] Second criterion
+- [ ] Third criterion
+
+## Open Questions
+
+None
+
+## Approval
+
+- **Status**: APPROVED
+`
+	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644)
+
+	orig := runBDGateStatusFn
+	defer func() { runBDGateStatusFn = orig }()
+	runBDGateStatusFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 3 && args[0] == "show" && args[1] == "gate-spec" {
+			return []byte(`[{"status":"open"}]`), nil
+		}
+		return nil, fmt.Errorf("unexpected args: %v", args)
+	}
+
+	r := ValidateSpec(tmp, "999-test")
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "spec-gate-consistency" {
+			found = true
+			if issue.Severity != SevWarning {
+				t.Errorf("expected warning severity, got %s", issue.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected spec-gate-consistency warning")
 	}
 }
 
