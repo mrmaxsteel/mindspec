@@ -102,7 +102,7 @@ Spec 026 (Visual Polish) delivered star-point nodes, constellation edges, bloom,
 
 ## Approval
 
-- **Status**: DRAFT
+- **Status**: DRAFT (low priority backlog)
 - **Approved By**: —
 - **Approval Date**: —
-- **Notes**: —
+- **Notes**: Low priority unless another viz polish push is planned. Valid but not urgent.

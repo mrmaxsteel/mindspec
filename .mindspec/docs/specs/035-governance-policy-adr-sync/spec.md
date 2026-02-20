@@ -148,7 +148,8 @@ The policy `domain-operations-require-approval` states that "Adding, splitting, 
 
 ## Approval
 
-- **Status**: DRAFT
+- **Status**: SUPERSEDED
+- **Superseded By**: 039-plan-quality-gates (ADR citation hardening, ADR Fitness gates), remaining scope (policy sync/schema, domain lifecycle gates) deferred to future spec
 - **Approved By**: —
 - **Approval Date**: —
-- **Notes**: —
+- **Notes**: ADR governance requirements (reqs 9-12, 13-15) are covered by Spec 039's ADR Fitness and citation checks. Policy sync/schema (reqs 1-8) and domain lifecycle gates (reqs 16-20) remain valid but are deferred as separate, smaller specs.

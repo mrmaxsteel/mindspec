@@ -156,7 +156,8 @@ This makes the visualization not just beautiful but informative at a glance: the
 
 ## Approval
 
-- **Status**: DRAFT
+- **Status**: SUPERSEDED
+- **Superseded By**: 026-viz-visual-polish
 - **Approved By**: —
 - **Approval Date**: —
-- **Notes**: —
+- **Notes**: All core ideas (star-point nodes, constellation edges, multi-layer starfield, bloom) were rolled into Spec 026, which is fully implemented.

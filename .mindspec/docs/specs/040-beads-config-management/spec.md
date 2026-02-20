@@ -59,3 +59,10 @@ Database-stored config (`bd config set`) is for per-clone preferences and should
 3. `mindspec doctor` reports a warning when `types.custom` in config.yaml does not include `gate`.
 4. `mindspec doctor` reports a warning when `status.custom` in config.yaml does not include `resolved`.
 5. After `mindspec init`, `bd config list` shows `types.custom = gate` and `status.custom = resolved` in database config.
+
+## Approval
+
+- **Status**: DRAFT (backlog)
+- **Approved By**: —
+- **Approval Date**: —
+- **Notes**: Becomes critical when onboarding external projects to mindspec. Good candidate for the Explore Mode workflow once 041 is implemented.
