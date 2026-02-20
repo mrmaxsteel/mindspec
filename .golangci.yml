@@ -1,0 +1,95 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  default: 'none'
+  enable:
+    - errcheck
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*os.File).Close
+        - (*net/http.Response.Body).Close
+        - (os).RemoveAll
+        - (os).Remove
+        - (os).Setenv
+        - (os).Unsetenv
+        - (os).Chdir
+        - (os).MkdirAll
+        - (fmt).Fprintf
+        - (fmt).Fprintln
+        - (fmt).Fprint
+        - (fmt).Sscanf
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+        - fmt.Sscanf
+    misspell:
+      locale: US
+
+  exclusions:
+    rules:
+      # G304: File inclusion via variable — all paths are from trusted internal sources
+      - linters:
+          - gosec
+        text: "G304"
+      # G204: Subprocess launched with variable — args are from trusted internal sources
+      - linters:
+          - gosec
+        text: "G204"
+      # G104: Deferred/cleanup error handling — non-critical in CLI context
+      - linters:
+          - gosec
+        text: "G104"
+      # G112: Slowloris — internal servers (bench collector, viz), not public-facing
+      - linters:
+          - gosec
+        text: "G112"
+      # G302/G306: File permissions 0644/0700/0750 are acceptable for CLI tool files
+      - linters:
+          - gosec
+        text: "G30[126]"
+      # G702/G703: Taint analysis — paths and args are from trusted internal sources
+      - linters:
+          - gosec
+        text: "G70[23]"
+      # errcheck: Ignore unchecked Close/cleanup errors (non-critical)
+      - linters:
+          - errcheck
+        text: "Error return value of .*(Close|RemoveAll|Setenv|Unsetenv|Chdir|MkdirAll|Remove|Release|Encode).* is not checked"
+      # errcheck: Ignore unchecked errors in test cleanup
+      - path: '_test\.go'
+        linters:
+          - errcheck
+      # misspell: "cancelled" is intentional — matches Go context.Canceled pattern
+      - linters:
+          - misspell
+        text: 'cancelled'
+      # unparam: Parameters kept for API consistency / future use
+      - path: 'internal/brownfield/plan\.go'
+        linters:
+          - unparam
+        text: 'buildMigrationPlan'
+      - path: 'internal/contextpack/builder\.go'
+        linters:
+          - unparam
+        text: 'isNeighbor'
+      - path: 'internal/next/beads\.go'
+        linters:
+          - unparam
+        text: 'findRoot'
+      - path: 'internal/state/validate\.go'
+        linters:
+          - unparam
+        text: 'validateReviewMode'
+
+issues:
+  uniq-by-line: true
