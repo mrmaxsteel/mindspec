@@ -1,8 +1,6 @@
 {
-  "mode": "idle",
-  "activeSpec": "",
+  "mode": "plan",
+  "activeSpec": "043-lifecycle-closeout",
   "activeBead": "",
-  "activeMolecule": "",
-  "stepMapping": {},
-  "lastUpdated": "2026-02-20T12:05:00Z"
+  "lastUpdated": "2026-02-20T13:16:55Z"
 }

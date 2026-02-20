@@ -1,0 +1,23 @@
+{
+  "spec_id": "043-lifecycle-closeout",
+  "started_at": "2026-02-20T12:55:05Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-20T12:55:05Z",
+      "ended_at": "2026-02-20T13:08:20Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-02-20T13:08:20Z",
+      "ended_at": "2026-02-20T13:16:55Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-02-20T13:16:55Z"
+    }
+  ]
+}
