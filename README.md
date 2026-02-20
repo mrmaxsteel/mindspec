@@ -88,25 +88,20 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 # https://github.com/mrmaxsteel/mindspec/releases
 # or build from source: make build && cp ./bin/mindspec /usr/local/bin/
 
-# 2. Bootstrap a project
+# 2. Bootstrap your project
 cd your-project
-mindspec init          # scaffolds .mindspec/, GLOSSARY.md, CLAUDE.md, etc.
-
-# 3. Explore an idea (optional)
-mindspec explore "Add caching to API responses"
-# Agent helps you evaluate feasibility, then:
-mindspec explore promote 042-api-caching   # → enters Spec Mode
-# or: mindspec explore dismiss --adr       # → captures "no" as an ADR
-
-# 4. Or jump straight to a spec
-mindspec spec-init 042-api-caching
-
-# 5. Work through the lifecycle
-# Write spec → /spec-approve → Write plan → /plan-approve → Implement → /impl-approve
-
-# 6. Check project health anytime
-mindspec doctor
+mindspec init
 ```
+
+That's it. `mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `CLAUDE.md`, and everything else the agent needs. From here, your coding agent (Claude Code, Codex, etc.) picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
+
+Tell the agent what you want to build. It will walk you through the lifecycle:
+
+1. **Explore** — "I have an idea about X" (agent evaluates feasibility, you decide go/no-go)
+2. **Spec** — Agent drafts the spec, you approve with `/spec-approve`
+3. **Plan** — Agent decomposes into work chunks, you approve with `/plan-approve`
+4. **Implement** — Agent codes in isolated worktrees, scoped to the plan
+5. **Review** — Agent verifies acceptance criteria, you approve with `/impl-approve`
 
 ### Guides
 
