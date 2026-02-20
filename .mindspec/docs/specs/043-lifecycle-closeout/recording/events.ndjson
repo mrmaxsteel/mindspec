@@ -4,3 +4,4 @@
 {"ts":"2026-02-20T13:48:15.444863Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"043-lifecycle-closeout","to":"plan-approved"}}
 {"ts":"2026-02-20T13:54:51.84869Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"043-lifecycle-closeout","to":"plan-approved"}}
 {"ts":"2026-02-20T14:25:02.888611Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-mol-v5m","spec_id":"043-lifecycle-closeout"}}
+{"ts":"2026-02-20T14:35:24.929096Z","event":"lifecycle.end","data":{"spec_id":"043-lifecycle-closeout"}}
