@@ -51,8 +51,6 @@ AgentMind gives you real-time visibility into what your agent is doing, what it'
 - **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
 - **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
 
-![AgentMind UI](agentmind.png)
-
 ### Quick Start
 
 ```bash
