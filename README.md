@@ -12,6 +12,12 @@ AI coding agents are powerful but unstructured. Without guardrails they:
 
 MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
 
+<p align="center">
+  <img src="agentmind.png" alt="AgentMind — AI Agent Observability UI" width="800" />
+  <br />
+  <em>AgentMind — real-time observability for AI coding agents</em>
+</p>
+
 ## The Workflow
 
 Every phase transition requires explicit human approval:
@@ -45,7 +51,7 @@ AgentMind gives you real-time visibility into what your agent is doing, what it'
 - **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
 - **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
 
-<!-- TODO: Add screenshot or GIF -->
+![AgentMind UI](agentmind.png)
 
 ### Quick Start
 
