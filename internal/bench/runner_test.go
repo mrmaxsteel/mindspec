@@ -39,7 +39,7 @@ func TestCompareN(t *testing.T) {
 			CacheRead: 2800000, CacheCreate: 140000,
 			CostUSD: 2.10, DurationMs: 360000,
 			ModelBreakdown: map[string]*ModelStats{
-				"claude-opus-4-6":          {Calls: 3, InputTokens: 2000, OutputTokens: 20000, CostUSD: 1.77},
+				"claude-opus-4-6":           {Calls: 3, InputTokens: 2000, OutputTokens: 20000, CostUSD: 1.77},
 				"claude-haiku-4-5-20251001": {Calls: 9, InputTokens: 31000, OutputTokens: 16000, CostUSD: 0.32},
 			},
 		},

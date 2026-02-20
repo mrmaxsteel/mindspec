@@ -9,17 +9,17 @@ import (
 
 // runtimePatterns are Beads runtime filenames that should not be git-tracked.
 var runtimePatterns = map[string]bool{
-	"bd.sock":          true,
-	"daemon.lock":      true,
-	"daemon.log":       true,
-	"daemon.pid":       true,
-	"sync-state.json":  true,
-	"last-touched":     true,
-	".local_version":   true,
-	"db.sqlite":        true,
-	"bd.db":            true,
-	"redirect":         true,
-	".sync.lock":       true,
+	"bd.sock":         true,
+	"daemon.lock":     true,
+	"daemon.log":      true,
+	"daemon.pid":      true,
+	"sync-state.json": true,
+	"last-touched":    true,
+	".local_version":  true,
+	"db.sqlite":       true,
+	"bd.db":           true,
+	"redirect":        true,
+	".sync.lock":      true,
 }
 
 // runtimeExtensions are file extensions for Beads runtime artifacts.

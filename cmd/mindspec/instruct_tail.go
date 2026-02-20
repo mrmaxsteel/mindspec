@@ -38,4 +38,3 @@ func emitInstruct(root string) error {
 	fmt.Fprint(os.Stdout, output)
 	return nil
 }
-
