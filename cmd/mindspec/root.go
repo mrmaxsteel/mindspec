@@ -8,12 +8,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Set by goreleaser ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 var cmdStartTime time.Time
 
 var rootCmd = &cobra.Command{
-	Use:   "mindspec",
-	Short: "MindSpec: Spec-Driven Development and Self-Documentation System",
-	Long:  `MindSpec is a spec-driven development + context management framework.`,
+	Use:     "mindspec",
+	Short:   "MindSpec: Spec-Driven Development and Self-Documentation System",
+	Long:    `MindSpec is a spec-driven development + context management framework.`,
+	Version: version + " (" + commit + ") " + date,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		cmdStartTime = time.Now()
 
