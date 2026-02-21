@@ -12,11 +12,14 @@ import (
 	"github.com/mindspec/mindspec/internal/templates"
 )
 
+const mindspecMarker = "<!-- mindspec:managed -->"
+
 // Result tracks what the init operation created or skipped.
 type Result struct {
-	Created []string
-	Skipped []string
-	BeadsOK bool // true if bd/beads found in PATH
+	Created  []string
+	Appended []string
+	Skipped  []string
+	BeadsOK  bool // true if bd/beads found in PATH
 }
 
 // FormatSummary returns a human-readable summary of the init result.
@@ -27,6 +30,18 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("Created:\n")
 		for _, p := range r.Created {
 			sb.WriteString("  + ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Appended) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Appended MindSpec block:\n")
+		for _, p := range r.Appended {
+			sb.WriteString("  ~ ")
 			sb.WriteString(p)
 			sb.WriteString("\n")
 		}
@@ -77,7 +92,35 @@ func Run(root string, dryRun bool) (*Result, error) {
 			}
 		} else {
 			if fileExists(target) {
-				r.Skipped = append(r.Skipped, item.path)
+				// If this item supports appending, check for the marker
+				if item.appendBlock != "" {
+					existing, err := os.ReadFile(target)
+					if err != nil {
+						return nil, fmt.Errorf("reading %s: %w", item.path, err)
+					}
+					if !strings.Contains(string(existing), mindspecMarker) {
+						r.Appended = append(r.Appended, item.path)
+						if !dryRun {
+							block := "\n" + mindspecMarker + "\n" + item.appendBlock
+							f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0644)
+							if err != nil {
+								return nil, fmt.Errorf("appending to %s: %w", item.path, err)
+							}
+							_, writeErr := f.WriteString(block)
+							closeErr := f.Close()
+							if writeErr != nil {
+								return nil, fmt.Errorf("writing to %s: %w", item.path, writeErr)
+							}
+							if closeErr != nil {
+								return nil, fmt.Errorf("closing %s: %w", item.path, closeErr)
+							}
+						}
+					} else {
+						r.Skipped = append(r.Skipped, item.path+" (MindSpec block present)")
+					}
+				} else {
+					r.Skipped = append(r.Skipped, item.path)
+				}
 				continue
 			}
 			r.Created = append(r.Created, item.path)
@@ -105,6 +148,7 @@ type manifestItem struct {
 	isDir       bool
 	content     string
 	contentFunc func() string // lazy content (e.g. timestamp)
+	appendBlock string        // if set, append this block to existing files (idempotent via marker)
 }
 
 func manifest() []manifestItem {
@@ -120,8 +164,8 @@ func manifest() []manifestItem {
 
 		// Root files
 		{path: "GLOSSARY.md", content: starterGlossary},
-		{path: "AGENTS.md", content: starterAgentsMD},
-		{path: "CLAUDE.md", content: starterClaudeMD},
+		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
+		{path: "CLAUDE.md", content: starterClaudeMD, appendBlock: appendClaudeBlock},
 		{path: ".mindspec/docs/context-map.md", content: starterContextMap},
 		{path: ".mindspec/policies.yml", content: starterPolicies},
 		{path: ".mindspec/state.json", contentFunc: starterState},
@@ -201,6 +245,7 @@ Maps key concepts to their primary documentation sections.
 `
 
 const starterAgentsMD = `# AGENTS.md — MindSpec Project
+<!-- mindspec:managed -->
 
 This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
 
@@ -236,12 +281,67 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 `
 
 const starterClaudeMD = `# CLAUDE.md
+<!-- mindspec:managed -->
 
 See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
 ## Custom Commands
+
+| Command | Purpose |
+|:--------|:--------|
+| ` + "`/spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
+| ` + "`/spec-approve`" + ` | Approve spec → Plan Mode |
+| ` + "`/plan-approve`" + ` | Approve plan → Implementation Mode |
+| ` + "`/impl-approve`" + ` | Approve implementation → Idle |
+| ` + "`/spec-status`" + ` | Check current mode and active spec/bead state |
+`
+
+// appendAgentsBlock is appended to an existing AGENTS.md when the marker is absent.
+const appendAgentsBlock = `
+## MindSpec
+
+This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
+
+Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
+
+### Build & Test
+
+` + "```bash" + `
+make build    # Build binary
+make test     # Run all tests
+` + "```" + `
+
+### Modes
+
+This project follows a strict spec-driven workflow with human gates:
+
+1. **Explore** — evaluate whether an idea is worth pursuing
+2. **Spec** — define the problem and acceptance criteria (no code)
+3. **Plan** — break the spec into implementation beads (no code)
+4. **Implement** — write code against the approved plan
+5. **Review** — verify implementation meets acceptance criteria
+
+Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`mindspec complete`" + `.
+
+### Conventions
+
+- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
+- In Spec and Plan modes, only documentation may be created or modified — no code changes
+- Working tree must be clean before switching modes
+- Run ` + "`mindspec doctor`" + ` to verify project structure health
+`
+
+// appendClaudeBlock is appended to an existing CLAUDE.md when the marker is absent.
+const appendClaudeBlock = `
+## MindSpec
+
+See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
+
+Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
+
+### Custom Commands
 
 | Command | Purpose |
 |:--------|:--------|
