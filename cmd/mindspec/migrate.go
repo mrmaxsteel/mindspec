@@ -52,7 +52,7 @@ Use --json to output just the file inventory for programmatic use.`,
 			}
 			data, err := json.MarshalIndent(inv, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshalling JSON: %w", err)
+				return fmt.Errorf("marshaling JSON: %w", err)
 			}
 			fmt.Println(string(data))
 			return nil

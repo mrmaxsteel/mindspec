@@ -147,7 +147,7 @@ func ensureSettings(root string, check bool, r *Result) error {
 			settings["hooks"] = hooks
 			out, err := json.MarshalIndent(settings, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshalling %s: %w", relPath, err)
+				return fmt.Errorf("marshaling %s: %w", relPath, err)
 			}
 			if err := os.WriteFile(absPath, append(out, '\n'), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
@@ -164,7 +164,7 @@ func ensureSettings(root string, check bool, r *Result) error {
 			}
 			out, err := json.MarshalIndent(settings, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshalling %s: %w", relPath, err)
+				return fmt.Errorf("marshaling %s: %w", relPath, err)
 			}
 			if err := os.WriteFile(absPath, append(out, '\n'), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
@@ -184,7 +184,7 @@ func wantedHooks() map[string][]map[string]any {
 				"hooks": []map[string]any{
 					{
 						"type":          "command",
-						"command":        "mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+						"command":       "mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
 						"statusMessage": "Loading mode guidance...",
 					},
 				},
@@ -196,7 +196,7 @@ func wantedHooks() map[string][]map[string]any {
 				"hooks": []map[string]any{
 					{
 						"type":          "command",
-						"command":        `state=$(cat .mindspec/state.json 2>/dev/null | jq -r '.mode // empty'); if [ "$state" = "plan" ]; then echo 'MindSpec plan mode is active. Do NOT exit plan mode directly. Run /plan-approve to validate the plan, create beads, and transition to implementation.' >&2; exit 2; fi`,
+						"command":       `state=$(cat .mindspec/state.json 2>/dev/null | jq -r '.mode // empty'); if [ "$state" = "plan" ]; then echo 'MindSpec plan mode is active. Do NOT exit plan mode directly. Run /plan-approve to validate the plan, create beads, and transition to implementation.' >&2; exit 2; fi`,
 						"statusMessage": "Checking MindSpec plan gate...",
 					},
 				},
@@ -206,7 +206,7 @@ func wantedHooks() map[string][]map[string]any {
 				"hooks": []map[string]any{
 					{
 						"type":          "command",
-						"command":        `state=$(cat .mindspec/state.json 2>/dev/null | jq -r '.mode // empty'); if [ "$state" = "plan" ]; then echo '{"additionalContext": "MindSpec plan mode is active. Write your plan to docs/specs/*/plan.md. When complete, use /plan-approve — do NOT use ExitPlanMode directly."}'; fi`,
+						"command":       `state=$(cat .mindspec/state.json 2>/dev/null | jq -r '.mode // empty'); if [ "$state" = "plan" ]; then echo '{"additionalContext": "MindSpec plan mode is active. Write your plan to docs/specs/*/plan.md. When complete, use /plan-approve — do NOT use ExitPlanMode directly."}'; fi`,
 						"statusMessage": "Checking MindSpec plan gate...",
 					},
 				},

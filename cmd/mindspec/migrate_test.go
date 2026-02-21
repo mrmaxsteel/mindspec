@@ -51,10 +51,10 @@ func TestScanSourceMarkdown(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"CONTRIBUTING.md":     false,
-		"README.md":          false,
+		"CONTRIBUTING.md":      false,
+		"README.md":            false,
 		"docs/adr/ADR-0001.md": false,
-		"docs/guide.md":      false,
+		"docs/guide.md":        false,
 	}
 	for _, f := range files {
 		if _, ok := expected[f]; ok {
