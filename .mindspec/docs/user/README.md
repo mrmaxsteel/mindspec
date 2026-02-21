@@ -153,9 +153,9 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec init` | Bootstrap project structure |
-| `mindspec migrate plan` | Analyze existing docs and generate migration plan artifacts |
-| `mindspec migrate apply --run-id <id>` | Apply a reviewed migration plan |
+| `mindspec init` | Bootstrap project structure and AGENTS.md |
+| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
+| `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
 | `mindspec spec-init <id>` | Create new specification |
 | `mindspec doctor` | Project health checks |
 

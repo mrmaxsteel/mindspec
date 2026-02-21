@@ -65,6 +65,8 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("  MindSpec works without Beads but the full workflow requires it.\n")
 	}
 
+	sb.WriteString("\nNext: run 'mindspec setup claude' to configure Claude Code integration.\n")
+
 	return sb.String()
 }
 

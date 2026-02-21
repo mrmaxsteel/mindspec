@@ -69,6 +69,7 @@ func init() {
 	rootCmd.AddCommand(instructCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(nextCmd)
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(specInitCmd)
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(traceCmd)

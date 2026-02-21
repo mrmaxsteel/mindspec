@@ -54,9 +54,10 @@ Documentation stays current because the system won't let you skip it — beads c
 # 2. Bootstrap your project
 cd your-project
 mindspec init
+mindspec setup claude   # Configure Claude Code hooks + slash commands
 ```
 
-That's it. `mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `CLAUDE.md`, and everything else the agent needs. From here, your coding agent (Claude Code, Codex, etc.) picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
+`mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, `/spec-init` and other slash commands). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
 
 Tell the agent what you want to build. It will walk you through the lifecycle:
 
@@ -186,7 +187,9 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec init` | Bootstrap project structure |
+| `mindspec init` | Bootstrap project structure and AGENTS.md |
+| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
+| `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
 | `mindspec spec-init <id>` | Create new specification |
 | `mindspec doctor` | Project health checks |
 
@@ -199,9 +202,11 @@ your-project/
 │   ├── policies.yml            # Canonical architecture policies
 │   └── state.json              # Current mode, active spec/bead (committed)
 ├── .beads/                     # Beads work graph (committed)
-├── docs_archive/               # Migration archive outputs by run-id
-├── AGENTS.md                   # Minimal bootstrap (points to CLI)
-└── CLAUDE.md                   # Minimal bootstrap (points to CLI)
+├── .claude/                    # Claude Code config (created by mindspec setup claude)
+│   ├── settings.json           # Hooks (SessionStart, PreToolUse plan gates)
+│   └── commands/               # Slash commands (/spec-init, /spec-approve, etc.)
+├── AGENTS.md                   # Cross-agent workflow conventions (read by all agents)
+└── CLAUDE.md                   # Claude Code-specific config (points to AGENTS.md)
 ```
 
 ## Design Principles
