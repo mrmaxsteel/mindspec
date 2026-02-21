@@ -120,6 +120,7 @@ func manifest() []manifestItem {
 
 		// Root files
 		{path: "GLOSSARY.md", content: starterGlossary},
+		{path: "AGENTS.md", content: starterAgentsMD},
 		{path: "CLAUDE.md", content: starterClaudeMD},
 		{path: ".mindspec/docs/context-map.md", content: starterContextMap},
 		{path: ".mindspec/policies.yml", content: starterPolicies},
@@ -199,9 +200,13 @@ Maps key concepts to their primary documentation sections.
 | **Context Map** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
 `
 
-const starterClaudeMD = `# CLAUDE.md
+const starterAgentsMD = `# AGENTS.md — MindSpec Project
 
-Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
+This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
+
+## Workflow
+
+Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
 
 ## Build & Test
 
@@ -209,6 +214,32 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 make build    # Build binary
 make test     # Run all tests
 ` + "```" + `
+
+## Modes
+
+This project follows a strict spec-driven workflow with human gates:
+
+1. **Explore** — evaluate whether an idea is worth pursuing
+2. **Spec** — define the problem and acceptance criteria (no code)
+3. **Plan** — break the spec into implementation beads (no code)
+4. **Implement** — write code against the approved plan
+5. **Review** — verify implementation meets acceptance criteria
+
+Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`mindspec complete`" + `.
+
+## Conventions
+
+- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
+- In Spec and Plan modes, only documentation may be created or modified — no code changes
+- Working tree must be clean before switching modes
+- Run ` + "`mindspec doctor`" + ` to verify project structure health
+`
+
+const starterClaudeMD = `# CLAUDE.md
+
+See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
+
+Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
 ## Custom Commands
 
