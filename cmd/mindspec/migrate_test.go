@@ -120,6 +120,11 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 	)
 
 	required := []string{
+		"Phase 1",
+		"Phase 2",
+		"Phase 3",
+		"Phase 4",
+		"Phase 5",
 		"Canonical Structure",
 		"Category Rubric",
 		"adr",
@@ -127,9 +132,9 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 		"domain",
 		"core",
 		"context-map",
-		"glossary",
 		"user-docs",
 		"agent",
+		"mindspec domain add",
 		"Source Files to Classify",
 		"docs/guide.md",
 		"README.md",

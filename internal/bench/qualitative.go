@@ -117,9 +117,9 @@ produced by Claude Code under different conditions:
   with no project documentation.
 - **Session B (baseline)**: No MindSpec tooling (CLAUDE.md, .mindspec/ removed, hooks
   stripped from .claude/settings.json, MindSpec commands removed), but docs/ directory
-  (domain docs, ADRs, glossary, context map) and .claude/ directory still present.
+  (domain docs, ADRs, context map) and .claude/ directory still present.
 - **Session C (mindspec)**: Full MindSpec tooling — spec-driven workflow with CLAUDE.md,
-  hooks, domain documentation, glossary, context map, and policies.
+  hooks, domain documentation, context map, and ADRs.
 
 All three sessions started from the same git commit and received the same feature prompt:
 

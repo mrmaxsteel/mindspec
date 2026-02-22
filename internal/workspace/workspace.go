@@ -54,15 +54,6 @@ func LegacyDocsDir(root string) string {
 	return filepath.Join(root, "docs")
 }
 
-// GlossaryPath returns the canonical glossary path with legacy fallback.
-func GlossaryPath(root string) string {
-	canonical := filepath.Join(CanonicalDocsDir(root), "glossary.md")
-	if exists(canonical) {
-		return canonical
-	}
-	return filepath.Join(root, "GLOSSARY.md")
-}
-
 // SpecDir returns the path to a specific spec directory under root.
 func SpecDir(root, specID string) string {
 	return filepath.Join(DocsDir(root), "specs", specID)
@@ -76,17 +67,6 @@ func ContextMapPath(root string) string {
 // ADRDir returns the path to docs/adr/ under root.
 func ADRDir(root string) string {
 	return filepath.Join(DocsDir(root), "adr")
-}
-
-// PoliciesPath returns the canonical path to .mindspec/policies.yml under root.
-func PoliciesPath(root string) string {
-	return filepath.Join(root, ".mindspec", "policies.yml")
-}
-
-// LegacyPoliciesPath returns the legacy path to architecture/policies.yml under root.
-// Kept for brownfield read fallback during migration.
-func LegacyPoliciesPath(root string) string {
-	return filepath.Join(root, "architecture", "policies.yml")
 }
 
 // DomainDir returns the path to a specific domain's doc directory under root.

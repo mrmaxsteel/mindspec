@@ -11,8 +11,6 @@ This document outlines the file organization, naming, and structural conventions
 | `.mindspec/docs/specs/` | Historical and active specifications |
 | `.mindspec/docs/context-map.md` | Bounded context relationships and integration contracts |
 | `.mindspec/docs/adr/` | Cross-cutting architecture decision records |
-| `.mindspec/policies.yml` | Machine-readable policies |
-| `GLOSSARY.md` | Concept-to-doc-section mapping for context injection |
 | `(binary-internal templates)` | Templates for specs, ADRs, and domain docs are embedded in the `mindspec` binary |
 | `AGENTS.md` | Agent behavioral instructions |
 | `CLAUDE.md` | Claude Code project instructions |
@@ -230,12 +228,6 @@ Always commit `.beads/` and `.mindspec/state.json` changes alongside the relevan
 - Changes are isolated per bead
 - Closing a bead requires clean state sync from worktree
 
-## Glossary Conventions
-
-- **Pathing**: Always use **relative paths** from the project root for glossary targets (e.g., `.mindspec/docs/core/ARCHITECTURE.md#section-id`). Do not use absolute paths.
-- **Format**: Use the standard table format: `| **Term** | [label](relative/path#anchor) |`.
-- **Coverage**: Every new concept introduced in a spec or domain doc should have a glossary entry.
-
 ## Documentation Anchors
 
 Use stable Markdown header anchors for deterministic section retrieval:
@@ -282,7 +274,6 @@ Schema:
 The primary interface is the Go CLI binary. Key commands:
 
 - `mindspec doctor`: Project structure health check
-- `mindspec glossary list|match|show`: Glossary-based context injection
 - `mindspec context pack <spec-id>`: Generate context for an agent session
 - `mindspec state set|show`: Manage focused-spec cursor (ADR-0015; mode is derived from molecule)
 - `mindspec instruct`: Emit mode-appropriate operating guidance (ADR-0003)

@@ -6,13 +6,13 @@
 
 ### Core
 
-**Owns**: CLI entry point, project health validation, policy framework, workspace resolution.
+**Owns**: CLI entry point, project health validation, workspace resolution.
 
 **Domain docs**: [`docs/domains/core/`](domains/core/overview.md)
 
 ### Context-System
 
-**Owns**: Glossary parsing, context pack assembly, DDD-informed routing, provenance tracking.
+**Owns**: Context pack assembly, DDD-informed routing, provenance tracking.
 
 **Domain docs**: [`docs/domains/context-system/`](domains/context-system/overview.md)
 
@@ -30,8 +30,8 @@
 ┌────────────┐       ┌──────────────────┐       ┌────────────┐
 │    Core     │◄──────│  Context-System  │──────►│  Workflow   │
 │             │       │                  │       │            │
-│ CLI, health,│       │ Glossary, context│       │ Modes, spec│
-│ policies,   │       │ packs, provenance│       │ lifecycle, │
+│ CLI, health,│       │ Context packs,   │       │ Modes, spec│
+│ workspace   │       │ DDD routing,     │       │ lifecycle, │
 │ workspace   │       │                  │       │ Beads,     │
 └──────┬──────┘       └──────────────────┘       │ worktrees  │
        │                                         └─────┬──────┘
@@ -42,7 +42,7 @@
 
 ### Core → Context-System (upstream)
 
-Core provides workspace resolution and path infrastructure. Context-system consumes `Workspace.find_project_root()`, `get_docs_dir()`, `get_glossary_path()`.
+Core provides workspace resolution and path infrastructure. Context-system consumes `workspace.FindRoot()`, `workspace.DocsDir()`, `workspace.SpecDir()`.
 
 **Contract**: [`docs/domains/core/interfaces.md`](domains/core/interfaces.md)
 
@@ -69,13 +69,11 @@ Context-system delivers assembled context packs that workflow uses during planni
 | Concept | Authoritative Location |
 |:--------|:----------------------|
 | Project structure health | Core (`mindspec doctor`) |
-| Glossary term mapping | `GLOSSARY.md` (parsed by context-system) |
 | Mode state and transitions | Workflow (spec/bead status) |
 | Execution tracking (issues, dependencies) | Beads (external, accessed via workflow adapter) |
-| Long-form specifications | `docs/specs/` |
-| Domain architecture | `docs/domains/<domain>/` |
-| ADR lifecycle | `docs/adr/` + `docs/domains/<domain>/adr/` |
-| Machine-checkable policies | `architecture/policies.yml` |
+| Long-form specifications | `.mindspec/docs/specs/` |
+| Domain architecture | `.mindspec/docs/domains/<domain>/` |
+| ADR lifecycle | `.mindspec/docs/adr/` + `.mindspec/docs/domains/<domain>/adr/` |
 | Context pack content and provenance | Context-system (generated artifacts) |
 
 ---

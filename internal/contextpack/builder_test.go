@@ -101,25 +101,6 @@ Use DDD.
 Beads as substrate.
 `), 0o644)
 
-	// Policies (canonical path)
-	msDir := filepath.Join(root, ".mindspec")
-	os.MkdirAll(msDir, 0o755)
-	os.WriteFile(filepath.Join(msDir, "policies.yml"), []byte(`policies:
-  - id: spec-no-code
-    description: "No code in spec mode"
-    severity: error
-    mode: spec
-
-  - id: doc-sync
-    description: "Doc sync required"
-    severity: warning
-
-  - id: impl-scope
-    description: "Scope discipline"
-    severity: error
-    mode: implementation
-`), 0o644)
-
 	return root
 }
 
@@ -157,18 +138,6 @@ func TestBuild_SpecMode(t *testing.T) {
 	}
 	if strings.Contains(rendered, "ADR-0002") {
 		t.Error("should not include ADR-0002 (workflow domain only)")
-	}
-
-	// Should include policies
-	if !strings.Contains(rendered, "spec-no-code") {
-		t.Error("missing spec-mode policy")
-	}
-	if !strings.Contains(rendered, "doc-sync") {
-		t.Error("missing global policy")
-	}
-	// impl-scope should be excluded in spec mode
-	if strings.Contains(rendered, "impl-scope") {
-		t.Error("should not include implementation-only policy in spec mode")
 	}
 
 	// Provenance
@@ -225,38 +194,6 @@ func TestBuild_ImplementMode(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "Workflow Interfaces") {
 		t.Error("implement mode should include neighbor interfaces")
-	}
-}
-
-func TestBuild_PoliciesLegacyFallback(t *testing.T) {
-	root := setupTestProject(t)
-
-	// Move policies to legacy location to verify fallback behavior.
-	if err := os.MkdirAll(filepath.Join(root, "architecture"), 0o755); err != nil {
-		t.Fatalf("mkdir legacy architecture dir: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, ".mindspec", "policies.yml"))
-	if err != nil {
-		t.Fatalf("read canonical policies: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "architecture", "policies.yml"), data, 0o644); err != nil {
-		t.Fatalf("write legacy policies: %v", err)
-	}
-	if err := os.Remove(filepath.Join(root, ".mindspec", "policies.yml")); err != nil {
-		t.Fatalf("remove canonical policies: %v", err)
-	}
-
-	pack, err := Build(root, "001-test", ModeSpec)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	rendered := pack.Render()
-	if !strings.Contains(rendered, "spec-no-code") {
-		t.Fatal("expected policies section via legacy fallback")
-	}
-	if !strings.Contains(rendered, "architecture/policies.yml") {
-		t.Fatal("expected legacy policy path in provenance when fallback is used")
 	}
 }
 

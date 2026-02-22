@@ -23,17 +23,8 @@ func TestRun_EmptyDir(t *testing.T) {
 
 	// Verify key files exist
 	requiredFiles := []string{
-		"GLOSSARY.md",
 		"CLAUDE.md",
-		".mindspec/docs/context-map.md",
-		".mindspec/policies.yml",
 		".mindspec/state.json",
-		".mindspec/docs/domains/core/overview.md",
-		".mindspec/docs/domains/core/architecture.md",
-		".mindspec/docs/domains/core/interfaces.md",
-		".mindspec/docs/domains/core/runbook.md",
-		".mindspec/docs/domains/context-system/overview.md",
-		".mindspec/docs/domains/workflow/overview.md",
 	}
 	for _, f := range requiredFiles {
 		p := filepath.Join(root, f)
@@ -44,10 +35,8 @@ func TestRun_EmptyDir(t *testing.T) {
 
 	// Verify key dirs exist
 	requiredDirs := []string{
-		".mindspec/docs/core",
 		".mindspec/docs/domains",
 		".mindspec/docs/specs",
-		".mindspec/docs/adr",
 		".mindspec",
 	}
 	for _, d := range requiredDirs {
@@ -57,6 +46,29 @@ func TestRun_EmptyDir(t *testing.T) {
 			t.Errorf("expected dir %s to exist", d)
 		} else if err == nil && !info.IsDir() {
 			t.Errorf("expected %s to be a directory", d)
+		}
+	}
+
+	// Verify removed items are NOT created
+	removedFiles := []string{
+		"GLOSSARY.md",
+		".mindspec/docs/context-map.md",
+		".mindspec/policies.yml",
+	}
+	for _, f := range removedFiles {
+		p := filepath.Join(root, f)
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("expected file %s to NOT exist (removed from bootstrap)", f)
+		}
+	}
+	removedDirs := []string{
+		".mindspec/docs/core",
+		".mindspec/docs/adr",
+	}
+	for _, d := range removedDirs {
+		p := filepath.Join(root, d)
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("expected dir %s to NOT exist (removed from bootstrap)", d)
 		}
 	}
 }
@@ -74,7 +86,7 @@ func TestRun_Idempotent(t *testing.T) {
 	}
 
 	// Capture file content for comparison
-	glossaryBefore, _ := os.ReadFile(filepath.Join(root, "GLOSSARY.md"))
+	claudeBefore, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
 
 	// Second run
 	r2, err := Run(root, false)
@@ -89,9 +101,9 @@ func TestRun_Idempotent(t *testing.T) {
 	}
 
 	// Verify content unchanged
-	glossaryAfter, _ := os.ReadFile(filepath.Join(root, "GLOSSARY.md"))
-	if string(glossaryBefore) != string(glossaryAfter) {
-		t.Error("GLOSSARY.md content changed on second run")
+	claudeAfter, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if string(claudeBefore) != string(claudeAfter) {
+		t.Error("CLAUDE.md content changed on second run")
 	}
 }
 
@@ -118,8 +130,8 @@ func TestRun_PartialExists(t *testing.T) {
 	root := t.TempDir()
 
 	// Pre-create some files
-	os.MkdirAll(filepath.Join(root, ".mindspec/docs/core"), 0755)
-	os.WriteFile(filepath.Join(root, "GLOSSARY.md"), []byte("# Custom Glossary\n"), 0644)
+	os.MkdirAll(filepath.Join(root, ".mindspec/docs/domains"), 0755)
+	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("# Custom CLAUDE\n"), 0644)
 
 	result, err := Run(root, false)
 	if err != nil {
@@ -131,17 +143,14 @@ func TestRun_PartialExists(t *testing.T) {
 	for _, s := range result.Skipped {
 		skipped[s] = true
 	}
-	if !skipped[".mindspec/docs/core/"] {
-		t.Error("expected .mindspec/docs/core/ to be skipped")
-	}
-	if !skipped["GLOSSARY.md"] {
-		t.Error("expected GLOSSARY.md to be skipped")
+	if !skipped[".mindspec/docs/domains/"] {
+		t.Error("expected .mindspec/docs/domains/ to be skipped")
 	}
 
 	// Verify pre-existing file was not overwritten
-	content, _ := os.ReadFile(filepath.Join(root, "GLOSSARY.md"))
-	if string(content) != "# Custom Glossary\n" {
-		t.Error("GLOSSARY.md was overwritten")
+	content, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if string(content) == "" {
+		t.Error("CLAUDE.md was emptied")
 	}
 
 	// Verify other items were created
@@ -149,8 +158,8 @@ func TestRun_PartialExists(t *testing.T) {
 	for _, c := range result.Created {
 		created[c] = true
 	}
-	if !created["CLAUDE.md"] {
-		t.Error("expected CLAUDE.md to be created")
+	if !created["AGENTS.md"] {
+		t.Error("expected AGENTS.md to be created")
 	}
 }
 
@@ -176,7 +185,7 @@ func TestRun_StateFileContent(t *testing.T) {
 	}
 }
 
-func TestRun_DomainTemplateSubstitution(t *testing.T) {
+func TestRun_NoDomainScaffolding(t *testing.T) {
 	root := t.TempDir()
 
 	_, err := Run(root, false)
@@ -184,33 +193,25 @@ func TestRun_DomainTemplateSubstitution(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Verify domain name was substituted in scaffolded files
-	data, err := os.ReadFile(filepath.Join(root, ".mindspec/docs/domains/context-system/overview.md"))
+	// Domains dir should exist but be empty — no default domains are scaffolded
+	entries, err := os.ReadDir(filepath.Join(root, ".mindspec/docs/domains"))
 	if err != nil {
-		t.Fatalf("reading domain overview: %v", err)
+		t.Fatalf("reading domains dir: %v", err)
 	}
-	if !contains(string(data), "Context-System") {
-		t.Error("domain overview should contain 'Context-System' display name")
-	}
-	if contains(string(data), "{{.DomainName}}") {
-		t.Error("domain overview should not contain unreplaced template placeholder")
-	}
-
-	// Templates are internal to the binary and should not be materialized in workspace.
-	if _, err := os.Stat(filepath.Join(root, "docs/templates")); !os.IsNotExist(err) {
-		t.Error("docs/templates/ should not be created by bootstrap")
+	if len(entries) != 0 {
+		t.Errorf("expected empty domains dir, got %d entries", len(entries))
 	}
 }
 
 func TestFormatSummary(t *testing.T) {
 	r := &Result{
-		Created: []string{"GLOSSARY.md", "docs/core/"},
+		Created: []string{"AGENTS.md", ".mindspec/docs/domains/"},
 		Skipped: []string{"CLAUDE.md"},
 		BeadsOK: false,
 	}
 
 	summary := r.FormatSummary()
-	if !contains(summary, "+ GLOSSARY.md") {
+	if !contains(summary, "+ AGENTS.md") {
 		t.Error("summary should list created items with +")
 	}
 	if !contains(summary, "- CLAUDE.md") {
@@ -223,7 +224,7 @@ func TestFormatSummary(t *testing.T) {
 
 func TestFormatSummary_BeadsOK(t *testing.T) {
 	r := &Result{
-		Created: []string{"GLOSSARY.md"},
+		Created: []string{"AGENTS.md"},
 		BeadsOK: true,
 	}
 

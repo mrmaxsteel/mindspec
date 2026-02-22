@@ -39,12 +39,10 @@ func setupDocsFixture(t *testing.T) string {
 	root := t.TempDir()
 
 	dirs := []string{
-		"docs/core",
 		"docs/domains/core",
 		"docs/domains/context-system",
 		"docs/domains/workflow",
 		"docs/specs",
-		"architecture",
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(filepath.Join(root, d), 0755); err != nil {
@@ -84,18 +82,6 @@ func setupDocsFixture(t *testing.T) string {
 func TestCheckDocs_AllPresent(t *testing.T) {
 	root := setupDocsFixture(t)
 
-	// Create a glossary with a valid link
-	if err := os.WriteFile(filepath.Join(root, "docs/core/ARCHITECTURE.md"), []byte("# arch"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	glossary := `| Term | Target |
-|:-----|:-------|
-| **Bead** | [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md) |
-`
-	if err := os.WriteFile(filepath.Join(root, "GLOSSARY.md"), []byte(glossary), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	r := &Report{}
 	checkDocs(r, root)
 
@@ -122,30 +108,6 @@ func TestCheckDocs_MissingDirs(t *testing.T) {
 	}
 	if missingCount == 0 {
 		t.Error("expected missing checks for empty root")
-	}
-}
-
-func TestCheckGlossary_BrokenLinks(t *testing.T) {
-	root := t.TempDir()
-	glossary := `| Term | Target |
-|:-----|:-------|
-| **Missing** | [does-not-exist.md](does-not-exist.md) |
-`
-	if err := os.WriteFile(filepath.Join(root, "GLOSSARY.md"), []byte(glossary), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	r := &Report{}
-	checkGlossary(r, root)
-
-	foundBroken := false
-	for _, c := range r.Checks {
-		if c.Name == "Glossary links" && c.Status == Error {
-			foundBroken = true
-		}
-	}
-	if !foundBroken {
-		t.Error("expected broken link error")
 	}
 }
 

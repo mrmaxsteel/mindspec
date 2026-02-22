@@ -6,13 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/glossary"
 	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
-// expectedDomains and their expected files.
-var expectedDomains = []string{"core", "context-system", "workflow"}
+// domainFiles are the expected files within each domain directory.
 var domainFiles = []string{"overview.md", "architecture.md", "interfaces.md", "runbook.md"}
 
 func checkDocs(r *Report, root string) {
@@ -22,7 +20,6 @@ func checkDocs(r *Report, root string) {
 		path string // relative to project root
 		name string // display name
 	}{
-		{filepath.Join(docsRel, "core"), filepath.ToSlash(filepath.Join(docsRel, "core")) + "/"},
 		{filepath.Join(docsRel, "domains"), filepath.ToSlash(filepath.Join(docsRel, "domains")) + "/"},
 		{filepath.Join(docsRel, "specs"), filepath.ToSlash(filepath.Join(docsRel, "specs")) + "/"},
 	}
@@ -41,22 +38,6 @@ func checkDocs(r *Report, root string) {
 		}
 	}
 
-	// GLOSSARY.md
-	checkGlossary(r, root)
-
-	// context-map.md
-	cmPath := workspace.ContextMapPath(root)
-	cmName := filepath.ToSlash(filepath.Join(docsRel, "context-map.md"))
-	if fileExists(cmPath) {
-		r.Checks = append(r.Checks, Check{Name: cmName, Status: OK})
-	} else {
-		r.Checks = append(r.Checks, Check{
-			Name:    cmName,
-			Status:  Missing,
-			Message: fmt.Sprintf("create %s", cmName),
-		})
-	}
-
 	// Domain subdirectory checks
 	checkDomains(r, root, docsRel)
 
@@ -67,67 +48,24 @@ func checkDocs(r *Report, root string) {
 	checkMigrationMetadata(r, root)
 }
 
-func checkGlossary(r *Report, root string) {
-	glossaryName := relSlash(root, workspace.GlossaryPath(root))
-	entries, err := glossary.Parse(root)
-	if err != nil {
-		r.Checks = append(r.Checks, Check{
-			Name:    glossaryName,
-			Status:  Missing,
-			Message: fmt.Sprintf("create %s", glossaryName),
-		})
-		return
-	}
-
-	r.Checks = append(r.Checks, Check{
-		Name:    glossaryName,
-		Status:  OK,
-		Message: fmt.Sprintf("(%d terms)", len(entries)),
-	})
-
-	// Check for broken links using parsed entries
-	var broken []string
-	for _, e := range entries {
-		if e.FilePath == "" {
-			continue
-		}
-		fullPath := filepath.Join(root, e.FilePath)
-		if !fileExists(fullPath) {
-			broken = append(broken, fmt.Sprintf("%s -> %s", e.Term, e.Target))
-		}
-	}
-
-	if len(broken) > 0 {
-		r.Checks = append(r.Checks, Check{
-			Name:    "Glossary links",
-			Status:  Error,
-			Message: fmt.Sprintf("%d broken: %s", len(broken), strings.Join(broken, "; ")),
-		})
-	} else {
-		r.Checks = append(r.Checks, Check{
-			Name:    "Glossary links",
-			Status:  OK,
-			Message: "all links verified",
-		})
-	}
-}
-
 func checkDomains(r *Report, root, docsRel string) {
 	domainsDir := filepath.Join(root, docsRel, "domains")
 	if !dirExists(domainsDir) {
 		return // already reported as missing in requiredDirs
 	}
 
-	for _, domain := range expectedDomains {
-		domainDir := filepath.Join(domainsDir, domain)
-		if !dirExists(domainDir) {
-			r.Checks = append(r.Checks, Check{
-				Name:    filepath.ToSlash(filepath.Join(docsRel, "domains", domain)) + "/",
-				Status:  Warn,
-				Message: "domain directory not found",
-			})
+	// Discover domains from disk rather than a hardcoded list.
+	entries, err := os.ReadDir(domainsDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
+		domain := entry.Name()
+		domainDir := filepath.Join(domainsDir, domain)
 
 		for _, f := range domainFiles {
 			fp := filepath.Join(domainDir, f)
@@ -159,14 +97,6 @@ func docsRootRel(root string) string {
 	rel, err := filepath.Rel(root, workspace.DocsDir(root))
 	if err != nil {
 		return "docs"
-	}
-	return filepath.ToSlash(rel)
-}
-
-func relSlash(root, path string) string {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(rel)
 }

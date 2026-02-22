@@ -1,7 +1,6 @@
 package contextpack
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -129,40 +128,6 @@ func Build(root, specID, mode string) (*ContextPack, error) {
 		})
 	}
 
-	// Parse and filter policies (canonical path, then legacy fallback)
-	polPath := workspace.PoliciesPath(root)
-	policies, err := ParsePolicies(polPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			legacyPath := workspace.LegacyPoliciesPath(root)
-			if legacyPath != polPath {
-				policies, err = ParsePolicies(legacyPath)
-				if err == nil {
-					polPath = legacyPath
-				}
-			}
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("parsing policies: %w", err)
-		}
-	}
-
-	if err == nil {
-		filteredPolicies := FilterPolicies(policies, mode)
-		if len(filteredPolicies) > 0 {
-			source := filepath.ToSlash(relPath(root, polPath))
-			pack.Sections = append(pack.Sections, PackSection{
-				Heading: "Applicable Policies",
-				Content: renderPoliciesTable(filteredPolicies),
-			})
-			pack.Provenance = append(pack.Provenance, ProvenanceEntry{
-				Source:  source,
-				Section: "Policies",
-				Reason:  fmt.Sprintf("Policies applicable to mode %q", mode),
-			})
-		}
-	}
-
 	return pack, nil
 }
 
@@ -284,20 +249,6 @@ func (cp *ContextPack) WriteToFile(root, specID string) error {
 	}
 	outPath := filepath.Join(outDir, "context-pack.md")
 	return os.WriteFile(outPath, []byte(cp.Render()), 0o644)
-}
-
-func renderPoliciesTable(policies []Policy) string {
-	var b strings.Builder
-	b.WriteString("| ID | Severity | Description | Reference |\n")
-	b.WriteString("|:---|:---------|:------------|:----------|\n")
-	for _, p := range policies {
-		ref := p.Reference
-		if ref == "" {
-			ref = "—"
-		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", p.ID, p.Severity, p.Description, ref))
-	}
-	return b.String()
 }
 
 func gitCommitSHA(root string) string {

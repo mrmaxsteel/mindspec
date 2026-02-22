@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/mindspec/mindspec/internal/templates"
 )
 
 const mindspecMarker = "<!-- mindspec:managed -->"
@@ -154,50 +152,19 @@ type manifestItem struct {
 }
 
 func manifest() []manifestItem {
-	domains := []string{"core", "context-system", "workflow"}
-
 	items := []manifestItem{
 		// Required directories
 		{path: ".mindspec", isDir: true},
-		{path: ".mindspec/docs/core", isDir: true},
 		{path: ".mindspec/docs/domains", isDir: true},
 		{path: ".mindspec/docs/specs", isDir: true},
-		{path: ".mindspec/docs/adr", isDir: true},
 
 		// Root files
-		{path: "GLOSSARY.md", content: starterGlossary},
 		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
 		{path: "CLAUDE.md", content: starterClaudeMD, appendBlock: appendClaudeBlock},
-		{path: ".mindspec/docs/context-map.md", content: starterContextMap},
-		{path: ".mindspec/policies.yml", content: starterPolicies},
 		{path: ".mindspec/state.json", contentFunc: starterState},
 	}
 
-	// Domain scaffolding — one set of 4 files per domain
-	for _, domain := range domains {
-		domainDir := filepath.Join(".mindspec", "docs", "domains", domain)
-		items = append(items, manifestItem{path: domainDir, isDir: true})
-
-		displayName := domainDisplayName(domain)
-		for _, tmplFile := range templates.DomainTemplateFileNames {
-			items = append(items, manifestItem{
-				path:    filepath.Join(domainDir, tmplFile),
-				content: strings.ReplaceAll(templates.Domain(tmplFile), "{{.DomainName}}", displayName),
-			})
-		}
-	}
-
 	return items
-}
-
-func domainDisplayName(slug string) string {
-	parts := strings.Split(slug, "-")
-	for i, p := range parts {
-		if len(p) > 0 {
-			parts[i] = strings.ToUpper(p[:1]) + p[1:]
-		}
-	}
-	return strings.Join(parts, "-")
 }
 
 func checkBeadsCLI() bool {
@@ -231,20 +198,6 @@ func starterState() string {
 }
 
 // --- Starter file content ---
-
-const starterGlossary = `# Glossary
-
-Maps key concepts to their primary documentation sections.
-
-| Term | Target |
-|:-----|:-------|
-| **Spec Mode** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-| **Plan Mode** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-| **Implementation Mode** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-| **Human Gate** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-| **Domain** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-| **Context Map** | [.mindspec/docs/context-map.md](.mindspec/docs/context-map.md) |
-`
 
 const starterAgentsMD = `# AGENTS.md — MindSpec Project
 <!-- mindspec:managed -->
@@ -352,77 +305,4 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/impl-approve`" + ` | Approve implementation → Idle |
 | ` + "`/spec-status`" + ` | Check current mode and active spec/bead state |
-`
-
-const starterContextMap = `# Context Map
-
-> Declares the bounded contexts in this project, their relationships, and integration contracts.
-
-## Bounded Contexts
-
-### Core
-
-**Owns**: <List core responsibilities>
-
-**Domain docs**: [` + "`" + `.mindspec/docs/domains/core/` + "`" + `](domains/core/overview.md)
-
-### Context-System
-
-**Owns**: <List context-system responsibilities>
-
-**Domain docs**: [` + "`" + `.mindspec/docs/domains/context-system/` + "`" + `](domains/context-system/overview.md)
-
-### Workflow
-
-**Owns**: <List workflow responsibilities>
-
-**Domain docs**: [` + "`" + `.mindspec/docs/domains/workflow/` + "`" + `](domains/workflow/overview.md)
-
----
-
-## Relationships
-
-` + "```" + `
-Core <--- Context-System ---> Workflow
-` + "```" + `
-
----
-
-## Source of Truth
-
-| Concept | Authoritative Location |
-|:--------|:----------------------|
-| Project structure health | Core (` + "`mindspec doctor`" + `) |
-| Glossary term mapping | ` + "`GLOSSARY.md`" + ` |
-| Mode state and transitions | Workflow |
-| Long-form specifications | ` + "`.mindspec/docs/specs/`" + ` |
-| Domain architecture | ` + "`.mindspec/docs/domains/<domain>/`" + ` |
-| ADR lifecycle | ` + "`.mindspec/docs/adr/`" + ` |
-| Machine-checkable policies | ` + "`.mindspec/policies.yml`" + ` |
-`
-
-const starterPolicies = `# Architecture Policies
-
-policies:
-  - id: spec-mode-no-code
-    description: "In Spec Mode, only markdown files may be created or modified."
-    severity: error
-    mode: spec
-
-  - id: plan-mode-no-code
-    description: "In Plan Mode, only plans, ADR proposals, and documentation may be modified."
-    severity: error
-    mode: plan
-
-  - id: spec-required
-    description: "Every functional change must refer to a spec in .mindspec/docs/specs/"
-    severity: error
-
-  - id: doc-sync-required
-    description: "Changes to core logic must be accompanied by documentation updates."
-    severity: warning
-
-  - id: clean-tree-before-transition
-    description: "Working tree must be clean before starting new work or switching modes."
-    severity: error
 `

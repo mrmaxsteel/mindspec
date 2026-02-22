@@ -126,7 +126,7 @@ A Context Pack is a concise bundle constructed from:
 - Accepted ADRs (not superseded) for impacted domains
 - Neighbor contracts (1-hop from Context Map)
 - Explicitly referenced files/sections
-- Glossary/registry mappings
+- Explicitly referenced files/sections
 
 ### Properties
 
@@ -173,4 +173,4 @@ v1 emits structured events (minimal) for future "Agent Mind Visualization":
 - [ADR-0001](../adr/ADR-0001.md) — DDD enablement + context packs
 - [ADR-0014](../adr/ADR-0014.md) — Canonical docs/policies path supersession scope
 - [ADR-0002](../adr/ADR-0002.md) — Beads integration strategy
-- [policies.yml](../../.mindspec/policies.yml) — Machine-checkable policies
+- [DOCS-LAYOUT.md](DOCS-LAYOUT.md) — Canonical documentation layout reference

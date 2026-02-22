@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/mindspec/mindspec/internal/trace"
+	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +54,18 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func findRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine working directory: %w", err)
+	}
+	root, err := workspace.FindRoot(cwd)
+	if err != nil {
+		return "", fmt.Errorf("workspace not found: %w", err)
+	}
+	return root, nil
+}
+
 func init() {
 	rootCmd.PersistentFlags().String("trace", "", "Write trace events to file (use - for stderr)")
 
@@ -64,7 +78,6 @@ func init() {
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(exploreCmd)
-	rootCmd.AddCommand(glossaryCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(instructCmd)
 	rootCmd.AddCommand(migrateCmd)

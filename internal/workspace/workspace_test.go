@@ -183,40 +183,6 @@ func TestRecordingDir_UsesSpecDir(t *testing.T) {
 	}
 }
 
-func TestGlossaryPath(t *testing.T) {
-	root := "/project"
-	got := GlossaryPath(root)
-	want := filepath.Join(root, "GLOSSARY.md")
-	if got != want {
-		t.Errorf("GlossaryPath: got %q, want %q", got, want)
-	}
-}
-
-func TestGlossaryPath_CanonicalPreferred(t *testing.T) {
-	root := t.TempDir()
-	canonical := filepath.Join(root, ".mindspec", "docs")
-	if err := os.MkdirAll(canonical, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	glossary := filepath.Join(canonical, "glossary.md")
-	if err := os.WriteFile(glossary, []byte("# glossary"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := GlossaryPath(root)
-	if got != glossary {
-		t.Errorf("GlossaryPath canonical: got %q, want %q", got, glossary)
-	}
-}
-
-func TestPoliciesPath(t *testing.T) {
-	got := PoliciesPath("/project")
-	want := filepath.Join("/project", ".mindspec", "policies.yml")
-	if got != want {
-		t.Errorf("PoliciesPath: got %q, want %q", got, want)
-	}
-}
-
 func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	root := "/project"
 	if got := CanonicalDocsDir(root); got != filepath.Join(root, ".mindspec", "docs") {
@@ -227,10 +193,3 @@ func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	}
 }
 
-func TestLegacyPoliciesPath(t *testing.T) {
-	got := LegacyPoliciesPath("/project")
-	want := filepath.Join("/project", "architecture", "policies.yml")
-	if got != want {
-		t.Errorf("LegacyPoliciesPath: got %q, want %q", got, want)
-	}
-}
