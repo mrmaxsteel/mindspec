@@ -1,8 +1,8 @@
 ---
-approved_at: ""
-approved_by: ""
+approved_at: "2026-02-26T17:52:06Z"
+approved_by: user
 molecule_id: mindspec-mol-8orbb
-status: Draft
+status: Approved
 step_mapping:
     implement: mindspec-mol-spakr
     plan: mindspec-mol-bpf8j
@@ -12,6 +12,7 @@ step_mapping:
     spec-approve: mindspec-mol-lx1bf
     spec-lifecycle: mindspec-mol-8orbb
 ---
+
 
 # Spec 048-impl-approve-cleanup: Implementation Approval Cleanup
 
@@ -191,7 +192,7 @@ The net effect: once a worktree is active, an agent cannot run any bash command 
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-02-26
+- **Notes**: Approved via mindspec approve spec

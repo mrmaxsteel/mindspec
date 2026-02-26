@@ -1,0 +1,2 @@
+{"ts":"2026-02-26T17:35:32.979932Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"048-impl-approve-cleanup"}}
+{"ts":"2026-02-26T17:52:06.877491Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"048-impl-approve-cleanup","to":"plan"}}
