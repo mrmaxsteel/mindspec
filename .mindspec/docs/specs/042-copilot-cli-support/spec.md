@@ -15,6 +15,7 @@ step_mapping:
 
 
 
+
 # Spec 042-copilot-cli-support: Copilot Integration Support (CLI + VS Code)
 
 ## Goal

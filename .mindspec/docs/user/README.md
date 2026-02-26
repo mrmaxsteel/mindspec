@@ -78,6 +78,7 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 | Goal | Guide |
 |:-----|:------|
 | **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/guides/claude-code.md) |
+| **Full workflow with GitHub Copilot** | [Copilot guide](.mindspec/docs/guides/copilot.md) |
 | **Full workflow with Codex** | [Codex guide](.mindspec/docs/guides/codex.md) |
 | **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
@@ -155,6 +156,7 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 |:--------|:------------|
 | `mindspec init` | Bootstrap project structure and AGENTS.md |
 | `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
+| `mindspec setup copilot` | Configure GitHub Copilot integration (instructions, prompt files) |
 | `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
 | `mindspec spec-init <id>` | Create new specification |
 | `mindspec doctor` | Project health checks |
@@ -189,7 +191,7 @@ your-project/
 - Go 1.22+
 - [Beads](https://github.com/steveyegge/beads) CLI (`bd`)
 - Git (for worktree support)
-- Claude Code or Codex (for agent integration; MindSpec is CLI-first and works standalone)
+- Claude Code, GitHub Copilot, or Codex (for agent integration; MindSpec is CLI-first and works standalone)
 
 ## Building
 

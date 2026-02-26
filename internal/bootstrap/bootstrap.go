@@ -65,7 +65,9 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("  MindSpec works without Beads but the full workflow requires it.\n")
 	}
 
-	sb.WriteString("\nNext: run 'mindspec setup claude' to configure Claude Code integration.\n")
+	sb.WriteString("\nNext steps:\n")
+	sb.WriteString("  mindspec setup claude    # Configure Claude Code integration\n")
+	sb.WriteString("  mindspec setup copilot   # Configure GitHub Copilot integration\n")
 
 	return sb.String()
 }
@@ -163,6 +165,7 @@ func manifest() []manifestItem {
 		// Root files
 		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
 		{path: "CLAUDE.md", content: starterClaudeMD, appendBlock: appendClaudeBlock},
+		{path: ".github/copilot-instructions.md", content: starterCopilotInstructionsMD, appendBlock: appendCopilotBlock},
 		{path: ".mindspec/state.json", contentFunc: starterState},
 
 		// Beads formula (required by spec-init)
@@ -310,4 +313,33 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/impl-approve`" + ` | Approve implementation → Idle |
 | ` + "`/spec-status`" + ` | Check current mode and active spec/bead state |
+`
+
+// starterCopilotInstructionsMD is written when .github/copilot-instructions.md doesn't exist.
+const starterCopilotInstructionsMD = `# Copilot Instructions
+<!-- mindspec:managed -->
+
+See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding agents.
+
+On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
+
+## Prompt Commands
+
+This project includes prompt files in ` + "`.github/prompts/`" + ` for workflow operations.
+Run ` + "`mindspec setup copilot`" + ` to create them.
+`
+
+// appendCopilotBlock is appended to an existing copilot-instructions.md when the marker is absent.
+const appendCopilotBlock = `
+## MindSpec
+<!-- mindspec:managed -->
+
+See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding agents.
+
+On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
+
+### Prompt Commands
+
+This project includes prompt files in ` + "`.github/prompts/`" + ` for workflow operations.
+Run ` + "`mindspec setup copilot`" + ` to create them.
 `

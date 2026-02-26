@@ -1,7 +1,7 @@
 {
-  "mode": "plan",
+  "mode": "implement",
   "activeSpec": "042-copilot-cli-support",
-  "activeBead": "",
+  "activeBead": "mindspec-mol-zq3",
   "activeMolecule": "mindspec-mol-75a",
   "stepMapping": {
     "implement": "mindspec-mol-zq3",
@@ -12,5 +12,5 @@
     "spec-approve": "mindspec-mol-vqe",
     "spec-lifecycle": "mindspec-mol-75a"
   },
-  "lastUpdated": "2026-02-26T07:17:32Z"
+  "lastUpdated": "2026-02-26T07:18:32Z"
 }

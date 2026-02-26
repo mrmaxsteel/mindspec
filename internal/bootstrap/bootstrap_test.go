@@ -24,6 +24,7 @@ func TestRun_EmptyDir(t *testing.T) {
 	// Verify key files exist
 	requiredFiles := []string{
 		"CLAUDE.md",
+		".github/copilot-instructions.md",
 		".mindspec/state.json",
 	}
 	for _, f := range requiredFiles {
@@ -203,6 +204,95 @@ func TestRun_NoDomainScaffolding(t *testing.T) {
 	}
 }
 
+func TestRun_CopilotInstructionsCreated(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".github/copilot-instructions.md"))
+	if err != nil {
+		t.Fatalf("reading copilot-instructions.md: %v", err)
+	}
+
+	content := string(data)
+	if !contains(content, "AGENTS.md") {
+		t.Error("copilot-instructions.md should reference AGENTS.md")
+	}
+	if !contains(content, "mindspec instruct") {
+		t.Error("copilot-instructions.md should reference mindspec instruct")
+	}
+	if !contains(content, mindspecMarker) {
+		t.Error("copilot-instructions.md should contain mindspec marker")
+	}
+}
+
+func TestRun_CopilotInstructionsAppend(t *testing.T) {
+	root := t.TempDir()
+
+	// Pre-create .github/copilot-instructions.md without marker
+	os.MkdirAll(filepath.Join(root, ".github"), 0755)
+	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
+		[]byte("# Existing Copilot instructions\n\nCustom content here.\n"), 0644)
+
+	result, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Should be in appended list
+	appended := false
+	for _, a := range result.Appended {
+		if a == ".github/copilot-instructions.md" {
+			appended = true
+			break
+		}
+	}
+	if !appended {
+		t.Error("expected .github/copilot-instructions.md in Appended list")
+	}
+
+	data, _ := os.ReadFile(filepath.Join(root, ".github/copilot-instructions.md"))
+	content := string(data)
+	if !contains(content, "Existing Copilot instructions") {
+		t.Error("original content should be preserved")
+	}
+	if !contains(content, mindspecMarker) {
+		t.Error("appended block should contain marker")
+	}
+	if !contains(content, "AGENTS.md") {
+		t.Error("appended block should reference AGENTS.md")
+	}
+}
+
+func TestRun_CopilotInstructionsIdempotent(t *testing.T) {
+	root := t.TempDir()
+
+	// Pre-create with marker already present
+	os.MkdirAll(filepath.Join(root, ".github"), 0755)
+	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
+		[]byte("# Custom\n"+mindspecMarker+"\nMindSpec block\n"), 0644)
+
+	result, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Should be in skipped list
+	skipped := false
+	for _, s := range result.Skipped {
+		if contains(s, "copilot-instructions.md") {
+			skipped = true
+			break
+		}
+	}
+	if !skipped {
+		t.Error("expected copilot-instructions.md to be skipped when marker present")
+	}
+}
+
 func TestFormatSummary(t *testing.T) {
 	r := &Result{
 		Created: []string{"AGENTS.md", ".mindspec/docs/domains/"},
@@ -231,6 +321,21 @@ func TestFormatSummary_BeadsOK(t *testing.T) {
 	summary := r.FormatSummary()
 	if contains(summary, "not found in PATH") {
 		t.Error("summary should not include Beads advisory when BeadsOK=true")
+	}
+}
+
+func TestFormatSummary_MentionsCopilotSetup(t *testing.T) {
+	r := &Result{
+		Created: []string{"AGENTS.md"},
+		BeadsOK: true,
+	}
+
+	summary := r.FormatSummary()
+	if !contains(summary, "mindspec setup copilot") {
+		t.Error("summary should mention 'mindspec setup copilot'")
+	}
+	if !contains(summary, "mindspec setup claude") {
+		t.Error("summary should mention 'mindspec setup claude'")
 	}
 }
 
