@@ -1,0 +1,3 @@
+{"ts":"2026-02-26T08:15:09.151563Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"046-worktree-enforcement"}}
+{"ts":"2026-02-26T08:37:10.954775Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"046-worktree-enforcement","to":"plan"}}
+{"ts":"2026-02-26T08:49:52.041445Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"046-worktree-enforcement","to":"plan-approved"}}

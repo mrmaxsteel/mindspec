@@ -1,0 +1,23 @@
+{
+  "spec_id": "046-worktree-enforcement",
+  "started_at": "2026-02-26T08:15:09Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-26T08:15:09Z",
+      "ended_at": "2026-02-26T08:37:10Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-02-26T08:37:10Z",
+      "ended_at": "2026-02-26T08:49:52Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-02-26T08:49:52Z"
+    }
+  ]
+}
