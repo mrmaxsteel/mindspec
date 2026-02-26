@@ -26,6 +26,7 @@ exist and no --spec is given, the command fails with a list of candidates.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pick, _ := cmd.Flags().GetInt("pick")
 		specFlag, _ := cmd.Flags().GetString("spec")
+		force, _ := cmd.Flags().GetBool("force")
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -35,6 +36,16 @@ exist and no --spec is given, the command fails with a list of candidates.`,
 		root, err := workspace.FindRoot(cwd)
 		if err != nil {
 			return err
+		}
+
+		// Step 0: Check needs_clear gate
+		if cur, readErr := state.Read(root); readErr == nil && cur.NeedsClear {
+			if !force {
+				return fmt.Errorf("context clear required. Run /clear to reset your context, then retry.\nUse --force to bypass")
+			}
+			fmt.Fprintln(os.Stderr, "warning: bypassing context clear gate (--force)")
+			cur.NeedsClear = false
+			_ = state.Write(root, cur)
 		}
 
 		// Step 1: Check clean tree
@@ -192,4 +203,5 @@ func containsSpecID(title, specID string) bool {
 func init() {
 	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready")
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
+	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 }

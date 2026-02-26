@@ -214,6 +214,70 @@ func TestSetMode_DifferentSpecDoesNotCarryMoleculeMetadata(t *testing.T) {
 	}
 }
 
+func TestNeedsClear_RoundTrip(t *testing.T) {
+	tmp := setupTestProject(t)
+
+	// Write state with NeedsClear = true
+	s := &State{
+		Mode:       ModeImplement,
+		ActiveSpec: "004-instruct",
+		ActiveBead: "bead-1",
+		NeedsClear: true,
+	}
+	if err := Write(tmp, s); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Read back — should be true
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if !got.NeedsClear {
+		t.Error("expected NeedsClear to be true after write")
+	}
+
+	// Clear it
+	if err := ClearNeedsClear(tmp); err != nil {
+		t.Fatalf("ClearNeedsClear failed: %v", err)
+	}
+
+	// Read back — should be false
+	got2, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got2.NeedsClear {
+		t.Error("expected NeedsClear to be false after ClearNeedsClear")
+	}
+}
+
+func TestNeedsClear_OmittedWhenFalse(t *testing.T) {
+	tmp := setupTestProject(t)
+
+	s := &State{
+		Mode:       ModeIdle,
+		NeedsClear: false,
+	}
+	if err := Write(tmp, s); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, ".mindspec", "state.json"))
+	if err != nil {
+		t.Fatalf("reading state file: %v", err)
+	}
+
+	// omitempty means the field should not appear in JSON
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := parsed["needs_clear"]; ok {
+		t.Error("expected needs_clear to be omitted when false")
+	}
+}
+
 func TestSetModeWithMetadata_UsesProvidedValues(t *testing.T) {
 	tmp := setupTestProject(t)
 

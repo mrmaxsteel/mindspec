@@ -116,6 +116,25 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 	},
 }
 
+var stateClearFlagCmd = &cobra.Command{
+	Use:   "clear-flag",
+	Short: "Clear the needs_clear flag after a context reset",
+	Long:  `Clears the needs_clear flag in state.json. Called by the SessionStart hook after /clear.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := findRoot()
+		if err != nil {
+			return err
+		}
+
+		if err := state.ClearNeedsClear(root); err != nil {
+			return fmt.Errorf("clearing needs_clear flag: %w", err)
+		}
+
+		fmt.Println("needs_clear flag cleared.")
+		return nil
+	},
+}
+
 func init() {
 	stateSetCmd.Flags().String("mode", "", "Mode to set (idle, spec, plan, implement)")
 	stateSetCmd.Flags().String("spec", "", "Active spec ID (required for spec, plan, implement modes)")
@@ -125,4 +144,5 @@ func init() {
 
 	stateCmd.AddCommand(stateSetCmd)
 	stateCmd.AddCommand(stateShowCmd)
+	stateCmd.AddCommand(stateClearFlagCmd)
 }

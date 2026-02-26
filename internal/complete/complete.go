@@ -146,6 +146,13 @@ func Run(root, beadID string) (*Result, error) {
 		if err := setModeFn(root, state.ModeImplement, specID, nextBead); err != nil {
 			return result, fmt.Errorf("advancing state to implement: %w", err)
 		}
+		// Set needs_clear flag so the next `mindspec next` requires a context reset.
+		if cur, readErr := readStateFn(root); readErr == nil {
+			cur.NeedsClear = true
+			if writeErr := writeStateFn(root, cur); writeErr != nil {
+				fmt.Printf("Warning: could not set needs_clear flag: %v\n", writeErr)
+			}
+		}
 	case state.ModePlan:
 		if err := setModeFn(root, state.ModePlan, specID, ""); err != nil {
 			return result, fmt.Errorf("advancing state to plan: %w", err)

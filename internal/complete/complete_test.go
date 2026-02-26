@@ -376,6 +376,96 @@ func TestRun_NoBead(t *testing.T) {
 	}
 }
 
+func TestRun_SetsNeedsClearWhenNextBeadReady(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t, "008-test", "mol-parent-1")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "008-test",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-parent-1",
+	})
+	readStateFn = state.Read
+	writeStateFn = state.Write
+
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "")
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			items := []bead.BeadInfo{
+				{ID: "bead-2", Title: "[IMPL 008-test.2] Next"},
+			}
+			return json.Marshal(items)
+		}
+		return nil, fmt.Errorf("unexpected")
+	}
+
+	result, err := Run(root, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NextMode != state.ModeImplement {
+		t.Fatalf("expected implement mode, got %s", result.NextMode)
+	}
+
+	// Verify NeedsClear was set
+	s, err := state.Read(root)
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+	if !s.NeedsClear {
+		t.Error("expected NeedsClear to be true when next bead is ready")
+	}
+}
+
+func TestRun_DoesNotSetNeedsClearWhenReview(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t, "008-test", "mol-parent-1")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "008-test",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-parent-1",
+	})
+	readStateFn = state.Read
+	writeStateFn = state.Write
+
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "")
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+
+	// No ready beads, no open beads → review
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	result, err := Run(root, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NextMode != state.ModeReview {
+		t.Fatalf("expected review mode, got %s", result.NextMode)
+	}
+
+	s, err := state.Read(root)
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+	if s.NeedsClear {
+		t.Error("NeedsClear should NOT be set when advancing to review")
+	}
+}
+
 func TestFormatResult_Implement(t *testing.T) {
 	r := &Result{
 		BeadID:          "bead-1",
