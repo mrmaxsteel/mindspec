@@ -2,3 +2,5 @@
 {"ts":"2026-02-26T08:37:10.954775Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"046-worktree-enforcement","to":"plan"}}
 {"ts":"2026-02-26T08:49:52.041445Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"046-worktree-enforcement","to":"plan-approved"}}
 {"ts":"2026-02-26T08:52:26.278101Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-mol-wz9","spec_id":"046-worktree-enforcement"}}
+{"ts":"2026-02-26T09:50:51.580584Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-mol-wz9","spec_id":"046-worktree-enforcement"}}
+{"ts":"2026-02-26T09:51:37.291839Z","event":"lifecycle.end","data":{"spec_id":"046-worktree-enforcement"}}

@@ -17,6 +17,7 @@ step_mapping:
 
 
 
+
 # Spec 046-worktree-enforcement: Deterministic Worktree and Branch Enforcement
 
 ## Goal
