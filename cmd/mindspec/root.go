@@ -85,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(specInitCmd)
+	rootCmd.AddCommand(hookCmd)
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(validateCmd)
