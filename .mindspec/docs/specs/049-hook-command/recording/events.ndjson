@@ -1,0 +1,5 @@
+{"ts":"2026-02-26T20:10:03.827934Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"049-hook-command"}}
+{"ts":"2026-02-26T20:20:59.309162Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"049-hook-command","to":"plan"}}
+{"ts":"2026-02-26T20:24:53.201621Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"049-hook-command","to":"plan-approved"}}
+{"ts":"2026-02-26T23:25:17.427364Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-mol-41m89.1","spec_id":"049-hook-command"}}
+{"ts":"2026-02-26T23:26:24.324141Z","event":"lifecycle.end","data":{"spec_id":"049-hook-command"}}
