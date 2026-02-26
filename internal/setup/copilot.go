@@ -152,6 +152,11 @@ func copilotHooksConfig() map[string]any {
 					"bash":       ".github/hooks/mindspec-plan-gate.sh",
 					"timeoutSec": 5,
 				},
+				{
+					"type":       "command",
+					"bash":       ".github/hooks/mindspec-worktree-guard.sh",
+					"timeoutSec": 5,
+				},
 			},
 		},
 	}
@@ -160,6 +165,58 @@ func copilotHooksConfig() map[string]any {
 // copilotHookScripts returns helper scripts for Copilot hooks.
 func copilotHookScripts() map[string]string {
 	return map[string]string{
+		"mindspec-worktree-guard.sh": `#!/usr/bin/env bash
+# MindSpec worktree enforcement hook for Copilot preToolUse.
+# Blocks file writes and shell commands outside the active worktree.
+#
+# Reads .mindspec/state.json for activeWorktree. If set and the tool
+# targets a path outside the worktree (or CWD is outside), denies the action.
+
+set -euo pipefail
+
+STATE_FILE=".mindspec/state.json"
+if [ ! -f "$STATE_FILE" ]; then
+  exit 0
+fi
+
+WT=$(jq -r '.activeWorktree // empty' "$STATE_FILE" 2>/dev/null)
+if [ -z "$WT" ]; then
+  exit 0
+fi
+
+# Check if enforcement is disabled
+ENFORCE=$(cat .mindspec/config.yaml 2>/dev/null | grep 'agent_hooks' | grep -c 'false' || true)
+if [ "$ENFORCE" = "1" ]; then
+  exit 0
+fi
+
+# Read tool invocation from stdin
+INPUT=$(cat)
+TOOL=$(echo "$INPUT" | jq -r '.toolName // empty' 2>/dev/null)
+
+case "$TOOL" in
+  edit|write|create_file|insert|replace)
+    # Check if target file is outside the worktree
+    FILE_PATH=$(echo "$INPUT" | jq -r '.toolArgs.file_path // .toolArgs.path // empty' 2>/dev/null)
+    if [ -n "$FILE_PATH" ]; then
+      case "$FILE_PATH" in "$WT"*)
+        exit 0 ;;
+      esac
+      echo "{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mindspec: blocked — file $FILE_PATH is outside active worktree $WT. Switch to: cd $WT\"}"
+      exit 0
+    fi
+    ;;
+  terminal|bash|shell)
+    # Check if CWD is outside the worktree
+    CWD=$(pwd)
+    case "$CWD" in "$WT"*)
+      exit 0 ;;
+    esac
+    echo "{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mindspec: blocked — your working directory is the main worktree. Run: cd $WT\"}"
+    exit 0
+    ;;
+esac
+`,
 		"mindspec-plan-gate.sh": `#!/usr/bin/env bash
 # MindSpec plan gate hook for Copilot preToolUse.
 # Reads tool invocation JSON from stdin. If the agent tries to write code

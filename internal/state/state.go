@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mindspec/mindspec/internal/trace"
@@ -60,6 +62,8 @@ func Read(root string) (*State, error) {
 
 // Write persists the state to .mindspec/state.json under root.
 // Creates the .mindspec/ directory if it doesn't exist.
+// If root is inside a git worktree, also propagates state to the main
+// worktree so enforcement hooks (which read from main's CWD) stay current.
 func Write(root string, s *State) error {
 	dir := workspace.MindspecDir(root)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -78,6 +82,17 @@ func Write(root string, s *State) error {
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing state file: %w", err)
 	}
+
+	// Dual-write: if we're in a worktree, also write to the main worktree.
+	if mainRoot, ok := mainWorktreeRoot(root); ok && mainRoot != root {
+		mainDir := workspace.MindspecDir(mainRoot)
+		if err := os.MkdirAll(mainDir, 0755); err == nil {
+			mainPath := workspace.StatePath(mainRoot)
+			// Best-effort — don't fail the primary write if this fails.
+			_ = os.WriteFile(mainPath, data, 0644)
+		}
+	}
+
 	return nil
 }
 
@@ -90,6 +105,51 @@ func ClearNeedsClear(root string) error {
 	}
 	s.NeedsClear = false
 	return Write(root, s)
+}
+
+// mainWorktreeRoot returns the main worktree's root path if the given root
+// is inside a git worktree. Returns ("", false) if root is the main worktree
+// or detection fails.
+func mainWorktreeRoot(root string) (string, bool) {
+	// In a git worktree, .git is a file containing "gitdir: <path>".
+	// In the main worktree, .git is a directory.
+	gitPath := filepath.Join(root, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		return "", false
+	}
+	if info.IsDir() {
+		// This is the main worktree — no propagation needed.
+		return "", false
+	}
+
+	// .git is a file — read it to find the main repo.
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return "", false
+	}
+	// Format: "gitdir: /path/to/main/.git/worktrees/<name>\n"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir: ") {
+		return "", false
+	}
+	gitdir := strings.TrimPrefix(line, "gitdir: ")
+
+	// Walk up from gitdir to find the main .git directory.
+	// gitdir is typically: <main>/.git/worktrees/<name>
+	// We need: <main>
+	idx := strings.Index(gitdir, filepath.Join(".git", "worktrees"))
+	if idx <= 0 {
+		return "", false
+	}
+	mainRoot := gitdir[:idx-1] // strip trailing separator
+
+	// Verify the main root has .mindspec/
+	if _, err := os.Stat(workspace.MindspecDir(mainRoot)); err != nil {
+		return "", false
+	}
+
+	return mainRoot, true
 }
 
 // SetMode validates inputs and writes a new state. Emits a trace event on transition.
