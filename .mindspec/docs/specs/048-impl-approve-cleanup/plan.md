@@ -1,16 +1,18 @@
 ---
-status: Draft
-spec_id: 048-impl-approve-cleanup
-version: 1
-last_updated: "2026-02-26"
-approved_at: ""
-approved_by: ""
-bead_ids: []
 adr_citations:
-  - id: ADR-0006
-    sections: [ADR Fitness]
-  - id: ADR-0019
-    sections: [ADR Fitness]
+    - id: ADR-0006
+      sections:
+        - ADR Fitness
+    - id: ADR-0019
+      sections:
+        - ADR Fitness
+approved_at: "2026-02-26T17:54:28Z"
+approved_by: user
+bead_ids: []
+last_updated: "2026-02-26"
+spec_id: 048-impl-approve-cleanup
+status: Approved
+version: 1
 ---
 
 # Plan: 048-impl-approve-cleanup
