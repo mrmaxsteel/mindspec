@@ -17,7 +17,7 @@ step_mapping:
 
 ## Goal
 
-Fix two related gaps in the spec lifecycle endgame: (1) `spec-init` writes spec files to main before creating the worktree, violating zero-on-main, and (2) `impl-approve` silently performs merge/cleanup without informing the user what happened, offering no interactive PR flow, and never waiting for CI.
+Fix three related gaps in the spec lifecycle endgame: (1) `spec-init` writes spec files to main before creating the worktree, violating zero-on-main, (2) `impl-approve` silently performs merge/cleanup without informing the user what happened, offering no interactive PR flow, and never waiting for CI, and (3) the `PreToolUse` enforcement hooks (spec 046) block agents completely — the Bash hook uses `pwd` which always returns the main CWD, and the Edit/Write hooks receive an empty `$CLAUDE_TOOL_ARG_FILE_PATH`, making it impossible for an agent to comply.
 
 ## Background
 
@@ -39,10 +39,21 @@ Problems:
 4. Worktree and branch leak when using PR strategy (cleanup is gated on merge success, but PR merge happens out-of-band)
 5. No summary of what was merged (commit count, files changed)
 
+### Bug: PreToolUse enforcement hooks block all agent activity
+
+The spec 046 enforcement hooks in `.claude/settings.json` have two bugs that make them completely block agents instead of guiding them:
+
+1. **Bash hook** (`worktreeBashGuardScript()` in `internal/setup/claude.go:267-275`): Uses `cwd=$(pwd)` to check if the agent is in the worktree. But Claude Code `PreToolUse` hooks run in the *process* CWD (always the main worktree), not the command's target CWD. So `pwd` always returns main, the check always fails, and *every* bash command is blocked — including `cd /path/to/worktree`. The agent is told to `cd` to the worktree but cannot execute the `cd`.
+
+2. **Edit/Write hooks** (`worktreeFileGuardScript()` in `internal/setup/claude.go:255-263`): Use `$CLAUDE_TOOL_ARG_FILE_PATH` to check if the target file is inside the worktree. But this env var is empty at hook execution time, so the path comparison `case "$fp" in "$wt"*) exit 0;; esac` always falls through to the block. Every file edit is blocked regardless of whether it targets the worktree.
+
+The net effect: once a worktree is active, an agent cannot run any bash command or edit any file. The enforcement hooks must be manually disabled to proceed, defeating their purpose.
+
 ## Impacted Domains
 
 - **workflow**: `spec-init` file creation order; `impl-approve` merge/cleanup flow
 - **git**: Branch push, PR creation, CI polling, merge+cleanup sequencing
+- **agent-integration**: PreToolUse enforcement hooks need redesign to actually work
 
 ## ADR Touchpoints
 
@@ -99,9 +110,23 @@ Problems:
     - If open: offer to wait for CI and merge
     - If closed without merge: warn and offer to re-open or clean up anyway
 
+### R7: Fix PreToolUse enforcement hooks
+
+12. **Bash hook**: Replace `pwd`-based check with inspection of `$CLAUDE_TOOL_ARG_COMMAND`. The hook should:
+    a. Allow commands that begin with `cd <worktree-path>` (the agent is trying to comply)
+    b. Allow `mindspec` and `bd` CLI commands (they have their own Layer 2 CWD guards)
+    c. Block other commands when CWD is main and a worktree is active
+    d. The hook cannot change the process CWD, so it must be permissive for commands that target the worktree
+
+13. **Edit/Write hooks**: Replace `$CLAUDE_TOOL_ARG_FILE_PATH` with the correct env var. Investigate what Claude Code actually exposes for the file path argument. If no reliable env var exists, fall back to emitting `additionalContext` guidance instead of hard-blocking.
+
+14. **`mindspec setup claude`** must regenerate the hooks with the fixed scripts. Running `mindspec setup claude` should detect stale hooks (by comparing command strings) and update them.
+
+15. All three hooks must preserve the escape hatch: `config.yaml` with `enforcement.agent_hooks: false` disables them.
+
 ### R6: gitops package additions
 
-11. New functions in `internal/gitops`:
+16. New functions in `internal/gitops`:
     - `MergePR(url string) error` — calls `gh pr merge <url> --merge --delete-branch`
     - `PRChecksWatch(url string) error` — calls `gh pr checks <url> --watch`, returns nil on pass
     - `PRStatus(url string) (string, error)` — returns "open", "merged", or "closed"
@@ -117,6 +142,7 @@ Problems:
 - `cmd/mindspec/approve.go` — wire `--wait`/`--no-wait` flags
 - `internal/gitops/gitops.go` — new PR merge, CI check, diffstat functions
 - `cmd/mindspec/cleanup.go` — new cleanup command (deferred PR merge)
+- `internal/setup/claude.go` — fix `worktreeBashGuardScript()` and `worktreeFileGuardScript()`, add stale hook detection
 - Tests for all changed functions
 
 ### Out of Scope
@@ -142,6 +168,10 @@ Problems:
 - [ ] `impl-approve --no-wait` with `merge_strategy: pr` creates PR and returns without polling (current behavior, plus summary)
 - [ ] `mindspec cleanup <spec-id>` detects merged PR and cleans up worktree + branch + state
 - [ ] `mindspec cleanup <spec-id>` on an open PR offers to wait and merge
+- [ ] Fixed Bash `PreToolUse` hook allows `cd <worktree>` and `mindspec`/`bd` commands from main CWD
+- [ ] Fixed Edit/Write `PreToolUse` hooks correctly read the target file path and allow writes inside the worktree
+- [ ] `mindspec setup claude` detects stale hooks and replaces them with fixed versions
+- [ ] An agent can run `mindspec approve spec <id>` from main CWD without being blocked by enforcement hooks
 - [ ] All new gitops functions have unit tests
 
 ## Validation Proofs
@@ -154,7 +184,7 @@ Problems:
 
 ## Open Questions
 
-None — the design follows existing patterns (gitops package, `gh` CLI dependency, interactive prompts via stdout).
+- [ ] What env vars does Claude Code actually expose to `PreToolUse` hooks? Need to verify `CLAUDE_TOOL_ARG_FILE_PATH` and `CLAUDE_TOOL_ARG_COMMAND` availability — the current hooks assume these exist but they may be empty or named differently. Resolve during planning by testing hook env vars.
 
 ## Approval
 
