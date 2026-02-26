@@ -1,16 +1,16 @@
 {
-  "mode": "implement",
-  "activeSpec": "042-copilot-cli-support",
-  "activeBead": "mindspec-mol-zq3",
-  "activeMolecule": "mindspec-mol-75a",
+  "mode": "plan",
+  "activeSpec": "046-worktree-enforcement",
+  "activeBead": "",
+  "activeMolecule": "mindspec-mol-7d0",
   "stepMapping": {
-    "implement": "mindspec-mol-zq3",
-    "plan": "mindspec-mol-7ty",
-    "plan-approve": "mindspec-mol-667",
-    "review": "mindspec-mol-48h",
-    "spec": "mindspec-mol-2ta",
-    "spec-approve": "mindspec-mol-vqe",
-    "spec-lifecycle": "mindspec-mol-75a"
+    "implement": "mindspec-mol-wz9",
+    "plan": "mindspec-mol-dtw",
+    "plan-approve": "mindspec-mol-qmq",
+    "review": "mindspec-mol-li5",
+    "spec": "mindspec-mol-otu",
+    "spec-approve": "mindspec-mol-19e",
+    "spec-lifecycle": "mindspec-mol-7d0"
   },
-  "lastUpdated": "2026-02-26T07:18:32Z"
+  "lastUpdated": "2026-02-26T08:37:10Z"
 }
