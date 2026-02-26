@@ -44,25 +44,68 @@ type Result struct {
 // Run creates a new spec directory with a spec.md from the template,
 // then sets state to spec mode. If title is empty, it is derived from
 // the slug portion of specID (e.g. "010-spec-init-cmd" → "Spec Init Cmd").
+//
+// ADR-0006 (zero-on-main): the worktree is created FIRST, then spec files
+// are written into the worktree — never to the main worktree.
 func Run(root, specID, title string) (*Result, error) {
 	if !specIDPattern.MatchString(specID) {
 		return nil, fmt.Errorf("invalid spec ID %q: must match NNN-kebab-case (e.g. 010-my-feature)", specID)
-	}
-
-	specDir := workspace.SpecDir(root, specID)
-	if _, err := os.Stat(specDir); err == nil {
-		return nil, fmt.Errorf("spec directory already exists: %s", specDir)
 	}
 
 	if title == "" {
 		title = titleFromSlug(specID)
 	}
 
-	// Fill placeholders
+	// --- Phase 1: Create worktree (before any file writes) ---
+
+	cfg, cfgErr := loadConfigFn(root)
+	if cfgErr != nil {
+		return nil, fmt.Errorf("could not load config (required for worktree creation): %w", cfgErr)
+	}
+
+	specBranch := "spec/" + specID
+	wtName := "worktree-spec-" + specID
+	wtPath := cfg.WorktreePath(root, wtName)
+
+	// Ensure .worktrees/ dir exists and is gitignored.
+	if err := os.MkdirAll(filepath.Join(root, cfg.WorktreeRoot), 0755); err != nil {
+		return nil, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
+	}
+	if err := ensureGitignore(root, cfg.WorktreeRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
+	}
+
+	// Create spec branch from HEAD if it doesn't exist.
+	if !branchExistsFn(specBranch) {
+		if err := createBranchFn(specBranch, "HEAD"); err != nil {
+			return nil, fmt.Errorf("creating branch %s: %w", specBranch, err)
+		}
+	}
+
+	// Create worktree via beads (sets up .beads/redirect for shared DB).
+	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
+	if err := worktreeCreateFn(relWtPath, specBranch); err != nil {
+		return nil, fmt.Errorf("creating worktree: %w", err)
+	}
+
+	result := &Result{
+		WorktreePath: wtPath,
+		SpecBranch:   specBranch,
+	}
+
+	// --- Phase 2: Write spec files into the worktree (not main) ---
+
+	// Check for existing spec dir in the worktree.
+	specDir := workspace.SpecDir(wtPath, specID)
+	if _, err := os.Stat(specDir); err == nil {
+		return nil, fmt.Errorf("spec directory already exists: %s", specDir)
+	}
+	result.SpecDir = specDir
+
+	// Fill placeholders and write spec.md.
 	content := strings.Replace(templates.Spec(), "<ID>", specID, 1)
 	content = strings.Replace(content, "<Title>", title, 1)
 
-	// Create directory and write spec
 	if err := os.MkdirAll(specDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating spec directory: %w", err)
 	}
@@ -71,10 +114,13 @@ func Run(root, specID, title string) (*Result, error) {
 		return nil, fmt.Errorf("writing spec file: %w", err)
 	}
 
-	// Pour and bind the spec-lifecycle molecule (required).
+	// --- Phase 3: Molecule setup (beads) ---
+
 	s := &state.State{
-		Mode:       state.ModeSpec,
-		ActiveSpec: specID,
+		Mode:            state.ModeSpec,
+		ActiveSpec:      specID,
+		ActiveWorktree:  wtPath,
+		SpecBranch:      specBranch,
 	}
 	if err := preflightFn(root); err != nil {
 		return nil, fmt.Errorf("creating lifecycle molecule requires beads to be available: %w", err)
@@ -105,7 +151,7 @@ func Run(root, specID, title string) (*Result, error) {
 			fmt.Fprintf(os.Stderr, "warning: could not start spec step: %v\n", err)
 		}
 	}
-	// Write molecule binding into spec frontmatter (ADR-0015).
+	// Write molecule binding into spec frontmatter in the WORKTREE (ADR-0015).
 	meta := &specmeta.Meta{
 		MoleculeID:  molID,
 		StepMapping: stepMap,
@@ -114,43 +160,7 @@ func Run(root, specID, title string) (*Result, error) {
 		return nil, fmt.Errorf("writing molecule binding to spec frontmatter: %w", err)
 	}
 
-	result := &Result{SpecDir: specDir}
-
-	// Create spec branch + worktree (ADR-0006: zero changes on main).
-	cfg, cfgErr := loadConfigFn(root)
-	if cfgErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load config: %v (skipping worktree creation)\n", cfgErr)
-	} else {
-		specBranch := "spec/" + specID
-		wtName := "worktree-spec-" + specID
-		wtPath := cfg.WorktreePath(root, wtName)
-
-		// Ensure .worktrees/ dir exists and is gitignored.
-		if err := os.MkdirAll(filepath.Join(root, cfg.WorktreeRoot), 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not create %s directory: %v\n", cfg.WorktreeRoot, err)
-		}
-		if err := ensureGitignore(root, cfg.WorktreeRoot); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
-		}
-
-		// Create spec branch from HEAD if it doesn't exist.
-		if !branchExistsFn(specBranch) {
-			if err := createBranchFn(specBranch, "HEAD"); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not create branch %s: %v\n", specBranch, err)
-			}
-		}
-
-		// Create worktree via beads (sets up .beads/redirect for shared DB).
-		relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
-		if err := worktreeCreateFn(relWtPath, specBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not create worktree: %v\n", err)
-		} else {
-			result.WorktreePath = wtPath
-			result.SpecBranch = specBranch
-			s.ActiveWorktree = wtPath
-			s.SpecBranch = specBranch
-		}
-	}
+	// --- Phase 4: State + hooks + recording ---
 
 	// Write state to main root (enforcement hooks read this).
 	if err := state.Write(root, s); err != nil {
@@ -158,10 +168,8 @@ func Run(root, specID, title string) (*Result, error) {
 	}
 
 	// Also write state to worktree root so commands work from either location.
-	if result.WorktreePath != "" {
-		if err := state.Write(result.WorktreePath, s); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write state to worktree: %v\n", err)
-		}
+	if err := state.Write(wtPath, s); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write state to worktree: %v\n", err)
 	}
 
 	// Install pre-commit hook (best-effort, ensures Layer 1 enforcement).
@@ -169,14 +177,14 @@ func Run(root, specID, title string) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "warning: could not install pre-commit hook: %v\n", err)
 	}
 
-	// Start recording (best-effort)
-	if wrote, err := recording.EnsureOTLP(root); err != nil {
+	// Start recording in the worktree (best-effort).
+	if wrote, err := recording.EnsureOTLP(wtPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not configure OTLP: %v\n", err)
 	} else if wrote {
 		fmt.Fprintln(os.Stderr, "OTLP telemetry enabled. Restart Claude Code to begin recording.")
 	}
 
-	if err := recording.StartRecording(root, specID); err != nil {
+	if err := recording.StartRecording(wtPath, specID); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not start recording: %v\n", err)
 	}
 

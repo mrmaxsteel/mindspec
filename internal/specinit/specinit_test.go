@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/config"
+	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-func mockMoleculeSuccess(t *testing.T) {
+func mockMoleculeSuccess(t *testing.T, testRoot string) {
 	t.Helper()
 	origPreflight := preflightFn
 	origPour := pourFormulaFn
@@ -21,6 +22,7 @@ func mockMoleculeSuccess(t *testing.T) {
 	origBranchExists := branchExistsFn
 	origWorktreeCreate := worktreeCreateFn
 	origEnsureGitignore := ensureGitignore
+	origWriteSpecMeta := writeSpecMeta
 	t.Cleanup(func() {
 		preflightFn = origPreflight
 		pourFormulaFn = origPour
@@ -30,6 +32,7 @@ func mockMoleculeSuccess(t *testing.T) {
 		branchExistsFn = origBranchExists
 		worktreeCreateFn = origWorktreeCreate
 		ensureGitignore = origEnsureGitignore
+		writeSpecMeta = origWriteSpecMeta
 	})
 
 	preflightFn = func(root string) error { return nil }
@@ -45,11 +48,19 @@ func mockMoleculeSuccess(t *testing.T) {
 		}, nil
 	}
 	runBDCombined = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	writeSpecMeta = func(specDir string, meta *specmeta.Meta) error { return nil }
 	// Stub out git/worktree operations for unit tests.
 	loadConfigFn = func(root string) (*config.Config, error) { return config.DefaultConfig(), nil }
 	createBranchFn = func(name, from string) error { return nil }
 	branchExistsFn = func(name string) bool { return false }
-	worktreeCreateFn = func(name, branch string) error { return nil }
+	worktreeCreateFn = func(relPath, branch string) error {
+		// Simulate worktree creation by creating the absolute directory.
+		absPath := filepath.Join(testRoot, relPath)
+		if err := os.MkdirAll(absPath, 0755); err != nil {
+			return fmt.Errorf("mock worktree create: %w", err)
+		}
+		return nil
+	}
 	ensureGitignore = func(root, entry string) error { return nil }
 }
 
@@ -71,14 +82,15 @@ func setupTestRoot(t *testing.T) string {
 
 func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
-	_, err := Run(root, "010-my-feature", "")
+	result, err := Run(root, "010-my-feature", "")
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	specPath := filepath.Join(root, "docs", "specs", "010-my-feature", "spec.md")
+	// Spec files are written to the worktree, not to root (ADR-0006).
+	specPath := filepath.Join(result.WorktreePath, "docs", "specs", "010-my-feature", "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("spec.md not created: %v", err)
@@ -92,14 +104,15 @@ func TestRunCreatesSpecFromTemplate(t *testing.T) {
 
 func TestRunWithExplicitTitle(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
-	_, err := Run(root, "011-custom", "Custom Title")
+	result, err := Run(root, "011-custom", "Custom Title")
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	specPath := filepath.Join(root, "docs", "specs", "011-custom", "spec.md")
+	// Spec files are written to the worktree (ADR-0006).
+	specPath := filepath.Join(result.WorktreePath, "docs", "specs", "011-custom", "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("spec.md not created: %v", err)
@@ -113,9 +126,13 @@ func TestRunWithExplicitTitle(t *testing.T) {
 
 func TestRunErrorsOnExistingDirectory(t *testing.T) {
 	root := setupTestRoot(t)
+	mockMoleculeSuccess(t, root)
 
-	// Pre-create the spec directory
-	specDir := filepath.Join(root, "docs", "specs", "010-exists")
+	// Pre-create the spec directory in the worktree path (where Run() now checks).
+	cfg := config.DefaultConfig()
+	wtName := "worktree-spec-010-exists"
+	wtPath := cfg.WorktreePath(root, wtName)
+	specDir := filepath.Join(wtPath, "docs", "specs", "010-exists")
 	os.MkdirAll(specDir, 0755)
 
 	_, err := Run(root, "010-exists", "")
@@ -129,7 +146,7 @@ func TestRunErrorsOnExistingDirectory(t *testing.T) {
 
 func TestRunSetsState(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
 	_, err := Run(root, "012-state-test", "")
 	if err != nil {
@@ -151,7 +168,7 @@ func TestRunSetsState(t *testing.T) {
 
 func TestRunRejectsInvalidSpecID(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
 	tests := []struct {
 		id      string
@@ -215,7 +232,7 @@ func TestTitleFromSlug(t *testing.T) {
 
 func TestRunCreatesFormulaIfMissing(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
 	// Ensure .beads dir exists but formula does not
 	os.MkdirAll(filepath.Join(root, ".beads"), 0755)
@@ -241,7 +258,7 @@ func TestRunCreatesFormulaIfMissing(t *testing.T) {
 
 func TestRunSkipsFormulaIfExists(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t)
+	mockMoleculeSuccess(t, root)
 
 	// Pre-create formula with custom content
 	formulaDir := filepath.Join(root, ".beads", "formulas")
@@ -266,9 +283,8 @@ func TestRunSkipsFormulaIfExists(t *testing.T) {
 
 func TestRunFailsWhenMoleculeUnavailable(t *testing.T) {
 	root := setupTestRoot(t)
-
-	origPreflight := preflightFn
-	defer func() { preflightFn = origPreflight }()
+	// Set up stubs for Phase 1 (worktree creation) but fail at Phase 3 (preflight).
+	mockMoleculeSuccess(t, root)
 	preflightFn = func(root string) error { return fmt.Errorf("bd unavailable") }
 
 	_, err := Run(root, "013-molecule-required", "")
