@@ -1,1 +1,2 @@
 {"ts":"2026-02-20T11:41:37.974099Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"042-copilot-cli-support"}}
+{"ts":"2026-02-26T07:06:44.467044Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"042-copilot-cli-support","to":"plan"}}
