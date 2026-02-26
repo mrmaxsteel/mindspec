@@ -3,6 +3,8 @@ package approve
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -12,6 +14,9 @@ import (
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mindspec/mindspec/internal/workspace"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -29,6 +34,8 @@ var (
 	prStatusFn          = gitops.PRStatus
 	prChecksWatchFn     = gitops.PRChecksWatch
 	mergePRFn           = gitops.MergePR
+	isAncestorFn        = gitops.IsAncestor
+	branchExistsFn      = gitops.BranchExists
 )
 
 // ImplOpts holds options for implementation approval.
@@ -87,6 +94,13 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 				continue
 			}
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not close molecule member %s: %v", targetID, err))
+		}
+	}
+
+	// Preflight: verify spec branch has actual implementation content.
+	if s.SpecBranch != "" {
+		if err := verifyImplContent(root, s, specID); err != nil {
+			return nil, fmt.Errorf("preflight check failed: %w", err)
 		}
 	}
 
@@ -236,6 +250,87 @@ func mergeSpecToMain(root string, s *state.State, cfg *config.Config, result *Im
 	default:
 		return fmt.Errorf("unknown merge strategy: %s", strategy)
 	}
+}
+
+// verifyImplContent checks that the spec branch has real implementation content
+// before allowing the merge to main. It verifies:
+// 1. The spec branch has commits beyond main.
+// 2. All plan beads are closed.
+// 3. Any local bead branches are ancestors of the spec branch.
+func verifyImplContent(root string, s *state.State, specID string) error {
+	// Check 1: spec branch has commits beyond main.
+	count, err := commitCountFn(root, "main", s.SpecBranch)
+	if err != nil {
+		return fmt.Errorf("checking commit count: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("spec branch %s has no commits beyond main — nothing to merge", s.SpecBranch)
+	}
+
+	// Read bead_ids from plan.md frontmatter.
+	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
+	beadIDs, err := readPlanBeadIDs(planPath)
+	if err != nil {
+		// If plan.md doesn't exist or has no bead_ids, skip bead checks.
+		return nil
+	}
+
+	// Check 2: all plan beads are closed.
+	for _, bid := range beadIDs {
+		status, err := readBeadStatus(bid)
+		if err != nil {
+			return fmt.Errorf("checking bead %s status: %w", bid, err)
+		}
+		if status != "closed" {
+			return fmt.Errorf("bead %s is still %q — close all beads before approving implementation", bid, status)
+		}
+	}
+
+	// Check 3: bead branches are ancestors of spec branch.
+	for _, bid := range beadIDs {
+		beadBranch := "bead/" + bid
+		if !branchExistsFn(beadBranch) {
+			continue
+		}
+		isAnc, err := isAncestorFn(root, beadBranch, s.SpecBranch)
+		if err != nil {
+			return fmt.Errorf("checking ancestry of %s: %w", beadBranch, err)
+		}
+		if !isAnc {
+			return fmt.Errorf("bead branch %s has commits not merged into spec branch %s — run `git merge %s` on the spec branch first", beadBranch, s.SpecBranch, beadBranch)
+		}
+	}
+
+	return nil
+}
+
+// readPlanBeadIDs reads bead_ids from the plan.md YAML frontmatter.
+func readPlanBeadIDs(planPath string) ([]string, error) {
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		return nil, err
+	}
+
+	content := string(data)
+	if !strings.HasPrefix(content, "---\n") {
+		return nil, fmt.Errorf("no frontmatter found")
+	}
+	end := strings.Index(content[4:], "\n---")
+	if end < 0 {
+		return nil, fmt.Errorf("no frontmatter end marker")
+	}
+	fmContent := content[4 : 4+end]
+
+	var fm struct {
+		BeadIDs []string `yaml:"bead_ids"`
+	}
+	if err := yaml.Unmarshal([]byte(fmContent), &fm); err != nil {
+		return nil, fmt.Errorf("parsing plan frontmatter: %w", err)
+	}
+	if len(fm.BeadIDs) == 0 {
+		return nil, fmt.Errorf("no bead_ids in plan frontmatter")
+	}
+	return fm.BeadIDs, nil
 }
 
 func isAlreadyClosedErr(err error) bool {

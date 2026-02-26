@@ -385,7 +385,7 @@ func TestApproveImpl_PRNoWaitFlow(t *testing.T) {
 	deleteBranchFn = func(name string) error { branchDeleted = true; return nil }
 	worktreeRemoveFn = func(name string) error { worktreeRemoved = true; return nil }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
-	commitCountFn = func(workdir, base, head string) (int, error) { return 0, nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 
 	result, err := ApproveImpl(tmp, "010-test") // no opts = no wait
 	if err != nil {
@@ -400,5 +400,198 @@ func TestApproveImpl_PRNoWaitFlow(t *testing.T) {
 	}
 	if branchDeleted {
 		t.Error("branch should not be deleted without --wait PR merge")
+	}
+}
+
+// writePlanWithBeads creates a plan.md with bead_ids in frontmatter.
+func writePlanWithBeads(t *testing.T, root, specID string, beadIDs []string) {
+	t.Helper()
+	specDir := filepath.Join(root, "docs", "specs", specID)
+	os.MkdirAll(specDir, 0755)
+	var ids string
+	for _, id := range beadIDs {
+		ids += fmt.Sprintf("  - %s\n", id)
+	}
+	content := fmt.Sprintf("---\nstatus: Approved\nspec_id: %q\nbead_ids:\n%s---\n\n# Plan\n", specID, ids)
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+}
+
+// saveAndRestore saves the current values of all impl function variables and
+// returns a cleanup function that restores them.
+func saveAndRestore(t *testing.T) {
+	t.Helper()
+	origRunBD := implRunBDFn
+	origRunBDCombined := implRunBDCombinedFn
+	origLoadConfig := loadConfigFn
+	origMergeBranch := mergeBranchFn
+	origDeleteBranch := deleteBranchFn
+	origWorktreeRemove := worktreeRemoveFn
+	origDiffStat := diffStatFn
+	origCommitCount := commitCountFn
+	origIsAncestor := isAncestorFn
+	origBranchExists := branchExistsFn
+	origHasRemote := hasRemoteFn
+	origPushBranch := pushBranchFn
+	origCreatePR := createPRFn
+	origPRChecksWatch := prChecksWatchFn
+	origMergePR := mergePRFn
+	t.Cleanup(func() {
+		implRunBDFn = origRunBD
+		implRunBDCombinedFn = origRunBDCombined
+		loadConfigFn = origLoadConfig
+		mergeBranchFn = origMergeBranch
+		deleteBranchFn = origDeleteBranch
+		worktreeRemoveFn = origWorktreeRemove
+		diffStatFn = origDiffStat
+		commitCountFn = origCommitCount
+		isAncestorFn = origIsAncestor
+		branchExistsFn = origBranchExists
+		hasRemoteFn = origHasRemote
+		pushBranchFn = origPushBranch
+		createPRFn = origCreatePR
+		prChecksWatchFn = origPRChecksWatch
+		mergePRFn = origMergePR
+	})
+}
+
+func TestVerifyImplContent_NoCommits(t *testing.T) {
+	tmp := t.TempDir()
+	writeBoundSpec(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	state.Write(tmp, &state.State{
+		Mode:       state.ModeReview,
+		ActiveSpec: "010-test",
+		SpecBranch: "spec/010-test",
+	})
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 0, nil }
+
+	_, err := ApproveImpl(tmp, "010-test")
+	if err == nil {
+		t.Fatal("expected error when spec branch has no commits beyond main")
+	}
+	if !strings.Contains(err.Error(), "no commits beyond main") {
+		t.Errorf("error should mention no commits: %v", err)
+	}
+}
+
+func TestVerifyImplContent_OpenBeads(t *testing.T) {
+	tmp := t.TempDir()
+	writeBoundSpec(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	state.Write(tmp, &state.State{
+		Mode:       state.ModeReview,
+		ActiveSpec: "010-test",
+		SpecBranch: "spec/010-test",
+	})
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" {
+			status := "closed"
+			if args[1] == "bead-bbb" {
+				status = "in_progress"
+			}
+			payload := []map[string]string{{"status": status}}
+			return json.Marshal(payload)
+		}
+		return nil, fmt.Errorf("unexpected args: %v", args)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
+	branchExistsFn = func(name string) bool { return false }
+
+	_, err := ApproveImpl(tmp, "010-test")
+	if err == nil {
+		t.Fatal("expected error when beads are still open")
+	}
+	if !strings.Contains(err.Error(), "bead-bbb") || !strings.Contains(err.Error(), "in_progress") {
+		t.Errorf("error should mention open bead: %v", err)
+	}
+}
+
+func TestVerifyImplContent_BeadBranchNotMerged(t *testing.T) {
+	tmp := t.TempDir()
+	writeBoundSpec(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	state.Write(tmp, &state.State{
+		Mode:       state.ModeReview,
+		ActiveSpec: "010-test",
+		SpecBranch: "spec/010-test",
+	})
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
+	branchExistsFn = func(name string) bool { return name == "bead/bead-aaa" }
+	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return false, nil }
+
+	_, err := ApproveImpl(tmp, "010-test")
+	if err == nil {
+		t.Fatal("expected error when bead branch is not merged into spec branch")
+	}
+	if !strings.Contains(err.Error(), "bead/bead-aaa") || !strings.Contains(err.Error(), "not merged") {
+		t.Errorf("error should mention unmerged bead branch: %v", err)
+	}
+}
+
+func TestVerifyImplContent_AllGood(t *testing.T) {
+	tmp := t.TempDir()
+	writeBoundSpec(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	state.Write(tmp, &state.State{
+		Mode:       state.ModeReview,
+		ActiveSpec: "010-test",
+		SpecBranch: "spec/010-test",
+	})
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
+	branchExistsFn = func(name string) bool { return true }
+	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
+	loadConfigFn = func(root string) (*config.Config, error) {
+		cfg := config.DefaultConfig()
+		cfg.MergeStrategy = "direct"
+		return cfg, nil
+	}
+	mergeBranchFn = func(workdir, source, target string) error { return nil }
+	deleteBranchFn = func(name string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+	diffStatFn = func(workdir, base, head string) (string, error) { return "2 files changed", nil }
+
+	result, err := ApproveImpl(tmp, "010-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MergeStrategy != "direct" {
+		t.Errorf("MergeStrategy: got %q, want %q", result.MergeStrategy, "direct")
 	}
 }

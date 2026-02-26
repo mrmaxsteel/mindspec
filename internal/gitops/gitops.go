@@ -221,6 +221,21 @@ func MergePR(prURL string) error {
 	return nil
 }
 
+// IsAncestor returns true if ancestor is an ancestor of descendant.
+// Uses git merge-base --is-ancestor.
+func IsAncestor(workdir, ancestor, descendant string) (bool, error) {
+	cmd := execCommand("git", "-C", workdir, "merge-base", "--is-ancestor", ancestor, descendant)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// Exit code 1 means not an ancestor; other errors are real failures.
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking ancestry %s..%s: %w", ancestor, descendant, err)
+}
+
 // File I/O wrappers for testability.
 var (
 	readFile  = os.ReadFile
