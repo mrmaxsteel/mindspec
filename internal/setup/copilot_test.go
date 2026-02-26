@@ -32,6 +32,21 @@ func TestRunCopilot_Greenfield(t *testing.T) {
 		t.Error("copilot-instructions.md should contain marker")
 	}
 
+	// Verify hooks
+	hooksPath := filepath.Join(root, ".github/hooks/mindspec.json")
+	if _, err := os.Stat(hooksPath); os.IsNotExist(err) {
+		t.Error("expected .github/hooks/mindspec.json to exist")
+	}
+	scriptPath := filepath.Join(root, ".github/hooks/mindspec-plan-gate.sh")
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		t.Error("expected .github/hooks/mindspec-plan-gate.sh to exist")
+	}
+	// Verify script is executable
+	info, err := os.Stat(scriptPath)
+	if err == nil && info.Mode()&0o111 == 0 {
+		t.Error("mindspec-plan-gate.sh should be executable")
+	}
+
 	// Verify prompt files
 	expectedPrompts := []string{
 		"spec-init.prompt.md",
@@ -67,6 +82,44 @@ func TestRunCopilot_PromptFileContent(t *testing.T) {
 	}
 	if !strings.Contains(content, "mindspec approve spec") {
 		t.Error("spec-approve prompt should reference mindspec approve spec command")
+	}
+}
+
+func TestRunCopilot_HooksContent(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("RunCopilot() error: %v", err)
+	}
+
+	// Check hooks JSON has the right structure
+	data, err := os.ReadFile(filepath.Join(root, ".github/hooks/mindspec.json"))
+	if err != nil {
+		t.Fatalf("reading hooks JSON: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "mindspec instruct") {
+		t.Error("hooks should contain sessionStart with mindspec instruct")
+	}
+	if !strings.Contains(content, "mindspec-plan-gate.sh") {
+		t.Error("hooks should reference plan gate script in preToolUse")
+	}
+	if !strings.Contains(content, `"version": 1`) {
+		t.Error("hooks should have version 1")
+	}
+
+	// Check plan gate script content
+	scriptData, err := os.ReadFile(filepath.Join(root, ".github/hooks/mindspec-plan-gate.sh"))
+	if err != nil {
+		t.Fatalf("reading plan gate script: %v", err)
+	}
+	scriptContent := string(scriptData)
+	if !strings.Contains(scriptContent, "permissionDecision") {
+		t.Error("plan gate script should output permissionDecision JSON")
+	}
+	if !strings.Contains(scriptContent, "plan") {
+		t.Error("plan gate script should check for plan mode")
 	}
 }
 

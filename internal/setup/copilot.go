@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,12 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 2. prompt files (.github/prompts/*.prompt.md)
+	// 2. hooks (.github/hooks/mindspec.json + helper scripts)
+	if err := ensureCopilotHooks(root, check, r); err != nil {
+		return nil, err
+	}
+
+	// 3. prompt files (.github/prompts/*.prompt.md)
 	for name, content := range copilotPromptFiles() {
 		relPath := filepath.Join(".github", "prompts", name)
 		absPath := filepath.Join(root, relPath)
@@ -82,6 +88,114 @@ func ensureCopilotInstructions(root string, check bool, r *Result) error {
 	}
 
 	return nil
+}
+
+// ensureCopilotHooks creates .github/hooks/mindspec.json and helper scripts.
+func ensureCopilotHooks(root string, check bool, r *Result) error {
+	// Hook config file
+	hooksRelPath := filepath.Join(".github", "hooks", "mindspec.json")
+	hooksAbsPath := filepath.Join(root, hooksRelPath)
+
+	if fileExists(hooksAbsPath) {
+		r.Skipped = append(r.Skipped, hooksRelPath)
+	} else {
+		r.Created = append(r.Created, hooksRelPath)
+		if !check {
+			if err := os.MkdirAll(filepath.Dir(hooksAbsPath), 0o755); err != nil {
+				return fmt.Errorf("creating dir for %s: %w", hooksRelPath, err)
+			}
+			data, err := json.MarshalIndent(copilotHooksConfig(), "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshaling hooks config: %w", err)
+			}
+			if err := os.WriteFile(hooksAbsPath, append(data, '\n'), 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", hooksRelPath, err)
+			}
+		}
+	}
+
+	// Helper scripts
+	scripts := copilotHookScripts()
+	for name, content := range scripts {
+		relPath := filepath.Join(".github", "hooks", name)
+		absPath := filepath.Join(root, relPath)
+		if fileExists(absPath) {
+			r.Skipped = append(r.Skipped, relPath)
+		} else {
+			r.Created = append(r.Created, relPath)
+			if !check {
+				if err := os.WriteFile(absPath, []byte(content), 0o755); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// copilotHooksConfig returns the Copilot hooks configuration structure.
+func copilotHooksConfig() map[string]any {
+	return map[string]any{
+		"version": 1,
+		"hooks": map[string]any{
+			"sessionStart": []map[string]any{
+				{
+					"type":       "command",
+					"bash":       "mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+					"timeoutSec": 10,
+				},
+			},
+			"preToolUse": []map[string]any{
+				{
+					"type":       "command",
+					"bash":       ".github/hooks/mindspec-plan-gate.sh",
+					"timeoutSec": 5,
+				},
+			},
+		},
+	}
+}
+
+// copilotHookScripts returns helper scripts for Copilot hooks.
+func copilotHookScripts() map[string]string {
+	return map[string]string{
+		"mindspec-plan-gate.sh": `#!/usr/bin/env bash
+# MindSpec plan gate hook for Copilot preToolUse.
+# Reads tool invocation JSON from stdin. If the agent tries to write code
+# while MindSpec is in plan mode, deny the action.
+#
+# Copilot preToolUse hooks receive JSON on stdin with tool info and
+# output a permissionDecision JSON object.
+
+set -euo pipefail
+
+STATE_FILE=".mindspec/state.json"
+if [ ! -f "$STATE_FILE" ]; then
+  exit 0
+fi
+
+MODE=$(jq -r '.mode // empty' "$STATE_FILE" 2>/dev/null)
+if [ "$MODE" != "plan" ]; then
+  exit 0
+fi
+
+# In plan mode: read the tool name from stdin
+INPUT=$(cat)
+TOOL=$(echo "$INPUT" | jq -r '.toolName // empty' 2>/dev/null)
+
+# Block file-writing tools during plan mode
+case "$TOOL" in
+  edit|write|create_file|insert|replace)
+    echo '{"permissionDecision":"deny","permissionDecisionReason":"MindSpec plan mode is active. Only documentation files (plan.md) may be edited. Use /plan-approve to transition to implementation mode."}'
+    ;;
+  *)
+    # Allow all other tools
+    exit 0
+    ;;
+esac
+`,
+	}
 }
 
 // copilotPromptFiles returns the prompt file contents keyed by filename.

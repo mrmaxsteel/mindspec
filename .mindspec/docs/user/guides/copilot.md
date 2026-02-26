@@ -39,6 +39,8 @@ mindspec setup copilot
 
 This creates:
 - `.github/copilot-instructions.md` — workspace instructions pointing to `AGENTS.md`
+- `.github/hooks/mindspec.json` — hooks for session start guidance and plan mode gate enforcement
+- `.github/hooks/mindspec-plan-gate.sh` — preToolUse script that blocks code edits during plan mode
 - `.github/prompts/*.prompt.md` — workflow prompt commands (`/spec-init`, `/spec-approve`, etc.)
 
 ### 4. Verify
@@ -143,7 +145,7 @@ Or use `/impl-approve` in Copilot Chat.
 | Feature | Claude Code | Codex | Copilot CLI | Copilot Chat (VS Code) |
 |:--------|:-----------|:------|:------------|:----------------------|
 | Instruction file | `CLAUDE.md` → `AGENTS.md` | `AGENTS.md` | `AGENTS.md` | `.github/copilot-instructions.md` → `AGENTS.md` |
-| Session guidance | Auto (SessionStart hook) | Manual (reads AGENTS.md) | Manual (reads AGENTS.md) | Auto (reads instructions on open) |
+| Session guidance | Auto (SessionStart hook) | Manual (reads AGENTS.md) | Auto (sessionStart hook) | Auto (reads instructions on open + sessionStart hook) |
 | Custom commands | `.claude/commands/*.md` | Direct CLI | Direct CLI | `.github/prompts/*.prompt.md` |
 | OTLP telemetry | Built-in export | Supported via config | Not yet supported | Not yet supported |
 | AgentMind viz | Full support | Supported (OTEL + JSONL) | Not yet supported | Not yet supported |
@@ -159,9 +161,17 @@ CLAUDE.md                        →  AGENTS.md  →  mindspec instruct
 
 Agent-specific files are thin pointers to the universal `AGENTS.md`, which holds shared workflow conventions and points to `mindspec instruct` for runtime guidance.
 
+## Hooks
+
+`mindspec setup copilot` installs hooks in `.github/hooks/mindspec.json`:
+
+- **sessionStart** — runs `mindspec instruct` automatically when a Copilot session begins
+- **preToolUse** — enforces the plan mode gate: blocks code-editing tools while MindSpec is in plan mode, similar to Claude's `PreToolUse` hook
+
+These hooks are the Copilot equivalent of Claude Code's `.claude/settings.json` hooks.
+
 ## Limitations
 
-- **No automatic SessionStart hook** for Copilot CLI — the agent must call `mindspec instruct` based on the AGENTS.md instruction
 - **Telemetry is not yet supported** — Copilot doesn't expose OTEL configuration hooks
 - **Worktree support** depends on Copilot's ability to change directories
 

@@ -70,6 +70,7 @@ var setupCopilotCmd = &cobra.Command{
 	Long: `Creates GitHub Copilot-specific configuration:
 
   - .github/copilot-instructions.md with pointer to AGENTS.md and MindSpec guidance
+  - .github/hooks/mindspec.json with sessionStart and preToolUse hooks
   - .github/prompts/*.prompt.md workflow prompt files (spec-init, spec-approve, etc.)
 
 This command is idempotent — re-running it skips existing items.
