@@ -61,12 +61,15 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	if implementStepID != "" {
 		beadIDs, err := createImplementationBeads(planPath, specID, implementStepID)
 		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-create implementation beads: %v", err))
+			return nil, fmt.Errorf("failed to create implementation beads: %w\n\nThe plan has been approved but beads were NOT created.\nFix the issue and re-run: mindspec bead create-from-plan %s", err, specID)
 		} else if len(beadIDs) > 0 {
 			result.BeadIDs = beadIDs
 			if err := writeBeadIDsToFrontmatter(planPath, beadIDs); err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write bead IDs to plan frontmatter: %v", err))
 			}
+		} else {
+			// Plan has no ## Bead sections — warn loudly
+			result.Warnings = append(result.Warnings, "plan has no '## Bead N:' sections; no implementation beads were created. Add bead sections to the plan or create beads manually with: bd create --title '[SPEC] Bead N: ...' --parent "+implementStepID)
 		}
 	} else {
 		result.Warnings = append(result.Warnings, "no implement step in molecule; skipping bead auto-creation")
@@ -303,4 +306,36 @@ func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
 	output := "---\n" + string(newFm) + "---\n" + body
 
 	return os.WriteFile(planPath, []byte(output), 0644)
+}
+
+// CreateBeadsFromPlan is a recovery function that creates implementation beads
+// from an already-approved plan. Use this when plan-approve failed to create
+// beads (e.g., bd was unreachable, CWD issue, etc.).
+func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
+	result := &PlanResult{SpecID: specID}
+
+	meta, err := specmeta.EnsureFullyBound(root, specID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
+	}
+
+	implementStepID := strings.TrimSpace(meta.StepMapping["implement"])
+	if implementStepID == "" {
+		return nil, fmt.Errorf("spec %s has no implement step in molecule; cannot create beads", specID)
+	}
+
+	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
+	beadIDs, err := createImplementationBeads(planPath, specID, implementStepID)
+	if err != nil {
+		return nil, fmt.Errorf("creating beads: %w", err)
+	}
+
+	result.BeadIDs = beadIDs
+	if len(beadIDs) > 0 {
+		if err := writeBeadIDsToFrontmatter(planPath, beadIDs); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write bead IDs to plan frontmatter: %v", err))
+		}
+	}
+
+	return result, nil
 }

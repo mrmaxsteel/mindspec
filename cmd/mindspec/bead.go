@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mindspec/mindspec/internal/approve"
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/spf13/cobra"
 )
@@ -138,6 +139,47 @@ var beadHygieneCmd = &cobra.Command{
 	},
 }
 
+var beadCreateFromPlanCmd = &cobra.Command{
+	Use:   "create-from-plan [spec-id]",
+	Short: "Create implementation beads from an approved plan's ## Bead sections",
+	Long: `Parses the plan.md for ## Bead N: sections and creates corresponding
+beads in Beads, parented to the spec's implement molecule step.
+Use this to recover when plan-approve failed to create beads.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		specID := args[0]
+
+		root, err := findRoot()
+		if err != nil {
+			return err
+		}
+
+		if err := bead.Preflight(root); err != nil {
+			return fmt.Errorf("beads preflight failed: %w", err)
+		}
+
+		result, err := approve.CreateBeadsFromPlan(root, specID)
+		if err != nil {
+			return err
+		}
+
+		if len(result.BeadIDs) == 0 {
+			fmt.Println("No ## Bead sections found in plan.")
+			return nil
+		}
+
+		fmt.Printf("Created %d implementation beads:\n", len(result.BeadIDs))
+		for _, id := range result.BeadIDs {
+			fmt.Printf("  - %s\n", id)
+		}
+		for _, w := range result.Warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	beadWorktreeCmd.Flags().Bool("create", false, "Create a new worktree for the bead")
 	beadHygieneCmd.Flags().Int("stale-days", 7, "Days without update before a bead is considered stale")
@@ -148,4 +190,5 @@ func init() {
 	beadCmd.AddCommand(beadPlanCmd)
 	beadCmd.AddCommand(beadWorktreeCmd)
 	beadCmd.AddCommand(beadHygieneCmd)
+	beadCmd.AddCommand(beadCreateFromPlanCmd)
 }

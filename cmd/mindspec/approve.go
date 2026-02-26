@@ -104,6 +104,8 @@ Run 'mindspec next' after this to claim work and enter Implementation Mode.`,
 			for _, id := range result.BeadIDs {
 				fmt.Printf("  - %s\n", id)
 			}
+		} else {
+			fmt.Println("WARNING: No implementation beads were created.")
 		}
 		for _, w := range result.Warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)

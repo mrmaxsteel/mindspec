@@ -293,6 +293,45 @@ None
 	}
 }
 
+func TestCreateImplementationBeads_BDCreateFails(t *testing.T) {
+	tmp := t.TempDir()
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: Widget factory
+
+**Steps**
+1. Step one
+
+**Verification**
+- [ ] Tests pass
+
+**Depends on**
+None
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("bd not available")
+	}
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err == nil {
+		t.Fatal("expected error when bd create fails")
+	}
+	if len(beadIDs) != 0 {
+		t.Errorf("expected 0 bead IDs on error, got %d", len(beadIDs))
+	}
+}
+
 func TestWriteBeadIDsToFrontmatter(t *testing.T) {
 	tmp := t.TempDir()
 	planContent := `---
