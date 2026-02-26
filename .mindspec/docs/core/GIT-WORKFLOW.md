@@ -69,6 +69,10 @@ enforcement:
   agent_hooks: true
 ```
 
+## State File
+
+`.mindspec/state.json` is **gitignored** — it is a local runtime cursor, not version-controlled state. It contains machine-local fields (absolute worktree paths) and is derivable from molecules via `mindspec instruct`. See ADR-0015 for the demotion from "primary source of truth" to convenience cursor.
+
 ## Related ADRs
 
 - **ADR-0006** — Branching model (zero-on-main, one PR per spec lifecycle)

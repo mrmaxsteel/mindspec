@@ -168,6 +168,9 @@ func manifest() []manifestItem {
 		{path: ".github/copilot-instructions.md", content: starterCopilotInstructionsMD, appendBlock: appendCopilotBlock},
 		{path: ".mindspec/state.json", contentFunc: starterState},
 
+		// Gitignore: state.json is a local runtime cursor, not version-controlled
+		{path: ".gitignore", content: starterGitignore},
+
 		// Beads formula (required by spec-init)
 		{path: ".beads/formulas/spec-lifecycle.formula.toml", contentFunc: templates.SpecLifecycleFormula},
 	}
@@ -204,6 +207,11 @@ func starterState() string {
 	data, _ := json.MarshalIndent(s, "", "  ")
 	return string(data) + "\n"
 }
+
+// starterGitignore ensures state.json is gitignored in new projects.
+const starterGitignore = `# MindSpec local state (runtime cursor, not version-controlled)
+.mindspec/state.json
+`
 
 // --- Starter file content ---
 

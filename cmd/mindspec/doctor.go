@@ -12,8 +12,12 @@ import (
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check the health of the current workspace",
-	Long:  `Validates project structure, documentation health, and Beads hygiene.`,
+	Long: `Validates project structure, documentation health, and Beads hygiene.
+
+Use --fix to auto-repair fixable issues (e.g. tracked state.json).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		fix, _ := cmd.Flags().GetBool("fix")
+
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("cannot determine working directory: %w", err)
@@ -27,6 +31,10 @@ var doctorCmd = &cobra.Command{
 		fmt.Printf("Workspace Root: %s\n", root)
 
 		report := doctor.Run(root)
+
+		if fix {
+			report.Fix()
+		}
 
 		for _, c := range report.Checks {
 			fmt.Printf("%s: %s", c.Name, statusTag(c.Status))
@@ -53,7 +61,13 @@ func statusTag(s doctor.Status) string {
 		return "[ERROR]"
 	case doctor.Warn:
 		return "[WARN]"
+	case doctor.Fixed:
+		return "[FIXED]"
 	default:
 		return "[UNKNOWN]"
 	}
+}
+
+func init() {
+	doctorCmd.Flags().Bool("fix", false, "Auto-repair fixable issues")
 }

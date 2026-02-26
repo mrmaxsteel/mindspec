@@ -1,5 +1,7 @@
 package doctor
 
+import "fmt"
+
 // Status represents the result of a single health check.
 type Status int
 
@@ -8,6 +10,7 @@ const (
 	Missing        // expected artifact is absent
 	Error          // something is wrong and needs action
 	Warn           // advisory, not a failure
+	Fixed          // was broken, auto-repaired by --fix
 )
 
 // Check represents a single health check result.
@@ -15,6 +18,7 @@ type Check struct {
 	Name    string
 	Status  Status
 	Message string
+	FixFunc func() error // if non-nil, --fix can auto-repair this check
 }
 
 // Report holds the results of all doctor checks.
@@ -32,10 +36,26 @@ func (r *Report) HasFailures() bool {
 	return false
 }
 
+// Fix runs FixFunc on all checks that have one and are in Error status.
+// Fixed checks are updated to Fixed status.
+func (r *Report) Fix() {
+	for i := range r.Checks {
+		c := &r.Checks[i]
+		if c.FixFunc != nil && c.Status == Error {
+			if err := c.FixFunc(); err != nil {
+				c.Message += fmt.Sprintf(" (fix failed: %v)", err)
+			} else {
+				c.Status = Fixed
+			}
+		}
+	}
+}
+
 // Run executes all doctor checks against the given project root.
 func Run(root string) *Report {
 	r := &Report{}
 	checkDocs(r, root)
 	checkBeads(r, root)
+	checkGit(r, root)
 	return r
 }

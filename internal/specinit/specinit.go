@@ -152,9 +152,16 @@ func Run(root, specID, title string) (*Result, error) {
 		}
 	}
 
-	// Write state (on main — enforcement hooks read this).
+	// Write state to main root (enforcement hooks read this).
 	if err := state.Write(root, s); err != nil {
 		return nil, fmt.Errorf("setting state: %w", err)
+	}
+
+	// Also write state to worktree root so commands work from either location.
+	if result.WorktreePath != "" {
+		if err := state.Write(result.WorktreePath, s); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write state to worktree: %v\n", err)
+		}
 	}
 
 	// Install pre-commit hook (best-effort, ensures Layer 1 enforcement).

@@ -1,5 +1,7 @@
-# Mindspec local state — state.json is committed (project-level workflow state)
-# Only ignore runtime/temp files if any are added later
+# Mindspec local state — state.json is a local runtime cursor (ADR-0015),
+# not version-controlled. It contains machine-local paths (activeWorktree)
+# and is derivable from molecules via `mindspec instruct`.
+.mindspec/state.json
 .mindspec/current-spec.json
 
 # Beads runtime artifacts are handled by .beads/.gitignore
