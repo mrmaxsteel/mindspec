@@ -118,11 +118,13 @@ The net effect: once a worktree is active, an agent cannot run any bash command 
     c. Block other commands when CWD is main and a worktree is active
     d. The hook cannot change the process CWD, so it must be permissive for commands that target the worktree
 
-13. **Edit/Write hooks**: Replace `$CLAUDE_TOOL_ARG_FILE_PATH` with the correct env var. Investigate what Claude Code actually exposes for the file path argument. If no reliable env var exists, fall back to emitting `additionalContext` guidance instead of hard-blocking.
+13. **Edit/Write hooks**: Replace `$CLAUDE_TOOL_ARG_FILE_PATH` with stdin JSON parsing. Claude Code passes tool arguments as JSON on stdin (field `tool_input.file_path`). The hook must read stdin and use `jq` to extract the path: `fp=$(cat | jq -r '.tool_input.file_path')`.
 
 14. **`mindspec setup claude`** must regenerate the hooks with the fixed scripts. Running `mindspec setup claude` should detect stale hooks (by comparing command strings) and update them.
 
-15. All three hooks must preserve the escape hatch: `config.yaml` with `enforcement.agent_hooks: false` disables them.
+15. **Copilot hooks**: The worktree guard script (`.github/hooks/mindspec-worktree-guard.sh`) has the same `pwd` bug for bash/shell tool checks (line 210-217 of `copilot.go`). Fix it to read stdin JSON for the command and use the same allowlist logic as the Claude Code hook.
+
+16. All hooks (Claude Code and Copilot) must preserve the escape hatch: `config.yaml` with `enforcement.agent_hooks: false` disables them.
 
 ### R6: gitops package additions
 
@@ -143,6 +145,7 @@ The net effect: once a worktree is active, an agent cannot run any bash command 
 - `internal/gitops/gitops.go` — new PR merge, CI check, diffstat functions
 - `cmd/mindspec/cleanup.go` — new cleanup command (deferred PR merge)
 - `internal/setup/claude.go` — fix `worktreeBashGuardScript()` and `worktreeFileGuardScript()`, add stale hook detection
+- `internal/setup/copilot.go` — fix `mindspec-worktree-guard.sh` template (same `pwd` bug)
 - Tests for all changed functions
 
 ### Out of Scope
@@ -184,7 +187,7 @@ The net effect: once a worktree is active, an agent cannot run any bash command 
 
 ## Open Questions
 
-- [ ] What env vars does Claude Code actually expose to `PreToolUse` hooks? Need to verify `CLAUDE_TOOL_ARG_FILE_PATH` and `CLAUDE_TOOL_ARG_COMMAND` availability — the current hooks assume these exist but they may be empty or named differently. Resolve during planning by testing hook env vars.
+- [x] **Resolved**: Claude Code does NOT expose tool arguments as env vars. `$CLAUDE_TOOL_ARG_FILE_PATH` and `$CLAUDE_TOOL_ARG_COMMAND` do not exist — that's why they're always empty. Tool arguments are passed as **JSON on stdin** in a `tool_input` field. Hooks must read stdin and parse with `jq`. For Bash: `.tool_input.command`, for Edit/Write: `.tool_input.file_path`. Hooks can also return `permissionDecision` (allow/deny/ask) and `updatedInput` to modify tool args.
 
 ## Approval
 
