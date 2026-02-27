@@ -121,10 +121,11 @@ func upsertSpecFrontmatterApproval(content, approvedBy string, now time.Time) (s
 		return "", fmt.Errorf("marshaling frontmatter: %w", err)
 	}
 
+	trimmed := strings.TrimRight(string(fmBytes), "\n")
 	if hasFrontmatter {
-		return "---\n" + string(fmBytes) + "---\n" + body, nil
+		return "---\n" + trimmed + "\n---\n" + body, nil
 	}
-	return "---\n" + string(fmBytes) + "---\n" + content, nil
+	return "---\n" + trimmed + "\n---\n" + content, nil
 }
 
 func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string {

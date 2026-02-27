@@ -91,8 +91,8 @@ func Write(specDir string, m *Meta) error {
 
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	sb.Write(fmBytes)
-	sb.WriteString("---\n")
+	sb.WriteString(strings.TrimRight(string(fmBytes), "\n"))
+	sb.WriteString("\n---\n")
 	sb.WriteString(body)
 
 	return os.WriteFile(specPath, []byte(sb.String()), 0644)
