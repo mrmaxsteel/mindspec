@@ -18,7 +18,7 @@ func Run(name string, inp *Input, st *state.State, enforce bool) Result {
 	case "worktree-bash":
 		return WorktreeBash(inp, st, enforce)
 	case "needs-clear":
-		return NeedsClear(inp, st)
+		return SessionFreshnessGate(inp, st)
 	case "workflow-guard":
 		return WorkflowGuard(inp, st, enforce)
 	default:
@@ -108,9 +108,12 @@ func WorktreeBash(inp *Input, st *state.State, enforce bool) Result {
 	}
 }
 
-// NeedsClear blocks `mindspec next` when needs_clear is set.
-func NeedsClear(inp *Input, st *state.State) Result {
-	if st == nil || !st.NeedsClear {
+// SessionFreshnessGate blocks `mindspec next` when the session is not fresh.
+// A session is fresh if SessionSource is "startup" or "clear" and no bead
+// has been claimed since the last session start.
+func SessionFreshnessGate(inp *Input, st *state.State) Result {
+	if st == nil || st.SessionStartedAt == "" {
+		// No session metadata — non-Claude-Code environment, skip gate.
 		return Result{Action: Pass}
 	}
 	cmd := inp.Command
@@ -120,10 +123,20 @@ func NeedsClear(inp *Input, st *state.State) Result {
 	if containsWord(cmd, "--force") {
 		return Result{Action: Pass}
 	}
-	return Result{
-		Action:  Block,
-		Message: "needs_clear is set. Run /clear to reset your context, then retry mindspec next. Use --force to bypass.",
+
+	if st.SessionSource == "resume" {
+		return Result{
+			Action:  Block,
+			Message: "session freshness gate: session was resumed (not fresh). Run /clear to reset your context, then retry mindspec next. Use --force to bypass.",
+		}
 	}
+	if st.BeadClaimedAt != "" && st.BeadClaimedAt >= st.SessionStartedAt {
+		return Result{
+			Action:  Block,
+			Message: "session freshness gate: a bead was already claimed in this session. Run /clear to reset your context, then retry mindspec next. Use --force to bypass.",
+		}
+	}
+	return Result{Action: Pass}
 }
 
 // WorkflowGuard is the universal state-aware guard.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mindspec/mindspec/internal/contextpack"
 	"github.com/mindspec/mindspec/internal/next"
@@ -49,14 +50,23 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return runEmitOnly(root, specFlag, args)
 		}
 
-		// Step 0: Check needs_clear gate
-		if cur, readErr := state.Read(root); readErr == nil && cur.NeedsClear {
-			if !force {
-				return fmt.Errorf("context clear required. Run /clear to reset your context, then retry.\nUse --force to bypass")
+		// Step 0: Session freshness gate
+		if cur, readErr := state.Read(root); readErr == nil && cur.SessionStartedAt != "" {
+			stale := false
+			reason := ""
+			if cur.SessionSource == "resume" {
+				stale = true
+				reason = "session was resumed (not fresh)"
+			} else if cur.BeadClaimedAt != "" && cur.BeadClaimedAt >= cur.SessionStartedAt {
+				stale = true
+				reason = "a bead was already claimed in this session"
 			}
-			fmt.Fprintln(os.Stderr, "warning: bypassing context clear gate (--force)")
-			cur.NeedsClear = false
-			_ = state.Write(root, cur)
+			if stale {
+				if !force {
+					return fmt.Errorf("session freshness gate: %s.\nRun /clear to reset your context, then retry.\nUse --force to bypass", reason)
+				}
+				fmt.Fprintf(os.Stderr, "warning: bypassing session freshness gate (%s)\n", reason)
+			}
 		}
 
 		// Step 1: Check clean tree
@@ -145,6 +155,12 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		fmt.Printf("Claiming [%s] %s ...\n", selected.ID, selected.Title)
 		if err := next.ClaimBead(selected.ID); err != nil {
 			return fmt.Errorf("claiming bead: %w", err)
+		}
+
+		// Step 5.1: Record bead claim time for session freshness gate
+		if cur, readErr := state.Read(root); readErr == nil {
+			cur.BeadClaimedAt = time.Now().UTC().Format(time.RFC3339)
+			_ = state.Write(root, cur)
 		}
 
 		// Step 5.5: Create or reuse worktree

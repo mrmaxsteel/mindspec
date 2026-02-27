@@ -171,49 +171,96 @@ func TestWorktreeBash_AllowsSpecWorktree(t *testing.T) {
 	}
 }
 
-// --- Needs Clear ---
+// --- Session Freshness Gate ---
 
-func TestNeedsClear_NilState(t *testing.T) {
+func TestSessionFreshnessGate_NilState(t *testing.T) {
 	t.Parallel()
-	r := NeedsClear(&Input{Command: "mindspec next"}, nil)
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, nil)
 	if r.Action != Pass {
 		t.Error("nil state should pass")
 	}
 }
 
-func TestNeedsClear_NotSet(t *testing.T) {
+func TestSessionFreshnessGate_NoSessionData(t *testing.T) {
 	t.Parallel()
-	st := &state.State{NeedsClear: false}
-	r := NeedsClear(&Input{Command: "mindspec next"}, st)
+	st := &state.State{}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
 	if r.Action != Pass {
-		t.Error("needs_clear=false should pass")
+		t.Error("missing sessionStartedAt should skip gate")
 	}
 }
 
-func TestNeedsClear_SetAndMatch(t *testing.T) {
+func TestSessionFreshnessGate_FreshStartup(t *testing.T) {
 	t.Parallel()
-	st := &state.State{NeedsClear: true}
-	r := NeedsClear(&Input{Command: "mindspec next"}, st)
+	st := &state.State{
+		SessionSource:    "startup",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
+	if r.Action != Pass {
+		t.Error("fresh startup with no prior bead should pass")
+	}
+}
+
+func TestSessionFreshnessGate_FreshClear(t *testing.T) {
+	t.Parallel()
+	st := &state.State{
+		SessionSource:    "clear",
+		SessionStartedAt: "2026-02-27T00:05:00Z",
+		BeadClaimedAt:    "2026-02-27T00:01:00Z", // claimed before clear
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
+	if r.Action != Pass {
+		t.Error("clear after bead claim should pass (sessionStartedAt > beadClaimedAt)")
+	}
+}
+
+func TestSessionFreshnessGate_StaleSession(t *testing.T) {
+	t.Parallel()
+	st := &state.State{
+		SessionSource:    "startup",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+		BeadClaimedAt:    "2026-02-27T00:01:00Z", // claimed after session start
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
 	if r.Action != Block {
-		t.Error("needs_clear=true with mindspec next should block")
+		t.Error("bead claimed after session start without /clear should block")
 	}
 }
 
-func TestNeedsClear_SetWithForce(t *testing.T) {
+func TestSessionFreshnessGate_ResumedSession(t *testing.T) {
 	t.Parallel()
-	st := &state.State{NeedsClear: true}
-	r := NeedsClear(&Input{Command: "mindspec next --force"}, st)
-	if r.Action != Pass {
-		t.Error("--force should bypass needs_clear")
+	st := &state.State{
+		SessionSource:    "resume",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
+	if r.Action != Block {
+		t.Error("resumed session should block")
 	}
 }
 
-func TestNeedsClear_SetDifferentCommand(t *testing.T) {
+func TestSessionFreshnessGate_ForceBypass(t *testing.T) {
 	t.Parallel()
-	st := &state.State{NeedsClear: true}
-	r := NeedsClear(&Input{Command: "mindspec instruct"}, st)
+	st := &state.State{
+		SessionSource:    "resume",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next --force"}, st)
 	if r.Action != Pass {
-		t.Error("non-next command should pass even with needs_clear")
+		t.Error("--force should bypass session freshness gate")
+	}
+}
+
+func TestSessionFreshnessGate_DifferentCommand(t *testing.T) {
+	t.Parallel()
+	st := &state.State{
+		SessionSource:    "resume",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec instruct"}, st)
+	if r.Action != Pass {
+		t.Error("non-next command should pass regardless of session state")
 	}
 }
 

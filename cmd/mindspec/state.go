@@ -116,21 +116,26 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 	},
 }
 
-var stateClearFlagCmd = &cobra.Command{
-	Use:   "clear-flag",
-	Short: "Clear the needs_clear flag after a context reset",
-	Long:  `Clears the needs_clear flag in state.json. Called by the SessionStart hook after /clear.`,
+var stateWriteSessionCmd = &cobra.Command{
+	Use:   "write-session",
+	Short: "Record session freshness metadata from SessionStart hook",
+	Long:  `Writes sessionSource and sessionStartedAt to state.json. Called by the SessionStart hook with the source field from stdin JSON.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
+		if source == "" {
+			source = "unknown"
+		}
+
 		root, err := findRoot()
 		if err != nil {
 			return err
 		}
 
-		if err := state.ClearNeedsClear(root); err != nil {
-			return fmt.Errorf("clearing needs_clear flag: %w", err)
+		if err := state.WriteSession(root, source); err != nil {
+			return fmt.Errorf("writing session metadata: %w", err)
 		}
 
-		fmt.Println("needs_clear flag cleared.")
+		fmt.Printf("Session recorded: source=%s\n", source)
 		return nil
 	},
 }
@@ -142,7 +147,9 @@ func init() {
 
 	stateShowCmd.Flags().String("spec", "", "Target spec ID (auto-detected if exactly one active spec)")
 
+	stateWriteSessionCmd.Flags().String("source", "", "Session source from SessionStart hook (startup, clear, resume, compact)")
+
 	stateCmd.AddCommand(stateSetCmd)
 	stateCmd.AddCommand(stateShowCmd)
-	stateCmd.AddCommand(stateClearFlagCmd)
+	stateCmd.AddCommand(stateWriteSessionCmd)
 }

@@ -425,7 +425,7 @@ func TestRun_NoBead(t *testing.T) {
 	}
 }
 
-func TestRun_SetsNeedsClearWhenNextBeadReady(t *testing.T) {
+func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t, "008-test", "mol-parent-1")
@@ -462,18 +462,12 @@ func TestRun_SetsNeedsClearWhenNextBeadReady(t *testing.T) {
 	if result.NextMode != state.ModeImplement {
 		t.Fatalf("expected implement mode, got %s", result.NextMode)
 	}
-
-	// Verify NeedsClear was set
-	s, err := state.Read(root)
-	if err != nil {
-		t.Fatalf("reading state: %v", err)
-	}
-	if !s.NeedsClear {
-		t.Error("expected NeedsClear to be true when next bead is ready")
+	if result.NextBead != "bead-2" {
+		t.Errorf("expected next bead bead-2, got %s", result.NextBead)
 	}
 }
 
-func TestRun_DoesNotSetNeedsClearWhenReview(t *testing.T) {
+func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t, "008-test", "mol-parent-1")
@@ -504,14 +498,6 @@ func TestRun_DoesNotSetNeedsClearWhenReview(t *testing.T) {
 	}
 	if result.NextMode != state.ModeReview {
 		t.Fatalf("expected review mode, got %s", result.NextMode)
-	}
-
-	s, err := state.Read(root)
-	if err != nil {
-		t.Fatalf("reading state: %v", err)
-	}
-	if s.NeedsClear {
-		t.Error("NeedsClear should NOT be set when advancing to review")
 	}
 }
 

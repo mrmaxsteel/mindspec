@@ -55,4 +55,6 @@ worktree-mindspec-u7mk/
 # bd worktree
 .worktrees/worktree-spec-051-worktree-state-propagation/
 # bd worktree
+.worktrees/worktree-mindspec-mol-wrx3o.1/
+# bd worktree
 .worktrees/worktree-spec-052-session-freshness-gate/

@@ -187,7 +187,7 @@ func wantedHooks() map[string][]map[string]any {
 				"hooks": []map[string]any{
 					{
 						"type":          "command",
-						"command":       "mindspec state clear-flag 2>/dev/null; mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+						"command":       "source=$(cat | jq -r '.source // \"unknown\"'); mindspec state write-session --source=\"$source\" 2>/dev/null; mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
 						"statusMessage": "Loading mode guidance...",
 					},
 				},

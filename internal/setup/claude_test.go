@@ -400,8 +400,8 @@ func TestWantedHooks_SessionStartIncludesClearFlag(t *testing.T) {
 	}
 
 	cmd, _ := hooksList[0]["command"].(string)
-	if !strings.Contains(cmd, "state clear-flag") {
-		t.Errorf("SessionStart command should include 'state clear-flag', got: %s", cmd)
+	if !strings.Contains(cmd, "state write-session") {
+		t.Errorf("SessionStart command should include 'state write-session', got: %s", cmd)
 	}
 	if !strings.Contains(cmd, "mindspec instruct") {
 		t.Error("SessionStart command should still include 'mindspec instruct'")

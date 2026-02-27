@@ -214,51 +214,40 @@ func TestSetMode_DifferentSpecDoesNotCarryMoleculeMetadata(t *testing.T) {
 	}
 }
 
-func TestNeedsClear_RoundTrip(t *testing.T) {
+func TestSessionFreshness_RoundTrip(t *testing.T) {
 	tmp := setupTestProject(t)
 
-	// Write state with NeedsClear = true
 	s := &State{
-		Mode:       ModeImplement,
-		ActiveSpec: "004-instruct",
-		ActiveBead: "bead-1",
-		NeedsClear: true,
+		Mode:             ModeImplement,
+		ActiveSpec:       "004-instruct",
+		ActiveBead:       "bead-1",
+		SessionSource:    "startup",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+		BeadClaimedAt:    "2026-02-27T00:01:00Z",
 	}
 	if err := Write(tmp, s); err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	// Read back — should be true
 	got, err := Read(tmp)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
-	if !got.NeedsClear {
-		t.Error("expected NeedsClear to be true after write")
+	if got.SessionSource != "startup" {
+		t.Errorf("sessionSource: got %q, want %q", got.SessionSource, "startup")
 	}
-
-	// Clear it
-	if err := ClearNeedsClear(tmp); err != nil {
-		t.Fatalf("ClearNeedsClear failed: %v", err)
+	if got.SessionStartedAt != "2026-02-27T00:00:00Z" {
+		t.Errorf("sessionStartedAt: got %q, want %q", got.SessionStartedAt, "2026-02-27T00:00:00Z")
 	}
-
-	// Read back — should be false
-	got2, err := Read(tmp)
-	if err != nil {
-		t.Fatalf("Read failed: %v", err)
-	}
-	if got2.NeedsClear {
-		t.Error("expected NeedsClear to be false after ClearNeedsClear")
+	if got.BeadClaimedAt != "2026-02-27T00:01:00Z" {
+		t.Errorf("beadClaimedAt: got %q, want %q", got.BeadClaimedAt, "2026-02-27T00:01:00Z")
 	}
 }
 
-func TestNeedsClear_OmittedWhenFalse(t *testing.T) {
+func TestSessionFreshness_OmittedWhenEmpty(t *testing.T) {
 	tmp := setupTestProject(t)
 
-	s := &State{
-		Mode:       ModeIdle,
-		NeedsClear: false,
-	}
+	s := &State{Mode: ModeIdle}
 	if err := Write(tmp, s); err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
@@ -268,13 +257,70 @@ func TestNeedsClear_OmittedWhenFalse(t *testing.T) {
 		t.Fatalf("reading state file: %v", err)
 	}
 
-	// omitempty means the field should not appear in JSON
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, ok := parsed["needs_clear"]; ok {
-		t.Error("expected needs_clear to be omitted when false")
+	for _, key := range []string{"sessionSource", "sessionStartedAt", "beadClaimedAt"} {
+		if _, ok := parsed[key]; ok {
+			t.Errorf("expected %s to be omitted when empty", key)
+		}
+	}
+}
+
+func TestWriteSession(t *testing.T) {
+	tmp := setupTestProject(t)
+
+	// Write initial state
+	if err := Write(tmp, &State{
+		Mode:       ModeImplement,
+		ActiveSpec: "004-instruct",
+		ActiveBead: "bead-1",
+	}); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Write session metadata
+	if err := WriteSession(tmp, "clear"); err != nil {
+		t.Fatalf("WriteSession failed: %v", err)
+	}
+
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got.SessionSource != "clear" {
+		t.Errorf("sessionSource: got %q, want %q", got.SessionSource, "clear")
+	}
+	if got.SessionStartedAt == "" {
+		t.Error("sessionStartedAt should be set")
+	}
+	// Verify existing fields are preserved
+	if got.Mode != ModeImplement {
+		t.Errorf("mode should be preserved: got %q, want %q", got.Mode, ModeImplement)
+	}
+	if got.ActiveBead != "bead-1" {
+		t.Errorf("activeBead should be preserved: got %q, want %q", got.ActiveBead, "bead-1")
+	}
+}
+
+func TestWriteSession_NoExistingState(t *testing.T) {
+	tmp := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	if err := WriteSession(tmp, "startup"); err != nil {
+		t.Fatalf("WriteSession failed: %v", err)
+	}
+
+	got, err := Read(tmp)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if got.SessionSource != "startup" {
+		t.Errorf("sessionSource: got %q, want %q", got.SessionSource, "startup")
+	}
+	if got.Mode != ModeIdle {
+		t.Errorf("mode: got %q, want %q", got.Mode, ModeIdle)
 	}
 }
 
