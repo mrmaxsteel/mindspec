@@ -1,0 +1,23 @@
+{
+  "spec_id": "051-worktree-state-propagation",
+  "started_at": "2026-02-27T00:20:43Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-27T00:20:43Z",
+      "ended_at": "2026-02-27T00:22:12Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-02-27T00:22:12Z",
+      "ended_at": "2026-02-27T00:24:44Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-02-27T00:24:44Z"
+    }
+  ]
+}

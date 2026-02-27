@@ -1,0 +1,3 @@
+{"ts":"2026-02-27T00:20:43.968007Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"051-worktree-state-propagation"}}
+{"ts":"2026-02-27T00:22:12.891723Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"051-worktree-state-propagation","to":"plan"}}
+{"ts":"2026-02-27T00:24:44.248899Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"051-worktree-state-propagation","to":"plan-approved"}}
