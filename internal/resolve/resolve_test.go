@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/state"
@@ -228,6 +229,21 @@ func TestFormatActiveList_Empty(t *testing.T) {
 	got := FormatActiveList(nil)
 	if got != "No active specs found.\n" {
 		t.Errorf("FormatActiveList(nil) = %q", got)
+	}
+}
+
+func TestResolveSpecBranch(t *testing.T) {
+	got := ResolveSpecBranch("053-drop-state-json")
+	if got != "spec/053-drop-state-json" {
+		t.Errorf("ResolveSpecBranch() = %q, want %q", got, "spec/053-drop-state-json")
+	}
+}
+
+func TestResolveWorktree(t *testing.T) {
+	got := ResolveWorktree("/project", "053-drop-state-json")
+	want := filepath.Join("/project", ".worktrees", "worktree-spec-053-drop-state-json")
+	if got != want {
+		t.Errorf("ResolveWorktree() = %q, want %q", got, want)
 	}
 }
 

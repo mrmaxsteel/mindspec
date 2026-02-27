@@ -234,6 +234,55 @@ func isActive(stepMapping map[string]string, statuses map[string]string) bool {
 	return false
 }
 
+// ResolveActiveBead returns the in-progress bead ID for a spec's implement step.
+// Returns "" if no bead is in_progress, or an error if multiple are (ambiguous).
+func ResolveActiveBead(root, specID string) (string, error) {
+	meta, err := specmeta.EnsureFullyBound(root, specID)
+	if err != nil {
+		return "", fmt.Errorf("resolving molecule for %s: %w", specID, err)
+	}
+
+	implStepID, ok := meta.StepMapping["implement"]
+	if !ok {
+		return "", fmt.Errorf("spec %s has no implement step in molecule", specID)
+	}
+
+	out, err := bead.RunBD("list", "--status=in_progress", "--parent", implStepID, "--json")
+	if err != nil {
+		return "", fmt.Errorf("querying in-progress beads for %s: %w", specID, err)
+	}
+
+	var results []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &results); err != nil {
+		return "", fmt.Errorf("parsing bead list output: %w", err)
+	}
+
+	switch len(results) {
+	case 0:
+		return "", nil
+	case 1:
+		return results[0].ID, nil
+	default:
+		ids := make([]string, len(results))
+		for i, r := range results {
+			ids[i] = r.ID
+		}
+		return "", fmt.Errorf("ambiguous: multiple in-progress beads for %s: %v", specID, ids)
+	}
+}
+
+// ResolveSpecBranch returns the canonical branch name for a spec.
+func ResolveSpecBranch(specID string) string {
+	return state.SpecBranch(specID)
+}
+
+// ResolveWorktree returns the canonical worktree path for a spec.
+func ResolveWorktree(root, specID string) string {
+	return state.SpecWorktreePath(root, specID)
+}
+
 // FormatActiveList produces a human-readable list of active specs.
 func FormatActiveList(specs []SpecStatus) string {
 	if len(specs) == 0 {

@@ -39,29 +39,29 @@ func TestErrAmbiguousTarget_Message(t *testing.T) {
 	}
 }
 
-func TestResolveTarget_NoSpecsNoState(t *testing.T) {
-	// With nonexistent root, both resolver and state cursor fail
+func TestResolveTarget_NoActiveSpecs(t *testing.T) {
+	// With nonexistent root, resolver fails with clear error
 	_, err := ResolveTarget("/nonexistent-root-"+t.Name(), "")
 	if err == nil {
-		t.Fatal("expected error when no specs and no state available")
+		t.Fatal("expected error when no active specs found")
+	}
+	if !strings.Contains(err.Error(), "no active specs") {
+		t.Errorf("error should mention 'no active specs': %v", err)
 	}
 }
 
-func TestResolveTarget_FallbackToCursor(t *testing.T) {
-	// Create a temp root with state.json but no specs directory
+func TestResolveTarget_NoActiveSpecs_SuggestsFlag(t *testing.T) {
+	// Create a temp root with empty specs directory (no active specs)
 	root := t.TempDir()
-	mindspecDir := filepath.Join(root, ".mindspec")
-	os.MkdirAll(mindspecDir, 0755)
+	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
+	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
 
-	stateJSON := `{"mode":"plan","activeSpec":"099-existing","activeBead":"","lastUpdated":"2026-01-01T00:00:00Z"}`
-	os.WriteFile(filepath.Join(mindspecDir, "state.json"), []byte(stateJSON), 0644)
-
-	got, err := ResolveTarget(root, "")
-	if err != nil {
-		t.Fatalf("ResolveTarget() error: %v", err)
+	_, err := ResolveTarget(root, "")
+	if err == nil {
+		t.Fatal("expected error when no active specs found")
 	}
-	if got != "099-existing" {
-		t.Errorf("ResolveTarget() = %q, want %q (fallback to cursor)", got, "099-existing")
+	if !strings.Contains(err.Error(), "--spec") {
+		t.Errorf("error should suggest --spec flag: %v", err)
 	}
 }
 
