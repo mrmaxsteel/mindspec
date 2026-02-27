@@ -65,15 +65,15 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 	result := &ImplResult{SpecID: specID}
 
 	// Verify current state is review mode for this spec
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
 		return nil, fmt.Errorf("reading state: %w", err)
 	}
-	if s.Mode != state.ModeReview {
-		return nil, fmt.Errorf("expected review mode, got %q", s.Mode)
+	if mc.Mode != state.ModeReview {
+		return nil, fmt.Errorf("expected review mode, got %q", mc.Mode)
 	}
-	if s.ActiveSpec != specID {
-		return nil, fmt.Errorf("active spec is %q, not %q", s.ActiveSpec, specID)
+	if mc.ActiveSpec != specID {
+		return nil, fmt.Errorf("active spec is %q, not %q", mc.ActiveSpec, specID)
 	}
 
 	// Resolve and enforce molecule binding before mutation.
@@ -97,21 +97,24 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 		}
 	}
 
+	// Derive spec branch from convention.
+	specBranch := state.SpecBranch(specID)
+
 	// Preflight: verify spec branch has actual implementation content.
-	if s.SpecBranch != "" {
-		if err := verifyImplContent(root, s, specID); err != nil {
+	if specBranch != "" {
+		if err := verifyImplContent(root, specBranch, specID); err != nil {
 			return nil, fmt.Errorf("preflight check failed: %w", err)
 		}
 	}
 
 	// Merge spec branch → main (ADR-0006: one PR per spec lifecycle).
-	if s.SpecBranch != "" {
+	if specBranch != "" {
 		cfg, cfgErr := loadConfigFn(root)
 		if cfgErr != nil {
 			cfg = config.DefaultConfig()
 		}
 
-		mergeErr := mergeSpecToMain(root, s, cfg, result, opt)
+		mergeErr := mergeSpecToMain(root, specBranch, specID, cfg, result, opt)
 		if mergeErr != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("spec→main merge: %v", mergeErr))
 		} else if result.MergeStrategy == "direct" || result.PRMerged {
@@ -120,7 +123,7 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 			if err := worktreeRemoveFn(specWtName); err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not remove spec worktree: %v", err))
 			}
-			if err := deleteBranchFn(s.SpecBranch); err != nil {
+			if err := deleteBranchFn(specBranch); err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not delete spec branch: %v", err))
 			}
 		}
@@ -132,9 +135,8 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 	}
 
 	// Transition to idle
-	idleState := &state.State{Mode: state.ModeIdle}
-	if err := state.Write(root, idleState); err != nil {
-		return nil, fmt.Errorf("setting state to idle: %w", err)
+	if err := state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle}); err != nil {
+		return nil, fmt.Errorf("writing mode-cache: %w", err)
 	}
 
 	return result, nil
@@ -196,7 +198,7 @@ func readBeadStatus(id string) (string, error) {
 
 // mergeSpecToMain merges the spec branch to main using the configured strategy.
 // It populates result with merge metadata (strategy, stats, PR URL).
-func mergeSpecToMain(root string, s *state.State, cfg *config.Config, result *ImplResult, opt ImplOpts) error {
+func mergeSpecToMain(root, specBranch, specID string, cfg *config.Config, result *ImplResult, opt ImplOpts) error {
 	strategy := cfg.MergeStrategy
 
 	// "auto" resolves to "pr" if a remote exists, "direct" otherwise.
@@ -209,24 +211,24 @@ func mergeSpecToMain(root string, s *state.State, cfg *config.Config, result *Im
 	}
 
 	result.MergeStrategy = strategy
-	result.SpecBranch = s.SpecBranch
+	result.SpecBranch = specBranch
 
 	// Gather pre-merge stats (best-effort).
-	if count, err := commitCountFn(root, "main", s.SpecBranch); err == nil {
+	if count, err := commitCountFn(root, "main", specBranch); err == nil {
 		result.CommitCount = count
 	}
-	if stat, err := diffStatFn(root, "main", s.SpecBranch); err == nil {
+	if stat, err := diffStatFn(root, "main", specBranch); err == nil {
 		result.DiffStat = stat
 	}
 
 	switch strategy {
 	case "pr":
-		if err := pushBranchFn(s.SpecBranch); err != nil {
+		if err := pushBranchFn(specBranch); err != nil {
 			return fmt.Errorf("pushing spec branch: %w", err)
 		}
-		title := fmt.Sprintf("[SPEC %s] Merge spec branch to main", s.ActiveSpec)
-		body := fmt.Sprintf("Automated PR for spec %s lifecycle completion.", s.ActiveSpec)
-		prURL, err := createPRFn(s.SpecBranch, "main", title, body)
+		title := fmt.Sprintf("[SPEC %s] Merge spec branch to main", specID)
+		body := fmt.Sprintf("Automated PR for spec %s lifecycle completion.", specID)
+		prURL, err := createPRFn(specBranch, "main", title, body)
 		if err != nil {
 			return fmt.Errorf("creating PR: %w", err)
 		}
@@ -245,7 +247,7 @@ func mergeSpecToMain(root string, s *state.State, cfg *config.Config, result *Im
 		return nil
 
 	case "direct":
-		return mergeBranchFn(root, s.SpecBranch, "main")
+		return mergeBranchFn(root, specBranch, "main")
 
 	default:
 		return fmt.Errorf("unknown merge strategy: %s", strategy)
@@ -257,14 +259,14 @@ func mergeSpecToMain(root string, s *state.State, cfg *config.Config, result *Im
 // 1. The spec branch has commits beyond main.
 // 2. All plan beads are closed.
 // 3. Any local bead branches are ancestors of the spec branch.
-func verifyImplContent(root string, s *state.State, specID string) error {
+func verifyImplContent(root, specBranch, specID string) error {
 	// Check 1: spec branch has commits beyond main.
-	count, err := commitCountFn(root, "main", s.SpecBranch)
+	count, err := commitCountFn(root, "main", specBranch)
 	if err != nil {
 		return fmt.Errorf("checking commit count: %w", err)
 	}
 	if count == 0 {
-		return fmt.Errorf("spec branch %s has no commits beyond main — nothing to merge", s.SpecBranch)
+		return fmt.Errorf("spec branch %s has no commits beyond main — nothing to merge", specBranch)
 	}
 
 	// Read bead_ids from plan.md frontmatter.
@@ -292,12 +294,12 @@ func verifyImplContent(root string, s *state.State, specID string) error {
 		if !branchExistsFn(beadBranch) {
 			continue
 		}
-		isAnc, err := isAncestorFn(root, beadBranch, s.SpecBranch)
+		isAnc, err := isAncestorFn(root, beadBranch, specBranch)
 		if err != nil {
 			return fmt.Errorf("checking ancestry of %s: %w", beadBranch, err)
 		}
 		if !isAnc {
-			return fmt.Errorf("bead branch %s has commits not merged into spec branch %s — run `git merge %s` on the spec branch first", beadBranch, s.SpecBranch, beadBranch)
+			return fmt.Errorf("bead branch %s has commits not merged into spec branch %s — run `git merge %s` on the spec branch first", beadBranch, specBranch, beadBranch)
 		}
 	}
 

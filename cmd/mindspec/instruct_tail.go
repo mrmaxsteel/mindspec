@@ -9,18 +9,14 @@ import (
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-// emitInstruct reads current state and prints mode-appropriate guidance.
+// emitInstruct reads mode-cache and prints mode-appropriate guidance.
 // This is the "instruct-tail" convention: every state-changing command
 // (approve, next, complete) calls this after transitioning to emit
 // guidance for the new mode.
 func emitInstruct(root string) error {
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
-		if err == state.ErrNoState {
-			s = &state.State{Mode: state.ModeIdle}
-		} else {
-			return fmt.Errorf("reading state: %w", err)
-		}
+		mc = &state.ModeCache{Mode: state.ModeIdle}
 	}
 
 	// CWD redirect: if on main with active worktree, emit redirect only.
@@ -29,11 +25,17 @@ func emitInstruct(root string) error {
 		return nil
 	}
 
+	// Build a State from mode-cache for instruct.BuildContext compatibility.
+	s := &state.State{
+		Mode:       mc.Mode,
+		ActiveSpec: mc.ActiveSpec,
+		ActiveBead: mc.ActiveBead,
+	}
 	ctx := instruct.BuildContext(root, s)
 
 	// Add worktree check when an active worktree is set.
-	if s.ActiveWorktree != "" {
-		if warning := instruct.CheckWorktree(s.ActiveWorktree); warning != "" {
+	if mc.ActiveWorktree != "" {
+		if warning := instruct.CheckWorktree(mc.ActiveWorktree); warning != "" {
 			ctx.Warnings = append(ctx.Warnings, "[worktree] "+warning)
 		}
 	}

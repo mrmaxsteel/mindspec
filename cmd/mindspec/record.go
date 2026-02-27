@@ -31,14 +31,11 @@ var recordStatusCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			s, err := state.Read(root)
-			if err != nil {
-				return fmt.Errorf("no active spec (use --spec): %w", err)
+			mc, err := state.ReadModeCache(root)
+			if err != nil || mc.ActiveSpec == "" {
+				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
-			specID = s.ActiveSpec
-		}
-		if specID == "" {
-			return fmt.Errorf("no active spec — use --spec to specify one")
+			specID = mc.ActiveSpec
 		}
 
 		if !recording.HasRecording(root, specID) {
@@ -100,14 +97,11 @@ var recordStopCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			s, err := state.Read(root)
-			if err != nil {
-				return fmt.Errorf("no active spec (use --spec): %w", err)
+			mc, err := state.ReadModeCache(root)
+			if err != nil || mc.ActiveSpec == "" {
+				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
-			specID = s.ActiveSpec
-		}
-		if specID == "" {
-			return fmt.Errorf("no active spec — use --spec to specify one")
+			specID = mc.ActiveSpec
 		}
 
 		if err := recording.StopRecording(root, specID); err != nil {
@@ -128,15 +122,15 @@ var recordHealthCmd = &cobra.Command{
 			return nil // silent exit if no project root
 		}
 
-		s, err := state.Read(root)
-		if err != nil || s.Mode == state.ModeIdle {
+		mc, err := state.ReadModeCache(root)
+		if err != nil || mc.Mode == state.ModeIdle {
 			return nil // no active spec
 		}
-		if s.ActiveSpec == "" {
+		if mc.ActiveSpec == "" {
 			return nil
 		}
 
-		return recording.RestartIfDead(root, s.ActiveSpec)
+		return recording.RestartIfDead(root, mc.ActiveSpec)
 	},
 }
 

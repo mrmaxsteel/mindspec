@@ -44,17 +44,12 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	// Set state to review mode
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
 
-	origRunBD := implRunBDFn
-	origRunBDCombined := implRunBDCombinedFn
-	defer func() {
-		implRunBDFn = origRunBD
-		implRunBDCombinedFn = origRunBDCombined
-	}()
+	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "show" {
@@ -72,6 +67,8 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected args: %v", args)
 	}
+	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
+	branchExistsFn = func(name string) bool { return false }
 
 	result, err := ApproveImpl(tmp, "010-test")
 	if err != nil {
@@ -88,13 +85,13 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 		t.Errorf("closed IDs mismatch\ngot:  %v\nwant: %v", got, want)
 	}
 
-	// Verify state is now idle
-	s, err := state.Read(tmp)
-	if err != nil {
-		t.Fatalf("reading state: %v", err)
+	// Verify mode-cache is now idle
+	mc, mcErr := state.ReadModeCache(tmp)
+	if mcErr != nil {
+		t.Fatalf("reading mode-cache: %v", mcErr)
 	}
-	if s.Mode != state.ModeIdle {
-		t.Errorf("mode: got %q, want %q", s.Mode, state.ModeIdle)
+	if mc.Mode != state.ModeIdle {
+		t.Errorf("mode: got %q, want %q", mc.Mode, state.ModeIdle)
 	}
 }
 
@@ -104,7 +101,7 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeImplement,
 		ActiveSpec: "010-test",
 		ActiveBead: "bead-1",
@@ -125,7 +122,7 @@ func TestApproveImpl_WrongSpec(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
@@ -144,17 +141,12 @@ func TestApproveImpl_PartialCloseFailureWarnsAndContinues(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
 
-	origRunBD := implRunBDFn
-	origRunBDCombined := implRunBDCombinedFn
-	defer func() {
-		implRunBDFn = origRunBD
-		implRunBDCombinedFn = origRunBDCombined
-	}()
+	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
 		payload := []map[string]string{{"status": "open"}}
@@ -172,6 +164,8 @@ func TestApproveImpl_PartialCloseFailureWarnsAndContinues(t *testing.T) {
 		closed = append(closed, args[1])
 		return []byte("ok"), nil
 	}
+	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
+	branchExistsFn = func(name string) bool { return false }
 
 	result, err := ApproveImpl(tmp, "010-test")
 	if err != nil {
@@ -193,7 +187,7 @@ func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -260,7 +254,7 @@ func TestApproveImpl_PRWaitFlow(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -336,7 +330,7 @@ func TestApproveImpl_PRNoWaitFlow(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -461,7 +455,7 @@ func TestVerifyImplContent_NoCommits(t *testing.T) {
 	writeBoundSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -491,7 +485,7 @@ func TestVerifyImplContent_OpenBeads(t *testing.T) {
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -529,7 +523,7 @@ func TestVerifyImplContent_BeadBranchNotMerged(t *testing.T) {
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -561,7 +555,7 @@ func TestVerifyImplContent_AllGood(t *testing.T) {
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.Write(tmp, &state.State{
+	state.WriteModeCache(tmp, &state.ModeCache{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",

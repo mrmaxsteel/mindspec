@@ -35,26 +35,18 @@ type Result struct {
 func Run(root, specID string, force bool) (*Result, error) {
 	result := &Result{SpecID: specID}
 
-	s, err := state.Read(root)
-	if err != nil {
-		return nil, fmt.Errorf("reading state: %w", err)
-	}
-
-	// Determine the spec branch and worktree name.
-	specBranch := s.SpecBranch
-	if specBranch == "" {
-		specBranch = "spec/" + specID
-	}
-
+	// Determine the spec branch and worktree name from conventions.
+	specBranch := state.SpecBranch(specID)
 	specWtName := "worktree-spec-" + specID
 
 	if force {
 		return forceCleanup(result, specWtName, specBranch)
 	}
 
-	// If state still has activeSpec matching, check mode.
-	if s.ActiveSpec == specID && s.Mode != state.ModeIdle {
-		return nil, fmt.Errorf("spec %s is still active (mode: %s). Run `mindspec approve impl %s` first", specID, s.Mode, specID)
+	// If mode-cache still has activeSpec matching, check mode.
+	mc, _ := state.ReadModeCache(root)
+	if mc != nil && mc.ActiveSpec == specID && mc.Mode != state.ModeIdle {
+		return nil, fmt.Errorf("spec %s is still active (mode: %s). Run `mindspec approve impl %s` first", specID, mc.Mode, specID)
 	}
 
 	// Try to detect PR status via gh CLI. Look for an open or merged PR

@@ -21,44 +21,42 @@ func setupTestProject(t *testing.T) string {
 
 func TestEnter_FromIdle(t *testing.T) {
 	root := setupTestProject(t)
-	// Set idle state
-	state.SetMode(root, state.ModeIdle, "", "")
+	// Set idle mode-cache
+	state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle})
 
 	if err := Enter(root, "test idea"); err != nil {
 		t.Fatalf("Enter failed: %v", err)
 	}
 
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
-		t.Fatalf("Read state failed: %v", err)
+		t.Fatalf("ReadModeCache failed: %v", err)
 	}
-	if s.Mode != state.ModeExplore {
-		t.Errorf("mode: got %q, want %q", s.Mode, state.ModeExplore)
+	if mc.Mode != state.ModeExplore {
+		t.Errorf("mode: got %q, want %q", mc.Mode, state.ModeExplore)
 	}
 }
 
 func TestEnter_FromNoState(t *testing.T) {
 	root := setupTestProject(t)
-	// No state file exists
+	// No mode-cache file exists
 
 	if err := Enter(root, "test idea"); err != nil {
 		t.Fatalf("Enter failed: %v", err)
 	}
 
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
-		t.Fatalf("Read state failed: %v", err)
+		t.Fatalf("ReadModeCache failed: %v", err)
 	}
-	if s.Mode != state.ModeExplore {
-		t.Errorf("mode: got %q, want %q", s.Mode, state.ModeExplore)
+	if mc.Mode != state.ModeExplore {
+		t.Errorf("mode: got %q, want %q", mc.Mode, state.ModeExplore)
 	}
 }
 
 func TestEnter_RejectsNonIdle(t *testing.T) {
 	root := setupTestProject(t)
-	// Create a spec dir so state.SetMode accepts spec mode
-	os.MkdirAll(filepath.Join(root, "docs", "specs", "001-test"), 0755)
-	state.SetMode(root, state.ModeSpec, "001-test", "")
+	state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeSpec, ActiveSpec: "001-test"})
 
 	err := Enter(root, "test idea")
 	if err == nil {
@@ -71,24 +69,24 @@ func TestEnter_RejectsNonIdle(t *testing.T) {
 
 func TestDismiss_FromExplore(t *testing.T) {
 	root := setupTestProject(t)
-	state.SetMode(root, state.ModeExplore, "", "")
+	state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeExplore})
 
 	if err := Dismiss(root); err != nil {
 		t.Fatalf("Dismiss failed: %v", err)
 	}
 
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
-		t.Fatalf("Read state failed: %v", err)
+		t.Fatalf("ReadModeCache failed: %v", err)
 	}
-	if s.Mode != state.ModeIdle {
-		t.Errorf("mode: got %q, want %q", s.Mode, state.ModeIdle)
+	if mc.Mode != state.ModeIdle {
+		t.Errorf("mode: got %q, want %q", mc.Mode, state.ModeIdle)
 	}
 }
 
 func TestDismiss_RejectsNonExplore(t *testing.T) {
 	root := setupTestProject(t)
-	state.SetMode(root, state.ModeIdle, "", "")
+	state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle})
 
 	err := Dismiss(root)
 	if err == nil {
@@ -101,7 +99,7 @@ func TestDismiss_RejectsNonExplore(t *testing.T) {
 
 func TestPromote_RejectsNonExplore(t *testing.T) {
 	root := setupTestProject(t)
-	state.SetMode(root, state.ModeIdle, "", "")
+	state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle})
 
 	err := Promote(root, "042-test", "")
 	if err == nil {

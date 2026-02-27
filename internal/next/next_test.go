@@ -288,61 +288,11 @@ func TestParseSpecID(t *testing.T) {
 
 // --- QueryReady tests ---
 
-func TestQueryReady_UsesMoleculeFromState(t *testing.T) {
+func TestQueryReady_GlobalReady(t *testing.T) {
 	origRunBD := runBDFn
-	origReadState := readStateFn
 	defer func() {
 		runBDFn = origRunBD
-		readStateFn = origReadState
 	}()
-
-	// Set up temp state with molecule
-	tmp := t.TempDir()
-	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
-	state.Write(tmp, &state.State{
-		Mode:           state.ModeImplement,
-		ActiveSpec:     "test",
-		ActiveMolecule: "mol-123",
-	})
-	readStateFn = func(root string) (*state.State, error) {
-		return state.Read(tmp)
-	}
-
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[0] == "ready" && args[1] == "--mol" && args[2] == "mol-123" {
-			items := []BeadInfo{
-				{ID: "child-1", Title: "[IMPL test.1] First chunk"},
-				{ID: "child-2", Title: "[IMPL test.2] Second chunk"},
-			}
-			return json.Marshal(items)
-		}
-		return nil, fmt.Errorf("unexpected: %v", args)
-	}
-
-	items, err := QueryReady()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
-	}
-	if items[0].ID != "child-1" {
-		t.Errorf("items[0].ID: got %q, want %q", items[0].ID, "child-1")
-	}
-}
-
-func TestQueryReady_FallsBackWithoutMolecule(t *testing.T) {
-	origRunBD := runBDFn
-	origReadState := readStateFn
-	defer func() {
-		runBDFn = origRunBD
-		readStateFn = origReadState
-	}()
-
-	// No molecule in state
-	readStateFn = func(root string) (*state.State, error) {
-		return &state.State{Mode: state.ModeIdle}, nil
-	}
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "ready" && args[1] == "--json" {
@@ -351,7 +301,6 @@ func TestQueryReady_FallsBackWithoutMolecule(t *testing.T) {
 			}
 			return json.Marshal(items)
 		}
-		// worktree info can fail
 		return nil, fmt.Errorf("not available")
 	}
 
@@ -413,8 +362,8 @@ func stubWorktreeHelpers(t *testing.T) {
 	origBranch := createBranchFn
 	origExists := branchExistsFn
 	origGitignore := ensureGitignore
-	origState := readStateFn
-	origWriteState := writeStateFn
+	origModeCache := readModeCacheFn
+	origWriteMC := writeModeCacheFn
 	t.Cleanup(func() {
 		worktreeList = origList
 		worktreeCreate = origCreate
@@ -422,8 +371,8 @@ func stubWorktreeHelpers(t *testing.T) {
 		createBranchFn = origBranch
 		branchExistsFn = origExists
 		ensureGitignore = origGitignore
-		readStateFn = origState
-		writeStateFn = origWriteState
+		readModeCacheFn = origModeCache
+		writeModeCacheFn = origWriteMC
 	})
 
 	// Defaults: config returns defaults, no spec branch, branch doesn't exist.
@@ -431,9 +380,10 @@ func stubWorktreeHelpers(t *testing.T) {
 	createBranchFn = func(name, from string) error { return nil }
 	branchExistsFn = func(name string) bool { return false }
 	ensureGitignore = func(root, entry string) error { return nil }
-	readStateFn = func(root string) (*state.State, error) {
-		return &state.State{Mode: state.ModeImplement}, nil
+	readModeCacheFn = func(root string) (*state.ModeCache, error) {
+		return &state.ModeCache{Mode: state.ModeImplement}, nil
 	}
+	writeModeCacheFn = func(root string, mc *state.ModeCache) error { return nil }
 }
 
 func TestEnsureWorktree_CreatesNew(t *testing.T) {
@@ -483,8 +433,8 @@ func TestEnsureWorktree_BranchesFromSpecBranch(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
 
-	readStateFn = func(root string) (*state.State, error) {
-		return &state.State{
+	readModeCacheFn = func(root string) (*state.ModeCache, error) {
+		return &state.ModeCache{
 			Mode:       state.ModeImplement,
 			SpecBranch: "spec/046-test",
 		}, nil
@@ -536,26 +486,24 @@ func TestEnsureWorktree_ReusesExisting(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktree_PropagatesState(t *testing.T) {
+func TestEnsureWorktree_PropagatesModeCache(t *testing.T) {
 	stubWorktreeHelpers(t)
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
 
-	readStateFn = func(root string) (*state.State, error) {
-		return &state.State{
-			Mode:           state.ModeImplement,
-			ActiveSpec:     "051-test",
-			SpecBranch:     "spec/051-test",
-			ActiveMolecule: "mol-abc",
-			StepMapping:    map[string]string{"implement": "mol-impl"},
+	readModeCacheFn = func(root string) (*state.ModeCache, error) {
+		return &state.ModeCache{
+			Mode:       state.ModeImplement,
+			ActiveSpec: "051-test",
+			SpecBranch: "spec/051-test",
 		}, nil
 	}
 
-	var writtenState *state.State
+	var writtenMC *state.ModeCache
 	var writtenRoot string
-	writeStateFn = func(root string, s *state.State) error {
+	writeModeCacheFn = func(root string, mc *state.ModeCache) error {
 		writtenRoot = root
-		writtenState = s
+		writtenMC = mc
 		return nil
 	}
 
@@ -569,27 +517,24 @@ func TestEnsureWorktree_PropagatesState(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// State should have been written to the bead worktree
-	if writtenState == nil {
-		t.Fatal("expected state to be written to bead worktree")
+	// Mode-cache should have been written to the bead worktree
+	if writtenMC == nil {
+		t.Fatal("expected mode-cache to be written to bead worktree")
 	}
 	if writtenRoot != wtPath {
-		t.Errorf("state written to %q, want %q", writtenRoot, wtPath)
+		t.Errorf("mode-cache written to %q, want %q", writtenRoot, wtPath)
 	}
-	if writtenState.ActiveBead != "bead-xyz" {
-		t.Errorf("ActiveBead = %q, want %q", writtenState.ActiveBead, "bead-xyz")
+	if writtenMC.ActiveBead != "bead-xyz" {
+		t.Errorf("ActiveBead = %q, want %q", writtenMC.ActiveBead, "bead-xyz")
 	}
-	if writtenState.ActiveWorktree != wtPath {
-		t.Errorf("ActiveWorktree = %q, want %q", writtenState.ActiveWorktree, wtPath)
+	if writtenMC.ActiveWorktree != wtPath {
+		t.Errorf("ActiveWorktree = %q, want %q", writtenMC.ActiveWorktree, wtPath)
 	}
-	if writtenState.Mode != state.ModeImplement {
-		t.Errorf("Mode = %q, want %q", writtenState.Mode, state.ModeImplement)
+	if writtenMC.Mode != state.ModeImplement {
+		t.Errorf("Mode = %q, want %q", writtenMC.Mode, state.ModeImplement)
 	}
-	if writtenState.SpecBranch != "spec/051-test" {
-		t.Errorf("SpecBranch = %q, want %q", writtenState.SpecBranch, "spec/051-test")
-	}
-	if writtenState.ActiveMolecule != "mol-abc" {
-		t.Errorf("ActiveMolecule = %q, want %q", writtenState.ActiveMolecule, "mol-abc")
+	if writtenMC.SpecBranch != "spec/051-test" {
+		t.Errorf("SpecBranch = %q, want %q", writtenMC.SpecBranch, "spec/051-test")
 	}
 }
 

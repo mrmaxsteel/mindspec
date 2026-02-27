@@ -153,16 +153,16 @@ func TestRunSetsState(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
-		t.Fatalf("state.Read() error: %v", err)
+		t.Fatalf("state.ReadModeCache() error: %v", err)
 	}
 
-	if s.Mode != state.ModeSpec {
-		t.Errorf("expected mode=%q, got %q", state.ModeSpec, s.Mode)
+	if mc.Mode != state.ModeSpec {
+		t.Errorf("expected mode=%q, got %q", state.ModeSpec, mc.Mode)
 	}
-	if s.ActiveSpec != "012-state-test" {
-		t.Errorf("expected activeSpec=%q, got %q", "012-state-test", s.ActiveSpec)
+	if mc.ActiveSpec != "012-state-test" {
+		t.Errorf("expected activeSpec=%q, got %q", "012-state-test", mc.ActiveSpec)
 	}
 }
 

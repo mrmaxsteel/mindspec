@@ -27,34 +27,20 @@ type BeadInfo struct {
 
 // Package-level function variables for testability.
 var (
-	runBDFn         = bead.RunBD
-	runBDCombFn     = bead.RunBDCombined
-	worktreeList    = bead.WorktreeList
-	worktreeCreate  = bead.WorktreeCreate
-	readStateFn     = state.Read
-	writeStateFn    = state.Write
-	loadConfigFn    = config.Load
-	createBranchFn  = gitops.CreateBranch
-	branchExistsFn  = gitops.BranchExists
-	ensureGitignore = gitops.EnsureGitignoreEntry
+	runBDFn            = bead.RunBD
+	runBDCombFn        = bead.RunBDCombined
+	worktreeList       = bead.WorktreeList
+	worktreeCreate     = bead.WorktreeCreate
+	readModeCacheFn    = state.ReadModeCache
+	writeModeCacheFn   = state.WriteModeCache
+	loadConfigFn       = config.Load
+	createBranchFn     = gitops.CreateBranch
+	branchExistsFn     = gitops.BranchExists
+	ensureGitignore    = gitops.EnsureGitignoreEntry
 )
 
-// QueryReady discovers ready work. If an active molecule exists in state,
-// queries its ready children. Otherwise falls back to global bd ready.
+// QueryReady discovers ready work via global bd ready.
 func QueryReady() ([]BeadInfo, error) {
-	// Check state for active molecule
-	root, err := findRoot()
-	if err == nil {
-		s, err := readStateFn(root)
-		if err == nil && s.ActiveMolecule != "" {
-			items, err := QueryReadyForMolecule(s.ActiveMolecule)
-			if err == nil && len(items) > 0 {
-				return items, nil
-			}
-		}
-	}
-
-	// Fall back to global bd ready
 	out, err := runBDFn("ready", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd ready failed: %w", err)
@@ -219,11 +205,11 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Determine the base branch: use spec branch from state if available.
+	// Determine the base branch: use spec branch from mode-cache if available.
 	baseBranch := "HEAD"
-	s, stateErr := readStateFn(root)
-	if stateErr == nil && s.SpecBranch != "" {
-		baseBranch = s.SpecBranch
+	mc, mcErr := readModeCacheFn(root)
+	if mcErr == nil && mc.SpecBranch != "" {
+		baseBranch = mc.SpecBranch
 	}
 
 	// Create the bead branch from the spec branch (or HEAD).
@@ -260,15 +246,14 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Propagate state into the bead worktree so commands work from it.
-	// Pattern matches specinit.Run() lines 166-173.
-	if stateErr == nil && s != nil {
-		beadState := *s // shallow copy
-		beadState.ActiveWorktree = wtPath
-		beadState.ActiveBead = beadID
-		beadState.Mode = state.ModeImplement
-		if err := writeStateFn(wtPath, &beadState); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write state to bead worktree: %v\n", err)
+	// Propagate mode-cache into the bead worktree so commands work from it.
+	if mcErr == nil && mc != nil {
+		beadMC := *mc // shallow copy
+		beadMC.ActiveWorktree = wtPath
+		beadMC.ActiveBead = beadID
+		beadMC.Mode = state.ModeImplement
+		if err := writeModeCacheFn(wtPath, &beadMC); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write mode-cache to bead worktree: %v\n", err)
 		}
 	}
 

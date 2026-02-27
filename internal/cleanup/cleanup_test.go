@@ -14,12 +14,12 @@ func setupCleanupTest(t *testing.T, specID string, mode string) string {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 
-	s := &state.State{
+	mc := &state.ModeCache{
 		Mode:       mode,
 		ActiveSpec: specID,
-		SpecBranch: "spec/" + specID,
+		SpecBranch: state.SpecBranch(specID),
 	}
-	if err := state.Write(root, s); err != nil {
+	if err := state.WriteModeCache(root, mc); err != nil {
 		t.Fatal(err)
 	}
 	return root

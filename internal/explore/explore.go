@@ -1,7 +1,6 @@
 package explore
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/mindspec/mindspec/internal/specinit"
@@ -10,42 +9,47 @@ import (
 
 // Enter validates the current state is idle (or absent) and transitions to explore mode.
 func Enter(root, description string) error {
-	s, err := state.Read(root)
-	if err != nil && !errors.Is(err, state.ErrNoState) {
+	mc, err := state.ReadModeCache(root)
+	if err != nil {
+		// Real error reading mode-cache
 		return fmt.Errorf("reading state: %w", err)
 	}
-
-	if s != nil && s.Mode != state.ModeIdle {
-		return fmt.Errorf("cannot enter explore mode: currently in %q mode (must be idle)", s.Mode)
+	if mc == nil {
+		// No mode-cache file means idle — OK to proceed
+		mc = &state.ModeCache{Mode: state.ModeIdle}
 	}
 
-	return state.SetMode(root, state.ModeExplore, "", "")
+	if mc.Mode != state.ModeIdle && mc.Mode != "" {
+		return fmt.Errorf("cannot enter explore mode: currently in %q mode (must be idle)", mc.Mode)
+	}
+
+	return state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeExplore})
 }
 
 // Dismiss validates the current state is explore and transitions to idle.
 func Dismiss(root string) error {
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
 		return fmt.Errorf("reading state: %w", err)
 	}
 
-	if s.Mode != state.ModeExplore {
-		return fmt.Errorf("cannot dismiss: not in explore mode (currently %q)", s.Mode)
+	if mc.Mode != state.ModeExplore {
+		return fmt.Errorf("cannot dismiss: not in explore mode (currently %q)", mc.Mode)
 	}
 
-	return state.SetMode(root, state.ModeIdle, "", "")
+	return state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle})
 }
 
 // Promote validates the current state is explore and delegates to spec-init.
 // specinit.Run handles the state transition to spec mode and molecule creation.
 func Promote(root, specID, title string) error {
-	s, err := state.Read(root)
+	mc, err := state.ReadModeCache(root)
 	if err != nil {
 		return fmt.Errorf("reading state: %w", err)
 	}
 
-	if s.Mode != state.ModeExplore {
-		return fmt.Errorf("cannot promote: not in explore mode (currently %q)", s.Mode)
+	if mc.Mode != state.ModeExplore {
+		return fmt.Errorf("cannot promote: not in explore mode (currently %q)", mc.Mode)
 	}
 
 	_, err = specinit.Run(root, specID, title)

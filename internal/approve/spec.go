@@ -50,11 +50,10 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 	}
 
 	// Step 3b: Auto-commit approval changes so downstream branches see them.
-	if s, sErr := state.Read(root); sErr == nil && s.ActiveWorktree != "" {
-		commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
-		if err := gitops.CommitAll(s.ActiveWorktree, commitMsg); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
-		}
+	specWtPath := state.SpecWorktreePath(root, specID)
+	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
+	if err := gitops.CommitAll(specWtPath, commitMsg); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
 	}
 
 	// Step 4: Close spec-approve step in molecule (best-effort).
@@ -68,9 +67,15 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		result.GateID = stepID
 	}
 
-	// Step 5: Set state to plan mode while retaining molecule metadata.
-	if err := state.SetModeWithMetadata(root, state.ModePlan, specID, "", meta.MoleculeID, meta.StepMapping); err != nil {
-		return nil, fmt.Errorf("setting state: %w", err)
+	// Step 5: Write mode-cache for plan mode.
+	mc := &state.ModeCache{
+		Mode:            state.ModePlan,
+		ActiveSpec:      specID,
+		SpecBranch:      state.SpecBranch(specID),
+		ActiveWorktree:  specWtPath,
+	}
+	if err := state.WriteModeCache(root, mc); err != nil {
+		return nil, fmt.Errorf("writing mode-cache: %w", err)
 	}
 
 	// Step 6: Emit recording phase marker (best-effort)

@@ -14,13 +14,13 @@ import (
 var stateCmd = &cobra.Command{
 	Use:   "state",
 	Short: "Manage MindSpec workflow state",
-	Long:  `Read and write the .mindspec/state.json file that tracks current mode and active work.`,
+	Long:  `Read and write the mode-cache that tracks current mode and active work.`,
 }
 
 var stateSetCmd = &cobra.Command{
 	Use:   "set",
 	Short: "Set the current mode and active work",
-	Long:  `Update .mindspec/state.json with the current mode, active spec, and active bead.`,
+	Long:  `Update the mode-cache with the current mode, active spec, and active bead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		mode, _ := cmd.Flags().GetString("mode")
 		spec, _ := cmd.Flags().GetString("spec")
@@ -40,11 +40,18 @@ var stateSetCmd = &cobra.Command{
 			return err
 		}
 
-		if err := state.SetMode(root, mode, spec, bead); err != nil {
+		mc := &state.ModeCache{
+			Mode:       mode,
+			ActiveSpec: spec,
+			ActiveBead: bead,
+		}
+		if spec != "" {
+			mc.SpecBranch = state.SpecBranch(spec)
+			mc.ActiveWorktree = state.SpecWorktreePath(root, spec)
+		}
+		if err := state.WriteModeCache(root, mc); err != nil {
 			return err
 		}
-
-		// Note: parent status propagation handled natively by beads molecules
 
 		fmt.Printf("State updated: mode=%s", mode)
 		if spec != "" {
@@ -84,12 +91,12 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return ambErr
 			}
-			// Fall back to raw state.json
-			s, err := state.Read(root)
+			// Fall back to mode-cache
+			mc, err := state.ReadModeCache(root)
 			if err != nil {
-				return err
+				return fmt.Errorf("no active state: %w", err)
 			}
-			data, _ := json.MarshalIndent(s, "", "  ")
+			data, _ := json.MarshalIndent(mc, "", "  ")
 			fmt.Println(string(data))
 			return nil
 		}
@@ -97,17 +104,17 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 		// Derive mode from molecule
 		mode, modeErr := resolve.ResolveMode(root, specID)
 
-		// Read base state for bead info
-		s, _ := state.Read(root)
-		if s == nil {
-			s = &state.State{}
+		mc, _ := state.ReadModeCache(root)
+		if mc == nil {
+			mc = &state.ModeCache{}
 		}
-		s.ActiveSpec = specID
+		mc.ActiveSpec = specID
+		mc.SpecBranch = state.SpecBranch(specID)
 		if modeErr == nil {
-			s.Mode = mode
+			mc.Mode = mode
 		}
 
-		data, err := json.MarshalIndent(s, "", "  ")
+		data, err := json.MarshalIndent(mc, "", "  ")
 		if err != nil {
 			return fmt.Errorf("formatting state: %w", err)
 		}
@@ -119,7 +126,7 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 var stateWriteSessionCmd = &cobra.Command{
 	Use:   "write-session",
 	Short: "Record session freshness metadata from SessionStart hook",
-	Long:  `Writes sessionSource and sessionStartedAt to state.json. Called by the SessionStart hook with the source field from stdin JSON.`,
+	Long:  `Writes sessionSource and sessionStartedAt to session.json. Called by the SessionStart hook with the source field from stdin JSON.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		if source == "" {

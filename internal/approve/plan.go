@@ -78,11 +78,10 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 
 	// Step 2c: Auto-commit plan approval + bead_ids so implementation
 	// worktrees that branch from spec/<id> contain the approved artifacts.
-	if s, sErr := state.Read(root); sErr == nil && s.ActiveWorktree != "" {
-		commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
-		if err := gitops.CommitAll(s.ActiveWorktree, commitMsg); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
-		}
+	specWtPath := state.SpecWorktreePath(root, specID)
+	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
+	if err := gitops.CommitAll(specWtPath, commitMsg); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
 	}
 
 	// Step 3: Close plan-approve step in molecule (best-effort)
@@ -96,11 +95,17 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		result.GateID = stepID
 	}
 
-	// Step 5: Set state to plan mode (approved)
+	// Step 5: Write mode-cache for plan mode (approved).
 	// Note: implement mode requires a bead ID. The user runs `mindspec next`
 	// to claim work and transition to implement mode.
-	if err := state.SetModeWithMetadata(root, state.ModePlan, specID, "", meta.MoleculeID, meta.StepMapping); err != nil {
-		return nil, fmt.Errorf("setting state: %w", err)
+	mc := &state.ModeCache{
+		Mode:           state.ModePlan,
+		ActiveSpec:     specID,
+		SpecBranch:     state.SpecBranch(specID),
+		ActiveWorktree: specWtPath,
+	}
+	if err := state.WriteModeCache(root, mc); err != nil {
+		return nil, fmt.Errorf("writing mode-cache: %w", err)
 	}
 
 	// Step 6: Emit recording phase marker (best-effort)

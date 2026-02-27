@@ -168,16 +168,22 @@ func Run(root, specID, title string) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "warning: could not auto-commit spec files: %v\n", err)
 	}
 
-	// --- Phase 4: State + hooks + recording ---
+	// --- Phase 4: Mode-cache + hooks + recording ---
 
-	// Write state to main root (enforcement hooks read this).
-	if err := state.Write(root, s); err != nil {
-		return nil, fmt.Errorf("setting state: %w", err)
+	// Write mode-cache to main root (enforcement hooks read this).
+	mc := &state.ModeCache{
+		Mode:           state.ModeSpec,
+		ActiveSpec:     specID,
+		SpecBranch:     specBranch,
+		ActiveWorktree: wtPath,
+	}
+	if err := state.WriteModeCache(root, mc); err != nil {
+		return nil, fmt.Errorf("writing mode-cache: %w", err)
 	}
 
-	// Also write state to worktree root so commands work from either location.
-	if err := state.Write(wtPath, s); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write state to worktree: %v\n", err)
+	// Also write mode-cache to worktree root so commands work from either location.
+	if err := state.WriteModeCache(wtPath, mc); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write mode-cache to worktree: %v\n", err)
 	}
 
 	// Install pre-commit hook (best-effort, ensures Layer 1 enforcement).
