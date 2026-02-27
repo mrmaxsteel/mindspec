@@ -160,6 +160,14 @@ func Run(root, specID, title string) (*Result, error) {
 		return nil, fmt.Errorf("writing molecule binding to spec frontmatter: %w", err)
 	}
 
+	// --- Phase 3b: Auto-commit spec files to the branch ---
+	// Without this, downstream worktrees (bead branches) that branch from
+	// spec/<id> would not contain spec.md or its molecule frontmatter.
+	commitMsg := fmt.Sprintf("chore: initialize spec %s", specID)
+	if err := gitops.CommitAll(wtPath, commitMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not auto-commit spec files: %v\n", err)
+	}
+
 	// --- Phase 4: State + hooks + recording ---
 
 	// Write state to main root (enforcement hooks read this).

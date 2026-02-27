@@ -236,6 +236,33 @@ func IsAncestor(workdir, ancestor, descendant string) (bool, error) {
 	return false, fmt.Errorf("checking ancestry %s..%s: %w", ancestor, descendant, err)
 }
 
+// CommitAll stages all changes in workdir and commits with the given message.
+// Used for auto-commits at lifecycle boundaries (spec-init, approvals) to ensure
+// artifacts are on the branch before downstream worktrees branch from it.
+// Returns nil if there are no changes to commit.
+func CommitAll(workdir, message string) error {
+	statusCmd := execCommand("git", "-C", workdir, "status", "--porcelain")
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("checking git status: %w", err)
+	}
+	if strings.TrimSpace(string(statusOut)) == "" {
+		return nil // nothing to commit
+	}
+
+	addCmd := execCommand("git", "-C", workdir, "add", "-A")
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("staging changes: %s", strings.TrimSpace(string(out)))
+	}
+
+	commitCmd := execCommand("git", "-C", workdir, "commit", "-m", message)
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("committing: %s", strings.TrimSpace(string(out)))
+	}
+
+	return nil
+}
+
 // File I/O wrappers for testability.
 var (
 	readFile  = os.ReadFile

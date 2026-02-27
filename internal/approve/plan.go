@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
@@ -73,6 +74,15 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		}
 	} else {
 		result.Warnings = append(result.Warnings, "no implement step in molecule; skipping bead auto-creation")
+	}
+
+	// Step 2c: Auto-commit plan approval + bead_ids so implementation
+	// worktrees that branch from spec/<id> contain the approved artifacts.
+	if s, sErr := state.Read(root); sErr == nil && s.ActiveWorktree != "" {
+		commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
+		if err := gitops.CommitAll(s.ActiveWorktree, commitMsg); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
+		}
 	}
 
 	// Step 3: Close plan-approve step in molecule (best-effort)

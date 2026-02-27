@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
@@ -46,6 +47,14 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
 	if err := updateSpecApproval(specPath, approvedBy); err != nil {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
+	}
+
+	// Step 3b: Auto-commit approval changes so downstream branches see them.
+	if s, sErr := state.Read(root); sErr == nil && s.ActiveWorktree != "" {
+		commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
+		if err := gitops.CommitAll(s.ActiveWorktree, commitMsg); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
+		}
 	}
 
 	// Step 4: Close spec-approve step in molecule (best-effort).

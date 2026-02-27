@@ -1,0 +1,23 @@
+{
+  "spec_id": "050-lifecycle-autocommit",
+  "started_at": "2026-02-27T00:08:29Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-02-27T00:08:29Z",
+      "ended_at": "2026-02-27T00:09:20Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-02-27T00:09:20Z",
+      "ended_at": "2026-02-27T00:09:42Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-02-27T00:09:42Z"
+    }
+  ]
+}
