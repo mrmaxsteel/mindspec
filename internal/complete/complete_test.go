@@ -291,8 +291,12 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 			return json.Marshal([]bead.BeadInfo{}) // nothing ready
 		}
 		if len(args) > 0 && args[0] == "search" {
+			// Verify the search uses the correct prefix format [specID]
+			if len(args) > 1 && args[1] != "[test-spec]" {
+				t.Errorf("search prefix: got %q, want %q", args[1], "[test-spec]")
+			}
 			items := []bead.BeadInfo{
-				{ID: "blocked-bead", Title: "[IMPL test-spec.3] Blocked"},
+				{ID: "blocked-bead", Title: "[test-spec] Bead 3: Blocked"},
 			}
 			return json.Marshal(items)
 		}
@@ -330,6 +334,51 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 	if nextBead != "" {
 		t.Errorf("nextBead should be empty, got %q", nextBead)
+	}
+}
+
+func TestAdvanceState_UsesImplementStepFromMapping(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t, "test-spec", "mol-123")
+	state.Write(root, &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "test-spec",
+		ActiveBead:     "bead-1",
+		ActiveMolecule: "mol-123",
+		StepMapping: map[string]string{
+			"implement": "mol-123.implement",
+		},
+	})
+	readStateFn = state.Read
+
+	var readyParent string
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			// Capture which parent was used
+			for i, a := range args {
+				if a == "--parent" && i+1 < len(args) {
+					readyParent = args[i+1]
+				}
+			}
+			items := []bead.BeadInfo{
+				{ID: "next-bead", Title: "[test-spec] Bead 2: Next"},
+			}
+			return json.Marshal(items)
+		}
+		return nil, fmt.Errorf("unexpected")
+	}
+
+	mode, nextBead := advanceState(root, "test-spec")
+	if mode != state.ModeImplement {
+		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
+	}
+	if nextBead != "next-bead" {
+		t.Errorf("nextBead: got %q, want %q", nextBead, "next-bead")
+	}
+	// Key assertion: should use implement step, not molecule root
+	if readyParent != "mol-123.implement" {
+		t.Errorf("bd ready --parent: got %q, want %q", readyParent, "mol-123.implement")
 	}
 }
 

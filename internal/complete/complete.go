@@ -214,18 +214,25 @@ func advanceState(root, specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// Read molecule ID from state
+	// Read molecule and step mapping from state
 	s, err := readStateFn(root)
 	if err != nil {
 		return state.ModeIdle, ""
 	}
-	molParentID := s.ActiveMolecule
-	if molParentID == "" {
+
+	// Use the implement step ID (not the top-level molecule) as parent.
+	// Implementation beads are children of the implement step, not the molecule root.
+	implStepID := s.StepMapping["implement"]
+	if implStepID == "" {
+		// Fallback to molecule ID for backwards compatibility.
+		implStepID = s.ActiveMolecule
+	}
+	if implStepID == "" {
 		return state.ModeIdle, ""
 	}
 
-	// Check for ready children in the molecule
-	out, err := runBDFn("ready", "--parent", molParentID, "--json")
+	// Check for ready children under the implement step
+	out, err := runBDFn("ready", "--parent", implStepID, "--json")
 	if err == nil {
 		var ready []bead.BeadInfo
 		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
@@ -233,8 +240,8 @@ func advanceState(root, specID string) (mode, nextBead string) {
 		}
 	}
 
-	// Check for open (but blocked) children
-	implPrefix := "[IMPL " + specID + "."
+	// Check for open (but blocked) children — match actual title format [specID]
+	implPrefix := "[" + specID + "]"
 	out, err = runBDFn("search", implPrefix, "--json", "--status=open")
 	if err == nil {
 		var open []bead.BeadInfo
