@@ -173,7 +173,7 @@ func updatePlanApproval(planPath, approvedBy string) error {
 
 	// Splice back
 	body := strings.Join(lines[fmEndIdx+1:], "\n")
-	output := "---\n" + string(newFm) + "---\n" + body
+	output := "---\n" + strings.TrimRight(string(newFm), "\n") + "\n---\n" + body
 
 	return os.WriteFile(planPath, []byte(output), 0644)
 }
@@ -313,7 +313,7 @@ func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
 	}
 
 	body := strings.Join(lines[fmEndIdx+1:], "\n")
-	output := "---\n" + string(newFm) + "---\n" + body
+	output := "---\n" + strings.TrimRight(string(newFm), "\n") + "\n---\n" + body
 
 	return os.WriteFile(planPath, []byte(output), 0644)
 }
