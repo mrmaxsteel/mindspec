@@ -34,9 +34,12 @@ type State struct {
 	ActiveWorktree string            `json:"activeWorktree,omitempty"`
 	SpecBranch     string            `json:"specBranch,omitempty"`
 	ActiveMolecule string            `json:"activeMolecule,omitempty"`
-	StepMapping    map[string]string `json:"stepMapping,omitempty"`
-	NeedsClear     bool              `json:"needs_clear,omitempty"`
-	LastUpdated    string            `json:"lastUpdated"`
+	StepMapping      map[string]string `json:"stepMapping,omitempty"`
+	NeedsClear       bool              `json:"needs_clear,omitempty"`       // Deprecated: replaced by session freshness fields. Removed in Bead 3.
+	SessionSource    string            `json:"sessionSource,omitempty"`
+	SessionStartedAt string            `json:"sessionStartedAt,omitempty"`
+	BeadClaimedAt    string            `json:"beadClaimedAt,omitempty"`
+	LastUpdated      string            `json:"lastUpdated"`
 }
 
 // ErrNoState is returned when .mindspec/state.json does not exist.
@@ -96,14 +99,19 @@ func Write(root string, s *State) error {
 	return nil
 }
 
-// ClearNeedsClear reads state, sets NeedsClear to false, and writes it back.
-// Used by the SessionStart hook after a context clear.
-func ClearNeedsClear(root string) error {
+// WriteSession records session freshness metadata (source and timestamp).
+// Called by the SessionStart hook to track when a fresh session began.
+func WriteSession(root, source string) error {
 	s, err := Read(root)
 	if err != nil {
-		return err
+		if err == ErrNoState {
+			s = &State{Mode: ModeIdle}
+		} else {
+			return err
+		}
 	}
-	s.NeedsClear = false
+	s.SessionSource = source
+	s.SessionStartedAt = time.Now().UTC().Format(time.RFC3339)
 	return Write(root, s)
 }
 
