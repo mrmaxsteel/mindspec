@@ -152,6 +152,15 @@ func TestCommitAll_CleanTree(t *testing.T) {
 func TestCommitAll_DirtyTree(t *testing.T) {
 	dir := initGitRepo(t)
 
+	// Set local git config so CommitAll's real git commands work in CI
+	// (initGitRepo uses env vars for its helper, but CommitAll calls git directly).
+	for _, kv := range [][2]string{{"user.name", "test"}, {"user.email", "test@test.com"}} {
+		cmd := exec.Command("git", "-C", dir, "config", kv[0], kv[1])
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %s", kv[0], out)
+		}
+	}
+
 	// Create an untracked file
 	os.WriteFile(filepath.Join(dir, "spec.md"), []byte("# Spec\n"), 0644)
 
