@@ -16,16 +16,16 @@ import (
 
 // Package-level function variables for testability.
 var (
-	closeBeadFn        = bead.Close
-	worktreeListFn     = bead.WorktreeList
-	worktreeRemoveFn   = bead.WorktreeRemove
-	runBDFn            = bead.RunBD
-	execCommandFn      = exec.Command
-	mergeBranchFn      = gitops.MergeBranch
-	deleteBranchFn     = gitops.DeleteBranch
-	resolveTargetFn    = resolve.ResolveTarget
+	closeBeadFn         = bead.Close
+	worktreeListFn      = bead.WorktreeList
+	worktreeRemoveFn    = bead.WorktreeRemove
+	runBDFn             = bead.RunBD
+	execCommandFn       = exec.Command
+	mergeBranchFn       = gitops.MergeBranch
+	deleteBranchFn      = gitops.DeleteBranch
+	resolveTargetFn     = resolve.ResolveTarget
 	resolveActiveBeadFn = resolve.ResolveActiveBead
-	ensureFullyBoundFn = specmeta.EnsureFullyBound
+	ensureFullyBoundFn  = specmeta.EnsureFullyBound
 )
 
 // Result summarizes what mindspec complete did.

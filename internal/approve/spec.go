@@ -69,10 +69,10 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 
 	// Step 5: Write mode-cache for plan mode.
 	mc := &state.ModeCache{
-		Mode:            state.ModePlan,
-		ActiveSpec:      specID,
-		SpecBranch:      state.SpecBranch(specID),
-		ActiveWorktree:  specWtPath,
+		Mode:           state.ModePlan,
+		ActiveSpec:     specID,
+		SpecBranch:     state.SpecBranch(specID),
+		ActiveWorktree: specWtPath,
 	}
 	if err := state.WriteModeCache(root, mc); err != nil {
 		return nil, fmt.Errorf("writing mode-cache: %w", err)
