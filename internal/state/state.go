@@ -28,12 +28,12 @@ var ValidModes = []string{ModeIdle, ModeExplore, ModeSpec, ModePlan, ModeImpleme
 
 // State represents the MindSpec workflow state persisted at .mindspec/state.json.
 type State struct {
-	Mode           string            `json:"mode"`
-	ActiveSpec     string            `json:"activeSpec"`
-	ActiveBead     string            `json:"activeBead"`
-	ActiveWorktree string            `json:"activeWorktree,omitempty"`
-	SpecBranch     string            `json:"specBranch,omitempty"`
-	ActiveMolecule string            `json:"activeMolecule,omitempty"`
+	Mode             string            `json:"mode"`
+	ActiveSpec       string            `json:"activeSpec"`
+	ActiveBead       string            `json:"activeBead"`
+	ActiveWorktree   string            `json:"activeWorktree,omitempty"`
+	SpecBranch       string            `json:"specBranch,omitempty"`
+	ActiveMolecule   string            `json:"activeMolecule,omitempty"`
 	StepMapping      map[string]string `json:"stepMapping,omitempty"`
 	SessionSource    string            `json:"sessionSource,omitempty"`
 	SessionStartedAt string            `json:"sessionStartedAt,omitempty"`
