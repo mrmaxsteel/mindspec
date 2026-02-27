@@ -269,6 +269,9 @@ func TestParseSpecID(t *testing.T) {
 		{"[SPEC 008b-gates] Human Gates Feature", "008b-gates"},
 		{"[PLAN 009-feature] Plan decomposition", "009-feature"},
 		{"[IMPL 001.3] Simple numeric", "001"},
+		// No-tag bracket format: [specID] Bead N: title
+		{"[049-hook-command] Bead 1: Core hook infrastructure", "049-hook-command"},
+		{"[010-spec-init] Bead 3: Worktree creation", "010-spec-init"},
 		{"005-next: Implement work selection", "005-next"},
 		{"003-context: Fix rendering bug", "003-context"},
 		{"No colon here", ""},

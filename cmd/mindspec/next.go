@@ -158,7 +158,8 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		// Step 6: Resolve mode and spec ID
 		resolved := next.ResolveMode(root, selected)
-		if resolved.SpecID == "" && specFlag != "" {
+		if specFlag != "" {
+			// Explicit --spec flag always wins over title parsing
 			resolved.SpecID = specFlag
 		}
 

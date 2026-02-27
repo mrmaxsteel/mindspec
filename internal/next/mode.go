@@ -57,12 +57,13 @@ func ResolveMode(root string, bead BeadInfo) ResolvedWork {
 //	"[IMPL 009-feature.1] Chunk title" → "009-feature"
 //	"[SPEC 008b-gates] Feature"        → "008b-gates"
 //	"[PLAN 009-feature] Plan decomp"   → "009-feature"
+//	"[049-hook-command] Bead 1: ..."    → "049-hook-command"
 //
 // Falls back to legacy colon convention:
 //
 //	"005-next: Implement work selection" → "005-next"
 func parseSpecID(title string) string {
-	// Try bracket-prefix: [TAG specID] or [TAG specID.chunk]
+	// Try bracket-prefix: [TAG specID] or [TAG specID.chunk] or [specID]
 	if strings.HasPrefix(title, "[") {
 		closeBracket := strings.Index(title, "]")
 		if closeBracket > 0 {
@@ -71,21 +72,12 @@ func parseSpecID(title string) string {
 			if spaceIdx > 0 {
 				slug := inner[spaceIdx+1:] // e.g. "009-feature.1"
 				// Strip chunk suffix (everything from the last dot if it's followed by digits)
-				if dotIdx := strings.LastIndex(slug, "."); dotIdx > 0 {
-					suffix := slug[dotIdx+1:]
-					allDigits := true
-					for _, c := range suffix {
-						if c < '0' || c > '9' {
-							allDigits = false
-							break
-						}
-					}
-					if allDigits {
-						slug = slug[:dotIdx]
-					}
-				}
+				slug = stripChunkSuffix(slug)
 				return slug
 			}
+			// No space inside brackets: entire content is the spec ID
+			// e.g. "[049-hook-command] Bead 1: ..." → "049-hook-command"
+			return inner
 		}
 	}
 
@@ -95,6 +87,22 @@ func parseSpecID(title string) string {
 		return ""
 	}
 	return strings.TrimSpace(title[:idx])
+}
+
+// stripChunkSuffix removes a trailing ".N" chunk suffix from a slug.
+// e.g. "009-feature.1" → "009-feature", "008b-gates" → "008b-gates"
+func stripChunkSuffix(slug string) string {
+	dotIdx := strings.LastIndex(slug, ".")
+	if dotIdx <= 0 {
+		return slug
+	}
+	suffix := slug[dotIdx+1:]
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return slug
+		}
+	}
+	return slug[:dotIdx]
 }
 
 // resolveFeatureMode checks the spec's artifact state to determine if we're in
