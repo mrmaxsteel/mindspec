@@ -75,7 +75,7 @@ The single-cursor `ActiveBead` field in `state.json` is the primary blocker for 
 - `cmd/mindspec/complete.go` + `internal/complete/complete.go` — Remove state.json reads/writes; derive ActiveBead from Beads query; derive SpecBranch/ActiveWorktree from convention; write mode-cache after completion
 - `cmd/mindspec/approve.go` + `internal/approve/` — Remove state.json writes; write mode-cache after approval
 - `cmd/mindspec/instruct.go` + `internal/instruct/instruct.go` — Remove state.json fallback; use resolver exclusively
-- `cmd/mindspec/state.go` — Remove `state set` command (no state file to set). `state show` becomes a pure resolver view. `state write-session` writes to session.json
+- `cmd/mindspec/state.go` — Remove `state set` command entirely (`bd update` is the override mechanism now). `state show` becomes a pure resolver view. `state write-session` writes to session.json
 - `internal/hook/dispatch.go` — Read mode-cache instead of state.json for Mode/ActiveWorktree. Read session.json for freshness gate
 - `internal/guard/` — Derive ActiveWorktree from convention or mode-cache
 - `cmd/mindspec/spec_init.go` + `internal/specinit/` — Remove state.json writes; write mode-cache
@@ -115,10 +115,10 @@ The single-cursor `ActiveBead` field in `state.json` is the primary blocker for 
 - `make test` passes
 - Manual lifecycle walkthrough on a fresh spec confirms parity
 
-## Open Questions
+## Decisions
 
-- [ ] Should `state set` be removed entirely or kept as a debug/override tool that writes to mode-cache? (Leaning: remove — `bd update` is the override mechanism now)
-- [ ] Should mode-cache be `.gitignore`d? (Leaning: yes — it's a local cache, not shared state)
+- **`state set` removed entirely** — `bd update` is the override mechanism for molecule state. A mode-cache override would diverge from the source of truth
+- **mode-cache is `.gitignore`d** — it's a local write-through cache, not shared state. Each worktree gets its own mode-cache when lifecycle commands run in it. Hooks fall back to molecule resolution when cache is missing (e.g., fresh worktree before first lifecycle command)
 
 ## Approval
 
