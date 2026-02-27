@@ -79,9 +79,7 @@ func containsWord(haystack, needle string) bool {
 }
 
 // getCwd returns the current working directory.
-func getCwd() (string, error) {
-	return os.Getwd()
-}
+var getCwd = os.Getwd
 
 // isCodeFile returns true if the path looks like a code file (not documentation).
 func isCodeFile(path string) bool {

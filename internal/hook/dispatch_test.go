@@ -152,6 +152,25 @@ func TestWorktreeBash_EnvPrefixStrip(t *testing.T) {
 	}
 }
 
+func TestWorktreeBash_AllowsSpecWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+
+	// CWD is the spec worktree, ActiveWorktree is the bead worktree
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-051-test", nil
+	}
+	st := &state.State{
+		Mode:           state.ModeImplement,
+		ActiveSpec:     "051-test",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-051-test/.worktrees/worktree-bead-abc",
+	}
+	r := WorktreeBash(&Input{Command: "cat foo.txt"}, st, true)
+	if r.Action != Pass {
+		t.Errorf("spec worktree CWD should pass, got %v: %s", r.Action, r.Message)
+	}
+}
+
 // --- Needs Clear ---
 
 func TestNeedsClear_NilState(t *testing.T) {

@@ -91,6 +91,23 @@ func TestCheckCWD_GuardsDisabled(t *testing.T) {
 	}
 }
 
+func TestCheckCWD_AllowsSpecWorktree(t *testing.T) {
+	stubGuard(t)
+	readStateFn = func(root string) (*state.State, error) {
+		return &state.State{
+			Mode:           state.ModeImplement,
+			ActiveSpec:     "051-test",
+			ActiveWorktree: "/repo/.worktrees/worktree-spec-051-test/.worktrees/worktree-bead-abc",
+		}, nil
+	}
+	// CWD is the spec worktree, not the bead worktree
+	getwdFn = func() (string, error) { return "/repo/.worktrees/worktree-spec-051-test", nil }
+
+	if err := CheckCWD("/repo"); err != nil {
+		t.Errorf("expected nil error for spec worktree CWD, got: %v", err)
+	}
+}
+
 func TestIsMainCWD(t *testing.T) {
 	stubGuard(t)
 	readStateFn = func(root string) (*state.State, error) {

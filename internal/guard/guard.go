@@ -48,6 +48,16 @@ func CheckCWD(root string) error {
 		return nil
 	}
 
+	// Also allow the spec worktree — lifecycle commands (complete, impl-approve)
+	// need to run there after all beads are done.
+	if s.ActiveSpec != "" {
+		specWtName := "worktree-spec-" + s.ActiveSpec
+		specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
+		if strings.HasPrefix(cwdAbs, specWtAbs) {
+			return nil
+		}
+	}
+
 	// If CWD is under the main repo root (not the worktree), block.
 	rootAbs, _ := filepath.Abs(root)
 	if strings.HasPrefix(cwdAbs, rootAbs) {

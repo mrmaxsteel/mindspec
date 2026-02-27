@@ -414,6 +414,7 @@ func stubWorktreeHelpers(t *testing.T) {
 	origExists := branchExistsFn
 	origGitignore := ensureGitignore
 	origState := readStateFn
+	origWriteState := writeStateFn
 	t.Cleanup(func() {
 		worktreeList = origList
 		worktreeCreate = origCreate
@@ -422,6 +423,7 @@ func stubWorktreeHelpers(t *testing.T) {
 		branchExistsFn = origExists
 		ensureGitignore = origGitignore
 		readStateFn = origState
+		writeStateFn = origWriteState
 	})
 
 	// Defaults: config returns defaults, no spec branch, branch doesn't exist.
@@ -531,6 +533,63 @@ func TestEnsureWorktree_ReusesExisting(t *testing.T) {
 	expectedPath := filepath.Join(root, ".worktrees", "worktree-bead-abc")
 	if path != expectedPath {
 		t.Errorf("path: got %q, want %q", path, expectedPath)
+	}
+}
+
+func TestEnsureWorktree_PropagatesState(t *testing.T) {
+	stubWorktreeHelpers(t)
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
+
+	readStateFn = func(root string) (*state.State, error) {
+		return &state.State{
+			Mode:           state.ModeImplement,
+			ActiveSpec:     "051-test",
+			SpecBranch:     "spec/051-test",
+			ActiveMolecule: "mol-abc",
+			StepMapping:    map[string]string{"implement": "mol-impl"},
+		}, nil
+	}
+
+	var writtenState *state.State
+	var writtenRoot string
+	writeStateFn = func(root string, s *state.State) error {
+		writtenRoot = root
+		writtenState = s
+		return nil
+	}
+
+	worktreeList = func() ([]bead.WorktreeListEntry, error) {
+		return nil, nil
+	}
+	worktreeCreate = func(name, branch string) error { return nil }
+
+	wtPath, err := EnsureWorktree(root, "bead-xyz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// State should have been written to the bead worktree
+	if writtenState == nil {
+		t.Fatal("expected state to be written to bead worktree")
+	}
+	if writtenRoot != wtPath {
+		t.Errorf("state written to %q, want %q", writtenRoot, wtPath)
+	}
+	if writtenState.ActiveBead != "bead-xyz" {
+		t.Errorf("ActiveBead = %q, want %q", writtenState.ActiveBead, "bead-xyz")
+	}
+	if writtenState.ActiveWorktree != wtPath {
+		t.Errorf("ActiveWorktree = %q, want %q", writtenState.ActiveWorktree, wtPath)
+	}
+	if writtenState.Mode != state.ModeImplement {
+		t.Errorf("Mode = %q, want %q", writtenState.Mode, state.ModeImplement)
+	}
+	if writtenState.SpecBranch != "spec/051-test" {
+		t.Errorf("SpecBranch = %q, want %q", writtenState.SpecBranch, "spec/051-test")
+	}
+	if writtenState.ActiveMolecule != "mol-abc" {
+		t.Errorf("ActiveMolecule = %q, want %q", writtenState.ActiveMolecule, "mol-abc")
 	}
 }
 

@@ -33,6 +33,7 @@ worktree-*/
 
 # Go
 bin/
+/mindspec
 *.exe
 
 # OS

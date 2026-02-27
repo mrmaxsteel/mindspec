@@ -1,6 +1,10 @@
 package hook
 
-import "github.com/mindspec/mindspec/internal/state"
+import (
+	"strings"
+
+	"github.com/mindspec/mindspec/internal/state"
+)
 
 // Run dispatches to the named hook and returns its result.
 func Run(name string, inp *Input, st *state.State, enforce bool) Result {
@@ -89,6 +93,14 @@ func WorktreeBash(inp *Input, st *state.State, enforce bool) Result {
 	wt := st.ActiveWorktree
 	if cwd != "" && hasPathPrefix(cwd, wt) {
 		return Result{Action: Pass}
+	}
+	// Also allow CWD inside the spec worktree — lifecycle commands
+	// (complete, impl-approve) need to run there after beads are done.
+	if st.ActiveSpec != "" && cwd != "" {
+		specWtSuffix := "/worktree-spec-" + st.ActiveSpec
+		if strings.HasSuffix(cwd, specWtSuffix) || strings.Contains(cwd, specWtSuffix+"/") {
+			return Result{Action: Pass}
+		}
 	}
 	return Result{
 		Action:  Block,

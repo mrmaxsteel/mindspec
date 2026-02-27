@@ -32,6 +32,7 @@ var (
 	worktreeList    = bead.WorktreeList
 	worktreeCreate  = bead.WorktreeCreate
 	readStateFn     = state.Read
+	writeStateFn    = state.Write
 	loadConfigFn    = config.Load
 	createBranchFn  = gitops.CreateBranch
 	branchExistsFn  = gitops.BranchExists
@@ -253,8 +254,21 @@ func EnsureWorktree(root, beadID string) (string, error) {
 	if err == nil {
 		for _, e := range entries {
 			if e.Name == wtName || strings.HasSuffix(e.Path, wtName) {
-				return e.Path, nil
+				wtPath = e.Path
+				break
 			}
+		}
+	}
+
+	// Propagate state into the bead worktree so commands work from it.
+	// Pattern matches specinit.Run() lines 166-173.
+	if stateErr == nil && s != nil {
+		beadState := *s // shallow copy
+		beadState.ActiveWorktree = wtPath
+		beadState.ActiveBead = beadID
+		beadState.Mode = state.ModeImplement
+		if err := writeStateFn(wtPath, &beadState); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write state to bead worktree: %v\n", err)
 		}
 	}
 
