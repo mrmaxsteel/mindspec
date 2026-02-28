@@ -56,8 +56,10 @@ func NewSandbox(t *testing.T) *Sandbox {
 		}
 	}
 
-	// Write default config (agent_hooks disabled so PreToolUse hooks don't block
-	// tool calls in the sandbox — the sandbox lacks proper worktree structure)
+	// Write default config. agent_hooks: false makes PreToolUse enforcement hooks
+	// no-op — non-enforcement scenarios run from the main repo root (not a worktree),
+	// so worktree-file and worktree-bash guards would incorrectly block tool calls.
+	// Enforcement scenarios (HookBlocks*) can override this in their Setup func.
 	configContent := `protected_branches: [main]
 merge_strategy: direct
 worktree_root: .worktrees
@@ -70,8 +72,8 @@ enforcement:
 		t.Fatalf("writing config: %v", err)
 	}
 
-	// Set up Claude Code integration: CLAUDE.md and minimal settings.json
-	// (SessionStart hook only — no PreToolUse enforcement hooks in sandbox)
+	// Set up Claude Code integration: CLAUDE.md, slash commands, and full hooks
+	// (SessionStart runs mindspec instruct; PreToolUse hooks installed but no-op)
 	if err := setupClaudeForSandbox(root); err != nil {
 		t.Logf("warning: setup claude: %v", err)
 	}
@@ -315,24 +317,15 @@ func (s *Sandbox) runBD(args ...string) (string, error) {
 	return string(out), err
 }
 
-// setupClaudeForSandbox installs CLAUDE.md and slash commands but strips all
-// hooks from settings.json. We skip:
-//   - PreToolUse hooks: sandbox lacks worktree structure, enforcement would block tool calls
-//   - SessionStart hook: `mindspec instruct` in idle mode tells the agent to "greet the user"
-//     which overrides the scenario prompt in LLM tests
+// setupClaudeForSandbox installs CLAUDE.md, slash commands, and hooks via
+// setup.RunClaude(). This gives the agent the full SessionStart hook (runs
+// `mindspec instruct`) and PreToolUse hooks. The PreToolUse enforcement hooks
+// are no-ops because config.yaml has agent_hooks: false — non-enforcement
+// scenarios work from the main repo root (not a worktree), so worktree/file
+// guards would incorrectly block tool calls.
 func setupClaudeForSandbox(root string) error {
-	// Use setup.RunClaude for CLAUDE.md and slash commands
-	if _, err := setup.RunClaude(root, false); err != nil {
-		return err
-	}
-
-	// Overwrite settings.json with no hooks — agent gets context from CLAUDE.md only
-	settingsContent := `{
-  "hooks": {}
-}
-`
-	settingsPath := filepath.Join(root, ".claude", "settings.json")
-	return os.WriteFile(settingsPath, []byte(settingsContent), 0o644)
+	_, err := setup.RunClaude(root, false)
+	return err
 }
 
 // projectBinDir finds the mindspec project's bin/ directory by walking up

@@ -121,8 +121,7 @@ Create greeting.go with a Greet function.
 		},
 		Prompt: `You are in implement mode for a pre-approved spec. A bead is already claimed.
 Your task: create a file called greeting.go with a function Greet(name string) string
-that returns "Hello, <name>!". Then git add and git commit your changes.
-Finally run 'mindspec complete' to finish the bead. You MUST commit before completing.`,
+that returns "Hello, <name>!". Then run 'mindspec complete' to finish the bead.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent should have created the file
 			if !sandbox.FileExists("greeting.go") {

@@ -121,6 +121,10 @@ command "mindspec" with arg "complete" was not found in events   <-- FAIL
 | **Max turns exhausted** | Agent runs out of turns before finishing | MaxTurns budget, prompt efficiency |
 | **Worktree issues** | git worktree creation fails or wrong path | `internal/next/`, sandbox git setup |
 
+### Fix Surface Rule
+
+**When an LLM test fails due to agent behavior, the fix MUST go into mindspec's own guidance** (instruct templates, CLAUDE.md, CLI error messages) — **NEVER into the test prompt**. Test prompts describe the task only ("implement this bead"), not workflow instructions the agent should already have. Putting workflow hints in the prompt makes the test a tautology instead of testing the product.
+
 ### Common Fixes by Category
 
 **Agent doesn't follow prompt:**
@@ -159,6 +163,8 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 34 | 2 | 15.5s | Added "commit before completing" to prompt — eliminated retry, -24% events |
 | 2026-02-28 | 5/5 PASS | 34 | 12-16s | Reliability: 34 events, 2 turns, 100% fwd ratio, 0 retries across all 5 runs |
 | 2026-02-28 | PASS | 34 | 2 | 14.2s | Infra filter: no change (already 100% fwd), regression check only |
+| 2026-02-28 | PASS | 45 | 3 | 23s | Removed prompt workaround "MUST commit before completing" — fix moved to instruct template. Agent now retries once (complete→error→commit→complete). 1 retry is expected: sandbox has no hooks so instruct template doesn't run, agent learns from CLI error. |
+| 2026-02-28 | PASS | 74 | 3 | 23s | Full hooks enabled: SessionStart runs `mindspec instruct`, PreToolUse hooks installed (no-op via agent_hooks:false). Agent gets implement.md guidance. 100% fwd ratio. More events due to hook invocations. |
 
 ### TestLLM_SpecToIdle
 
@@ -178,6 +184,14 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | FAIL | 11 | 1 | 6.5s | Baseline: conversational response, agent asked "What would you like?" |
 | 2026-02-28 | PASS | 18 | 2 | 10s | Imperative prompt pattern: "Execute these commands immediately" (50% fwd — infra noise) |
 | 2026-02-28 | PASS | 18 | 2 | 8.8s | Filter infra git cmds from retry detection: **100% forward ratio** |
+| 2026-02-28 | PASS | 31 | 1 | 11s | Full hooks enabled: `mindspec instruct` runs via SessionStart. Imperative prompt overrides idle template. 100% fwd, 1 turn (down from 2). |
+
+### TestLLM_ResumeAfterCrash
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-02-28 | PASS | 45 | 3 | 29.4s | Baseline: 66.7% fwd ratio, 1 retry (complete before commit) |
+| 2026-02-28 | PASS | 74 | 2 | 22s | Full hooks enabled: agent gets implement.md guidance via SessionStart. **100% fwd ratio** (up from 66.7%), 2 turns (down from 3). Still 1 retry on complete (session.json dirty). |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
@@ -195,7 +209,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - **Doesn't regress other scenarios** (always recheck SingleBead)
 
 ### What Can Regress
-- Changing hooks/settings.json can make agent conversational
+- Changing hooks/settings.json or instruct templates can make agent conversational
 - Changing CWD guards can break scenarios that depend on worktree enforcement
 - Changing mindspec instruct templates can override scenario prompts
 - Changing beads integration can break bead creation/claiming
@@ -204,8 +218,9 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 
 ### Sandbox Setup (`sandbox.go`)
 - Creates temp dir with git repo, `.mindspec/`, `config.yaml`
-- Runs `setup.RunClaude()` for CLAUDE.md + slash commands
-- Overwrites `settings.json` with **empty hooks** (no SessionStart, no PreToolUse)
+- Runs `setup.RunClaude()` for CLAUDE.md, slash commands, **and full hooks** (SessionStart + PreToolUse)
+- SessionStart hook runs `mindspec instruct` — agent gets mode-aware guidance
+- PreToolUse enforcement hooks are installed but **no-op** because `config.yaml` has `agent_hooks: false` (non-enforcement scenarios work from main repo root, not a worktree)
 - Runs `bd init --sandbox --skip-hooks --server-port 0`
 - Installs recording shims in `.harness/bin/`
 - Adds `.beads/` and `.harness/` to `.gitignore`
@@ -258,7 +273,7 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 2. **Say "Do NOT respond conversationally"**
 3. **Number every step explicitly**
 4. **End with "Execute step 1 NOW"**
-5. **Don't rely on CLAUDE.md or hooks for task direction** -- put everything in the prompt
+5. **Task description goes in the prompt; workflow guidance comes from hooks/CLAUDE.md** -- don't duplicate workflow instructions in the prompt (see Fix Surface Rule)
 6. **Be specific about file paths and exact command syntax**
 7. **Include "cd into the worktree" as an explicit step** -- Haiku won't infer this
 
@@ -277,6 +292,5 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 **Status**: Git fully supports nested worktrees. `workspace.FindRoot()` correctly resolves them. The bead worktree is created inside the spec worktree: `.worktrees/worktree-spec-XXX/.worktrees/worktree-bead-YYY`. This is fine -- it reflects the merge hierarchy (bead -> spec -> main).
 
 ### mindspec instruct Idle Template
-**Problem**: The idle template contains "Greet the user" / "Ask what they'd like to work on" which overrides scenario prompts.
-**Fix applied**: Sandbox settings.json has empty hooks `{}` -- no SessionStart hook runs `mindspec instruct`.
-**Note**: This means the agent doesn't get mode-aware guidance in tests. Context comes from CLAUDE.md only.
+**Problem**: The idle template contains "Greet the user" / "Ask what they'd like to work on" which could override scenario prompts.
+**Status**: SessionStart hook now runs in the sandbox (full hooks enabled). Scenarios starting in idle mode (SpecToIdle, AbandonSpec) use imperative prompts ("Execute these commands immediately. Do NOT respond conversationally.") which override the idle template greeting via `claude -p` mode. If a scenario fails due to idle template interference, fix the idle template itself (product improvement).

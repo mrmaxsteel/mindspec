@@ -48,8 +48,8 @@ When the bead is done:
 
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
-3. Run `mindspec complete` — closes the bead, removes the worktree, and advances state automatically
-4. Milestone commit (include `.beads/` changes)
+3. Commit all changes (`git add` + `git commit`) — you MUST commit before completing
+4. Run `mindspec complete` — closes the bead, removes the worktree, and advances state automatically
 
 ## Next Action
 
