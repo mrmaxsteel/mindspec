@@ -141,6 +141,8 @@ command "mindspec" with arg "complete" was not found in events   <-- FAIL
 
 Track each test run with: scenario, date, pass/fail, recorded events count, turns used, wall-clock time, and what changed.
 
+**Before adding a row**: re-read the LAST existing row in that scenario's table to know the actual baseline. Only claim a metric changed if it actually moved. Do not infer "before" values from the current session — check the table.
+
 ### TestLLM_SingleBead
 
 | Date | Result | Events | Turns | Time | Change |
