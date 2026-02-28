@@ -70,31 +70,90 @@ func TestSessionFile_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
-// --- ModeCache tests ---
+// --- Lifecycle tests ---
 
-func TestModeCache_RoundTrip(t *testing.T) {
+func TestLifecycle_RoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", "054-test")
+
+	lc := &Lifecycle{
+		Phase:  ModeImplement,
+		EpicID: "mindspec-xyz",
+	}
+	if err := WriteLifecycle(specDir, lc); err != nil {
+		t.Fatalf("WriteLifecycle failed: %v", err)
+	}
+
+	got, err := ReadLifecycle(specDir)
+	if err != nil {
+		t.Fatalf("ReadLifecycle failed: %v", err)
+	}
+	if got.Phase != ModeImplement {
+		t.Errorf("phase: got %q, want %q", got.Phase, ModeImplement)
+	}
+	if got.EpicID != "mindspec-xyz" {
+		t.Errorf("epic_id: got %q, want %q", got.EpicID, "mindspec-xyz")
+	}
+}
+
+func TestLifecycle_MissingReturnsNil(t *testing.T) {
 	tmp := t.TempDir()
 
-	mc := &ModeCache{
-		Mode:           ModeImplement,
-		ActiveSpec:     "053-drop-state-json",
-		ActiveBead:     "beads-abc",
-		ActiveWorktree: "/path/to/worktree",
-		SpecBranch:     "spec/053-drop-state-json",
+	got, err := ReadLifecycle(tmp)
+	if err != nil {
+		t.Fatalf("ReadLifecycle failed: %v", err)
 	}
-	if err := WriteModeCache(tmp, mc); err != nil {
-		t.Fatalf("WriteModeCache failed: %v", err)
+	if got != nil {
+		t.Errorf("expected nil for missing lifecycle.yaml, got %+v", got)
+	}
+}
+
+func TestLifecycle_PhaseOnly(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "specs", "test")
+
+	lc := &Lifecycle{Phase: ModeSpec}
+	if err := WriteLifecycle(specDir, lc); err != nil {
+		t.Fatalf("WriteLifecycle failed: %v", err)
 	}
 
-	got, err := ReadModeCache(tmp)
+	got, err := ReadLifecycle(specDir)
 	if err != nil {
-		t.Fatalf("ReadModeCache failed: %v", err)
+		t.Fatalf("ReadLifecycle failed: %v", err)
+	}
+	if got.Phase != ModeSpec {
+		t.Errorf("phase: got %q, want %q", got.Phase, ModeSpec)
+	}
+	if got.EpicID != "" {
+		t.Errorf("expected empty epic_id, got %q", got.EpicID)
+	}
+}
+
+// --- Focus tests (formerly ModeCache) ---
+
+func TestFocus_RoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+
+	f := &Focus{
+		Mode:           ModeImplement,
+		ActiveSpec:     "054-simplify",
+		ActiveBead:     "beads-abc",
+		ActiveWorktree: "/path/to/worktree",
+		SpecBranch:     "spec/054-simplify",
+	}
+	if err := WriteFocus(tmp, f); err != nil {
+		t.Fatalf("WriteFocus failed: %v", err)
+	}
+
+	got, err := ReadFocus(tmp)
+	if err != nil {
+		t.Fatalf("ReadFocus failed: %v", err)
 	}
 	if got.Mode != ModeImplement {
 		t.Errorf("mode: got %q, want %q", got.Mode, ModeImplement)
 	}
-	if got.ActiveSpec != "053-drop-state-json" {
-		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "053-drop-state-json")
+	if got.ActiveSpec != "054-simplify" {
+		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "054-simplify")
 	}
 	if got.ActiveBead != "beads-abc" {
 		t.Errorf("activeBead: got %q, want %q", got.ActiveBead, "beads-abc")
@@ -104,27 +163,71 @@ func TestModeCache_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestModeCache_MissingReturnsNil(t *testing.T) {
+func TestFocus_MissingReturnsNil(t *testing.T) {
 	tmp := t.TempDir()
 
-	got, err := ReadModeCache(tmp)
+	got, err := ReadFocus(tmp)
 	if err != nil {
-		t.Fatalf("ReadModeCache failed: %v", err)
+		t.Fatalf("ReadFocus failed: %v", err)
 	}
 	if got != nil {
-		t.Errorf("expected nil for missing mode-cache, got %+v", got)
+		t.Errorf("expected nil for missing focus, got %+v", got)
 	}
 }
 
-func TestModeCache_SetsTimestamp(t *testing.T) {
+func TestFocus_SetsTimestamp(t *testing.T) {
 	tmp := t.TempDir()
 
-	mc := &ModeCache{Mode: ModeIdle}
+	f := &Focus{Mode: ModeIdle}
+	if err := WriteFocus(tmp, f); err != nil {
+		t.Fatalf("WriteFocus failed: %v", err)
+	}
+	if f.Timestamp == "" {
+		t.Error("WriteFocus should set Timestamp")
+	}
+}
+
+func TestFocus_BackwardCompatWithModeCache(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Write via backward-compat alias
+	mc := &ModeCache{
+		Mode:       ModeImplement,
+		ActiveSpec: "053-test",
+	}
 	if err := WriteModeCache(tmp, mc); err != nil {
 		t.Fatalf("WriteModeCache failed: %v", err)
 	}
-	if mc.Timestamp == "" {
-		t.Error("WriteModeCache should set Timestamp")
+
+	// Read via new API
+	got, err := ReadFocus(tmp)
+	if err != nil {
+		t.Fatalf("ReadFocus failed: %v", err)
+	}
+	if got.ActiveSpec != "053-test" {
+		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "053-test")
+	}
+}
+
+func TestFocus_FallbackToModeCachePath(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Write directly to old mode-cache path
+	dir := filepath.Join(tmp, ".mindspec")
+	os.MkdirAll(dir, 0755)
+	data := []byte(`{"mode":"plan","activeSpec":"old-spec","timestamp":"2026-01-01T00:00:00Z"}`)
+	os.WriteFile(filepath.Join(dir, "mode-cache"), data, 0644)
+
+	// ReadFocus should find it at the old path
+	got, err := ReadFocus(tmp)
+	if err != nil {
+		t.Fatalf("ReadFocus failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil focus from mode-cache fallback")
+	}
+	if got.ActiveSpec != "old-spec" {
+		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "old-spec")
 	}
 }
 

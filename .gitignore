@@ -1,6 +1,7 @@
-# MindSpec local runtime files (ADR-0015) — not version-controlled.
-# Mode and state are derived from molecules; these are transient caches.
+# MindSpec local runtime files — not version-controlled.
+# Phase is stored per-spec in lifecycle.yaml (committed). These are transient.
 .mindspec/session.json
+.mindspec/focus
 .mindspec/mode-cache
 .mindspec/current-spec.json
 

@@ -89,9 +89,20 @@ func SessionPath(root string) string {
 	return filepath.Join(root, ".mindspec", "session.json")
 }
 
+// FocusPath returns the path to .mindspec/focus under root.
+func FocusPath(root string) string {
+	return filepath.Join(root, ".mindspec", "focus")
+}
+
 // ModeCachePath returns the path to .mindspec/mode-cache under root.
+// Deprecated: use FocusPath instead.
 func ModeCachePath(root string) string {
 	return filepath.Join(root, ".mindspec", "mode-cache")
+}
+
+// LifecyclePath returns the path to lifecycle.yaml in a spec directory.
+func LifecyclePath(root, specID string) string {
+	return filepath.Join(SpecDir(root, specID), "lifecycle.yaml")
 }
 
 func exists(path string) bool {
