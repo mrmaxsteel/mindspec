@@ -240,6 +240,18 @@ func TestSessionFreshnessGate_ResumedSession(t *testing.T) {
 	}
 }
 
+func TestSessionFreshnessGate_CompactedSession(t *testing.T) {
+	t.Parallel()
+	st := &HookState{
+		SessionSource:    "compact",
+		SessionStartedAt: "2026-02-27T00:00:00Z",
+	}
+	r := SessionFreshnessGate(&Input{Command: "mindspec next"}, st)
+	if r.Action != Block {
+		t.Error("compacted session should block")
+	}
+}
+
 func TestSessionFreshnessGate_ForceBypass(t *testing.T) {
 	t.Parallel()
 	st := &HookState{

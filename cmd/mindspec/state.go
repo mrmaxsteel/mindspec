@@ -143,6 +143,15 @@ var stateWriteSessionCmd = &cobra.Command{
 			SessionSource:    source,
 			SessionStartedAt: time.Now().UTC().Format(time.RFC3339),
 		}
+
+		// On compact, preserve BeadClaimedAt so the freshness gate
+		// still blocks mindspec next — compact is NOT a fresh context.
+		if source == "compact" {
+			if prev, readErr := state.ReadSession(root); readErr == nil {
+				sess.BeadClaimedAt = prev.BeadClaimedAt
+			}
+		}
+
 		if err := state.WriteSessionFile(root, sess); err != nil {
 			return fmt.Errorf("writing session metadata: %w", err)
 		}
