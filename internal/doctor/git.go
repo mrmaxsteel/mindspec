@@ -15,7 +15,7 @@ func checkGit(r *Report, root string) {
 // runtimeFiles lists MindSpec local runtime files that should be gitignored.
 var runtimeFiles = []string{
 	".mindspec/session.json",
-	".mindspec/mode-cache",
+	".mindspec/focus",
 }
 
 // checkRuntimeFilesTracked detects MindSpec runtime files tracked by git.

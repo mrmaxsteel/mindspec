@@ -7,7 +7,7 @@ import (
 )
 
 // HookState holds the subset of workflow state that hooks need.
-// Constructed from mode-cache + session.json.
+// Constructed from focus + session.json.
 type HookState struct {
 	Mode             string
 	ActiveSpec       string

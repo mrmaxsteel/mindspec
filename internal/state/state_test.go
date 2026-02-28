@@ -129,7 +129,7 @@ func TestLifecycle_PhaseOnly(t *testing.T) {
 	}
 }
 
-// --- Focus tests (formerly ModeCache) ---
+// --- Focus tests (formerly Focus) ---
 
 func TestFocus_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
@@ -187,47 +187,22 @@ func TestFocus_SetsTimestamp(t *testing.T) {
 	}
 }
 
-func TestFocus_BackwardCompatWithModeCache(t *testing.T) {
+func TestFocus_IgnoresLegacyModeCachePath(t *testing.T) {
 	tmp := t.TempDir()
 
-	// Write via backward-compat alias
-	mc := &ModeCache{
-		Mode:       ModeImplement,
-		ActiveSpec: "053-test",
-	}
-	if err := WriteModeCache(tmp, mc); err != nil {
-		t.Fatalf("WriteModeCache failed: %v", err)
-	}
-
-	// Read via new API
-	got, err := ReadFocus(tmp)
-	if err != nil {
-		t.Fatalf("ReadFocus failed: %v", err)
-	}
-	if got.ActiveSpec != "053-test" {
-		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "053-test")
-	}
-}
-
-func TestFocus_FallbackToModeCachePath(t *testing.T) {
-	tmp := t.TempDir()
-
-	// Write directly to old mode-cache path
+	// Write directly to old mode-cache path (should be ignored)
 	dir := filepath.Join(tmp, ".mindspec")
 	os.MkdirAll(dir, 0755)
 	data := []byte(`{"mode":"plan","activeSpec":"old-spec","timestamp":"2026-01-01T00:00:00Z"}`)
 	os.WriteFile(filepath.Join(dir, "mode-cache"), data, 0644)
 
-	// ReadFocus should find it at the old path
+	// ReadFocus should NOT find it — mode-cache fallback is removed
 	got, err := ReadFocus(tmp)
 	if err != nil {
 		t.Fatalf("ReadFocus failed: %v", err)
 	}
-	if got == nil {
-		t.Fatal("expected non-nil focus from mode-cache fallback")
-	}
-	if got.ActiveSpec != "old-spec" {
-		t.Errorf("activeSpec: got %q, want %q", got.ActiveSpec, "old-spec")
+	if got != nil {
+		t.Errorf("expected nil (mode-cache should be ignored), got %+v", got)
 	}
 }
 

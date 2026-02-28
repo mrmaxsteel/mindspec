@@ -16,8 +16,8 @@ if [ "${MINDSPEC_ALLOW_MAIN:-}" = "1" ]; then
   exit 0
 fi
 
-# Read mode-cache — if no cache file, allow commit
-MODE_CACHE=".mindspec/mode-cache"
+# Read focus — if no cache file, allow commit
+MODE_CACHE=".mindspec/focus"
 if [ ! -f "$MODE_CACHE" ]; then
   exit 0
 fi

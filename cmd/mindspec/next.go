@@ -178,7 +178,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		// Note: parent status propagation handled natively by beads epics
 
-		// Step 7: Write mode-cache
+		// Step 7: Write focus
 		mc := &state.Focus{
 			Mode:       resolved.Mode,
 			ActiveSpec: resolved.SpecID,
@@ -189,7 +189,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			mc.ActiveWorktree = wtPath
 		}
 		if err := state.WriteFocus(root, mc); err != nil {
-			return fmt.Errorf("writing mode-cache: %w", err)
+			return fmt.Errorf("writing focus: %w", err)
 		}
 
 		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)

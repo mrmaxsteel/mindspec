@@ -156,8 +156,7 @@ func emitCopilot(r Result) int {
 	return 0
 }
 
-// ReadState constructs a HookState from mode-cache and session.json.
-// Falls back to molecule resolution if mode-cache is missing.
+// ReadState constructs a HookState from focus and session.json.
 // Returns nil (not error) if state cannot be determined.
 func ReadState() *HookState {
 	root, err := workspace.FindRoot(".")
@@ -167,12 +166,12 @@ func ReadState() *HookState {
 
 	hs := &HookState{}
 
-	// Read mode-cache for mode/worktree/spec
-	mc, err := state.ReadModeCache(root)
-	if err == nil && mc != nil {
-		hs.Mode = mc.Mode
-		hs.ActiveSpec = mc.ActiveSpec
-		hs.ActiveWorktree = mc.ActiveWorktree
+	// Read focus for mode/worktree/spec
+	f, err := state.ReadFocus(root)
+	if err == nil && f != nil {
+		hs.Mode = f.Mode
+		hs.ActiveSpec = f.ActiveSpec
+		hs.ActiveWorktree = f.ActiveWorktree
 	}
 
 	// Read session.json for freshness fields
@@ -183,7 +182,7 @@ func ReadState() *HookState {
 		hs.BeadClaimedAt = sess.BeadClaimedAt
 	}
 
-	// If mode-cache is missing, no useful state
+	// If focus is missing, no useful state
 	if hs.Mode == "" && hs.SessionStartedAt == "" {
 		return nil
 	}

@@ -362,7 +362,7 @@ func stubWorktreeHelpers(t *testing.T) {
 	origBranch := createBranchFn
 	origExists := branchExistsFn
 	origGitignore := ensureGitignore
-	origModeCache := readFocusFn
+	origFocus := readFocusFn
 	origWriteMC := writeFocusFn
 	t.Cleanup(func() {
 		worktreeList = origList
@@ -371,7 +371,7 @@ func stubWorktreeHelpers(t *testing.T) {
 		createBranchFn = origBranch
 		branchExistsFn = origExists
 		ensureGitignore = origGitignore
-		readFocusFn = origModeCache
+		readFocusFn = origFocus
 		writeFocusFn = origWriteMC
 	})
 
@@ -486,7 +486,7 @@ func TestEnsureWorktree_ReusesExisting(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktree_PropagatesModeCache(t *testing.T) {
+func TestEnsureWorktree_PropagatesFocus(t *testing.T) {
 	stubWorktreeHelpers(t)
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
@@ -519,10 +519,10 @@ func TestEnsureWorktree_PropagatesModeCache(t *testing.T) {
 
 	// Mode-cache should have been written to the bead worktree
 	if writtenMC == nil {
-		t.Fatal("expected mode-cache to be written to bead worktree")
+		t.Fatal("expected focus to be written to bead worktree")
 	}
 	if writtenRoot != wtPath {
-		t.Errorf("mode-cache written to %q, want %q", writtenRoot, wtPath)
+		t.Errorf("focus written to %q, want %q", writtenRoot, wtPath)
 	}
 	if writtenMC.ActiveBead != "bead-xyz" {
 		t.Errorf("ActiveBead = %q, want %q", writtenMC.ActiveBead, "bead-xyz")

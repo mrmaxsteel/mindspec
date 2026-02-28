@@ -188,10 +188,10 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// starterGitignore ensures session.json and mode-cache are gitignored in new projects.
+// starterGitignore ensures session.json and focus are gitignored in new projects.
 const starterGitignore = `# MindSpec local runtime files (not version-controlled)
 .mindspec/session.json
-.mindspec/mode-cache
+.mindspec/focus
 `
 
 // --- Starter file content ---

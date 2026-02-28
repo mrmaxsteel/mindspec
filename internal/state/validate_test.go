@@ -13,7 +13,7 @@ func TestCrossValidate_SpecMode_OK(t *testing.T) {
 	os.WriteFile(filepath.Join(tmp, "docs", "specs", "004-instruct", "spec.md"),
 		[]byte("# Spec\n\n## Approval\n\n- **Status**: DRAFT\n"), 0644)
 
-	s := &ModeCache{Mode: ModeSpec, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 0 {
@@ -30,7 +30,7 @@ func TestCrossValidate_SpecMode_PlanExistsSkippedGate(t *testing.T) {
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
-	s := &ModeCache{Mode: ModeSpec, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	found := false
@@ -50,7 +50,7 @@ func TestCrossValidate_SpecMode_AlreadyApproved(t *testing.T) {
 	os.WriteFile(filepath.Join(tmp, "docs", "specs", "004-instruct", "spec.md"),
 		[]byte("# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"), 0644)
 
-	s := &ModeCache{Mode: ModeSpec, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 1 {
@@ -64,7 +64,7 @@ func TestCrossValidate_SpecMode_AlreadyApproved(t *testing.T) {
 func TestCrossValidate_SpecMode_NoSpec(t *testing.T) {
 	tmp := t.TempDir()
 
-	s := &ModeCache{Mode: ModeSpec, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 1 {
@@ -78,7 +78,7 @@ func TestCrossValidate_SpecMode_NoSpec(t *testing.T) {
 func TestCrossValidate_SpecMode_NoActiveSpec(t *testing.T) {
 	tmp := t.TempDir()
 
-	s := &ModeCache{Mode: ModeSpec, ActiveSpec: ""}
+	s := &Focus{Mode: ModeSpec, ActiveSpec: ""}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 1 {
@@ -98,7 +98,7 @@ func TestCrossValidate_PlanMode_OK(t *testing.T) {
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
-	s := &ModeCache{Mode: ModePlan, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModePlan, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 0 {
@@ -115,7 +115,7 @@ func TestCrossValidate_PlanMode_SpecNotApproved(t *testing.T) {
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
-	s := &ModeCache{Mode: ModePlan, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModePlan, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 1 {
@@ -130,7 +130,7 @@ func TestCrossValidate_PlanMode_NoPlan(t *testing.T) {
 	os.WriteFile(filepath.Join(specDir, "spec.md"),
 		[]byte("# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"), 0644)
 
-	s := &ModeCache{Mode: ModePlan, ActiveSpec: "004-instruct"}
+	s := &Focus{Mode: ModePlan, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 1 {
@@ -141,7 +141,7 @@ func TestCrossValidate_PlanMode_NoPlan(t *testing.T) {
 func TestCrossValidate_ImplementMode_NoBead(t *testing.T) {
 	tmp := t.TempDir()
 
-	s := &ModeCache{Mode: ModeImplement, ActiveSpec: "004-instruct", ActiveBead: ""}
+	s := &Focus{Mode: ModeImplement, ActiveSpec: "004-instruct", ActiveBead: ""}
 	warnings := CrossValidate(tmp, s)
 
 	hasBeadWarning := false
@@ -158,7 +158,7 @@ func TestCrossValidate_ImplementMode_NoBead(t *testing.T) {
 func TestCrossValidate_IdleMode(t *testing.T) {
 	tmp := t.TempDir()
 
-	s := &ModeCache{Mode: ModeIdle}
+	s := &Focus{Mode: ModeIdle}
 	warnings := CrossValidate(tmp, s)
 
 	if len(warnings) != 0 {

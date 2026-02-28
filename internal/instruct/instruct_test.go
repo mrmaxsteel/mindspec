@@ -61,7 +61,7 @@ func setupTestProject(t *testing.T) string {
 func TestRender_IdleMode(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeIdle}
+	s := &state.Focus{Mode: state.ModeIdle}
 	ctx := BuildContext(root, s)
 
 	output, err := Render(ctx)
@@ -83,7 +83,7 @@ func TestRender_IdleMode(t *testing.T) {
 func TestRender_SpecMode(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
+	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
 
 	output, err := Render(ctx)
@@ -111,7 +111,7 @@ func TestRender_SpecMode(t *testing.T) {
 func TestRender_PlanMode(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
+	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
 
 	output, err := Render(ctx)
@@ -144,7 +144,7 @@ func TestRender_PlanMode(t *testing.T) {
 func TestRender_ImplementMode(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
+	s := &state.Focus{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
 	ctx := BuildContext(root, s)
 
 	output, err := Render(ctx)
@@ -172,7 +172,7 @@ func TestRender_ImplementMode(t *testing.T) {
 func TestRender_SpecGoalExtracted(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
+	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
 
 	if !strings.Contains(ctx.SpecGoal, "Replace static files") {
@@ -184,7 +184,7 @@ func TestRender_Warnings(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	// Spec mode but spec is already approved → should produce drift warning
-	s := &state.ModeCache{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
+	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
 
 	if len(ctx.Warnings) == 0 {
@@ -204,7 +204,7 @@ func TestRender_Warnings(t *testing.T) {
 func TestRenderJSON_Structure(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
+	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
 
 	output, err := RenderJSON(ctx)
@@ -237,7 +237,7 @@ func TestRenderJSON_Structure(t *testing.T) {
 func TestRender_ExploreMode(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeExplore}
+	s := &state.Focus{Mode: state.ModeExplore}
 	ctx := BuildContext(root, s)
 
 	output, err := Render(ctx)
@@ -266,7 +266,7 @@ func TestRenderJSON_AllModes(t *testing.T) {
 	modes := []string{state.ModeIdle, state.ModeExplore, state.ModeSpec, state.ModePlan, state.ModeImplement}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
-			s := &state.ModeCache{Mode: mode, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
+			s := &state.Focus{Mode: mode, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
 			ctx := BuildContext(root, s)
 
 			output, err := RenderJSON(ctx)
@@ -344,7 +344,7 @@ func TestCapturePrime_Unavailable(t *testing.T) {
 func TestBuildContext_PopulatesBeadsContext(t *testing.T) {
 	mockPrimeAvailable(t, "# Beads Workflow Context")
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeIdle}
+	s := &state.Focus{Mode: state.ModeIdle}
 	ctx := BuildContext(root, s)
 
 	if !strings.Contains(ctx.BeadsContext, "Beads Workflow Context") {
@@ -362,7 +362,7 @@ func TestBuildContext_PopulatesBeadsContext(t *testing.T) {
 func TestBuildContext_WarnsWhenPrimeUnavailable(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
-	s := &state.ModeCache{Mode: state.ModeIdle}
+	s := &state.Focus{Mode: state.ModeIdle}
 	ctx := BuildContext(root, s)
 
 	if ctx.BeadsContext != "" {

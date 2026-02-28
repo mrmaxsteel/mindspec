@@ -15,13 +15,13 @@ import (
 var stateCmd = &cobra.Command{
 	Use:   "state",
 	Short: "Manage MindSpec workflow state",
-	Long:  `Read and write the mode-cache that tracks current mode and active work.`,
+	Long:  `Read and write the focus cursor that tracks current mode and active work.`,
 }
 
 var stateSetCmd = &cobra.Command{
 	Use:   "set",
 	Short: "Set the current mode and active work",
-	Long:  `Update the mode-cache with the current mode, active spec, and active bead.`,
+	Long:  `Update the focus cursor with the current mode, active spec, and active bead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		mode, _ := cmd.Flags().GetString("mode")
 		spec, _ := cmd.Flags().GetString("spec")
@@ -92,7 +92,7 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return ambErr
 			}
-			// Fall back to mode-cache
+			// Fall back to focus
 			mc, err := state.ReadFocus(root)
 			if err != nil {
 				return fmt.Errorf("no active state: %w", err)

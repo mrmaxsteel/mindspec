@@ -50,9 +50,6 @@ type Focus struct {
 	Timestamp      string `json:"timestamp"`
 }
 
-// ModeCache is a backward-compatible alias for Focus.
-// Deprecated: use Focus instead.
-type ModeCache = Focus
 
 // ReadSession loads the session from .mindspec/session.json under root.
 // Returns a zero Session (no error) if the file does not exist.
@@ -123,17 +120,10 @@ func WriteLifecycle(specDir string, lc *Lifecycle) error {
 }
 
 // ReadFocus loads the focus cursor from .mindspec/focus under root.
-// Falls back to .mindspec/mode-cache for backward compatibility.
-// Returns nil (no error) if neither file exists.
+// Returns nil (no error) if the file does not exist.
 func ReadFocus(root string) (*Focus, error) {
-	// Try new path first.
 	path := workspace.FocusPath(root)
 	data, err := os.ReadFile(path)
-	if err != nil && os.IsNotExist(err) {
-		// Fall back to legacy path.
-		path = workspace.ModeCachePath(root)
-		data, err = os.ReadFile(path)
-	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -166,13 +156,6 @@ func WriteFocus(root string, f *Focus) error {
 	return os.WriteFile(workspace.FocusPath(root), data, 0644)
 }
 
-// ReadModeCache is a backward-compatible alias for ReadFocus.
-// Deprecated: use ReadFocus instead.
-func ReadModeCache(root string) (*Focus, error) { return ReadFocus(root) }
-
-// WriteModeCache is a backward-compatible alias for WriteFocus.
-// Deprecated: use WriteFocus instead.
-func WriteModeCache(root string, mc *Focus) error { return WriteFocus(root, mc) }
 
 // SpecBranch returns the canonical branch name for a spec.
 func SpecBranch(specID string) string { return "spec/" + specID }

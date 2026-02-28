@@ -43,8 +43,8 @@ func Run(root, specID string, force bool) (*Result, error) {
 		return forceCleanup(result, specWtName, specBranch)
 	}
 
-	// If mode-cache still has activeSpec matching, check mode.
-	mc, _ := state.ReadModeCache(root)
+	// If focus still has activeSpec matching, check mode.
+	mc, _ := state.ReadFocus(root)
 	if mc != nil && mc.ActiveSpec == specID && mc.Mode != state.ModeIdle {
 		return nil, fmt.Errorf("spec %s is still active (mode: %s). Run `mindspec approve impl %s` first", specID, mc.Mode, specID)
 	}
