@@ -165,6 +165,9 @@ This is the final human gate in the spec lifecycle.`,
 				fmt.Printf("  PR:       %s\n", result.PRURL)
 				if result.PRMerged {
 					fmt.Printf("  Status:   merged\n")
+				} else {
+					fmt.Printf("\nACTION REQUIRED: Fill in the PR template at %s\n", result.PRURL)
+					fmt.Printf("  Update the Summary, Spec, Changes, and Test plan sections.\n")
 				}
 			}
 			if result.DiffStat != "" {
