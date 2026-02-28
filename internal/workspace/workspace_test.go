@@ -258,6 +258,46 @@ func TestRecordingDir_UsesSpecDir(t *testing.T) {
 	}
 }
 
+func TestEffectiveSpecRoot_WorktreeExists(t *testing.T) {
+	mainRepo := t.TempDir()
+
+	// Create worktree directory with .mindspec marker
+	wtDir := filepath.Join(mainRepo, ".worktrees", "worktree-spec-044-launch-website")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := EffectiveSpecRoot(mainRepo, "044-launch-website")
+	if got != wtDir {
+		t.Errorf("EffectiveSpecRoot with worktree: got %q, want %q", got, wtDir)
+	}
+}
+
+func TestEffectiveSpecRoot_NoWorktree(t *testing.T) {
+	mainRepo := t.TempDir()
+
+	// No worktree exists — should fall back to mainRoot
+	got := EffectiveSpecRoot(mainRepo, "044-launch-website")
+	if got != mainRepo {
+		t.Errorf("EffectiveSpecRoot without worktree: got %q, want %q", got, mainRepo)
+	}
+}
+
+func TestEffectiveSpecRoot_WorktreeDirExistsButNoMindspec(t *testing.T) {
+	mainRepo := t.TempDir()
+
+	// Worktree directory exists but without .mindspec marker
+	wtDir := filepath.Join(mainRepo, ".worktrees", "worktree-spec-044-launch-website")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := EffectiveSpecRoot(mainRepo, "044-launch-website")
+	if got != mainRepo {
+		t.Errorf("EffectiveSpecRoot with dir but no .mindspec: got %q, want %q", got, mainRepo)
+	}
+}
+
 func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	root := "/project"
 	if got := CanonicalDocsDir(root); got != filepath.Join(root, ".mindspec", "docs") {
