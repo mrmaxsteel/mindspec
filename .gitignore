@@ -29,9 +29,6 @@ ENV/
 *.swp
 *.swo
 
-# Worktrees
-worktree-*/
-
 # Go
 bin/
 /mindspec
@@ -43,19 +40,6 @@ Thumbs.db
 
 # beads git submodule
 beads/
+
 # mindspec worktrees
 .worktrees/
-.worktrees/worktree-mindspec-u7mk/
-worktree-mindspec-u7mk/
-# bd worktree
-.worktrees/worktree-mindspec-mol-41m89.1/
-# bd worktree
-.worktrees/worktree-spec-050-lifecycle-autocommit/
-# bd worktree
-.worktrees/worktree-mindspec-mol-a4bf4.1/
-# bd worktree
-.worktrees/worktree-spec-051-worktree-state-propagation/
-# bd worktree
-.worktrees/worktree-mindspec-mol-wrx3o.1/
-# bd worktree
-.worktrees/worktree-spec-052-session-freshness-gate/

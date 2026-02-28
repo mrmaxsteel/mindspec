@@ -83,7 +83,7 @@
       {
         "hooks": [
           {
-            "command": "mindspec state clear-flag 2\u003e/dev/null; mindspec instruct 2\u003e/dev/null || echo 'mindspec instruct unavailable — run make build'",
+            "command": "source=$(cat | jq -r '.source // \"unknown\"'); mindspec state write-session --source=\"$source\" 2\u003e/dev/null; mindspec instruct 2\u003e/dev/null || echo 'mindspec instruct unavailable — run make build'",
             "statusMessage": "Loading mode guidance...",
             "type": "command"
           }
