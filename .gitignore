@@ -42,5 +42,3 @@ beads/
 
 # mindspec worktrees
 .worktrees/
-# bd worktree
-.worktrees/worktree-spec-055-lifecycle-test-suite/
