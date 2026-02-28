@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrNoRoot is returned when no project root marker is found.
@@ -11,6 +12,8 @@ var ErrNoRoot = errors.New("no mindspec project root found (looked for .mindspec
 
 // FindRoot walks up from startDir looking for .mindspec/ or .git at each level.
 // It checks .mindspec/ first, then .git, to identify the project root.
+// If the candidate is a git worktree (.git is a file, not a directory),
+// it resolves to the main repository root instead.
 func FindRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
@@ -18,10 +21,10 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if exists(filepath.Join(dir, ".mindspec")) {
-			return dir, nil
-		}
-		if exists(filepath.Join(dir, ".git")) {
+		if exists(filepath.Join(dir, ".mindspec")) || exists(filepath.Join(dir, ".git")) {
+			if resolved := resolveWorktreeRoot(dir); resolved != "" {
+				return resolved, nil
+			}
 			return dir, nil
 		}
 
@@ -33,6 +36,52 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	return "", ErrNoRoot
+}
+
+// resolveWorktreeRoot checks if dir is a git worktree and returns the main
+// repo root. Git worktrees have a .git file (not directory) containing
+// "gitdir: <path>". The linked gitdir contains a "commondir" file pointing
+// back to the main .git directory, whose parent is the main repo root.
+// Returns "" if dir is not a worktree or resolution fails.
+func resolveWorktreeRoot(dir string) string {
+	gitPath := filepath.Join(dir, ".git")
+	fi, err := os.Lstat(gitPath)
+	if err != nil || fi.IsDir() {
+		return "" // real repo or no .git — not a worktree
+	}
+
+	// .git is a file → parse "gitdir: <path>"
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(content, "gitdir: ") {
+		return ""
+	}
+	gitdir := strings.TrimPrefix(content, "gitdir: ")
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(dir, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+
+	// Read commondir to find the shared .git directory
+	commondirData, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return ""
+	}
+	commondir := strings.TrimSpace(string(commondirData))
+	if !filepath.IsAbs(commondir) {
+		commondir = filepath.Join(gitdir, commondir)
+	}
+	commondir = filepath.Clean(commondir)
+
+	// commondir is the main .git directory; its parent is the main repo root
+	mainRoot := filepath.Dir(commondir)
+	if exists(filepath.Join(mainRoot, ".mindspec")) || exists(filepath.Join(mainRoot, ".git")) {
+		return mainRoot
+	}
+	return ""
 }
 
 // DocsDir returns the path to the docs directory under root.

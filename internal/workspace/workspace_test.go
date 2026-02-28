@@ -76,6 +76,81 @@ func TestFindRoot_MindspecDirPriority(t *testing.T) {
 	}
 }
 
+func TestFindRoot_WorktreeResolvesToMainRepo(t *testing.T) {
+	// Simulate a git worktree inside the main repo:
+	// mainRepo/.mindspec/  mainRepo/.git/worktrees/wt-033/  (directory)
+	// mainRepo/.worktrees/wt-033/.mindspec/
+	// mainRepo/.worktrees/wt-033/.git  (file → gitdir: ../../.git/worktrees/wt-033)
+	mainRepo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(mainRepo, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Main repo .git directory with worktrees subdir
+	wtGitDir := filepath.Join(mainRepo, ".git", "worktrees", "wt-033")
+	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// commondir file inside the worktree's gitdir
+	if err := os.WriteFile(filepath.Join(wtGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Worktree directory with .mindspec/ and .git file
+	wtDir := filepath.Join(mainRepo, ".worktrees", "wt-033")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitFileContent := "gitdir: " + wtGitDir + "\n"
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte(gitFileContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// FindRoot from inside the worktree should resolve to mainRepo
+	root, err := FindRoot(wtDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if root != mainRepo {
+		t.Errorf("expected root %q (main repo), got %q (worktree)", mainRepo, root)
+	}
+}
+
+func TestFindRoot_WorktreeNestedSubdir(t *testing.T) {
+	// FindRoot from a subdirectory inside a worktree should still resolve to main repo
+	mainRepo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(mainRepo, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtGitDir := filepath.Join(mainRepo, ".git", "worktrees", "wt-x")
+	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "commondir"), []byte("../.."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wtDir := filepath.Join(mainRepo, ".worktrees", "wt-x")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte("gitdir: "+wtGitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nested := filepath.Join(wtDir, "internal", "pkg")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := FindRoot(nested)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if root != mainRepo {
+		t.Errorf("expected root %q (main repo), got %q", mainRepo, root)
+	}
+}
+
 func TestFindRoot_NoMarker(t *testing.T) {
 	tmp := t.TempDir()
 	nested := filepath.Join(tmp, "isolated")
