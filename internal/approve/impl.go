@@ -30,7 +30,6 @@ var (
 	createPRFn          = gitops.CreatePR
 	diffStatFn          = gitops.DiffStat
 	commitCountFn       = gitops.CommitCount
-	commitLogFn         = gitops.CommitLog
 	prStatusFn          = gitops.PRStatus
 	prChecksWatchFn     = gitops.PRChecksWatch
 	mergePRFn           = gitops.MergePR
@@ -196,8 +195,7 @@ func mergeSpecToMain(root, specBranch, specID string, cfg *config.Config, result
 			return fmt.Errorf("pushing spec branch: %w", err)
 		}
 		title := fmt.Sprintf("[SPEC %s] Merge spec branch to main", specID)
-		body := buildPRBody(root, specID, specBranch, result)
-		prURL, err := createPRFn(specBranch, "main", title, body)
+		prURL, err := createPRFn(specBranch, "main", title, "")
 		if err != nil {
 			return fmt.Errorf("creating PR: %w", err)
 		}
@@ -308,49 +306,6 @@ func readPlanBeadIDs(planPath string) ([]string, error) {
 		return nil, fmt.Errorf("no bead_ids in plan frontmatter")
 	}
 	return fm.BeadIDs, nil
-}
-
-// buildPRBody generates a PR description following the repo's PR template.
-func buildPRBody(root, specID, specBranch string, result *ImplResult) string {
-	var b strings.Builder
-
-	b.WriteString("## Summary\n\n")
-	b.WriteString(fmt.Sprintf("Merge spec branch `%s` to main, completing the %s lifecycle.\n\n", specBranch, specID))
-
-	b.WriteString("## Spec\n\n")
-	b.WriteString(fmt.Sprintf("- Spec ID: %s\n", specID))
-
-	// Read bead IDs from plan frontmatter (best-effort).
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
-	if beadIDs, err := readPlanBeadIDs(planPath); err == nil && len(beadIDs) > 0 {
-		b.WriteString(fmt.Sprintf("- Beads: %s\n", strings.Join(beadIDs, ", ")))
-	}
-	b.WriteString("\n")
-
-	b.WriteString("## Changes\n\n")
-	if result.CommitCount > 0 {
-		b.WriteString(fmt.Sprintf("%d commit(s) on `%s`:\n\n", result.CommitCount, specBranch))
-	}
-	if log, err := commitLogFn(root, "main", specBranch); err == nil && log != "" {
-		b.WriteString("```\n")
-		b.WriteString(log)
-		b.WriteString("\n```\n\n")
-	}
-	if result.DiffStat != "" {
-		b.WriteString("```\n")
-		b.WriteString(result.DiffStat)
-		b.WriteString("\n```\n\n")
-	}
-
-	b.WriteString("## Test plan\n\n")
-	b.WriteString("- [ ] `make build` passes\n")
-	b.WriteString("- [ ] `make test` passes\n")
-	b.WriteString("- [ ] CI green\n\n")
-
-	b.WriteString("## Rollback plan\n\n")
-	b.WriteString("Revert this PR.\n")
-
-	return b.String()
 }
 
 func isAlreadyClosedErr(err error) bool {

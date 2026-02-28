@@ -112,17 +112,24 @@ func PushBranch(branch string) error {
 }
 
 // CreatePR creates a pull request using gh CLI.
+// If body is empty, uses the repo's PR template via --template flag.
 // Returns the PR URL on success.
 func CreatePR(branch, base, title, body string) (string, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", fmt.Errorf("gh CLI not found — install it to create PRs, or use merge_strategy: direct")
 	}
 
-	cmd := execCommand("gh", "pr", "create",
+	args := []string{"pr", "create",
 		"--head", branch,
 		"--base", base,
 		"--title", title,
-		"--body", body)
+	}
+	if body != "" {
+		args = append(args, "--body", body)
+	} else {
+		args = append(args, "--template", "pull_request_template.md")
+	}
+	cmd := execCommand("gh", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("creating PR: %s", strings.TrimSpace(string(out)))
@@ -182,16 +189,6 @@ func CommitCount(workdir, base, head string) (int, error) {
 		return 0, fmt.Errorf("parsing commit count: %w", err)
 	}
 	return count, nil
-}
-
-// CommitLog returns a short oneline log of commits between base and head.
-func CommitLog(workdir, base, head string) (string, error) {
-	cmd := execCommand("git", "-C", workdir, "log", "--oneline", base+".."+head)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("commit log %s..%s: %w", base, head, err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // PRStatus returns the status of a PR by URL (e.g. "open", "merged", "closed").
