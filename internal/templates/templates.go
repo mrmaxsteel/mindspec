@@ -18,6 +18,10 @@ func Plan() string {
 	return planTemplate
 }
 
+// SpecLifecycleFormula returns an empty string.
+// Deprecated: spec lifecycle formulas are no longer used (Spec 054).
+func SpecLifecycleFormula() string { return "" }
+
 // ADR returns the built-in ADR template.
 func ADR() string {
 	return adrTemplate

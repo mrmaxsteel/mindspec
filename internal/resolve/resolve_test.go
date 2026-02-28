@@ -1,227 +1,155 @@
 package resolve
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-// stepMapping returns a standard test step mapping.
-func testStepMapping() map[string]string {
-	return map[string]string{
-		"spec":         "step-spec",
-		"spec-approve": "step-spec-approve",
-		"plan":         "step-plan",
-		"plan-approve": "step-plan-approve",
-		"implement":    "step-implement",
-		"review":       "step-review",
+func TestActiveSpecs_ScansLifecycle(t *testing.T) {
+	root := t.TempDir()
+	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
+
+	// Spec in implement phase — active
+	specA := filepath.Join(specsDir, "038-alpha")
+	os.MkdirAll(specA, 0755)
+	state.WriteLifecycle(specA, &state.Lifecycle{Phase: state.ModeImplement, EpicID: "epic-a"})
+
+	// Spec in spec phase — active
+	specB := filepath.Join(specsDir, "039-beta")
+	os.MkdirAll(specB, 0755)
+	state.WriteLifecycle(specB, &state.Lifecycle{Phase: state.ModeSpec})
+
+	// Spec in idle phase — NOT active
+	specC := filepath.Join(specsDir, "040-gamma")
+	os.MkdirAll(specC, 0755)
+	state.WriteLifecycle(specC, &state.Lifecycle{Phase: state.ModeIdle})
+
+	// Spec done — NOT active
+	specD := filepath.Join(specsDir, "041-delta")
+	os.MkdirAll(specD, 0755)
+	state.WriteLifecycle(specD, &state.Lifecycle{Phase: "done"})
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
+	}
+
+	if len(active) != 2 {
+		t.Fatalf("expected 2 active specs, got %d: %+v", len(active), active)
+	}
+
+	// Should be sorted by spec ID
+	if active[0].SpecID != "038-alpha" {
+		t.Errorf("first active spec: got %q, want %q", active[0].SpecID, "038-alpha")
+	}
+	if active[0].Mode != state.ModeImplement {
+		t.Errorf("first active mode: got %q, want %q", active[0].Mode, state.ModeImplement)
+	}
+	if active[1].SpecID != "039-beta" {
+		t.Errorf("second active spec: got %q, want %q", active[1].SpecID, "039-beta")
 	}
 }
 
-func TestDeriveMode_SpecPhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "in_progress",
-		"step-spec-approve": "open",
-		"step-plan":         "open",
-		"step-plan-approve": "open",
-		"step-implement":    "open",
-		"step-review":       "open",
+func TestActiveSpecs_NoLifecycle(t *testing.T) {
+	root := t.TempDir()
+	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
+
+	// Spec directory with no lifecycle.yaml — should be skipped
+	os.MkdirAll(filepath.Join(specsDir, "005-legacy"), 0755)
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModeSpec {
-		t.Errorf("deriveMode() = %q, want %q", got, state.ModeSpec)
+	if len(active) != 0 {
+		t.Errorf("expected 0 active specs, got %d", len(active))
 	}
 }
 
-func TestDeriveMode_SpecApprovePhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "open",
-		"step-plan":         "open",
-		"step-plan-approve": "open",
-		"step-implement":    "open",
-		"step-review":       "open",
+func TestActiveSpecs_EmptyPhase(t *testing.T) {
+	root := t.TempDir()
+	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
+
+	// Spec with empty phase — NOT active
+	specDir := filepath.Join(specsDir, "042-empty")
+	os.MkdirAll(specDir, 0755)
+	state.WriteLifecycle(specDir, &state.Lifecycle{Phase: ""})
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModeSpec {
-		t.Errorf("deriveMode() = %q, want %q (spec-approve → spec mode)", got, state.ModeSpec)
+	if len(active) != 0 {
+		t.Errorf("expected 0 active specs for empty phase, got %d", len(active))
 	}
 }
 
-func TestDeriveMode_PlanPhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "in_progress",
-		"step-plan-approve": "open",
-		"step-implement":    "open",
-		"step-review":       "open",
+func TestActiveSpecs_AllPhases(t *testing.T) {
+	root := t.TempDir()
+	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
+
+	tests := []struct {
+		specID   string
+		phase    string
+		wantActive bool
+	}{
+		{"001-explore", state.ModeExplore, true},
+		{"002-spec", state.ModeSpec, true},
+		{"003-plan", state.ModePlan, true},
+		{"004-implement", state.ModeImplement, true},
+		{"005-review", state.ModeReview, true},
+		{"006-idle", state.ModeIdle, false},
+		{"007-done", "done", false},
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModePlan {
-		t.Errorf("deriveMode() = %q, want %q", got, state.ModePlan)
+
+	for _, tt := range tests {
+		specDir := filepath.Join(specsDir, tt.specID)
+		os.MkdirAll(specDir, 0755)
+		state.WriteLifecycle(specDir, &state.Lifecycle{Phase: tt.phase})
+	}
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
+	}
+
+	activeSet := make(map[string]bool)
+	for _, a := range active {
+		activeSet[a.SpecID] = true
+	}
+
+	for _, tt := range tests {
+		got := activeSet[tt.specID]
+		if got != tt.wantActive {
+			t.Errorf("spec %s (phase=%s): active=%v, want %v", tt.specID, tt.phase, got, tt.wantActive)
+		}
 	}
 }
 
-func TestDeriveMode_PlanApprovePhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "open",
-		"step-implement":    "open",
-		"step-review":       "open",
-	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModePlan {
-		t.Errorf("deriveMode() = %q, want %q (plan-approve → plan mode)", got, state.ModePlan)
-	}
-}
+func TestActiveSpecs_SortOrder(t *testing.T) {
+	root := t.TempDir()
+	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
-func TestDeriveMode_ImplementPhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "closed",
-		"step-implement":    "in_progress",
-		"step-review":       "open",
+	// Create in reverse order
+	for _, id := range []string{"039-beta", "040-gamma", "038-alpha"} {
+		specDir := filepath.Join(specsDir, id)
+		os.MkdirAll(specDir, 0755)
+		state.WriteLifecycle(specDir, &state.Lifecycle{Phase: state.ModeSpec})
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModeImplement {
-		t.Errorf("deriveMode() = %q, want %q", got, state.ModeImplement)
-	}
-}
 
-func TestDeriveMode_ReviewPhase(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "closed",
-		"step-implement":    "closed",
-		"step-review":       "open",
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModeReview {
-		t.Errorf("deriveMode() = %q, want %q", got, state.ModeReview)
-	}
-}
 
-func TestDeriveMode_AllClosed(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "closed",
-		"step-implement":    "closed",
-		"step-review":       "closed",
+	if len(active) != 3 {
+		t.Fatalf("expected 3, got %d", len(active))
 	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModeIdle {
-		t.Errorf("deriveMode() = %q, want %q (all closed → idle)", got, state.ModeIdle)
-	}
-}
-
-func TestDeriveMode_EmptyMapping(t *testing.T) {
-	got := deriveMode(nil, map[string]string{"some-id": "open"})
-	if got != state.ModeIdle {
-		t.Errorf("deriveMode() with nil mapping = %q, want %q", got, state.ModeIdle)
-	}
-}
-
-func TestDeriveMode_PartialMapping(t *testing.T) {
-	// Only spec and plan steps mapped, implement/review missing
-	mapping := map[string]string{
-		"spec": "step-spec",
-		"plan": "step-plan",
-	}
-	statuses := map[string]string{
-		"step-spec": "closed",
-		"step-plan": "in_progress",
-	}
-	got := deriveMode(mapping, statuses)
-	if got != state.ModePlan {
-		t.Errorf("deriveMode() = %q, want %q", got, state.ModePlan)
-	}
-}
-
-func TestIsActive_NoStepMapping(t *testing.T) {
-	// No step mapping, some non-closed statuses → active
-	statuses := map[string]string{
-		"root":   "in_progress",
-		"step-1": "open",
-	}
-	got := isActive(nil, statuses)
-	if !got {
-		t.Error("isActive() = false, want true (non-closed steps exist)")
-	}
-}
-
-func TestIsActive_AllClosed_NoMapping(t *testing.T) {
-	statuses := map[string]string{
-		"root":   "closed",
-		"step-1": "closed",
-	}
-	got := isActive(nil, statuses)
-	if got {
-		t.Error("isActive() = true, want false (all closed)")
-	}
-}
-
-func TestIsActive_ReviewClosed(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "closed",
-		"step-implement":    "closed",
-		"step-review":       "closed",
-	}
-	got := isActive(mapping, statuses)
-	if got {
-		t.Error("isActive() = true, want false (review closed → lifecycle complete)")
-	}
-}
-
-func TestIsActive_ImplementInProgress(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "closed",
-		"step-spec-approve": "closed",
-		"step-plan":         "closed",
-		"step-plan-approve": "closed",
-		"step-implement":    "in_progress",
-		"step-review":       "open",
-	}
-	got := isActive(mapping, statuses)
-	if !got {
-		t.Error("isActive() = false, want true (implement in_progress)")
-	}
-}
-
-func TestIsActive_SpecOpen(t *testing.T) {
-	mapping := testStepMapping()
-	statuses := map[string]string{
-		"step-spec":         "open",
-		"step-spec-approve": "open",
-		"step-plan":         "open",
-		"step-plan-approve": "open",
-		"step-implement":    "open",
-		"step-review":       "open",
-	}
-	got := isActive(mapping, statuses)
-	if !got {
-		t.Error("isActive() = false, want true (all open)")
+	if active[0].SpecID != "038-alpha" || active[1].SpecID != "039-beta" || active[2].SpecID != "040-gamma" {
+		t.Errorf("not sorted: %v", active)
 	}
 }
 
@@ -229,6 +157,17 @@ func TestFormatActiveList_Empty(t *testing.T) {
 	got := FormatActiveList(nil)
 	if got != "No active specs found.\n" {
 		t.Errorf("FormatActiveList(nil) = %q", got)
+	}
+}
+
+func TestFormatActiveList_Multiple(t *testing.T) {
+	specs := []SpecStatus{
+		{SpecID: "001-alpha", Mode: "spec"},
+		{SpecID: "002-beta", Mode: "plan"},
+	}
+	got := FormatActiveList(specs)
+	if got == "No active specs found.\n" {
+		t.Error("expected non-empty list")
 	}
 }
 
@@ -244,16 +183,5 @@ func TestResolveWorktree(t *testing.T) {
 	want := filepath.Join("/project", ".worktrees", "worktree-spec-053-drop-state-json")
 	if got != want {
 		t.Errorf("ResolveWorktree() = %q, want %q", got, want)
-	}
-}
-
-func TestFormatActiveList_Multiple(t *testing.T) {
-	specs := []SpecStatus{
-		{SpecID: "001-alpha", Mode: "spec", MoleculeID: "mol-1"},
-		{SpecID: "002-beta", Mode: "plan", MoleculeID: "mol-2"},
-	}
-	got := FormatActiveList(specs)
-	if got == "No active specs found.\n" {
-		t.Error("expected non-empty list")
 	}
 }

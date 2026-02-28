@@ -3,14 +3,16 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/gitops"
+	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/resolve"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -24,8 +26,7 @@ var (
 	mergeBranchFn       = gitops.MergeBranch
 	deleteBranchFn      = gitops.DeleteBranch
 	resolveTargetFn     = resolve.ResolveTarget
-	resolveActiveBeadFn = resolve.ResolveActiveBead
-	ensureFullyBoundFn  = specmeta.EnsureFullyBound
+	resolveActiveBeadFn = next.ResolveActiveBead
 )
 
 // Result summarizes what mindspec complete did.
@@ -189,23 +190,19 @@ func advanceState(root, specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// Read step mapping from spec frontmatter
-	meta, err := ensureFullyBoundFn(root, specID)
-	if err != nil || meta == nil {
+	// Read epic_id from lifecycle.yaml
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+	if _, err := os.Stat(specDir); err != nil {
+		specDir = filepath.Join(root, "docs", "specs", specID)
+	}
+
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil || lc.EpicID == "" {
 		return state.ModeIdle, ""
 	}
 
-	// Use the implement step ID (not the top-level molecule) as parent.
-	implStepID := meta.StepMapping["implement"]
-	if implStepID == "" {
-		implStepID = meta.MoleculeID
-	}
-	if implStepID == "" {
-		return state.ModeIdle, ""
-	}
-
-	// Check for ready children under the implement step
-	out, err := runBDFn("ready", "--parent", implStepID, "--json")
+	// Check for ready children under the epic
+	out, err := runBDFn("ready", "--parent", lc.EpicID, "--json")
 	if err == nil {
 		var ready []bead.BeadInfo
 		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {

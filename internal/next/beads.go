@@ -141,6 +141,49 @@ func filterReadyItems(items []BeadInfo) []BeadInfo {
 	return filtered
 }
 
+// ResolveActiveBead finds the currently in-progress bead for a spec by reading
+// the epic_id from lifecycle.yaml and querying bd for in-progress children.
+// Returns empty string (no error) if no bead is in progress.
+func ResolveActiveBead(root, specID string) (string, error) {
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+	if _, err := os.Stat(specDir); err != nil {
+		// Try legacy docs path
+		specDir = filepath.Join(root, "docs", "specs", specID)
+	}
+
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil {
+		return "", fmt.Errorf("reading lifecycle for %s: %w", specID, err)
+	}
+	if lc == nil || lc.EpicID == "" {
+		return "", nil
+	}
+
+	out, err := runBDFn("list", "--parent", lc.EpicID, "--status=in_progress", "--json")
+	if err != nil {
+		return "", nil // No in-progress beads
+	}
+
+	// Parse directly — don't use filterReadyItems which excludes in_progress status
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return "", nil
+	}
+
+	var items []BeadInfo
+	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+		return "", nil
+	}
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id != "" && !strings.EqualFold(strings.TrimSpace(item.IssueType), "epic") {
+			return id, nil
+		}
+	}
+
+	return "", nil
+}
+
 // ClaimBead marks a bead as in_progress via bd update.
 func ClaimBead(id string) error {
 	_, err := runBDCombFn("update", id, "--status=in_progress")
