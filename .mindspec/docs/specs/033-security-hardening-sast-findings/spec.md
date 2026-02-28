@@ -1,3 +1,8 @@
+---
+approved_at: "2026-02-28T08:21:00Z"
+approved_by: user
+status: Approved
+---
 # Spec 033-security-hardening-sast-findings: Security Hardening for SAST Findings
 
 ## Goal
@@ -80,7 +85,7 @@ These findings impact the default "local-first" trust model and create avoidable
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: —
-- **Approval Date**: —
-- **Notes**: —
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-02-28
+- **Notes**: Approved via mindspec approve spec
