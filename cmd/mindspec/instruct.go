@@ -65,7 +65,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			}
 			mc = cached
 		} else {
-			// Derive mode from molecule
+			// Derive mode from lifecycle
 			mode, modeErr := resolve.ResolveMode(root, specID)
 			cached, _ := state.ReadFocus(root)
 			if modeErr != nil {

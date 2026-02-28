@@ -12,29 +12,29 @@ import (
 var beadCmd = &cobra.Command{
 	Use:   "bead",
 	Short: "Beads integration commands for worktree management and workset hygiene",
-	Long:  `Manage worktrees and audit workset hygiene. Spec and plan beads are now created automatically via formulas (see mindspec spec-init).`,
+	Long:  `Manage worktrees and audit workset hygiene. Implementation beads are created via 'mindspec approve plan'.`,
 }
 
 var beadSpecCmd = &cobra.Command{
 	Use:        "spec [spec-id]",
-	Short:      "Deprecated: spec beads are created via formula on spec-init",
-	Deprecated: "use 'mindspec spec-init' which creates a molecule via bd mol pour",
+	Short:      "Deprecated: lifecycle managed via lifecycle.yaml (ADR-0020)",
+	Deprecated: "use 'mindspec spec-init' which creates a lifecycle epic and lifecycle.yaml",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "Spec beads are now created automatically by 'mindspec spec-init' via the spec-lifecycle formula.")
-		fmt.Fprintln(os.Stderr, "To create a molecule manually: bd mol pour spec-lifecycle --var spec_id=<id>")
+		fmt.Fprintln(os.Stderr, "Lifecycle state is now managed via per-spec lifecycle.yaml (ADR-0020).")
+		fmt.Fprintln(os.Stderr, "Use 'mindspec spec-init' to create a new spec with lifecycle tracking.")
 		return nil
 	},
 }
 
 var beadPlanCmd = &cobra.Command{
 	Use:        "plan [spec-id]",
-	Short:      "Deprecated: plan beads are created via formula on spec-init",
-	Deprecated: "use 'mindspec spec-init' which creates the full lifecycle via bd mol pour",
+	Short:      "Deprecated: lifecycle managed via lifecycle.yaml (ADR-0020)",
+	Deprecated: "use 'mindspec approve plan' which creates implementation beads",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "Plan beads are now created automatically by 'mindspec spec-init' via the spec-lifecycle formula.")
-		fmt.Fprintln(os.Stderr, "To create a molecule manually: bd mol pour spec-lifecycle --var spec_id=<id>")
+		fmt.Fprintln(os.Stderr, "Implementation beads are created automatically by 'mindspec approve plan'.")
+		fmt.Fprintln(os.Stderr, "Use 'mindspec bead create-from-plan' to manually create beads from a plan.")
 		return nil
 	},
 }
@@ -143,7 +143,7 @@ var beadCreateFromPlanCmd = &cobra.Command{
 	Use:   "create-from-plan [spec-id]",
 	Short: "Create implementation beads from an approved plan's ## Bead sections",
 	Long: `Parses the plan.md for ## Bead N: sections and creates corresponding
-beads in Beads, parented to the spec's implement molecule step.
+beads in Beads, parented to the spec's lifecycle epic.
 Use this to recover when plan-approve failed to create beads.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

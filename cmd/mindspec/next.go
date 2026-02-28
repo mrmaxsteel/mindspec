@@ -97,7 +97,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			specDir := workspace.SpecDir(root, specFlag)
 			lc, lcErr := state.ReadLifecycle(specDir)
 			if lcErr == nil && lc != nil && lc.EpicID != "" {
-				items, err = next.QueryReadyForMolecule(lc.EpicID)
+				items, err = next.QueryReadyForEpic(lc.EpicID)
 			} else {
 				items, err = next.QueryReady()
 			}
@@ -176,7 +176,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			resolved.SpecID = specFlag
 		}
 
-		// Note: parent status propagation handled natively by beads molecules
+		// Note: parent status propagation handled natively by beads epics
 
 		// Step 7: Write mode-cache
 		mc := &state.Focus{
@@ -246,7 +246,7 @@ func runEmitOnly(root, specFlag string, args []string) error {
 			specDir := workspace.SpecDir(root, specFlag)
 			lc, lcErr := state.ReadLifecycle(specDir)
 			if lcErr == nil && lc != nil && lc.EpicID != "" {
-				items, err = next.QueryReadyForMolecule(lc.EpicID)
+				items, err = next.QueryReadyForEpic(lc.EpicID)
 			} else {
 				items, err = next.QueryReady()
 			}

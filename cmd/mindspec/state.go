@@ -102,7 +102,7 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			return nil
 		}
 
-		// Derive mode from molecule
+		// Derive mode from lifecycle
 		mode, modeErr := resolve.ResolveMode(root, specID)
 
 		mc, _ := state.ReadFocus(root)

@@ -31,8 +31,8 @@ var (
 	runBDCombFn      = bead.RunBDCombined
 	worktreeList     = bead.WorktreeList
 	worktreeCreate   = bead.WorktreeCreate
-	readModeCacheFn  = state.ReadModeCache
-	writeModeCacheFn = state.WriteModeCache
+	readFocusFn  = state.ReadFocus
+	writeFocusFn = state.WriteFocus
 	loadConfigFn     = config.Load
 	createBranchFn   = gitops.CreateBranch
 	branchExistsFn   = gitops.BranchExists
@@ -49,15 +49,11 @@ func QueryReady() ([]BeadInfo, error) {
 	return ParseBeadsJSON(out)
 }
 
-// QueryReadyForMolecule queries ready work for a specific molecule.
-func QueryReadyForMolecule(moleculeID string) ([]BeadInfo, error) {
-	out, err := runBDFn("ready", "--mol", moleculeID, "--json")
+// QueryReadyForEpic queries ready work scoped to a specific epic (parent issue).
+func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
+	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err != nil {
-		// Compatibility fallback for older beads versions.
-		out, err = runBDFn("ready", "--parent", moleculeID, "--json")
-		if err != nil {
-			return nil, fmt.Errorf("bd ready for molecule %s failed: %w", moleculeID, err)
-		}
+		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, err)
 	}
 
 	return ParseBeadsJSON(out)
@@ -102,7 +98,7 @@ func ParseBeadsJSON(data []byte) ([]BeadInfo, error) {
 			} `json:"steps"`
 		}
 		if err := json.Unmarshal(data, &payload); err != nil {
-			return nil, fmt.Errorf("parsing molecule-ready JSON: %w", err)
+			return nil, fmt.Errorf("parsing beads ready JSON: %w", err)
 		}
 		items := make([]BeadInfo, 0, len(payload.Steps))
 		for _, step := range payload.Steps {
@@ -248,9 +244,9 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Determine the base branch: use spec branch from mode-cache if available.
+	// Determine the base branch: use spec branch from focus if available.
 	baseBranch := "HEAD"
-	mc, mcErr := readModeCacheFn(root)
+	mc, mcErr := readFocusFn(root)
 	if mcErr == nil && mc.SpecBranch != "" {
 		baseBranch = mc.SpecBranch
 	}
@@ -289,14 +285,14 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Propagate mode-cache into the bead worktree so commands work from it.
+	// Propagate focus into the bead worktree so commands work from it.
 	if mcErr == nil && mc != nil {
 		beadMC := *mc // shallow copy
 		beadMC.ActiveWorktree = wtPath
 		beadMC.ActiveBead = beadID
 		beadMC.Mode = state.ModeImplement
-		if err := writeModeCacheFn(wtPath, &beadMC); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write mode-cache to bead worktree: %v\n", err)
+		if err := writeFocusFn(wtPath, &beadMC); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write focus to bead worktree: %v\n", err)
 		}
 	}
 

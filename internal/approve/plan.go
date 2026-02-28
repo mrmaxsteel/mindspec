@@ -181,7 +181,7 @@ func updatePlanApproval(planPath, approvedBy string) error {
 var beadNumRe = regexp.MustCompile(`^Bead\s+(\d+)`)
 
 // createImplementationBeads parses plan.md for ## Bead sections, creates child
-// beads under the implement molecule step, and wires inter-bead dependencies.
+// beads under the lifecycle epic, and wires inter-bead dependencies.
 // Returns the ordered list of created bead IDs.
 func createImplementationBeads(planPath, specID, parentID string) ([]string, error) {
 	data, err := os.ReadFile(planPath)

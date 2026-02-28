@@ -60,7 +60,7 @@ func ValidateSpec(root, specID string) *Result {
 	// Check open questions resolved
 	checkOpenQuestions(r, sections)
 
-	// Check molecule binding (ADR-0015) — warning only, not blocking
+	// Check lifecycle binding (ADR-0020) — warning only, not blocking
 	checkLifecycleBinding(r, root, specID)
 	checkSpecApprovalGateConsistency(r, root, specID)
 
