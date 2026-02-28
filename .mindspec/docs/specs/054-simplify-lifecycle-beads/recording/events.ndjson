@@ -1,3 +1,4 @@
 {"ts":"2026-02-28T01:29:41.981499Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"054-simplify-lifecycle-beads"}}
 {"ts":"2026-02-28T01:55:13.395783Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"054-simplify-lifecycle-beads","to":"plan"}}
 {"ts":"2026-02-28T02:03:42.395735Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"054-simplify-lifecycle-beads","to":"plan-approved"}}
+{"ts":"2026-02-28T07:52:40.298951Z","event":"lifecycle.end","data":{"spec_id":"054-simplify-lifecycle-beads"}}

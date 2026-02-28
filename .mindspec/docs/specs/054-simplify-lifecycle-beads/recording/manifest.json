@@ -3,7 +3,7 @@
   "started_at": "2026-02-28T01:29:41Z",
   "collector_pid": 0,
   "collector_port": 4318,
-  "status": "recording",
+  "status": "complete",
   "phases": [
     {
       "phase": "spec",
@@ -17,7 +17,8 @@
     },
     {
       "phase": "plan-approved",
-      "started_at": "2026-02-28T02:03:42Z"
+      "started_at": "2026-02-28T02:03:42Z",
+      "ended_at": "2026-02-28T07:52:40Z"
     }
   ]
 }

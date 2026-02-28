@@ -15,6 +15,7 @@ step_mapping:
 
 
 
+
 # Spec 054-simplify-lifecycle-beads: Drop Ceremony Molecules, Keep Implementation Beads
 
 ## Goal
