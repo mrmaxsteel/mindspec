@@ -7,6 +7,7 @@
 <!-- If this PR implements a MindSpec specification, link it here. -->
 - Spec ID: <!-- e.g. 054-simplify-lifecycle-beads -->
 - ADRs: <!-- e.g. ADR-0020 -->
+- Beads: <!-- Optional. List implementation beads if beads was used, e.g. beads-abc12, beads-def34 -->
 
 ## Changes
 
