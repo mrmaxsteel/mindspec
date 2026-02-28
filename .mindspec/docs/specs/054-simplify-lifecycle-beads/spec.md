@@ -49,7 +49,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 - **workflow**: Lifecycle phase tracking moves from molecule-derived to per-spec file
 - **beads integration**: Molecule pour eliminated at spec-init; implementation beads created standalone at plan-approve
-- **state management**: Per-spec `lifecycle.yaml` is the source of truth; global mode-cache becomes a cursor for "which spec am I focused on"
+- **state management**: Per-spec `lifecycle.yaml` is the source of truth; global focus file (`.mindspec/focus`) becomes a cursor for "which spec am I focused on"
 
 ## ADR Touchpoints
 
@@ -69,7 +69,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 2. **Drop the spec-lifecycle molecule entirely.** `spec-init` no longer calls `bd mol pour`. No molecule is created at any point in the lifecycle.
 
-3. **Demote global mode-cache to a focus cursor.** Mode-cache retains `activeSpec` (which spec the user is working on) and `activeBead` (which bead is claimed). Phase is read from the spec's `lifecycle.yaml`, not stored in mode-cache. Hooks that need the phase read `lifecycle.yaml` from the active spec's directory.
+3. **Rename mode-cache to focus file (`.mindspec/focus`).** The focus file retains `activeSpec` (which spec the user is working on) and `activeBead` (which bead is claimed). Phase is read from the spec's `lifecycle.yaml`, not stored in the focus file. Hooks that need the phase read `lifecycle.yaml` from the active spec's directory.
 
 4. **Implementation beads are created standalone at plan-approve.** `bd create --parent <epic-id>` with dependency wiring, same as today. The parent epic is a single Beads issue created at plan-approve time. `epic_id` is written to `lifecycle.yaml`.
 
@@ -85,7 +85,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 10. **Supersede ADR-0013 and ADR-0015** with ADR-0020.
 
-11. **Auto-detect spec from branch.** When on branch `spec/054-foo`, commands can infer `specID = 054-foo` and read `lifecycle.yaml` from the spec directory without consulting mode-cache. Mode-cache's `activeSpec` serves as fallback when branch detection isn't possible.
+11. **Auto-detect spec from branch.** When on branch `spec/054-foo`, commands can infer `specID = 054-foo` and read `lifecycle.yaml` from the spec directory without consulting the focus file. The focus file's `activeSpec` serves as fallback when branch detection isn't possible.
 
 ## Scope
 
@@ -100,7 +100,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 - `internal/approve/spec.go` — remove `EnsureFullyBound` call, write phase to `lifecycle.yaml`
 - `internal/specinit/specinit.go` — remove `pourFormula`, write `lifecycle.yaml` with `phase: spec`
 - `internal/complete/complete.go` — simplify `advanceState`, update `lifecycle.yaml`
-- `internal/state/state.go` — add `lifecycle.yaml` read/write helpers; simplify `ModeCache` to focus cursor
+- `internal/state/state.go` — add `lifecycle.yaml` read/write helpers; rename `ModeCache` to `Focus`, simplify to cursor only
 - `internal/state/validate.go` — remove molecule cross-validation
 - `internal/validate/spec.go`, `plan.go` — remove molecule-related validation
 - `cmd/mindspec/next.go` — read `epic_id` from `lifecycle.yaml`, use `bd ready --parent`
@@ -108,7 +108,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 - `cmd/mindspec/state.go` — `state show` reads `lifecycle.yaml` for phase
 - `internal/templates/templates.go` — remove embedded formula
 - `.beads/formulas/spec-lifecycle.formula.toml` — delete
-- `internal/hook/dispatch.go` — update to read phase from `lifecycle.yaml` instead of mode-cache
+- `internal/hook/dispatch.go` — update to read phase from `lifecycle.yaml` instead of focus file
 - ADR-0020 superseding ADR-0013 and ADR-0015
 
 ### Out of Scope
@@ -150,7 +150,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 ## Open Questions
 
-- [ ] Should hooks read `lifecycle.yaml` directly, or should mode-cache mirror the phase for hook performance? (If `lifecycle.yaml` is in the worktree, reads are fast — probably no need for mirroring.)
+- [ ] Should hooks read `lifecycle.yaml` directly, or should the focus file mirror the phase for hook performance? (If `lifecycle.yaml` is in the worktree, reads are fast — probably no need for mirroring.)
 - [ ] Should `ResolveActiveBead` stay in `internal/resolve/` or move to `internal/next/`?
 
 ## Approval
