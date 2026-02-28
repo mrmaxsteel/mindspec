@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +43,25 @@ func runScenario(t *testing.T, scenario Scenario) (*Report, *Sandbox) {
 
 	events := sandbox.ReadEvents()
 
+	// Log recorded shim events for observability (before assertions, so we see
+	// them even if assertions fatal). This is the primary diagnostic for
+	// understanding how far the agent got.
+	t.Logf("--- Recorded events (%d) ---", len(events))
+	for i, ev := range events {
+		args := strings.Join(ev.ArgsList, " ")
+		if args == "" {
+			args = fmt.Sprintf("%v", ev.Args)
+		}
+		blocked := ""
+		if ev.Blocked {
+			blocked = fmt.Sprintf(" [BLOCKED: %s]", ev.BlockReason)
+		}
+		t.Logf("  [%d] %s %s (exit=%d)%s", i+1, ev.Command, args, ev.ExitCode, blocked)
+	}
+
+	// Log agent output early — before analysis/assertions so it's visible on failure.
+	t.Logf("--- Agent output (exit=%d, dur=%s) ---\n%s", result.ExitCode, result.Duration, result.Output)
+
 	// Run analyzer
 	analyzer := NewAnalyzer()
 	summaries := analyzer.Classify(events)
@@ -53,8 +74,6 @@ func runScenario(t *testing.T, scenario Scenario) (*Report, *Sandbox) {
 	if scenario.Assertions != nil {
 		scenario.Assertions(t, sandbox, events)
 	}
-
-	t.Logf("Agent output (exit=%d, dur=%s):\n%s", result.ExitCode, result.Duration, result.Output)
 
 	return report, sandbox
 }
