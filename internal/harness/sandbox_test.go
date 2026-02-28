@@ -27,6 +27,16 @@ func TestSandboxCreatesValidRepo(t *testing.T) {
 		}
 	}
 
+	// Claude Code setup files (from setup.RunClaude)
+	for _, path := range []string{
+		"CLAUDE.md",
+		".claude/settings.json",
+	} {
+		if !s.FileExists(path) {
+			t.Errorf("%s missing (setup.RunClaude)", path)
+		}
+	}
+
 	// config.yaml has expected content
 	config := s.ReadFile(".mindspec/config.yaml")
 	if config == "" {

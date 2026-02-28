@@ -1,12 +1,15 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mindspec/mindspec/internal/setup"
 )
 
 // Sandbox is an isolated git repository with recording shims installed,
@@ -18,6 +21,8 @@ type Sandbox struct {
 	ShimBinDir string
 	// EventLogPath is the JSONL file where shims log command invocations.
 	EventLogPath string
+	// mindspecBinDir is the project's bin/ directory (contains mindspec binary).
+	mindspecBinDir string
 
 	t *testing.T
 }
@@ -51,28 +56,55 @@ func NewSandbox(t *testing.T) *Sandbox {
 		}
 	}
 
-	// Write default config
+	// Write default config (agent_hooks disabled so PreToolUse hooks don't block
+	// tool calls in the sandbox — the sandbox lacks proper worktree structure)
 	configContent := `protected_branches: [main]
 merge_strategy: direct
 worktree_root: .worktrees
 enforcement:
   pre_commit_hook: true
   cli_guards: true
-  agent_hooks: true
+  agent_hooks: false
 `
 	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(configContent), 0o644); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
 
-	// Initial commit
+	// Set up Claude Code integration: CLAUDE.md and minimal settings.json
+	// (SessionStart hook only — no PreToolUse enforcement hooks in sandbox)
+	if err := setupClaudeForSandbox(root); err != nil {
+		t.Logf("warning: setup claude: %v", err)
+	}
+
+	// Initial commit (includes .mindspec/ and Claude Code setup files)
 	mustRun(t, root, "git", "add", "-A")
 	mustRun(t, root, "git", "commit", "-m", "initial commit")
 
-	// Set up recording shims
+	// Initialize beads in sandbox mode (no auto-sync, no git hooks).
+	// Add .beads/ to .gitignore first — dolt server writes runtime files
+	// (dolt-server.activity, dolt-server.port) that would make the worktree
+	// appear dirty to mindspec complete's clean-tree check.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n"), 0o644); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+	mustRun(t, root, "git", "add", ".gitignore")
+	mustRun(t, root, "git", "commit", "-m", "add gitignore")
+	initBeads(t, root)
+
+	// Resolve project bin/ directory for mindspec binary
+	binDir := projectBinDir()
+
+	// Set up recording shims — temporarily extend PATH so mindspec shim is created
 	shimDir := filepath.Join(root, ".harness", "bin")
 	logPath := filepath.Join(root, ".harness", "events.jsonl")
 	if err := os.MkdirAll(filepath.Join(root, ".harness"), 0o755); err != nil {
 		t.Fatalf("creating harness dir: %v", err)
+	}
+
+	if binDir != "" {
+		origPath := os.Getenv("PATH")
+		os.Setenv("PATH", binDir+":"+origPath)
+		defer os.Setenv("PATH", origPath)
 	}
 
 	if err := InstallShims(shimDir, logPath); err != nil {
@@ -81,10 +113,11 @@ enforcement:
 	}
 
 	return &Sandbox{
-		Root:         root,
-		ShimBinDir:   shimDir,
-		EventLogPath: logPath,
-		t:            t,
+		Root:           root,
+		ShimBinDir:     shimDir,
+		EventLogPath:   logPath,
+		mindspecBinDir: binDir,
+		t:              t,
 	}
 }
 
@@ -92,7 +125,7 @@ enforcement:
 func (s *Sandbox) Run(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = s.Root
-	cmd.Env = append(os.Environ(), ShimEnv(s.ShimBinDir)...)
+	cmd.Env = s.Env()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -158,9 +191,26 @@ func mustRun(t *testing.T, dir string, name string, args ...string) string { //n
 }
 
 // Env returns the environment variables for running commands in the sandbox,
-// with recording shims prepended to PATH.
+// with recording shims and the mindspec bin dir prepended to PATH.
 func (s *Sandbox) Env() []string {
-	return append(os.Environ(), ShimEnv(s.ShimBinDir)...)
+	// Build a single PATH: shimDir (first, for recording) + mindspecBinDir + original PATH.
+	// We must avoid duplicate PATH entries since Go exec uses the last one.
+	origPath := os.Getenv("PATH")
+	newPath := s.ShimBinDir
+	if s.mindspecBinDir != "" {
+		newPath += ":" + s.mindspecBinDir
+	}
+	newPath += ":" + origPath
+
+	// Start with os.Environ() minus PATH, then add our unified PATH.
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "PATH=") {
+			env = append(env, e)
+		}
+	}
+	env = append(env, "PATH="+newPath)
+	return env
 }
 
 // GitBranch returns the current git branch name.
@@ -193,4 +243,122 @@ func (s *Sandbox) WriteLifecycle(specID, content string) {
 	s.t.Helper()
 	relPath := fmt.Sprintf(".mindspec/docs/specs/%s/lifecycle.yaml", specID)
 	s.WriteFile(relPath, content)
+}
+
+// initBeads runs bd init in sandbox mode within the given root directory.
+// Uses --server-port 0 so dolt picks a random free port (avoids collisions
+// between parallel test sandboxes and the main project's dolt server).
+func initBeads(t *testing.T, root string) {
+	t.Helper()
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		t.Logf("warning: bd not found, skipping beads init")
+		return
+	}
+	cmd := exec.Command(bdPath, "init", "--sandbox", "--skip-hooks", "-q", "--server-port", "0")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("warning: bd init: %v\n%s", err, out)
+	}
+}
+
+// bdCreateIssue is the JSON response from bd create --json.
+type bdCreateIssue struct {
+	ID string `json:"id"`
+}
+
+// CreateBead creates a beads issue in the sandbox and returns its ID.
+// issueType is "epic" or "task". parentID is optional.
+func (s *Sandbox) CreateBead(title, issueType, parentID string) string {
+	s.t.Helper()
+	args := []string{"create", "--title", title, "--type", issueType, "--priority", "2", "--json"}
+	if parentID != "" {
+		args = append(args, "--parent", parentID)
+	}
+	out, err := s.runBD(args...)
+	if err != nil {
+		s.t.Fatalf("bd create %q: %v\n%s", title, err, out)
+	}
+	var issue bdCreateIssue
+	if err := json.Unmarshal([]byte(out), &issue); err != nil {
+		s.t.Fatalf("parsing bd create output: %v\n%s", err, out)
+	}
+	return issue.ID
+}
+
+// ClaimBead sets a beads issue to in_progress status.
+func (s *Sandbox) ClaimBead(beadID string) {
+	s.t.Helper()
+	out, err := s.runBD("update", beadID, "--status=in_progress")
+	if err != nil {
+		s.t.Fatalf("bd update %s: %v\n%s", beadID, err, out)
+	}
+}
+
+// runBD executes a bd command in the sandbox directory, returning stdout only.
+func (s *Sandbox) runBD(args ...string) (string, error) {
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		return "", fmt.Errorf("bd not found: %w", err)
+	}
+	cmd := exec.Command(bdPath, args...)
+	cmd.Dir = s.Root
+	out, err := cmd.Output() // stdout only (bd emits warnings to stderr)
+	return string(out), err
+}
+
+// setupClaudeForSandbox installs CLAUDE.md, slash commands, and a minimal
+// settings.json with only the SessionStart hook. We skip PreToolUse hooks
+// because the sandbox lacks worktree structure and enforcement would block
+// all tool calls.
+func setupClaudeForSandbox(root string) error {
+	// Use setup.RunClaude for CLAUDE.md and slash commands
+	if _, err := setup.RunClaude(root, false); err != nil {
+		return err
+	}
+
+	// Overwrite settings.json with only SessionStart hook (no PreToolUse)
+	settingsContent := `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mindspec instruct 2>/dev/null || true",
+            "statusMessage": "Loading mode guidance..."
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	settingsPath := filepath.Join(root, ".claude", "settings.json")
+	return os.WriteFile(settingsPath, []byte(settingsContent), 0o644)
+}
+
+// projectBinDir finds the mindspec project's bin/ directory by walking up
+// from CWD to find go.mod, then checking for bin/mindspec.
+func projectBinDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			binDir := filepath.Join(dir, "bin")
+			if _, err := os.Stat(filepath.Join(binDir, "mindspec")); err == nil {
+				return binDir
+			}
+			return ""
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

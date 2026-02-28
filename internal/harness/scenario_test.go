@@ -54,7 +54,7 @@ func runScenario(t *testing.T, scenario Scenario) (*Report, *Sandbox) {
 		scenario.Assertions(t, sandbox, events)
 	}
 
-	_ = result // available if tests need agent output
+	t.Logf("Agent output (exit=%d, dur=%s):\n%s", result.ExitCode, result.Duration, result.Output)
 
 	return report, sandbox
 }

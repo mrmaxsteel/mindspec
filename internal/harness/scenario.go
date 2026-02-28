@@ -70,6 +70,11 @@ func ScenarioSingleBead() Scenario {
 		MaxTurns:    15,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			// Create real beads: epic + child task
+			epicID := sandbox.CreateBead("[001-greeting] Epic", "epic", "")
+			beadID := sandbox.CreateBead("[001-greeting] Implement greeting", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
 			// Set up as if spec and plan are already approved
 			sandbox.WriteFile(".mindspec/docs/specs/001-greeting/spec.md", `---
 title: Greeting Feature
@@ -87,11 +92,11 @@ spec_id: 001-greeting
 Create greeting.go with a Greet function.
 `)
 			sandbox.WriteFile(".mindspec/docs/specs/001-greeting/lifecycle.yaml",
-				"phase: implement\nepic_id: test-bead-1\n")
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":       "implement",
 				"activeSpec": "001-greeting",
-				"activeBead": "test-bead-1",
+				"activeBead": beadID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.Commit("setup: pre-approved spec and plan")
@@ -119,6 +124,13 @@ func ScenarioMultiBeadDeps() Scenario {
 		MaxTurns:    30,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			// Create real beads: epic + 3 child tasks
+			epicID := sandbox.CreateBead("[002-multi] Epic", "epic", "")
+			bead1 := sandbox.CreateBead("[002-multi] Core types", "task", epicID)
+			sandbox.CreateBead("[002-multi] Formatter", "task", epicID)
+			sandbox.CreateBead("[002-multi] Tests", "task", epicID)
+			sandbox.ClaimBead(bead1)
+
 			sandbox.WriteFile(".mindspec/docs/specs/002-multi/spec.md", `---
 title: Multi-bead Feature
 status: Approved
@@ -139,11 +151,11 @@ Create formatter.go that formats Messages.
 Create formatter_test.go with tests.
 `)
 			sandbox.WriteFile(".mindspec/docs/specs/002-multi/lifecycle.yaml",
-				"phase: implement\nepic_id: test-multi\n")
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":       "implement",
 				"activeSpec": "002-multi",
-				"activeBead": "test-multi-1",
+				"activeBead": bead1,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.Commit("setup: multi-bead spec")
@@ -192,12 +204,16 @@ func ScenarioInterruptForBug() Scenario {
 		MaxTurns:    25,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			epicID := sandbox.CreateBead("[003-feature] Epic", "epic", "")
+			beadID := sandbox.CreateBead("[003-feature] Implement feature", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
 			sandbox.WriteFile(".mindspec/docs/specs/003-feature/lifecycle.yaml",
-				"phase: implement\nepic_id: test-interrupt\n")
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":       "implement",
 				"activeSpec": "003-feature",
-				"activeBead": "test-feature-1",
+				"activeBead": beadID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.WriteFile("main.go", `package main
@@ -209,7 +225,7 @@ func main() {
 			sandbox.Commit("setup: feature in progress")
 			return nil
 		},
-		Prompt: `You are implementing a feature bead (test-feature-1). While working, you notice
+		Prompt: `You are implementing a feature bead. While working, you notice
 main.go has a critical bug — the main function doesn't print anything.
 Fix main.go to add fmt.Println("hello") and commit the fix, then continue your feature work
 by creating feature.go with a Feature() function. Run 'mindspec complete' when done.`,
@@ -229,13 +245,17 @@ func ScenarioResumeAfterCrash() Scenario {
 		MaxTurns:    15,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			epicID := sandbox.CreateBead("[004-resume] Epic", "epic", "")
+			beadID := sandbox.CreateBead("[004-resume] Process feature", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
 			// Simulate a crash: focus says implement, bead is in_progress, partial work exists
 			sandbox.WriteFile(".mindspec/docs/specs/004-resume/lifecycle.yaml",
-				"phase: implement\nepic_id: test-resume\n")
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":       "implement",
 				"activeSpec": "004-resume",
-				"activeBead": "test-resume-1",
+				"activeBead": beadID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.WriteFile("partial.go", `package main
@@ -248,7 +268,7 @@ func Process() {
 			return nil
 		},
 		Prompt: `You are resuming after a session crash. The project is in implement mode with
-bead test-resume-1 in progress. There's a partial.go file with an incomplete Process function.
+a bead in progress. There's a partial.go file with an incomplete Process function.
 Complete the Process function (make it return "processed") and run 'mindspec complete'.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			if !sandbox.FileExists("partial.go") {
@@ -303,12 +323,16 @@ func ScenarioHookBlocksMainCommit() Scenario {
 		MaxTurns:    10,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			epicID := sandbox.CreateBead("[006-main] Epic", "epic", "")
+			beadID := sandbox.CreateBead("[006-main] Implement work", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
 			sandbox.WriteFile(".mindspec/docs/specs/006-main/lifecycle.yaml",
-				"phase: implement\nepic_id: test-main\n")
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":       "implement",
 				"activeSpec": "006-main",
-				"activeBead": "test-main-1",
+				"activeBead": beadID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.Commit("setup: implement mode in main")
@@ -367,7 +391,7 @@ func assertCommandRan(t *testing.T, events []ActionEvent, command string, argSub
 		if len(argSubstr) == 0 {
 			return // found the command
 		}
-		args := flatArgs(e.Args)
+		args := eventArgs(e)
 		if containsAll(args, argSubstr[0]) {
 			return
 		}
@@ -385,7 +409,7 @@ func assertCommandContains(t *testing.T, events []ActionEvent, command, substr s
 		if e.Command != command {
 			continue
 		}
-		args := flatArgs(e.Args)
+		args := eventArgs(e)
 		for _, arg := range args {
 			if arg == substr {
 				return
@@ -393,4 +417,11 @@ func assertCommandContains(t *testing.T, events []ActionEvent, command, substr s
 		}
 	}
 	t.Errorf("command %q with arg containing %q was not found in events", command, substr)
+}
+
+// eventArgs returns args from both the Args map and ArgsList slice.
+func eventArgs(e ActionEvent) []string {
+	args := flatArgs(e.Args)
+	args = append(args, e.ArgsList...)
+	return args
 }

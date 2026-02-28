@@ -42,7 +42,7 @@ func (a *ClaudeCodeAgent) Name() string { return "claude-code" }
 
 // Run executes a Claude Code session in the sandbox.
 func (a *ClaudeCodeAgent) Run(ctx context.Context, sandbox *Sandbox, prompt string, opts RunOpts) (*SessionResult, error) {
-	args := []string{"-p", prompt, "--no-input"}
+	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions"}
 
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
@@ -54,8 +54,9 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, sandbox *Sandbox, prompt stri
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = sandbox.Root
 
-	// Merge sandbox env (recording shims) with any extra opts.Env
-	env := sandbox.Env()
+	// Merge sandbox env (recording shims) with any extra opts.Env.
+	// Filter out CLAUDECODE to allow launching from within a Claude Code session.
+	env := filterEnv(sandbox.Env(), "CLAUDECODE")
 	env = append(env, opts.Env...)
 	cmd.Env = env
 
@@ -102,4 +103,22 @@ func DefaultAgentName() string {
 func ClaudeCodeAvailable() bool {
 	cmd := exec.Command("claude", "--version")
 	return cmd.Run() == nil
+}
+
+// filterEnv removes environment variables matching any of the given keys.
+func filterEnv(env []string, keys ...string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		skip := false
+		for _, k := range keys {
+			if strings.HasPrefix(e, k+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, e)
+		}
+	}
+	return out
 }

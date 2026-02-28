@@ -17,6 +17,7 @@ type ActionEvent struct {
 	ToolName    string            `json:"tool_name,omitempty"`
 	Command     string            `json:"command,omitempty"`
 	Args        map[string]string `json:"args,omitempty"`
+	ArgsList    []string          `json:"args_list,omitempty"` // shim-recorded positional args
 	CWD         string            `json:"cwd,omitempty"`
 	ExitCode    int               `json:"exit_code"`
 	Blocked     bool              `json:"blocked,omitempty"`
