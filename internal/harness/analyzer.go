@@ -185,7 +185,7 @@ func (a *Analyzer) Classify(events []ActionEvent) []TurnSummary {
 
 		// Record failed commands from this turn for future retry detection
 		for _, e := range turnEvents {
-			if e.Command != "" && e.ExitCode != 0 {
+			if e.Command != "" && e.ExitCode != 0 && !isInfrastructureCmd(e) {
 				failedCmds[cmdKey(e)] = true
 			}
 		}
@@ -240,7 +240,7 @@ func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map
 
 	// Check for retry: re-running a command that previously failed
 	for _, e := range events {
-		if e.Command != "" && failedCmds[cmdKey(e)] {
+		if e.Command != "" && !isInfrastructureCmd(e) && failedCmds[cmdKey(e)] {
 			return ClassRetry, "retrying previously failed: " + e.Command + " " + strings.Join(e.ArgsList, " ")
 		}
 	}
@@ -425,6 +425,35 @@ func cmdKey(e ActionEvent) string {
 		return e.Command + " " + args[0]
 	}
 	return e.Command
+}
+
+// isInfrastructureCmd returns true for Claude Code internal git operations that
+// run automatically every turn (upstream checks, sparse checkout probes, etc.).
+// These should not count as agent-initiated retries when they fail.
+func isInfrastructureCmd(e ActionEvent) bool {
+	if e.Command != "git" && e.Command != "bd" {
+		return false
+	}
+	args := strings.Join(e.ArgsList, " ")
+	infraPatterns := []string{
+		"config --get core.sparseCheckout",
+		"rev-parse --abbrev-ref --symbolic-full-name @{u}",
+		"--no-optional-locks status",
+		"--no-optional-locks log",
+		"-c credential.helper= pull",
+		"rev-parse --git-dir",
+		"rev-parse --git-common-dir",
+	}
+	for _, pat := range infraPatterns {
+		if strings.Contains(args, pat) {
+			return true
+		}
+	}
+	// bd prime is infrastructure (context recovery)
+	if e.Command == "bd" && containsAll(e.ArgsList, "prime") {
+		return true
+	}
+	return false
 }
 
 func containsCWDMain(cwd string) bool {
