@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-02-28T12:15:15Z"
+approved_by: user
+status: Approved
 ---
 # Spec 055-lifecycle-test-suite: Lifecycle Documentation & LLM Behavior Test Suite
 
@@ -218,7 +218,7 @@ type Assertion struct {
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-02-28
+- **Notes**: Approved via mindspec approve spec
