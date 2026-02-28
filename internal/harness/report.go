@@ -69,7 +69,7 @@ func (r *Report) FormatText() string {
 	fmt.Fprintln(&b)
 
 	fmt.Fprintln(&b, "Turn classification:")
-	for _, class := range []TurnClass{ClassForward, ClassCorrection, ClassRecovery, ClassWrongAction, ClassOverhead} {
+	for _, class := range []TurnClass{ClassForward, ClassRetry, ClassCorrection, ClassRecovery, ClassWrongAction, ClassOverhead} {
 		count := r.TurnsByClass[class]
 		if count > 0 {
 			fmt.Fprintf(&b, "  %-14s %d\n", class, count)

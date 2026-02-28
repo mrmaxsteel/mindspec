@@ -13,6 +13,7 @@ type TurnClass string
 
 const (
 	ClassForward     TurnClass = "forward"      // Productive work advancing the task
+	ClassRetry       TurnClass = "retry"        // Re-running a previously failed command
 	ClassCorrection  TurnClass = "correction"   // Fixing a recent mistake (same file within 2 turns)
 	ClassRecovery    TurnClass = "recovery"     // Recovering from a hook block
 	ClassWrongAction TurnClass = "wrong_action" // Violated a workflow rule and was NOT blocked
@@ -153,6 +154,8 @@ func (a *Analyzer) Classify(events []ActionEvent) []TurnSummary {
 
 	// Track files written per turn for correction detection
 	writtenFiles := make(map[int]map[string]bool) // turn -> set of file paths
+	// Track failed commands for retry detection: cmdKey -> true
+	failedCmds := make(map[string]bool)
 
 	var summaries []TurnSummary
 	maxTurn := log.MaxTurn()
@@ -172,13 +175,20 @@ func (a *Analyzer) Classify(events []ActionEvent) []TurnSummary {
 			}
 		}
 
-		class, reason := a.classifyTurn(turn, turnEvents, writtenFiles)
+		class, reason := a.classifyTurn(turn, turnEvents, writtenFiles, failedCmds)
 		summaries = append(summaries, TurnSummary{
 			Turn:   turn,
 			Class:  class,
 			Events: turnEvents,
 			Reason: reason,
 		})
+
+		// Record failed commands from this turn for future retry detection
+		for _, e := range turnEvents {
+			if e.Command != "" && e.ExitCode != 0 {
+				failedCmds[cmdKey(e)] = true
+			}
+		}
 	}
 
 	return summaries
@@ -211,7 +221,7 @@ func assignTurns(events []ActionEvent) {
 	}
 }
 
-func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map[int]map[string]bool) (TurnClass, string) {
+func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map[int]map[string]bool, failedCmds map[string]bool) (TurnClass, string) {
 	// Check for recovery: any blocked event means the agent was recovering
 	for _, e := range events {
 		if e.Blocked {
@@ -225,6 +235,13 @@ func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map
 			if violated, reason := rule.Check(e); violated {
 				return ClassWrongAction, reason
 			}
+		}
+	}
+
+	// Check for retry: re-running a command that previously failed
+	for _, e := range events {
+		if e.Command != "" && failedCmds[cmdKey(e)] {
+			return ClassRetry, "retrying previously failed: " + e.Command + " " + strings.Join(e.ArgsList, " ")
 		}
 	}
 
@@ -395,6 +412,19 @@ func containsAll(items []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// cmdKey returns a stable key for a command+args pair, used to detect retries.
+// Uses command name + first meaningful arg (e.g. "mindspec complete", "git commit").
+func cmdKey(e ActionEvent) string {
+	if len(e.ArgsList) > 0 {
+		return e.Command + " " + e.ArgsList[0]
+	}
+	args := flatArgs(e.Args)
+	if len(args) > 0 {
+		return e.Command + " " + args[0]
+	}
+	return e.Command
 }
 
 func containsCWDMain(cwd string) bool {
