@@ -1,0 +1,151 @@
+package harness
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+// skipUnlessClaudeCode skips the test if the claude CLI is not available.
+func skipUnlessClaudeCode(t *testing.T) {
+	t.Helper()
+	if !ClaudeCodeAvailable() {
+		t.Skip("claude CLI not available (install Claude Code and authenticate to run LLM tests)")
+	}
+}
+
+func resolveTestAgent(t *testing.T) Agent {
+	t.Helper()
+	name := DefaultAgentName()
+	agent, err := ResolveAgent(name)
+	if err != nil {
+		t.Fatalf("resolving agent %q: %v", name, err)
+	}
+	return agent
+}
+
+func runScenario(t *testing.T, scenario Scenario) (*Report, *Sandbox) {
+	t.Helper()
+	skipUnlessClaudeCode(t)
+
+	agent := resolveTestAgent(t)
+	sandbox := NewSandbox(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	result, err := RunSession(ctx, agent, scenario, sandbox)
+	if err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	events := sandbox.ReadEvents()
+
+	// Run analyzer
+	analyzer := NewAnalyzer()
+	summaries := analyzer.Classify(events)
+	wrongActions := analyzer.DetectWrongActions(events)
+
+	report := NewReport(scenario.Name, agent.Name(), summaries, wrongActions, 0)
+	t.Logf("Report:\n%s", report.FormatText())
+
+	// Run scenario-specific assertions
+	if scenario.Assertions != nil {
+		scenario.Assertions(t, sandbox, events)
+	}
+
+	_ = result // available if tests need agent output
+
+	return report, sandbox
+}
+
+// --- Happy path scenarios ---
+
+func TestLLM_SpecToIdle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioSpecToIdle())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+		for _, wa := range report.WrongActions {
+			t.Logf("  [%s] %s", wa.Rule, wa.Reason)
+		}
+	}
+}
+
+func TestLLM_SingleBead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioSingleBead())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+func TestLLM_MultiBeadDeps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioMultiBeadDeps())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+// --- Alternative flow scenarios ---
+
+func TestLLM_AbandonSpec(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioAbandonSpec())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+func TestLLM_InterruptForBug(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioInterruptForBug())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+func TestLLM_ResumeAfterCrash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioResumeAfterCrash())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+// --- Enforcement scenarios ---
+
+func TestLLM_HookBlocksCodeInSpec(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	runScenario(t, ScenarioHookBlocksCodeInSpec())
+	// Assertions are in the scenario itself — no code files should be written
+}
+
+func TestLLM_HookBlocksMainCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	runScenario(t, ScenarioHookBlocksMainCommit())
+}
+
+func TestLLM_HookBlocksStaleNext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	runScenario(t, ScenarioHookBlocksStaleNext())
+}

@@ -1,0 +1,415 @@
+package harness
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// TurnClass categorizes an agent turn.
+type TurnClass string
+
+const (
+	ClassForward     TurnClass = "forward"      // Productive work advancing the task
+	ClassCorrection  TurnClass = "correction"    // Fixing a recent mistake (same file within 2 turns)
+	ClassRecovery    TurnClass = "recovery"      // Recovering from a hook block
+	ClassWrongAction TurnClass = "wrong_action"  // Violated a workflow rule and was NOT blocked
+	ClassOverhead    TurnClass = "overhead"       // Read/search without subsequent write
+)
+
+// TurnSummary describes a single agent turn.
+type TurnSummary struct {
+	Turn   int
+	Class  TurnClass
+	Events []ActionEvent
+	Reason string // explanation for classification
+}
+
+// WrongActionRule checks if an event violates a workflow rule.
+// Returns (violated, reason).
+type WrongActionRule struct {
+	Name  string
+	Check func(ActionEvent) (bool, string)
+}
+
+// DefaultWrongActionRules returns the standard set of wrong-action detectors.
+func DefaultWrongActionRules() []WrongActionRule {
+	return []WrongActionRule{
+		{
+			Name: "code_in_spec_mode",
+			Check: func(e ActionEvent) (bool, string) {
+				if e.Phase != "spec" {
+					return false, ""
+				}
+				if e.ActionType != "command" && e.ActionType != "tool_invoke" {
+					return false, ""
+				}
+				if e.ToolName == "Write" || e.ToolName == "Edit" {
+					path := e.Args["file_path"]
+					if path != "" && isCodePath(path) {
+						return true, "code edit in spec mode: " + path
+					}
+				}
+				return false, ""
+			},
+		},
+		{
+			Name: "code_in_plan_mode",
+			Check: func(e ActionEvent) (bool, string) {
+				if e.Phase != "plan" {
+					return false, ""
+				}
+				if e.ToolName == "Write" || e.ToolName == "Edit" {
+					path := e.Args["file_path"]
+					if path != "" && isCodePath(path) {
+						return true, "code edit in plan mode: " + path
+					}
+				}
+				return false, ""
+			},
+		},
+		{
+			Name: "commit_to_main",
+			Check: func(e ActionEvent) (bool, string) {
+				if e.Command != "git" {
+					return false, ""
+				}
+				args := flatArgs(e.Args)
+				if containsAll(args, "commit") && containsCWDMain(e.CWD) {
+					return true, "git commit on main branch"
+				}
+				return false, ""
+			},
+		},
+		{
+			Name: "skip_next",
+			Check: func(e ActionEvent) (bool, string) {
+				// Agent went straight to coding without running mindspec next
+				// Detected at the session level, not per-event
+				return false, ""
+			},
+		},
+		{
+			Name: "skip_complete",
+			Check: func(e ActionEvent) (bool, string) {
+				// Agent finished coding without running mindspec complete
+				// Detected at the session level, not per-event
+				return false, ""
+			},
+		},
+		{
+			Name: "wrong_cwd",
+			Check: func(e ActionEvent) (bool, string) {
+				if e.Command == "" || e.CWD == "" {
+					return false, ""
+				}
+				// If there's an active worktree but CWD is the main repo
+				if e.Phase == "implement" && containsCWDMain(e.CWD) {
+					// Only flag for code-modifying commands
+					if e.Command == "git" && containsAll(flatArgs(e.Args), "commit") {
+						return true, "command executed from main repo instead of worktree"
+					}
+				}
+				return false, ""
+			},
+		},
+		{
+			Name: "force_bypass",
+			Check: func(e ActionEvent) (bool, string) {
+				if e.Command != "mindspec" {
+					return false, ""
+				}
+				args := flatArgs(e.Args)
+				if containsAll(args, "--force") || containsAll(args, "--no-verify") {
+					return true, "force bypass used: " + strings.Join(args, " ")
+				}
+				return false, ""
+			},
+		},
+	}
+}
+
+// Analyzer classifies agent turns and detects wrong actions.
+type Analyzer struct {
+	Rules []WrongActionRule
+}
+
+// NewAnalyzer creates an analyzer with default rules.
+func NewAnalyzer() *Analyzer {
+	return &Analyzer{Rules: DefaultWrongActionRules()}
+}
+
+// Classify groups events by turn and classifies each turn.
+func (a *Analyzer) Classify(events []ActionEvent) []TurnSummary {
+	log := NewEventLog(events)
+	byTurn := log.ByTurn()
+
+	// Track files written per turn for correction detection
+	writtenFiles := make(map[int]map[string]bool) // turn -> set of file paths
+
+	var summaries []TurnSummary
+	maxTurn := log.MaxTurn()
+
+	for turn := 0; turn <= maxTurn; turn++ {
+		turnEvents, ok := byTurn[turn]
+		if !ok {
+			continue
+		}
+
+		writtenFiles[turn] = make(map[string]bool)
+		for _, e := range turnEvents {
+			if e.ToolName == "Write" || e.ToolName == "Edit" {
+				if path, ok := e.Args["file_path"]; ok {
+					writtenFiles[turn][path] = true
+				}
+			}
+		}
+
+		class, reason := a.classifyTurn(turn, turnEvents, writtenFiles)
+		summaries = append(summaries, TurnSummary{
+			Turn:   turn,
+			Class:  class,
+			Events: turnEvents,
+			Reason: reason,
+		})
+	}
+
+	return summaries
+}
+
+func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map[int]map[string]bool) (TurnClass, string) {
+	// Check for recovery: any blocked event means the agent was recovering
+	for _, e := range events {
+		if e.Blocked {
+			return ClassRecovery, "hook blocked: " + e.BlockReason
+		}
+	}
+
+	// Check for wrong actions (rules that fire and event was NOT blocked)
+	for _, e := range events {
+		for _, rule := range a.Rules {
+			if violated, reason := rule.Check(e); violated {
+				return ClassWrongAction, reason
+			}
+		}
+	}
+
+	// Check for correction: writing to a file that was written in the last 2 turns
+	for _, e := range events {
+		if e.ToolName == "Write" || e.ToolName == "Edit" {
+			path := e.Args["file_path"]
+			if path == "" {
+				continue
+			}
+			for lookback := 1; lookback <= 2; lookback++ {
+				prevTurn := turn - lookback
+				if prevTurn < 0 {
+					continue
+				}
+				if prevFiles, ok := writtenFiles[prevTurn]; ok && prevFiles[path] {
+					return ClassCorrection, "re-editing " + filepath.Base(path) + " within 2 turns"
+				}
+			}
+		}
+	}
+
+	// Check for overhead: only read/search operations, no writes
+	hasWrite := false
+	hasCommand := false
+	for _, e := range events {
+		switch e.ActionType {
+		case "command":
+			hasCommand = true
+		case "tool_invoke":
+			if e.ToolName == "Write" || e.ToolName == "Edit" || e.ToolName == "NotebookEdit" {
+				hasWrite = true
+			}
+		}
+	}
+	if !hasWrite && !hasCommand {
+		return ClassOverhead, "read-only operations"
+	}
+
+	return ClassForward, ""
+}
+
+// DetectWrongActions scans all events for wrong-action violations.
+func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult {
+	var results []WrongActionResult
+	for _, e := range events {
+		if e.Blocked {
+			continue // blocked events are handled by hooks, not wrong actions
+		}
+		for _, rule := range a.Rules {
+			if violated, reason := rule.Check(e); violated {
+				results = append(results, WrongActionResult{
+					Rule:   rule.Name,
+					Event:  e,
+					Reason: reason,
+				})
+			}
+		}
+	}
+	return results
+}
+
+// WrongActionResult captures a specific rule violation.
+type WrongActionResult struct {
+	Rule   string
+	Event  ActionEvent
+	Reason string
+}
+
+// PlanFidelity calculates how well the agent followed the plan.
+// Returns a score between 0.0 and 1.0.
+func PlanFidelity(planPath string, events []ActionEvent) (float64, error) {
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		return 0, err
+	}
+
+	content := string(data)
+	expectedPaths := extractMentionedPaths(content)
+	expectedCommands := extractMentionedCommands(content)
+
+	if len(expectedPaths)+len(expectedCommands) == 0 {
+		return 1.0, nil // no expectations means perfect fidelity
+	}
+
+	total := len(expectedPaths) + len(expectedCommands)
+	matched := 0
+
+	// Check which expected paths were touched
+	touchedPaths := make(map[string]bool)
+	for _, e := range events {
+		if e.ToolName == "Write" || e.ToolName == "Edit" || e.ToolName == "Read" {
+			if path, ok := e.Args["file_path"]; ok {
+				touchedPaths[path] = true
+				// Also match by basename
+				touchedPaths[filepath.Base(path)] = true
+			}
+		}
+	}
+	for _, p := range expectedPaths {
+		if touchedPaths[p] || touchedPaths[filepath.Base(p)] {
+			matched++
+		}
+	}
+
+	// Check which expected commands were run
+	ranCommands := make(map[string]bool)
+	for _, e := range events {
+		if e.Command != "" {
+			ranCommands[e.Command] = true
+			// Also match with first arg
+			args := flatArgs(e.Args)
+			if len(args) > 0 {
+				ranCommands[e.Command+" "+args[0]] = true
+			}
+		}
+	}
+	for _, cmd := range expectedCommands {
+		if ranCommands[cmd] {
+			matched++
+		}
+	}
+
+	return float64(matched) / float64(total), nil
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func isCodePath(path string) bool {
+	docPrefixes := []string{".mindspec/", "docs/", ".claude/", ".github/"}
+	for _, prefix := range docPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	if strings.HasSuffix(path, ".md") {
+		return false
+	}
+	return true
+}
+
+func flatArgs(args map[string]string) []string {
+	if args == nil {
+		return nil
+	}
+	var result []string
+	for i := 0; i < len(args); i++ {
+		key := strconv.Itoa(i)
+		if v, ok := args[key]; ok {
+			result = append(result, v)
+		}
+	}
+	// Also include named args
+	for k, v := range args {
+		if k == "file_path" || k == "command" {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func containsAll(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCWDMain(cwd string) bool {
+	// Heuristic: if CWD does NOT contain ".worktrees/" it's likely the main repo
+	return cwd != "" && !strings.Contains(cwd, ".worktrees/")
+}
+
+func extractMentionedPaths(content string) []string {
+	var paths []string
+	seen := make(map[string]bool)
+
+	for _, line := range strings.Split(content, "\n") {
+		// Look for file-like references (containing / and a file extension)
+		words := strings.Fields(line)
+		for _, w := range words {
+			w = strings.Trim(w, "`\"'(),[]")
+			if strings.Contains(w, "/") && (strings.Contains(w, ".go") ||
+				strings.Contains(w, ".ts") || strings.Contains(w, ".js") ||
+				strings.Contains(w, ".py") || strings.Contains(w, ".yaml") ||
+				strings.Contains(w, ".yml") || strings.Contains(w, ".md") ||
+				strings.Contains(w, ".json")) {
+				if !seen[w] {
+					paths = append(paths, w)
+					seen[w] = true
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func extractMentionedCommands(content string) []string {
+	var commands []string
+	seen := make(map[string]bool)
+
+	knownCmds := []string{"mindspec", "git", "go test", "make"}
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		for _, cmd := range knownCmds {
+			if strings.Contains(trimmed, cmd) {
+				// Extract the command reference
+				if !seen[cmd] {
+					commands = append(commands, cmd)
+					seen[cmd] = true
+				}
+			}
+		}
+	}
+	return commands
+}
+
