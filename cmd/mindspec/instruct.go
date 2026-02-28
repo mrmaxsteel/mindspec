@@ -16,8 +16,8 @@ import (
 var instructCmd = &cobra.Command{
 	Use:   "instruct",
 	Short: "Emit agent instructions for the current mode and active work",
-	Long: `Derives mode from the target spec's molecule state (ADR-0015) and emits
-mode-appropriate operating guidance for agent consumption.
+	Long: `Derives mode from lifecycle.yaml and emits mode-appropriate operating
+guidance for agent consumption.
 
 If --spec is omitted and exactly one active spec exists, it is auto-selected.
 If multiple active specs exist, the command fails with a list of candidates.`,
@@ -52,14 +52,14 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 		specID, resolveErr := resolve.ResolveTarget(root, specFlag)
 
 		// Build mode-cache for instruct.BuildContext
-		var mc *state.ModeCache
+		var mc *state.Focus
 		if resolveErr != nil {
 			// If ambiguous, surface the error directly
 			if _, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return resolveErr
 			}
 			// Other errors: fall back to mode-cache
-			cached, mcErr := state.ReadModeCache(root)
+			cached, mcErr := state.ReadFocus(root)
 			if mcErr != nil || cached == nil {
 				return handleNoState(root, format)
 			}
@@ -67,17 +67,17 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 		} else {
 			// Derive mode from molecule
 			mode, modeErr := resolve.ResolveMode(root, specID)
-			cached, _ := state.ReadModeCache(root)
+			cached, _ := state.ReadFocus(root)
 			if modeErr != nil {
 				// Fallback: use mode-cache mode but resolved specID
 				if cached != nil {
-					mc = &state.ModeCache{
+					mc = &state.Focus{
 						Mode:       cached.Mode,
 						ActiveSpec: specID,
 						ActiveBead: cached.ActiveBead,
 					}
 				} else {
-					mc = &state.ModeCache{
+					mc = &state.Focus{
 						Mode:       state.ModeIdle,
 						ActiveSpec: specID,
 					}
@@ -87,7 +87,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 				if cached != nil {
 					activeBead = cached.ActiveBead
 				}
-				mc = &state.ModeCache{
+				mc = &state.Focus{
 					Mode:       mode,
 					ActiveSpec: specID,
 					ActiveBead: activeBead,
@@ -132,7 +132,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 
 // handleNoState provides a graceful fallback when no state exists.
 func handleNoState(root, format string) error {
-	mc := &state.ModeCache{Mode: state.ModeIdle}
+	mc := &state.Focus{Mode: state.ModeIdle}
 	ctx := instruct.BuildContext(root, mc)
 	ctx.Warnings = append(ctx.Warnings,
 		"[state] No active state found. Run `mindspec spec-init` to start a new spec.",

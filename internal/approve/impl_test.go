@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -13,38 +12,32 @@ import (
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-func writeBoundSpec(t *testing.T, root, specID string) {
+func writeLifecycleSpec(t *testing.T, root, specID string) {
 	t.Helper()
 	specDir := filepath.Join(root, "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
 	}
-	spec := `---
-molecule_id: mol-parent
-step_mapping:
-  spec: step-spec
-  spec-approve: step-spec-approve
-  plan: step-plan
-  plan-approve: step-plan-approve
-  implement: step-impl
-  review: step-review
-  spec-lifecycle: mol-parent
----
-# Spec ` + specID + `
-`
+	// Write a minimal spec.md
+	spec := "# Spec " + specID + "\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644); err != nil {
 		t.Fatalf("write spec: %v", err)
+	}
+	// Write lifecycle.yaml with epic_id
+	lc := &state.Lifecycle{Phase: state.ModeReview, EpicID: "epic-parent"}
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		t.Fatalf("write lifecycle: %v", err)
 	}
 }
 
 func TestApproveImpl_HappyPath(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	// Set state to review mode
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
@@ -77,31 +70,38 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 	if result.SpecID != "010-test" {
 		t.Errorf("SpecID: got %q, want %q", result.SpecID, "010-test")
 	}
-	got := append([]string(nil), closed...)
-	sort.Strings(got)
-	want := []string{"mol-parent", "step-impl", "step-plan", "step-plan-approve", "step-review", "step-spec", "step-spec-approve"}
-	sort.Strings(want)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("closed IDs mismatch\ngot:  %v\nwant: %v", got, want)
+	// Should close only the epic
+	if len(closed) != 1 || closed[0] != "epic-parent" {
+		t.Errorf("expected to close epic-parent, got: %v", closed)
 	}
 
-	// Verify mode-cache is now idle
-	mc, mcErr := state.ReadModeCache(tmp)
+	// Verify focus is now idle
+	mc, mcErr := state.ReadFocus(tmp)
 	if mcErr != nil {
-		t.Fatalf("reading mode-cache: %v", mcErr)
+		t.Fatalf("reading focus: %v", mcErr)
 	}
 	if mc.Mode != state.ModeIdle {
 		t.Errorf("mode: got %q, want %q", mc.Mode, state.ModeIdle)
+	}
+
+	// Verify lifecycle.yaml is now "done"
+	specDir := filepath.Join(tmp, "docs", "specs", "010-test")
+	lc, lcErr := state.ReadLifecycle(specDir)
+	if lcErr != nil {
+		t.Fatalf("reading lifecycle: %v", lcErr)
+	}
+	if lc.Phase != "done" {
+		t.Errorf("lifecycle phase: got %q, want %q", lc.Phase, "done")
 	}
 }
 
 func TestApproveImpl_WrongMode(t *testing.T) {
 	tmp := t.TempDir()
 
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeImplement,
 		ActiveSpec: "010-test",
 		ActiveBead: "bead-1",
@@ -119,10 +119,10 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 func TestApproveImpl_WrongSpec(t *testing.T) {
 	tmp := t.TempDir()
 
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
@@ -136,12 +136,12 @@ func TestApproveImpl_WrongSpec(t *testing.T) {
 	}
 }
 
-func TestApproveImpl_PartialCloseFailureWarnsAndContinues(t *testing.T) {
+func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 	})
@@ -153,15 +153,10 @@ func TestApproveImpl_PartialCloseFailureWarnsAndContinues(t *testing.T) {
 		return json.Marshal(payload)
 	}
 
-	var closed []string
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("unexpected args: %v", args)
-		}
-		if args[1] == "step-plan" {
+		if len(args) >= 2 && args[0] == "close" {
 			return nil, fmt.Errorf("boom")
 		}
-		closed = append(closed, args[1])
 		return []byte("ok"), nil
 	}
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
@@ -172,22 +167,19 @@ func TestApproveImpl_PartialCloseFailureWarnsAndContinues(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(result.Warnings) == 0 {
-		t.Fatal("expected warning for failed close")
+		t.Fatal("expected warning for failed epic close")
 	}
-	if !strings.Contains(strings.Join(result.Warnings, "\n"), "step-plan") {
-		t.Errorf("expected warning to mention failed member: %v", result.Warnings)
-	}
-	if len(closed) == 0 {
-		t.Fatal("expected other members to still be closed")
+	if !strings.Contains(strings.Join(result.Warnings, "\n"), "epic-parent") {
+		t.Errorf("expected warning to mention epic: %v", result.Warnings)
 	}
 }
 
 func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -251,10 +243,10 @@ func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 
 func TestApproveImpl_PRWaitFlow(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -327,10 +319,10 @@ func TestApproveImpl_PRWaitFlow(t *testing.T) {
 
 func TestApproveImpl_PRNoWaitFlow(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -452,10 +444,10 @@ func saveAndRestore(t *testing.T) {
 
 func TestVerifyImplContent_NoCommits(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -481,11 +473,11 @@ func TestVerifyImplContent_NoCommits(t *testing.T) {
 
 func TestVerifyImplContent_OpenBeads(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -519,11 +511,11 @@ func TestVerifyImplContent_OpenBeads(t *testing.T) {
 
 func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -561,7 +553,7 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 		t.Fatalf("expected auto-merge to succeed, got error: %v", err)
 	}
 
-	// First merge should be bead→spec (auto-merge), second is spec→main
+	// First merge should be bead->spec (auto-merge), second is spec->main
 	if len(merges) < 1 {
 		t.Fatal("expected at least one merge call")
 	}
@@ -578,11 +570,11 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 
 func TestVerifyImplContent_BeadBranchMergeFails(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",
@@ -613,11 +605,11 @@ func TestVerifyImplContent_BeadBranchMergeFails(t *testing.T) {
 
 func TestVerifyImplContent_AllGood(t *testing.T) {
 	tmp := t.TempDir()
-	writeBoundSpec(t, tmp, "010-test")
+	writeLifecycleSpec(t, tmp, "010-test")
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-aaa", "bead-bbb"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
-	state.WriteModeCache(tmp, &state.ModeCache{
+	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeReview,
 		ActiveSpec: "010-test",
 		SpecBranch: "spec/010-test",

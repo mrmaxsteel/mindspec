@@ -1,10 +1,11 @@
 package validate
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mindspec/mindspec/internal/state"
 )
 
 func TestValidatePlan_WellFormed(t *testing.T) {
@@ -149,19 +150,16 @@ func TestValidatePlan_NonexistentPlan(t *testing.T) {
 	}
 }
 
-func TestValidatePlan_ApprovedFrontmatterOpenGateWarns(t *testing.T) {
+func TestValidatePlan_ApprovedFrontmatterPlanPhaseWarns(t *testing.T) {
 	tmp := t.TempDir()
 	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
 	os.MkdirAll(specDir, 0755)
 
-	spec := `---
-molecule_id: mol-1
-step_mapping:
-  plan-approve: gate-plan
----
-# Spec
-`
-	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644)
+	// Write lifecycle.yaml still in "plan" phase — inconsistent with approved plan.
+	lc := &state.Lifecycle{Phase: state.ModePlan, EpicID: "epic-1"}
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		t.Fatalf("write lifecycle: %v", err)
+	}
 
 	plan := `---
 status: Approved
@@ -185,15 +183,6 @@ version: "1.0"
 `
 	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
 
-	orig := runBDGateStatusFn
-	defer func() { runBDGateStatusFn = orig }()
-	runBDGateStatusFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[0] == "show" && args[1] == "gate-plan" {
-			return []byte(`[{"status":"open"}]`), nil
-		}
-		return nil, fmt.Errorf("unexpected args: %v", args)
-	}
-
 	r := ValidatePlan(tmp, "999-test")
 	found := false
 	for _, issue := range r.Issues {
@@ -205,7 +194,7 @@ version: "1.0"
 		}
 	}
 	if !found {
-		t.Error("expected plan-gate-consistency warning")
+		t.Error("expected plan-gate-consistency warning when plan is Approved but lifecycle is still in plan phase")
 	}
 }
 

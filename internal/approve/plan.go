@@ -13,7 +13,6 @@ import (
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -35,7 +34,7 @@ type PlanResult struct {
 	Warnings []string
 }
 
-// ApprovePlan validates and approves a plan, resolving its gate and setting state.
+// ApprovePlan validates and approves a plan, creating beads and setting state.
 func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	result := &PlanResult{SpecID: specID}
 
@@ -45,22 +44,23 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
 	}
 
-	// Step 2: Resolve and enforce molecule binding before mutating artifacts.
-	meta, err := specmeta.EnsureFullyBound(root, specID)
-	if err != nil {
-		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
+	// Step 2: Read lifecycle to get epic_id for bead parenting.
+	specDir := workspace.SpecDir(root, specID)
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil {
+		lc = &state.Lifecycle{}
 	}
 
-	// Step 2: Update plan frontmatter
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
+	// Step 3: Update plan frontmatter
+	planPath := filepath.Join(specDir, "plan.md")
 	if err := updatePlanApproval(planPath, approvedBy); err != nil {
 		return nil, fmt.Errorf("updating plan approval: %w", err)
 	}
 
-	// Step 2b: Auto-create implementation beads from plan sections
-	implementStepID := strings.TrimSpace(meta.StepMapping["implement"])
-	if implementStepID != "" {
-		beadIDs, err := createImplementationBeads(planPath, specID, implementStepID)
+	// Step 3b: Auto-create implementation beads from plan sections
+	parentID := lc.EpicID
+	if parentID != "" {
+		beadIDs, err := createImplementationBeads(planPath, specID, parentID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create implementation beads: %w\n\nThe plan has been approved but beads were NOT created.\nFix the issue and re-run: mindspec bead create-from-plan %s", err, specID)
 		} else if len(beadIDs) > 0 {
@@ -69,14 +69,19 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write bead IDs to plan frontmatter: %v", err))
 			}
 		} else {
-			// Plan has no ## Bead sections — warn loudly
-			result.Warnings = append(result.Warnings, "plan has no '## Bead N:' sections; no implementation beads were created. Add bead sections to the plan or create beads manually with: bd create --title '[SPEC] Bead N: ...' --parent "+implementStepID)
+			result.Warnings = append(result.Warnings, "plan has no '## Bead N:' sections; no implementation beads were created. Add bead sections to the plan or create beads manually.")
 		}
 	} else {
-		result.Warnings = append(result.Warnings, "no implement step in molecule; skipping bead auto-creation")
+		result.Warnings = append(result.Warnings, "no epic_id in lifecycle.yaml; skipping bead auto-creation")
 	}
 
-	// Step 2c: Auto-commit plan approval + bead_ids so implementation
+	// Step 4: Transition lifecycle to implement phase (plan is approved).
+	lc.Phase = state.ModeImplement
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
+	}
+
+	// Step 4b: Auto-commit plan approval + bead_ids so implementation
 	// worktrees that branch from spec/<id> contain the approved artifacts.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
@@ -84,28 +89,17 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
 	}
 
-	// Step 3: Close plan-approve step in molecule (best-effort)
-	stepID := strings.TrimSpace(meta.StepMapping["plan-approve"])
-	if stepID == "" {
-		return nil, fmt.Errorf("spec %s is missing step_mapping.plan-approve; re-run `mindspec spec-init %s` or repair frontmatter", specID, specID)
-	}
-	if _, err := planRunBDCombinedFn("close", stepID); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not close plan-approve step: %v", err))
-	} else {
-		result.GateID = stepID
-	}
-
-	// Step 5: Write mode-cache for plan mode (approved).
+	// Step 5: Write focus for plan mode (approved).
 	// Note: implement mode requires a bead ID. The user runs `mindspec next`
 	// to claim work and transition to implement mode.
-	mc := &state.ModeCache{
+	mc := &state.Focus{
 		Mode:           state.ModePlan,
 		ActiveSpec:     specID,
 		SpecBranch:     state.SpecBranch(specID),
 		ActiveWorktree: specWtPath,
 	}
-	if err := state.WriteModeCache(root, mc); err != nil {
-		return nil, fmt.Errorf("writing mode-cache: %w", err)
+	if err := state.WriteFocus(root, mc); err != nil {
+		return nil, fmt.Errorf("writing focus: %w", err)
 	}
 
 	// Step 6: Emit recording phase marker (best-effort)
@@ -329,18 +323,14 @@ func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
 func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
 	result := &PlanResult{SpecID: specID}
 
-	meta, err := specmeta.EnsureFullyBound(root, specID)
-	if err != nil {
-		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
+	specDir := workspace.SpecDir(root, specID)
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil || lc.EpicID == "" {
+		return nil, fmt.Errorf("spec %s has no epic_id in lifecycle.yaml; cannot create beads", specID)
 	}
 
-	implementStepID := strings.TrimSpace(meta.StepMapping["implement"])
-	if implementStepID == "" {
-		return nil, fmt.Errorf("spec %s has no implement step in molecule; cannot create beads", specID)
-	}
-
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
-	beadIDs, err := createImplementationBeads(planPath, specID, implementStepID)
+	planPath := filepath.Join(specDir, "plan.md")
+	beadIDs, err := createImplementationBeads(planPath, specID, lc.EpicID)
 	if err != nil {
 		return nil, fmt.Errorf("creating beads: %w", err)
 	}

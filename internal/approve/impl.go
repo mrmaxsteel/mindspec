@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/config"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 
@@ -65,9 +63,12 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 	result := &ImplResult{SpecID: specID}
 
 	// Verify current state is review mode for this spec
-	mc, err := state.ReadModeCache(root)
+	mc, err := state.ReadFocus(root)
 	if err != nil {
 		return nil, fmt.Errorf("reading state: %w", err)
+	}
+	if mc == nil {
+		mc = &state.Focus{}
 	}
 	if mc.Mode != state.ModeReview {
 		return nil, fmt.Errorf("expected review mode, got %q", mc.Mode)
@@ -76,24 +77,22 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 		return nil, fmt.Errorf("active spec is %q, not %q", mc.ActiveSpec, specID)
 	}
 
-	// Resolve and enforce molecule binding before mutation.
-	meta, err := specmeta.EnsureFullyBound(root, specID)
-	if err != nil {
-		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
+	// Close lifecycle epic (best-effort).
+	specDir := workspace.SpecDir(root, specID)
+	lc, lcErr := state.ReadLifecycle(specDir)
+	if lcErr == nil && lc != nil && lc.EpicID != "" {
+		if _, err := implRunBDCombinedFn("close", lc.EpicID); err != nil {
+			if !isAlreadyClosedErr(err) {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", lc.EpicID, err))
+			}
+		}
 	}
 
-	// Close parent epic + all unique mapped steps (best-effort).
-	for _, targetID := range closeoutTargets(meta) {
-		status, err := readBeadStatus(targetID)
-		if err == nil && status == "closed" {
-			continue
-		}
-
-		if _, err := implRunBDCombinedFn("close", targetID); err != nil {
-			if isAlreadyClosedErr(err) {
-				continue
-			}
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not close molecule member %s: %v", targetID, err))
+	// Transition lifecycle to done.
+	if lcErr == nil && lc != nil {
+		lc.Phase = "done"
+		if err := state.WriteLifecycle(specDir, lc); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not update lifecycle.yaml: %v", err))
 		}
 	}
 
@@ -135,47 +134,11 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 	}
 
 	// Transition to idle
-	if err := state.WriteModeCache(root, &state.ModeCache{Mode: state.ModeIdle}); err != nil {
-		return nil, fmt.Errorf("writing mode-cache: %w", err)
+	if err := state.WriteFocus(root, &state.Focus{Mode: state.ModeIdle}); err != nil {
+		return nil, fmt.Errorf("writing focus: %w", err)
 	}
 
 	return result, nil
-}
-
-func closeoutTargets(meta *specmeta.Meta) []string {
-	seen := map[string]struct{}{}
-	var targets []string
-
-	add := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, exists := seen[id]; exists {
-			return
-		}
-		seen[id] = struct{}{}
-		targets = append(targets, id)
-	}
-
-	add(meta.MoleculeID)
-
-	var remaining []string
-	for _, id := range meta.StepMapping {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		remaining = append(remaining, id)
-	}
-	sort.Strings(remaining)
-	targets = append(targets, remaining...)
-
-	return targets
 }
 
 func readBeadStatus(id string) (string, error) {

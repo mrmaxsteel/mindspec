@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/adr"
-	"github.com/mindspec/mindspec/internal/specmeta"
+	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -109,25 +109,17 @@ func checkPlanApprovalGateConsistency(r *Result, root, specID string, fm *PlanFr
 		return
 	}
 
-	meta, err := specmeta.ReadForSpec(root, specID)
-	if err != nil {
-		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but molecule metadata could not be read: %v", err))
-		return
+	// With lifecycle.yaml, verify the lifecycle phase is at least "implement"
+	// (meaning plan was approved and lifecycle advanced).
+	specDir := filepath.Join(workspace.DocsDir(root), "specs", specID)
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil {
+		return // no lifecycle → skip check
 	}
 
-	gateID := strings.TrimSpace(meta.StepMapping["plan-approve"])
-	if gateID == "" {
-		r.AddWarning("plan-gate-consistency", "plan frontmatter status is Approved but step_mapping.plan-approve is missing")
-		return
-	}
-
-	status, err := readGateStatus(gateID)
-	if err != nil {
-		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but gate %s could not be verified: %v", gateID, err))
-		return
-	}
-	if status != "closed" {
-		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but gate %s is %s", gateID, status))
+	// If plan is approved but lifecycle is still in plan phase, warn.
+	if lc.Phase == state.ModePlan || lc.Phase == state.ModeSpec {
+		r.AddWarning("plan-gate-consistency", fmt.Sprintf("plan frontmatter status is Approved but lifecycle phase is %q", lc.Phase))
 	}
 }
 

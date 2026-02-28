@@ -2,7 +2,6 @@ package validate
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -323,18 +322,12 @@ func TestValidateSpec_PlaceholderContent(t *testing.T) {
 	}
 }
 
-func TestValidateSpec_ApprovedFrontmatterOpenGateWarns(t *testing.T) {
+func TestValidateSpec_LifecycleBindingWarn(t *testing.T) {
 	tmp := t.TempDir()
 	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
 	os.MkdirAll(specDir, 0755)
 
-	spec := `---
-molecule_id: mol-1
-status: Approved
-step_mapping:
-  spec-approve: gate-spec
----
-# Spec 999: Test
+	spec := `# Spec 999: Test
 
 ## Goal
 
@@ -377,19 +370,11 @@ None
 `
 	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644)
 
-	orig := runBDGateStatusFn
-	defer func() { runBDGateStatusFn = orig }()
-	runBDGateStatusFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[0] == "show" && args[1] == "gate-spec" {
-			return []byte(`[{"status":"open"}]`), nil
-		}
-		return nil, fmt.Errorf("unexpected args: %v", args)
-	}
-
+	// No lifecycle.yaml — should warn about missing lifecycle binding.
 	r := ValidateSpec(tmp, "999-test")
 	found := false
 	for _, issue := range r.Issues {
-		if issue.Name == "spec-gate-consistency" {
+		if issue.Name == "lifecycle-binding" {
 			found = true
 			if issue.Severity != SevWarning {
 				t.Errorf("expected warning severity, got %s", issue.Severity)
@@ -397,7 +382,7 @@ None
 		}
 	}
 	if !found {
-		t.Error("expected spec-gate-consistency warning")
+		t.Error("expected lifecycle-binding warning when lifecycle.yaml is absent")
 	}
 }
 
