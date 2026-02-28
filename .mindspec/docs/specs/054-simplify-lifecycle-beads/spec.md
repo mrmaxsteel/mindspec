@@ -150,8 +150,8 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 ## Open Questions
 
-- [ ] Should hooks read `lifecycle.yaml` directly, or should the focus file mirror the phase for hook performance? (If `lifecycle.yaml` is in the worktree, reads are fast — probably no need for mirroring.)
-- [ ] Should `ResolveActiveBead` stay in `internal/resolve/` or move to `internal/next/`?
+- [x] Should hooks read `lifecycle.yaml` directly, or should the focus file mirror the phase for hook performance? **Decision: Hooks read `lifecycle.yaml` directly.** It's a local file read in the worktree — fast enough. No mirroring needed.
+- [x] Should `ResolveActiveBead` stay in `internal/resolve/` or move to `internal/next/`? **Decision: Move to `internal/next/`.** With molecule derivation removed, `internal/resolve/` shrinks to just `ResolveTarget`. `ResolveActiveBead` is only used by the next command.
 
 ## Approval
 
