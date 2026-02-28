@@ -248,6 +248,7 @@ func (s *Sandbox) WriteLifecycle(specID, content string) {
 // initBeads runs bd init in sandbox mode within the given root directory.
 // Uses --server-port 0 so dolt picks a random free port (avoids collisions
 // between parallel test sandboxes and the main project's dolt server).
+// Kills orphan dolt servers first to avoid "too many dolt sql-server" errors.
 func initBeads(t *testing.T, root string) {
 	t.Helper()
 	bdPath, err := exec.LookPath("bd")
@@ -255,6 +256,12 @@ func initBeads(t *testing.T, root string) {
 		t.Logf("warning: bd not found, skipping beads init")
 		return
 	}
+
+	// Kill orphan dolt servers that may have leaked from previous test runs.
+	killCmd := exec.Command(bdPath, "dolt", "killall")
+	killCmd.Dir = root
+	_ = killCmd.Run() // best-effort
+
 	cmd := exec.Command(bdPath, "init", "--sandbox", "--skip-hooks", "-q", "--server-port", "0")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
