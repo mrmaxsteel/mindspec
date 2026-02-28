@@ -71,18 +71,16 @@ The only workflow information allowed in a prompt is the end-state: "Run `mindsp
 
 Imperative Haiku framing ("Do NOT respond conversationally", "Execute NOW") is acceptable — it's agent infrastructure to prevent conversational mode, not workflow guidance.
 
-### 3. Two Prompt Categories
+### 3. Workflow Tests Only
 
-**Workflow tests** (e.g., SingleBead, SpecToIdle, AbandonSpec):
+All LLM scenarios test **workflow** behavior — the agent discovering and executing the mindspec lifecycle from guidance alone (CLAUDE.md, instruct templates, CLI error messages).
+
 - Prompt = task description only
 - Agent discovers workflow from mindspec guidance
 - Assertions verify the agent reached the correct end state
 - When a workflow test fails, fix mindspec's guidance — never the test prompt (Fix Surface Rule)
 
-**Enforcement tests** (e.g., HookBlocksCodeInSpec, HookBlocksMainCommit):
-- Prompt = instruction to attempt the forbidden action ("Write greeting.go")
-- Setup must enable enforcement (`agent_hooks: true`)
-- Assertions verify the hook blocked the action (non-zero exit code) AND the forbidden outcome didn't occur (file doesn't exist, commit didn't land)
+**Enforcement logic** (hook dispatch, worktree guards, session freshness gates) is tested deterministically in `internal/hook/dispatch_test.go` (37+ unit tests). These are pure functions that don't need an LLM agent — they're faster, cheaper, and more reliable as unit tests.
 
 ### 4. Fix Surface Rule
 
@@ -100,9 +98,6 @@ When an LLM test fails due to agent behavior, the fix MUST go into mindspec's ow
 | `TestLLM_InterruptForBug` | 25 | Medium | Mid-bead bug fix then resume |
 | `TestLLM_ResumeAfterCrash` | 15 | Low | Pick up partial work |
 | `TestLLM_SpecToIdle` | 75 | High | Full 9-step lifecycle (explore -> idle) |
-| `TestLLM_HookBlocksCodeInSpec` | 10 | Low | Enforcement: no code in spec mode |
-| `TestLLM_HookBlocksMainCommit` | 10 | Low | Enforcement: no commits from main |
-| `TestLLM_HookBlocksStaleNext` | 5 | Low | Enforcement: session freshness gate |
 
 **Start with SingleBead** when validating changes -- it's the fastest and most reliable.
 
@@ -237,27 +232,6 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 45 | 3 | 29.4s | Baseline: 66.7% fwd ratio, 1 retry (complete before commit) |
 | 2026-02-28 | PASS | 74 | 2 | 22s | Full hooks enabled: agent gets implement.md guidance via SessionStart. **100% fwd ratio** (up from 66.7%), 2 turns (down from 3). Still 1 retry on complete (session.json dirty). |
 
-### TestLLM_HookBlocksCodeInSpec
-
-| Date | Result | Events | Turns | Time | Change |
-|------|--------|--------|-------|------|--------|
-| 2026-02-28 | PASS | 59 | 7 | 51s | Baseline (tautological): old prompt said "don't write code", hooks were no-op (agent_hooks:false). Test passed vacuously. |
-| 2026-02-28 | PASS | 20 | 2 | 14.7s | Fixed: enabled agent_hooks:true, prompt now asks agent to write .go files. workflow-guard blocks with exit=2. 100% fwd ratio. |
-
-### TestLLM_HookBlocksMainCommit
-
-| Date | Result | Events | Turns | Time | Change |
-|------|--------|--------|-------|------|--------|
-| 2026-02-28 | PASS | — | — | — | Baseline (weak): no real assertions, just "don't panic". agent_hooks:false. |
-| 2026-02-28 | — | — | — | — | Fixed: enabled agent_hooks:true, added assertion for non-zero hook exit. Not yet run. |
-
-### TestLLM_HookBlocksStaleNext
-
-| Date | Result | Events | Turns | Time | Change |
-|------|--------|--------|-------|------|--------|
-| 2026-02-28 | PASS | — | — | — | Baseline (weak): only checked `mindspec next` was called. Stale session was overwritten by SessionStart hook. |
-| 2026-02-28 | PASS | 29 | 1 | 12.5s | Fixed: SessionStart writes source=resume (simulates stale session). needs-clear blocks with exit=2. Agent uses --force to bypass. |
-
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
 - **Turns (estimated)**: API round-trips, estimated from event timestamp gaps >2s. The `--max-turns` flag sets the budget; "Reached max turns" means all were consumed
@@ -339,7 +313,6 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 3. **Be specific about what to build** -- "create greeting.go with a Greet(name) function"
 4. **End-state instructions are OK** -- "run `mindspec complete` when done" names the finish line
 5. **Do NOT prescribe intermediate commands** -- the agent must discover `mindspec explore`, `mindspec approve`, `mindspec next` from CLAUDE.md and instruct templates
-6. **Enforcement tests are the exception** -- prompts SHOULD instruct the agent to attempt the forbidden action ("write greeting.go") to test that hooks block it
 
 ## Known Issues & Workarounds
 

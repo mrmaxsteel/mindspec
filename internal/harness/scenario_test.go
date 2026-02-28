@@ -145,26 +145,3 @@ func TestLLM_ResumeAfterCrash(t *testing.T) {
 	}
 }
 
-// --- Enforcement scenarios ---
-
-func TestLLM_HookBlocksCodeInSpec(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping LLM test in short mode")
-	}
-	runScenario(t, ScenarioHookBlocksCodeInSpec())
-	// Assertions are in the scenario itself — no code files should be written
-}
-
-func TestLLM_HookBlocksMainCommit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping LLM test in short mode")
-	}
-	runScenario(t, ScenarioHookBlocksMainCommit())
-}
-
-func TestLLM_HookBlocksStaleNext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping LLM test in short mode")
-	}
-	runScenario(t, ScenarioHookBlocksStaleNext())
-}
