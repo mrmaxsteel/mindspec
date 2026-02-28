@@ -148,6 +148,17 @@ func LifecyclePath(root, specID string) string {
 	return filepath.Join(SpecDir(root, specID), "lifecycle.yaml")
 }
 
+// EffectiveSpecRoot returns the worktree root for a spec if one exists,
+// otherwise returns mainRoot. Use this for reading spec artifacts that
+// may only exist in the worktree (plan.md, lifecycle.yaml, etc.).
+func EffectiveSpecRoot(mainRoot, specID string) string {
+	wtPath := filepath.Join(mainRoot, ".worktrees", "worktree-spec-"+specID)
+	if exists(filepath.Join(wtPath, ".mindspec")) {
+		return wtPath
+	}
+	return mainRoot
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

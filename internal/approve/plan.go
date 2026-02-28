@@ -38,14 +38,17 @@ type PlanResult struct {
 func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	result := &PlanResult{SpecID: specID}
 
+	// Use effective root: spec artifacts may only exist in the worktree.
+	effectiveRoot := workspace.EffectiveSpecRoot(root, specID)
+
 	// Step 1: Validate
-	vr := validate.ValidatePlan(root, specID)
+	vr := validate.ValidatePlan(effectiveRoot, specID)
 	if vr.HasFailures() {
 		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
 	}
 
 	// Step 2: Read lifecycle to get epic_id for bead parenting.
-	specDir := workspace.SpecDir(root, specID)
+	specDir := workspace.SpecDir(effectiveRoot, specID)
 	lc, err := state.ReadLifecycle(specDir)
 	if err != nil || lc == nil {
 		lc = &state.Lifecycle{}
@@ -103,10 +106,10 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	}
 
 	// Step 6: Emit recording phase marker (best-effort)
-	if err := recording.EmitPhaseMarker(root, specID, "plan", "plan-approved"); err != nil {
+	if err := recording.EmitPhaseMarker(effectiveRoot, specID, "plan", "plan-approved"); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
 	}
-	if err := recording.UpdatePhase(root, specID, "plan", "plan-approved"); err != nil {
+	if err := recording.UpdatePhase(effectiveRoot, specID, "plan", "plan-approved"); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not update recording phase: %v", err))
 	}
 
@@ -323,7 +326,8 @@ func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
 func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
 	result := &PlanResult{SpecID: specID}
 
-	specDir := workspace.SpecDir(root, specID)
+	effectiveRoot := workspace.EffectiveSpecRoot(root, specID)
+	specDir := workspace.SpecDir(effectiveRoot, specID)
 	lc, err := state.ReadLifecycle(specDir)
 	if err != nil || lc == nil || lc.EpicID == "" {
 		return nil, fmt.Errorf("spec %s has no epic_id in lifecycle.yaml; cannot create beads", specID)
