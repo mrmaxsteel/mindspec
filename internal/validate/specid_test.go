@@ -27,13 +27,13 @@ func TestSpecID(t *testing.T) {
 		"../etc/passwd",
 		"foo/bar",
 		"foo\\bar",
-		"33-too-short",    // only 2 digits
-		"no-digits",       // missing leading digits
-		"033",             // no slug
-		"033-",            // trailing hyphen
-		"033-UPPERCASE",   // uppercase
-		"033-has spaces",  // spaces
-		"033-has_under",   // underscores
+		"33-too-short",   // only 2 digits
+		"no-digits",      // missing leading digits
+		"033",            // no slug
+		"033-",           // trailing hyphen
+		"033-UPPERCASE",  // uppercase
+		"033-has spaces", // spaces
+		"033-has_under",  // underscores
 	}
 	for _, id := range invalid {
 		if err := SpecID(id); err == nil {
