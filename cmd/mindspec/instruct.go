@@ -51,14 +51,14 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 		// Resolve target spec (ADR-0015 targeting rules)
 		specID, resolveErr := resolve.ResolveTarget(root, specFlag)
 
-		// Build mode-cache for instruct.BuildContext
+		// Build focus for instruct.BuildContext
 		var mc *state.Focus
 		if resolveErr != nil {
 			// If ambiguous, surface the error directly
 			if _, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return resolveErr
 			}
-			// Other errors: fall back to mode-cache
+			// Other errors: fall back to focus
 			cached, mcErr := state.ReadFocus(root)
 			if mcErr != nil || cached == nil {
 				return handleNoState(root, format)
@@ -69,7 +69,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			mode, modeErr := resolve.ResolveMode(root, specID)
 			cached, _ := state.ReadFocus(root)
 			if modeErr != nil {
-				// Fallback: use mode-cache mode but resolved specID
+				// Fallback: use focus mode but resolved specID
 				if cached != nil {
 					mc = &state.Focus{
 						Mode:       cached.Mode,

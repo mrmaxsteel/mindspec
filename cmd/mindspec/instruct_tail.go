@@ -9,14 +9,14 @@ import (
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-// emitInstruct reads mode-cache and prints mode-appropriate guidance.
+// emitInstruct reads focus and prints mode-appropriate guidance.
 // This is the "instruct-tail" convention: every state-changing command
 // (approve, next, complete) calls this after transitioning to emit
 // guidance for the new mode.
 func emitInstruct(root string) error {
-	mc, err := state.ReadModeCache(root)
+	mc, err := state.ReadFocus(root)
 	if err != nil {
-		mc = &state.ModeCache{Mode: state.ModeIdle}
+		mc = &state.Focus{Mode: state.ModeIdle}
 	}
 
 	// CWD redirect: if on main with active worktree, emit redirect only.

@@ -31,7 +31,7 @@ var recordStatusCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			mc, err := state.ReadModeCache(root)
+			mc, err := state.ReadFocus(root)
 			if err != nil || mc.ActiveSpec == "" {
 				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
@@ -97,7 +97,7 @@ var recordStopCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			mc, err := state.ReadModeCache(root)
+			mc, err := state.ReadFocus(root)
 			if err != nil || mc.ActiveSpec == "" {
 				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
@@ -122,7 +122,7 @@ var recordHealthCmd = &cobra.Command{
 			return nil // silent exit if no project root
 		}
 
-		mc, err := state.ReadModeCache(root)
+		mc, err := state.ReadFocus(root)
 		if err != nil || mc.Mode == state.ModeIdle {
 			return nil // no active spec
 		}

@@ -127,7 +127,7 @@ func TestNeutralizeBaseline(t *testing.T) {
 	// Create fixture files
 	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("test"), 0644)
 	os.MkdirAll(filepath.Join(dir, ".mindspec"), 0755)
-	os.WriteFile(filepath.Join(dir, ".mindspec", "mode-cache"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(dir, ".mindspec", "focus"), []byte("{}"), 0644)
 	os.MkdirAll(filepath.Join(dir, ".claude", "commands"), 0755)
 	os.WriteFile(filepath.Join(dir, ".claude", "commands", "spec-init.md"), []byte("test"), 0644)
 	os.WriteFile(filepath.Join(dir, ".claude", "commands", "spec-approve.md"), []byte("test"), 0644)
@@ -559,7 +559,7 @@ func TestBuildRetryPrompt(t *testing.T) {
 	os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0755)
 
 	// Plan mode → should mention plan creation
-	os.WriteFile(filepath.Join(wtDir, ".mindspec", "mode-cache"),
+	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
 		[]byte(`{"mode":"plan","activeSpec":"test-spec"}`), 0644)
 	p := buildRetryPrompt("c", wtDir, "test-spec", 1)
 	if !strings.Contains(p, "plan") {
@@ -567,7 +567,7 @@ func TestBuildRetryPrompt(t *testing.T) {
 	}
 
 	// Implement mode → should mention implementation
-	os.WriteFile(filepath.Join(wtDir, ".mindspec", "mode-cache"),
+	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
 		[]byte(`{"mode":"implement","activeSpec":"test-spec"}`), 0644)
 	p = buildRetryPrompt("c", wtDir, "test-spec", 1)
 	if !strings.Contains(p, "Implement") {
@@ -580,8 +580,8 @@ func TestAutoApproveSessionC(t *testing.T) {
 	os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0755)
 	os.MkdirAll(filepath.Join(wtDir, "docs", "specs", "test-spec"), 0755)
 
-	// Write initial mode-cache: spec mode
-	os.WriteFile(filepath.Join(wtDir, ".mindspec", "mode-cache"),
+	// Write initial focus: spec mode
+	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
 		[]byte(`{"mode":"spec","activeSpec":"test-spec"}`), 0644)
 
 	// Write a spec with frontmatter
@@ -591,10 +591,10 @@ func TestAutoApproveSessionC(t *testing.T) {
 	// Auto-approve should advance spec → plan
 	autoApprove("c", wtDir, "test-spec")
 
-	// Check mode-cache advanced to plan
-	data, _ := os.ReadFile(filepath.Join(wtDir, ".mindspec", "mode-cache"))
+	// Check focus advanced to plan
+	data, _ := os.ReadFile(filepath.Join(wtDir, ".mindspec", "focus"))
 	if !strings.Contains(string(data), `"plan"`) {
-		t.Errorf("mode-cache should be plan, got: %s", string(data))
+		t.Errorf("focus should be plan, got: %s", string(data))
 	}
 
 	// Check spec frontmatter was updated
@@ -609,9 +609,9 @@ func TestAutoApproveSessionC(t *testing.T) {
 
 	autoApprove("c", wtDir, "test-spec")
 
-	data, _ = os.ReadFile(filepath.Join(wtDir, ".mindspec", "mode-cache"))
+	data, _ = os.ReadFile(filepath.Join(wtDir, ".mindspec", "focus"))
 	if !strings.Contains(string(data), `"implement"`) {
-		t.Errorf("mode-cache should be implement, got: %s", string(data))
+		t.Errorf("focus should be implement, got: %s", string(data))
 	}
 }
 

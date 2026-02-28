@@ -24,7 +24,7 @@ var (
 )
 
 func defaultReadGuardState(root string) (*guardState, error) {
-	mc, err := state.ReadModeCache(root)
+	mc, err := state.ReadFocus(root)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func IsMainCWD(root string) bool {
 	return CheckCWD(root) != nil
 }
 
-// ActiveWorktreePath returns the active worktree path from mode-cache, or empty string.
+// ActiveWorktreePath returns the active worktree path from focus, or empty string.
 func ActiveWorktreePath(root string) string {
 	gs, err := readGuardStateFn(root)
 	if err != nil {

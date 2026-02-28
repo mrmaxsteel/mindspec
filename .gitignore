@@ -2,7 +2,6 @@
 # Phase is stored per-spec in lifecycle.yaml (committed). These are transient.
 .mindspec/session.json
 .mindspec/focus
-.mindspec/mode-cache
 .mindspec/current-spec.json
 
 # Beads runtime artifacts are handled by .beads/.gitignore

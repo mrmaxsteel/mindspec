@@ -126,9 +126,9 @@ func Run(root, beadID string) (*Result, error) {
 	result.NextBead = nextBead
 	result.NextSpec = specID
 
-	// 6.5. Write mode-cache with next state
+	// 6.5. Write focus with next state
 	specWtPath := state.SpecWorktreePath(root, specID)
-	mc := &state.ModeCache{
+	mc := &state.Focus{
 		Mode:       nextMode,
 		ActiveSpec: specID,
 		ActiveBead: nextBead,
@@ -142,8 +142,8 @@ func Run(root, beadID string) (*Result, error) {
 	} else {
 		mc.ActiveWorktree = specWtPath
 	}
-	if err := state.WriteModeCache(root, mc); err != nil {
-		return result, fmt.Errorf("writing mode-cache: %w", err)
+	if err := state.WriteFocus(root, mc); err != nil {
+		return result, fmt.Errorf("writing focus: %w", err)
 	}
 
 	return result, nil

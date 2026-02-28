@@ -280,8 +280,8 @@ func autoApprove(label, wtPath, specID string) {
 		return // A/B: no state to advance, rely on retry prompt
 	}
 
-	// Read MindSpec mode-cache
-	cacheData, err := os.ReadFile(filepath.Join(wtPath, ".mindspec", "mode-cache"))
+	// Read MindSpec focus
+	cacheData, err := os.ReadFile(filepath.Join(wtPath, ".mindspec", "focus"))
 	if err != nil {
 		return
 	}
@@ -298,7 +298,7 @@ func autoApprove(label, wtPath, specID string) {
 		if specPath != "" {
 			updateFrontmatterApproval(specPath)
 		}
-		writeModeCache(wtPath, "plan", specID, "")
+		writeFocus(wtPath, "plan", specID, "")
 
 	case "plan":
 		// Approve the plan: update frontmatter, advance to implement mode
@@ -306,7 +306,7 @@ func autoApprove(label, wtPath, specID string) {
 		if _, err := os.Stat(planPath); err == nil {
 			updateFrontmatterApproval(planPath)
 		}
-		writeModeCache(wtPath, "implement", specID, "bench-impl")
+		writeFocus(wtPath, "implement", specID, "bench-impl")
 	}
 }
 
@@ -320,8 +320,8 @@ func buildRetryPrompt(label, wtPath, specID string, attempt int) string {
 		return "Implementation is required. Write the code now and commit all changes."
 	}
 
-	// Session C: check MindSpec mode-cache and give workflow-appropriate prompt
-	cacheData, err := os.ReadFile(filepath.Join(wtPath, ".mindspec", "mode-cache"))
+	// Session C: check MindSpec focus and give workflow-appropriate prompt
+	cacheData, err := os.ReadFile(filepath.Join(wtPath, ".mindspec", "focus"))
 	if err != nil {
 		return "Continue implementing. Write all remaining code and commit."
 	}
@@ -342,9 +342,9 @@ func buildRetryPrompt(label, wtPath, specID string, attempt int) string {
 	}
 }
 
-// prepareSessionC sets MindSpec mode-cache to spec mode so hooks emit spec-mode guidance.
+// prepareSessionC sets MindSpec focus to spec mode so hooks emit spec-mode guidance.
 func prepareSessionC(wtPath, specID string) {
-	writeModeCache(wtPath, "spec", specID, "")
+	writeFocus(wtPath, "spec", specID, "")
 }
 
 // updateFrontmatterApproval updates a markdown file's YAML frontmatter to set
@@ -394,8 +394,8 @@ func updateFrontmatterApproval(filePath string) {
 	os.WriteFile(filePath, []byte(content), 0644) //nolint:errcheck
 }
 
-// writeModeCache writes a MindSpec mode-cache file.
-func writeModeCache(wtPath, mode, specID, beadID string) {
+// writeFocus writes a MindSpec focus cursor file.
+func writeFocus(wtPath, mode, specID, beadID string) {
 	stateDir := filepath.Join(wtPath, ".mindspec")
 	os.MkdirAll(stateDir, 0755) //nolint:errcheck
 
@@ -408,7 +408,7 @@ func writeModeCache(wtPath, mode, specID, beadID string) {
 
 	data, _ := json.MarshalIndent(cache, "", "  ")
 	data = append(data, '\n')
-	os.WriteFile(filepath.Join(stateDir, "mode-cache"), data, 0644) //nolint:errcheck
+	os.WriteFile(filepath.Join(stateDir, "focus"), data, 0644) //nolint:errcheck
 }
 
 // findSpecFile locates the spec.md for a given spec ID in the worktree.

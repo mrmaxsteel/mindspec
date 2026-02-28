@@ -41,8 +41,8 @@ type JSONOutput struct {
 	Warnings     []string `json:"warnings"`
 }
 
-// BuildContext creates a rendering context from mode-cache and project root.
-func BuildContext(root string, mc *state.ModeCache) *Context {
+// BuildContext creates a rendering context from focus state and project root.
+func BuildContext(root string, mc *state.Focus) *Context {
 	ctx := &Context{
 		Mode:       mc.Mode,
 		ActiveSpec: mc.ActiveSpec,
