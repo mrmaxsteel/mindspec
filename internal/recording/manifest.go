@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
@@ -15,7 +16,8 @@ type Manifest struct {
 	StartedAt     string  `json:"started_at"`
 	CollectorPID  int     `json:"collector_pid"`
 	CollectorPort int     `json:"collector_port"`
-	Status        string  `json:"status"` // recording, stopped, complete
+	ProcessName   string  `json:"process_name,omitempty"` // expected binary name for PID verification
+	Status        string  `json:"status"`                 // recording, stopped, complete, stale
 	Phases        []Phase `json:"phases"`
 }
 
@@ -50,6 +52,9 @@ func HasRecording(root, specID string) bool {
 
 // ReadManifest reads the manifest from disk.
 func ReadManifest(root, specID string) (*Manifest, error) {
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(ManifestPath(root, specID))
 	if err != nil {
 		return nil, fmt.Errorf("reading manifest: %w", err)
@@ -63,6 +68,9 @@ func ReadManifest(root, specID string) (*Manifest, error) {
 
 // WriteManifest writes the manifest to disk.
 func WriteManifest(root, specID string, m *Manifest) error {
+	if err := validate.SpecID(specID); err != nil {
+		return err
+	}
 	dir := RecordingDir(root, specID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating recording dir: %w", err)

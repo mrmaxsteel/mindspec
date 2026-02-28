@@ -12,6 +12,7 @@ import (
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 
 	"gopkg.in/yaml.v3"
@@ -60,6 +61,10 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 		opt = opts[0]
 	}
 	_ = opt // used below in merge flow
+
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
+	}
 	result := &ImplResult{SpecID: specID}
 
 	// Verify current state is review mode for this spec

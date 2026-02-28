@@ -3,6 +3,7 @@ package bench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"time"
 )
+
+const maxCollectorBodySize = 4 << 20 // 4 MB
 
 // Collector is a lightweight OTLP/HTTP JSON receiver that extracts
 // Claude Code telemetry events and writes them as NDJSON.
@@ -54,8 +57,13 @@ func (c *Collector) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/metrics", c.handleMetrics)
 
 	c.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", c.port),
-		Handler: mux,
+		Addr:              fmt.Sprintf("127.0.0.1:%d", c.port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)
@@ -92,8 +100,14 @@ func (c *Collector) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxCollectorBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
@@ -113,8 +127,14 @@ func (c *Collector) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxCollectorBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}

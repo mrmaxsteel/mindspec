@@ -3,6 +3,7 @@ package viz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,9 +15,12 @@ import (
 	"github.com/mindspec/mindspec/internal/bench"
 )
 
+const maxOTLPBodySize = 4 << 20 // 4 MB
+
 // LiveReceiver is an OTLP/HTTP receiver that normalizes events into the graph.
 type LiveReceiver struct {
 	otlpPort   int
+	bindAddr   string
 	graph      *Graph
 	hub        *Hub
 	server     *http.Server
@@ -38,10 +42,16 @@ type LiveReceiver struct {
 func NewLiveReceiver(otlpPort int, graph *Graph, hub *Hub) *LiveReceiver {
 	return &LiveReceiver{
 		otlpPort:  otlpPort,
+		bindAddr:  "127.0.0.1",
 		graph:     graph,
 		hub:       hub,
 		startTime: time.Now(),
 	}
+}
+
+// SetBindAddr sets the address to bind to (default "127.0.0.1").
+func (l *LiveReceiver) SetBindAddr(addr string) {
+	l.bindAddr = addr
 }
 
 // SetOutput configures NDJSON disk output. Must be called before Run().
@@ -64,8 +74,13 @@ func (l *LiveReceiver) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/metrics", l.handleMetrics)
 
 	l.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", l.otlpPort),
-		Handler: mux,
+		Addr:              fmt.Sprintf("%s:%d", l.bindAddr, l.otlpPort),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)
@@ -107,8 +122,14 @@ func (l *LiveReceiver) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxOTLPBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
@@ -126,8 +147,14 @@ func (l *LiveReceiver) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxOTLPBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}

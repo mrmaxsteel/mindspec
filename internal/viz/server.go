@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -16,16 +17,19 @@ import (
 	"nhooyr.io/websocket"
 )
 
+const maxReplayBodySize = 64 << 20 // 64 MB
+
 //go:embed web/*
 var webFS embed.FS
 
 // Server serves the web UI and WebSocket endpoint.
 type Server struct {
-	port   int
-	hub    *Hub
-	graph  *Graph
-	live   *LiveReceiver // optional, set for live mode
-	server *http.Server
+	port     int
+	bindAddr string
+	hub      *Hub
+	graph    *Graph
+	live     *LiveReceiver // optional, set for live mode
+	server   *http.Server
 
 	// Active replay cancellation
 	replayMu     sync.Mutex
@@ -35,10 +39,16 @@ type Server struct {
 // NewServer creates a new visualization server.
 func NewServer(port int, hub *Hub, graph *Graph) *Server {
 	return &Server{
-		port:  port,
-		hub:   hub,
-		graph: graph,
+		port:     port,
+		bindAddr: "127.0.0.1",
+		hub:      hub,
+		graph:    graph,
 	}
+}
+
+// SetBindAddr sets the address to bind to (default "127.0.0.1").
+func (s *Server) SetBindAddr(addr string) {
+	s.bindAddr = addr
 }
 
 // SetLiveReceiver attaches a live receiver for save-recording support.
@@ -62,8 +72,13 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/debug-events", s.handleDebugEvents)
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: mux,
+		Addr:              fmt.Sprintf("%s:%d", s.bindAddr, s.port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)
@@ -89,7 +104,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // localhost only
+		OriginPatterns: []string{"localhost", "127.0.0.1", "[::1]"},
 	})
 	if err != nil {
 		http.Error(w, "websocket upgrade failed", http.StatusInternalServerError)
@@ -143,9 +158,15 @@ func (s *Server) handleReplayUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Read uploaded file body
+	// Read uploaded file body with size limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxReplayBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}

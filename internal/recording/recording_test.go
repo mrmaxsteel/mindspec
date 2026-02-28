@@ -12,7 +12,7 @@ import (
 
 func TestManifestRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	m := &Manifest{
 		SpecID:        specID,
@@ -55,7 +55,7 @@ func TestManifestRoundTrip(t *testing.T) {
 
 func TestHasRecording(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	if HasRecording(root, specID) {
 		t.Error("HasRecording should return false for missing recording")
@@ -77,7 +77,7 @@ func TestHasRecording(t *testing.T) {
 
 func TestEmitMarker(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	// Create recording dir and manifest
 	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
@@ -136,7 +136,7 @@ func TestEmitMarkerNoRecording(t *testing.T) {
 
 func TestEmitPhaseMarker(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestEmitPhaseMarker(t *testing.T) {
 
 func TestEmitBeadMarker(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestEnsureOTLPPreservesExisting(t *testing.T) {
 
 func TestUpdatePhase(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
 		t.Fatal(err)
@@ -338,7 +338,7 @@ func TestUpdatePhase(t *testing.T) {
 
 func TestAddBeadToPhase(t *testing.T) {
 	root := t.TempDir()
-	specID := "test-spec"
+	specID := "001-test-spec"
 
 	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
 		t.Fatal(err)

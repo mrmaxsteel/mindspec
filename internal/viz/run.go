@@ -6,19 +6,42 @@ import (
 	"os"
 )
 
+// LiveOpts holds options for RunLive.
+type LiveOpts struct {
+	OTLPPort   int
+	UIPort     int
+	OutputPath string
+	BindAddr   string // default "127.0.0.1"
+}
+
 // RunLive creates the full live visualization pipeline and blocks until ctx is cancelled.
 // If outputPath is non-empty, events are also written to an NDJSON file on disk.
 func RunLive(ctx context.Context, otlpPort, uiPort int, outputPath string) error {
+	return RunLiveOpts(ctx, LiveOpts{
+		OTLPPort:   otlpPort,
+		UIPort:     uiPort,
+		OutputPath: outputPath,
+	})
+}
+
+// RunLiveOpts creates the full live visualization pipeline with extended options.
+func RunLiveOpts(ctx context.Context, opts LiveOpts) error {
 	graph := NewGraph(DefaultGraphConfig())
 	hub := NewHub()
 	go hub.Run(ctx)
 
-	receiver := NewLiveReceiver(otlpPort, graph, hub)
-	if outputPath != "" {
-		receiver.SetOutput(outputPath)
+	receiver := NewLiveReceiver(opts.OTLPPort, graph, hub)
+	if opts.BindAddr != "" {
+		receiver.SetBindAddr(opts.BindAddr)
+	}
+	if opts.OutputPath != "" {
+		receiver.SetOutput(opts.OutputPath)
 	}
 
-	server := NewServer(uiPort, hub, graph)
+	server := NewServer(opts.UIPort, hub, graph)
+	if opts.BindAddr != "" {
+		server.SetBindAddr(opts.BindAddr)
+	}
 	server.SetLiveReceiver(receiver)
 	go func() {
 		if err := server.Run(ctx); err != nil {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/mindspec/mindspec/internal/recording"
+	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/viz"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -38,6 +39,7 @@ var agentmindServeCmd = &cobra.Command{
 		otlpPort, _ := cmd.Flags().GetInt("otlp-port")
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 		output, _ := cmd.Flags().GetString("output")
+		bind, _ := cmd.Flags().GetString("bind")
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -48,7 +50,12 @@ var agentmindServeCmd = &cobra.Command{
 			cancel()
 		}()
 
-		return viz.RunLive(ctx, otlpPort, uiPort, output)
+		return viz.RunLiveOpts(ctx, viz.LiveOpts{
+			OTLPPort:   otlpPort,
+			UIPort:     uiPort,
+			OutputPath: output,
+			BindAddr:   bind,
+		})
 	},
 }
 
@@ -67,6 +74,9 @@ var agentmindReplayCmd = &cobra.Command{
 		if len(args) > 0 {
 			filePath = args[0]
 		} else if specID != "" {
+			if err := validate.SpecID(specID); err != nil {
+				return err
+			}
 			root, err := findRoot()
 			if err != nil {
 				return fmt.Errorf("finding project root: %w", err)
@@ -183,6 +193,7 @@ func init() {
 	agentmindServeCmd.Flags().Int("otlp-port", 4318, "Port for OTLP/HTTP receiver")
 	agentmindServeCmd.Flags().Int("ui-port", 8420, "Port for web UI")
 	agentmindServeCmd.Flags().String("output", "", "Write events to NDJSON file (append mode)")
+	agentmindServeCmd.Flags().String("bind", "127.0.0.1", "Address to bind to (use 0.0.0.0 for all interfaces)")
 
 	agentmindReplayCmd.Flags().Float64("speed", 1, "Replay speed multiplier (1, 5, 10, or 0 for max)")
 	agentmindReplayCmd.Flags().Int("ui-port", 8420, "Port for web UI")
