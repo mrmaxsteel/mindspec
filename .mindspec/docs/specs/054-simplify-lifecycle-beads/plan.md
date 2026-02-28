@@ -1,14 +1,21 @@
 ---
-spec_id: 054-simplify-lifecycle-beads
-status: Draft
-version: 1
-last_updated: "2026-02-28"
-approved_at: ""
-approved_by: ""
-bead_ids: []
 adr_citations:
-  - id: ADR-0020
-    sections: [Decision, Decision Details]
+    - id: ADR-0020
+      sections:
+        - Decision
+        - Decision Details
+approved_at: "2026-02-28T02:03:41Z"
+approved_by: user
+bead_ids:
+    - mindspec-mol-mo9qh.1
+    - mindspec-mol-mo9qh.2
+    - mindspec-mol-mo9qh.3
+    - mindspec-mol-mo9qh.4
+    - mindspec-mol-mo9qh.5
+last_updated: "2026-02-28"
+spec_id: 054-simplify-lifecycle-beads
+status: Approved
+version: 1
 ---
 
 # Plan: 054-simplify-lifecycle-beads
