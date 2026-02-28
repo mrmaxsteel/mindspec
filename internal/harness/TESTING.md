@@ -83,6 +83,17 @@ Error: Reached max turns (75)        <-- agent ran out of turns
 
 ### 3. Report & Assertions
 ```
+=== Session Report: spec_to_idle ===
+Agent: claude-code
+Turns: 52 (estimated)  Events: 170
+Duration: 16.277s
+Forward ratio: 85.3%
+```
+- **Turns**: estimated from event timestamp gaps (>2s gap = new turn). Shims don't know API turns.
+- **Events**: total shim-recorded commands (multiple per turn since Claude calls tools in parallel)
+- **Forward ratio**: % of turns doing productive work (vs corrections, recovery, overhead)
+
+```
 command "mindspec" with arg "complete" was not found in events   <-- FAIL
 ```
 
@@ -155,11 +166,12 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | **PASS** | 170 | 75 | 2m42s | MaxTurns 50->75: **agent completed full lifecycle** |
 
 ### Key Metrics to Track Per Run
-- **Events**: total shim-recorded commands (measures agent activity)
-- **Turns used**: how many of the turn budget consumed
-- **Wall time**: total test duration
-- **Retry count**: how many times the agent retried failing commands (measures friction)
-- **First-command-to-last ratio**: events / turns (measures command density per turn)
+- **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
+- **Turns (estimated)**: API round-trips, estimated from event timestamp gaps >2s. The `--max-turns` flag sets the budget; "Reached max turns" means all were consumed
+- **Wall time**: total test duration (includes LLM thinking time between turns)
+- **Retry count**: how many times the agent retried failing commands (measures CLI friction)
+- **Events/turn ratio**: commands per turn (higher = agent is batching tool calls efficiently)
+- **Forward ratio**: % of turns classified as productive work (from analyzer report)
 - **Key milestone events**: which step in the lifecycle was reached before failure
 
 ### What Makes a Good Improvement
