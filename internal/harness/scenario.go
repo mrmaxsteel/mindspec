@@ -343,6 +343,15 @@ func ScenarioHookBlocksMainCommit() Scenario {
 		MaxTurns:    10,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			// Enable agent_hooks enforcement so worktree guards actually block
+			sandbox.WriteFile(".mindspec/config.yaml", `protected_branches: [main]
+merge_strategy: direct
+worktree_root: .worktrees
+enforcement:
+  pre_commit_hook: true
+  cli_guards: true
+  agent_hooks: true
+`)
 			epicID := sandbox.CreateBead("[006-main] Epic", "epic", "")
 			beadID := sandbox.CreateBead("[006-main] Implement work", "task", epicID)
 			sandbox.ClaimBead(beadID)
@@ -355,15 +364,26 @@ func ScenarioHookBlocksMainCommit() Scenario {
 				"activeBead": beadID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 			}))
-			sandbox.Commit("setup: implement mode in main")
+			sandbox.Commit("setup: implement mode in main with enforcement")
 			return nil
 		},
-		Prompt: `You are in implement mode. Create a file called work.go with a Work() function.
-Then commit your changes using git. Note: you should be working in a worktree, but
-you are in the main repo. The hook system should guide you.`,
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+You are in implement mode. Create a file called work.go with a Work() function that returns "done". Then commit your changes using git.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// We expect the agent to encounter the CWD enforcement
-			// The test validates the scenario ran without panicking
+			// Verify a worktree enforcement hook blocked something (non-zero exit)
+			blocked := false
+			for _, e := range events {
+				args := eventArgs(e)
+				if e.Command == "mindspec" && containsAll(args, "hook") && e.ExitCode != 0 {
+					// Any hook block (workflow-guard, worktree-bash, worktree-file)
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				t.Error("expected a hook to block operations from main worktree, but no block event found")
+			}
 		},
 	}
 }
@@ -376,18 +396,54 @@ func ScenarioHookBlocksStaleNext() Scenario {
 		MaxTurns:    5,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
-			// Set up a stale session (old timestamp)
-			sandbox.WriteFile(".mindspec/session.json", mustJSON(map[string]string{
-				"sessionSource":    "test",
-				"sessionStartedAt": "2020-01-01T00:00:00Z",
+			// Override SessionStart hook to simulate a resumed (stale) session.
+			// Normal SessionStart writes source=startup (fresh); we write source=resume
+			// so the needs-clear freshness gate actually triggers.
+			sandbox.WriteFile(".claude/settings.json", mustJSON(map[string]any{
+				"hooks": map[string]any{
+					"SessionStart": []map[string]any{
+						{
+							"matcher": "",
+							"hooks": []map[string]any{
+								{
+									"type":    "command",
+									"command": "mindspec state write-session --source=resume 2>/dev/null; mindspec instruct 2>/dev/null || true",
+								},
+							},
+						},
+					},
+					"PreToolUse": []map[string]any{
+						{
+							"matcher": "Bash",
+							"hooks": []map[string]any{
+								{
+									"type":    "command",
+									"command": "mindspec hook needs-clear",
+								},
+							},
+						},
+					},
+				},
 			}))
-			sandbox.Commit("setup: stale session")
+			sandbox.Commit("setup: stale session hooks")
 			return nil
 		},
-		Prompt: `You are in a MindSpec project. Run 'mindspec next' to find work.`,
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+Run 'mindspec next' to claim available work.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// The scenario should complete (agent may get blocked by freshness gate)
-			assertCommandRan(t, events, "mindspec", "next")
+			// Verify the needs-clear hook fired and blocked (non-zero exit)
+			blocked := false
+			for _, e := range events {
+				args := eventArgs(e)
+				if e.Command == "mindspec" && containsAll(args, "hook") && containsAll(args, "needs-clear") && e.ExitCode != 0 {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				t.Error("expected needs-clear hook to block stale mindspec next, but no block event found")
+			}
 		},
 	}
 }
