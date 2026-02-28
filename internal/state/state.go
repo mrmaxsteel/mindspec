@@ -50,7 +50,6 @@ type Focus struct {
 	Timestamp      string `json:"timestamp"`
 }
 
-
 // ReadSession loads the session from .mindspec/session.json under root.
 // Returns a zero Session (no error) if the file does not exist.
 func ReadSession(root string) (*Session, error) {
@@ -155,7 +154,6 @@ func WriteFocus(root string, f *Focus) error {
 
 	return os.WriteFile(workspace.FocusPath(root), data, 0644)
 }
-
 
 // SpecBranch returns the canonical branch name for a spec.
 func SpecBranch(specID string) string { return "spec/" + specID }
