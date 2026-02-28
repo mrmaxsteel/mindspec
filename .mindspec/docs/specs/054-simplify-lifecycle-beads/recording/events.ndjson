@@ -1,1 +1,2 @@
 {"ts":"2026-02-28T01:29:41.981499Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"054-simplify-lifecycle-beads"}}
+{"ts":"2026-02-28T01:55:13.395783Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"054-simplify-lifecycle-beads","to":"plan"}}

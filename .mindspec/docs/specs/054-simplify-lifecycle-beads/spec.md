@@ -1,8 +1,8 @@
 ---
-approved_at: ""
-approved_by: ""
+approved_at: "2026-02-28T01:55:13Z"
+approved_by: user
 molecule_id: mindspec-mol-q6abv
-status: Draft
+status: Approved
 step_mapping:
     implement: mindspec-mol-mo9qh
     plan: mindspec-mol-aodjs
@@ -12,6 +12,7 @@ step_mapping:
     spec-approve: mindspec-mol-cvw57
     spec-lifecycle: mindspec-mol-q6abv
 ---
+
 
 # Spec 054-simplify-lifecycle-beads: Drop Ceremony Molecules, Keep Implementation Beads
 
@@ -155,7 +156,7 @@ The per-spec approach avoids the problems of both predecessors: it's durable lik
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-02-28
+- **Notes**: Approved via mindspec approve spec
