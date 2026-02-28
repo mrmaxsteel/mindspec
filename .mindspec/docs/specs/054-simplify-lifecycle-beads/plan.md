@@ -79,6 +79,7 @@ Each bead includes unit tests for the changed code. The approach is:
 
 - [ ] `internal/specmeta/` directory does not exist
 - [ ] `go build ./internal/templates/...` succeeds
+- [ ] `go test ./internal/templates/...` passes (if template tests exist)
 - [ ] `.beads/formulas/spec-lifecycle.formula.toml` does not exist
 
 ## Bead 3: Simplify resolve, move ResolveActiveBead
