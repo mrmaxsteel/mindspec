@@ -41,7 +41,7 @@ var stateSetCmd = &cobra.Command{
 			return err
 		}
 
-		mc := &state.ModeCache{
+		mc := &state.Focus{
 			Mode:       mode,
 			ActiveSpec: spec,
 			ActiveBead: bead,
@@ -50,7 +50,7 @@ var stateSetCmd = &cobra.Command{
 			mc.SpecBranch = state.SpecBranch(spec)
 			mc.ActiveWorktree = state.SpecWorktreePath(root, spec)
 		}
-		if err := state.WriteModeCache(root, mc); err != nil {
+		if err := state.WriteFocus(root, mc); err != nil {
 			return err
 		}
 
@@ -70,8 +70,8 @@ var stateSetCmd = &cobra.Command{
 var stateShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the current MindSpec state",
-	Long: `Show the current MindSpec state. By default shows state derived from
-the molecule (ADR-0015). Use --spec to target a specific spec.
+	Long: `Show the current MindSpec state derived from lifecycle.yaml and focus.
+Use --spec to target a specific spec.
 If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specFlag, _ := cmd.Flags().GetString("spec")
@@ -93,7 +93,7 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 				return ambErr
 			}
 			// Fall back to mode-cache
-			mc, err := state.ReadModeCache(root)
+			mc, err := state.ReadFocus(root)
 			if err != nil {
 				return fmt.Errorf("no active state: %w", err)
 			}
@@ -102,12 +102,12 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			return nil
 		}
 
-		// Derive mode from molecule
+		// Derive mode from lifecycle
 		mode, modeErr := resolve.ResolveMode(root, specID)
 
-		mc, _ := state.ReadModeCache(root)
+		mc, _ := state.ReadFocus(root)
 		if mc == nil {
-			mc = &state.ModeCache{}
+			mc = &state.Focus{}
 		}
 		mc.ActiveSpec = specID
 		mc.SpecBranch = state.SpecBranch(specID)

@@ -13,7 +13,6 @@ import (
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/hooks"
 	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/templates"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -24,9 +23,8 @@ var specIDPattern = regexp.MustCompile(`^\d{3,}-[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
 var (
 	preflightFn      = bead.Preflight
-	pourFormulaFn    = pourFormula
+	runBDFn          = bead.RunBD
 	runBDCombined    = bead.RunBDCombined
-	writeSpecMeta    = specmeta.Write
 	loadConfigFn     = config.Load
 	createBranchFn   = gitops.CreateBranch
 	branchExistsFn   = gitops.BranchExists
@@ -114,67 +112,54 @@ func Run(root, specID, title string) (*Result, error) {
 		return nil, fmt.Errorf("writing spec file: %w", err)
 	}
 
-	// --- Phase 3: Molecule setup (beads) ---
+	// --- Phase 3: Create lifecycle epic (beads) ---
 
+	var epicID string
 	if err := preflightFn(root); err != nil {
-		return nil, fmt.Errorf("creating lifecycle molecule requires beads to be available: %w", err)
-	}
-
-	// Ensure the spec-lifecycle formula exists (self-healing for projects
-	// bootstrapped before the formula was included in mindspec init).
-	if err := ensureFormula(root); err != nil {
-		return nil, fmt.Errorf("ensuring spec-lifecycle formula: %w", err)
-	}
-
-	molID, stepMap, err := pourFormulaFn(specID)
-	if err != nil {
-		return nil, fmt.Errorf("pouring spec-lifecycle molecule: %w", err)
-	}
-
-	// Rename the parent epic to follow [SPEC <id>] convention.
-	epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
-	if _, err := runBDCombined("update", molID, "--title="+epicTitle); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not rename parent epic: %v\n", err)
-	}
-	// Mark the spec step as in_progress.
-	if stepID, ok := stepMap["spec"]; ok {
-		if _, err := runBDCombined("update", stepID, "--status=in_progress"); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not start spec step: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: beads not available, skipping epic creation: %v\n", err)
+	} else {
+		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
+		out, err := runBDFn("create", "--title", epicTitle, "--type=epic", "--json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not create lifecycle epic: %v\n", err)
+		} else {
+			var created struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(out, &created) == nil && created.ID != "" {
+				epicID = created.ID
+			}
 		}
 	}
-	// Write molecule binding into spec frontmatter in the WORKTREE (ADR-0015).
-	meta := &specmeta.Meta{
-		MoleculeID:  molID,
-		StepMapping: stepMap,
-	}
-	if err := writeSpecMeta(specDir, meta); err != nil {
-		return nil, fmt.Errorf("writing molecule binding to spec frontmatter: %w", err)
+
+	// Write lifecycle.yaml with initial phase and epic_id.
+	lc := &state.Lifecycle{Phase: state.ModeSpec, EpicID: epicID}
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
 	}
 
 	// --- Phase 3b: Auto-commit spec files to the branch ---
-	// Without this, downstream worktrees (bead branches) that branch from
-	// spec/<id> would not contain spec.md or its molecule frontmatter.
 	commitMsg := fmt.Sprintf("chore: initialize spec %s", specID)
 	if err := gitops.CommitAll(wtPath, commitMsg); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not auto-commit spec files: %v\n", err)
 	}
 
-	// --- Phase 4: Mode-cache + hooks + recording ---
+	// --- Phase 4: Focus + hooks + recording ---
 
-	// Write mode-cache to main root (enforcement hooks read this).
-	mc := &state.ModeCache{
+	// Write focus to main root (enforcement hooks read this).
+	mc := &state.Focus{
 		Mode:           state.ModeSpec,
 		ActiveSpec:     specID,
 		SpecBranch:     specBranch,
 		ActiveWorktree: wtPath,
 	}
-	if err := state.WriteModeCache(root, mc); err != nil {
-		return nil, fmt.Errorf("writing mode-cache: %w", err)
+	if err := state.WriteFocus(root, mc); err != nil {
+		return nil, fmt.Errorf("writing focus: %w", err)
 	}
 
-	// Also write mode-cache to worktree root so commands work from either location.
-	if err := state.WriteModeCache(wtPath, mc); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write mode-cache to worktree: %v\n", err)
+	// Also write focus to worktree root so commands work from either location.
+	if err := state.WriteFocus(wtPath, mc); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write focus to worktree: %v\n", err)
 	}
 
 	// Install pre-commit hook (best-effort, ensures Layer 1 enforcement).
@@ -194,52 +179,6 @@ func Run(root, specID, title string) (*Result, error) {
 	}
 
 	return result, nil
-}
-
-// pourResult represents the JSON output from `bd mol pour --json`.
-type pourResult struct {
-	NewEpicID string            `json:"new_epic_id"`
-	IDMapping map[string]string `json:"id_mapping"`
-}
-
-// pourFormula pours the spec-lifecycle formula and returns the molecule ID
-// and a step mapping (formula step ID → beads issue ID).
-func pourFormula(specID string) (string, map[string]string, error) {
-	out, err := bead.RunBD("mol", "pour", "spec-lifecycle",
-		"--var", "spec_id="+specID, "--json")
-	if err != nil {
-		return "", nil, fmt.Errorf("bd mol pour failed: %w", err)
-	}
-
-	var result pourResult
-	if err := json.Unmarshal(out, &result); err != nil {
-		return "", nil, fmt.Errorf("parsing pour output: %w", err)
-	}
-
-	// Build a clean step mapping: strip the formula prefix from keys
-	// id_mapping keys are like "spec-lifecycle.spec" → we want just "spec"
-	stepMap := make(map[string]string)
-	prefix := "spec-lifecycle."
-	for k, v := range result.IDMapping {
-		shortKey := strings.TrimPrefix(k, prefix)
-		stepMap[shortKey] = v
-	}
-
-	return result.NewEpicID, stepMap, nil
-}
-
-// ensureFormula writes the spec-lifecycle formula to .beads/formulas/ if it
-// does not already exist. This handles projects bootstrapped before the formula
-// was included in `mindspec init`.
-func ensureFormula(root string) error {
-	formulaPath := filepath.Join(root, ".beads", "formulas", "spec-lifecycle.formula.toml")
-	if _, err := os.Stat(formulaPath); err == nil {
-		return nil // already exists
-	}
-	if err := os.MkdirAll(filepath.Dir(formulaPath), 0755); err != nil {
-		return fmt.Errorf("creating formulas directory: %w", err)
-	}
-	return os.WriteFile(formulaPath, []byte(templates.SpecLifecycleFormula()), 0644)
 }
 
 // titleFromSlug derives a title from a spec ID slug.

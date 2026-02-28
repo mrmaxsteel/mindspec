@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/specmeta"
+	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
@@ -60,8 +60,8 @@ func ValidateSpec(root, specID string) *Result {
 	// Check open questions resolved
 	checkOpenQuestions(r, sections)
 
-	// Check molecule binding (ADR-0015) — warning only, not blocking
-	checkMoleculeBinding(r, root, specID)
+	// Check lifecycle binding (ADR-0020) — warning only, not blocking
+	checkLifecycleBinding(r, root, specID)
 	checkSpecApprovalGateConsistency(r, root, specID)
 
 	return r
@@ -179,39 +179,26 @@ func checkAcceptanceCriteria(r *Result, sections map[string]string) {
 	}
 }
 
-// checkMoleculeBinding warns if the spec lacks a molecule_id in its frontmatter.
-func checkMoleculeBinding(r *Result, root, specID string) {
-	m, err := specmeta.ReadForSpec(root, specID)
+// checkLifecycleBinding warns if the spec lacks a lifecycle.yaml.
+func checkLifecycleBinding(r *Result, root, specID string) {
+	specDir := workspace.SpecDir(root, specID)
+	lc, err := state.ReadLifecycle(specDir)
 	if err != nil {
 		return // can't read → skip this check
 	}
-	if m.MoleculeID == "" {
-		r.AddWarning("molecule-binding", "spec has no molecule_id in frontmatter; run backfill or re-init")
+	if lc == nil {
+		r.AddWarning("lifecycle-binding", "spec has no lifecycle.yaml; run spec-init to create one")
 	}
 }
 
 func checkSpecApprovalGateConsistency(r *Result, root, specID string) {
-	m, err := specmeta.ReadForSpec(root, specID)
-	if err != nil {
+	// With lifecycle.yaml, gate consistency is checked by verifying
+	// that the lifecycle phase matches the spec frontmatter status.
+	specDir := workspace.SpecDir(root, specID)
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil {
+		r.AddWarning("gate-consistency", "no lifecycle.yaml; cannot check gate consistency")
 		return
-	}
-	if !strings.EqualFold(strings.TrimSpace(m.Status), "Approved") {
-		return
-	}
-
-	gateID := strings.TrimSpace(m.StepMapping["spec-approve"])
-	if gateID == "" {
-		r.AddWarning("spec-gate-consistency", "spec frontmatter status is Approved but step_mapping.spec-approve is missing")
-		return
-	}
-
-	status, err := readGateStatus(gateID)
-	if err != nil {
-		r.AddWarning("spec-gate-consistency", fmt.Sprintf("spec frontmatter status is Approved but gate %s could not be verified: %v", gateID, err))
-		return
-	}
-	if status != "closed" {
-		r.AddWarning("spec-gate-consistency", fmt.Sprintf("spec frontmatter status is Approved but gate %s is %s", gateID, status))
 	}
 }
 

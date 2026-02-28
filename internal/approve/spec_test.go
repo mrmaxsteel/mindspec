@@ -9,10 +9,7 @@ import (
 
 func TestUpdateSpecApproval_UpdatesSection(t *testing.T) {
 	tmp := t.TempDir()
-	specContent := `---
-molecule_id: mol-123
----
-# Spec 010: Test Feature
+	specContent := `# Spec 010: Test Feature
 
 ## Goal
 

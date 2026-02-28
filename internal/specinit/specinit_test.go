@@ -8,47 +8,36 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/config"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-func mockMoleculeSuccess(t *testing.T, testRoot string) {
+func mockSuccess(t *testing.T, testRoot string) {
 	t.Helper()
 	origPreflight := preflightFn
-	origPour := pourFormulaFn
+	origRunBD := runBDFn
 	origRunBDCombined := runBDCombined
 	origLoadConfig := loadConfigFn
 	origCreateBranch := createBranchFn
 	origBranchExists := branchExistsFn
 	origWorktreeCreate := worktreeCreateFn
 	origEnsureGitignore := ensureGitignore
-	origWriteSpecMeta := writeSpecMeta
 	t.Cleanup(func() {
 		preflightFn = origPreflight
-		pourFormulaFn = origPour
+		runBDFn = origRunBD
 		runBDCombined = origRunBDCombined
 		loadConfigFn = origLoadConfig
 		createBranchFn = origCreateBranch
 		branchExistsFn = origBranchExists
 		worktreeCreateFn = origWorktreeCreate
 		ensureGitignore = origEnsureGitignore
-		writeSpecMeta = origWriteSpecMeta
 	})
 
 	preflightFn = func(root string) error { return nil }
-	pourFormulaFn = func(specID string) (string, map[string]string, error) {
-		return "mol-123", map[string]string{
-			"spec":           "step-spec",
-			"spec-approve":   "step-spec-approve",
-			"plan":           "step-plan",
-			"plan-approve":   "step-plan-approve",
-			"implement":      "step-impl",
-			"review":         "step-review",
-			"spec-lifecycle": "mol-123",
-		}, nil
+	runBDFn = func(args ...string) ([]byte, error) {
+		// Stub epic creation: return a JSON object with an ID.
+		return []byte(`{"id":"epic-123"}`), nil
 	}
 	runBDCombined = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	writeSpecMeta = func(specDir string, meta *specmeta.Meta) error { return nil }
 	// Stub out git/worktree operations for unit tests.
 	loadConfigFn = func(root string) (*config.Config, error) { return config.DefaultConfig(), nil }
 	createBranchFn = func(name, from string) error { return nil }
@@ -82,7 +71,7 @@ func setupTestRoot(t *testing.T) string {
 
 func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
 	result, err := Run(root, "010-my-feature", "")
 	if err != nil {
@@ -104,7 +93,7 @@ func TestRunCreatesSpecFromTemplate(t *testing.T) {
 
 func TestRunWithExplicitTitle(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
 	result, err := Run(root, "011-custom", "Custom Title")
 	if err != nil {
@@ -126,7 +115,7 @@ func TestRunWithExplicitTitle(t *testing.T) {
 
 func TestRunErrorsOnExistingDirectory(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
 	// Pre-create the spec directory in the worktree path (where Run() now checks).
 	cfg := config.DefaultConfig()
@@ -146,16 +135,16 @@ func TestRunErrorsOnExistingDirectory(t *testing.T) {
 
 func TestRunSetsState(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
 	_, err := Run(root, "012-state-test", "")
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	mc, err := state.ReadModeCache(root)
+	mc, err := state.ReadFocus(root)
 	if err != nil {
-		t.Fatalf("state.ReadModeCache() error: %v", err)
+		t.Fatalf("state.ReadFocus() error: %v", err)
 	}
 
 	if mc.Mode != state.ModeSpec {
@@ -168,7 +157,7 @@ func TestRunSetsState(t *testing.T) {
 
 func TestRunRejectsInvalidSpecID(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
 	tests := []struct {
 		id      string
@@ -230,68 +219,50 @@ func TestTitleFromSlug(t *testing.T) {
 	}
 }
 
-func TestRunCreatesFormulaIfMissing(t *testing.T) {
+func TestRunCreatesLifecycle(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
 
-	// Ensure .beads dir exists but formula does not
-	os.MkdirAll(filepath.Join(root, ".beads"), 0755)
-
-	formulaPath := filepath.Join(root, ".beads", "formulas", "spec-lifecycle.formula.toml")
-	if _, err := os.Stat(formulaPath); err == nil {
-		t.Fatal("formula should not exist before test")
-	}
-
-	_, err := Run(root, "014-formula-test", "")
+	result, err := Run(root, "014-lifecycle-test", "")
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	data, err := os.ReadFile(formulaPath)
+	// Verify lifecycle.yaml was created in the worktree spec dir.
+	specDir := filepath.Join(result.WorktreePath, "docs", "specs", "014-lifecycle-test")
+	lc, err := state.ReadLifecycle(specDir)
 	if err != nil {
-		t.Fatalf("formula not created: %v", err)
+		t.Fatalf("ReadLifecycle() error: %v", err)
 	}
-	if !strings.Contains(string(data), `formula = "spec-lifecycle"`) {
-		t.Error("formula file does not contain expected content")
+	if lc == nil {
+		t.Fatal("expected lifecycle.yaml to be created")
+	}
+	if lc.Phase != state.ModeSpec {
+		t.Errorf("expected phase=%q, got %q", state.ModeSpec, lc.Phase)
+	}
+	if lc.EpicID != "epic-123" {
+		t.Errorf("expected epic_id=%q, got %q", "epic-123", lc.EpicID)
 	}
 }
 
-func TestRunSkipsFormulaIfExists(t *testing.T) {
+func TestRunContinuesWhenBeadsUnavailable(t *testing.T) {
 	root := setupTestRoot(t)
-	mockMoleculeSuccess(t, root)
-
-	// Pre-create formula with custom content
-	formulaDir := filepath.Join(root, ".beads", "formulas")
-	os.MkdirAll(formulaDir, 0755)
-	customContent := "# custom formula\n"
-	os.WriteFile(filepath.Join(formulaDir, "spec-lifecycle.formula.toml"), []byte(customContent), 0644)
-
-	_, err := Run(root, "015-formula-exists", "")
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
-
-	// Verify it was NOT overwritten
-	data, err := os.ReadFile(filepath.Join(formulaDir, "spec-lifecycle.formula.toml"))
-	if err != nil {
-		t.Fatalf("reading formula: %v", err)
-	}
-	if string(data) != customContent {
-		t.Error("existing formula was overwritten")
-	}
-}
-
-func TestRunFailsWhenMoleculeUnavailable(t *testing.T) {
-	root := setupTestRoot(t)
-	// Set up stubs for Phase 1 (worktree creation) but fail at Phase 3 (preflight).
-	mockMoleculeSuccess(t, root)
+	mockSuccess(t, root)
+	// Override preflight to fail — Run should still succeed with a warning.
 	preflightFn = func(root string) error { return fmt.Errorf("bd unavailable") }
 
-	_, err := Run(root, "013-molecule-required", "")
-	if err == nil {
-		t.Fatal("expected error when molecule setup is unavailable")
+	result, err := Run(root, "013-no-beads", "")
+	if err != nil {
+		t.Fatalf("Run() error: %v (should succeed even without beads)", err)
 	}
-	if !strings.Contains(err.Error(), "lifecycle molecule") {
-		t.Errorf("expected lifecycle molecule error, got: %v", err)
+
+	// lifecycle.yaml should still be created, but with empty epic_id.
+	specDir := filepath.Join(result.WorktreePath, "docs", "specs", "013-no-beads")
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil {
+		t.Fatalf("ReadLifecycle() error: %v", err)
+	}
+	if lc.EpicID != "" {
+		t.Errorf("expected empty epic_id when beads unavailable, got %q", lc.EpicID)
 	}
 }

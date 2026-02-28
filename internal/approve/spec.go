@@ -7,27 +7,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
-// runBDFn is a package-level variable for testability.
-var runBDCombinedFn = bead.RunBDCombined
-
 // SpecResult holds the result of spec approval.
 type SpecResult struct {
 	SpecID   string
-	GateID   string // empty if no gate found
 	Warnings []string
 }
 
-// ApproveSpec validates and approves a spec, resolving its gate and setting state.
+// ApproveSpec validates and approves a spec, updating lifecycle and setting state.
 func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 	result := &SpecResult{SpecID: specID}
 
@@ -37,16 +31,21 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		return nil, fmt.Errorf("spec validation failed:\n%s", vr.FormatText())
 	}
 
-	// Step 2: Resolve and enforce molecule binding before mutating artifacts.
-	meta, err := specmeta.EnsureFullyBound(root, specID)
-	if err != nil {
-		return nil, fmt.Errorf("resolving molecule binding for %s: %w", specID, err)
-	}
-
-	// Step 3: Update spec frontmatter + markdown Approval section.
+	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
 	if err := updateSpecApproval(specPath, approvedBy); err != nil {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
+	}
+
+	// Step 3: Transition lifecycle to plan phase.
+	specDir := workspace.SpecDir(root, specID)
+	lc, err := state.ReadLifecycle(specDir)
+	if err != nil || lc == nil {
+		lc = &state.Lifecycle{}
+	}
+	lc.Phase = state.ModePlan
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
 	}
 
 	// Step 3b: Auto-commit approval changes so downstream branches see them.
@@ -56,29 +55,18 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
 	}
 
-	// Step 4: Close spec-approve step in molecule (best-effort).
-	stepID := strings.TrimSpace(meta.StepMapping["spec-approve"])
-	if stepID == "" {
-		return nil, fmt.Errorf("spec %s is missing step_mapping.spec-approve; re-run `mindspec spec-init %s` or repair frontmatter", specID, specID)
-	}
-	if _, err := runBDCombinedFn("close", stepID); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not close spec-approve step: %v", err))
-	} else {
-		result.GateID = stepID
-	}
-
-	// Step 5: Write mode-cache for plan mode.
-	mc := &state.ModeCache{
+	// Step 4: Write focus for plan mode.
+	mc := &state.Focus{
 		Mode:           state.ModePlan,
 		ActiveSpec:     specID,
 		SpecBranch:     state.SpecBranch(specID),
 		ActiveWorktree: specWtPath,
 	}
-	if err := state.WriteModeCache(root, mc); err != nil {
-		return nil, fmt.Errorf("writing mode-cache: %w", err)
+	if err := state.WriteFocus(root, mc); err != nil {
+		return nil, fmt.Errorf("writing focus: %w", err)
 	}
 
-	// Step 6: Emit recording phase marker (best-effort)
+	// Step 5: Emit recording phase marker (best-effort)
 	if err := recording.EmitPhaseMarker(root, specID, "spec", "plan"); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
 	}

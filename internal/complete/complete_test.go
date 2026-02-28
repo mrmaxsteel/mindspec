@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -26,7 +25,6 @@ func saveAndRestore(t *testing.T) {
 	origDelete := deleteBranchFn
 	origResolveTarget := resolveTargetFn
 	origResolveActiveBead := resolveActiveBeadFn
-	origEnsureFullyBound := ensureFullyBoundFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -38,7 +36,6 @@ func saveAndRestore(t *testing.T) {
 		deleteBranchFn = origDelete
 		resolveTargetFn = origResolveTarget
 		resolveActiveBeadFn = origResolveActiveBead
-		ensureFullyBoundFn = origEnsureFullyBound
 	})
 
 	// Default stubs
@@ -46,7 +43,6 @@ func saveAndRestore(t *testing.T) {
 	deleteBranchFn = func(branch string) error { return nil }
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	resolveActiveBeadFn = func(root, specID string) (string, error) { return "", fmt.Errorf("no active bead") }
-	ensureFullyBoundFn = func(root, specID string) (*specmeta.Meta, error) { return nil, fmt.Errorf("no meta") }
 }
 
 // setupTempRoot creates a temp dir with .mindspec/.
@@ -57,16 +53,25 @@ func setupTempRoot(t *testing.T) string {
 	return tmp
 }
 
+// writeLifecycleFixture creates a lifecycle.yaml for a spec in the temp root.
+func writeLifecycleFixture(t *testing.T, root, specID, epicID string) {
+	t.Helper()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+	os.MkdirAll(specDir, 0755)
+	lc := &state.Lifecycle{Phase: state.ModeImplement, EpicID: epicID}
+	if err := state.WriteLifecycle(specDir, lc); err != nil {
+		t.Fatalf("writing lifecycle fixture: %v", err)
+	}
+}
+
 func TestRun_HappyPath(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{MoleculeID: "mol-parent-1"}, nil
-	}
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
 		return []bead.WorktreeListEntry{
@@ -126,16 +131,16 @@ func TestRun_HappyPath(t *testing.T) {
 		t.Errorf("NextBead: got %q, want %q", result.NextBead, "bead-2")
 	}
 
-	// Verify mode-cache was written
-	mc, err := state.ReadModeCache(root)
+	// Verify focus was written
+	mc, err := state.ReadFocus(root)
 	if err != nil {
-		t.Fatalf("reading mode-cache: %v", err)
+		t.Fatalf("reading focus: %v", err)
 	}
 	if mc.Mode != state.ModeImplement {
-		t.Errorf("mode-cache mode: got %q, want %q", mc.Mode, state.ModeImplement)
+		t.Errorf("focus mode: got %q, want %q", mc.Mode, state.ModeImplement)
 	}
 	if mc.ActiveBead != "bead-2" {
-		t.Errorf("mode-cache activeBead: got %q, want %q", mc.ActiveBead, "bead-2")
+		t.Errorf("focus activeBead: got %q, want %q", mc.ActiveBead, "bead-2")
 	}
 }
 
@@ -171,12 +176,10 @@ func TestRun_DefaultsToActiveBead(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-from-resolver", nil }
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{MoleculeID: "mol-parent-1"}, nil
-	}
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
 		return nil, nil // no worktrees
@@ -207,11 +210,9 @@ func TestRun_NoWorktree(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{MoleculeID: "mol-parent-1"}, nil
-	}
 
 	// No worktrees at all
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
@@ -246,12 +247,7 @@ func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{
-			MoleculeID: "mol-123",
-		}, nil
-	}
+	writeLifecycleFixture(t, root, "test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
@@ -276,19 +272,13 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{
-			MoleculeID: "mol-123",
-		}, nil
-	}
+	writeLifecycleFixture(t, root, "test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			return json.Marshal([]bead.BeadInfo{}) // nothing ready
 		}
 		if len(args) > 0 && args[0] == "search" {
-			// Verify the search uses the correct prefix format [specID]
 			if len(args) > 1 && args[1] != "[test-spec]" {
 				t.Errorf("search prefix: got %q, want %q", args[1], "[test-spec]")
 			}
@@ -313,12 +303,7 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{
-			MoleculeID: "mol-123",
-		}, nil
-	}
+	writeLifecycleFixture(t, root, "test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{}) // nothing ready, nothing open
@@ -333,59 +318,11 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 }
 
-func TestAdvanceState_UsesImplementStepFromMapping(t *testing.T) {
+func TestAdvanceState_NoLifecycle(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{
-			MoleculeID: "mol-123",
-			StepMapping: map[string]string{
-				"implement": "mol-123.implement",
-			},
-		}, nil
-	}
-
-	var readyParent string
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
-			// Capture which parent was used
-			for i, a := range args {
-				if a == "--parent" && i+1 < len(args) {
-					readyParent = args[i+1]
-				}
-			}
-			items := []bead.BeadInfo{
-				{ID: "next-bead", Title: "[test-spec] Bead 2: Next"},
-			}
-			return json.Marshal(items)
-		}
-		return nil, fmt.Errorf("unexpected")
-	}
-
-	mode, nextBead := advanceState(root, "test-spec")
-	if mode != state.ModeImplement {
-		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
-	}
-	if nextBead != "next-bead" {
-		t.Errorf("nextBead: got %q, want %q", nextBead, "next-bead")
-	}
-	// Key assertion: should use implement step, not molecule root
-	if readyParent != "mol-123.implement" {
-		t.Errorf("bd ready --parent: got %q, want %q", readyParent, "mol-123.implement")
-	}
-}
-
-func TestAdvanceState_NoMolecule(t *testing.T) {
-	saveAndRestore(t)
-
-	root := setupTempRoot(t)
-
-	// No meta returned
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return nil, fmt.Errorf("no meta")
-	}
+	// No lifecycle.yaml → idle
 
 	mode, nextBead := advanceState(root, "test")
 	if mode != state.ModeIdle {
@@ -417,12 +354,10 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{MoleculeID: "mol-parent-1"}, nil
-	}
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	execCommandFn = func(name string, args ...string) *exec.Cmd {
@@ -457,12 +392,10 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
-	ensureFullyBoundFn = func(r, specID string) (*specmeta.Meta, error) {
-		return &specmeta.Meta{MoleculeID: "mol-parent-1"}, nil
-	}
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	execCommandFn = func(name string, args ...string) *exec.Cmd {

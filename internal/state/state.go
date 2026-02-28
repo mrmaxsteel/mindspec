@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/mindspec/mindspec/internal/workspace"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Valid mode values.
+// Valid mode values (used for phase in lifecycle.yaml and mode in hooks).
 const (
 	ModeIdle      = "idle"
 	ModeExplore   = "explore"
@@ -30,10 +32,16 @@ type Session struct {
 	BeadClaimedAt    string `json:"beadClaimedAt,omitempty"`
 }
 
-// ModeCache is a write-through cache for hook latency, persisted at .mindspec/mode-cache.
-// Lifecycle commands write this after mutating molecule state. Hooks read it
-// instead of calling bd mol show on every PreToolUse invocation.
-type ModeCache struct {
+// Lifecycle holds per-spec lifecycle state, persisted at docs/specs/<id>/lifecycle.yaml.
+// This is the authoritative source of truth for a spec's lifecycle phase.
+type Lifecycle struct {
+	Phase  string `yaml:"phase"`
+	EpicID string `yaml:"epic_id,omitempty"`
+}
+
+// Focus tracks which spec and bead the user is currently focused on.
+// Persisted at .mindspec/focus. This is a cursor, not lifecycle state.
+type Focus struct {
 	Mode           string `json:"mode"`
 	ActiveSpec     string `json:"activeSpec,omitempty"`
 	ActiveBead     string `json:"activeBead,omitempty"`
@@ -41,6 +49,10 @@ type ModeCache struct {
 	SpecBranch     string `json:"specBranch,omitempty"`
 	Timestamp      string `json:"timestamp"`
 }
+
+// ModeCache is a backward-compatible alias for Focus.
+// Deprecated: use Focus instead.
+type ModeCache = Focus
 
 // ReadSession loads the session from .mindspec/session.json under root.
 // Returns a zero Session (no error) if the file does not exist.
@@ -77,42 +89,90 @@ func WriteSessionFile(root string, s *Session) error {
 	return os.WriteFile(workspace.SessionPath(root), data, 0644)
 }
 
-// ReadModeCache loads the mode cache from .mindspec/mode-cache under root.
+// ReadLifecycle loads the lifecycle state from docs/specs/<id>/lifecycle.yaml.
 // Returns nil (no error) if the file does not exist.
-func ReadModeCache(root string) (*ModeCache, error) {
-	path := workspace.ModeCachePath(root)
+func ReadLifecycle(specDir string) (*Lifecycle, error) {
+	path := filepath.Join(specDir, "lifecycle.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("reading mode-cache: %w", err)
+		return nil, fmt.Errorf("reading lifecycle.yaml: %w", err)
 	}
 
-	var mc ModeCache
-	if err := json.Unmarshal(data, &mc); err != nil {
-		return nil, fmt.Errorf("parsing mode-cache: %w", err)
+	var lc Lifecycle
+	if err := yaml.Unmarshal(data, &lc); err != nil {
+		return nil, fmt.Errorf("parsing lifecycle.yaml: %w", err)
 	}
-	return &mc, nil
+	return &lc, nil
 }
 
-// WriteModeCache persists the mode cache to .mindspec/mode-cache under root.
-func WriteModeCache(root string, mc *ModeCache) error {
+// WriteLifecycle persists the lifecycle state to docs/specs/<id>/lifecycle.yaml.
+func WriteLifecycle(specDir string, lc *Lifecycle) error {
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		return fmt.Errorf("creating spec directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(lc)
+	if err != nil {
+		return fmt.Errorf("marshaling lifecycle: %w", err)
+	}
+
+	return os.WriteFile(filepath.Join(specDir, "lifecycle.yaml"), data, 0644)
+}
+
+// ReadFocus loads the focus cursor from .mindspec/focus under root.
+// Falls back to .mindspec/mode-cache for backward compatibility.
+// Returns nil (no error) if neither file exists.
+func ReadFocus(root string) (*Focus, error) {
+	// Try new path first.
+	path := workspace.FocusPath(root)
+	data, err := os.ReadFile(path)
+	if err != nil && os.IsNotExist(err) {
+		// Fall back to legacy path.
+		path = workspace.ModeCachePath(root)
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading focus: %w", err)
+	}
+
+	var f Focus
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parsing focus: %w", err)
+	}
+	return &f, nil
+}
+
+// WriteFocus persists the focus cursor to .mindspec/focus under root.
+func WriteFocus(root string, f *Focus) error {
 	dir := workspace.MindspecDir(root)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating .mindspec directory: %w", err)
 	}
 
-	mc.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	f.Timestamp = time.Now().UTC().Format(time.RFC3339)
 
-	data, err := json.MarshalIndent(mc, "", "  ")
+	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling mode-cache: %w", err)
+		return fmt.Errorf("marshaling focus: %w", err)
 	}
 	data = append(data, '\n')
 
-	return os.WriteFile(workspace.ModeCachePath(root), data, 0644)
+	return os.WriteFile(workspace.FocusPath(root), data, 0644)
 }
+
+// ReadModeCache is a backward-compatible alias for ReadFocus.
+// Deprecated: use ReadFocus instead.
+func ReadModeCache(root string) (*Focus, error) { return ReadFocus(root) }
+
+// WriteModeCache is a backward-compatible alias for WriteFocus.
+// Deprecated: use WriteFocus instead.
+func WriteModeCache(root string, mc *Focus) error { return WriteFocus(root, mc) }
 
 // SpecBranch returns the canonical branch name for a spec.
 func SpecBranch(specID string) string { return "spec/" + specID }

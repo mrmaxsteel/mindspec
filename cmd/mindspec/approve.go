@@ -45,9 +45,6 @@ sets state to plan mode, and emits plan mode guidance.`,
 
 		// Summary
 		fmt.Printf("Spec %s approved.\n", specID)
-		if result.GateID != "" {
-			fmt.Printf("Gate resolved: %s\n", result.GateID)
-		}
 		for _, w := range result.Warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}

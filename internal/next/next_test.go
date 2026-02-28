@@ -362,8 +362,8 @@ func stubWorktreeHelpers(t *testing.T) {
 	origBranch := createBranchFn
 	origExists := branchExistsFn
 	origGitignore := ensureGitignore
-	origModeCache := readModeCacheFn
-	origWriteMC := writeModeCacheFn
+	origModeCache := readFocusFn
+	origWriteMC := writeFocusFn
 	t.Cleanup(func() {
 		worktreeList = origList
 		worktreeCreate = origCreate
@@ -371,8 +371,8 @@ func stubWorktreeHelpers(t *testing.T) {
 		createBranchFn = origBranch
 		branchExistsFn = origExists
 		ensureGitignore = origGitignore
-		readModeCacheFn = origModeCache
-		writeModeCacheFn = origWriteMC
+		readFocusFn = origModeCache
+		writeFocusFn = origWriteMC
 	})
 
 	// Defaults: config returns defaults, no spec branch, branch doesn't exist.
@@ -380,10 +380,10 @@ func stubWorktreeHelpers(t *testing.T) {
 	createBranchFn = func(name, from string) error { return nil }
 	branchExistsFn = func(name string) bool { return false }
 	ensureGitignore = func(root, entry string) error { return nil }
-	readModeCacheFn = func(root string) (*state.ModeCache, error) {
-		return &state.ModeCache{Mode: state.ModeImplement}, nil
+	readFocusFn = func(root string) (*state.Focus, error) {
+		return &state.Focus{Mode: state.ModeImplement}, nil
 	}
-	writeModeCacheFn = func(root string, mc *state.ModeCache) error { return nil }
+	writeFocusFn = func(root string, mc *state.Focus) error { return nil }
 }
 
 func TestEnsureWorktree_CreatesNew(t *testing.T) {
@@ -433,8 +433,8 @@ func TestEnsureWorktree_BranchesFromSpecBranch(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
 
-	readModeCacheFn = func(root string) (*state.ModeCache, error) {
-		return &state.ModeCache{
+	readFocusFn = func(root string) (*state.Focus, error) {
+		return &state.Focus{
 			Mode:       state.ModeImplement,
 			SpecBranch: "spec/046-test",
 		}, nil
@@ -491,17 +491,17 @@ func TestEnsureWorktree_PropagatesModeCache(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
 
-	readModeCacheFn = func(root string) (*state.ModeCache, error) {
-		return &state.ModeCache{
+	readFocusFn = func(root string) (*state.Focus, error) {
+		return &state.Focus{
 			Mode:       state.ModeImplement,
 			ActiveSpec: "051-test",
 			SpecBranch: "spec/051-test",
 		}, nil
 	}
 
-	var writtenMC *state.ModeCache
+	var writtenMC *state.Focus
 	var writtenRoot string
-	writeModeCacheFn = func(root string, mc *state.ModeCache) error {
+	writeFocusFn = func(root string, mc *state.Focus) error {
 		writtenRoot = root
 		writtenMC = mc
 		return nil

@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/mindspec/mindspec/internal/templates"
 )
 
 const mindspecMarker = "<!-- mindspec:managed -->"
@@ -164,11 +162,8 @@ func manifest() []manifestItem {
 		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
 		{path: "CLAUDE.md", content: starterClaudeMD, appendBlock: appendClaudeBlock},
 		{path: ".github/copilot-instructions.md", content: starterCopilotInstructionsMD, appendBlock: appendCopilotBlock},
-		// Gitignore: session.json and mode-cache are local runtime files, not version-controlled
+		// Gitignore: session.json and focus are local runtime files, not version-controlled
 		{path: ".gitignore", content: starterGitignore},
-
-		// Beads formula (required by spec-init)
-		{path: ".beads/formulas/spec-lifecycle.formula.toml", contentFunc: templates.SpecLifecycleFormula},
 	}
 
 	return items

@@ -10,7 +10,6 @@ import (
 	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/resolve"
-	"github.com/mindspec/mindspec/internal/specmeta"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -92,18 +91,16 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 		}
 
-		var boundMeta *specmeta.Meta
-		if specFlag != "" {
-			boundMeta, err = specmeta.EnsureFullyBound(root, specFlag)
-			if err != nil {
-				return fmt.Errorf("spec %s requires a valid molecule binding before claiming work: %w", specFlag, err)
-			}
-		}
-
-		// Step 2: Query ready work
+		// Step 2: Query ready work (scoped to spec's epic if available)
 		var items []next.BeadInfo
-		if boundMeta != nil && boundMeta.MoleculeID != "" {
-			items, err = next.QueryReadyForMolecule(boundMeta.MoleculeID)
+		if specFlag != "" {
+			specDir := workspace.SpecDir(root, specFlag)
+			lc, lcErr := state.ReadLifecycle(specDir)
+			if lcErr == nil && lc != nil && lc.EpicID != "" {
+				items, err = next.QueryReadyForEpic(lc.EpicID)
+			} else {
+				items, err = next.QueryReady()
+			}
 		} else {
 			items, err = next.QueryReady()
 		}
@@ -179,10 +176,10 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			resolved.SpecID = specFlag
 		}
 
-		// Note: parent status propagation handled natively by beads molecules
+		// Note: parent status propagation handled natively by beads epics
 
 		// Step 7: Write mode-cache
-		mc := &state.ModeCache{
+		mc := &state.Focus{
 			Mode:       resolved.Mode,
 			ActiveSpec: resolved.SpecID,
 			ActiveBead: selected.ID,
@@ -191,7 +188,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		if wtErr == nil && wtPath != "" {
 			mc.ActiveWorktree = wtPath
 		}
-		if err := state.WriteModeCache(root, mc); err != nil {
+		if err := state.WriteFocus(root, mc); err != nil {
 			return fmt.Errorf("writing mode-cache: %w", err)
 		}
 
@@ -243,19 +240,16 @@ func runEmitOnly(root, specFlag string, args []string) error {
 		selected = info
 	} else {
 		// Query ready work and pick the first item
-		var boundMeta *specmeta.Meta
-		if specFlag != "" {
-			var err error
-			boundMeta, err = specmeta.EnsureFullyBound(root, specFlag)
-			if err != nil {
-				return fmt.Errorf("spec %s binding: %w", specFlag, err)
-			}
-		}
-
 		var items []next.BeadInfo
 		var err error
-		if boundMeta != nil && boundMeta.MoleculeID != "" {
-			items, err = next.QueryReadyForMolecule(boundMeta.MoleculeID)
+		if specFlag != "" {
+			specDir := workspace.SpecDir(root, specFlag)
+			lc, lcErr := state.ReadLifecycle(specDir)
+			if lcErr == nil && lc != nil && lc.EpicID != "" {
+				items, err = next.QueryReadyForEpic(lc.EpicID)
+			} else {
+				items, err = next.QueryReady()
+			}
 		} else {
 			items, err = next.QueryReady()
 		}

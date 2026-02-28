@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/specmeta"
+	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
@@ -41,8 +41,8 @@ func checkDocs(r *Report, root string) {
 	// Domain subdirectory checks
 	checkDomains(r, root, docsRel)
 
-	// Spec molecule binding checks (ADR-0015)
-	checkSpecBindings(r, root)
+	// Spec lifecycle checks (ADR-0020)
+	checkSpecLifecycles(r, root)
 
 	// Migration metadata checks (only when migration artifacts are present).
 	checkMigrationMetadata(r, root)
@@ -101,16 +101,15 @@ func docsRootRel(root string) string {
 	return filepath.ToSlash(rel)
 }
 
-// checkSpecBindings warns on spec directories that lack a molecule_id binding
-// in their frontmatter (ADR-0015).
-func checkSpecBindings(r *Report, root string) {
+// checkSpecLifecycles warns on active spec directories that lack a lifecycle.yaml.
+func checkSpecLifecycles(r *Report, root string) {
 	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
 		return // specs dir missing is already reported
 	}
 
-	var unbound []string
+	var missing []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -119,22 +118,19 @@ func checkSpecBindings(r *Report, root string) {
 		if !fileExists(filepath.Join(specDir, "spec.md")) {
 			continue
 		}
-		m, err := specmeta.Read(specDir)
-		if err != nil {
-			continue
-		}
-		if m.MoleculeID == "" {
-			unbound = append(unbound, e.Name())
+		lc, err := state.ReadLifecycle(specDir)
+		if err != nil || lc == nil {
+			missing = append(missing, e.Name())
 		}
 	}
 
-	if len(unbound) == 0 {
+	if len(missing) == 0 {
 		return
 	}
 
 	r.Checks = append(r.Checks, Check{
-		Name:    "Spec molecule bindings",
+		Name:    "Spec lifecycle files",
 		Status:  Warn,
-		Message: fmt.Sprintf("%d specs missing molecule_id: %s", len(unbound), strings.Join(unbound, ", ")),
+		Message: fmt.Sprintf("%d specs missing lifecycle.yaml: %s", len(missing), strings.Join(missing, ", ")),
 	})
 }
