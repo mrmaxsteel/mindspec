@@ -27,16 +27,16 @@ type BeadInfo struct {
 
 // Package-level function variables for testability.
 var (
-	runBDFn          = bead.RunBD
-	runBDCombFn      = bead.RunBDCombined
-	worktreeList     = bead.WorktreeList
-	worktreeCreate   = bead.WorktreeCreate
-	readFocusFn  = state.ReadFocus
-	writeFocusFn = state.WriteFocus
-	loadConfigFn     = config.Load
-	createBranchFn   = gitops.CreateBranch
-	branchExistsFn   = gitops.BranchExists
-	ensureGitignore  = gitops.EnsureGitignoreEntry
+	runBDFn         = bead.RunBD
+	runBDCombFn     = bead.RunBDCombined
+	worktreeList    = bead.WorktreeList
+	worktreeCreate  = bead.WorktreeCreate
+	readFocusFn     = state.ReadFocus
+	writeFocusFn    = state.WriteFocus
+	loadConfigFn    = config.Load
+	createBranchFn  = gitops.CreateBranch
+	branchExistsFn  = gitops.BranchExists
+	ensureGitignore = gitops.EnsureGitignoreEntry
 )
 
 // QueryReady discovers ready work via global bd ready.

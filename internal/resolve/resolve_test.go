@@ -92,8 +92,8 @@ func TestActiveSpecs_AllPhases(t *testing.T) {
 	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
 	tests := []struct {
-		specID   string
-		phase    string
+		specID     string
+		phase      string
 		wantActive bool
 	}{
 		{"001-explore", state.ModeExplore, true},

@@ -197,7 +197,8 @@ func checkSpecApprovalGateConsistency(r *Result, root, specID string) {
 	specDir := workspace.SpecDir(root, specID)
 	lc, err := state.ReadLifecycle(specDir)
 	if err != nil || lc == nil {
-		return // no lifecycle → nothing to check
+		r.AddWarning("gate-consistency", "no lifecycle.yaml; cannot check gate consistency")
+		return
 	}
 }
 

@@ -246,4 +246,3 @@ const adrTemplate = `# ADR-NNNN: <Title>
 1. <Validation step 1>
 2. <Validation step 2>
 `
-
