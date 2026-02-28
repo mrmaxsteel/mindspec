@@ -204,8 +204,15 @@ func ScenarioAbandonSpec() Scenario {
 		Setup: func(sandbox *Sandbox) error {
 			return nil
 		},
-		Prompt: `You are in a MindSpec project. Run 'mindspec explore "bad idea"' to enter explore mode.
-After exploring, decide this isn't worth pursuing. Run 'mindspec explore dismiss' to exit.`,
+		Prompt: `IMPORTANT: Execute these commands immediately. Do NOT respond conversationally. Do NOT ask what I'd like to do. Execute each step in order using the Bash tool:
+
+Step 1: Run this command now:
+  mindspec explore "bad idea"
+
+Step 2: Run this command:
+  mindspec explore dismiss
+
+Execute step 1 NOW.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			assertCommandRan(t, events, "mindspec", "explore")
 			// Check that dismiss was called
