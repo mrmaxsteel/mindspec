@@ -34,4 +34,4 @@ mindspec explore dismiss [--adr]       # Exit (optionally record decision as ADR
 | `/ms-plan-approve` | Approve plan → Implementation Mode |
 | `/ms-impl-approve` | Approve implementation → Idle |
 | `/ms-spec-status` | Check current mode and active spec/bead state |
-| `/ms-llm-test` | Enter the iterative LLM test harness loop (test/observe/fix/retest) |
+| `/llm-test` | Enter the iterative LLM test harness loop (test/observe/fix/retest) |
