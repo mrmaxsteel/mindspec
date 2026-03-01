@@ -28,7 +28,7 @@ MindSpec treats these as system design problems, not prompting problems. It prov
 - **Scope discipline** — discovered work becomes new beads (work items), never scope creep in the current task
 
 **Context Engineering**
-- **Deterministic context packs** — token-budgeted, DDD-informed bundles of specs, domain docs, ADRs, and policies assembled automatically
+- **Deterministic context packs** — token-budgeted, DDD-informed bundles of specs, domain docs, and ADRs assembled automatically
 - **Domain-driven bounded contexts** — specs declare impacted domains; context packs expand through the Context Map to include neighboring contexts
 - **Dynamic agent guidance** — `mindspec instruct` emits mode-appropriate operating instructions at runtime based on current state, replacing static instruction files
 - **Architecture Decision Records** — governed ADR lifecycle with auto-numbered IDs, superseding workflow, and mandatory citation in plans
@@ -122,7 +122,6 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 your-project/
 ├── .mindspec/
 │   ├── config.yaml             # MindSpec + Beads configuration
-│   ├── policies.yml            # Canonical architecture policies
 │   └── docs/
 │       ├── core/               # USAGE.md, MODES.md, ARCHITECTURE.md, etc.
 │       ├── adr/                # Architecture Decision Records
