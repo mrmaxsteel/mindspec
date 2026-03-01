@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,6 +51,18 @@ You are in a MindSpec project with no active work. Your task: add a simple "gree
 				[]string{"spec-init"}, []string{"explore", "promote"})
 			assertCommandRan(t, events, "mindspec", "next")
 			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Approve commands ran during lifecycle
+			assertCommandRan(t, events, "mindspec", "approve")
+
+			// Git state after full lifecycle
+			assertBranchIs(t, sandbox, "main")
+			assertNoBranches(t, sandbox, "spec/")
+			assertNoBranches(t, sandbox, "bead/")
+			assertNoWorktrees(t, sandbox)
+
+			// Agent used worktrees during implementation
+			assertEventCWDContains(t, events, ".worktrees/")
 		},
 	}
 }
@@ -349,4 +362,38 @@ func eventArgs(e ActionEvent) []string {
 	args := flatArgs(e.Args)
 	args = append(args, e.ArgsList...)
 	return args
+}
+
+func assertBranchIs(t *testing.T, sandbox *Sandbox, expected string) {
+	t.Helper()
+	actual := sandbox.GitBranch()
+	if actual != expected {
+		t.Errorf("expected current branch %q, got %q", expected, actual)
+	}
+}
+
+func assertNoBranches(t *testing.T, sandbox *Sandbox, prefix string) {
+	t.Helper()
+	branches := sandbox.ListBranches(prefix)
+	if len(branches) > 0 {
+		t.Errorf("expected no branches with prefix %q, found: %v", prefix, branches)
+	}
+}
+
+func assertNoWorktrees(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+	wts := sandbox.ListWorktrees()
+	if len(wts) > 0 {
+		t.Errorf("expected no worktrees, found: %v", wts)
+	}
+}
+
+func assertEventCWDContains(t *testing.T, events []ActionEvent, substr string) {
+	t.Helper()
+	for _, e := range events {
+		if strings.Contains(e.CWD, substr) {
+			return
+		}
+	}
+	t.Errorf("no event had CWD containing %q", substr)
 }

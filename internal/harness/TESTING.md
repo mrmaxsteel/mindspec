@@ -97,7 +97,7 @@ When an LLM test fails due to agent behavior, the fix MUST go into mindspec's ow
 | `TestLLM_AbandonSpec` | 10 | Low | Enter explore, then dismiss |
 | `TestLLM_InterruptForBug` | 25 | Medium | Mid-bead bug fix then resume |
 | `TestLLM_ResumeAfterCrash` | 15 | Low | Pick up partial work |
-| `TestLLM_SpecToIdle` | 75 | High | Full 9-step lifecycle (explore -> idle) |
+| `TestLLM_SpecToIdle` | 75 | High | Full 9-step lifecycle (explore -> idle), verifies git state cleanup (branches, worktrees, CWD) |
 
 **Start with SingleBead** when validating changes -- it's the fastest and most reliable.
 
@@ -218,6 +218,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | **PASS** | 170 | 75 | 2m42s | MaxTurns 50->75: **agent completed full lifecycle** |
 | 2026-02-28 | FAIL | 327 | 30 | 3m16s | Full suite run: agent skipped `explore` (went to spec-init), then stuck retrying `complete` in worktree (17 retries, 43% fwd ratio) |
 | 2026-03-01 | **PASS** | 358 | 28 | 4m10s | Fix: auto-commit `.mindspec/` state files in `complete.Run()`, remove dead `--spec` flag, accept explore+promote as valid path. 71.4% fwd ratio (20 fwd / 8 retry). Remaining retries: `approve plan` (needs bead creation) and `approve impl` (merge conflicts). |
+| 2026-03-01 | FAIL (new assertions) | 377 | 22 | 3m8s | Added git state assertions (branch cleanup, worktree removal, CWD contains .worktrees/). Existing assertions pass (explore+promote, next, complete all ran). New assertions caught: spec/ and bead/ branches not deleted, worktree not removed. Agent stuck retrying `complete` from spec worktree CWD (not bead worktree). 59.1% fwd ratio (13 fwd / 9 retry). Root cause: guidance gap — agent doesn't know to cd into bead worktree. |
 
 ### TestLLM_AbandonSpec
 
@@ -319,6 +320,8 @@ sandbox.FileExists(relPath) bool                         // Check file exists
 sandbox.ReadFile(relPath) string                         // Read file content
 sandbox.GitBranch() string                               // Current branch
 sandbox.BranchExists(branch) bool                        // Check branch exists
+sandbox.ListBranches(prefix) []string                    // List branches matching prefix
+sandbox.ListWorktrees() []string                         // List .worktrees/ entries
 ```
 
 ## Prompt Engineering for Haiku

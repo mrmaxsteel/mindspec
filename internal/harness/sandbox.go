@@ -234,6 +234,38 @@ func (s *Sandbox) WorktreeExists(name string) bool {
 	return s.FileExists(filepath.Join(".worktrees", name))
 }
 
+// ListBranches returns branch names matching the given prefix (e.g. "spec/", "bead/").
+func (s *Sandbox) ListBranches(prefix string) []string {
+	cmd := exec.Command("git", "branch", "--list", prefix+"*")
+	cmd.Dir = s.Root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		b := strings.TrimSpace(strings.TrimPrefix(line, "* "))
+		if b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches
+}
+
+// ListWorktrees returns directory entries under .worktrees/ (empty if dir doesn't exist).
+func (s *Sandbox) ListWorktrees() []string {
+	wtDir := filepath.Join(s.Root, ".worktrees")
+	entries, err := os.ReadDir(wtDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
 // WriteFocus writes a focus file to the sandbox .mindspec/focus.
 func (s *Sandbox) WriteFocus(content string) {
 	s.t.Helper()
