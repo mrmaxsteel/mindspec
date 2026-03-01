@@ -490,10 +490,10 @@ description: Check the current MindSpec mode and active specification
 }
 
 // claudeMDFull is written when CLAUDE.md doesn't exist.
-const claudeMDFull = `# CLAUDE.md
+const claudeMDFull = `# CLAUDE.md — MindSpec
 <!-- mindspec:managed -->
 
-See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
+**IMPORTANT**: You MUST read and follow [AGENTS.md](AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
@@ -513,7 +513,7 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 const claudeMDAppendBlock = `
 ## MindSpec
 
-See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
+**IMPORTANT**: You MUST read and follow [AGENTS.md](AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
