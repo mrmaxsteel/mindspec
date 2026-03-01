@@ -338,8 +338,9 @@ func ScenarioSpecInit() Scenario {
 
 // ScenarioSpecApprove tests the /ms-spec-approve flow: spec mode → approve → plan mode.
 //
-// Before: main branch (CWD), spec/001-calc branch, worktree exists, spec mode, clean tree
-// After:  approve ran, plan mode in focus, spec/ branch still exists, worktree still exists
+// Before: spec worktree exists with draft spec, spec/001-calc branch, spec mode,
+//         focus.activeWorktree points to spec worktree, clean tree
+// After:  approve ran, plan mode in focus, spec/ branch + worktree still exist
 func ScenarioSpecApprove() Scenario {
 	return Scenario{
 		Name:        "spec_approve",
@@ -436,11 +437,8 @@ Pending.
 			// Git state: spec branch still exists (not deleted during approve)
 			assertHasBranches(t, sandbox, "spec/")
 
-			// Git state: worktree still exists (spec worktree persists through plan mode)
+			// Git state: spec worktree still exists (persists through plan mode)
 			assertHasWorktrees(t, sandbox)
-
-			// Git state: CWD is still main
-			assertBranchIs(t, sandbox, "main")
 
 			// Focus transitioned to plan mode
 			assertFocusMode(t, sandbox, "plan")
@@ -450,8 +448,10 @@ Pending.
 
 // ScenarioPlanApprove tests the /ms-plan-approve flow: plan mode → approve → implement mode.
 //
-// Before: main branch (CWD), spec/001-planner branch, spec worktree, no bead/ branches, plan mode, clean tree
-// After:  approve plan ran, next ran, implement mode, bead/ branch created, nested worktree created
+// Before: spec worktree exists with draft plan, spec/001-planner branch, no bead/ branches,
+//         plan mode, focus.activeWorktree points to spec worktree, clean tree
+// After:  approve plan ran, mindspec next ran, implement mode, bead/ branch + worktree created,
+//         agent CWD moved to bead worktree
 func ScenarioPlanApprove() Scenario {
 	return Scenario{
 		Name:        "plan_approve",
@@ -568,19 +568,19 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			assertCommandRan(t, events, "mindspec", "approve")
 			assertCommandRan(t, events, "mindspec", "next")
 
-			// Git state: spec branch still exists
+			// Git state: spec branch still exists (worktree is still needed)
 			assertHasBranches(t, sandbox, "spec/")
 
 			// Git state: bead branch created by mindspec next
 			assertHasBranches(t, sandbox, "bead/")
 
-			// Git state: CWD is still main
-			assertBranchIs(t, sandbox, "main")
+			// Git state: bead worktree created by mindspec next
+			assertHasWorktrees(t, sandbox)
 
 			// Focus transitioned to implement mode
 			assertFocusMode(t, sandbox, "implement")
 
-			// Agent CWD entered a worktree during next
+			// Agent CWD moved to bead worktree (instruct emits worktree redirect)
 			assertEventCWDContains(t, events, ".worktrees/")
 		},
 	}
@@ -588,8 +588,10 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 
 // ScenarioImplApprove tests the /ms-impl-approve flow: review mode → approve impl → idle.
 //
-// Before: main branch (CWD), spec/001-done branch with impl content, review mode, clean tree
-// After:  approve impl ran, idle mode, spec/ branch deleted (merged to main), no worktrees, clean tree
+// Before: spec worktree exists with impl content, spec/001-done branch, review mode,
+//         focus.activeWorktree points to spec worktree, all beads closed, clean tree
+// After:  approve impl ran, idle mode, spec/ branch deleted (merged to main),
+//         spec worktree removed, implementation content merged to main, clean tree
 func ScenarioImplApprove() Scenario {
 	return Scenario{
 		Name:        "impl_approve",
@@ -606,18 +608,20 @@ func ScenarioImplApprove() Scenario {
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
 
-			// Create spec branch with implementation content
-			mustRunSandbox(sandbox, "git", "checkout", "-b", specBranch)
+			// Create spec branch and worktree (stay on main)
+			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			wtDir := ".worktrees/worktree-spec-" + specID
+			mustRunSandbox(sandbox, "git", "worktree", "add", wtDir, specBranch)
 
-			// Write spec files
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			// Write spec files in the worktree (where they'd be in real workflow)
+			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Done Feature
 status: Approved
 ---
 # Done Feature
 A completed feature.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -627,25 +631,24 @@ bead_ids:
 ## Bead 1: Implement feature
 Create done.go.
 `, specID, beadID))
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
+			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: review\nepic_id: %s\n", epicID))
 
-			// Write actual implementation file
-			sandbox.WriteFile("done.go", `package main
+			// Write actual implementation file in the worktree
+			sandbox.WriteFile(wtDir+"/done.go", `package main
 
 func Done() string { return "done" }
 `)
-			sandbox.Commit("impl: implement feature")
+			mustRunSandbox(sandbox, "git", "-C", wtDir, "add", "-A")
+			mustRunSandbox(sandbox, "git", "-C", wtDir, "commit", "-m", "impl: implement feature")
 
-			// Switch back to main for the merge target
-			mustRunSandbox(sandbox, "git", "checkout", "main")
-
-			// Set focus to review mode
+			// Set focus to review mode with activeWorktree (as mindspec complete would)
 			sandbox.WriteFocus(mustJSON(map[string]string{
-				"mode":       "review",
-				"activeSpec": specID,
-				"specBranch": specBranch,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+				"mode":            "review",
+				"activeSpec":      specID,
+				"specBranch":      specBranch,
+				"activeWorktree":  wtDir,
+				"timestamp":       time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.Commit("setup: review mode focus")
 
@@ -655,6 +658,9 @@ func Done() string { return "done" }
 			}
 			if branches := sandbox.ListBranches("spec/"); len(branches) == 0 {
 				return fmt.Errorf("precondition: expected spec/ branch to exist")
+			}
+			if wts := sandbox.ListWorktrees(); len(wts) == 0 {
+				return fmt.Errorf("precondition: expected spec worktree to exist")
 			}
 			if !sandbox.GitStatusClean() {
 				return fmt.Errorf("precondition: expected clean working tree")
@@ -669,17 +675,16 @@ func Done() string { return "done" }
 			assertCommandRan(t, events, "mindspec", "approve")
 			assertCommandContains(t, events, "mindspec", "impl")
 
-			// Git state: back on main
-			assertBranchIs(t, sandbox, "main")
-
 			// Git state: spec branch deleted after merge
 			assertNoBranches(t, sandbox, "spec/")
 
-			// Git state: no worktrees remain
+			// Git state: spec worktree removed after merge
 			assertNoWorktrees(t, sandbox)
 
-			// Git state: working tree is clean (agent committed state files)
-			assertCleanWorktree(t, sandbox)
+			// Git state: implementation content merged to main
+			if !sandbox.FileExists("done.go") {
+				t.Error("expected done.go to be merged to main")
+			}
 
 			// Focus transitioned to idle
 			assertFocusMode(t, sandbox, "idle")
@@ -689,8 +694,9 @@ func Done() string { return "done" }
 
 // ScenarioSpecStatus tests the /ms-spec-status flow: check current mode and report.
 //
-// Before: main branch, implement mode, clean tree
-// After:  no state changes (read-only command), still implement mode, still main branch, still clean
+// Before: implement mode, spec worktree + bead worktree exist, spec/001-status + bead/ branches,
+//         focus.activeWorktree points to bead worktree, active bead in focus
+// After:  no state changes (read-only command), still implement mode, worktrees+branches unchanged
 func ScenarioSpecStatus() Scenario {
 	return Scenario{
 		Name:        "spec_status",
@@ -698,30 +704,54 @@ func ScenarioSpecStatus() Scenario {
 		MaxTurns:    10,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
-			// Set up in implement mode so there's interesting state to report
-			epicID := sandbox.CreateBead("[001-status] Epic", "epic", "")
-			beadID := sandbox.CreateBead("[001-status] Feature", "task", epicID)
+			specID := "001-status"
+			specBranch := "spec/" + specID
+
+			// Set up in implement mode with realistic worktree structure
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			beadID := sandbox.CreateBead("["+specID+"] Feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/001-status/spec.md", `---
+			// Create spec branch and worktree
+			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			specWtDir := ".worktrees/worktree-spec-" + specID
+			mustRunSandbox(sandbox, "git", "worktree", "add", specWtDir, specBranch)
+
+			// Write spec files in the spec worktree
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Status Feature
 status: Approved
 ---
 # Status Feature
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/001-status/lifecycle.yaml",
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
+			mustRunSandbox(sandbox, "git", "-C", specWtDir, "add", "-A")
+			mustRunSandbox(sandbox, "git", "-C", specWtDir, "commit", "-m", "setup: spec files")
+
+			// Create bead branch and worktree off the spec branch
+			beadBranch := "bead/" + beadID
+			mustRunSandbox(sandbox, "git", "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + beadID
+			mustRunSandbox(sandbox, "git", "worktree", "add", beadWtDir, beadBranch)
+
+			// Set focus to implement mode with bead worktree
 			sandbox.WriteFocus(mustJSON(map[string]string{
-				"mode":       "implement",
-				"activeSpec": "001-status",
-				"activeBead": beadID,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+				"mode":            "implement",
+				"activeSpec":      specID,
+				"activeBead":      beadID,
+				"specBranch":      specBranch,
+				"activeWorktree":  beadWtDir,
+				"timestamp":       time.Now().UTC().Format(time.RFC3339),
 			}))
 			sandbox.Commit("setup: implement mode with active bead")
 
 			// Verify preconditions
 			if branch := sandbox.GitBranch(); branch != "main" {
 				return fmt.Errorf("precondition: expected main branch, got %q", branch)
+			}
+			if wts := sandbox.ListWorktrees(); len(wts) < 2 {
+				return fmt.Errorf("precondition: expected spec + bead worktrees, got %v", wts)
 			}
 			if !sandbox.GitStatusClean() {
 				return fmt.Errorf("precondition: expected clean working tree")
@@ -756,11 +786,14 @@ status: Approved
 			// Read-only: no state changes — still implement mode
 			assertFocusMode(t, sandbox, "implement")
 
-			// Read-only: still on main branch
-			assertBranchIs(t, sandbox, "main")
+			// Read-only: worktrees still exist (status is read-only)
+			assertHasWorktrees(t, sandbox)
+
+			// Read-only: branches still exist
+			assertHasBranches(t, sandbox, "spec/")
+			assertHasBranches(t, sandbox, "bead/")
 
 			// Read-only: no non-infrastructure files modified.
-			// Note: .mindspec/session.json is written by SessionStart hook (infrastructure noise).
 			assertNoUserFilesModified(t, sandbox)
 		},
 	}

@@ -266,6 +266,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 47 | 4 | 39s | Baseline: agent ran `mindspec approve spec` (3 attempts, exit=1 each — spec validation failures). 50% fwd ratio. Hit max turns (15). Validation errors are a product gap, not test issue. |
+| 2026-03-01 | PASS | 68 | 5 | 35s | Fixed setup: realistic worktree structure. Removed misleading `assertBranchIs(main)`. 100% fwd ratio. |
 
 ### TestLLM_PlanApprove
 
@@ -273,18 +274,21 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 117 | 9 | 56s | Baseline: agent ran `approve plan` (succeeded on 3rd try) then `mindspec next` (claimed bead, created nested worktree). 77.8% fwd ratio (7 fwd / 2 retry). |
 | 2026-03-01 | PASS | 130 | 8 | 54s | Fixed plan.md to pass ValidatePlan (added version, ADR Fitness, Testing Strategy, proper bead Steps/Verification). Added git state assertions. 100% fwd ratio. |
+| 2026-03-01 | PASS | 90 | 2 | 23s | Fixed assertions: removed misleading `assertBranchIs(main)`, added `assertHasWorktrees`. Agent CWD enters bead worktree. 100% fwd ratio. |
 
 ### TestLLM_ImplApprove
 
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 60 | 3 | 24s | Baseline: agent ran `state show`, then `approve impl` (direct merge + cleanup), then session close (bd sync, git commit, git push). 100% fwd ratio. |
+| 2026-03-01 | PASS | 58 | 3 | 22s | Fixed setup: realistic spec worktree (not just branch), focus.activeWorktree set. Added `assertFileExists(done.go)` to verify merge. 100% fwd ratio. |
 
 ### TestLLM_SpecStatus
 
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 40 | 2 | 14s | Baseline: agent ran `state show` and `instruct`, reported implement mode with active bead. 100% fwd ratio. |
+| 2026-03-01 | PASS | 33 | 2 | 17s | Fixed setup: realistic spec + bead worktrees, branches, focus.activeWorktree. Added branch/worktree preservation assertions. 100% fwd ratio. |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
