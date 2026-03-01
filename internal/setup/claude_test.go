@@ -45,7 +45,7 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	}
 
 	// Verify command files exist
-	for _, name := range []string{"ms-explore.md", "ms-spec-init.md", "ms-spec-approve.md", "ms-plan-approve.md", "ms-impl-approve.md", "ms-spec-status.md"} {
+	for _, name := range []string{"ms:explore.md", "ms:spec-init.md", "ms:spec-approve.md", "ms:plan-approve.md", "ms:impl-approve.md", "ms:spec-status.md"} {
 		cmdPath := filepath.Join(root, ".claude", "commands", name)
 		if _, err := os.Stat(cmdPath); os.IsNotExist(err) {
 			t.Errorf("missing command file: %s", name)
