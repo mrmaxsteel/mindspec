@@ -97,7 +97,32 @@ func ensureCopilotHooks(root string, check bool, r *Result) error {
 	hooksAbsPath := filepath.Join(root, hooksRelPath)
 
 	if fileExists(hooksAbsPath) {
-		r.Skipped = append(r.Skipped, hooksRelPath)
+		// Stale detection: compare existing content against wanted config
+		stale := false
+		if !check {
+			existingData, err := os.ReadFile(hooksAbsPath)
+			if err == nil {
+				wantedData, err2 := json.MarshalIndent(copilotHooksConfig(), "", "  ")
+				if err2 == nil {
+					// Compare canonical JSON (append newline to match file format)
+					if string(existingData) != string(append(wantedData, '\n')) {
+						stale = true
+					}
+				}
+			}
+		}
+		if stale {
+			r.Created = append(r.Created, hooksRelPath+" (updated)")
+			data, err := json.MarshalIndent(copilotHooksConfig(), "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshaling hooks config: %w", err)
+			}
+			if err := os.WriteFile(hooksAbsPath, append(data, '\n'), 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", hooksRelPath, err)
+			}
+		} else {
+			r.Skipped = append(r.Skipped, hooksRelPath)
+		}
 	} else {
 		r.Created = append(r.Created, hooksRelPath)
 		if !check {
@@ -142,7 +167,7 @@ func copilotHooksConfig() map[string]any {
 			"sessionStart": []map[string]any{
 				{
 					"type":       "command",
-					"bash":       "mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+					"bash":       `source=$(cat | jq -r '.source // "unknown"'); mindspec state write-session --source="$source" 2>/dev/null; mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'`,
 					"timeoutSec": 10,
 				},
 			},
@@ -155,6 +180,11 @@ func copilotHooksConfig() map[string]any {
 				{
 					"type":       "command",
 					"bash":       "mindspec hook worktree-bash --format copilot",
+					"timeoutSec": 5,
+				},
+				{
+					"type":       "command",
+					"bash":       "mindspec hook needs-clear --format copilot",
 					"timeoutSec": 5,
 				},
 				{

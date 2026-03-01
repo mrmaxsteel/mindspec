@@ -103,9 +103,13 @@ func TestRunCopilot_HooksContent(t *testing.T) {
 	if !strings.Contains(content, `"version": 1`) {
 		t.Error("hooks should have version 1")
 	}
-	// Verify no inline shell scripts remain
-	if strings.Contains(content, "jq") {
-		t.Error("hooks should not contain jq references — all logic in mindspec hook commands")
+	// sessionStart now uses jq for source parsing (matching Claude pattern)
+	if !strings.Contains(content, "state write-session") {
+		t.Error("hooks should contain state write-session in sessionStart")
+	}
+	// needs-clear hook
+	if !strings.Contains(content, "mindspec hook needs-clear --format copilot") {
+		t.Error("hooks should contain needs-clear hook in preToolUse")
 	}
 }
 
@@ -184,6 +188,51 @@ func TestRunCopilot_ExistingInstructionsAppend(t *testing.T) {
 	}
 	if !strings.Contains(content, mindspecMarker) {
 		t.Error("should contain mindspec marker")
+	}
+}
+
+func TestRunCopilot_StaleHooksUpdated(t *testing.T) {
+	root := t.TempDir()
+
+	// First run to create everything
+	_, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("first RunCopilot() error: %v", err)
+	}
+
+	// Write stale hooks JSON (missing needs-clear hook)
+	hooksPath := filepath.Join(root, ".github/hooks/mindspec.json")
+	staleContent := `{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"type":"command","bash":"mindspec instruct","timeoutSec":10}],
+    "preToolUse": [{"type":"command","bash":"mindspec hook worktree-file --format copilot","timeoutSec":5}]
+  }
+}
+`
+	os.WriteFile(hooksPath, []byte(staleContent), 0o644)
+
+	// Second run should detect stale and update
+	r2, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("second RunCopilot() error: %v", err)
+	}
+
+	hasUpdate := false
+	for _, c := range r2.Created {
+		if strings.Contains(c, "mindspec.json") && strings.Contains(c, "updated") {
+			hasUpdate = true
+			break
+		}
+	}
+	if !hasUpdate {
+		t.Errorf("expected stale hooks to be updated, got created=%v skipped=%v", r2.Created, r2.Skipped)
+	}
+
+	// Verify updated content has needs-clear
+	data, _ := os.ReadFile(hooksPath)
+	if !strings.Contains(string(data), "needs-clear") {
+		t.Error("updated hooks should contain needs-clear")
 	}
 }
 
