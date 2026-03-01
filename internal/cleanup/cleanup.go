@@ -40,7 +40,7 @@ func Run(root, specID string, force bool) (*Result, error) {
 	specWtName := "worktree-spec-" + specID
 
 	if force {
-		return forceCleanup(result, specWtName, specBranch)
+		return forceCleanup(root, result, specWtName, specBranch)
 	}
 
 	// If focus still has activeSpec matching, check mode.
@@ -85,6 +85,9 @@ func Run(root, specID string, force bool) (*Result, error) {
 		result.WorktreeRemoved = true
 	}
 
+	// Clear focus if it still points to this spec (prevent stale worktree deadlock).
+	clearFocusIfStale(root, specID)
+
 	// Delete branch (best-effort).
 	if gitops.BranchExists(specBranch) {
 		if err := deleteBranchFn(specBranch); err != nil {
@@ -98,7 +101,7 @@ func Run(root, specID string, force bool) (*Result, error) {
 }
 
 // forceCleanup removes worktree and branch without checking PR status.
-func forceCleanup(result *Result, wtName, branch string) (*Result, error) {
+func forceCleanup(root string, result *Result, wtName, branch string) (*Result, error) {
 	if err := worktreeRemoveFn(wtName); err != nil {
 		if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "does not exist") {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not remove worktree: %v", err))
@@ -106,6 +109,9 @@ func forceCleanup(result *Result, wtName, branch string) (*Result, error) {
 	} else {
 		result.WorktreeRemoved = true
 	}
+
+	// Clear focus if it still points to this spec.
+	clearFocusIfStale(root, result.SpecID)
 
 	if gitops.BranchExists(branch) {
 		if err := deleteBranchFn(branch); err != nil {
@@ -116,6 +122,17 @@ func forceCleanup(result *Result, wtName, branch string) (*Result, error) {
 	}
 
 	return result, nil
+}
+
+// clearFocusIfStale resets focus to idle if it still references the given spec.
+func clearFocusIfStale(root, specID string) {
+	f, err := state.ReadFocus(root)
+	if err != nil || f == nil {
+		return
+	}
+	if f.ActiveSpec == specID {
+		_ = state.WriteFocus(root, &state.Focus{Mode: state.ModeIdle})
+	}
 }
 
 var findPRForBranchFn = findPRForBranch

@@ -105,6 +105,90 @@ func TestCleanup_MergedPR(t *testing.T) {
 	}
 }
 
+func TestCleanup_ClearsFocusAfterForce(t *testing.T) {
+	root := setupCleanupTest(t, "010-test", state.ModeImplement)
+	mockCleanupFns(t)
+
+	worktreeRemoveFn = func(name string) error { return nil }
+	deleteBranchFn = func(name string) error { return nil }
+
+	// Force cleanup should clear focus even when mode is active.
+	result, err := Run(root, "010-test", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.WorktreeRemoved {
+		t.Error("expected worktree to be removed")
+	}
+
+	// Focus should now be idle.
+	f, err := state.ReadFocus(root)
+	if err != nil {
+		t.Fatalf("reading focus: %v", err)
+	}
+	if f.Mode != state.ModeIdle {
+		t.Errorf("focus mode after force cleanup: got %q, want %q", f.Mode, state.ModeIdle)
+	}
+	if f.ActiveSpec != "" {
+		t.Errorf("focus activeSpec after force cleanup: got %q, want empty", f.ActiveSpec)
+	}
+}
+
+func TestCleanup_ClearsFocusAfterMergedPR(t *testing.T) {
+	root := setupCleanupTest(t, "010-test", state.ModeIdle)
+	mockCleanupFns(t)
+
+	// Set focus to reference the spec (simulates stale focus after approve impl).
+	state.WriteFocus(root, &state.Focus{
+		Mode:            state.ModeIdle,
+		ActiveSpec:      "010-test",
+		ActiveWorktree:  "/deleted/worktree",
+	})
+
+	findPRForBranchFn = func(branch string) (string, string, error) {
+		return "merged", "https://github.com/test/repo/pull/1", nil
+	}
+	worktreeRemoveFn = func(name string) error { return nil }
+	deleteBranchFn = func(name string) error { return nil }
+
+	_, err := Run(root, "010-test", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Focus should be cleared.
+	f, _ := state.ReadFocus(root)
+	if f.ActiveSpec != "" {
+		t.Errorf("focus activeSpec should be cleared, got %q", f.ActiveSpec)
+	}
+}
+
+func TestCleanup_PreservesFocusForOtherSpec(t *testing.T) {
+	root := setupCleanupTest(t, "other-spec", state.ModeImplement)
+	mockCleanupFns(t)
+
+	findPRForBranchFn = func(branch string) (string, string, error) {
+		return "merged", "https://github.com/test/repo/pull/2", nil
+	}
+	worktreeRemoveFn = func(name string) error { return nil }
+	deleteBranchFn = func(name string) error { return nil }
+
+	// Clean up spec "010-test" while "other-spec" is active.
+	_, err := Run(root, "010-test", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Focus should NOT be cleared — it belongs to a different spec.
+	f, _ := state.ReadFocus(root)
+	if f.ActiveSpec != "other-spec" {
+		t.Errorf("focus activeSpec should still be %q, got %q", "other-spec", f.ActiveSpec)
+	}
+	if f.Mode != state.ModeImplement {
+		t.Errorf("focus mode should still be %q, got %q", state.ModeImplement, f.Mode)
+	}
+}
+
 func TestCleanup_OpenPRRefuses(t *testing.T) {
 	root := setupCleanupTest(t, "010-test", state.ModeIdle)
 	mockCleanupFns(t)

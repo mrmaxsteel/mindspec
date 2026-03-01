@@ -544,6 +544,23 @@ func findSubstr(s, sub string) bool {
 	return false
 }
 
+// --- dirExists guard ---
+
+func TestDirExists_DeletedPath(t *testing.T) {
+	t.Parallel()
+	if dirExists("/nonexistent/path/that/does/not/exist") {
+		t.Error("dirExists should return false for nonexistent path")
+	}
+}
+
+func TestDirExists_RealDir(t *testing.T) {
+	t.Parallel()
+	d := t.TempDir()
+	if !dirExists(d) {
+		t.Error("dirExists should return true for existing dir")
+	}
+}
+
 // --- Run dispatcher ---
 
 func TestRun_UnknownHook(t *testing.T) {

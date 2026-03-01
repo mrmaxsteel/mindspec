@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// dirExists returns true if the path exists and is a directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // hasPathPrefix checks if path starts with prefix, handling trailing slashes.
 func hasPathPrefix(path, prefix string) bool {
 	if prefix == "" {

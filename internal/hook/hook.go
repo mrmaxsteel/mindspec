@@ -171,7 +171,12 @@ func ReadState() *HookState {
 	if err == nil && f != nil {
 		hs.Mode = f.Mode
 		hs.ActiveSpec = f.ActiveSpec
-		hs.ActiveWorktree = f.ActiveWorktree
+		// Only trust ActiveWorktree if the path still exists on disk.
+		// A stale worktree path (deleted but focus not cleared) would
+		// cause hooks to block ALL operations — deadlocking the agent.
+		if f.ActiveWorktree != "" && dirExists(f.ActiveWorktree) {
+			hs.ActiveWorktree = f.ActiveWorktree
+		}
 	}
 
 	// Read session.json for freshness fields
