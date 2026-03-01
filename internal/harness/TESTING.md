@@ -296,13 +296,13 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
-| | | | | | Scenario added — not yet run |
+| 2026-03-01 | PASS | 87 | 5 | 47s | Baseline: agent discovered `--spec` flag after initial `complete` and `state show` failures. Tried `complete`, `complete --spec=001-alpha`, `bd close`, `state set`, then `complete` again. 80% fwd ratio (4 fwd / 1 retry). Agent reached max turns (20) but all assertions pass. |
 
 ### TestLLM_StaleWorktree
 
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
-| | | | | | Scenario added — not yet run |
+| 2026-03-01 | PASS | 70 | 7 | 42s | Baseline: agent recovered from missing worktree by manually closing the bead via `bd close` and resetting state with `mindspec state set --mode idle`. 71.4% fwd ratio (5 fwd / 2 retry). `mindspec complete` failed (stale worktree), agent worked around it. |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
