@@ -45,7 +45,9 @@ func ScenarioSpecToIdle() Scenario {
 
 You are in a MindSpec project with no active work. Your task: add a simple "greeting" feature — a hello.go program that prints "Hello!". Take it from idea all the way through to a completed implementation using the mindspec workflow.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			assertCommandRan(t, events, "mindspec", "explore")
+			// Agent may use explore+promote or go straight to spec-init — both are valid paths.
+			assertCommandRanEither(t, events, "mindspec",
+				[]string{"spec-init"}, []string{"explore", "promote"})
 			assertCommandRan(t, events, "mindspec", "next")
 			assertCommandRan(t, events, "mindspec", "complete")
 		},
@@ -299,6 +301,31 @@ func assertCommandRan(t *testing.T, events []ActionEvent, command string, argSub
 	} else {
 		t.Errorf("command %q was not found in events", command)
 	}
+}
+
+// assertCommandRanEither checks that the command was invoked with one of the
+// given arg patterns (each is a list of substrings that must all appear).
+func assertCommandRanEither(t *testing.T, events []ActionEvent, command string, patterns ...[]string) {
+	t.Helper()
+	for _, e := range events {
+		if e.Command != command {
+			continue
+		}
+		args := eventArgs(e)
+		for _, pattern := range patterns {
+			matched := true
+			for _, sub := range pattern {
+				if !containsAll(args, sub) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return
+			}
+		}
+	}
+	t.Errorf("command %q was not found with any of the expected arg patterns %v", command, patterns)
 }
 
 func assertCommandContains(t *testing.T, events []ActionEvent, command, substr string) {

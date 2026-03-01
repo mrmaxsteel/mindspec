@@ -204,6 +204,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 34 | 2 | 14.2s | Infra filter: no change (already 100% fwd), regression check only |
 | 2026-02-28 | PASS | 45 | 3 | 23s | Removed prompt workaround "MUST commit before completing" — fix moved to instruct template. Agent now retries once (complete→error→commit→complete). 1 retry is expected: sandbox has no hooks so instruct template doesn't run, agent learns from CLI error. |
 | 2026-02-28 | PASS | 74 | 3 | 23s | Full hooks enabled: SessionStart runs `mindspec instruct`, PreToolUse hooks installed (no-op via agent_hooks:false). Agent gets implement.md guidance. 100% fwd ratio. More events due to hook invocations. |
+| 2026-02-28 | PASS | 80 | 2 | 25s | Full suite run: stable, 100% fwd ratio |
 
 ### TestLLM_SpecToIdle
 
@@ -215,6 +216,8 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | FAIL | 107 | 50 | 2m3s | Imperative prompt: agent executed but dolt orphans blocked bd init |
 | 2026-02-28 | FAIL (1 assertion) | 108 | 50 | 1m52s | bd dolt killall in initBeads: agent reached `next` but ran out of turns before `complete` |
 | 2026-02-28 | **PASS** | 170 | 75 | 2m42s | MaxTurns 50->75: **agent completed full lifecycle** |
+| 2026-02-28 | FAIL | 327 | 30 | 3m16s | Full suite run: agent skipped `explore` (went to spec-init), then stuck retrying `complete` in worktree (17 retries, 43% fwd ratio) |
+| 2026-03-01 | **PASS** | 358 | 28 | 4m10s | Fix: auto-commit `.mindspec/` state files in `complete.Run()`, remove dead `--spec` flag, accept explore+promote as valid path. 71.4% fwd ratio (20 fwd / 8 retry). Remaining retries: `approve plan` (needs bead creation) and `approve impl` (merge conflicts). |
 
 ### TestLLM_AbandonSpec
 
@@ -224,6 +227,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 18 | 2 | 10s | Imperative prompt pattern: "Execute these commands immediately" (50% fwd — infra noise) |
 | 2026-02-28 | PASS | 18 | 2 | 8.8s | Filter infra git cmds from retry detection: **100% forward ratio** |
 | 2026-02-28 | PASS | 31 | 1 | 11s | Full hooks enabled: `mindspec instruct` runs via SessionStart. Imperative prompt overrides idle template. 100% fwd, 1 turn (down from 2). |
+| 2026-02-28 | PASS | 35 | 3 | 14s | Full suite run: stable, 100% fwd ratio |
 
 ### TestLLM_ResumeAfterCrash
 
@@ -231,6 +235,19 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-02-28 | PASS | 45 | 3 | 29.4s | Baseline: 66.7% fwd ratio, 1 retry (complete before commit) |
 | 2026-02-28 | PASS | 74 | 2 | 22s | Full hooks enabled: agent gets implement.md guidance via SessionStart. **100% fwd ratio** (up from 66.7%), 2 turns (down from 3). Still 1 retry on complete (session.json dirty). |
+| 2026-02-28 | PASS | 86 | 3 | 33s | Full suite run: stable, 100% fwd ratio |
+
+### TestLLM_InterruptForBug
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-02-28 | PASS | 81 | 3 | 26s | First recorded run: 100% fwd ratio, agent fixed bug + created feature + completed bead |
+
+### TestLLM_MultiBeadDeps
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-02-28 | PASS | 230 | 6 | 66s | First recorded run: completed 2/3 beads within 30 turns, 66.7% fwd (2 retries on complete due to dirty tree), all 3 files created |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)

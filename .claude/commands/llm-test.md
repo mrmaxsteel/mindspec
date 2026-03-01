@@ -104,5 +104,4 @@ git push
 - `make build` before testing — the shims call ./bin/mindspec
 - Kill dolt orphans before testing: `bd dolt killall`
 - Haiku prompts must be imperative or the agent responds conversationally
-- The sandbox has empty hooks {} — no SessionStart, no PreToolUse
 - Always check SingleBead still passes after changing shared infrastructure

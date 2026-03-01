@@ -79,6 +79,10 @@ func Run(root, beadID string) (*Result, error) {
 	if checkPath == "" {
 		checkPath = root // No worktree — check main tree
 	}
+	// Auto-commit .mindspec/ state files so they don't block the clean-tree check.
+	if err := autoCommitStateFiles(checkPath); err != nil {
+		return nil, fmt.Errorf("auto-committing state files: %w", err)
+	}
 	if err := checkCleanWorktree(checkPath); err != nil {
 		return nil, err
 	}
@@ -169,6 +173,28 @@ func FormatResult(r *Result) string {
 		sb.WriteString("All beads complete. Mode: idle\n")
 	}
 	return sb.String()
+}
+
+// autoCommitStateFiles stages and commits any dirty .mindspec/ state files
+// so they don't block the clean-worktree check. These files are written by
+// `mindspec next` and are not user content.
+func autoCommitStateFiles(path string) error {
+	// Stage .mindspec/ files
+	add := execCommandFn("git", "-C", path, "add", ".mindspec/")
+	if err := add.Run(); err != nil {
+		return nil // .mindspec/ may not exist — not an error
+	}
+	// Check if anything was staged
+	diff := execCommandFn("git", "-C", path, "diff", "--cached", "--quiet")
+	if diff.Run() == nil {
+		return nil // nothing staged
+	}
+	// Commit the staged state files
+	commit := execCommandFn("git", "-C", path, "commit", "-m", "mindspec: state checkpoint")
+	if out, err := commit.CombinedOutput(); err != nil {
+		return fmt.Errorf("committing state files: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // checkCleanWorktree verifies a worktree has no uncommitted changes.
