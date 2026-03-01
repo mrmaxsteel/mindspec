@@ -108,10 +108,11 @@ Use --check to see what would be created without writing files.`,
 
 var setupCodexCmd = &cobra.Command{
 	Use:   "codex",
-	Short: "Set up OpenAI Codex CLI integration (AGENTS.md, git hooks)",
+	Short: "Set up OpenAI Codex CLI integration (AGENTS.md, skills, git hooks)",
 	Long: `Creates OpenAI Codex CLI-specific configuration:
 
   - AGENTS.md with MindSpec guidance block
+  - .agents/skills/ms-*/SKILL.md workflow skills (explore, spec-init, approve, etc.)
   - Git hooks (pre-commit branch enforcement)
 
 If beads (bd) is installed, also runs 'bd setup codex'.
