@@ -114,123 +114,6 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 | **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
 
----
-
-## AgentMind — AI Agent Observability UI
-
-AgentMind gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working.
-
-- **3D Activity Graph** — Agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
-- **Token & Cost Tracking** — Input tokens, output tokens, cache reads, cache creation tokens, and estimated USD cost — broken down per model
-- **Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized, with frequency histograms
-- **Model Statistics** — Per-model breakdown of API calls, token usage, and cost across multi-model sessions
-- **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
-- **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
-
-### Quick Start
-
-```bash
-# 1. Build MindSpec
-make build
-
-# 2. Start AgentMind
-./bin/mindspec agentmind serve
-# OTLP receiver on :4318, UI at http://localhost:8420
-
-# 3. Configure Claude Code
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-
-# 4. Open http://localhost:8420
-```
-
-Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4318`.
-
-**Full guide:** [.mindspec/docs/guides/agentmind.md](.mindspec/docs/guides/agentmind.md)
-
----
-
-## How It Works
-
-### Context Packs
-
-MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, glossary terms, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets.
-
-```bash
-mindspec context pack 009-my-feature
-```
-
-### Architecture Decision Records
-
-ADRs are a governed primitive. Plans must cite the ADRs they rely on. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a new superseding ADR or reject the divergence.
-
-```bash
-mindspec adr create --title "Use WebSockets for real-time updates" --domain viz
-mindspec adr list --status accepted
-```
-
-### Dynamic Agent Guidance
-
-Instead of maintaining sprawling static instruction files, MindSpec emits agent guidance at runtime based on current state (mode, active spec, active bead, worktree status):
-
-```bash
-mindspec instruct
-```
-
-### Domain-Driven Design
-
-Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs route through the Context Map, expanding one hop to include neighboring bounded contexts. Domain-scoped ADRs live alongside domain docs.
-
----
-
-## CLI Reference
-
-### AgentMind & Observability
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec agentmind serve` | Start OTLP receiver + web UI (tokens, cost, tool analytics, 3D graph) |
-| `mindspec agentmind replay <file>` | Replay a recorded NDJSON session at any speed |
-| `mindspec bench setup\|collect\|report` | A/B/C benchmark agent workflows with comparative reporting |
-| `mindspec trace summary <file>` | Summarize NDJSON trace events |
-
-### Workflow
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec explore [description]` | Enter Explore Mode to evaluate an idea |
-| `mindspec explore promote <id>` | Promote exploration to a spec |
-| `mindspec explore dismiss [--adr]` | Exit exploration (optionally record as ADR) |
-| `mindspec instruct` | Emit mode-appropriate agent guidance |
-| `mindspec state show` | Show current mode and active work |
-| `mindspec next` | Claim next ready bead, create worktree |
-| `mindspec complete` | Close bead, remove worktree, advance state |
-| `mindspec approve spec <id>` | Approve spec, transition to Plan Mode |
-| `mindspec approve plan <id>` | Approve plan, transition to Implementation |
-| `mindspec approve impl <id>` | Approve implementation, return to Idle |
-
-### Context & Documentation
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec context pack <id>` | Generate token-budgeted context pack |
-| `mindspec glossary list\|match\|show` | Term lookup and section extraction |
-| `mindspec adr create\|list\|show` | ADR lifecycle management |
-| `mindspec validate spec\|plan\|docs` | Pre-flight validation checks |
-
-### Project Management
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec init` | Bootstrap project structure and AGENTS.md |
-| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
-| `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
-| `mindspec spec-init <id>` | Create new specification |
-| `mindspec doctor` | Project health checks |
-
 ## Project Structure
 
 ```
@@ -253,7 +136,7 @@ MindSpec's workflow is validated by a behavioral test harness that runs real LLM
 
 Tests track **forward ratio** (percentage of turns doing productive work vs. retries), **retry count**, and **event volume**. When a test fails because the agent does the wrong thing, the fix goes into MindSpec's guidance (instruct templates, CLI error messages, CLAUDE.md) — never into the test prompt. This keeps tests honest: they validate the product, not prompt engineering.
 
-14 scenarios cover the full lifecycle — from single-bead implementation to the complete Explore-to-Idle journey — running on Haiku for cost efficiency. The logic: if the smallest model can follow the workflow from guidance alone, larger models will too.
+Scenarios cover the full lifecycle — from single-bead implementation to the complete Explore-to-Idle journey — running on Haiku for cost efficiency. The logic: if the smallest model can follow the workflow from guidance alone, larger models will too.
 
 ## Design Principles
 
