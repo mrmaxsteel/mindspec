@@ -16,6 +16,7 @@ instruction file pointers) for a particular coding agent.
 
 Supported agents:
   claude    Claude Code (.claude/settings.json, commands, CLAUDE.md)
+  codex     OpenAI Codex CLI (AGENTS.md, git hooks)
   copilot   GitHub Copilot (.github/copilot-instructions.md, prompts)
 
 Run 'mindspec setup <agent>' after 'mindspec init' to complete onboarding.`,
@@ -105,9 +106,53 @@ Use --check to see what would be created without writing files.`,
 	},
 }
 
+var setupCodexCmd = &cobra.Command{
+	Use:   "codex",
+	Short: "Set up OpenAI Codex CLI integration (AGENTS.md, git hooks)",
+	Long: `Creates OpenAI Codex CLI-specific configuration:
+
+  - AGENTS.md with MindSpec guidance block
+  - Git hooks (pre-commit branch enforcement)
+
+If beads (bd) is installed, also runs 'bd setup codex'.
+
+This command is idempotent — re-running it skips existing items.
+Use --check to see what would be created without writing files.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		checkFlag, _ := cmd.Flags().GetBool("check")
+
+		root, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		result, err := setup.RunCodex(root, checkFlag)
+		if err != nil {
+			return err
+		}
+
+		if checkFlag {
+			fmt.Println("Check mode — no files written.")
+			fmt.Println()
+		}
+
+		fmt.Print(result.FormatSummary())
+
+		if !checkFlag && len(result.Created) > 0 {
+			fmt.Println("\nCodex CLI integration configured.")
+		} else if !checkFlag && len(result.Created) == 0 {
+			fmt.Println("\nCodex CLI integration already configured.")
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	setupClaudeCmd.Flags().Bool("check", false, "Report what would be created without writing files")
+	setupCodexCmd.Flags().Bool("check", false, "Report what would be created without writing files")
 	setupCopilotCmd.Flags().Bool("check", false, "Report what would be created without writing files")
 	setupCmd.AddCommand(setupClaudeCmd)
+	setupCmd.AddCommand(setupCodexCmd)
 	setupCmd.AddCommand(setupCopilotCmd)
 }
