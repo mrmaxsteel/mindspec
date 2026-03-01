@@ -42,25 +42,6 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		}
 	}
 
-	// 4. prompt files (.github/prompts/*.prompt.md)
-	for name, content := range copilotPromptFiles() {
-		relPath := filepath.Join(".github", "prompts", name)
-		absPath := filepath.Join(root, relPath)
-		if fileExists(absPath) {
-			r.Skipped = append(r.Skipped, relPath)
-		} else {
-			r.Created = append(r.Created, relPath)
-			if !check {
-				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-					return nil, fmt.Errorf("creating dir for %s: %w", relPath, err)
-				}
-				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-					return nil, fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		}
-	}
-
 	return r, nil
 }
 
@@ -222,92 +203,6 @@ func copilotHookScripts() map[string]string {
 	return map[string]string{}
 }
 
-// copilotPromptFiles returns the prompt file contents keyed by filename.
-func copilotPromptFiles() map[string]string {
-	return map[string]string{
-		"ms:explore.prompt.md": `---
-description: "Enter, promote, or dismiss an Explore Mode session"
-agent: "agent"
----
-
-# Explore Mode
-
-- Enter: ` + "`mindspec explore \"short description\"`" + `
-- Promote to spec: ` + "`mindspec explore promote <spec-id>`" + `
-- Dismiss: ` + "`mindspec explore dismiss`" + ` (optionally ` + "`--adr`" + ` to record decision)
-`,
-
-		"ms:spec-init.prompt.md": `---
-description: "Initialize a new MindSpec specification"
-agent: "agent"
----
-
-# Spec Init
-
-1. Ask the user for a spec ID (check ` + "`docs/specs/`" + ` for next available number)
-2. Run ` + "`mindspec spec-init <id>`" + ` in the terminal (optionally with ` + "`--title \"...\"`" + `)
-3. If it fails, show the error and help the user fix it
-4. On success: begin drafting the spec (the init output includes guidance)
-`,
-
-		"ms:spec-approve.prompt.md": `---
-description: "Approve a spec and transition to Plan Mode"
-agent: "agent"
----
-
-# Spec Approval
-
-1. Identify the active spec via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve spec <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
-3. If approval fails, show the validation errors and help the user fix them
-4. On success: immediately begin planning (the approval is the authorization)
-`,
-
-		"ms:plan-approve.prompt.md": `---
-description: "Approve a plan and transition toward Implementation Mode"
-agent: "agent"
----
-
-# Plan Approval
-
-1. Identify the active spec/plan via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve plan <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
-3. If approval fails, show the validation errors and help the user fix them
-4. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
-`,
-
-		"ms:impl-approve.prompt.md": `---
-description: "Approve implementation and close out the spec lifecycle"
-agent: "agent"
----
-
-# Implementation Approval
-
-1. Identify the active spec via ` + "`mindspec state show`" + `
-2. If not in review mode, run ` + "`mindspec complete`" + ` first to transition
-3. Run ` + "`mindspec approve impl <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
-4. If approval fails, show the error and help the user resolve it
-5. On success: run the session close protocol:
-   - ` + "`bd sync`" + `
-   - ` + "`git add`" + ` all changed files
-   - ` + "`git commit`" + `
-   - ` + "`bd sync`" + `
-   - ` + "`git push`" + `
-`,
-
-		"ms:spec-status.prompt.md": `---
-description: "Check the current MindSpec mode and active specification"
-agent: "agent"
----
-
-# Spec Status
-
-1. Run ` + "`mindspec state show`" + ` and ` + "`mindspec instruct`" + ` in the terminal
-2. Summarize the mode, active spec/bead, and any warnings to the user
-`,
-	}
-}
-
 // copilotInstructionsFull is written when .github/copilot-instructions.md doesn't exist.
 const copilotInstructionsFull = `# Copilot Instructions
 <!-- mindspec:managed -->
@@ -316,18 +211,9 @@ const copilotInstructionsFull = `# Copilot Instructions
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
-## Prompt Commands
+## Skills
 
-This project includes MindSpec workflow prompt files in ` + "`.github/prompts/`" + `:
-
-| Command | Purpose |
-|:--------|:--------|
-| ` + "`/ms:explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
-| ` + "`/ms:spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
-| ` + "`/ms:spec-approve`" + ` | Approve spec → Plan Mode |
-| ` + "`/ms:plan-approve`" + ` | Approve plan → Implementation Mode |
-| ` + "`/ms:impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
+MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `
 
 // copilotInstructionsAppendBlock is appended to an existing copilot-instructions.md.
@@ -338,16 +224,7 @@ const copilotInstructionsAppendBlock = `
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
-### Prompt Commands
+### Skills
 
-This project includes MindSpec workflow prompt files in ` + "`.github/prompts/`" + `:
-
-| Command | Purpose |
-|:--------|:--------|
-| ` + "`/ms:explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
-| ` + "`/ms:spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
-| ` + "`/ms:spec-approve`" + ` | Approve spec → Plan Mode |
-| ` + "`/ms:plan-approve`" + ` | Approve plan → Implementation Mode |
-| ` + "`/ms:impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
+MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `
