@@ -18,6 +18,45 @@ MindSpec treats these as system design problems, not prompting problems. It prov
   <em>AgentMind — real-time observability for AI coding agents</em>
 </p>
 
+## Features
+
+**Lifecycle & Governance**
+- **Gated development lifecycle** — Explore, Spec, Plan, Implement, Review — every phase transition requires explicit human approval
+- **Explore Mode** — evaluate whether an idea is worth pursuing before committing to a full spec
+- **Spec-anchored implementation** — all code traces back to a versioned specification with acceptance criteria
+- **Human gates for architecture divergence** — if the agent needs to deviate from an ADR, it stops and escalates
+- **Scope discipline** — discovered work becomes new beads (work items), never scope creep in the current task
+
+**Context Engineering**
+- **Deterministic context packs** — token-budgeted, DDD-informed bundles of specs, domain docs, and ADRs assembled automatically
+- **Domain-driven bounded contexts** — specs declare impacted domains; context packs expand through the Context Map to include neighboring contexts
+- **Dynamic agent guidance** — `mindspec instruct` emits mode-appropriate operating instructions at runtime based on current state, replacing static instruction files
+- **Architecture Decision Records** — governed ADR lifecycle with auto-numbered IDs, superseding workflow, and mandatory citation in plans
+
+**Workflow Automation**
+- **One-command work selection** — `mindspec next` discovers the next ready work item, creates an isolated git worktree, and emits guidance
+- **Isolated worktrees** — each work item executes in its own git worktree, scoped to exactly what the plan defined
+- **Automated bead creation** — approving a spec or plan automatically creates and links the corresponding work items
+- **Doc-sync enforcement** — work items can't close without documentation updates; docs stay current because the system won't let you skip them
+- **Validation gates** — `mindspec validate` catches structural issues in specs, plans, and docs before they reach approval
+- **Proof runner** — executes validation proof commands from specs and records timestamped pass/fail evidence
+
+**Observability (AgentMind)**
+- **3D activity visualization** — agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
+- **Token and cost tracking** — input/output tokens, cache reads, cache creation, and estimated USD cost broken down per model
+- **Tool and MCP analytics** — every tool call and MCP server interaction counted and categorized with frequency histograms
+- **Session recording and replay** — capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
+- **A/B/C benchmarking** — compare agentic workflows side-by-side with automated delta reporting and qualitative analysis
+- **Multi-agent identity** — distinct visualization nodes for each agent and sub-agent with parent-child hierarchy
+
+**Project Setup & Integration**
+- **One-command bootstrap** — `mindspec init` scaffolds the full project structure; additive and safe for existing repos
+- **Brownfield onboarding** — analyzes existing docs and migrates them into canonical MindSpec structure with full provenance
+- **Claude Code integration** — `mindspec setup claude` configures hooks, slash commands, plan gates, and CLAUDE.md automatically
+- **Codex support** — first-class workflow for OpenAI Codex CLI with the same gated lifecycle
+- **Copilot support** — first-class workflow for GitHub Copilot users in both CLI and VS Code Chat
+- **OTLP-compatible** — any agent that speaks OpenTelemetry can feed AgentMind; not locked to a single agent
+
 ## The Workflow
 
 Every phase transition requires explicit human approval:
@@ -54,10 +93,10 @@ Documentation stays current because the system won't let you skip it — beads c
 # 2. Bootstrap your project
 cd your-project
 mindspec init
-mindspec setup claude   # Configure Claude Code hooks + slash commands
+mindspec setup claude   # Or: codex, copilot — configures hooks + skills
 ```
 
-`mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, `/ms:spec-init` and other skills). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
+`mindspec init` scaffolds the `.mindspec/` directory, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, and skills). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
 
 Tell the agent what you want to build. It will walk you through the lifecycle:
 
@@ -71,143 +110,35 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 
 | Goal | Guide |
 |:-----|:------|
-| **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/guides/claude-code.md) |
-| **Full workflow with Codex** | [Codex guide](.mindspec/docs/guides/codex.md) |
-| **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/guides/agentmind.md) |
+| **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/user/guides/claude-code.md) |
+| **Full workflow with Codex** | [Codex guide](.mindspec/docs/user/guides/codex.md) |
+| **Full workflow with Copilot** | [Copilot guide](.mindspec/docs/user/guides/copilot.md) |
+| **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/user/guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
-
----
-
-## AgentMind — AI Agent Observability UI
-
-AgentMind gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working.
-
-- **3D Activity Graph** — Agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
-- **Token & Cost Tracking** — Input tokens, output tokens, cache reads, cache creation tokens, and estimated USD cost — broken down per model
-- **Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized, with frequency histograms
-- **Model Statistics** — Per-model breakdown of API calls, token usage, and cost across multi-model sessions
-- **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
-- **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
-
-### Quick Start
-
-```bash
-# 1. Build MindSpec
-make build
-
-# 2. Start AgentMind
-./bin/mindspec agentmind serve
-# OTLP receiver on :4318, UI at http://localhost:8420
-
-# 3. Configure Claude Code
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-
-# 4. Open http://localhost:8420
-```
-
-Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4318`.
-
-**Full guide:** [.mindspec/docs/guides/agentmind.md](.mindspec/docs/guides/agentmind.md)
-
----
-
-## How It Works
-
-### Context Packs
-
-MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, glossary terms, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets.
-
-```bash
-mindspec context pack 009-my-feature
-```
-
-### Architecture Decision Records
-
-ADRs are a governed primitive. Plans must cite the ADRs they rely on. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a new superseding ADR or reject the divergence.
-
-```bash
-mindspec adr create --title "Use WebSockets for real-time updates" --domain viz
-mindspec adr list --status accepted
-```
-
-### Dynamic Agent Guidance
-
-Instead of maintaining sprawling static instruction files, MindSpec emits agent guidance at runtime based on current state (mode, active spec, active bead, worktree status):
-
-```bash
-mindspec instruct
-```
-
-### Domain-Driven Design
-
-Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs route through the Context Map, expanding one hop to include neighboring bounded contexts. Domain-scoped ADRs live alongside domain docs.
-
----
-
-## CLI Reference
-
-### AgentMind & Observability
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec agentmind serve` | Start OTLP receiver + web UI (tokens, cost, tool analytics, 3D graph) |
-| `mindspec agentmind replay <file>` | Replay a recorded NDJSON session at any speed |
-| `mindspec bench setup\|collect\|report` | A/B/C benchmark agent workflows with comparative reporting |
-| `mindspec trace summary <file>` | Summarize NDJSON trace events |
-
-### Workflow
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec explore [description]` | Enter Explore Mode to evaluate an idea |
-| `mindspec explore promote <id>` | Promote exploration to a spec |
-| `mindspec explore dismiss [--adr]` | Exit exploration (optionally record as ADR) |
-| `mindspec instruct` | Emit mode-appropriate agent guidance |
-| `mindspec state show` | Show current mode and active work |
-| `mindspec next` | Claim next ready bead, create worktree |
-| `mindspec complete` | Close bead, remove worktree, advance state |
-| `mindspec approve spec <id>` | Approve spec, transition to Plan Mode |
-| `mindspec approve plan <id>` | Approve plan, transition to Implementation |
-| `mindspec approve impl <id>` | Approve implementation, return to Idle |
-
-### Context & Documentation
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec context pack <id>` | Generate token-budgeted context pack |
-| `mindspec glossary list\|match\|show` | Term lookup and section extraction |
-| `mindspec adr create\|list\|show` | ADR lifecycle management |
-| `mindspec validate spec\|plan\|docs` | Pre-flight validation checks |
-
-### Project Management
-
-| Command | Description |
-|:--------|:------------|
-| `mindspec init` | Bootstrap project structure and AGENTS.md |
-| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
-| `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
-| `mindspec spec-init <id>` | Create new specification |
-| `mindspec doctor` | Project health checks |
 
 ## Project Structure
 
 ```
 your-project/
 ├── .mindspec/
-│   ├── docs/                   # Canonical docs (core, domains, adr, specs, guides)
-│   ├── policies.yml            # Canonical architecture policies
-│   └── state.json              # Current mode, active spec/bead (committed)
+│   ├── config.yaml             # MindSpec + Beads configuration
+│   └── docs/
+│       ├── core/               # USAGE.md, MODES.md, ARCHITECTURE.md, etc.
+│       ├── adr/                # Architecture Decision Records
+│       ├── domains/            # Bounded context documentation
+│       └── specs/              # Versioned specifications and plans
 ├── .beads/                     # Beads work graph (committed)
 ├── .claude/                    # Claude Code config (created by mindspec setup claude)
-│   ├── settings.json           # Hooks (SessionStart, PreToolUse plan gates)
+│   ├── settings.json           # Hooks (SessionStart, PreToolUse gates)
+│   ├── commands/               # Custom slash commands
 │   └── skills/                 # Skills (/ms:spec-init, /ms:spec-approve, etc.)
-├── AGENTS.md                   # Cross-agent workflow conventions (read by all agents)
-└── CLAUDE.md                   # Claude Code-specific config (points to AGENTS.md)
+├── AGENTS.md                   # Cross-agent workflow conventions
+└── CLAUDE.md                   # Claude Code-specific config
 ```
+
+## Tested Against Real Agents
+
+MindSpec's workflow is continuously validated by a behavioral test harness that runs real LLM agents through every lifecycle phase. An iterative test-observe-measure-improve cycle tracks forward ratio, retry count, and wasted turns — then feeds failures back into MindSpec's own guidance layer until the agent gets it right. The result is a framework where your agent reliably follows the workflow, stays architecturally sound, and spends its turns on productive work instead of recovery.
 
 ## Design Principles
 
