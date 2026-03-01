@@ -102,6 +102,23 @@ func TestHookMatrix_WorkflowGuard_EnforcementDisabled(t *testing.T) {
 	}
 }
 
+func TestHookMatrix_WorkflowGuard_PlanOutsideWorktree(t *testing.T) {
+	origGetCwd := hook.ExportGetCwd()
+	t.Cleanup(func() { hook.SetGetCwd(origGetCwd) })
+	hook.SetGetCwd(func() (string, error) { return "/repo", nil })
+
+	st := &hook.HookState{
+		Mode:           state.ModePlan,
+		ActiveSpec:     "044",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-044",
+	}
+	inp := &hook.Input{FilePath: "/repo/internal/harness/agent.go"}
+	got := hook.Run("workflow-guard", inp, st, true)
+	if got.Action != hook.Warn {
+		t.Errorf("plan mode code edit outside worktree: got %v, want Warn", got.Action)
+	}
+}
+
 func TestHookMatrix_WorkflowGuard_UnknownMode(t *testing.T) {
 	st := &hook.HookState{Mode: "unknown-mode"}
 	inp := &hook.Input{FilePath: "internal/foo.go"}

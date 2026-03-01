@@ -405,6 +405,71 @@ func TestWorkflowGuard_Review(t *testing.T) {
 	}
 }
 
+// --- Workflow Guard: worktree bypass for spec/plan ---
+
+func TestWorkflowGuard_Plan_CodeEdit_OutsideWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo", nil // CWD is main repo, not the spec worktree
+	}
+
+	st := &HookState{
+		Mode:           state.ModePlan,
+		ActiveSpec:     "044",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-044",
+	}
+	r := WorkflowGuard(&Input{FilePath: "/repo/internal/harness/agent.go"}, st, true)
+	if r.Action != Warn {
+		t.Errorf("plan mode code edit OUTSIDE worktree should warn, got %v: %s", r.Action, r.Message)
+	}
+}
+
+func TestWorkflowGuard_Plan_CodeEdit_InsideWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-044", nil
+	}
+
+	st := &HookState{
+		Mode:           state.ModePlan,
+		ActiveSpec:     "044",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-044",
+	}
+	r := WorkflowGuard(&Input{FilePath: "/repo/.worktrees/worktree-spec-044/cmd/main.go"}, st, true)
+	if r.Action != Block {
+		t.Errorf("plan mode code edit INSIDE worktree should block, got %v", r.Action)
+	}
+}
+
+func TestWorkflowGuard_Spec_CodeEdit_OutsideWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo", nil
+	}
+
+	st := &HookState{
+		Mode:           state.ModeSpec,
+		ActiveSpec:     "044",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-044",
+	}
+	r := WorkflowGuard(&Input{FilePath: "/repo/Makefile"}, st, true)
+	if r.Action != Warn {
+		t.Errorf("spec mode code edit OUTSIDE worktree should warn, got %v: %s", r.Action, r.Message)
+	}
+}
+
+func TestWorkflowGuard_Plan_NoWorktree_StillBlocks(t *testing.T) {
+	t.Parallel()
+	st := &HookState{Mode: state.ModePlan}
+	r := WorkflowGuard(&Input{FilePath: "cmd/main.go"}, st, true)
+	if r.Action != Block {
+		t.Errorf("plan mode with no worktree should still block code edits, got %v", r.Action)
+	}
+}
+
 // --- Helpers ---
 
 func TestIsCodeFile(t *testing.T) {
@@ -550,6 +615,96 @@ func findSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- outsideActiveWorktree ---
+
+func TestOutsideActiveWorktree_NilState(t *testing.T) {
+	t.Parallel()
+	if outsideActiveWorktree(nil) {
+		t.Error("nil state should return false (conservative)")
+	}
+}
+
+func TestOutsideActiveWorktree_NoWorktree(t *testing.T) {
+	t.Parallel()
+	if outsideActiveWorktree(&HookState{Mode: state.ModePlan}) {
+		t.Error("no active worktree should return false")
+	}
+}
+
+func TestOutsideActiveWorktree_Inside(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-044/subdir", nil
+	}
+	st := &HookState{ActiveWorktree: "/repo/.worktrees/worktree-spec-044"}
+	if outsideActiveWorktree(st) {
+		t.Error("CWD inside worktree should return false")
+	}
+}
+
+func TestOutsideActiveWorktree_Outside(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo", nil
+	}
+	st := &HookState{ActiveWorktree: "/repo/.worktrees/worktree-spec-044"}
+	if !outsideActiveWorktree(st) {
+		t.Error("CWD outside worktree should return true")
+	}
+}
+
+func TestOutsideActiveWorktree_CwdInDifferentWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-055", nil
+	}
+	// ActiveWorktree is a different spec's worktree
+	st := &HookState{ActiveWorktree: "/repo/.worktrees/worktree-spec-044"}
+	if !outsideActiveWorktree(st) {
+		t.Error("CWD in different worktree should return true")
+	}
+}
+
+func TestOutsideActiveWorktree_CwdInWorktreeNoActiveSet(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-055/subdir", nil
+	}
+	// No ActiveWorktree set at all
+	st := &HookState{Mode: "plan"}
+	if !outsideActiveWorktree(st) {
+		t.Error("CWD in any worktree with no ActiveWorktree should return true")
+	}
+}
+
+func TestOutsideActiveWorktree_CwdInNestedWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-044/.worktrees/worktree-bead-abc", nil
+	}
+	st := &HookState{ActiveWorktree: "/repo/.worktrees/worktree-spec-044"}
+	if !outsideActiveWorktree(st) {
+		t.Error("CWD in nested worktree (bead inside spec) should return true")
+	}
+}
+
+func TestOutsideActiveWorktree_CwdInActiveWorktree(t *testing.T) {
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) {
+		return "/repo/.worktrees/worktree-spec-044/internal", nil
+	}
+	st := &HookState{ActiveWorktree: "/repo/.worktrees/worktree-spec-044"}
+	if outsideActiveWorktree(st) {
+		t.Error("CWD inside active worktree should return false")
+	}
 }
 
 // --- dirExists guard ---

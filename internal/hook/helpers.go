@@ -104,6 +104,43 @@ func containsWord(haystack, needle string) bool {
 // getCwd returns the current working directory.
 var getCwd = os.Getwd
 
+// outsideActiveWorktree returns true if CWD is outside the active worktree,
+// meaning the agent is doing unrelated work and spec/plan mode restrictions
+// should not apply. Also returns true if CWD is within any .worktrees/
+// directory (even with no ActiveWorktree set), since that means the agent
+// is working in a scoped worktree context.
+// Returns false if there's no active worktree and CWD is not in a worktree.
+func outsideActiveWorktree(st *HookState) bool {
+	cwd, err := getCwd()
+	if err != nil || cwd == "" {
+		return false
+	}
+	// Check nested worktree first: CWD is in a worktree spawned FROM the
+	// active worktree (e.g. bead worktree inside spec worktree). That's
+	// scoped implementation work, not spec/plan editing.
+	if st != nil && st.ActiveWorktree != "" {
+		nestedWt := st.ActiveWorktree + "/.worktrees/"
+		if strings.HasPrefix(cwd, nestedWt) {
+			return true
+		}
+	}
+	// If CWD is inside any .worktrees/ directory, the agent is in a
+	// scoped worktree — not subject to the global mode restriction.
+	if strings.Contains(cwd, "/.worktrees/") {
+		// But if CWD is inside the *active* worktree (and not nested),
+		// that's the spec's own worktree — restrictions should apply.
+		if st != nil && st.ActiveWorktree != "" && hasPathPrefix(cwd, st.ActiveWorktree) {
+			return false
+		}
+		return true
+	}
+	// No ActiveWorktree set and CWD not in a worktree — conservative.
+	if st == nil || st.ActiveWorktree == "" {
+		return false
+	}
+	return !hasPathPrefix(cwd, st.ActiveWorktree)
+}
+
 // isCodeFile returns true if the path looks like a code file (not documentation).
 func isCodeFile(path string) bool {
 	if path == "" {

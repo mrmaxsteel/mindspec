@@ -174,6 +174,12 @@ func WorkflowGuard(inp *Input, st *HookState, enforce bool) Result {
 
 	case state.ModeSpec:
 		if isCodeFile(inp.FilePath) {
+			if outsideActiveWorktree(st) {
+				return Result{
+					Action:  Warn,
+					Message: warnOutsideWorktreeCode,
+				}
+			}
 			return Result{
 				Action:  Block,
 				Message: "mindspec: blocked — code edits are not allowed during Spec Mode. Only documentation files may be edited.",
@@ -183,6 +189,12 @@ func WorkflowGuard(inp *Input, st *HookState, enforce bool) Result {
 
 	case state.ModePlan:
 		if isCodeFile(inp.FilePath) {
+			if outsideActiveWorktree(st) {
+				return Result{
+					Action:  Warn,
+					Message: warnOutsideWorktreeCode,
+				}
+			}
 			return Result{
 				Action:  Block,
 				Message: "mindspec: blocked — code edits are not allowed during Plan Mode. Only documentation and plan files may be edited.",
@@ -216,6 +228,10 @@ const warnExplore = "⚠️ WORKFLOW VIOLATION: Explore Mode is for evaluating i
 	"You must stop editing files. Promote to a spec (/ms-explore promote) or dismiss (/ms-explore dismiss). " +
 	"If these are exceptional circumstances (debugging a CI failure, fixing a broken build, " +
 	"correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason."
+
+const warnOutsideWorktreeCode = "⚠️ WORKFLOW WARNING: You are editing code outside the active spec worktree. " +
+	"This is allowed for unrelated work (infrastructure, tooling, bug fixes) but make sure this is intentional. " +
+	"If this edit belongs to the active spec, switch to the spec worktree."
 
 const warnReview = "⚠️ WORKFLOW WARNING: Review Mode — implementation is complete. " +
 	"Edits should only address review feedback. If you need to make substantial changes, " +
