@@ -37,6 +37,8 @@ func AllScenarios() []Scenario {
 		ScenarioMultipleActiveSpecs(),
 		ScenarioStaleWorktree(),
 		ScenarioCompleteFromSpecWorktree(),
+		ScenarioApproveSpecFromWorktree(),
+		ScenarioApprovePlanFromWorktree(),
 	}
 }
 
@@ -1059,6 +1061,194 @@ If it fails, diagnose the issue and find a way to complete successfully.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent should have run mindspec complete successfully (exit code 0)
 			assertCommandSucceeded(t, events, "mindspec", "complete")
+		},
+	}
+}
+
+// ScenarioApproveSpecFromWorktree tests that an agent can approve a spec when
+// spec artifacts only exist in the spec worktree (not in the main repo).
+// The agent's CWD is the main repo, so it must navigate to the worktree or
+// rely on worktree-aware resolution.
+func ScenarioApproveSpecFromWorktree() Scenario {
+	return Scenario{
+		Name:        "approve_spec_from_worktree",
+		Description: "mindspec approve spec succeeds when spec artifacts are only in worktree",
+		MaxTurns:    10,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-greeting"
+			specBranch := "spec/" + specID
+
+			// Create spec branch and worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			specWtDir := ".worktrees/worktree-spec-" + specID
+			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+
+			// Write spec files ONLY in the spec worktree
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+spec_id: %s
+status: Draft
+version: 1
+---
+
+# Spec: %s — Greeting Feature
+
+## Goal
+
+Add a greeting function that takes a name and returns a personalized greeting.
+
+## User Value
+
+Users can generate personalized greetings.
+
+## Acceptance Criteria
+
+- [ ] Greet("World") returns "Hello, World!"
+- [ ] Greet("") returns "Hello!"
+- [ ] Function is exported and documented
+
+## Open Questions
+
+None.
+`, specID, specID))
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
+				"phase: spec\n")
+
+			// Commit in spec worktree
+			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
+
+			// Set focus: spec mode, CWD is main repo
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "spec",
+				"activeSpec":     specID,
+				"specBranch":     specBranch,
+				"activeWorktree": specWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: spec mode focus")
+
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+You are in spec mode for spec 001-greeting. The spec is written and ready for approval.
+Run 'mindspec approve spec 001-greeting' to approve the spec and transition to plan mode.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			assertCommandSucceeded(t, events, "mindspec", "approve")
+		},
+	}
+}
+
+// ScenarioApprovePlanFromWorktree tests that an agent can approve a plan when
+// spec and plan artifacts only exist in the spec worktree.
+func ScenarioApprovePlanFromWorktree() Scenario {
+	return Scenario{
+		Name:        "approve_plan_from_worktree",
+		Description: "mindspec approve plan succeeds when plan artifacts are only in worktree",
+		MaxTurns:    10,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-greeting"
+			specBranch := "spec/" + specID
+
+			// Create epic for bead parenting
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+
+			// Create spec branch and worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			specWtDir := ".worktrees/worktree-spec-" + specID
+			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+
+			// Write spec + plan ONLY in the spec worktree
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+spec_id: %s
+status: Approved
+version: 1
+approved_at: "2026-01-01T00:00:00Z"
+approved_by: test-user
+---
+
+# Spec: %s — Greeting Feature
+
+## Goal
+
+Add a greeting function.
+
+## User Value
+
+Users can generate personalized greetings.
+
+## Acceptance Criteria
+
+- [ ] Greet("World") returns "Hello, World!"
+
+## Open Questions
+
+None.
+`, specID, specID))
+
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+spec_id: %s
+status: Draft
+version: 1
+last_updated: "2026-01-01"
+---
+
+# Plan: %s
+
+## ADR Fitness
+
+No ADRs are relevant to this spec.
+
+## Testing Strategy
+
+- Unit tests: greeting_test.go
+
+## Bead 1: Implement greeting
+
+**Steps**
+1. Create greeting.go with Greet function
+2. Create greeting_test.go with tests
+
+**Verification**
+- [ ] `+"`go test ./...`"+` passes
+
+**Depends on**
+None
+
+## Provenance
+
+| Acceptance Criterion | Bead | Verification |
+|:-|:-|:-|
+| Greet("World") returns "Hello, World!" | Bead 1 | greeting_test.go |
+`, specID, specID))
+
+			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
+				fmt.Sprintf("phase: plan\nepic_id: %s\n", epicID))
+
+			// Commit in spec worktree
+			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec+plan files")
+
+			// Set focus: plan mode
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "plan",
+				"activeSpec":     specID,
+				"specBranch":     specBranch,
+				"activeWorktree": specWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: plan mode focus")
+
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+You are in plan mode for spec 001-greeting. The plan is written and ready for approval.
+Run 'mindspec approve plan 001-greeting' to approve the plan and create implementation beads.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			assertCommandSucceeded(t, events, "mindspec", "approve")
 		},
 	}
 }

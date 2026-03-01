@@ -46,6 +46,62 @@ func TestActiveSpecs_MultiSpec_Independent(t *testing.T) {
 	}
 }
 
+func TestActiveSpecsWorktreeOnly(t *testing.T) {
+	root := t.TempDir()
+	// Create .mindspec/docs/specs with no specs in it
+	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
+
+	// Create a spec that only exists in a worktree (not in main repo)
+	specID := "099-worktree-only"
+	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
+		".mindspec", "docs", "specs", specID)
+	os.MkdirAll(wtSpecDir, 0755)
+	state.WriteLifecycle(wtSpecDir, &state.Lifecycle{Phase: state.ModeSpec})
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
+	}
+
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active spec from worktree, got %d: %+v", len(active), active)
+	}
+	if active[0].SpecID != specID {
+		t.Errorf("expected specID %q, got %q", specID, active[0].SpecID)
+	}
+	if active[0].Mode != state.ModeSpec {
+		t.Errorf("expected mode %q, got %q", state.ModeSpec, active[0].Mode)
+	}
+}
+
+func TestActiveSpecsWorktreeWinsOverMain(t *testing.T) {
+	root := t.TempDir()
+	specID := "099-dual"
+
+	// Create spec in main repo with phase=spec
+	mainSpecDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+	os.MkdirAll(mainSpecDir, 0755)
+	state.WriteLifecycle(mainSpecDir, &state.Lifecycle{Phase: state.ModeSpec})
+
+	// Create same spec in worktree with phase=plan (should win)
+	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
+		".mindspec", "docs", "specs", specID)
+	os.MkdirAll(wtSpecDir, 0755)
+	state.WriteLifecycle(wtSpecDir, &state.Lifecycle{Phase: state.ModePlan})
+
+	active, err := ActiveSpecs(root)
+	if err != nil {
+		t.Fatalf("ActiveSpecs() error: %v", err)
+	}
+
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active spec (deduplicated), got %d: %+v", len(active), active)
+	}
+	if active[0].Mode != state.ModePlan {
+		t.Errorf("worktree should win: expected mode %q, got %q", state.ModePlan, active[0].Mode)
+	}
+}
+
 func TestAmbiguousTarget_RefusesToGuess(t *testing.T) {
 	err := &ErrAmbiguousTarget{
 		Active: []SpecStatus{

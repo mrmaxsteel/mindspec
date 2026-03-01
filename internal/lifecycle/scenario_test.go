@@ -11,6 +11,7 @@ import (
 	"github.com/mindspec/mindspec/internal/approve"
 	"github.com/mindspec/mindspec/internal/explore"
 	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
 
@@ -569,6 +570,39 @@ func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
 	}
 	if lc.Phase != state.ModePlan {
 		t.Errorf("lifecycle phase = %q, want %q", lc.Phase, state.ModePlan)
+	}
+}
+
+// TestValidateFromWorktree verifies that validate succeeds when spec artifacts
+// only exist in the worktree (not in the main repo). Uses the validate package
+// directly to avoid needing a binary path.
+func TestValidateFromWorktree(t *testing.T) {
+	root := testRepo(t)
+	specID := "090-wt-validate"
+
+	// Create spec worktree directory structure with spec artifacts
+	// (spec files do NOT exist in main repo's .mindspec/docs/specs/)
+	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
+		".mindspec", "docs", "specs", specID)
+	must(t, os.MkdirAll(wtSpecDir, 0o755))
+	must(t, os.WriteFile(filepath.Join(wtSpecDir, "spec.md"),
+		[]byte(validSpecMD(specID)), 0o644))
+	must(t, os.WriteFile(filepath.Join(wtSpecDir, "lifecycle.yaml"),
+		[]byte("phase: spec\n"), 0o644))
+
+	// Validate spec should find it via worktree-aware SpecDir
+	result := validate.ValidateSpec(root, specID)
+	if result.HasFailures() {
+		t.Fatalf("ValidateSpec from worktree failed:\n%s", result.FormatText())
+	}
+
+	// Also validate plan (write a plan in the worktree)
+	must(t, os.WriteFile(filepath.Join(wtSpecDir, "plan.md"),
+		[]byte(validPlanMD(specID)), 0o644))
+
+	result = validate.ValidatePlan(root, specID)
+	if result.HasFailures() {
+		t.Fatalf("ValidatePlan from worktree failed:\n%s", result.FormatText())
 	}
 }
 
