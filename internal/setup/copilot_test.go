@@ -28,8 +28,11 @@ func TestRunCopilot_Greenfield(t *testing.T) {
 	if !strings.Contains(content, "AGENTS.md") {
 		t.Error("copilot-instructions.md should reference AGENTS.md")
 	}
-	if !strings.Contains(content, mindspecMarker) {
-		t.Error("copilot-instructions.md should contain marker")
+	if !strings.Contains(content, mindspecMarkerBegin) {
+		t.Error("copilot-instructions.md should contain BEGIN marker")
+	}
+	if !strings.Contains(content, mindspecMarkerEnd) {
+		t.Error("copilot-instructions.md should contain END marker")
 	}
 
 	// Verify hooks JSON
@@ -37,7 +40,6 @@ func TestRunCopilot_Greenfield(t *testing.T) {
 	if _, err := os.Stat(hooksPath); os.IsNotExist(err) {
 		t.Error("expected .github/hooks/mindspec.json to exist")
 	}
-
 }
 
 func TestRunCopilot_HooksContent(t *testing.T) {
@@ -149,8 +151,11 @@ func TestRunCopilot_ExistingInstructionsAppend(t *testing.T) {
 	if !strings.Contains(content, "My custom Copilot instructions") {
 		t.Error("original content should be preserved")
 	}
-	if !strings.Contains(content, mindspecMarker) {
-		t.Error("should contain mindspec marker")
+	if !strings.Contains(content, mindspecMarkerBegin) {
+		t.Error("should contain BEGIN marker")
+	}
+	if !strings.Contains(content, mindspecMarkerEnd) {
+		t.Error("should contain END marker")
 	}
 }
 
@@ -199,13 +204,13 @@ func TestRunCopilot_StaleHooksUpdated(t *testing.T) {
 	}
 }
 
-func TestRunCopilot_ExistingInstructionsSkip(t *testing.T) {
+func TestRunCopilot_ExistingInstructionsSkip_Legacy(t *testing.T) {
 	root := t.TempDir()
 
-	// Pre-create with marker
+	// Pre-create with legacy marker
 	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
-		[]byte("# Custom\n"+mindspecMarker+"\nMindSpec block\n"), 0o644)
+		[]byte("# Custom\n"+mindspecMarkerLegacy+"\nMindSpec block\n"), 0o644)
 
 	result, err := RunCopilot(root, false)
 	if err != nil {
@@ -220,6 +225,66 @@ func TestRunCopilot_ExistingInstructionsSkip(t *testing.T) {
 		}
 	}
 	if !hasSkip {
-		t.Error("expected copilot-instructions.md to be skipped when marker present")
+		t.Error("expected copilot-instructions.md to be skipped when legacy marker present")
+	}
+}
+
+func TestRunCopilot_ExistingInstructionsSkip_BeginEnd(t *testing.T) {
+	root := t.TempDir()
+
+	// Pre-create with BEGIN/END markers and the correct managed content
+	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
+	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
+		[]byte("# Custom\n"+mindspecMarkerBegin+"\n"+copilotManagedBlock+mindspecMarkerEnd+"\n"), 0o644)
+
+	result, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("RunCopilot() error: %v", err)
+	}
+
+	hasSkip := false
+	for _, s := range result.Skipped {
+		if strings.Contains(s, "copilot-instructions.md") {
+			hasSkip = true
+			break
+		}
+	}
+	if !hasSkip {
+		t.Error("expected copilot-instructions.md to be skipped when BEGIN/END markers present with current content")
+	}
+}
+
+func TestRunCopilot_ExistingInstructionsUpdate_StaleBeginEnd(t *testing.T) {
+	root := t.TempDir()
+
+	// Pre-create with BEGIN/END markers but stale content
+	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
+	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
+		[]byte("# Custom\n"+mindspecMarkerBegin+"\nOld stale content\n"+mindspecMarkerEnd+"\n"), 0o644)
+
+	result, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("RunCopilot() error: %v", err)
+	}
+
+	hasUpdate := false
+	for _, c := range result.Created {
+		if strings.Contains(c, "copilot-instructions.md") && strings.Contains(c, "updated") {
+			hasUpdate = true
+			break
+		}
+	}
+	if !hasUpdate {
+		t.Error("expected copilot-instructions.md to be updated when BEGIN/END markers present with stale content")
+	}
+
+	// Verify content was updated
+	data, _ := os.ReadFile(filepath.Join(root, ".github/copilot-instructions.md"))
+	content := string(data)
+	if !strings.Contains(content, "Custom") {
+		t.Error("original content outside markers should be preserved")
+	}
+	if !strings.Contains(content, ".agents/skills/") {
+		t.Error("managed block should contain updated content")
 	}
 }

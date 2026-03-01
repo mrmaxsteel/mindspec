@@ -55,24 +55,38 @@ func ensureCopilotInstructions(root string, check bool, r *Result) error {
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", relPath, err)
 		}
-		if strings.Contains(string(data), mindspecMarker) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+		content := string(data)
+		if strings.Contains(content, mindspecMarkerBegin) {
+			updated := replaceManagedBlock(content, copilotInstructionsAppendBlock)
+			if updated == content {
+				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+				return nil
+			}
+			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
+			if !check {
+				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+		} else if strings.Contains(content, mindspecMarkerLegacy) {
+			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
 			return nil
-		}
-		r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-		if !check {
-			block := "\n" + mindspecMarker + "\n" + copilotInstructionsAppendBlock
-			f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
-			if err != nil {
-				return fmt.Errorf("opening %s: %w", relPath, err)
-			}
-			_, writeErr := f.WriteString(block)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("closing %s: %w", relPath, closeErr)
+		} else {
+			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
+			if !check {
+				block := "\n" + mindspecMarkerBegin + "\n" + copilotInstructionsAppendBlock + mindspecMarkerEnd + "\n"
+				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					return fmt.Errorf("opening %s: %w", relPath, err)
+				}
+				_, writeErr := f.WriteString(block)
+				closeErr := f.Close()
+				if writeErr != nil {
+					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("closing %s: %w", relPath, closeErr)
+				}
 			}
 		}
 	} else {
@@ -203,10 +217,8 @@ func copilotHookScripts() map[string]string {
 	return map[string]string{}
 }
 
-// copilotInstructionsFull is written when .github/copilot-instructions.md doesn't exist.
-const copilotInstructionsFull = `# Copilot Instructions
-<!-- mindspec:managed -->
-
+// copilotManagedBlock is the canonical content placed between BEGIN/END markers.
+const copilotManagedBlock = `
 **IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
@@ -216,15 +228,8 @@ On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-app
 MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `
 
-// copilotInstructionsAppendBlock is appended to an existing copilot-instructions.md.
-const copilotInstructionsAppendBlock = `
-## MindSpec
+// copilotInstructionsFull is written when .github/copilot-instructions.md doesn't exist.
+var copilotInstructionsFull = "# Copilot Instructions\n" + mindspecMarkerBegin + "\n" + copilotManagedBlock + mindspecMarkerEnd + "\n"
 
-**IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
-
-On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
-
-### Skills
-
-MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
-`
+// copilotInstructionsAppendBlock is the same managed content, used when appending.
+var copilotInstructionsAppendBlock = copilotManagedBlock

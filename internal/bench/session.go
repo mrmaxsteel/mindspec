@@ -334,7 +334,7 @@ func buildRetryPrompt(label, wtPath, specID string, attempt int) string {
 	case "plan":
 		specRel := findSpecRelPath(wtPath, specID)
 		planRel := strings.TrimSuffix(specRel, "/spec.md") + "/plan.md"
-		return fmt.Sprintf("The spec is approved. Create a plan at %s, then use /ms-plan-approve to approve it. After approval, implement all code and tests. Commit your changes when complete.", planRel)
+		return fmt.Sprintf("The spec is approved. Create a plan at %s, then use /ms:plan-approve to approve it. After approval, implement all code and tests. Commit your changes when complete.", planRel)
 	case "implement":
 		return "The plan is approved. Implement all code and tests described in the plan. Commit your changes when complete."
 	default:

@@ -1,5 +1,5 @@
 # CLAUDE.md — MindSpec
-<!-- mindspec:managed -->
+<!-- BEGIN mindspec:managed -->
 
 MindSpec is a spec-driven development framework (Claude Code-first). See [USAGE.md](.mindspec/docs/core/USAGE.md) for the development workflow, or [.mindspec/docs/guides/claude-code.md](.mindspec/docs/guides/claude-code.md) for the quick start guide.
 
@@ -24,14 +24,15 @@ mindspec explore promote <spec-id>     # Promote to spec (enters Spec Mode)
 mindspec explore dismiss [--adr]       # Exit (optionally record decision as ADR)
 ```
 
-## Custom Commands
+## Skills
 
-| Command | Purpose |
-|:--------|:--------|
-| `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification (enters Spec Mode) |
-| `/ms-spec-approve` | Approve spec → Plan Mode |
-| `/ms-plan-approve` | Approve plan → Implementation Mode |
-| `/ms-impl-approve` | Approve implementation → Idle |
-| `/ms-spec-status` | Check current mode and active spec/bead state |
+| Skill | Purpose |
+|:------|:--------|
+| `/ms:explore` | Enter, promote, or dismiss an Explore Mode session |
+| `/ms:spec-init` | Initialize a new specification (enters Spec Mode) |
+| `/ms:spec-approve` | Approve spec → Plan Mode |
+| `/ms:plan-approve` | Approve plan → Implementation Mode |
+| `/ms:impl-approve` | Approve implementation → Idle |
+| `/ms:spec-status` | Check current mode and active spec/bead state |
 | `/llm-test` | Enter the iterative LLM test harness loop (test/observe/fix/retest) |
+<!-- END mindspec:managed -->

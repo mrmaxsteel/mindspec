@@ -58,7 +58,7 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading CLAUDE.md: %v", err)
 	}
-	if !strings.Contains(string(claudeData), mindspecMarker) {
+	if !strings.Contains(string(claudeData), mindspecMarkerBegin) {
 		t.Error("CLAUDE.md missing mindspec marker")
 	}
 	if !strings.Contains(string(claudeData), "AGENTS.md") {
@@ -440,7 +440,7 @@ func TestRunClaude_AppendExistingClaudeMD(t *testing.T) {
 	if !strings.HasPrefix(content, original) {
 		t.Error("original CLAUDE.md content was not preserved")
 	}
-	if !strings.Contains(content, mindspecMarker) {
+	if !strings.Contains(content, mindspecMarkerBegin) {
 		t.Error("marker not appended")
 	}
 	if !strings.Contains(content, "AGENTS.md") {

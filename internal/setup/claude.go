@@ -11,7 +11,12 @@ import (
 	"github.com/mindspec/mindspec/internal/hooks"
 )
 
-const mindspecMarker = "<!-- mindspec:managed -->"
+const (
+	mindspecMarkerBegin = "<!-- BEGIN mindspec:managed -->"
+	mindspecMarkerEnd   = "<!-- END mindspec:managed -->"
+	// Legacy marker for detecting old-format blocks during upgrades.
+	mindspecMarkerLegacy = "<!-- mindspec:managed -->"
+)
 
 // Result tracks what the setup operation created, skipped, or found existing.
 type Result struct {
@@ -355,24 +360,39 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", relPath, err)
 		}
-		if strings.Contains(string(data), mindspecMarker) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+		content := string(data)
+		if strings.Contains(content, mindspecMarkerBegin) {
+			// Has BEGIN/END markers — replace managed block in place.
+			updated := replaceManagedBlock(content, claudeMDAppendBlock)
+			if updated == content {
+				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+				return nil
+			}
+			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
+			if !check {
+				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+		} else if strings.Contains(content, mindspecMarkerLegacy) {
+			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
 			return nil
-		}
-		r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-		if !check {
-			block := "\n" + mindspecMarker + "\n" + claudeMDAppendBlock
-			f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
-			if err != nil {
-				return fmt.Errorf("opening %s: %w", relPath, err)
-			}
-			_, writeErr := f.WriteString(block)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("closing %s: %w", relPath, closeErr)
+		} else {
+			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
+			if !check {
+				block := "\n" + mindspecMarkerBegin + "\n" + claudeMDAppendBlock + mindspecMarkerEnd + "\n"
+				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					return fmt.Errorf("opening %s: %w", relPath, err)
+				}
+				_, writeErr := f.WriteString(block)
+				closeErr := f.Close()
+				if writeErr != nil {
+					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("closing %s: %w", relPath, closeErr)
+				}
 			}
 		}
 	} else {
@@ -402,6 +422,32 @@ func chainBeadsSetup(r *Result) {
 	} else if len(out) > 0 {
 		r.BeadsMsg = strings.TrimSpace(string(out))
 	}
+}
+
+// hasManagedBlock returns true if the content contains either the new BEGIN/END
+// markers or the legacy single marker.
+func hasManagedBlock(content string) bool {
+	return strings.Contains(content, mindspecMarkerBegin) || strings.Contains(content, mindspecMarkerLegacy)
+}
+
+// replaceManagedBlock replaces the content between BEGIN and END markers.
+// Returns the original string unchanged if the new content matches.
+func replaceManagedBlock(content, newBlock string) string {
+	beginIdx := strings.Index(content, mindspecMarkerBegin)
+	if beginIdx == -1 {
+		return content
+	}
+	endIdx := strings.Index(content, mindspecMarkerEnd)
+	if endIdx == -1 {
+		return content
+	}
+	endIdx += len(mindspecMarkerEnd)
+	// Include trailing newline if present
+	if endIdx < len(content) && content[endIdx] == '\n' {
+		endIdx++
+	}
+	replacement := mindspecMarkerBegin + "\n" + newBlock + mindspecMarkerEnd + "\n"
+	return content[:beginIdx] + replacement + content[endIdx:]
 }
 
 func fileExists(path string) bool {
@@ -502,10 +548,9 @@ func claudeSkillFiles() map[string]string {
 	return skillFiles()
 }
 
-// claudeMDFull is written when CLAUDE.md doesn't exist.
-const claudeMDFull = `# CLAUDE.md — MindSpec
-<!-- mindspec:managed -->
-
+// claudeMDManagedBlock is the canonical content placed between BEGIN/END markers.
+// Used for both new files and appends, ensuring idempotent updates.
+const claudeMDManagedBlock = `
 **IMPORTANT**: You MUST read and follow [AGENTS.md](AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
@@ -522,22 +567,8 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
 `
 
-// claudeMDAppendBlock is appended to an existing CLAUDE.md.
-const claudeMDAppendBlock = `
-## MindSpec
+// claudeMDFull is written when CLAUDE.md doesn't exist.
+var claudeMDFull = "# CLAUDE.md — MindSpec\n" + mindspecMarkerBegin + "\n" + claudeMDManagedBlock + mindspecMarkerEnd + "\n"
 
-**IMPORTANT**: You MUST read and follow [AGENTS.md](AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
-
-Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
-
-### Skills
-
-| Skill | Purpose |
-|:------|:--------|
-| ` + "`/ms:explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
-| ` + "`/ms:spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
-| ` + "`/ms:spec-approve`" + ` | Approve spec → Plan Mode |
-| ` + "`/ms:plan-approve`" + ` | Approve plan → Implementation Mode |
-| ` + "`/ms:impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
-`
+// claudeMDAppendBlock is the same managed content, used when appending to existing files.
+var claudeMDAppendBlock = claudeMDManagedBlock

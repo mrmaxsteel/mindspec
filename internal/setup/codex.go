@@ -64,24 +64,38 @@ func ensureAgentsMD(root string, check bool, r *Result) error {
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", relPath, err)
 		}
-		if strings.Contains(string(data), mindspecMarker) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+		content := string(data)
+		if strings.Contains(content, mindspecMarkerBegin) {
+			updated := replaceManagedBlock(content, agentsMDAppendBlock)
+			if updated == content {
+				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+				return nil
+			}
+			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
+			if !check {
+				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+		} else if strings.Contains(content, mindspecMarkerLegacy) {
+			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
 			return nil
-		}
-		r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-		if !check {
-			block := "\n" + mindspecMarker + "\n" + agentsMDAppendBlock
-			f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
-			if err != nil {
-				return fmt.Errorf("opening %s: %w", relPath, err)
-			}
-			_, writeErr := f.WriteString(block)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("closing %s: %w", relPath, closeErr)
+		} else {
+			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
+			if !check {
+				block := "\n" + mindspecMarkerBegin + "\n" + agentsMDAppendBlock + mindspecMarkerEnd + "\n"
+				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					return fmt.Errorf("opening %s: %w", relPath, err)
+				}
+				_, writeErr := f.WriteString(block)
+				closeErr := f.Close()
+				if writeErr != nil {
+					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("closing %s: %w", relPath, closeErr)
+				}
 			}
 		}
 	} else {
@@ -113,10 +127,8 @@ func chainBeadsSetupCodex(r *Result) {
 	}
 }
 
-// agentsMDFull is written when AGENTS.md doesn't exist.
-const agentsMDFull = `# AGENTS.md
-<!-- mindspec:managed -->
-
+// agentsMDManagedBlock is the canonical content placed between BEGIN/END markers.
+const agentsMDManagedBlock = `
 This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
@@ -148,37 +160,8 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
 `
 
-// agentsMDAppendBlock is appended to an existing AGENTS.md.
-const agentsMDAppendBlock = `
-## MindSpec
+// agentsMDFull is written when AGENTS.md doesn't exist.
+var agentsMDFull = "# AGENTS.md\n" + mindspecMarkerBegin + "\n" + agentsMDManagedBlock + mindspecMarkerEnd + "\n"
 
-This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
-
-Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
-
-### Build & Test
-
-` + "```bash" + `
-make build    # Build binary
-make test     # Run all tests
-` + "```" + `
-
-### Modes
-
-This project follows a strict spec-driven workflow with human gates:
-
-1. **Explore** — evaluate whether an idea is worth pursuing
-2. **Spec** — define the problem and acceptance criteria (no code)
-3. **Plan** — break the spec into implementation beads (no code)
-4. **Implement** — write code against the approved plan
-5. **Review** — verify implementation meets acceptance criteria
-
-Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`mindspec complete`" + `.
-
-### Conventions
-
-- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
-- In Spec and Plan modes, only documentation may be created or modified — no code changes
-- Working tree must be clean before switching modes
-- Run ` + "`mindspec doctor`" + ` to verify project structure health
-`
+// agentsMDAppendBlock is the same managed content, used when appending.
+var agentsMDAppendBlock = agentsMDManagedBlock

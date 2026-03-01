@@ -299,7 +299,7 @@ Complete the Process function (make it return "processed") and run 'mindspec com
 	}
 }
 
-// ScenarioSpecInit tests the /ms-spec-init flow: idle → spec-init → spec mode with worktree.
+// ScenarioSpecInit tests the /ms:spec-init flow: idle → spec-init → spec mode with worktree.
 //
 // Before: main branch, no worktrees, no spec/ branches, clean tree, idle mode
 // After:  main branch (CWD), spec/ branch created, worktree created, spec mode in focus
@@ -324,7 +324,7 @@ func ScenarioSpecInit() Scenario {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-init 001-calculator --title "Calculator"`,
+/ms:spec-init 001-calculator --title "Calculator"`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran
 			assertCommandRan(t, events, "mindspec", "spec-init")
@@ -344,7 +344,7 @@ func ScenarioSpecInit() Scenario {
 	}
 }
 
-// ScenarioSpecApprove tests the /ms-spec-approve flow: spec mode → approve → plan mode.
+// ScenarioSpecApprove tests the /ms:spec-approve flow: spec mode → approve → plan mode.
 //
 // Before: spec worktree exists with draft spec, spec/001-calc branch, spec mode,
 //
@@ -438,7 +438,7 @@ Pending.
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-approve`,
+/ms:spec-approve`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran
 			assertCommandRan(t, events, "mindspec", "approve")
@@ -456,7 +456,7 @@ Pending.
 	}
 }
 
-// ScenarioPlanApprove tests the /ms-plan-approve flow: plan mode → approve → implement mode.
+// ScenarioPlanApprove tests the /ms:plan-approve flow: plan mode → approve → implement mode.
 //
 // Before: spec worktree exists with draft plan, spec/001-planner branch, no bead/ branches,
 //
@@ -575,7 +575,7 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-plan-approve`,
+/ms:plan-approve`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Commands ran
 			assertCommandRan(t, events, "mindspec", "approve")
@@ -599,7 +599,7 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 	}
 }
 
-// ScenarioImplApprove tests the /ms-impl-approve flow: review mode → approve impl → idle.
+// ScenarioImplApprove tests the /ms:impl-approve flow: review mode → approve impl → idle.
 //
 // Before: spec worktree exists with impl content, spec/001-done branch, review mode,
 //
@@ -685,7 +685,7 @@ func Done() string { return "done" }
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-impl-approve`,
+/ms:impl-approve`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran
 			assertCommandRan(t, events, "mindspec", "approve")
@@ -708,7 +708,7 @@ func Done() string { return "done" }
 	}
 }
 
-// ScenarioSpecStatus tests the /ms-spec-status flow: check current mode and report.
+// ScenarioSpecStatus tests the /ms:spec-status flow: check current mode and report.
 //
 // Before: implement mode, spec worktree + bead worktree exist, spec/001-status + bead/ branches,
 //
@@ -778,7 +778,7 @@ status: Approved
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-status`,
+/ms:spec-status`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran: agent ran state show or instruct
 			ran := false

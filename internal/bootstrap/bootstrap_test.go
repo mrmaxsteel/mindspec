@@ -201,8 +201,11 @@ func TestRun_CopilotInstructionsCreated(t *testing.T) {
 	if !contains(content, "mindspec instruct") {
 		t.Error("copilot-instructions.md should reference mindspec instruct")
 	}
-	if !contains(content, mindspecMarker) {
-		t.Error("copilot-instructions.md should contain mindspec marker")
+	if !contains(content, mindspecMarkerBegin) {
+		t.Error("copilot-instructions.md should contain BEGIN marker")
+	}
+	if !contains(content, mindspecMarkerEnd) {
+		t.Error("copilot-instructions.md should contain END marker")
 	}
 }
 
@@ -236,8 +239,11 @@ func TestRun_CopilotInstructionsAppend(t *testing.T) {
 	if !contains(content, "Existing Copilot instructions") {
 		t.Error("original content should be preserved")
 	}
-	if !contains(content, mindspecMarker) {
-		t.Error("appended block should contain marker")
+	if !contains(content, mindspecMarkerBegin) {
+		t.Error("appended block should contain BEGIN marker")
+	}
+	if !contains(content, mindspecMarkerEnd) {
+		t.Error("appended block should contain END marker")
 	}
 	if !contains(content, "AGENTS.md") {
 		t.Error("appended block should reference AGENTS.md")
@@ -250,7 +256,7 @@ func TestRun_CopilotInstructionsIdempotent(t *testing.T) {
 	// Pre-create with marker already present
 	os.MkdirAll(filepath.Join(root, ".github"), 0755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
-		[]byte("# Custom\n"+mindspecMarker+"\nMindSpec block\n"), 0644)
+		[]byte("# Custom\n"+mindspecMarkerBegin+"\nMindSpec block\n"+mindspecMarkerEnd+"\n"), 0644)
 
 	result, err := Run(root, false)
 	if err != nil {

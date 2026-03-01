@@ -199,7 +199,7 @@ func FormatResult(r *Result) string {
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
 	case state.ModeReview:
 		fmt.Fprintf(&sb, "All beads complete. Mode: review (spec: %s)\n", r.NextSpec)
-		sb.WriteString("Review implementation against acceptance criteria, then use `/ms-impl-approve` to accept.\n")
+		sb.WriteString("Review implementation against acceptance criteria, then use `/ms:impl-approve` to accept.\n")
 	default:
 		sb.WriteString("All beads complete. Mode: idle\n")
 	}
