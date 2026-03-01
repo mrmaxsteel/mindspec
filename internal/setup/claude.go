@@ -90,19 +90,38 @@ func RunClaude(root string, check bool) (*Result, error) {
 		}
 	}
 
-	// 3. CLAUDE.md (append with marker)
+	// 3. Skills (.agents/skills/<name>/SKILL.md)
+	for name, content := range skillFiles() {
+		relPath := filepath.Join(".agents", "skills", name, "SKILL.md")
+		absPath := filepath.Join(root, relPath)
+		if fileExists(absPath) {
+			r.Skipped = append(r.Skipped, relPath)
+		} else {
+			r.Created = append(r.Created, relPath)
+			if !check {
+				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+					return nil, fmt.Errorf("creating dir for %s: %w", relPath, err)
+				}
+				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+					return nil, fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+		}
+	}
+
+	// 4. CLAUDE.md (append with marker)
 	if err := ensureClaudeMD(root, check, r); err != nil {
 		return nil, err
 	}
 
-	// 4. Install/upgrade git hooks (pre-commit, post-checkout)
+	// 5. Install/upgrade git hooks (pre-commit, post-checkout)
 	if !check {
 		if err := hooks.InstallAll(root); err != nil {
 			return nil, fmt.Errorf("installing git hooks: %w", err)
 		}
 	}
 
-	// 5. Optionally chain bd setup claude
+	// 6. Optionally chain bd setup claude
 	if !check {
 		chainBeadsSetup(r)
 	}

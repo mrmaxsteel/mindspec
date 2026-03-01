@@ -18,9 +18,9 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should create settings.json, 6 command files, and CLAUDE.md = 8 items
-	if len(r.Created) != 8 {
-		t.Errorf("expected 8 created items, got %d: %v", len(r.Created), r.Created)
+	// Should create settings.json, 6 command files, 6 skill files, and CLAUDE.md = 14 items
+	if len(r.Created) != 14 {
+		t.Errorf("expected 14 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -88,8 +88,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 8 {
-		t.Errorf("second run should skip 8 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 14 {
+		t.Errorf("second run should skip 14 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 
