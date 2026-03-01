@@ -293,7 +293,7 @@ agent: "agent"
 const copilotInstructionsFull = `# Copilot Instructions
 <!-- mindspec:managed -->
 
-**IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioural instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
+**IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
@@ -315,7 +315,7 @@ This project includes MindSpec workflow prompt files in ` + "`.github/prompts/`"
 const copilotInstructionsAppendBlock = `
 ## MindSpec
 
-**IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioural instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
+**IMPORTANT**: You MUST read and follow [AGENTS.md](../AGENTS.md) as your primary behavioral instructions. AGENTS.md is the canonical source of project conventions, workflow rules, and development guidance shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
