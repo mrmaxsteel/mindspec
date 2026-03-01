@@ -24,6 +24,7 @@ ADR-0022 documents the architectural decision to make resolution worktree-aware 
 - complete: `advanceState` lifecycle reading
 - next: `ResolveActiveBead` lifecycle reading
 - approve: `spec.go`, `plan.go` use `EffectiveSpecRoot` + `SpecDir` pattern
+- state: `validate.go` calls `SpecDir(root, activeSpec)` for spec/plan existence checks (5 callsites, auto-fixed by worktree-aware `SpecDir`)
 
 ## ADR Touchpoints
 
