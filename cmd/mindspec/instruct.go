@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mindspec/mindspec/internal/config"
+	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/guard"
 	"github.com/mindspec/mindspec/internal/instruct"
 	"github.com/mindspec/mindspec/internal/resolve"
@@ -53,15 +55,27 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			return nil
 		}
 
+		// Protected branch check: main/master → always idle (focus file is stale).
+		if specFlag == "" {
+			branch, _ := gitops.CurrentBranch()
+			cfg, cfgErr := config.Load(mainRoot)
+			if cfgErr != nil {
+				cfg = config.DefaultConfig()
+			}
+			if branch != "" && cfg.IsProtectedBranch(branch) {
+				return handleNoState(mainRoot, format)
+			}
+		}
+
 		// Resolve target spec (ADR-0015 targeting rules) — uses mainRoot for spec dirs.
 		specID, resolveErr := resolve.ResolveTarget(mainRoot, specFlag)
 
 		// Build focus for instruct.BuildContext — read focus from localRoot.
 		var mc *state.Focus
 		if resolveErr != nil {
-			// If ambiguous, surface the error directly
-			if _, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
-				return resolveErr
+			// If ambiguous, fall back to idle with a warning listing the specs.
+			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
+				return handleAmbiguous(mainRoot, format, ambErr)
 			}
 			// Other errors: fall back to focus
 			cached, mcErr := state.ReadFocus(localRoot)
@@ -141,6 +155,31 @@ func handleNoState(root, format string) error {
 	ctx := instruct.BuildContext(root, mc)
 	ctx.Warnings = append(ctx.Warnings,
 		"[state] No active state found. Run `mindspec spec-init` to start a new spec.",
+	)
+
+	if format == "json" {
+		output, err := instruct.RenderJSON(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Println(output)
+		return nil
+	}
+
+	output, err := instruct.Render(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Print(output)
+	return nil
+}
+
+// handleAmbiguous falls back to idle guidance with a warning listing the ambiguous specs.
+func handleAmbiguous(root, format string, ambErr *resolve.ErrAmbiguousTarget) error {
+	mc := &state.Focus{Mode: state.ModeIdle}
+	ctx := instruct.BuildContext(root, mc)
+	ctx.Warnings = append(ctx.Warnings,
+		"[resolve] "+ambErr.Error()+"Use `mindspec instruct --spec <id>` to target a specific spec.",
 	)
 
 	if format == "json" {
