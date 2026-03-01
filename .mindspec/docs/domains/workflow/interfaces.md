@@ -77,12 +77,12 @@ func CheckWorktree(activeBead string) string
 | `mindspec state show` | Display current state |
 | `mindspec instruct` | Emit mode-appropriate operating guidance (ADR-0003) |
 
-## Agent Commands
+## Agent Skills
 
-| Command | Purpose |
-|:--------|:--------|
-| `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification |
-| `/ms-spec-approve` | Request Spec -> Plan transition |
-| `/ms-plan-approve` | Request Plan -> Implementation transition |
-| `/ms-spec-status` | Check current mode and state |
+| Skill | Purpose |
+|:------|:--------|
+| `/ms:explore` | Enter, promote, or dismiss an Explore Mode session |
+| `/ms:spec-init` | Initialize a new specification |
+| `/ms:spec-approve` | Request Spec -> Plan transition |
+| `/ms:plan-approve` | Request Plan -> Implementation transition |
+| `/ms:spec-status` | Check current mode and state |

@@ -17,7 +17,7 @@ Run `mindspec spec-init` — it creates the branch + worktree automatically.
 
 ### Exception: trivial fixes only (typos, single-file bugfixes)
 
-1. **FIRST**: `git worktree add ../fix-<description> -b fix/<description>` then `cd ../fix-<description>`
+1. **FIRST**: `git worktree add .worktrees/fix-<description> -b fix/<description>` then `cd .worktrees/fix-<description>`
 2. Make your changes in the worktree
 3. `git add <files>` + `git commit -m "<message>"`
 4. `git push -u origin <branch-name>`

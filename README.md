@@ -57,15 +57,15 @@ mindspec init
 mindspec setup claude   # Configure Claude Code hooks + slash commands
 ```
 
-`mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, `/ms-spec-init` and other slash commands). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
+`mindspec init` scaffolds the `.mindspec/` directory, `GLOSSARY.md`, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, `/ms:spec-init` and other skills). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
 
 Tell the agent what you want to build. It will walk you through the lifecycle:
 
 1. **Explore** — "I have an idea about X" (agent evaluates feasibility, you decide go/no-go)
-2. **Spec** — Agent drafts the spec, you approve with `/ms-spec-approve`
-3. **Plan** — Agent decomposes into work chunks, you approve with `/ms-plan-approve`
+2. **Spec** — Agent drafts the spec, you approve with `/ms:spec-approve`
+3. **Plan** — Agent decomposes into work chunks, you approve with `/ms:plan-approve`
 4. **Implement** — Agent codes in isolated worktrees, scoped to the plan
-5. **Review** — Agent verifies acceptance criteria, you approve with `/ms-impl-approve`
+5. **Review** — Agent verifies acceptance criteria, you approve with `/ms:impl-approve`
 
 ### Guides
 
@@ -204,7 +204,7 @@ your-project/
 ├── .beads/                     # Beads work graph (committed)
 ├── .claude/                    # Claude Code config (created by mindspec setup claude)
 │   ├── settings.json           # Hooks (SessionStart, PreToolUse plan gates)
-│   └── commands/               # Slash commands (/ms-spec-init, /ms-spec-approve, etc.)
+│   └── skills/                 # Skills (/ms:spec-init, /ms:spec-approve, etc.)
 ├── AGENTS.md                   # Cross-agent workflow conventions (read by all agents)
 └── CLAUDE.md                   # Claude Code-specific config (points to AGENTS.md)
 ```

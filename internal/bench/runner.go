@@ -150,8 +150,8 @@ func Run(cfg *RunConfig) error {
 			planRelPath := strings.TrimSuffix(specRelPath, "/spec.md") + "/plan.md"
 			def.Prompt = fmt.Sprintf(`The specification at %s is ready for review.
 Follow the MindSpec workflow:
-1. Review the spec, then use /ms-spec-approve to approve it
-2. Create a plan at %s, then use /ms-plan-approve
+1. Review the spec, then use /ms:spec-approve to approve it
+2. Create a plan at %s, then use /ms:plan-approve
 3. Implement all code and tests described in the plan
 4. Commit your changes when complete`, specRelPath, planRelPath)
 		} else {

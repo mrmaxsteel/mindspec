@@ -45,7 +45,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 
 **1. Start a specification**
 
-Use the `/ms-spec-init` custom command (or `mindspec spec-init 001-my-feature`). This creates `docs/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
+Use the `/ms:spec-init` custom command (or `mindspec spec-init 001-my-feature`). This creates `docs/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
 
 **2. Draft the spec collaboratively**
 
@@ -53,7 +53,7 @@ You and the agent fill in the spec: goal, requirements, acceptance criteria, imp
 
 **3. Approve the spec**
 
-Type `/ms-spec-approve`. This validates the spec, updates its frontmatter to `APPROVED`, closes the spec-approve molecule step, generates a context pack, and transitions to Plan Mode.
+Type `/ms:spec-approve`. This validates the spec, updates its frontmatter to `APPROVED`, closes the spec-approve molecule step, generates a context pack, and transitions to Plan Mode.
 
 **4. Draft the plan**
 
@@ -61,7 +61,7 @@ The agent reviews domain docs and ADRs, then creates `docs/specs/001-my-feature/
 
 **5. Approve the plan**
 
-Type `/ms-plan-approve`. This validates the plan, updates frontmatter, closes the plan-approve molecule step (unblocking the implement step), and transitions toward Implementation Mode.
+Type `/ms:plan-approve`. This validates the plan, updates frontmatter, closes the plan-approve molecule step (unblocking the implement step), and transitions toward Implementation Mode.
 
 **6. Claim work**
 
@@ -85,18 +85,18 @@ This closes the bead, removes the worktree, and advances state. If more beads ar
 
 **9. Approve the implementation**
 
-Type `/ms-impl-approve`. This verifies the work against acceptance criteria and returns to Idle.
+Type `/ms:impl-approve`. This verifies the work against acceptance criteria and returns to Idle.
 
-## Custom Commands
+## Skills
 
-| Command | What It Does |
-|:--------|:-------------|
-| `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification (enters Spec Mode) |
-| `/ms-spec-approve` | Approve spec → Plan Mode |
-| `/ms-plan-approve` | Approve plan → Implementation Mode |
-| `/ms-impl-approve` | Approve implementation → Idle |
-| `/ms-spec-status` | Check current mode and active spec/bead state |
+| Skill | What It Does |
+|:------|:-------------|
+| `/ms:explore` | Enter, promote, or dismiss an Explore Mode session |
+| `/ms:spec-init` | Initialize a new specification (enters Spec Mode) |
+| `/ms:spec-approve` | Approve spec → Plan Mode |
+| `/ms:plan-approve` | Approve plan → Implementation Mode |
+| `/ms:impl-approve` | Approve implementation → Idle |
+| `/ms:spec-status` | Check current mode and active spec/bead state |
 
 ## How Guidance Works
 

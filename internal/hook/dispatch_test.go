@@ -598,8 +598,8 @@ func TestWorkflowGuard_ExploreWarning_ContainsPromote(t *testing.T) {
 	t.Parallel()
 	st := &HookState{Mode: state.ModeExplore}
 	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
-	if !contains(r.Message, "/ms-explore promote") {
-		t.Error("explore warning should mention /ms-explore promote")
+	if !contains(r.Message, "/ms:explore promote") {
+		t.Error("explore warning should mention /ms:explore promote")
 	}
 }
 

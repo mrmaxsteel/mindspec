@@ -8,7 +8,11 @@ import (
 	"strings"
 )
 
-const mindspecMarker = "<!-- mindspec:managed -->"
+const (
+	mindspecMarkerBegin  = "<!-- BEGIN mindspec:managed -->"
+	mindspecMarkerEnd    = "<!-- END mindspec:managed -->"
+	mindspecMarkerLegacy = "<!-- mindspec:managed -->"
+)
 
 // Result tracks what the init operation created or skipped.
 type Result struct {
@@ -98,10 +102,13 @@ func Run(root string, dryRun bool) (*Result, error) {
 					if err != nil {
 						return nil, fmt.Errorf("reading %s: %w", item.path, err)
 					}
-					if !strings.Contains(string(existing), mindspecMarker) {
+					content := string(existing)
+					if strings.Contains(content, mindspecMarkerBegin) || strings.Contains(content, mindspecMarkerLegacy) {
+						r.Skipped = append(r.Skipped, item.path+" (MindSpec block present)")
+					} else {
 						r.Appended = append(r.Appended, item.path)
 						if !dryRun {
-							block := "\n" + mindspecMarker + "\n" + item.appendBlock
+							block := "\n" + mindspecMarkerBegin + "\n" + item.appendBlock + mindspecMarkerEnd + "\n"
 							f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0644)
 							if err != nil {
 								return nil, fmt.Errorf("appending to %s: %w", item.path, err)
@@ -115,8 +122,6 @@ func Run(root string, dryRun bool) (*Result, error) {
 								return nil, fmt.Errorf("closing %s: %w", item.path, closeErr)
 							}
 						}
-					} else {
-						r.Skipped = append(r.Skipped, item.path+" (MindSpec block present)")
 					}
 				} else {
 					r.Skipped = append(r.Skipped, item.path)
@@ -197,7 +202,7 @@ const starterGitignore = `# MindSpec local runtime files (not version-controlled
 // --- Starter file content ---
 
 const starterAgentsMD = `# AGENTS.md — MindSpec Project
-<!-- mindspec:managed -->
+<!-- BEGIN mindspec:managed -->
 
 This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
 
@@ -230,25 +235,27 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 - In Spec and Plan modes, only documentation may be created or modified — no code changes
 - Working tree must be clean before switching modes
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
+<!-- END mindspec:managed -->
 `
 
 const starterClaudeMD = `# CLAUDE.md
-<!-- mindspec:managed -->
+<!-- BEGIN mindspec:managed -->
 
 See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
-## Custom Commands
+## Skills
 
-| Command | Purpose |
-|:--------|:--------|
-| ` + "`/ms-explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
-| ` + "`/ms-spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
-| ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
-| ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
-| ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms:explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
+| ` + "`/ms:spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
+| ` + "`/ms:spec-approve`" + ` | Approve spec → Plan Mode |
+| ` + "`/ms:plan-approve`" + ` | Approve plan → Implementation Mode |
+| ` + "`/ms:impl-approve`" + ` | Approve implementation → Idle |
+| ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
+<!-- END mindspec:managed -->
 `
 
 // appendAgentsBlock is appended to an existing AGENTS.md when the marker is absent.
@@ -287,6 +294,7 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 `
 
 // appendClaudeBlock is appended to an existing CLAUDE.md when the marker is absent.
+// When appended, it is wrapped with BEGIN/END markers by Run().
 const appendClaudeBlock = `
 ## MindSpec
 
@@ -294,43 +302,42 @@ See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agen
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
-### Custom Commands
+### Skills
 
-| Command | Purpose |
-|:--------|:--------|
-| ` + "`/ms-explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
-| ` + "`/ms-spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
-| ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
-| ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
-| ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms:explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
+| ` + "`/ms:spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
+| ` + "`/ms:spec-approve`" + ` | Approve spec → Plan Mode |
+| ` + "`/ms:plan-approve`" + ` | Approve plan → Implementation Mode |
+| ` + "`/ms:impl-approve`" + ` | Approve implementation → Idle |
+| ` + "`/ms:spec-status`" + ` | Check current mode and active spec/bead state |
 `
 
 // starterCopilotInstructionsMD is written when .github/copilot-instructions.md doesn't exist.
 const starterCopilotInstructionsMD = `# Copilot Instructions
-<!-- mindspec:managed -->
+<!-- BEGIN mindspec:managed -->
 
 See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
-## Prompt Commands
+## Skills
 
-This project includes prompt files in ` + "`.github/prompts/`" + ` for workflow operations.
-Run ` + "`mindspec setup copilot`" + ` to create them.
+MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
+<!-- END mindspec:managed -->
 `
 
 // appendCopilotBlock is appended to an existing copilot-instructions.md when the marker is absent.
+// When appended, it is wrapped with BEGIN/END markers by Run().
 const appendCopilotBlock = `
 ## MindSpec
-<!-- mindspec:managed -->
 
 See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
-### Prompt Commands
+### Skills
 
-This project includes prompt files in ` + "`.github/prompts/`" + ` for workflow operations.
-Run ` + "`mindspec setup copilot`" + ` to create them.
+MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `

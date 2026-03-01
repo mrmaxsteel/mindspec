@@ -45,7 +45,7 @@ func PlanGateExit(_ *Input, st *HookState) Result {
 	if st.Mode == state.ModePlan {
 		return Result{
 			Action:  Block,
-			Message: "MindSpec plan mode is active. Do NOT exit plan mode directly. Run /ms-plan-approve to validate the plan, create beads, and transition to implementation.",
+			Message: "MindSpec plan mode is active. Do NOT exit plan mode directly. Run /ms:plan-approve to validate the plan, create beads, and transition to implementation.",
 		}
 	}
 	return Result{Action: Pass}
@@ -59,7 +59,7 @@ func PlanGateEnter(_ *Input, st *HookState) Result {
 	if st.Mode == state.ModePlan {
 		return Result{
 			Action:  Warn,
-			Message: "MindSpec plan mode is active. Write your plan to docs/specs/*/plan.md. When complete, use /ms-plan-approve — do NOT use ExitPlanMode directly.",
+			Message: "MindSpec plan mode is active. Write your plan to docs/specs/*/plan.md. When complete, use /ms:plan-approve — do NOT use ExitPlanMode directly.",
 		}
 	}
 	return Result{Action: Pass}
@@ -225,7 +225,7 @@ const blockIdle = "mindspec: blocked — no active work context. All edits must 
 	"  • git checkout -b <branch>       — manual branch for ad-hoc work"
 
 const warnExplore = "⚠️ WORKFLOW VIOLATION: Explore Mode is for evaluating ideas, not implementing them. " +
-	"You must stop editing files. Promote to a spec (/ms-explore promote) or dismiss (/ms-explore dismiss). " +
+	"You must stop editing files. Promote to a spec (/ms:explore promote) or dismiss (/ms:explore dismiss). " +
 	"If these are exceptional circumstances (debugging a CI failure, fixing a broken build, " +
 	"correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason."
 
