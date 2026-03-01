@@ -34,6 +34,8 @@ func AllScenarios() []Scenario {
 		ScenarioPlanApprove(),
 		ScenarioImplApprove(),
 		ScenarioSpecStatus(),
+		ScenarioMultipleActiveSpecs(),
+		ScenarioStaleWorktree(),
 	}
 }
 
@@ -805,6 +807,162 @@ status: Approved
 
 			// Read-only: no non-infrastructure files modified.
 			assertNoUserFilesModified(t, sandbox)
+		},
+	}
+}
+
+// ScenarioMultipleActiveSpecs tests that the agent can work when two specs are active
+// simultaneously. CLI commands like `mindspec instruct`, `mindspec next`, and
+// `mindspec complete` fail with "multiple active specs found; use --spec to target one"
+// when more than one spec is active. The agent must discover the --spec flag from the
+// CLI error message and use it to disambiguate.
+//
+// Before: Two specs active (001-alpha in implement mode, 002-beta in plan mode),
+//
+//	one bead claimed for 001-alpha, agent is asked to implement the bead
+//
+// After:  Agent successfully implements the bead and runs complete despite
+//
+//	multiple active specs requiring --spec disambiguation
+func ScenarioMultipleActiveSpecs() Scenario {
+	return Scenario{
+		Name:        "multiple_active_specs",
+		Description: "Two active specs, agent must discover --spec flag from CLI errors",
+		MaxTurns:    20,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			// --- Spec 001-alpha: implement mode with a claimed bead ---
+			epicAlpha := sandbox.CreateBead("[001-alpha] Epic", "epic", "")
+			beadAlpha := sandbox.CreateBead("[001-alpha] Implement greeting", "task", epicAlpha)
+			sandbox.ClaimBead(beadAlpha)
+
+			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/spec.md", `---
+title: Alpha Feature
+status: Approved
+---
+# Alpha Feature
+Add a greeting function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/plan.md", `---
+status: Approved
+spec_id: 001-alpha
+---
+# Plan
+## Bead 1: Implement greeting
+Create greeting.go with a Greet function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/lifecycle.yaml",
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicAlpha))
+
+			// --- Spec 002-beta: plan mode (no beads yet) ---
+			epicBeta := sandbox.CreateBead("[002-beta] Epic", "epic", "")
+			sandbox.WriteFile(".mindspec/docs/specs/002-beta/spec.md", `---
+title: Beta Feature
+status: Approved
+---
+# Beta Feature
+Add a calculator function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/002-beta/plan.md", `---
+status: Draft
+spec_id: 002-beta
+---
+# Plan — Draft
+TBD
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/002-beta/lifecycle.yaml",
+				fmt.Sprintf("phase: plan\nepic_id: %s\n", epicBeta))
+
+			// Focus: implement mode for 001-alpha (but both specs are active)
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":       "implement",
+				"activeSpec": "001-alpha",
+				"activeBead": beadAlpha,
+				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: two active specs")
+			return nil
+		},
+		Prompt: `You are in implement mode for spec 001-alpha. A bead is already claimed.
+Your task: create a file called greeting.go with a function Greet(name string) string
+that returns "Hello, <name>!". Then run 'mindspec complete' to finish the bead.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent should have created the file
+			if !sandbox.FileExists("greeting.go") {
+				t.Error("greeting.go was not created")
+			}
+			// Agent should have run mindspec complete
+			assertCommandRan(t, events, "mindspec", "complete")
+		},
+	}
+}
+
+// ScenarioStaleWorktree tests recovery when state references a worktree that doesn't exist.
+// This happens when a session crashes after worktree creation was recorded in focus but
+// before the worktree was actually created, or when a worktree was manually deleted.
+//
+// Before: Focus says implement mode with activeWorktree pointing to a nonexistent path,
+//
+//	bead is claimed, spec/plan are approved
+//
+// After:  Agent recovers (works from main or recreates worktree),
+//
+//	implements the bead, runs complete
+func ScenarioStaleWorktree() Scenario {
+	return Scenario{
+		Name:        "stale_worktree",
+		Description: "State references nonexistent worktree, agent must recover",
+		MaxTurns:    20,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			epicID := sandbox.CreateBead("[005-stale] Epic", "epic", "")
+			beadID := sandbox.CreateBead("[005-stale] Implement widget", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
+			sandbox.WriteFile(".mindspec/docs/specs/005-stale/spec.md", `---
+title: Widget Feature
+status: Approved
+---
+# Widget Feature
+Add a widget function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/005-stale/plan.md", `---
+status: Approved
+spec_id: 005-stale
+---
+# Plan
+## Bead 1: Implement widget
+Create widget.go with a Widget function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/005-stale/lifecycle.yaml",
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
+
+			// Focus references a worktree that does NOT exist on disk
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     "005-stale",
+				"activeBead":     beadID,
+				"activeWorktree": ".worktrees/worktree-" + beadID,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: stale worktree reference")
+
+			// Verify the worktree does NOT exist (that's the point of this test)
+			if sandbox.FileExists(".worktrees/worktree-" + beadID) {
+				return fmt.Errorf("precondition: worktree should NOT exist")
+			}
+			return nil
+		},
+		Prompt: `You are resuming work in implement mode. The state references a worktree that may not exist.
+Your task: create a file called widget.go with a function Widget() string that returns "widget".
+Then run 'mindspec complete' to finish the bead.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent should have created the file
+			if !sandbox.FileExists("widget.go") {
+				t.Error("widget.go was not created")
+			}
+			// Agent should have run mindspec complete
+			assertCommandRan(t, events, "mindspec", "complete")
 		},
 	}
 }

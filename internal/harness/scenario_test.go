@@ -196,3 +196,25 @@ func TestLLM_SpecStatus(t *testing.T) {
 		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
 	}
 }
+
+// --- Error recovery scenarios ---
+
+func TestLLM_MultipleActiveSpecs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioMultipleActiveSpecs())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+func TestLLM_StaleWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioStaleWorktree())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}

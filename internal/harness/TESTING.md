@@ -103,6 +103,8 @@ When an LLM test fails due to agent behavior, the fix MUST go into mindspec's ow
 | `TestLLM_PlanApprove` | 20 | Medium | Plan mode → approve plan → mindspec next → implement mode |
 | `TestLLM_ImplApprove` | 15 | Low | Review mode → approve impl → idle, merge + cleanup |
 | `TestLLM_SpecStatus` | 10 | Low | Check current mode via state show / instruct (read-only) |
+| `TestLLM_MultipleActiveSpecs` | 20 | Medium | Two active specs — agent must discover `--spec` flag from CLI errors |
+| `TestLLM_StaleWorktree` | 20 | Medium | State references nonexistent worktree — agent must recover and complete |
 
 **Start with SingleBead** when validating changes -- it's the fastest and most reliable.
 
@@ -289,6 +291,18 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 40 | 2 | 14s | Baseline: agent ran `state show` and `instruct`, reported implement mode with active bead. 100% fwd ratio. |
 | 2026-03-01 | PASS | 33 | 2 | 17s | Fixed setup: realistic spec + bead worktrees, branches, focus.activeWorktree. Added branch/worktree preservation assertions. 100% fwd ratio. |
+
+### TestLLM_MultipleActiveSpecs
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| | | | | | Scenario added — not yet run |
+
+### TestLLM_StaleWorktree
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| | | | | | Scenario added — not yet run |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
