@@ -140,9 +140,9 @@ func TestCleanup_ClearsFocusAfterMergedPR(t *testing.T) {
 
 	// Set focus to reference the spec (simulates stale focus after approve impl).
 	state.WriteFocus(root, &state.Focus{
-		Mode:            state.ModeIdle,
-		ActiveSpec:      "010-test",
-		ActiveWorktree:  "/deleted/worktree",
+		Mode:           state.ModeIdle,
+		ActiveSpec:     "010-test",
+		ActiveWorktree: "/deleted/worktree",
 	})
 
 	findPRForBranchFn = func(branch string) (string, string, error) {

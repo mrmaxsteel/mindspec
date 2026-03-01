@@ -20,15 +20,15 @@ var templateFS embed.FS
 
 // Context holds all data needed to render guidance.
 type Context struct {
-	Mode           string   `json:"mode"`
-	ActiveSpec     string   `json:"active_spec"`
-	ActiveBead     string   `json:"active_bead"`
-	SpecGoal       string   `json:"spec_goal,omitempty"`
-	PlanApproved   bool     `json:"plan_approved,omitempty"`
-	AvailableSpecs []string `json:"available_specs,omitempty"`
-	BeadPrimer     string   `json:"bead_primer,omitempty"`
+	Mode             string   `json:"mode"`
+	ActiveSpec       string   `json:"active_spec"`
+	ActiveBead       string   `json:"active_bead"`
+	SpecGoal         string   `json:"spec_goal,omitempty"`
+	PlanApproved     bool     `json:"plan_approved,omitempty"`
+	AvailableSpecs   []string `json:"available_specs,omitempty"`
+	BeadPrimer       string   `json:"bead_primer,omitempty"`
 	BeadsContext     string   `json:"beads_context,omitempty"`
-	BranchProtection bool    `json:"branch_protection,omitempty"`
+	BranchProtection bool     `json:"branch_protection,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`
 }
 
