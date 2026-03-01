@@ -533,6 +533,28 @@ func saveAndRestore(t *testing.T) {
 
 	// Default: findLocalRoot falls back to the root arg passed to ApproveImpl.
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
+
+	// Deterministic defaults for tests that don't care about merge transport.
+	// Individual tests can override any of these as needed.
+	loadConfigFn = func(root string) (*config.Config, error) {
+		cfg := config.DefaultConfig()
+		cfg.MergeStrategy = "direct"
+		return cfg, nil
+	}
+	mergeBranchFn = func(workdir, source, target string) error { return nil }
+	deleteBranchFn = func(name string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
+	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
+	branchExistsFn = func(name string) bool { return false }
+	hasRemoteFn = func() bool { return false }
+	pushBranchFn = func(branch string) error { return nil }
+	createPRFn = func(branch, base, title, body string) (string, error) {
+		return "https://github.com/test/repo/pull/1", nil
+	}
+	prChecksWatchFn = func(url string) error { return nil }
+	mergePRFn = func(url string) error { return nil }
 }
 
 func TestVerifyImplContent_NoCommits(t *testing.T) {

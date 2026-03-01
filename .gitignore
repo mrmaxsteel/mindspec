@@ -42,3 +42,7 @@ beads/
 
 # mindspec worktrees
 .worktrees/
+
+# local harness run artifacts
+.harness_runs/
+.harness-runs/
