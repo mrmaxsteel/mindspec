@@ -18,9 +18,9 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should create settings.json, 6 command files, 6 skill files, and CLAUDE.md = 14 items
-	if len(r.Created) != 14 {
-		t.Errorf("expected 14 created items, got %d: %v", len(r.Created), r.Created)
+	// Should create settings.json, 6 skill files, and CLAUDE.md = 8 items
+	if len(r.Created) != 8 {
+		t.Errorf("expected 8 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -44,11 +44,11 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Error("missing PreToolUse hook")
 	}
 
-	// Verify command files exist
-	for _, name := range []string{"ms:explore.md", "ms:spec-init.md", "ms:spec-approve.md", "ms:plan-approve.md", "ms:impl-approve.md", "ms:spec-status.md"} {
-		cmdPath := filepath.Join(root, ".claude", "commands", name)
-		if _, err := os.Stat(cmdPath); os.IsNotExist(err) {
-			t.Errorf("missing command file: %s", name)
+	// Verify skill files exist
+	for _, name := range []string{"ms:explore", "ms:spec-init", "ms:spec-approve", "ms:plan-approve", "ms:impl-approve", "ms:spec-status"} {
+		skillPath := filepath.Join(root, ".claude", "skills", name, "SKILL.md")
+		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+			t.Errorf("missing skill file: %s", name)
 		}
 	}
 
@@ -88,8 +88,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 14 {
-		t.Errorf("second run should skip 14 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 8 {
+		t.Errorf("second run should skip 8 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 

@@ -24,11 +24,11 @@ Run 'mindspec setup <agent>' after 'mindspec init' to complete onboarding.`,
 
 var setupClaudeCmd = &cobra.Command{
 	Use:   "claude",
-	Short: "Set up Claude Code integration (hooks, slash commands, CLAUDE.md)",
+	Short: "Set up Claude Code integration (hooks, skills, CLAUDE.md)",
 	Long: `Creates Claude Code-specific configuration:
 
   - .claude/settings.json with SessionStart and PreToolUse hooks
-  - .claude/commands/*.md slash commands (spec-init, spec-approve, etc.)
+  - .claude/skills/ms:*/SKILL.md workflow skills (explore, spec-init, approve, etc.)
   - CLAUDE.md with pointer to AGENTS.md and MindSpec guidance
 
 If beads (bd) is installed, also runs 'bd setup claude'.
