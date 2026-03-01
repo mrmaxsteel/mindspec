@@ -417,11 +417,46 @@ func TestIsCodeFile(t *testing.T) {
 		{"some-notes.md", false},
 		{".mindspec/config.yaml", false},
 		{"", false},
+		// Absolute paths (Claude Code sends these via tool_input.file_path)
+		{"/Users/max/project/.mindspec/focus", false},
+		{"/Users/max/project/.mindspec/docs/specs/001/spec.md", false},
+		{"/Users/max/project/.claude/settings.json", false},
+		{"/Users/max/project/internal/foo.go", true},
+		{"/Users/max/project/cmd/main.go", true},
+		// Worktree absolute paths
+		{"/Users/max/project/.worktrees/wt-spec-001/.mindspec/focus", false},
+		{"/Users/max/project/.worktrees/wt-spec-001/internal/foo.go", true},
 	}
 	for _, tt := range tests {
 		got := isCodeFile(tt.path)
 		if got != tt.code {
 			t.Errorf("isCodeFile(%q) = %v, want %v", tt.path, got, tt.code)
+		}
+	}
+}
+
+func TestIsAllowedCommandAbsolutePath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		cmd     string
+		allowed bool
+	}{
+		{"mindspec state set --mode idle", true},
+		{"./bin/mindspec complete", true},
+		{"/usr/local/bin/mindspec state show", true},
+		{"/Users/max/project/bin/mindspec complete --spec 001", true},
+		{"git status", true},
+		{"/usr/bin/git log", true},
+		{"bd list", true},
+		{"/opt/homebrew/bin/bd ready", true},
+		{"rm -rf /", false},
+		{"/usr/bin/rm -rf /", false},
+		{"curl http://example.com", false},
+	}
+	for _, tt := range tests {
+		got := isAllowedCommand(tt.cmd)
+		if got != tt.allowed {
+			t.Errorf("isAllowedCommand(%q) = %v, want %v", tt.cmd, got, tt.allowed)
 		}
 	}
 }

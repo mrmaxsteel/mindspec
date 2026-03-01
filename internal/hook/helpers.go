@@ -70,6 +70,23 @@ func isAllowedCommand(cmd string) bool {
 			return true
 		}
 	}
+	// Handle absolute paths: extract the binary name from the first token.
+	// e.g. "/usr/local/bin/mindspec state" → "mindspec state" matches "mindspec ".
+	if idx := strings.Index(cmd, " "); idx > 0 {
+		binary := filepath.Base(cmd[:idx])
+		rest := cmd[idx:]
+		for _, prefix := range allowedPrefixes {
+			trimmed := strings.TrimSpace(strings.TrimSuffix(prefix, " "))
+			if trimmed == "" {
+				continue
+			}
+			// Match "mindspec" from prefix "mindspec " against base of absolute path
+			if binary == trimmed || binary == filepath.Base(trimmed) {
+				_ = rest // binary matches; allow the command
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -97,6 +114,11 @@ func isCodeFile(path string) bool {
 	}
 	for _, prefix := range docPrefixes {
 		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+		// Handle absolute paths: check if the path contains /prefix as a segment.
+		// e.g. "/Users/x/project/.mindspec/focus" contains "/.mindspec/"
+		if strings.Contains(path, "/"+prefix) {
 			return false
 		}
 	}
