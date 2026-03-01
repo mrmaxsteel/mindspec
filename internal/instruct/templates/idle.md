@@ -9,7 +9,13 @@ You are not currently working on any spec or bead.
 
 ## How to Make Changes
 
-When asked to fix a bug, add a feature, or make any code change:
+**All new features and non-trivial changes MUST go through `mindspec spec-init`.** The only exception is single-file bugfixes or typo corrections — for those, use the direct worktree path below.
+
+### Default: spec-driven (features, multi-file changes, new commands)
+
+Run `mindspec spec-init` — it creates the branch + worktree automatically.
+
+### Exception: trivial fixes only (typos, single-file bugfixes)
 
 1. **FIRST**: `git worktree add ../fix-<description> -b fix/<description>` then `cd ../fix-<description>`
 2. Make your changes in the worktree
@@ -18,8 +24,6 @@ When asked to fix a bug, add a feature, or make any code change:
 5. `gh pr create` — open a pull request
 
 Work is NOT complete until the PR is created. Always finish all 5 steps.
-
-For spec-driven work, use `mindspec spec-init` instead (it creates the branch automatically).
 {{- end}}
 
 ## Available Actions
