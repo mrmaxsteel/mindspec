@@ -152,6 +152,42 @@ func TestWorktreeBash_EnvPrefixStrip(t *testing.T) {
 	}
 }
 
+func TestWorktreeBash_BlocksProtectedBranchCommit(t *testing.T) {
+	origGetCwd := getCwd
+	origGetGitBranch := getGitBranch
+	t.Cleanup(func() {
+		getCwd = origGetCwd
+		getGitBranch = origGetGitBranch
+	})
+
+	getCwd = func() (string, error) { return "/repo", nil }
+	getGitBranch = func(workdir string) (string, error) { return "main", nil }
+
+	st := &HookState{Mode: state.ModeImplement, ActiveWorktree: "/repo/.worktrees/worktree-bead-abc"}
+	r := WorktreeBash(&Input{Command: "git commit -m test"}, st, true)
+	if r.Action != Block {
+		t.Fatalf("expected Block for protected-branch commit, got %v", r.Action)
+	}
+}
+
+func TestWorktreeBash_BlocksProtectedBranchMerge(t *testing.T) {
+	origGetCwd := getCwd
+	origGetGitBranch := getGitBranch
+	t.Cleanup(func() {
+		getCwd = origGetCwd
+		getGitBranch = origGetGitBranch
+	})
+
+	getCwd = func() (string, error) { return "/repo", nil }
+	getGitBranch = func(workdir string) (string, error) { return "main", nil }
+
+	st := &HookState{Mode: state.ModeImplement, ActiveWorktree: "/repo/.worktrees/worktree-bead-abc"}
+	r := WorktreeBash(&Input{Command: "git merge spec/001-greeting"}, st, true)
+	if r.Action != Block {
+		t.Fatalf("expected Block for protected-branch merge, got %v", r.Action)
+	}
+}
+
 func TestWorktreeBash_AllowsSpecWorktree(t *testing.T) {
 	origGetCwd := getCwd
 	t.Cleanup(func() { getCwd = origGetCwd })

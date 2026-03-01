@@ -2,6 +2,7 @@ package hook
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -26,7 +27,15 @@ func hasPathPrefix(path, prefix string) bool {
 
 // stripEnvPrefixes removes leading VAR=val prefixes from a command string.
 func stripEnvPrefixes(cmd string) string {
-	stripped := cmd
+	_, stripped := parseEnvPrefixes(cmd)
+	return stripped
+}
+
+// parseEnvPrefixes parses and removes leading VAR=val prefixes from a command.
+// It returns both the parsed env map and the remaining command string.
+func parseEnvPrefixes(cmd string) (map[string]string, string) {
+	env := map[string]string{}
+	stripped := strings.TrimSpace(cmd)
 	for {
 		// Match pattern: UPPERCASE_CHARS=VALUE SPACE
 		idx := strings.Index(stripped, " ")
@@ -42,9 +51,10 @@ func stripEnvPrefixes(cmd string) string {
 		if !isEnvVarName(varName) {
 			break
 		}
-		stripped = stripped[idx+1:]
+		env[varName] = prefix[eqIdx+1:]
+		stripped = strings.TrimSpace(stripped[idx+1:])
 	}
-	return stripped
+	return env, stripped
 }
 
 func isEnvVarName(s string) bool {
@@ -99,6 +109,96 @@ func isAllowedCommand(cmd string) bool {
 // containsWord checks if haystack contains needle as a substring.
 func containsWord(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
+}
+
+// getGitBranch resolves the current git branch in workdir (or current dir if
+// workdir is empty). Function var for testability.
+var getGitBranch = func(workdir string) (string, error) {
+	args := []string{}
+	if workdir != "" {
+		args = append(args, "-C", workdir)
+	}
+	args = append(args, "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := exec.Command("git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// protectedGitWrite returns operation + branch when command is a protected-branch
+// git commit/merge that should be blocked at hook layer.
+func protectedGitWrite(rawCmd, strippedCmd, cwd string) (operation, branch string, block bool) {
+	env, _ := parseEnvPrefixes(rawCmd)
+	if env["MINDSPEC_ALLOW_MAIN"] == "1" {
+		return "", "", false
+	}
+
+	workdir, subcommand, ok := parseGitCommand(strippedCmd)
+	if !ok {
+		return "", "", false
+	}
+	if subcommand != "commit" && subcommand != "merge" {
+		return "", "", false
+	}
+
+	branchWorkdir := workdir
+	if branchWorkdir == "" {
+		branchWorkdir = cwd
+	} else if !filepath.IsAbs(branchWorkdir) && cwd != "" {
+		branchWorkdir = filepath.Clean(filepath.Join(cwd, branchWorkdir))
+	}
+
+	current, err := getGitBranch(branchWorkdir)
+	if err != nil {
+		return "", "", false
+	}
+	if current == "main" || current == "master" {
+		return subcommand, current, true
+	}
+	return "", "", false
+}
+
+// parseGitCommand extracts git workdir + subcommand from a command string.
+func parseGitCommand(cmd string) (workdir, subcommand string, ok bool) {
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 || filepath.Base(fields[0]) != "git" {
+		return "", "", false
+	}
+
+	for i := 1; i < len(fields); i++ {
+		tok := fields[i]
+		switch tok {
+		case "-C":
+			if i+1 >= len(fields) {
+				return "", "", false
+			}
+			workdir = fields[i+1]
+			i++
+			continue
+		case "--git-dir", "--work-tree", "-c":
+			if i+1 < len(fields) {
+				i++
+			}
+			continue
+		}
+
+		if strings.HasPrefix(tok, "-C") && len(tok) > 2 {
+			workdir = strings.TrimPrefix(tok, "-C")
+			continue
+		}
+		if strings.HasPrefix(tok, "--git-dir=") ||
+			strings.HasPrefix(tok, "--work-tree=") ||
+			strings.HasPrefix(tok, "-c") {
+			continue
+		}
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		return workdir, tok, true
+	}
+	return workdir, "", false
 }
 
 // getCwd returns the current working directory.

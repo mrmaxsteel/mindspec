@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/state"
@@ -94,11 +95,20 @@ func WorktreeBash(inp *Input, st *HookState, enforce bool) Result {
 	if st == nil || st.ActiveWorktree == "" || !enforce {
 		return Result{Action: Pass}
 	}
+	cwd, _ := getCwd()
 	cmd := stripEnvPrefixes(inp.Command)
+	if op, branch, block := protectedGitWrite(inp.Command, cmd, cwd); block {
+		return Result{
+			Action: Block,
+			Message: fmt.Sprintf(
+				"mindspec: blocked — git %s on protected branch %q bypasses lifecycle guards. Use mindspec lifecycle commands, or switch to: cd %s",
+				op, branch, st.ActiveWorktree,
+			),
+		}
+	}
 	if isAllowedCommand(cmd) {
 		return Result{Action: Pass}
 	}
-	cwd, _ := getCwd()
 	wt := st.ActiveWorktree
 	if cwd != "" && hasPathPrefix(cwd, wt) {
 		return Result{Action: Pass}
