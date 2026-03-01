@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-01T09:59:27Z"
+approved_by: user
+status: Approved
 ---
 # Spec 057-worktree-aware-resolution: Worktree-Aware Spec Resolution
 
@@ -93,7 +93,7 @@ None — ADR-0022 resolved the design questions.
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: Implements ADR-0022. Bugfix for mindspec-ofp0 already merged with targeted workarounds; this spec consolidates them into the proper architectural solution.
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-01
+- **Notes**: Approved via mindspec approve spec
