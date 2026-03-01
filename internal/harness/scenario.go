@@ -352,11 +352,11 @@ func ScenarioSpecApprove() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create the branch (stay on main)
-			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			mustRunGit(sandbox, "branch", specBranch)
 
 			// Create worktree from the branch
 			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunSandbox(sandbox, "git", "worktree", "add", wtDir, specBranch)
+			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Create epic for lifecycle
 			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
@@ -404,8 +404,8 @@ Pending.
 				fmt.Sprintf("phase: spec\nepic_id: %s\n", epicID))
 
 			// Commit in the worktree
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "add", "-A")
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "commit", "-m", "setup: draft spec")
+			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "setup: draft spec")
 
 			// Set focus to spec mode (in main repo)
 			sandbox.WriteFocus(mustJSON(map[string]string{
@@ -466,9 +466,9 @@ func ScenarioPlanApprove() Scenario {
 			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
 
 			// Create spec branch and worktree (stay on main)
-			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			mustRunGit(sandbox, "branch", specBranch)
 			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunSandbox(sandbox, "git", "worktree", "add", wtDir, specBranch)
+			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Write approved spec
 			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -542,8 +542,8 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			}))
 
 			// Commit in worktree
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "add", "-A")
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "commit", "-m", "setup: draft plan")
+			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "setup: draft plan")
 
 			// Commit focus in main
 			sandbox.Commit("setup: plan mode focus")
@@ -609,9 +609,9 @@ func ScenarioImplApprove() Scenario {
 			sandbox.runBDMust("close", beadID)
 
 			// Create spec branch and worktree (stay on main)
-			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			mustRunGit(sandbox, "branch", specBranch)
 			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunSandbox(sandbox, "git", "worktree", "add", wtDir, specBranch)
+			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Write spec files in the worktree (where they'd be in real workflow)
 			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -639,8 +639,8 @@ Create done.go.
 
 func Done() string { return "done" }
 `)
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "add", "-A")
-			mustRunSandbox(sandbox, "git", "-C", wtDir, "commit", "-m", "impl: implement feature")
+			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "impl: implement feature")
 
 			// Set focus to review mode with activeWorktree (as mindspec complete would)
 			sandbox.WriteFocus(mustJSON(map[string]string{
@@ -713,9 +713,9 @@ func ScenarioSpecStatus() Scenario {
 			sandbox.ClaimBead(beadID)
 
 			// Create spec branch and worktree
-			mustRunSandbox(sandbox, "git", "branch", specBranch)
+			mustRunGit(sandbox, "branch", specBranch)
 			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunSandbox(sandbox, "git", "worktree", "add", specWtDir, specBranch)
+			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
 
 			// Write spec files in the spec worktree
 			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -726,14 +726,14 @@ status: Approved
 `)
 			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
-			mustRunSandbox(sandbox, "git", "-C", specWtDir, "add", "-A")
-			mustRunSandbox(sandbox, "git", "-C", specWtDir, "commit", "-m", "setup: spec files")
+			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
 
 			// Create bead branch and worktree off the spec branch
 			beadBranch := "bead/" + beadID
-			mustRunSandbox(sandbox, "git", "branch", beadBranch, specBranch)
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
 			beadWtDir := ".worktrees/worktree-" + beadID
-			mustRunSandbox(sandbox, "git", "worktree", "add", beadWtDir, beadBranch)
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
 
 			// Set focus to implement mode with bead worktree
 			sandbox.WriteFocus(mustJSON(map[string]string{
@@ -799,10 +799,10 @@ status: Approved
 	}
 }
 
-// mustRunSandbox runs a command in the sandbox root, fataling on error.
-func mustRunSandbox(sandbox *Sandbox, name string, args ...string) {
+// mustRunGit runs a git command in the sandbox root, fataling on error.
+func mustRunGit(sandbox *Sandbox, args ...string) {
 	sandbox.t.Helper()
-	mustRun(sandbox.t, sandbox.Root, name, args...)
+	mustRun(sandbox.t, sandbox.Root, "git", args...)
 }
 
 // --- Helpers ---
