@@ -105,6 +105,7 @@ When an LLM test fails due to agent behavior, the fix MUST go into mindspec's ow
 | `TestLLM_SpecStatus` | 10 | Low | Check current mode via state show / instruct (read-only) |
 | `TestLLM_MultipleActiveSpecs` | 20 | Medium | Two active specs — agent must discover `--spec` flag from CLI errors |
 | `TestLLM_StaleWorktree` | 20 | Medium | State references nonexistent worktree — agent must recover and complete |
+| `TestLLM_BugfixBranch` | 25 | Medium | Fix a pre-existing bug on a branch via PR, never commit to main |
 
 **Start with SingleBead** when validating changes -- it's the fastest and most reliable.
 
@@ -303,6 +304,14 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | PASS | 70 | 7 | 42s | Baseline: agent recovered from missing worktree by manually closing the bead via `bd close` and resetting state with `mindspec state set --mode idle`. 71.4% fwd ratio (5 fwd / 2 retry). `mindspec complete` failed (stale worktree), agent worked around it. |
+
+### TestLLM_BugfixBranch
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-03-01 | PASS | 45 | 2 | 25s | Baseline (local bare remote): agent created `fix/division-by-zero` branch, fixed calculator.go, committed on branch, attempted `gh pr create` (failed — local bare remote), pushed branch. 100% fwd ratio. Main branch unmodified. |
+| 2026-03-01 | PASS | 51 | 3 | 23s | Switched to real GitHub remote (mrmaxsteel/test-mindspec). `gh pr create` succeeded (exit=0). PR #1 created. 100% fwd ratio. Added cleanup to close PRs + delete remote branches. |
+| 2026-03-01 | 3/3 PASS | 74-82 | 3-4 | 32-42s | Reliability run. All passes. Agent retries `gh pr create` once (branch not pushed yet — expected). 50-75% fwd ratio due to gh retry. PRs #2-4 created + cleaned up. Main always unmodified. |
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)

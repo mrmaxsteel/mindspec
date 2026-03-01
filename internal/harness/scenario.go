@@ -39,6 +39,7 @@ func AllScenarios() []Scenario {
 		ScenarioCompleteFromSpecWorktree(),
 		ScenarioApproveSpecFromWorktree(),
 		ScenarioApprovePlanFromWorktree(),
+		ScenarioBugfixBranch(),
 	}
 }
 
@@ -1254,6 +1255,129 @@ Run 'mindspec approve plan 001-greeting' to approve the plan and create implemen
 	}
 }
 
+// bugfixBranchRemote is the GitHub repo used as remote for the BugfixBranch scenario.
+// Each test run pushes to a unique branch, creates a PR, then cleans up.
+const bugfixBranchRemote = "mrmaxsteel/test-mindspec"
+
+// ScenarioBugfixBranch tests that when a user asks to fix a pre-existing bug,
+// the agent creates a bugfix branch + worktree, fixes on that branch, and
+// creates a PR — never committing directly to main.
+func ScenarioBugfixBranch() Scenario {
+	return Scenario{
+		Name:        "bugfix_branch",
+		Description: "Fix a bug on a branch via PR, not directly on main",
+		MaxTurns:    25,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			// Create buggy source code on main
+			sandbox.WriteFile("calculator.go", `package main
+
+import "fmt"
+
+func Divide(a, b int) int {
+	return a / b
+}
+
+func main() {
+	fmt.Println(Divide(10, 2))
+	fmt.Println(Divide(10, 0)) // BUG: division by zero panic
+}
+`)
+			sandbox.Commit("add calculator with division-by-zero bug")
+
+			// Record main branch commit count so we can verify it doesn't change
+			mainCount := mustRun(sandbox.t, sandbox.Root, "git", "rev-list", "--count", "HEAD")
+			sandbox.WriteFile(".harness/main_commit_count", strings.TrimSpace(mainCount))
+
+			// Create pre-existing bugs in beads
+			sandbox.CreateBead("Division by zero in calculator.go", "bug", "")
+			sandbox.CreateBead("Missing input validation in parser", "bug", "")
+
+			// Use real GitHub remote so gh pr create works
+			ghURL := fmt.Sprintf("https://github.com/%s.git", bugfixBranchRemote)
+			mustRun(sandbox.t, sandbox.Root, "git", "remote", "add", "origin", ghURL)
+
+			// Push main to the remote (force to reset any stale state from prior runs)
+			mustRun(sandbox.t, sandbox.Root, "git", "push", "--force", "origin", "main")
+
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+There is a division-by-zero bug in calculator.go — Divide(10, 0) panics. Fix it by adding a zero-divisor check that returns 0 when b is 0. Create a bugfix branch, fix the bug there, and create a pull request. Do NOT commit directly to main.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent must have created a branch (any non-main branch)
+			assertHasNonMainBranch(t, sandbox)
+
+			// Main branch must not have new commits
+			assertMainCommitCountUnchanged(t, sandbox)
+
+			// Agent pushed the branch
+			assertCommandRan(t, events, "git", "push")
+
+			// Agent created a PR via gh
+			assertCommandRan(t, events, "gh", "pr")
+
+			// PR should have succeeded (exit=0)
+			assertCommandSucceeded(t, events, "gh", "pr")
+
+			// Cleanup: close any PRs and delete remote branches created by this test
+			cleanupBugfixBranchPRs(t, sandbox)
+		},
+	}
+}
+
+// cleanupBugfixBranchPRs closes open PRs and deletes remote branches on the
+// test repo created by the BugfixBranch scenario.
+func cleanupBugfixBranchPRs(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+
+	// Close all open PRs on the test repo
+	cmd := exec.Command("gh", "pr", "list", "--repo", bugfixBranchRemote, "--state", "open", "--json", "number", "--jq", ".[].number")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Logf("cleanup: could not list PRs: %v", err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		closeCmd := exec.Command("gh", "pr", "close", line, "--repo", bugfixBranchRemote, "--delete-branch")
+		if closeOut, err := closeCmd.CombinedOutput(); err != nil {
+			t.Logf("cleanup: could not close PR #%s: %v\n%s", line, err, closeOut)
+		}
+	}
+
+	// Delete any non-main remote branches
+	listCmd := exec.Command("git", "ls-remote", "--heads", "origin")
+	listCmd.Dir = sandbox.Root
+	branchOut, err := listCmd.Output()
+	if err != nil {
+		t.Logf("cleanup: could not list remote branches: %v", err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(branchOut)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		ref := parts[1]
+		branch := strings.TrimPrefix(ref, "refs/heads/")
+		if branch == "main" {
+			continue
+		}
+		delCmd := exec.Command("git", "push", "origin", "--delete", branch)
+		delCmd.Dir = sandbox.Root
+		if delOut, err := delCmd.CombinedOutput(); err != nil {
+			t.Logf("cleanup: could not delete remote branch %s: %v\n%s", branch, err, delOut)
+		}
+	}
+}
+
 // mustRunGit runs a git command in the sandbox root, fataling on error.
 func mustRunGit(sandbox *Sandbox, args ...string) {
 	sandbox.t.Helper()
@@ -1446,5 +1570,42 @@ func assertFocusMode(t *testing.T, sandbox *Sandbox, expectedMode string) {
 	mode, _ := focus["mode"].(string)
 	if mode != expectedMode {
 		t.Errorf("expected focus mode %q, got %q", expectedMode, mode)
+	}
+}
+
+// assertHasNonMainBranch checks that at least one branch besides "main" exists.
+func assertHasNonMainBranch(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "--list")
+	cmd.Dir = sandbox.Root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Errorf("git branch --list failed: %v", err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		b := strings.TrimSpace(strings.TrimPrefix(line, "* "))
+		if b != "" && b != "main" {
+			return
+		}
+	}
+	t.Error("expected at least one non-main branch, found none")
+}
+
+// assertMainCommitCountUnchanged verifies that main has the same number of
+// commits as when setup recorded the count in .harness/main_commit_count.
+func assertMainCommitCountUnchanged(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+	expected := strings.TrimSpace(sandbox.ReadFile(".harness/main_commit_count"))
+	cmd := exec.Command("git", "rev-list", "--count", "main")
+	cmd.Dir = sandbox.Root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Errorf("git rev-list --count main failed: %v", err)
+		return
+	}
+	actual := strings.TrimSpace(string(out))
+	if actual != expected {
+		t.Errorf("main branch commit count changed: expected %s, got %s (agent committed directly to main)", expected, actual)
 	}
 }

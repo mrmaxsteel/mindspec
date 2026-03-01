@@ -40,7 +40,7 @@ exit $EXIT_CODE
 `
 
 // DefaultShimCommands is the list of commands that get recording shims.
-var DefaultShimCommands = []string{"mindspec", "git", "bd"}
+var DefaultShimCommands = []string{"mindspec", "git", "bd", "gh"}
 
 // InstallShims creates recording shim scripts in binDir for each command.
 // Each shim logs to logPath and delegates to the real binary found via PATH

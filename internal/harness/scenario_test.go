@@ -248,3 +248,13 @@ func TestLLM_ApprovePlanFromWorktree(t *testing.T) {
 		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
 	}
 }
+
+func TestLLM_BugfixBranch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioBugfixBranch())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
