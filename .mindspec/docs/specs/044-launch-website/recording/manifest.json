@@ -7,7 +7,12 @@
   "phases": [
     {
       "phase": "spec",
-      "started_at": "2026-02-21T07:45:01Z"
+      "started_at": "2026-02-21T07:45:01Z",
+      "ended_at": "2026-03-01T08:48:20Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-03-01T08:48:20Z"
     }
   ]
 }

@@ -1,8 +1,8 @@
 ---
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-01T08:48:20Z"
+approved_by: user
 molecule_id: mindspec-mol-1hh
-status: Draft
+status: Approved
 step_mapping:
     implement: mindspec-mol-kp5
     plan: mindspec-mol-c8v
@@ -96,7 +96,7 @@ AgentMind already renders in the browser, so the technical lift is embedding an 
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-01
+- **Notes**: Approved via mindspec approve spec
