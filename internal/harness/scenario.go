@@ -1295,11 +1295,6 @@ func main() {
 			sandbox.CreateBead("Division by zero in calculator.go", "bug", "")
 			sandbox.CreateBead("Missing input validation in parser", "bug", "")
 
-			// Install pre-commit hook to enforce branch protection in idle mode
-			if err := hooks.InstallPreCommit(sandbox.Root); err != nil {
-				return fmt.Errorf("installing pre-commit hook: %w", err)
-			}
-
 			// Use real GitHub remote so gh pr create works
 			ghURL := fmt.Sprintf("https://github.com/%s.git", bugfixBranchRemote)
 			mustRun(sandbox.t, sandbox.Root, "git", "remote", "add", "origin", ghURL)
