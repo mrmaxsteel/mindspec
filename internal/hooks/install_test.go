@@ -107,14 +107,11 @@ func TestInstallPostCheckout_NewHook(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "MindSpec post-checkout hook") {
-		t.Error("hook should contain MindSpec marker")
+	if !strings.Contains(content, "MindSpec post-checkout hook v2") {
+		t.Error("hook should contain MindSpec v2 marker")
 	}
-	if !strings.Contains(content, "MINDSPEC_ALLOW_MAIN") {
-		t.Error("hook should contain escape hatch")
-	}
-	if !strings.Contains(content, "git worktree add") {
-		t.Error("hook should suggest git worktree add")
+	if !strings.Contains(content, "exit 0") {
+		t.Error("v2 hook should be a no-op (exit 0)")
 	}
 }
 
@@ -222,39 +219,28 @@ func initGitRepo(t *testing.T) string {
 	return root
 }
 
-func TestPostCheckout_BlocksNonProtectedBranch(t *testing.T) {
+func TestPostCheckout_AllowsNonProtectedBranch(t *testing.T) {
 	root := initGitRepo(t)
 
-	// Install hook and create focus file (required for enforcement)
+	// Install hook and create focus file
 	if err := InstallPostCheckout(root); err != nil {
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 	os.WriteFile(filepath.Join(root, ".mindspec", "focus"), []byte(`{"mode":"idle"}`), 0644)
 
-	// Try to checkout a non-protected branch
+	// v2 hook is a no-op — checkout should succeed
 	cmd := exec.Command("git", "checkout", "-b", "feature/foo")
 	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	// Hook should have blocked it (exit 1)
-	if err == nil {
-		t.Fatal("expected checkout to be blocked, but it succeeded")
-	}
-	if !strings.Contains(output, "checkout blocked") {
-		t.Errorf("expected 'checkout blocked' message, got: %s", output)
-	}
-	if !strings.Contains(output, "git worktree add") {
-		t.Errorf("expected worktree guidance, got: %s", output)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout should succeed (v2 no-op hook): %s: %v", out, err)
 	}
 
-	// Should still be on main
 	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = root
 	branchOut, _ := cmd.Output()
-	if branch := strings.TrimSpace(string(branchOut)); branch != "main" {
-		t.Errorf("expected to be on 'main', got '%s'", branch)
+	if branch := strings.TrimSpace(string(branchOut)); branch != "feature/foo" {
+		t.Errorf("expected to be on 'feature/foo', got '%s'", branch)
 	}
 }
 
@@ -289,28 +275,30 @@ func TestPostCheckout_AllowsProtectedBranch(t *testing.T) {
 	}
 }
 
-func TestPostCheckout_EscapeHatch(t *testing.T) {
+func TestPostCheckout_UpgradesStaleV1Hook(t *testing.T) {
 	root := initGitRepo(t)
 
+	// Write a v1 hook (blocking version)
+	hooksDir := filepath.Join(root, ".git", "hooks")
+	hookPath := filepath.Join(hooksDir, "post-checkout")
+	v1Script := "#!/usr/bin/env bash\n# MindSpec post-checkout hook v1 (Layer 1 enforcement)\nexit 1\n"
+	os.WriteFile(hookPath, []byte(v1Script), 0755)
+
+	// InstallPostCheckout should detect stale v1 and upgrade to v2
 	if err := InstallPostCheckout(root); err != nil {
 		t.Fatal(err)
 	}
-	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
-	os.WriteFile(filepath.Join(root, ".mindspec", "focus"), []byte(`{"mode":"idle"}`), 0644)
 
-	// With escape hatch, checkout should succeed
-	cmd := exec.Command("git", "checkout", "-b", "feature/bar")
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "MINDSPEC_ALLOW_MAIN=1")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout with escape hatch should succeed: %s: %v", out, err)
+	data, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = root
-	branchOut, _ := cmd.Output()
-	if branch := strings.TrimSpace(string(branchOut)); branch != "feature/bar" {
-		t.Errorf("expected to be on 'feature/bar', got '%s'", branch)
+	content := string(data)
+	if !strings.Contains(content, "post-checkout hook v2") {
+		t.Error("expected v2 hook after upgrade, got:", content)
+	}
+	if strings.Contains(content, "checkout blocked") {
+		t.Error("v2 hook should not contain blocking logic")
 	}
 }
 

@@ -69,64 +69,10 @@ exit 0
 `
 
 const postCheckoutScript = `#!/usr/bin/env bash
-# MindSpec post-checkout hook v1 (Layer 1 enforcement)
-# Prevents the main worktree from checking out non-protected branches.
-# post-checkout receives: $1=prev_ref $2=new_ref $3=is_branch_checkout
-
-# Only act on branch checkouts (flag=1), not file checkouts
-if [ "$3" != "1" ]; then exit 0; fi
-
-# Escape hatch
-if [ "${MINDSPEC_ALLOW_MAIN:-}" = "1" ]; then exit 0; fi
-
-# Only enforce in main worktree (git-common-dir == git-dir means main worktree)
-GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
-COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
-if [ "$GIT_DIR" != "$COMMON_DIR" ]; then exit 0; fi
-
-# Must have mindspec focus file
-MODE_CACHE=".mindspec/focus"
-if [ ! -f "$MODE_CACHE" ]; then exit 0; fi
-
-# Check enforcement config
-CONFIG_FILE=".mindspec/config.yaml"
-if [ -f "$CONFIG_FILE" ]; then
-  if grep -q 'pre_commit_hook.*false' "$CONFIG_FILE" 2>/dev/null; then
-    exit 0
-  fi
-fi
-
-# Get current branch
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-if [ -z "$BRANCH" ]; then exit 0; fi
-
-# Read protected branches
-PROTECTED="main master"
-if [ -f "$CONFIG_FILE" ]; then
-  CUSTOM=$(grep -A5 'protected_branches' "$CONFIG_FILE" 2>/dev/null | grep '^\s*-' | sed 's/^[[:space:]]*-[[:space:]]*//' | tr '\n' ' ')
-  if [ -n "$CUSTOM" ]; then PROTECTED="$CUSTOM"; fi
-fi
-
-# If branch is protected, allow
-for p in $PROTECTED; do
-  if [ "$BRANCH" = "$p" ]; then exit 0; fi
-done
-
-# Find which protected branch to revert to (first one that exists)
-REVERT_TO=""
-for p in $PROTECTED; do
-  if git rev-parse --verify "$p" >/dev/null 2>&1; then
-    REVERT_TO="$p"; break
-  fi
-done
-if [ -z "$REVERT_TO" ]; then exit 0; fi
-
-# Auto-revert: switch back to protected branch
-echo "mindspec: checkout blocked — main worktree must stay on '$REVERT_TO'." >&2
-echo "  Use: git worktree add ../<name> -b $BRANCH" >&2
-echo "  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git checkout $BRANCH" >&2
-git checkout "$REVERT_TO" --quiet 2>/dev/null
-exit 1
+# MindSpec post-checkout hook v2 (no-op — ADR-0019)
+# Branch enforcement is handled by Layer 2 (Claude Code / Copilot hooks).
+# This hook is kept as a no-op placeholder for chaining.
+exit 0
 `
 
 // InstallPreCommit installs the MindSpec pre-commit hook.
@@ -179,8 +125,13 @@ func InstallPostCheckout(root string) error {
 	marker := "# MindSpec post-checkout hook"
 
 	if data, err := os.ReadFile(hookPath); err == nil {
-		if strings.Contains(string(data), marker) {
-			return nil // already installed
+		content := string(data)
+		if strings.Contains(content, marker) {
+			// Detect stale v1 hook (blocking) and re-install as v2 (no-op)
+			if !strings.Contains(content, "post-checkout hook v2") {
+				return os.WriteFile(hookPath, []byte(postCheckoutScript), 0755)
+			}
+			return nil // already installed and current
 		}
 		backupPath := hookPath + ".pre-mindspec"
 		if _, err := os.Stat(backupPath); os.IsNotExist(err) {

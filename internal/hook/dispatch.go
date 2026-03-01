@@ -206,11 +206,11 @@ func WorkflowGuard(inp *Input, st *HookState, enforce bool) Result {
 	}
 }
 
-const blockIdle = "mindspec: blocked — no active work context. All edits must happen on a worktree branch.\n\n" +
+const blockIdle = "mindspec: blocked — no active work context. All edits must happen on a work branch.\n\n" +
 	"Start work via one of:\n" +
+	"  • mindspec next                  — claim a ready bead and create a worktree\n" +
 	"  • mindspec spec-init <NNN-slug>  — new feature (full spec lifecycle)\n" +
-	"  • mindspec bugfix <description>  — bug fix (lightweight branch)\n" +
-	"  • mindspec quick <description>   — minor task (no spec required)"
+	"  • git checkout -b <branch>       — manual branch for ad-hoc work"
 
 const warnExplore = "⚠️ WORKFLOW VIOLATION: Explore Mode is for evaluating ideas, not implementing them. " +
 	"You must stop editing files. Promote to a spec (/ms-explore promote) or dismiss (/ms-explore dismiss). " +

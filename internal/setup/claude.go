@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mindspec/mindspec/internal/hooks"
 )
 
 const mindspecMarker = "<!-- mindspec:managed -->"
@@ -93,7 +95,14 @@ func RunClaude(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 4. Optionally chain bd setup claude
+	// 4. Install/upgrade git hooks (pre-commit, post-checkout)
+	if !check {
+		if err := hooks.InstallAll(root); err != nil {
+			return nil, fmt.Errorf("installing git hooks: %w", err)
+		}
+	}
+
+	// 5. Optionally chain bd setup claude
 	if !check {
 		chainBeadsSetup(r)
 	}

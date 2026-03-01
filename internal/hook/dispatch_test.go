@@ -520,8 +520,8 @@ func TestWorkflowGuard_IdleBlock_ContainsEscapePaths(t *testing.T) {
 	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
 	for _, phrase := range []string{
 		"spec-init",
-		"bugfix",
-		"quick",
+		"mindspec next",
+		"git checkout -b",
 	} {
 		if !contains(r.Message, phrase) {
 			t.Errorf("idle block message should contain %q", phrase)
