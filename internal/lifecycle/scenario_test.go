@@ -520,10 +520,8 @@ func TestScenario_ResumeAfterCrash(t *testing.T) {
 func TestScenario_InvalidTransition(t *testing.T) {
 	root := testRepo(t)
 
-	// Set up idle state explicitly (explore.Dismiss panics on nil focus)
-	must(t, state.WriteFocus(root, &state.Focus{Mode: state.ModeIdle}))
-
-	// Attempting to dismiss when not in explore mode should fail
+	// Attempting to dismiss when not in explore mode should fail, even
+	// when focus is absent (implicit idle).
 	err := explore.Dismiss(root)
 	if err == nil {
 		t.Fatal("expected error dismissing when not in explore mode")

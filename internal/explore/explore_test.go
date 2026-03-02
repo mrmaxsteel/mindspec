@@ -97,6 +97,19 @@ func TestDismiss_RejectsNonExplore(t *testing.T) {
 	}
 }
 
+func TestDismiss_RejectsNoState(t *testing.T) {
+	root := setupTestProject(t)
+	// No focus file exists.
+
+	err := Dismiss(root)
+	if err == nil {
+		t.Fatal("expected error when dismissing without focus state")
+	}
+	if !strings.Contains(err.Error(), `currently "idle"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestPromote_RejectsNonExplore(t *testing.T) {
 	root := setupTestProject(t)
 	state.WriteFocus(root, &state.Focus{Mode: state.ModeIdle})
@@ -106,6 +119,19 @@ func TestPromote_RejectsNonExplore(t *testing.T) {
 		t.Fatal("expected error when promoting from idle mode")
 	}
 	if !strings.Contains(err.Error(), "not in explore mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPromote_RejectsNoState(t *testing.T) {
+	root := setupTestProject(t)
+	// No focus file exists.
+
+	err := Promote(root, "042-test", "")
+	if err == nil {
+		t.Fatal("expected error when promoting without focus state")
+	}
+	if !strings.Contains(err.Error(), `currently "idle"`) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

@@ -247,6 +247,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 51 | 3 | 26.39s | Pass in full-suite run. More infra events than previous baseline, behavior still correct (`explore` + `dismiss`). |
 | 2026-03-01 | FAIL | 47 | 4 | 27.55s | Full-suite rerun: dismiss commands were attempted but only with non-zero exits, so no successful `dismiss` event matched stricter assertions. |
 | 2026-03-02 | FAIL | 25 | 2 | 10.48s | **REGRESSION**: `mindspec explore dismiss` exits 2 (panic), so no successful `explore`/`dismiss` events are recorded. |
+| 2026-03-02 | PASS | 35 | 3 | 13.18s | Fixed nil-focus handling in `explore.Dismiss`/`explore.Promote`; `mindspec explore dismiss` now exits 0 and the scenario passes. |
 
 ### TestLLM_ResumeAfterCrash
 
@@ -397,7 +398,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - 17 scenarios run sequentially with `env -u CLAUDECODE`.
 - 12 PASS (`TestLLM_SingleBead`, `TestLLM_ResumeAfterCrash`, `TestLLM_SpecInit`, `TestLLM_SpecApprove`, `TestLLM_PlanApprove`, `TestLLM_SpecStatus`, `TestLLM_MultipleActiveSpecs`, `TestLLM_StaleWorktree`, `TestLLM_CompleteFromSpecWorktree`, `TestLLM_ApproveSpecFromWorktree`, `TestLLM_ApprovePlanFromWorktree`, `TestLLM_BugfixBranch`), 5 FAIL (`TestLLM_SpecToIdle`, `TestLLM_MultiBeadDeps`, `TestLLM_AbandonSpec`, `TestLLM_InterruptForBug`, `TestLLM_ImplApprove`).
 - Main-branch setup regression remains resolved; failures are now concentrated in runtime behavior and cleanup/state-transition correctness.
-- Highest-impact remaining failures: cleanup leakage in `SpecToIdle`, workflow adherence in `MultiBeadDeps`, `explore dismiss` crash in `AbandonSpec`, missing artifact completion in `InterruptForBug`, and review→idle focus transition mismatch in `ImplApprove`.
+- Highest-impact remaining failures after targeted rerun: cleanup leakage in `SpecToIdle`, workflow adherence in `MultiBeadDeps`, missing artifact completion in `InterruptForBug`, and review→idle focus transition mismatch in `ImplApprove`.
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
@@ -495,10 +496,10 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 **Workaround**: In setup helpers, either commit before moving mode state out of idle, create/use the expected worktree branch first, or allow setup commits via `MINDSPEC_ALLOW_MAIN=1`.
 **Status (2026-03-01)**: Harness setup now applies the explicit escape hatch in `Sandbox.Commit()` (`MINDSPEC_ALLOW_MAIN=1`), restoring deterministic scenario bootstrap without changing runtime guard behavior.
 
-### Explore Dismiss Panic (REGRESSION — 2026-03-02)
-**Problem**: `mindspec explore dismiss` exits with code 2 and a nil-pointer panic in `TestLLM_AbandonSpec`.
-**Workaround**: No reliable agent-side workaround in the current scenario; command-level crash blocks completion.
-**Status (2026-03-02)**: Reproduced in full-suite run (25 events, 2 turns, 10.48s). Needs CLI fix in explore dismiss path.
+### Explore Dismiss Panic (RESOLVED — 2026-03-02)
+**Problem**: `mindspec explore dismiss` exited with code 2 and a nil-pointer panic in `TestLLM_AbandonSpec` when focus state was absent.
+**Workaround**: N/A (fixed in CLI).
+**Status (2026-03-02)**: Fixed by treating missing focus as implicit idle in `internal/explore` mode checks. Targeted rerun passes (35 events, 3 turns, 13.18s).
 
 ### ImplApprove Focus Transition Mismatch (REGRESSION — 2026-03-02)
 **Problem**: `mindspec approve impl` succeeds, but root `.mindspec/focus` remains `review`, failing expected `idle` transition in `TestLLM_ImplApprove`.

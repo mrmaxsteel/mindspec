@@ -7,19 +7,23 @@ import (
 	"github.com/mindspec/mindspec/internal/state"
 )
 
+func modeOrIdle(f *state.Focus) string {
+	if f == nil || f.Mode == "" {
+		return state.ModeIdle
+	}
+	return f.Mode
+}
+
 // Enter validates the current state is idle (or absent) and transitions to explore mode.
 func Enter(root, description string) error {
 	mc, err := state.ReadFocus(root)
 	if err != nil {
 		return fmt.Errorf("reading state: %w", err)
 	}
-	if mc == nil {
-		// No focus file means idle — OK to proceed
-		mc = &state.Focus{Mode: state.ModeIdle}
-	}
 
-	if mc.Mode != state.ModeIdle && mc.Mode != "" {
-		return fmt.Errorf("cannot enter explore mode: currently in %q mode (must be idle)", mc.Mode)
+	mode := modeOrIdle(mc)
+	if mode != state.ModeIdle {
+		return fmt.Errorf("cannot enter explore mode: currently in %q mode (must be idle)", mode)
 	}
 
 	return state.WriteFocus(root, &state.Focus{Mode: state.ModeExplore})
@@ -32,8 +36,9 @@ func Dismiss(root string) error {
 		return fmt.Errorf("reading state: %w", err)
 	}
 
-	if mc.Mode != state.ModeExplore {
-		return fmt.Errorf("cannot dismiss: not in explore mode (currently %q)", mc.Mode)
+	mode := modeOrIdle(mc)
+	if mode != state.ModeExplore {
+		return fmt.Errorf("cannot dismiss: not in explore mode (currently %q)", mode)
 	}
 
 	return state.WriteFocus(root, &state.Focus{Mode: state.ModeIdle})
@@ -47,8 +52,9 @@ func Promote(root, specID, title string) error {
 		return fmt.Errorf("reading state: %w", err)
 	}
 
-	if mc.Mode != state.ModeExplore {
-		return fmt.Errorf("cannot promote: not in explore mode (currently %q)", mc.Mode)
+	mode := modeOrIdle(mc)
+	if mode != state.ModeExplore {
+		return fmt.Errorf("cannot promote: not in explore mode (currently %q)", mode)
 	}
 
 	_, err = specinit.Run(root, specID, title)
