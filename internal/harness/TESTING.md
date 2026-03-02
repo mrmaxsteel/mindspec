@@ -216,6 +216,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 3.25s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` now hits main-branch guard in implement mode. |
 | 2026-03-01 | PASS | 141 | 5 | 45.10s | Fix: harness setup commits now use `MINDSPEC_ALLOW_MAIN=1` escape hatch. Setup regression resolved for this scenario. |
 | 2026-03-01 | FAIL | 75 | 8 | 43.89s | Full-suite rerun: agent stayed in diagnostics/retry flow, never created `greeting.go` and never ran successful `mindspec complete`. |
+| 2026-03-02 | PASS | 107 | 4 | 29.16s | Full-suite rerun after guard tightening: scenario passes again with one retry in commit/complete flow. |
 
 ### TestLLM_SpecToIdle
 
@@ -232,6 +233,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL (new assertions) | 377 | 22 | 3m8s | Added git state assertions (branch cleanup, worktree removal, CWD contains .worktrees/). Existing assertions pass (explore+promote, next, complete all ran). New assertions caught: spec/ and bead/ branches not deleted, worktree not removed. Agent stuck retrying `complete` from spec worktree CWD (not bead worktree). 59.1% fwd ratio (13 fwd / 9 retry). Root cause: guidance gap — agent doesn't know to cd into bead worktree. |
 | 2026-03-01 | FAIL | 452 | 53 | 4m20s | **REGRESSION**: lifecycle advanced but cleanup assertions failed again (spec/* and bead/* branches + worktree left behind). |
 | 2026-03-01 | FAIL | 485 | 25 | 199.62s | Full-suite rerun: still no successful `spec-init`/`explore promote` milestone and cleanup assertions fail (`spec/*`, `bead/*`, and spec worktree remain). |
+| 2026-03-02 | FAIL | 430 | 22 | 2m48.19s | Full-suite rerun: lifecycle progressed, but cleanup assertions still fail (`spec/*`, `bead/*`, and spec worktree remain). |
 
 ### TestLLM_AbandonSpec
 
@@ -244,6 +246,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 35 | 3 | 14s | Full suite run: stable, 100% fwd ratio |
 | 2026-03-01 | PASS | 51 | 3 | 26.39s | Pass in full-suite run. More infra events than previous baseline, behavior still correct (`explore` + `dismiss`). |
 | 2026-03-01 | FAIL | 47 | 4 | 27.55s | Full-suite rerun: dismiss commands were attempted but only with non-zero exits, so no successful `dismiss` event matched stricter assertions. |
+| 2026-03-02 | FAIL | 25 | 2 | 10.48s | **REGRESSION**: `mindspec explore dismiss` exits 2 (panic), so no successful `explore`/`dismiss` events are recorded. |
 
 ### TestLLM_ResumeAfterCrash
 
@@ -254,6 +257,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 86 | 3 | 33s | Full suite run: stable, 100% fwd ratio |
 | 2026-03-01 | FAIL | - | - | 2.15s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | PASS | 138 | 6 | 43.81s | Full-suite rerun pass: resume-after-crash flow completed under current setup and assertions. |
+| 2026-03-02 | PASS | 111 | 7 | 45.59s | Full-suite rerun pass; scenario still completes after one retry in the complete/commit flow. |
 
 ### TestLLM_InterruptForBug
 
@@ -262,6 +266,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 81 | 3 | 26s | First recorded run: 100% fwd ratio, agent fixed bug + created feature + completed bead |
 | 2026-03-01 | FAIL | - | - | 2.12s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | PASS | 180 | 7 | 61.76s | Full-suite rerun pass: interrupt-for-bug scenario still completes with current assertions. |
+| 2026-03-02 | FAIL | 148 | 12 | 1m13.62s | **REGRESSION**: run reached `mindspec complete`, but `feature.go` was never created so artifact assertion failed. |
 
 ### TestLLM_MultiBeadDeps
 
@@ -270,6 +275,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-02-28 | PASS | 230 | 6 | 66s | First recorded run: completed 2/3 beads within 30 turns, 66.7% fwd (2 retries on complete due to dirty tree), all 3 files created |
 | 2026-03-01 | FAIL | - | - | 2.46s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | FAIL | 228 | 7 | 69.37s | Full-suite rerun: scenario advanced, but artifact assertions failed (`formatter.go` and `formatter_test.go` not found at expected location). |
+| 2026-03-02 | FAIL | 131 | 12 | 1m15.11s | Full-suite rerun: max turns reached without successful `mindspec next`; no `.worktrees/` CWD observed. |
 
 ### TestLLM_SpecInit
 
@@ -278,6 +284,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 57 | 6 | 37s | Baseline: agent ran spec-init, created worktree + branch. 100% fwd ratio. Hit max turns (15) while writing spec content. |
 | 2026-03-01 | FAIL | 49 | 3 | 20.39s | **REGRESSION**: assertions failed after run (`.mindspec/focus` missing in repo root after spec-init). |
 | 2026-03-01 | FAIL | 56 | 5 | 29.78s | Full-suite rerun: `mindspec spec-init` never succeeded (exit non-zero) and root `.mindspec/focus` assertion remains red. |
+| 2026-03-02 | PASS | 54 | 3 | 28.96s | Full-suite rerun pass: `mindspec spec-init` succeeded and focus/worktree assertions held. |
 
 ### TestLLM_SpecApprove
 
@@ -287,6 +294,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 68 | 5 | 35s | Fixed setup: realistic worktree structure. Removed misleading `assertBranchIs(main)`. 100% fwd ratio. |
 | 2026-03-01 | FAIL | - | - | 2.22s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in spec mode. |
 | 2026-03-01 | FAIL | 74 | 6 | 37.52s | Full-suite rerun: scenario remained in `spec` mode; expected transition to `plan` did not occur. |
+| 2026-03-02 | PASS | 59 | 4 | 40.16s | Full-suite rerun pass: `approve spec` succeeded and scenario met transition assertions. |
 
 ### TestLLM_PlanApprove
 
@@ -297,6 +305,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 90 | 2 | 23s | Fixed assertions: removed misleading `assertBranchIs(main)`, added `assertHasWorktrees`. Agent CWD enters bead worktree. 100% fwd ratio. |
 | 2026-03-01 | FAIL | - | - | 2.07s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in plan mode. |
 | 2026-03-01 | FAIL | 148 | 3 | 46.93s | Full-suite rerun: `approve plan`/`next` activity occurred, but focus mode stayed `plan` instead of expected `implement`. |
+| 2026-03-02 | PASS | 155 | 6 | 43.84s | Full-suite rerun pass with higher retries/events; `approve plan` plus `next` completed successfully. |
 
 ### TestLLM_ImplApprove
 
@@ -306,6 +315,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 58 | 3 | 22s | Fixed setup: realistic spec worktree (not just branch), focus.activeWorktree set. Added `assertFileExists(done.go)` to verify merge. 100% fwd ratio. |
 | 2026-03-01 | FAIL | - | - | 2.67s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in review mode. |
 | 2026-03-01 | PASS | 69 | 3 | 26.33s | Full-suite rerun pass: review-to-idle transition and merge assertions still hold. |
+| 2026-03-02 | FAIL | 101 | 5 | 31.75s | **REGRESSION**: `approve impl` command succeeded, but focus remained `review` instead of transitioning to `idle`. |
 
 ### TestLLM_SpecStatus
 
@@ -315,6 +325,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 33 | 2 | 17s | Fixed setup: realistic spec + bead worktrees, branches, focus.activeWorktree. Added branch/worktree preservation assertions. 100% fwd ratio. |
 | 2026-03-01 | FAIL | - | - | 2.39s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | PASS | 33 | 2 | 19.25s | Full-suite rerun pass: read-only status checks and branch/worktree preservation assertions still pass. |
+| 2026-03-02 | PASS | 23 | 3 | 13.51s | Full-suite rerun pass with lower events/time while preserving status assertions. |
 
 ### TestLLM_MultipleActiveSpecs
 
@@ -324,6 +335,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.26s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | FAIL | 108 | 3 | 27.85s | Added explicit `--spec` assertion: agent completed bead successfully but never used `--spec` on `mindspec complete`. This indicates current product path can disambiguate without the flag, so scenario intent/assertion may no longer match runtime behavior. |
 | 2026-03-01 | FAIL | 169 | 6 | 51.79s | Full-suite rerun: bead closed successfully, but no successful `mindspec complete --spec...` invocation (new assertion still failing). |
+| 2026-03-02 | PASS | 179 | 8 | 51.33s | Full-suite rerun pass; scenario succeeds but retry overhead remains high (37.5% forward ratio). |
 
 ### TestLLM_StaleWorktree
 
@@ -332,6 +344,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 70 | 7 | 42s | Baseline: agent recovered from missing worktree by manually closing the bead via `bd close` and resetting state with `mindspec state set --mode idle`. 71.4% fwd ratio (5 fwd / 2 retry). `mindspec complete` failed (stale worktree), agent worked around it. |
 | 2026-03-01 | FAIL | - | - | 2.13s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | FAIL | 126 | 8 | 53.00s | Full-suite rerun: stale-worktree recovery attempts happened, but no successful `mindspec complete` event was recorded. |
+| 2026-03-02 | PASS | 101 | 5 | 47.28s | Full-suite rerun pass via documented fallback (`state set --mode idle` + `bd close`) after `complete` failure. |
 
 ### TestLLM_CompleteFromSpecWorktree
 
@@ -339,6 +352,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | FAIL | - | - | 2.48s | Baseline in full-suite run: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | FAIL | 152 | 2 | 35.91s | Full-suite rerun: scenario progressed further, but never produced a successful `mindspec complete`. |
+| 2026-03-02 | PASS | 132 | 9 | 49.42s | Full-suite rerun pass: successful `mindspec complete` observed from spec-worktree context. |
 
 ### TestLLM_ApproveSpecFromWorktree
 
@@ -346,6 +360,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | FAIL | - | - | 2.18s | Baseline in full-suite run: setup failed before agent run. `sandbox.Commit()` blocked on main in spec mode. |
 | 2026-03-01 | FAIL | 40 | 4 | 29.10s | Full-suite rerun: repeated `mindspec approve spec 001-greeting` attempts all exited non-zero; no successful approval event. |
+| 2026-03-02 | PASS | 55 | 6 | 44.53s | Full-suite rerun pass: successful `approve spec` recorded in worktree-only artifact context. |
 
 ### TestLLM_ApprovePlanFromWorktree
 
@@ -353,6 +368,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-01 | FAIL | - | - | 2.22s | Baseline in full-suite run: setup failed before agent run. `sandbox.Commit()` blocked on main in plan mode. |
 | 2026-03-01 | PASS | 104 | 4 | 27.41s | Full-suite rerun pass: worktree-context `approve plan` assertion now succeeds end-to-end. |
+| 2026-03-02 | PASS | 61 | 4 | 24.56s | Full-suite rerun pass; stable behavior with fewer events than prior pass. |
 
 ### TestLLM_BugfixBranch
 
@@ -367,6 +383,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | 2/3 PASS | 43-46 | 2-4 | 22-27s | Reliability (3 runs). 2 pass, 1 fail (Haiku skipped guidance, edited directly). ~67% reliability with guidance-only approach on Haiku. |
 | 2026-03-01 | FAIL | 23 | 2 | 32.85s | Regression check: agent fixed code but never created/pushed a branch or opened PR (`git push`/`gh pr` missing). |
 | 2026-03-01 | PASS | 47 | 4 | 42.11s | Full-suite rerun pass for current prompt contract; branch/PR workflow assertions succeeded. |
+| 2026-03-02 | PASS | 44 | 4 | 27.27s | Full-suite rerun pass: agent created branch/worktree, pushed, and opened PR successfully. |
 
 ### Session Summary — 2026-03-01 Full Suite
 
@@ -374,6 +391,13 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - 6 PASS (`TestLLM_ApprovePlanFromWorktree`, `TestLLM_BugfixBranch`, `TestLLM_ImplApprove`, `TestLLM_InterruptForBug`, `TestLLM_ResumeAfterCrash`, `TestLLM_SpecStatus`), 11 FAIL.
 - Setup-on-main regression is resolved; remaining failures are runtime behavior/assertion mismatches rather than sandbox bootstrap failures.
 - Highest-impact remaining failures: completion/approval success assertions (`SingleBead`, `AbandonSpec`, `StaleWorktree`, `CompleteFromSpecWorktree`, `ApproveSpecFromWorktree`, `MultipleActiveSpecs`), mode transition assertions (`SpecApprove`, `PlanApprove`), artifact/focus assertions (`MultiBeadDeps`, `SpecInit`), and cleanup assertions (`SpecToIdle`).
+
+### Session Summary — 2026-03-02 Full Suite
+
+- 17 scenarios run sequentially with `env -u CLAUDECODE`.
+- 12 PASS (`TestLLM_SingleBead`, `TestLLM_ResumeAfterCrash`, `TestLLM_SpecInit`, `TestLLM_SpecApprove`, `TestLLM_PlanApprove`, `TestLLM_SpecStatus`, `TestLLM_MultipleActiveSpecs`, `TestLLM_StaleWorktree`, `TestLLM_CompleteFromSpecWorktree`, `TestLLM_ApproveSpecFromWorktree`, `TestLLM_ApprovePlanFromWorktree`, `TestLLM_BugfixBranch`), 5 FAIL (`TestLLM_SpecToIdle`, `TestLLM_MultiBeadDeps`, `TestLLM_AbandonSpec`, `TestLLM_InterruptForBug`, `TestLLM_ImplApprove`).
+- Main-branch setup regression remains resolved; failures are now concentrated in runtime behavior and cleanup/state-transition correctness.
+- Highest-impact remaining failures: cleanup leakage in `SpecToIdle`, workflow adherence in `MultiBeadDeps`, `explore dismiss` crash in `AbandonSpec`, missing artifact completion in `InterruptForBug`, and review→idle focus transition mismatch in `ImplApprove`.
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
@@ -470,6 +494,16 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 **Problem**: Many scenarios call `sandbox.Commit()` after setting non-idle mode state. Current guard rules reject commits on `main` in spec/plan/implement/review, so setup fails before agent execution.
 **Workaround**: In setup helpers, either commit before moving mode state out of idle, create/use the expected worktree branch first, or allow setup commits via `MINDSPEC_ALLOW_MAIN=1`.
 **Status (2026-03-01)**: Harness setup now applies the explicit escape hatch in `Sandbox.Commit()` (`MINDSPEC_ALLOW_MAIN=1`), restoring deterministic scenario bootstrap without changing runtime guard behavior.
+
+### Explore Dismiss Panic (REGRESSION — 2026-03-02)
+**Problem**: `mindspec explore dismiss` exits with code 2 and a nil-pointer panic in `TestLLM_AbandonSpec`.
+**Workaround**: No reliable agent-side workaround in the current scenario; command-level crash blocks completion.
+**Status (2026-03-02)**: Reproduced in full-suite run (25 events, 2 turns, 10.48s). Needs CLI fix in explore dismiss path.
+
+### ImplApprove Focus Transition Mismatch (REGRESSION — 2026-03-02)
+**Problem**: `mindspec approve impl` succeeds, but root `.mindspec/focus` remains `review`, failing expected `idle` transition in `TestLLM_ImplApprove`.
+**Workaround**: Manual `mindspec state set --mode=idle` can recover state, but this should not be required.
+**Status (2026-03-02)**: Reproduced in full-suite run (101 events, 5 turns, 31.75s). Likely write-root mismatch between local/worktree focus targets.
 
 ### mindspec complete CWD Guard
 **Problem**: Agent runs from `sandbox.Root` (main repo) but `mindspec complete` requires CWD in the bead worktree.
