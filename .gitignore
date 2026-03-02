@@ -46,3 +46,7 @@ beads/
 # local harness run artifacts
 .harness_runs/
 .harness-runs/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
