@@ -280,6 +280,7 @@ Lifecycle state is **derived per-spec from the spec-lifecycle molecule's step st
 
 ## See Also
 
+- [WORKFLOW-STATE-MACHINE.md](WORKFLOW-STATE-MACHINE.md) — Exhaustive allowed/disallowed transitions and guard map
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Core system design
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
 - [policies.yml](../../architecture/policies.yml) — Machine-checkable policies

@@ -167,6 +167,7 @@ v1 emits structured events (minimal) for future "Agent Mind Visualization":
 
 ## See Also
 
+- [WORKFLOW-STATE-MACHINE.md](WORKFLOW-STATE-MACHINE.md) — Detailed workflow state machine, transition matrix, and guard rules
 - [mindspec-v1-spec.md](../archive/mindspec-v1-spec.md) — Original product specification (archived)
 - [MODES.md](MODES.md) — Mode definitions and transitions
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming

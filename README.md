@@ -114,6 +114,7 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 | **Full workflow with Codex** | [Codex guide](.mindspec/docs/user/guides/codex.md) |
 | **Full workflow with Copilot** | [Copilot guide](.mindspec/docs/user/guides/copilot.md) |
 | **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/user/guides/agentmind.md) |
+| **Workflow state machine (allowed/disallowed transitions)** | [WORKFLOW-STATE-MACHINE.md](.mindspec/docs/core/WORKFLOW-STATE-MACHINE.md) |
 | **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
 
 ## Project Structure

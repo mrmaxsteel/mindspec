@@ -22,6 +22,12 @@ No active worktree is recorded for this bead. Run `mindspec next` before writing
 
 Do NOT create manual workflow branches/worktrees in implement mode (`git checkout -b ...`, `git worktree add ...`).
 If `mindspec complete` reports another ready bead, run `mindspec next` immediately before further implementation.
+If no active worktree is recorded, run `mindspec next` before any code edits or commits.
+If the user asks for an interrupt fix (urgent bug + continue feature), do both:
+1. Apply and commit the urgent fix.
+2. Resume bead scope and produce the requested feature artifact(s).
+Do not stop after step 1.
+Never report completion unless required files exist and `mindspec complete` succeeds.
 
 ## Permitted Actions
 

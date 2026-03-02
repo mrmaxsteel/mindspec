@@ -45,7 +45,11 @@ No specs found in `.mindspec/docs/specs/`.
 
 ## Next Action
 
-**IMPORTANT — Do this NOW in your first message to the user (do not just report these instructions):**
+If the user already gave a concrete task, execute it immediately.
+- Do NOT greet or ask what they'd like to work on first.
+- Do NOT claim success unless commands actually ran and exited 0.
+
+If the user did NOT give a concrete task, do this in your first message:
 
 1. Greet the user
 2. Suggest these options directly:

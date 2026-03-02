@@ -220,6 +220,11 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | PASS | 94 | 3 | 26.54s | Regression check after `approve impl` focus-write fix: still green, one expected commit/complete retry remains. |
 | 2026-03-02 | PASS | 102 | 3 | 27.61s | Regression check after `mindspec-ce5b` worktree-anchor fix: remains green with one expected retry before final `mindspec complete`. |
 | 2026-03-02 | PASS | 91 | 3 | 24.69s | Regression check for `mindspec-n9j7`: implement guidance + pre-commit messaging changes still keep SingleBead green. |
+| 2026-03-02 | FAIL | 142 | 5 | 42.58s | Full-suite rerun: agent created and staged `greeting.go` but never reached successful `mindspec complete` before max turns. |
+| 2026-03-02 | PASS | 129 | 7 | 67.16s | Hardened setup to start with active bead worktree + imperative prompt; targeted rerun passes. |
+| 2026-03-02 | PASS | 141 | 4 | 54.12s | Final full-suite verification after setup hardening remains green. |
+| 2026-03-02 | FAIL | 32 | 2 | 15.27s | De-tautologized prompt (no explicit complete command) was too open: agent used `bd close` directly instead of lifecycle completion. |
+| 2026-03-02 | PASS | 173 | 3 | 44.90s | Prompt revised to require lifecycle end-state (review mode) without naming commands; agent discovered completion path and passed. |
 
 ### TestLLM_SpecToIdle
 
@@ -239,6 +244,10 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | FAIL | 430 | 22 | 2m48.19s | Full-suite rerun: lifecycle progressed, but cleanup assertions still fail (`spec/*`, `bead/*`, and spec worktree remain). |
 | 2026-03-02 | FAIL | 545 | 35 | 3m54.61s | Baseline for `mindspec-ce5b`: recursive bead worktree nesting from CWD-sensitive `mindspec next`, plus `approve impl` retries, left `spec/*`, `bead/*`, and worktrees behind. |
 | 2026-03-02 | PASS | 416 | 20 | 2m25.28s | Fix: `next.EnsureWorktree` now anchors worktree creation to spec worktree/main root (not caller CWD). Recursive nesting stopped and cleanup assertions passed. |
+| 2026-03-02 | FAIL | 506 | 26 | 3m21.03s | Full-suite rerun after SingleBead hardening: lifecycle advanced but cleanup assertions failed (`spec/*`, `bead/*`, worktrees remained) after max turns. |
+| 2026-03-02 | PASS | 675 | 28 | 4m10.23s | Increased MaxTurns 75->100 and clarified prompt end-state; targeted rerun completed cleanup and returned to idle. |
+| 2026-03-02 | PASS | 530 | 33 | 4m02.18s | Final full-suite verification remains green under the higher turn budget. |
+| 2026-03-02 | FAIL | 437 | 34 | 3m28.77s | De-tautologized full-suite validation: lifecycle progressed but strict cleanup assertions failed again (`spec/*`, `bead/*`, worktrees remained). |
 
 ### TestLLM_AbandonSpec
 
@@ -274,6 +283,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 180 | 7 | 61.76s | Full-suite rerun pass: interrupt-for-bug scenario still completes with current assertions. |
 | 2026-03-02 | FAIL | 148 | 12 | 1m13.62s | **REGRESSION**: run reached `mindspec complete`, but `feature.go` was never created so artifact assertion failed. |
 | 2026-03-02 | PASS | 156 | 8 | 57.97s | `mindspec-n9j7` validation: guidance/hook updates plus artifact assertion hardened to accept root or worktree output; scenario completes successfully. |
+| 2026-03-02 | FAIL | 140 | 8 | 1m02.81s | De-tautologized full-suite validation: agent handled interrupts but never produced `feature.go`; artifact assertion failed. |
 
 ### TestLLM_MultiBeadDeps
 
@@ -345,6 +355,11 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | 108 | 3 | 27.85s | Added explicit `--spec` assertion: agent completed bead successfully but never used `--spec` on `mindspec complete`. This indicates current product path can disambiguate without the flag, so scenario intent/assertion may no longer match runtime behavior. |
 | 2026-03-01 | FAIL | 169 | 6 | 51.79s | Full-suite rerun: bead closed successfully, but no successful `mindspec complete --spec...` invocation (new assertion still failing). |
 | 2026-03-02 | PASS | 179 | 8 | 51.33s | Full-suite rerun pass; scenario succeeds but retry overhead remains high (37.5% forward ratio). |
+| 2026-03-02 | FAIL | 151 | 5 | 57.41s | Full-suite rerun: no successful `mindspec complete --spec ...`; artifact/complete assertions failed. |
+| 2026-03-02 | PASS | 62 | 4 | 31.16s | Hardened setup with active bead worktree (while keeping activeSpec unset) + imperative prompt; targeted rerun passes and uses `--spec`. |
+| 2026-03-02 | PASS | 62 | 2 | 25.62s | Final full-suite verification remains green with successful `mindspec complete --spec ...`. |
+| 2026-03-02 | FAIL | 145 | 13 | 81.71s | De-tautologized prompt v1 (too open) regressed disambiguation completion: no successful `mindspec complete --spec ...` observed. |
+| 2026-03-02 | PASS | 203 | 7 | 72.26s | Prompt revised to lifecycle end-state (001-alpha to review, 002-beta unchanged, no `bd close` shortcut) restored `--spec` completion path without command-level prescription. |
 
 ### TestLLM_StaleWorktree
 
@@ -394,6 +409,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | 23 | 2 | 32.85s | Regression check: agent fixed code but never created/pushed a branch or opened PR (`git push`/`gh pr` missing). |
 | 2026-03-01 | PASS | 47 | 4 | 42.11s | Full-suite rerun pass for current prompt contract; branch/PR workflow assertions succeeded. |
 | 2026-03-02 | PASS | 44 | 4 | 27.27s | Full-suite rerun pass: agent created branch/worktree, pushed, and opened PR successfully. |
+| 2026-03-02 | FAIL | 23 | 2 | 13.47s | De-tautologized full-suite validation: agent fixed on main and exited without branch/push/PR workflow (`git push`/`gh pr` missing). |
 
 ### Session Summary — 2026-03-01 Full Suite
 
@@ -408,6 +424,26 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - 12 PASS (`TestLLM_SingleBead`, `TestLLM_ResumeAfterCrash`, `TestLLM_SpecInit`, `TestLLM_SpecApprove`, `TestLLM_PlanApprove`, `TestLLM_SpecStatus`, `TestLLM_MultipleActiveSpecs`, `TestLLM_StaleWorktree`, `TestLLM_CompleteFromSpecWorktree`, `TestLLM_ApproveSpecFromWorktree`, `TestLLM_ApprovePlanFromWorktree`, `TestLLM_BugfixBranch`), 5 FAIL (`TestLLM_SpecToIdle`, `TestLLM_MultiBeadDeps`, `TestLLM_AbandonSpec`, `TestLLM_InterruptForBug`, `TestLLM_ImplApprove`).
 - Main-branch setup regression remains resolved; failures are now concentrated in runtime behavior and cleanup/state-transition correctness.
 - Highest-impact remaining failures after targeted rerun: cleanup leakage in `SpecToIdle`, workflow adherence in `MultiBeadDeps`, missing artifact completion in `InterruptForBug`, and review→idle focus transition mismatch in `ImplApprove`.
+
+### Session Summary — 2026-03-02 Final Full Suite (mindspec-kt01)
+
+- 17 scenarios run sequentially with `env -u CLAUDECODE`.
+- 17 PASS, 0 FAIL.
+- Stabilization changes in this session:
+  - `ScenarioSingleBead`: setup now starts with active bead worktree; prompt made imperative.
+  - `ScenarioMultipleActiveSpecs`: setup now includes active bead worktree while preserving `--spec` disambiguation requirement; prompt made imperative; artifact assertion accepts worktree evidence.
+  - `ScenarioSpecToIdle`: MaxTurns increased from 75 to 100 with explicit idle/cleanup end-state wording.
+- Final full-suite command: `env -u CLAUDECODE go test ./internal/harness/ -v -run '^TestLLM_' -timeout 180m -count=1` (log: `/tmp/mindspec-kt01-fullsuite-final.log`).
+
+### Session Summary — 2026-03-02 De-tautologized Full Suite Validation
+
+- 17 scenarios run sequentially with `env -u CLAUDECODE`.
+- 14 PASS, 3 FAIL.
+- Failing scenarios:
+  - `TestLLM_SpecToIdle`: cleanup assertions failed (`spec/*`, `bead/*`, worktrees remained).
+  - `TestLLM_InterruptForBug`: no observable `feature.go` artifact.
+  - `TestLLM_BugfixBranch`: no non-main branch workflow (`git push`/`gh pr` absent).
+- Command/log: `env -u CLAUDECODE go test ./internal/harness/ -v -run '^TestLLM_' -timeout 180m -count=1` (`/tmp/mindspec-kt01-fullsuite-detautologized.log`).
 
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
