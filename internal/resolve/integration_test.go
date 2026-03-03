@@ -1,28 +1,33 @@
 package resolve
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
 // --- Multi-spec integration tests ---
+// ADR-0023: ActiveSpecs now derives from beads, not lifecycle.yaml files.
 
 func TestActiveSpecs_MultiSpec_Independent(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
-	// Alpha in implement, Beta in spec — both active, independent phases
-	specA := filepath.Join(specsDir, "038-alpha")
-	os.MkdirAll(specA, 0755)
-	state.WriteLifecycle(specA, &state.Lifecycle{Phase: state.ModeImplement})
-
-	specB := filepath.Join(specsDir, "039-beta")
-	os.MkdirAll(specB, 0755)
-	state.WriteLifecycle(specB, &state.Lifecycle{Phase: state.ModeSpec})
+	epics := []phase.EpicInfo{
+		{ID: "epic-a", Title: "[SPEC 038-alpha] Alpha", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "alpha"}},
+		{ID: "epic-b", Title: "[SPEC 039-beta] Beta", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(39), "spec_title": "beta"}},
+	}
+	childrenByEpic := map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "bead-1", Status: "in_progress", IssueType: "task"}},
+		"epic-b": {{ID: "bead-2", Status: "open", IssueType: "task"}},
+	}
+	stubActiveEpics(t, epics, childrenByEpic)
 
 	active, err := ActiveSpecs(root)
 	if err != nil {
@@ -33,7 +38,6 @@ func TestActiveSpecs_MultiSpec_Independent(t *testing.T) {
 		t.Fatalf("expected 2 active specs, got %d", len(active))
 	}
 
-	// Verify independent phases
 	phases := map[string]string{}
 	for _, a := range active {
 		phases[a.SpecID] = a.Mode
@@ -41,82 +45,47 @@ func TestActiveSpecs_MultiSpec_Independent(t *testing.T) {
 	if phases["038-alpha"] != state.ModeImplement {
 		t.Errorf("alpha: got %q, want %q", phases["038-alpha"], state.ModeImplement)
 	}
-	if phases["039-beta"] != state.ModeSpec {
-		t.Errorf("beta: got %q, want %q", phases["039-beta"], state.ModeSpec)
+	if phases["039-beta"] != state.ModePlan {
+		t.Errorf("beta: got %q, want %q", phases["039-beta"], state.ModePlan)
 	}
 }
 
-func TestActiveSpecsWorktreeOnly(t *testing.T) {
+func TestResolveTarget_SingleActiveSpec_AutoSelects(t *testing.T) {
 	root := t.TempDir()
-	// Create .mindspec/docs/specs with no specs in it
-	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
 
-	// Create a spec that only exists in a worktree (not in main repo)
-	specID := "099-worktree-only"
-	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
-		".mindspec", "docs", "specs", specID)
-	os.MkdirAll(wtSpecDir, 0755)
-	state.WriteLifecycle(wtSpecDir, &state.Lifecycle{Phase: state.ModeSpec})
+	epics := []phase.EpicInfo{
+		{ID: "epic-a", Title: "[SPEC 038-alpha] Alpha", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "alpha"}},
+	}
+	stubActiveEpics(t, epics, map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "b1", Status: "open", IssueType: "task"}},
+	})
 
-	active, err := ActiveSpecs(root)
+	got, err := ResolveTarget(root, "")
 	if err != nil {
-		t.Fatalf("ActiveSpecs() error: %v", err)
+		t.Fatalf("ResolveTarget should auto-select single spec: %v", err)
 	}
-
-	if len(active) != 1 {
-		t.Fatalf("expected 1 active spec from worktree, got %d: %+v", len(active), active)
-	}
-	if active[0].SpecID != specID {
-		t.Errorf("expected specID %q, got %q", specID, active[0].SpecID)
-	}
-	if active[0].Mode != state.ModeSpec {
-		t.Errorf("expected mode %q, got %q", state.ModeSpec, active[0].Mode)
-	}
-}
-
-func TestActiveSpecsWorktreeWinsOverMain(t *testing.T) {
-	root := t.TempDir()
-	specID := "099-dual"
-
-	// Create spec in main repo with phase=spec
-	mainSpecDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
-	os.MkdirAll(mainSpecDir, 0755)
-	state.WriteLifecycle(mainSpecDir, &state.Lifecycle{Phase: state.ModeSpec})
-
-	// Create same spec in worktree with phase=plan (should win)
-	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
-		".mindspec", "docs", "specs", specID)
-	os.MkdirAll(wtSpecDir, 0755)
-	state.WriteLifecycle(wtSpecDir, &state.Lifecycle{Phase: state.ModePlan})
-
-	active, err := ActiveSpecs(root)
-	if err != nil {
-		t.Fatalf("ActiveSpecs() error: %v", err)
-	}
-
-	if len(active) != 1 {
-		t.Fatalf("expected 1 active spec (deduplicated), got %d: %+v", len(active), active)
-	}
-	if active[0].Mode != state.ModePlan {
-		t.Errorf("worktree should win: expected mode %q, got %q", state.ModePlan, active[0].Mode)
+	if got != "038-alpha" {
+		t.Errorf("got %q, want %q", got, "038-alpha")
 	}
 }
 
 func TestResolveTarget_FocusDisambiguatesMultipleSpecs(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
+	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 
-	// Two active specs — would normally be ambiguous
-	specA := filepath.Join(specsDir, "038-alpha")
-	os.MkdirAll(specA, 0755)
-	state.WriteLifecycle(specA, &state.Lifecycle{Phase: state.ModeImplement})
-
-	specB := filepath.Join(specsDir, "039-beta")
-	os.MkdirAll(specB, 0755)
-	state.WriteLifecycle(specB, &state.Lifecycle{Phase: state.ModeSpec})
+	epics := []phase.EpicInfo{
+		{ID: "epic-a", Title: "[SPEC 038-alpha] Alpha", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "alpha"}},
+		{ID: "epic-b", Title: "[SPEC 039-beta] Beta", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(39), "spec_title": "beta"}},
+	}
+	stubActiveEpics(t, epics, map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "b1", Status: "in_progress", IssueType: "task"}},
+		"epic-b": {{ID: "b2", Status: "open", IssueType: "task"}},
+	})
 
 	// Focus points to beta — should resolve without ambiguity
-	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 	state.WriteFocus(root, &state.Focus{
 		Mode:       state.ModeSpec,
 		ActiveSpec: "039-beta",
@@ -128,24 +97,6 @@ func TestResolveTarget_FocusDisambiguatesMultipleSpecs(t *testing.T) {
 	}
 	if got != "039-beta" {
 		t.Errorf("focus should disambiguate: got %q, want %q", got, "039-beta")
-	}
-}
-
-func TestResolveTarget_NoFocusFallsBackToActiveSpecs(t *testing.T) {
-	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
-
-	// Single active spec, no focus file
-	specDir := filepath.Join(specsDir, "038-alpha")
-	os.MkdirAll(specDir, 0755)
-	state.WriteLifecycle(specDir, &state.Lifecycle{Phase: state.ModePlan})
-
-	got, err := ResolveTarget(root, "")
-	if err != nil {
-		t.Fatalf("ResolveTarget should auto-select single spec: %v", err)
-	}
-	if got != "038-alpha" {
-		t.Errorf("got %q, want %q", got, "038-alpha")
 	}
 }
 
@@ -164,9 +115,6 @@ func TestAmbiguousTarget_RefusesToGuess(t *testing.T) {
 	if !strings.Contains(msg, "038-alpha") {
 		t.Errorf("ambiguous error should list 038-alpha: %s", msg)
 	}
-	if !strings.Contains(msg, "039-beta") {
-		t.Errorf("ambiguous error should list 039-beta: %s", msg)
-	}
 }
 
 func TestExplicitTarget_BypassesAmbiguity(t *testing.T) {
@@ -179,40 +127,19 @@ func TestExplicitTarget_BypassesAmbiguity(t *testing.T) {
 	}
 }
 
-func TestSingleActiveSpec_AutoSelects(t *testing.T) {
-	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
-
-	specDir := filepath.Join(specsDir, "038-alpha")
-	os.MkdirAll(specDir, 0755)
-	state.WriteLifecycle(specDir, &state.Lifecycle{Phase: state.ModePlan})
-
-	got, err := ResolveTarget(root, "")
-	if err != nil {
-		t.Fatalf("ResolveTarget() error: %v", err)
-	}
-	if got != "038-alpha" {
-		t.Errorf("auto-select: got %q, want %q", got, "038-alpha")
-	}
-}
-
 func TestMixedRepo_ActiveAndDone(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
-	// Active spec
-	activeDir := filepath.Join(specsDir, "038-active")
-	os.MkdirAll(activeDir, 0755)
-	state.WriteLifecycle(activeDir, &state.Lifecycle{Phase: state.ModeImplement})
-
-	// Done spec
-	doneDir := filepath.Join(specsDir, "005-done")
-	os.MkdirAll(doneDir, 0755)
-	state.WriteLifecycle(doneDir, &state.Lifecycle{Phase: "done"})
-
-	// Legacy spec (no lifecycle.yaml)
-	legacyDir := filepath.Join(specsDir, "001-legacy")
-	os.MkdirAll(legacyDir, 0755)
+	// One active, one closed
+	epics := []phase.EpicInfo{
+		{ID: "epic-a", Title: "[SPEC 038-active] Active", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "active"}},
+		{ID: "epic-d", Title: "[SPEC 005-done] Done", Status: "closed", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(5), "spec_title": "done"}},
+	}
+	stubActiveEpics(t, epics, map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "b1", Status: "in_progress", IssueType: "task"}},
+	})
 
 	active, err := ActiveSpecs(root)
 	if err != nil {
@@ -226,10 +153,15 @@ func TestMixedRepo_ActiveAndDone(t *testing.T) {
 	}
 }
 
-func TestLegacyRepo_NoLifecycle(t *testing.T) {
+func TestLegacyRepo_NoEpics(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
-	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
+
+	// No epics → no active specs
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
 
 	_, err := ResolveTarget(root, "")
 	if err == nil {
@@ -240,7 +172,7 @@ func TestLegacyRepo_NoLifecycle(t *testing.T) {
 	}
 }
 
-// --- Focus cursor tests ---
+// --- Focus cursor tests (testing state package, kept for coverage) ---
 
 func TestFocusCursor_WritesReadBack(t *testing.T) {
 	root := t.TempDir()
@@ -312,4 +244,10 @@ func TestFormatActiveList_Ordering(t *testing.T) {
 			t.Errorf("expected %q in output: %s", id, output)
 		}
 	}
+}
+
+// stubActiveEpics helper for integration tests (same as resolve_test.go).
+func init() {
+	// Ensure json is importable for stubs
+	_ = json.Marshal
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/resolve"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
@@ -86,33 +87,40 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			return err
 		}
 
-		// Try resolver-based state derivation
+		// ADR-0023: derive state from beads, not focus files.
 		specID, resolveErr := resolve.ResolveTarget(root, specFlag)
 		if resolveErr != nil {
 			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return ambErr
 			}
-			// Fall back to focus
-			mc, err := state.ReadFocus(root)
-			if err != nil {
-				return fmt.Errorf("no active state: %w", err)
+			// Try phase context
+			ctx, ctxErr := phase.ResolveContext(root)
+			if ctxErr != nil || ctx == nil {
+				return fmt.Errorf("no active state found")
+			}
+			mc := &state.Focus{
+				Mode:       ctx.Phase,
+				ActiveSpec: ctx.SpecID,
+				ActiveBead: ctx.BeadID,
 			}
 			data, _ := json.MarshalIndent(mc, "", "  ")
 			fmt.Println(string(data))
 			return nil
 		}
 
-		// Derive mode from lifecycle
-		mode, modeErr := resolve.ResolveMode(root, specID)
-
-		mc, _ := state.ReadFocus(root)
-		if mc == nil {
-			mc = &state.Focus{}
+		// Derive mode from beads
+		mode, _ := resolve.ResolveMode(root, specID)
+		ctx, _ := phase.ResolveContextFromDir(root, root)
+		activeBead := ""
+		if ctx != nil {
+			activeBead = ctx.BeadID
 		}
-		mc.ActiveSpec = specID
-		mc.SpecBranch = state.SpecBranch(specID)
-		if modeErr == nil {
-			mc.Mode = mode
+
+		mc := &state.Focus{
+			Mode:       mode,
+			ActiveSpec: specID,
+			ActiveBead: activeBead,
+			SpecBranch: state.SpecBranch(specID),
 		}
 
 		data, err := json.MarshalIndent(mc, "", "  ")

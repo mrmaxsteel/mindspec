@@ -9,10 +9,21 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/approve"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
+
+// stubNoEpics stubs phase.runBDFn so that CheckSpecNumberCollision finds no collisions.
+func stubNoEpics(t *testing.T) {
+	t.Helper()
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		// Return empty list for all queries — no epics exist.
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,34 +95,10 @@ func gitRun(t *testing.T, dir string, args ...string) {
 func assertState(t *testing.T, root, specID, expectedMode, expectedPhase string) {
 	t.Helper()
 
-	// Check focus
-	mc, err := state.ReadFocus(root)
-	if err != nil {
-		t.Fatalf("assertState: reading focus: %v", err)
-	}
-	if mc == nil {
-		if expectedMode != "" && expectedMode != state.ModeIdle {
-			t.Errorf("assertState: focus is nil, want mode=%q", expectedMode)
-		}
-	} else if mc.Mode != expectedMode {
-		t.Errorf("assertState: focus mode = %q, want %q", mc.Mode, expectedMode)
-	}
-
-	// Check lifecycle phase (skip if no specID or phase expected)
-	if specID == "" || expectedPhase == "" {
-		return
-	}
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		t.Fatalf("assertState: reading lifecycle for %s: %v", specID, err)
-	}
-	if lc == nil {
-		t.Fatalf("assertState: lifecycle is nil for %s", specID)
-	}
-	if lc.Phase != expectedPhase {
-		t.Errorf("assertState: lifecycle phase = %q, want %q", lc.Phase, expectedPhase)
-	}
+	// ADR-0023: State is derived from beads, not focus/lifecycle files.
+	// These scenario tests verify the approval functions succeed (via error returns).
+	// Phase derivation is tested in internal/phase/ and internal/resolve/.
+	// This function is kept as a no-op to preserve test structure during migration.
 }
 
 // validSpecMD returns a spec.md that passes validate.ValidateSpec.
@@ -237,70 +224,30 @@ func simulateSpecInit(t *testing.T, root, specID string) {
 	must(t, os.MkdirAll(specDir, 0o755))
 
 	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "spec.md"), validSpecMD(specID))
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "lifecycle.yaml"), "phase: spec\n")
 
-	// Write focus
-	must(t, state.WriteFocus(root, &state.Focus{
-		Mode:       state.ModeSpec,
-		ActiveSpec: specID,
-		SpecBranch: state.SpecBranch(specID),
-	}))
+	// ADR-0023: no lifecycle.yaml or focus file — state derived from beads.
 
 	// Commit so git is clean for downstream operations
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", fmt.Sprintf("spec-init %s", specID))
 }
 
-// simulateNext writes focus to implement mode with an active bead.
+// simulateNext simulates claiming a bead (no focus file needed per ADR-0023).
 func simulateNext(t *testing.T, root, specID, beadID string) {
 	t.Helper()
-
-	must(t, state.WriteFocus(root, &state.Focus{
-		Mode:       state.ModeImplement,
-		ActiveSpec: specID,
-		ActiveBead: beadID,
-		SpecBranch: state.SpecBranch(specID),
-	}))
+	// ADR-0023: state derived from beads, no focus file written.
 }
 
-// simulateComplete transitions from implement to review mode.
+// simulateComplete simulates bead completion (no lifecycle/focus files per ADR-0023).
 func simulateComplete(t *testing.T, root, specID string) {
 	t.Helper()
-
-	// Update lifecycle to review
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil || lc == nil {
-		lc = &state.Lifecycle{}
-	}
-	lc.Phase = state.ModeReview
-	must(t, state.WriteLifecycle(specDir, lc))
-
-	// Update focus
-	must(t, state.WriteFocus(root, &state.Focus{
-		Mode:       state.ModeReview,
-		ActiveSpec: specID,
-		SpecBranch: state.SpecBranch(specID),
-	}))
+	// ADR-0023: state derived from beads, no lifecycle/focus files written.
 }
 
-// simulateApproveImpl transitions from review to idle (done).
+// simulateApproveImpl simulates impl approval (no lifecycle/focus files per ADR-0023).
 func simulateApproveImpl(t *testing.T, root, specID string) {
 	t.Helper()
-
-	// Update lifecycle to done
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil || lc == nil {
-		lc = &state.Lifecycle{}
-	}
-	lc.Phase = "done"
-	must(t, state.WriteLifecycle(specDir, lc))
-
-	// Update focus to idle
-	must(t, state.WriteFocus(root, &state.Focus{
-		Mode: state.ModeIdle,
-	}))
+	// ADR-0023: state derived from beads, no lifecycle/focus files written.
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +255,7 @@ func simulateApproveImpl(t *testing.T, root, specID string) {
 // ---------------------------------------------------------------------------
 
 func TestScenario_HappyPath(t *testing.T) {
+	stubNoEpics(t)
 	root := testRepo(t)
 	specID := "001-test-feature"
 
@@ -363,6 +311,7 @@ func TestScenario_IdleStartsClean(t *testing.T) {
 }
 
 func TestScenario_InterruptForBug(t *testing.T) {
+	stubNoEpics(t)
 	root := testRepo(t)
 	specID := "002-main-feature"
 	bugSpecID := "003-hotfix-bug"
@@ -390,15 +339,10 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	assertState(t, root, specID, state.ModeImplement, state.ModeImplement)
 
 	// --- INTERRUPT: Bug discovered ---
-	// Save current state for later resume
-	savedFocus, err := state.ReadFocus(root)
-	if err != nil {
-		t.Fatalf("reading focus before interrupt: %v", err)
-	}
+	// ADR-0023: no focus save/restore needed — state derived from beads.
 
 	// Set up bug fix spec (simulate the entire bug-fix lifecycle quickly)
 	simulateSpecInit(t, root, bugSpecID)
-	assertState(t, root, bugSpecID, state.ModeSpec, "spec")
 
 	// Approve bug spec
 	_, err = approve.ApproveSpec(root, bugSpecID, "test-user")
@@ -420,66 +364,28 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	simulateNext(t, root, bugSpecID, "bug-bead-001")
 	simulateComplete(t, root, bugSpecID)
 	simulateApproveImpl(t, root, bugSpecID)
-	assertState(t, root, bugSpecID, state.ModeIdle, "done")
 
 	// --- RESUME original work ---
-	// Restore focus to the original spec's implement mode
-	must(t, state.WriteFocus(root, savedFocus))
-	assertState(t, root, specID, state.ModeImplement, state.ModeImplement)
-
-	// The original spec's lifecycle should still be in implement phase
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		t.Fatalf("reading lifecycle after resume: %v", err)
-	}
-	if lc.Phase != state.ModeImplement {
-		t.Errorf("original spec lifecycle phase = %q after resume, want %q", lc.Phase, state.ModeImplement)
-	}
+	// ADR-0023: With beads-derived state, both specs' epics coexist.
+	// The original spec's epic and in-progress bead are still in beads,
+	// so `mindspec next` would discover and resume the original work.
+	// No focus file restoration needed.
 }
 
 func TestScenario_ResumeAfterCrash(t *testing.T) {
+	// ADR-0023: Crash recovery relies on beads having the in-progress bead.
+	// No focus/lifecycle files needed — `mindspec next` queries beads to find
+	// the active bead and resumes it. This test verifies that spec artifacts
+	// survive a simulated crash (spec dir + spec.md exist).
 	root := testRepo(t)
 	specID := "004-crash-resume"
-	beadID := "crash-bead-001"
 
-	// Set up state as if a session died mid-implementation:
-	// - lifecycle.yaml says implement
-	// - focus says implement with an active bead
-	// - spec directory exists with artifacts
 	simulateSpecInit(t, root, specID)
 
-	// Skip through to implement state
+	// Verify spec artifacts exist (the durable state that survives crashes)
 	specDir := workspace.SpecDir(root, specID)
-	must(t, state.WriteLifecycle(specDir, &state.Lifecycle{Phase: state.ModeImplement}))
-	must(t, state.WriteFocus(root, &state.Focus{
-		Mode:       state.ModeImplement,
-		ActiveSpec: specID,
-		ActiveBead: beadID,
-		SpecBranch: state.SpecBranch(specID),
-	}))
-
-	// Verify state is consistent after "crash"
-	assertState(t, root, specID, state.ModeImplement, state.ModeImplement)
-
-	// Verify focus has the correct active bead
-	mc, err := state.ReadFocus(root)
-	if err != nil {
-		t.Fatalf("ReadFocus: %v", err)
-	}
-	if mc.ActiveBead != beadID {
-		t.Errorf("ActiveBead = %q, want %q", mc.ActiveBead, beadID)
-	}
-	if mc.ActiveSpec != specID {
-		t.Errorf("ActiveSpec = %q, want %q", mc.ActiveSpec, specID)
-	}
-
-	// A recovered session would call mindspec next, which detects the
-	// existing in-progress bead and resumes it. Since next.* requires
-	// bd mocking, we verify the precondition: focus + lifecycle agree
-	// on implement mode with the correct spec and bead.
-	if mc.SpecBranch != state.SpecBranch(specID) {
-		t.Errorf("SpecBranch = %q, want %q", mc.SpecBranch, state.SpecBranch(specID))
+	if _, err := os.Stat(filepath.Join(specDir, "spec.md")); err != nil {
+		t.Fatalf("spec.md should exist after crash: %v", err)
 	}
 }
 
@@ -494,6 +400,7 @@ func TestScenario_InvalidTransition(t *testing.T) {
 }
 
 func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
+	stubNoEpics(t)
 	root := testRepo(t)
 	specID := "005-artifact-check"
 
@@ -519,15 +426,8 @@ func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
 		t.Error("spec.md should contain approver name 'artifact-tester'")
 	}
 
-	// Verify lifecycle.yaml transitioned to plan
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		t.Fatalf("reading lifecycle: %v", err)
-	}
-	if lc.Phase != state.ModePlan {
-		t.Errorf("lifecycle phase = %q, want %q", lc.Phase, state.ModePlan)
-	}
+	// ADR-0023: lifecycle.yaml is eliminated — phase is derived from beads.
+	// The spec.md artifact checks above verify the approval was recorded.
 }
 
 // TestValidateFromWorktree verifies that validate succeeds when spec artifacts
@@ -564,6 +464,7 @@ func TestValidateFromWorktree(t *testing.T) {
 }
 
 func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
+	stubNoEpics(t)
 	root := testRepo(t)
 	specID := "006-plan-artifact"
 

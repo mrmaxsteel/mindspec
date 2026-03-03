@@ -1,36 +1,50 @@
 package resolve
 
 import (
-	"os"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-func TestActiveSpecs_ScansLifecycle(t *testing.T) {
+// stubActiveEpics stubs phase.runBDFn to return the given epics.
+func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[string][]phase.ChildInfo) {
+	t.Helper()
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
+			return json.Marshal(epics)
+		}
+		if len(args) >= 2 && args[0] == "list" && args[1] == "--parent" {
+			epicID := args[2]
+			if children, ok := childrenByEpic[epicID]; ok {
+				return json.Marshal(children)
+			}
+			return []byte("[]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
+}
+
+func TestActiveSpecs_DeriveFromBeads(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
-	// Spec in implement phase — active
-	specA := filepath.Join(specsDir, "038-alpha")
-	os.MkdirAll(specA, 0755)
-	state.WriteLifecycle(specA, &state.Lifecycle{Phase: state.ModeImplement, EpicID: "epic-a"})
-
-	// Spec in spec phase — active
-	specB := filepath.Join(specsDir, "039-beta")
-	os.MkdirAll(specB, 0755)
-	state.WriteLifecycle(specB, &state.Lifecycle{Phase: state.ModeSpec})
-
-	// Spec in idle phase — NOT active
-	specC := filepath.Join(specsDir, "040-gamma")
-	os.MkdirAll(specC, 0755)
-	state.WriteLifecycle(specC, &state.Lifecycle{Phase: state.ModeIdle})
-
-	// Spec done — NOT active
-	specD := filepath.Join(specsDir, "041-delta")
-	os.MkdirAll(specD, 0755)
-	state.WriteLifecycle(specD, &state.Lifecycle{Phase: "done"})
+	// Two active epics: alpha in implement, beta in plan
+	epics := []phase.EpicInfo{
+		{ID: "epic-a", Title: "[SPEC 038-alpha] Alpha", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "alpha"}},
+		{ID: "epic-b", Title: "[SPEC 039-beta] Beta", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(39), "spec_title": "beta"}},
+		{ID: "epic-c", Title: "[SPEC 040-gamma] Gamma", Status: "closed", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(40), "spec_title": "gamma"}},
+	}
+	childrenByEpic := map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "bead-1", Status: "in_progress", IssueType: "task"}},
+		"epic-b": {{ID: "bead-2", Status: "open", IssueType: "task"}},
+	}
+	stubActiveEpics(t, epics, childrenByEpic)
 
 	active, err := ActiveSpecs(root)
 	if err != nil {
@@ -41,7 +55,6 @@ func TestActiveSpecs_ScansLifecycle(t *testing.T) {
 		t.Fatalf("expected 2 active specs, got %d: %+v", len(active), active)
 	}
 
-	// Should be sorted by spec ID
 	if active[0].SpecID != "038-alpha" {
 		t.Errorf("first active spec: got %q, want %q", active[0].SpecID, "038-alpha")
 	}
@@ -51,14 +64,14 @@ func TestActiveSpecs_ScansLifecycle(t *testing.T) {
 	if active[1].SpecID != "039-beta" {
 		t.Errorf("second active spec: got %q, want %q", active[1].SpecID, "039-beta")
 	}
+	if active[1].Mode != state.ModePlan {
+		t.Errorf("second active mode: got %q, want %q", active[1].Mode, state.ModePlan)
+	}
 }
 
-func TestActiveSpecs_NoLifecycle(t *testing.T) {
+func TestActiveSpecs_NoEpics(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
-
-	// Spec directory with no lifecycle.yaml — should be skipped
-	os.MkdirAll(filepath.Join(specsDir, "005-legacy"), 0755)
+	stubActiveEpics(t, nil, nil)
 
 	active, err := ActiveSpecs(root)
 	if err != nil {
@@ -69,75 +82,24 @@ func TestActiveSpecs_NoLifecycle(t *testing.T) {
 	}
 }
 
-func TestActiveSpecs_EmptyPhase(t *testing.T) {
-	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
-
-	// Spec with empty phase — NOT active
-	specDir := filepath.Join(specsDir, "042-empty")
-	os.MkdirAll(specDir, 0755)
-	state.WriteLifecycle(specDir, &state.Lifecycle{Phase: ""})
-
-	active, err := ActiveSpecs(root)
-	if err != nil {
-		t.Fatalf("ActiveSpecs() error: %v", err)
-	}
-	if len(active) != 0 {
-		t.Errorf("expected 0 active specs for empty phase, got %d", len(active))
-	}
-}
-
-func TestActiveSpecs_AllPhases(t *testing.T) {
-	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
-
-	tests := []struct {
-		specID     string
-		phase      string
-		wantActive bool
-	}{
-		{"002-spec", state.ModeSpec, true},
-		{"003-plan", state.ModePlan, true},
-		{"004-implement", state.ModeImplement, true},
-		{"005-review", state.ModeReview, true},
-		{"006-idle", state.ModeIdle, false},
-		{"007-done", "done", false},
-	}
-
-	for _, tt := range tests {
-		specDir := filepath.Join(specsDir, tt.specID)
-		os.MkdirAll(specDir, 0755)
-		state.WriteLifecycle(specDir, &state.Lifecycle{Phase: tt.phase})
-	}
-
-	active, err := ActiveSpecs(root)
-	if err != nil {
-		t.Fatalf("ActiveSpecs() error: %v", err)
-	}
-
-	activeSet := make(map[string]bool)
-	for _, a := range active {
-		activeSet[a.SpecID] = true
-	}
-
-	for _, tt := range tests {
-		got := activeSet[tt.specID]
-		if got != tt.wantActive {
-			t.Errorf("spec %s (phase=%s): active=%v, want %v", tt.specID, tt.phase, got, tt.wantActive)
-		}
-	}
-}
-
 func TestActiveSpecs_SortOrder(t *testing.T) {
 	root := t.TempDir()
-	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")
 
-	// Create in reverse order
-	for _, id := range []string{"039-beta", "040-gamma", "038-alpha"} {
-		specDir := filepath.Join(specsDir, id)
-		os.MkdirAll(specDir, 0755)
-		state.WriteLifecycle(specDir, &state.Lifecycle{Phase: state.ModeSpec})
+	// Create in reverse order — should be sorted in output
+	epics := []phase.EpicInfo{
+		{ID: "epic-c", Title: "[SPEC 040-gamma] Gamma", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(40), "spec_title": "gamma"}},
+		{ID: "epic-a", Title: "[SPEC 038-alpha] Alpha", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "alpha"}},
+		{ID: "epic-b", Title: "[SPEC 039-beta] Beta", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"spec_num": float64(39), "spec_title": "beta"}},
 	}
+	childrenByEpic := map[string][]phase.ChildInfo{
+		"epic-a": {{ID: "b1", Status: "open", IssueType: "task"}},
+		"epic-b": {{ID: "b2", Status: "open", IssueType: "task"}},
+		"epic-c": {{ID: "b3", Status: "open", IssueType: "task"}},
+	}
+	stubActiveEpics(t, epics, childrenByEpic)
 
 	active, err := ActiveSpecs(root)
 	if err != nil {

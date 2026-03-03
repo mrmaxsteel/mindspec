@@ -1,10 +1,10 @@
 package resolve
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mindspec/mindspec/internal/phase"
 )
 
 func TestResolveTarget_ExplicitFlag(t *testing.T) {
@@ -40,8 +40,13 @@ func TestErrAmbiguousTarget_Message(t *testing.T) {
 }
 
 func TestResolveTarget_NoActiveSpecs(t *testing.T) {
-	// With nonexistent root, resolver fails with clear error
-	_, err := ResolveTarget("/nonexistent-root-"+t.Name(), "")
+	// Stub bd to return no epics
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
+
+	_, err := ResolveTarget(t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected error when no active specs found")
 	}
@@ -51,12 +56,13 @@ func TestResolveTarget_NoActiveSpecs(t *testing.T) {
 }
 
 func TestResolveTarget_NoActiveSpecs_SuggestsFlag(t *testing.T) {
-	// Create a temp root with empty specs directory (no active specs)
-	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
-	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
+	// Stub bd to return no epics
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
 
-	_, err := ResolveTarget(root, "")
+	_, err := ResolveTarget(t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected error when no active specs found")
 	}

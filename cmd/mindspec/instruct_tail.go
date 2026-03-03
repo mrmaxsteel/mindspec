@@ -6,30 +6,28 @@ import (
 
 	"github.com/mindspec/mindspec/internal/guard"
 	"github.com/mindspec/mindspec/internal/instruct"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
-// emitInstruct reads focus and prints mode-appropriate guidance.
+// emitInstruct derives state from beads and prints mode-appropriate guidance.
 // This is the "instruct-tail" convention: every state-changing command
 // (approve, next, complete) calls this after transitioning to emit
 // guidance for the new mode.
 //
-// root is the main repo root (for spec dirs and guard). Focus is read
-// from the local root (per-worktree focus).
+// root is the main repo root (for spec dirs and guard).
 func emitInstruct(root string) error {
-	// Read focus from local root (per-worktree).
-	localRoot, localErr := findLocalRoot()
-	if localErr != nil {
-		localRoot = root
-	}
-	mc, err := state.ReadFocus(localRoot)
-	if err != nil || mc == nil {
-		// Fallback to main-root focus when local worktree focus is absent.
-		// This happens on freshly created worktrees before focus is copied.
-		if localRoot != root {
-			if rootFocus, rootErr := state.ReadFocus(root); rootErr == nil && rootFocus != nil {
-				mc = rootFocus
-			}
+	// ADR-0023: derive state from beads, not focus files.
+	ctx, _ := phase.ResolveContext(root)
+	var mc *state.Focus
+	if ctx != nil && ctx.Phase != "" {
+		mc = &state.Focus{
+			Mode:       ctx.Phase,
+			ActiveSpec: ctx.SpecID,
+			ActiveBead: ctx.BeadID,
+		}
+		if ctx.WorktreePath != "" {
+			mc.ActiveWorktree = ctx.WorktreePath
 		}
 	}
 	if mc == nil {
@@ -42,16 +40,16 @@ func emitInstruct(root string) error {
 		return nil
 	}
 
-	ctx := instruct.BuildContext(root, mc)
+	iCtx := instruct.BuildContext(root, mc)
 
 	// Add worktree check when an active worktree is set.
 	if mc.ActiveWorktree != "" {
 		if warning := instruct.CheckWorktree(mc.ActiveWorktree); warning != "" {
-			ctx.Warnings = append(ctx.Warnings, "[worktree] "+warning)
+			iCtx.Warnings = append(iCtx.Warnings, "[worktree] "+warning)
 		}
 	}
 
-	output, err := instruct.Render(ctx)
+	output, err := instruct.Render(iCtx)
 	if err != nil {
 		return fmt.Errorf("rendering guidance: %w", err)
 	}

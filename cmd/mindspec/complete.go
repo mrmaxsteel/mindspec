@@ -3,12 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/complete"
-	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -37,37 +35,10 @@ The bead ID is auto-resolved from state if not provided.`,
 		}
 		specID, _ := cmd.Flags().GetString("spec")
 
-		// CWD auto-redirect: if not in a bead worktree, try to chdir to active worktree from focus.
+		// CWD auto-redirect: if not in a bead worktree, try to find one via worktree list.
+		// ADR-0023: no focus file needed — use bead worktree discovery.
 		cwd, _ := os.Getwd()
 		kind, _, _ := workspace.DetectWorktreeContext(cwd)
-		if kind != workspace.WorktreeBead {
-			// Try focus from multiple locations: main repo root, then local root (spec worktree).
-			var activeWT string
-			for _, fr := range []string{root} {
-				if focus, ferr := state.ReadFocus(fr); ferr == nil && focus != nil && focus.ActiveWorktree != "" {
-					activeWT = focus.ActiveWorktree
-					break
-				}
-			}
-			if activeWT == "" {
-				if lr, lrErr := workspace.FindLocalRoot(cwd); lrErr == nil && lr != root {
-					if focus, ferr := state.ReadFocus(lr); ferr == nil && focus != nil && focus.ActiveWorktree != "" {
-						activeWT = focus.ActiveWorktree
-					}
-				}
-			}
-			if activeWT != "" {
-				wtPath := activeWT
-				if !filepath.IsAbs(wtPath) {
-					wtPath = filepath.Join(root, wtPath)
-				}
-				if err := os.Chdir(wtPath); err == nil {
-					fmt.Fprintf(os.Stderr, "note: switched to worktree %s\n", wtPath)
-					cwd, _ = os.Getwd()
-					kind, _, _ = workspace.DetectWorktreeContext(cwd)
-				}
-			}
-		}
 
 		// Worktree scoping guard (checked after auto-redirect)
 		switch kind {

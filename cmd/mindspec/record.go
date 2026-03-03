@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/spf13/cobra"
@@ -31,11 +32,12 @@ var recordStatusCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			mc, err := state.ReadFocus(root)
-			if err != nil || mc.ActiveSpec == "" {
+			// ADR-0023: derive active spec from beads, not focus file.
+			ctx, ctxErr := phase.ResolveContextFromDir(root, root)
+			if ctxErr != nil || ctx == nil || ctx.SpecID == "" {
 				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
-			specID = mc.ActiveSpec
+			specID = ctx.SpecID
 		}
 
 		if !recording.HasRecording(root, specID) {
@@ -97,11 +99,11 @@ var recordStopCmd = &cobra.Command{
 
 		specID, _ := cmd.Flags().GetString("spec")
 		if specID == "" {
-			mc, err := state.ReadFocus(root)
-			if err != nil || mc.ActiveSpec == "" {
+			ctx, ctxErr := phase.ResolveContextFromDir(root, root)
+			if ctxErr != nil || ctx == nil || ctx.SpecID == "" {
 				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
-			specID = mc.ActiveSpec
+			specID = ctx.SpecID
 		}
 
 		if err := recording.StopRecording(root, specID); err != nil {
@@ -122,15 +124,13 @@ var recordHealthCmd = &cobra.Command{
 			return nil // silent exit if no project root
 		}
 
-		mc, err := state.ReadFocus(root)
-		if err != nil || mc.Mode == state.ModeIdle {
+		// ADR-0023: derive active spec from beads, not focus file.
+		ctx, ctxErr := phase.ResolveContextFromDir(root, root)
+		if ctxErr != nil || ctx == nil || ctx.SpecID == "" || ctx.Phase == state.ModeIdle {
 			return nil // no active spec
 		}
-		if mc.ActiveSpec == "" {
-			return nil
-		}
 
-		return recording.RestartIfDead(root, mc.ActiveSpec)
+		return recording.RestartIfDead(root, ctx.SpecID)
 	},
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/guard"
 	"github.com/mindspec/mindspec/internal/instruct"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/resolve"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/trace"
@@ -67,50 +68,38 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			}
 		}
 
-		// Resolve target spec (ADR-0015 targeting rules) — uses mainRoot for spec dirs.
+		// ADR-0023: derive state from beads, not focus files.
+		// First try resolver for spec targeting, then use phase context.
 		specID, resolveErr := resolve.ResolveTarget(mainRoot, specFlag)
 
-		// Build focus for instruct.BuildContext — read focus from localRoot.
 		var mc *state.Focus
 		if resolveErr != nil {
-			// If ambiguous, fall back to idle with a warning listing the specs.
 			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 				return handleAmbiguous(mainRoot, format, ambErr)
 			}
-			// Other errors: fall back to focus
-			cached, mcErr := state.ReadFocus(localRoot)
-			if mcErr != nil || cached == nil {
+			// Try phase context for beads-derived state.
+			ctx, ctxErr := phase.ResolveContext(mainRoot)
+			if ctxErr != nil || ctx == nil || ctx.Phase == "" {
 				return handleNoState(mainRoot, format)
 			}
-			mc = cached
+			mc = &state.Focus{
+				Mode:       ctx.Phase,
+				ActiveSpec: ctx.SpecID,
+				ActiveBead: ctx.BeadID,
+			}
 		} else {
-			// Derive mode from lifecycle
-			mode, modeErr := resolve.ResolveMode(mainRoot, specID)
-			cached, _ := state.ReadFocus(localRoot)
-			if modeErr != nil {
-				// Fallback: use focus mode but resolved specID
-				if cached != nil {
-					mc = &state.Focus{
-						Mode:       cached.Mode,
-						ActiveSpec: specID,
-						ActiveBead: cached.ActiveBead,
-					}
-				} else {
-					mc = &state.Focus{
-						Mode:       state.ModeIdle,
-						ActiveSpec: specID,
-					}
-				}
-			} else {
-				activeBead := ""
-				if cached != nil {
-					activeBead = cached.ActiveBead
-				}
-				mc = &state.Focus{
-					Mode:       mode,
-					ActiveSpec: specID,
-					ActiveBead: activeBead,
-				}
+			// Derive mode from beads
+			mode, _ := resolve.ResolveMode(mainRoot, specID)
+			// Try to find active bead via phase context
+			ctx, _ := phase.ResolveContextFromDir(mainRoot, localRoot)
+			activeBead := ""
+			if ctx != nil {
+				activeBead = ctx.BeadID
+			}
+			mc = &state.Focus{
+				Mode:       mode,
+				ActiveSpec: specID,
+				ActiveBead: activeBead,
 			}
 		}
 

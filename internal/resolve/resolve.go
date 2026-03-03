@@ -3,13 +3,11 @@ package resolve
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
-	"github.com/mindspec/mindspec/internal/workspace"
 )
 
 // SpecStatus holds the resolved state for a single spec.
@@ -19,85 +17,42 @@ type SpecStatus struct {
 	Active bool   `json:"active"`
 }
 
-// ActiveSpecs discovers all specs with active lifecycles by scanning lifecycle.yaml files.
-// A spec is active if its lifecycle.yaml exists and phase is not "done" or "idle".
-// Scans both the main repo specs directory and worktree specs (ADR-0022).
-// Worktree results take priority when a spec exists in both locations.
+// ActiveSpecs discovers all specs with active lifecycles by querying beads for open epics.
+// ADR-0023: lifecycle phase is derived from beads state, not lifecycle.yaml files.
 // Returns specs sorted by spec ID for deterministic output.
 func ActiveSpecs(root string) ([]SpecStatus, error) {
-	seen := make(map[string]SpecStatus)
+	activeSpecs, err := phase.DiscoverActiveSpecs()
+	if err != nil {
+		return nil, err
+	}
 
-	// 1. Scan worktrees first (higher priority per ADR-0022).
-	wtRoot := filepath.Join(root, ".worktrees")
-	if wtEntries, err := os.ReadDir(wtRoot); err == nil {
-		for _, wte := range wtEntries {
-			if !wte.IsDir() || !strings.HasPrefix(wte.Name(), "worktree-spec-") {
-				continue
-			}
-			specID := strings.TrimPrefix(wte.Name(), "worktree-spec-")
-			specDir := workspace.SpecDir(root, specID)
-			if ss, ok := readActiveSpec(specID, specDir); ok {
-				seen[specID] = ss
-			}
+	result := make([]SpecStatus, 0, len(activeSpecs))
+	for _, as := range activeSpecs {
+		if as.Phase == "" || as.Phase == "done" || as.Phase == state.ModeIdle {
+			continue
 		}
+		result = append(result, SpecStatus{SpecID: as.SpecID, Mode: as.Phase, Active: true})
 	}
-
-	// 2. Scan main repo specs directory (fallback for specs without worktrees).
-	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
-	if entries, err := os.ReadDir(specsDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			specID := e.Name()
-			if _, exists := seen[specID]; exists {
-				continue // worktree result takes priority
-			}
-			specDir := filepath.Join(specsDir, specID)
-			if ss, ok := readActiveSpec(specID, specDir); ok {
-				seen[specID] = ss
-			}
-		}
-	}
-
-	active := make([]SpecStatus, 0, len(seen))
-	for _, ss := range seen {
-		active = append(active, ss)
-	}
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].SpecID < active[j].SpecID
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SpecID < result[j].SpecID
 	})
 
-	return active, nil
+	return result, nil
 }
 
-// readActiveSpec reads lifecycle.yaml from specDir and returns a SpecStatus
-// if the spec is active (phase is not empty, done, or idle).
-func readActiveSpec(specID, specDir string) (SpecStatus, bool) {
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil || lc == nil {
-		return SpecStatus{}, false
-	}
-	phase := lc.Phase
-	if phase == "" || phase == "done" || phase == state.ModeIdle {
-		return SpecStatus{}, false
-	}
-	return SpecStatus{SpecID: specID, Mode: phase, Active: true}, true
-}
-
-// ResolveMode returns the current lifecycle phase for a spec by reading lifecycle.yaml.
-// Returns ModeIdle if no lifecycle file exists.
-// Deprecated: callers should read lifecycle.yaml directly via state.ReadLifecycle.
+// ResolveMode returns the current lifecycle phase for a spec by querying beads.
+// ADR-0023: derived from beads state, not lifecycle.yaml.
+// Returns ModeIdle if no epic exists for the spec.
 func ResolveMode(root, specID string) (string, error) {
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil || epicID == "" {
+		return state.ModeIdle, nil
+	}
+	derivedPhase, err := phase.DerivePhase(epicID)
 	if err != nil {
 		return state.ModeIdle, err
 	}
-	if lc == nil || lc.Phase == "" {
-		return state.ModeIdle, nil
-	}
-	return lc.Phase, nil
+	return derivedPhase, nil
 }
 
 // ResolveSpecBranch returns the canonical branch name for a spec.
