@@ -84,7 +84,7 @@ func init() {
 	rootCmd.AddCommand(benchCmd)
 	rootCmd.AddCommand(adrCmd)
 	rootCmd.AddCommand(cleanupCmd)
-	rootCmd.AddCommand(approveCmd)  // hidden backward-compat alias
+	rootCmd.AddCommand(approveCmd) // hidden backward-compat alias
 	rootCmd.AddCommand(beadCmd)
 	rootCmd.AddCommand(completeCmd)
 	rootCmd.AddCommand(contextCmd)
