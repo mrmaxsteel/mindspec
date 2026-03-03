@@ -13,7 +13,12 @@
     },
     {
       "phase": "plan",
-      "started_at": "2026-03-03T09:20:31Z"
+      "started_at": "2026-03-03T09:20:31Z",
+      "ended_at": "2026-03-03T09:21:20Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-03-03T09:21:20Z"
     }
   ]
 }
