@@ -146,13 +146,13 @@ func SessionFreshnessGate(inp *Input, st *HookState) Result {
 	if st.SessionSource == "resume" || st.SessionSource == "compact" {
 		return Result{
 			Action:  Block,
-			Message: "session freshness gate: session was " + st.SessionSource + " (not fresh). Run /clear to reset your context, then retry mindspec next. Use --force to bypass.",
+			Message: "session freshness gate: session was " + st.SessionSource + " (not fresh). You MUST run /clear to reset your context, then retry mindspec next. Do NOT attempt workarounds.",
 		}
 	}
 	if st.BeadClaimedAt != "" && st.BeadClaimedAt >= st.SessionStartedAt {
 		return Result{
 			Action:  Block,
-			Message: "session freshness gate: a bead was already claimed in this session. Run /clear to reset your context, then retry mindspec next. Use --force to bypass.",
+			Message: "session freshness gate: a bead was already claimed in this session. You MUST run /clear to reset your context, then retry mindspec next. Do NOT attempt workarounds.",
 		}
 	}
 	return Result{Action: Pass}

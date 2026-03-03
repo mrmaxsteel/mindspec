@@ -72,7 +72,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 			if stale {
 				if !force {
-					return fmt.Errorf("session freshness gate: %s.\nRun /clear to reset your context, then retry.\nUse --force to bypass", reason)
+					return fmt.Errorf("session freshness gate: %s.\nYou MUST run /clear to reset your context, then retry.\nDo NOT attempt workarounds — /clear is required.", reason)
 				}
 				fmt.Fprintf(os.Stderr, "warning: bypassing session freshness gate (%s)\n", reason)
 			}
