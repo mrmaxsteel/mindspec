@@ -404,6 +404,7 @@ func newMinimalSandbox(t *testing.T) *Sandbox {
 		t.Fatal(err)
 	}
 	mustRun(t, root, "git", "init")
+	mustRun(t, root, "git", "branch", "-M", "main")
 	mustRun(t, root, "git", "config", "user.email", "test@mindspec.dev")
 	mustRun(t, root, "git", "config", "user.name", "Test")
 	// Write a dummy file so initial commit isn't empty.
@@ -424,7 +425,7 @@ type fakeTB struct {
 	errors []string
 }
 
-func (f *fakeTB) Helper()                        {}
+func (f *fakeTB) Helper() {}
 func (f *fakeTB) Errorf(format string, args ...interface{}) {
 	f.failed = true
 	f.errors = append(f.errors, fmt.Sprintf(format, args...))
