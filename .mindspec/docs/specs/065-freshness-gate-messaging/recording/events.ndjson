@@ -1,3 +1,5 @@
 {"ts":"2026-03-03T23:46:39.055779Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"065-freshness-gate-messaging"}}
 {"ts":"2026-03-03T23:48:06.488965Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"065-freshness-gate-messaging","to":"plan"}}
 {"ts":"2026-03-03T23:48:34.517347Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"065-freshness-gate-messaging","to":"plan-approved"}}
+{"ts":"2026-03-03T23:48:46.809028Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-sx1h.1","spec_id":"065-freshness-gate-messaging"}}
+{"ts":"2026-03-03T23:50:24.489729Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-sx1h.1","spec_id":"065-freshness-gate-messaging"}}
