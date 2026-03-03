@@ -362,6 +362,7 @@ func saveAndRestore(t *testing.T) {
 	origHasRemote := hasRemoteFn
 	origPushBranch := pushBranchFn
 	origFindLocalRoot := findLocalRootFn
+	origCommitAll := commitAllFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
@@ -375,6 +376,7 @@ func saveAndRestore(t *testing.T) {
 		hasRemoteFn = origHasRemote
 		pushBranchFn = origPushBranch
 		findLocalRootFn = origFindLocalRoot
+		commitAllFn = origCommitAll
 	})
 
 	// Default: findLocalRoot falls back to the root arg passed to ApproveImpl.
@@ -393,6 +395,7 @@ func saveAndRestore(t *testing.T) {
 	branchExistsFn = func(name string) bool { return false }
 	hasRemoteFn = func() bool { return false }
 	pushBranchFn = func(branch string) error { return nil }
+	commitAllFn = func(workdir, message string) error { return nil }
 }
 
 func TestVerifyImplContent_NoCommits(t *testing.T) {
@@ -551,6 +554,92 @@ func TestVerifyImplContent_BeadBranchMergeFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "merging bead branch") {
 		t.Errorf("error should mention merge failure: %v", err)
+	}
+}
+
+func TestApproveImpl_AutoCommitsSpecWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "open"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
+	branchExistsFn = func(name string) bool { return false }
+	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
+	deleteBranchFn = func(name string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+
+	var commitCalled bool
+	var commitWorkdir, commitMsg string
+	commitAllFn = func(workdir, message string) error {
+		commitCalled = true
+		commitWorkdir = workdir
+		commitMsg = message
+		return nil
+	}
+
+	result, err := ApproveImpl(tmp, "010-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !commitCalled {
+		t.Fatal("expected auto-commit to be called before cleanup")
+	}
+	expectedWt := filepath.Join(tmp, ".worktrees", "worktree-spec-010-test")
+	if commitWorkdir != expectedWt {
+		t.Errorf("auto-commit workdir: got %q, want %q", commitWorkdir, expectedWt)
+	}
+	if !strings.Contains(commitMsg, "remaining spec artifacts") {
+		t.Errorf("auto-commit message should mention spec artifacts, got: %q", commitMsg)
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings on successful auto-commit, got: %v", result.Warnings)
+	}
+}
+
+func TestApproveImpl_AutoCommitFailureWarns(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "open"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
+	branchExistsFn = func(name string) bool { return false }
+	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
+	deleteBranchFn = func(name string) error { return nil }
+	worktreeRemoveFn = func(name string) error { return nil }
+
+	commitAllFn = func(workdir, message string) error {
+		return fmt.Errorf("commit failed: lock held")
+	}
+
+	result, err := ApproveImpl(tmp, "010-test")
+	if err != nil {
+		t.Fatalf("auto-commit failure should warn, not error: %v", err)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected warning when auto-commit fails")
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "auto-commit") && strings.Contains(w, "lock held") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected auto-commit warning, got: %v", result.Warnings)
 	}
 }
 

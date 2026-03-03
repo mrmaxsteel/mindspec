@@ -258,21 +258,37 @@ func FindEpicBySpecID(specID string) (string, error) {
 // --- Internal helpers ---
 
 func queryEpics() ([]EpicInfo, error) {
-	out, err := runBDFn("list", "--type=epic", "--json")
-	if err != nil {
-		return nil, fmt.Errorf("bd list --type=epic failed: %w", err)
+	// Query all statuses: bd list --type=epic defaults to open only,
+	// but phase derivation needs closed epics too (e.g. impl approve).
+	var allEpics []EpicInfo
+	seen := map[string]bool{}
+	var lastErr error
+	for _, status := range []string{"open", "in_progress", "closed"} {
+		out, err := runBDFn("list", "--type=epic", "--status="+status, "--json")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed == "" || trimmed == "[]" {
+			continue
+		}
+		var epics []EpicInfo
+		if err := json.Unmarshal(out, &epics); err != nil {
+			lastErr = err
+			continue
+		}
+		for _, e := range epics {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				allEpics = append(allEpics, e)
+			}
+		}
 	}
-
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" || trimmed == "[]" {
-		return nil, nil
+	if len(allEpics) == 0 && lastErr != nil {
+		return nil, fmt.Errorf("bd list --type=epic failed: %w", lastErr)
 	}
-
-	var epics []EpicInfo
-	if err := json.Unmarshal(out, &epics); err != nil {
-		return nil, fmt.Errorf("parsing epic JSON: %w", err)
-	}
-	return epics, nil
+	return allEpics, nil
 }
 
 func queryChildren(epicID string) []ChildInfo {

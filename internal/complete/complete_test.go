@@ -22,7 +22,7 @@ func saveAndRestore(t *testing.T) {
 	origWtRemove := worktreeRemoveFn
 	origRunBD := runBDFn
 	origExec := execCommandFn
-	origMerge := mergeBranchFn
+	origMerge := mergeIntoFn
 	origDelete := deleteBranchFn
 	origCommitAll := commitAllFn
 	origResolveTarget := resolveTargetFn
@@ -35,7 +35,7 @@ func saveAndRestore(t *testing.T) {
 		worktreeRemoveFn = origWtRemove
 		runBDFn = origRunBD
 		execCommandFn = origExec
-		mergeBranchFn = origMerge
+		mergeIntoFn = origMerge
 		deleteBranchFn = origDelete
 		commitAllFn = origCommitAll
 		resolveTargetFn = origResolveTarget
@@ -44,7 +44,7 @@ func saveAndRestore(t *testing.T) {
 	})
 
 	// Default stubs
-	mergeBranchFn = func(repoPath, src, dst string) error { return nil }
+	mergeIntoFn = func(targetWorkdir, sourceBranch string) error { return nil }
 	deleteBranchFn = func(branch string) error { return nil }
 	commitAllFn = func(workdir, msg string) error { return nil }
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
@@ -96,6 +96,10 @@ func TestRun_HappyPath(t *testing.T) {
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 
+	// Create spec worktree dir so merge path is found
+	specWtDir := filepath.Join(root, ".worktrees", "worktree-spec-008-test")
+	os.MkdirAll(specWtDir, 0755)
+
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
 		return []bead.WorktreeListEntry{
 			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
@@ -116,6 +120,14 @@ func TestRun_HappyPath(t *testing.T) {
 	var removedName string
 	worktreeRemoveFn = func(name string) error {
 		removedName = name
+		return nil
+	}
+
+	// Verify merge targets spec worktree, not bead worktree
+	var mergedWorkdir, mergedBranch string
+	mergeIntoFn = func(targetWorkdir, sourceBranch string) error {
+		mergedWorkdir = targetWorkdir
+		mergedBranch = sourceBranch
 		return nil
 	}
 
@@ -152,6 +164,14 @@ func TestRun_HappyPath(t *testing.T) {
 	}
 	if result.NextBead != "bead-2" {
 		t.Errorf("NextBead: got %q, want %q", result.NextBead, "bead-2")
+	}
+
+	// Verify merge targeted the spec worktree (not the bead worktree)
+	if mergedWorkdir != specWtDir {
+		t.Errorf("merge workdir: got %q, want %q", mergedWorkdir, specWtDir)
+	}
+	if mergedBranch != "bead/bead-1" {
+		t.Errorf("merge branch: got %q, want %q", mergedBranch, "bead/bead-1")
 	}
 
 	// ADR-0023: no focus file written — state derived from beads.

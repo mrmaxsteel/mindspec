@@ -55,6 +55,18 @@ func MergeBranch(workdir, source, target string) error {
 	return nil
 }
 
+// MergeInto merges sourceBranch into the current branch of targetWorkdir.
+// Unlike MergeBranch, this does not checkout — it assumes targetWorkdir already
+// has the desired branch checked out (e.g. a spec worktree).
+func MergeInto(targetWorkdir, sourceBranch string) error {
+	mergeCmd := execCommand("git", "-C", targetWorkdir, "merge", "--no-ff", sourceBranch, "-m",
+		fmt.Sprintf("Merge %s", sourceBranch))
+	if out, err := mergeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("merge %s in %s: %s", sourceBranch, targetWorkdir, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // DeleteBranch deletes a local branch.
 func DeleteBranch(name string) error {
 	cmd := execCommand("git", "branch", "-d", name)
