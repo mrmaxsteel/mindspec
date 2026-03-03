@@ -635,9 +635,9 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 //
 //	focus.activeWorktree points to spec worktree, all beads closed, clean tree
 //
-// After:  approve impl ran, idle mode, spec/ branch deleted (merged to main),
+// After:  approve impl ran, idle mode, spec/ branch deleted,
 //
-//	spec worktree removed, implementation content merged to main, clean tree
+//	spec worktree removed, clean tree (no merge to main — push only)
 func ScenarioImplApprove() Scenario {
 	return Scenario{
 		Name:        "impl_approve",
@@ -722,16 +722,11 @@ func Done() string { return "done" }
 			assertCommandContains(t, events, "mindspec", "impl")
 			assertNoPreApproveImplMainMergeOrPR(t, events)
 
-			// Git state: spec branch deleted after merge
+			// Git state: spec branch deleted after cleanup
 			assertNoBranches(t, sandbox, "spec/")
 
-			// Git state: spec worktree removed after merge
+			// Git state: spec worktree removed after cleanup
 			assertNoWorktrees(t, sandbox)
-
-			// Git state: implementation content merged to main
-			if !sandbox.FileExists("done.go") {
-				t.Error("expected done.go to be merged to main")
-			}
 
 			// Focus transitioned to idle
 			assertFocusMode(t, sandbox, "idle")
@@ -1669,12 +1664,10 @@ func assertCommandSucceeded(t *testing.T, events []ActionEvent, command string, 
 	t.Errorf("command %q with args %v was not found with exit code 0 in events", command, argSubstr)
 }
 
-// assertNoPreApproveImplMainMergeOrPR enforces workflow ordering at the test
-// layer: no direct merge-to-main or PR creation before approve impl is invoked.
-//
-// Note: internal git merge commands executed *inside* `mindspec approve impl`
-// appear in event logs before the top-level `mindspec approve impl` event due to
-// wrapper timing. We treat the known canonical internal merge command as allowed.
+// assertNoPreApproveImplMainMergeOrPR enforces that agents never run raw git
+// merge-to-main or gh PR commands before approve impl is invoked. Since impl
+// approve no longer merges to main (it only pushes + cleans up), ANY
+// merge-to-main or gh pr command is a violation.
 func assertNoPreApproveImplMainMergeOrPR(t *testing.T, events []ActionEvent) {
 	t.Helper()
 	if err := preApproveImplMainMergeOrPRViolation(events); err != nil {
@@ -1696,23 +1689,15 @@ func preApproveImplMainMergeOrPRViolation(events []ActionEvent) error {
 			continue
 		}
 
-		// Fail if PR creation/merge is attempted before approve impl.
+		// Fail if gh PR creation/merge is attempted before approve impl.
 		if e.Command == "gh" && (containsAll(args, "pr") && (containsAll(args, "create") || containsAll(args, "merge"))) {
 			return fmt.Errorf("PR command ran before approve impl: %v", args)
 		}
 
-		// Fail if a non-canonical merge-to-main is attempted before approve impl.
-		// Canonical internal merge pattern (from approve impl) is allowed:
-		//   git ... merge --no-ff spec/<id> -m "Merge spec/<id> into main"
+		// Fail if any merge-to-main is attempted before approve impl.
+		// impl approve no longer merges spec→main, so no merge-to-main is expected.
 		if e.Command == "git" && e.ExitCode == 0 && containsAll(args, "merge") && containsAll(args, "main") {
-			isCanonicalInternal := containsAll(args, "--no-ff") &&
-				containsAll(args, "spec/") &&
-				containsAll(args, "-m") &&
-				containsAll(args, "Merge spec/") &&
-				containsAll(args, "into main")
-			if !isCanonicalInternal {
-				return fmt.Errorf("merge-to-main occurred before approve impl: %v", args)
-			}
+			return fmt.Errorf("merge-to-main occurred before approve impl: %v", args)
 		}
 	}
 

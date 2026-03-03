@@ -254,7 +254,7 @@ func TestLLM_BugfixBranch(t *testing.T) {
 }
 
 func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
-	t.Run("allows canonical internal merge before approve event", func(t *testing.T) {
+	t.Run("rejects merge spec into main before approve impl", func(t *testing.T) {
 		events := []ActionEvent{
 			{
 				ActionType: "command",
@@ -262,8 +262,15 @@ func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 				ExitCode:   0,
 				ArgsList: []string{
 					"-C", "/tmp/repo",
-					"merge", "--no-ff", "spec/001-test",
-					"-m", "Merge spec/001-test into main",
+					"checkout", "main",
+				},
+			},
+			{
+				ActionType: "command",
+				Command:    "git",
+				ExitCode:   0,
+				ArgsList: []string{
+					"merge", "--no-ff", "spec/001-test", "main",
 				},
 			},
 			{
@@ -274,8 +281,12 @@ func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 			},
 		}
 
-		if err := preApproveImplMainMergeOrPRViolation(events); err != nil {
-			t.Fatalf("expected no violation, got: %v", err)
+		err := preApproveImplMainMergeOrPRViolation(events)
+		if err == nil {
+			t.Fatal("expected violation on merge-to-main (impl approve no longer merges)")
+		}
+		if !strings.Contains(err.Error(), "merge-to-main occurred before approve impl") {
+			t.Fatalf("expected merge violation error, got: %v", err)
 		}
 	})
 
