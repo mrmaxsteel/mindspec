@@ -26,7 +26,7 @@ var (
 	worktreeRemoveFn    = bead.WorktreeRemove
 	runBDFn             = bead.RunBD
 	execCommandFn       = exec.Command
-	mergeBranchFn       = gitops.MergeBranch
+	mergeIntoFn         = gitops.MergeInto
 	deleteBranchFn      = gitops.DeleteBranch
 	commitAllFn         = gitops.CommitAll
 	resolveTargetFn     = resolve.ResolveTarget
@@ -143,9 +143,13 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 
 	// 4.7. Merge bead branch back to spec branch (ADR-0006).
+	// Use MergeInto targeting the spec worktree (which already has specBranch
+	// checked out) instead of MergeBranch (which tries to checkout specBranch
+	// and fails when the bead worktree is nested inside the spec worktree).
 	beadBranch := "bead/" + beadID
-	if wtPath != "" {
-		if err := mergeBranchFn(wtPath, beadBranch, specBranch); err != nil {
+	specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+	if _, err := os.Stat(specWtPath); err == nil {
+		if err := mergeIntoFn(specWtPath, beadBranch); err != nil {
 			fmt.Printf("Warning: could not merge %s → %s: %v\n", beadBranch, specBranch, err)
 		}
 	}
