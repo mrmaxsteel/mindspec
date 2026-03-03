@@ -262,9 +262,11 @@ func queryEpics() ([]EpicInfo, error) {
 	// but phase derivation needs closed epics too (e.g. impl approve).
 	var allEpics []EpicInfo
 	seen := map[string]bool{}
+	var lastErr error
 	for _, status := range []string{"open", "in_progress", "closed"} {
 		out, err := runBDFn("list", "--type=epic", "--status="+status, "--json")
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		trimmed := strings.TrimSpace(string(out))
@@ -273,6 +275,7 @@ func queryEpics() ([]EpicInfo, error) {
 		}
 		var epics []EpicInfo
 		if err := json.Unmarshal(out, &epics); err != nil {
+			lastErr = err
 			continue
 		}
 		for _, e := range epics {
@@ -281,6 +284,9 @@ func queryEpics() ([]EpicInfo, error) {
 				allEpics = append(allEpics, e)
 			}
 		}
+	}
+	if len(allEpics) == 0 && lastErr != nil {
+		return nil, fmt.Errorf("bd list --type=epic failed: %w", lastErr)
 	}
 	return allEpics, nil
 }
