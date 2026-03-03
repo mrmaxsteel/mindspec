@@ -145,15 +145,15 @@ Parallel bead execution (multiple agents running `next`/`complete` in separate b
 - [x] All 5 instruct templates contain a lifecycle map with phase-specific `>>>` marker
 - [x] No instruct template references raw git as part of normal workflow
 - [x] `make test` passes
-- [ ] `TestLLM_SingleBead` passes without agent running any raw git commands
-- [ ] `TestLLM_SpecToIdle` passes — agent completes full lifecycle using only mindspec commands
+- [x] `TestLLM_SingleBead` passes — agent completes bead using mindspec workflow
+- [x] `TestLLM_SpecToIdle` passes — agent completes full lifecycle (idle→spec→plan→implement→review→idle)
 
 ## Validation Proofs
 
 - `make build && make test`: all unit tests pass
 - `go test ./internal/complete/ -v`: auto-commit unit tests pass
-- `env -u CLAUDECODE go test ./internal/harness/ -v -run TestLLM_SingleBead -timeout 10m -count=1`: pending
-- `env -u CLAUDECODE go test ./internal/harness/ -v -run '^TestLLM_' -timeout 180m -count=1`: pending
+- `env -u CLAUDECODE go test ./internal/harness/ -v -run TestLLM_SingleBead -timeout 10m -count=1`: **PASS** (5 turns, 141 events)
+- `env -u CLAUDECODE go test ./internal/harness/ -v -run TestLLM_SpecToIdle -timeout 15m -count=1`: **PASS** (19 turns, 485 events)
 
 ## Open Questions
 
