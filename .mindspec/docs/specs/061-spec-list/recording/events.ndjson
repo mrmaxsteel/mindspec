@@ -1,3 +1,5 @@
 {"ts":"2026-03-03T22:20:11.789052Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"061-spec-list"}}
 {"ts":"2026-03-03T22:21:54.646207Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"061-spec-list","to":"plan"}}
 {"ts":"2026-03-03T22:22:34.192275Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"061-spec-list","to":"plan-approved"}}
+{"ts":"2026-03-03T22:22:45.286798Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-pg0w.1","spec_id":"061-spec-list"}}
+{"ts":"2026-03-03T22:24:33.309098Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-pg0w.1","spec_id":"061-spec-list"}}
