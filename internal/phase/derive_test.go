@@ -279,6 +279,49 @@ func TestResolveContextFromDir_MainWorktree(t *testing.T) {
 	}
 }
 
+func TestFindEpicBySpecID_ClosedEpic(t *testing.T) {
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
+			// Only the "closed" status query returns the epic
+			for _, a := range args {
+				if a == "--status=closed" {
+					return []byte(`[{"id":"epic-99","title":"[SPEC 099-done] Done","status":"closed","issue_type":"epic","metadata":{"spec_num":99,"spec_title":"done"}}]`), nil
+				}
+			}
+			return []byte("[]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	epicID, err := FindEpicBySpecID("099-done")
+	if err != nil {
+		t.Fatalf("expected to find closed epic, got error: %v", err)
+	}
+	if epicID != "epic-99" {
+		t.Errorf("epicID: got %q, want %q", epicID, "epic-99")
+	}
+}
+
+func TestFindEpicBySpecID_DeduplicatesAcrossStatuses(t *testing.T) {
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
+			// Return same epic for both open and in_progress queries
+			return []byte(`[{"id":"epic-1","title":"[SPEC 001-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	epicID, err := FindEpicBySpecID("001-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if epicID != "epic-1" {
+		t.Errorf("epicID: got %q, want %q", epicID, "epic-1")
+	}
+}
+
 func TestResolveContextFromDir_SpecWorktree_NoEpic(t *testing.T) {
 	origRunBD := runBDFn
 	defer func() { runBDFn = origRunBD }()
