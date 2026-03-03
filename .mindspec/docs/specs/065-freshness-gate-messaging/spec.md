@@ -1,59 +1,75 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-03T23:48:05Z"
+approved_by: user
+status: Approved
 ---
 # Spec 065-freshness-gate-messaging: Freshness Gate Messaging
 
 ## Goal
 
-<Brief description of what this spec achieves and the target user outcome>
+Make the session freshness gate error message forceful enough that LLM agents actually obey it instead of working around it.
 
 ## Background
 
-<Context, motivation, and any relevant prior decisions>
+When `mindspec next` hits the session freshness gate, the error message says "Run /clear to reset your context, then retry. Use --force to bypass." The agent reads this, ignores the `/clear` instruction, and tries `--force` or other workarounds. The `--force` escape hatch in the error message gives the agent an easy out.
+
+The `--force` flag should remain available for human users but must not be advertised in the error message where agents will see it.
 
 ## Impacted Domains
 
-- <domain-1>: <how it is impacted>
+- cli: error messages in `cmd/mindspec/next.go`
+- hooks: error messages in `internal/hook/dispatch.go`
+- tests: unit tests that assert on error message strings
 
 ## ADR Touchpoints
 
-- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+None — no architectural decisions affected.
 
 ## Requirements
 
-1. <Requirement 1>
-2. <Requirement 2>
+1. Remove "Use --force to bypass" from all freshness gate error messages
+2. Make the error message imperative: "You MUST run /clear" instead of "Run /clear"
+3. Add explicit "Do NOT attempt workarounds" language
+4. Keep the `--force` flag functional (undocumented escape hatch for humans)
+5. Update any unit tests that assert on the old message strings
 
 ## Scope
 
 ### In Scope
-- <File or component 1>
+- `cmd/mindspec/next.go` — error message on line 75
+- `internal/hook/dispatch.go` — error messages on lines 149, 155
+- `internal/hook/dispatch_test.go` — any tests asserting old message text
 
 ### Out of Scope
-- <Explicitly excluded items>
+- Removing the `--force` flag itself
+- Changes to the freshness gate logic
 
 ## Non-Goals
 
-- <What this spec intentionally does not address>
+- Changing when the freshness gate triggers
+- Adding new enforcement mechanisms
 
 ## Acceptance Criteria
 
-- [ ] <Specific, measurable criterion 1>
-- [ ] <Specific, measurable criterion 2>
+- [ ] Error messages no longer mention `--force`
+- [ ] Error messages use imperative "MUST" language
+- [ ] `--force` flag still works when explicitly passed
+- [ ] Unit tests pass with updated message strings
+- [ ] `make build` succeeds
 
 ## Validation Proofs
 
-- <command 1>: <Expected outcome>
+- `make build`: exits 0
+- `make test`: exits 0
+- `grep -r "Use --force to bypass" cmd/ internal/`: no matches
 
 ## Open Questions
 
-- [ ] <Question that must be resolved before planning>
+None.
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-03
+- **Notes**: Approved via mindspec approve spec
