@@ -470,7 +470,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - Changing mindspec instruct templates can override scenario prompts
 - Changing beads integration can break bead creation/claiming
 
-## Coverage Analysis (2026-03-03)
+## Coverage Analysis (2026-03-03, updated by Spec 059)
 
 ### State Transition Coverage
 
@@ -480,48 +480,45 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | spec → plan | `spec approve` | SpecToIdle, SpecApprove, ApproveSpecFromWorktree | Covered |
 | plan → implement | `plan approve` + `next` | SpecToIdle, PlanApprove, ApprovePlanFromWorktree | Covered |
 | implement → implement | `complete` + `next` (more beads) | MultiBeadDeps | Covered |
-| implement → plan | `complete` (only blocked beads) | — | **Gap** |
+| implement → plan | `complete` (only blocked beads) | BlockedBeadTransition | Covered (Spec 059) |
 | implement → review | `complete` (all done) | SingleBead, SpecToIdle, MultiBeadDeps, InterruptForBug, ResumeAfterCrash, CompleteFromSpecWorktree, MultipleActiveSpecs, StaleWorktree | Covered |
 | review → idle | `impl approve` | SpecToIdle, ImplApprove | Covered |
 
-**Unsupported transitions (none tested for rejection)**:
-idle→plan, idle→implement, spec→implement, plan→review, review→implement, review→plan.
+**Invalid transitions**: Tested deterministically via `TestInvalidTransitions` (Spec 059, Bead 3):
+idle→plan, idle→implement, spec→implement, plan→review, review→implement, review→plan — each verified to return non-zero exit code.
 
 ### Assertion Depth
 
 **Well-covered areas:**
 - Git branch/worktree cleanup after `impl approve` (SpecToIdle, ImplApprove)
 - Focus mode transitions at each phase boundary (SpecInit, SpecApprove, PlanApprove, ImplApprove)
+- **Focus field depth**: `assertFocusFields` checks activeSpec, specBranch (not just mode) in SpecApprove, PlanApprove, ImplApprove (Spec 059)
 - Wrong-action detection: code edits in spec/plan mode, commits to main, wrong CWD, force bypass
+- **Analyzer rules**: `skip_next` and `skip_complete` are fully implemented with deterministic tests (Spec 059)
 - Edge cases: stale worktree recovery, crash recovery, interrupt-for-bug, multi-spec disambiguation, complete-from-spec-worktree auto-redirect
 - No-mutation on read-only commands (SpecStatus)
 - Pre-approve merge/PR prohibition (ImplApprove, SpecToIdle)
+- **Merge topology**: `assertMergeTopology` verifies bead→spec merge commits in SingleBead (Spec 059)
+- **Commit message format**: `assertCommitMessage` verifies `impl(` prefix in SingleBead (Spec 059)
+- **Beads state**: `assertBeadsState` helper available, tested deterministically (Spec 059)
 
-**Gaps:**
+**Remaining gaps:**
 
 | Category | Gap | Impact |
 |:---------|:----|:-------|
-| Merge topology | No test verifies bead→spec→main merge chain (only checks branches exist/don't) | Could miss direct commits masquerading as merges |
-| Beads state | No test checks beads were created by `plan approve`, claimed by `next`, or closed by `complete` via `bd list` | Beads integration regressions would go undetected |
-| Invalid transitions | No negative tests for skipping phases or going backward | State machine enforcement untested |
-| implement→plan | "Only blocked beads" path after `complete` never exercised | Entire branch of next-state logic untested |
-| Commit message format | `impl(beadID): message` convention from `complete` not verified | Convention drift undetectable |
-| Focus field depth | Tests check `mode` but not `activeSpec`, `activeBead`, `activeWorktree`, `specBranch` | State corruption in non-mode fields would go unnoticed |
-| Analyzer placeholders | `skip_next` and `skip_complete` rules are stubs | Most common agent errors not auto-detected |
 | Auto-commit verification | No test checks that `spec approve`, `plan approve` produce commits on the spec branch | Auto-commit regressions could break downstream merges |
+| Beads state in LLM tests | `assertBeadsState` is available but not yet wired into PlanApprove LLM scenario | Beads creation after plan approve not verified end-to-end |
 
 ### Recommendations (Priority Order)
 
-1. **Implement `skip_next` / `skip_complete` analyzer rules** — these are the most common agent errors
-2. **Add beads state assertions** — `bd list --json` checks post-`plan approve` and post-`complete`
-3. **Add merge topology assertion** — verify merge commits exist with `git log --merges` on spec branch after `complete`
-4. **Add focus field depth helper** — read `.mindspec/focus` and assert all fields, not just mode
-5. **Add invalid transition rejection tests** — deterministic (no LLM needed), just verify CLI exits non-zero
-6. **Add implement→plan scenario** — 2-bead setup where bead-2 depends on bead-1, complete bead-1, verify mode=plan
-7. **Add commit message format assertion** — grep `git log` for `impl(<beadID>):` after `complete`
+1. ~~**Implement `skip_next` / `skip_complete` analyzer rules**~~ ✅ Done (Spec 059, Bead 2)
+2. ~~**Add beads state assertions**~~ ✅ Done (Spec 059, Bead 1)
+3. ~~**Add merge topology assertion**~~ ✅ Done (Spec 059, Bead 1 + 4)
+4. ~~**Add focus field depth helper**~~ ✅ Done (Spec 059, Bead 1 + 4)
+5. ~~**Add invalid transition rejection tests**~~ ✅ Done (Spec 059, Bead 3)
+6. ~~**Add implement→plan scenario**~~ ✅ Done (Spec 059, Bead 5)
+7. ~~**Add commit message format assertion**~~ ✅ Done (Spec 059, Bead 1 + 4)
 8. **Add auto-commit verification** — check spec branch has commits from `spec approve` / `plan approve`
-
-See Spec 059 for planned implementation.
 
 ## Architecture Notes
 
