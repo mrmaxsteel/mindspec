@@ -91,8 +91,7 @@ Additionally:
 - `mindspec bugfix` convenience command (future spec)
 - Removing hook enforcement (stays as defense-in-depth)
 - Changes to `approve spec/plan/impl` internals (already auto-commit)
-- Enforcing that `mindspec next` can only run from a spec worktree (known gap, documented)
-- Enforcing that `mindspec complete` can only run from a bead worktree (known gap, documented)
+- ~~Enforcing worktree scoping~~ (implemented: `next` requires spec worktree, `complete` requires bead worktree)
 - Multi-agent parallel bead execution (the primitives support it but orchestration is future work)
 
 ## Non-Goals
@@ -123,13 +122,13 @@ Originally the plan was to keep explore as a guidance-only command. During imple
 
 Removing it entirely (command, package, template, state constant) is simpler than maintaining dead code.
 
-### `mindspec next` / `mindspec complete` scoping (known gap)
+### `mindspec next` / `mindspec complete` worktree scoping
 
-The intended execution model:
+The execution model:
 - `mindspec next` runs from a **spec worktree** → creates a bead worktree off the spec branch
 - `mindspec complete` runs from a **bead worktree** → auto-commits, merges bead→spec, cleans up bead worktree + branch
 
-This scoping is not yet enforced. Both commands work from any directory today. This is documented as a known gap in WORKFLOW-STATE-MACHINE.md.
+This scoping is enforced via `workspace.DetectWorktreeContext()`. Running from the wrong context produces a helpful error. Both commands accept `--allow-main` for recovery scenarios.
 
 Parallel bead execution (multiple agents running `next`/`complete` in separate bead worktrees) works correctly by design: each bead worktree has its own focus file, and the DAG dependency graph ensures dependent beads cannot be claimed until prerequisites are closed.
 

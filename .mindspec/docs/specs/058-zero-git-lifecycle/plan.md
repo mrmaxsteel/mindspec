@@ -44,9 +44,9 @@ version: 3
 | WORKFLOW-STATE-MACHINE.md updated | Bead 4 (done) |
 | Spec updated to reflect actual implementation | Bead 4 (done) |
 | `make test` passes | Bead 4 (done) |
-| Stale CLI messages updated (spec-init refs, raw git in recovery hints) | Bead 5 |
-| `mindspec next` enforces spec worktree scoping | Bead 6 |
-| `mindspec complete` enforces bead worktree scoping | Bead 6 |
+| Stale CLI messages updated (spec-init refs, raw git in recovery hints) | Bead 5 (done) |
+| `mindspec next` enforces spec worktree scoping | Bead 6 (done) |
+| `mindspec complete` enforces bead worktree scoping | Bead 6 (done) |
 | `TestLLM_SingleBead` passes without raw git | Bead 7 |
 | `TestLLM_SpecToIdle` passes full lifecycle | Bead 7 |
 
@@ -121,7 +121,7 @@ Update LLM test scenarios, WORKFLOW-STATE-MACHINE.md, and spec for new commands 
 **Depends on**
 Bead 1, Bead 2, Bead 3
 
-## Bead 5: Stale CLI message cleanup
+## Bead 5: Stale CLI message cleanup (DONE)
 
 Several CLI error/help messages still reference `spec-init` and raw git commands. Update them to use the new command names and mindspec-native recovery paths.
 
@@ -133,30 +133,28 @@ Several CLI error/help messages still reference `spec-init` and raw git commands
 5. `cmd/mindspec/setup.go:31,75,115` — help text: replace `explore, spec-init` references with current command names
 
 **Verification**
-- [ ] `grep -r 'spec-init' cmd/mindspec/` only shows the hidden alias definition in `spec_init.go`
-- [ ] `grep -r 'git add\|git commit\|git checkout' cmd/mindspec/` returns no results (except git restore for discard)
-- [ ] `make build && make test` passes
+- [x] `grep -r 'spec-init' cmd/mindspec/` only shows the hidden alias definition in `spec_init.go`
+- [x] `grep -r 'git add\|git commit\|git checkout' cmd/mindspec/` returns no results (except git restore for discard)
+- [x] `make build && make test` passes
 
 **Depends on**
 Bead 2
 
-## Bead 6: Enforce worktree scoping for next and complete
+## Bead 6: Enforce worktree scoping for next and complete (DONE)
 
 `mindspec next` should only run from a spec worktree. `mindspec complete` should only run from a bead worktree. Add guards that detect the current worktree context and fail with a helpful message if run from the wrong location.
 
 **Steps**
-1. Add a `DetectWorktreeContext(cwd string) (kind string, specID string, beadID string)` helper that identifies whether the CWD is: main repo, spec worktree, or bead worktree (by path pattern matching against `.worktrees/worktree-spec-*` and `.worktrees/worktree-*`)
-2. In `cmd/mindspec/next.go`, before step 1 (clean tree check), verify CWD is a spec worktree. If on main, error: "mindspec next must run from a spec worktree. Use `mindspec spec create <slug>` first." If in a bead worktree, error: "you're already in a bead worktree — run `mindspec complete "msg"` when done."
-3. In `cmd/mindspec/complete.go` (or `internal/complete/complete.go`), verify CWD is a bead worktree. If on main or spec worktree, error with guidance.
-4. Add `--allow-main` or similar escape hatch for recovery scenarios
-5. Update tests to mock CWD where needed
+1. Added `DetectWorktreeContext(cwd string)` to `internal/workspace/workspace.go`
+2. Added guard in `cmd/mindspec/next.go` — rejects main and bead worktrees
+3. Added guard in `cmd/mindspec/complete.go` — rejects main and spec worktrees
+4. Both commands have `--allow-main` escape hatch for recovery
+5. Unit tests for `DetectWorktreeContext` in `workspace_test.go`
 
 **Verification**
-- [ ] `mindspec next` from main repo fails with helpful error
-- [ ] `mindspec next` from spec worktree succeeds
-- [ ] `mindspec complete` from bead worktree succeeds
-- [ ] `mindspec complete` from spec worktree fails with helpful error
-- [ ] `make build && make test` passes
+- [x] `mindspec next` from main repo fails with helpful error
+- [x] `mindspec complete` from spec worktree fails with helpful error
+- [x] `make build && make test` passes
 
 **Depends on**
 Bead 5
