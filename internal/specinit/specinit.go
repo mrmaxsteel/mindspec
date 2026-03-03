@@ -1,7 +1,6 @@
 package specinit
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/hooks"
 	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/templates"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
@@ -112,50 +110,15 @@ func Run(root, specID, title string) (*Result, error) {
 		return nil, fmt.Errorf("writing spec file: %w", err)
 	}
 
-	// --- Phase 3: Create lifecycle epic (beads) ---
-
-	var epicID string
-	if err := preflightFn(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: beads not available, skipping epic creation: %v\n", err)
-	} else {
-		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, title)
-		out, err := runBDFn("create", "--title", epicTitle, "--type=epic", "--json")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not create lifecycle epic: %v\n", err)
-		} else {
-			var created struct {
-				ID string `json:"id"`
-			}
-			if json.Unmarshal(out, &created) == nil && created.ID != "" {
-				epicID = created.ID
-			}
-		}
-	}
-
-	// Write lifecycle.yaml with initial phase and epic_id.
-	lc := &state.Lifecycle{Phase: state.ModeSpec, EpicID: epicID}
-	if err := state.WriteLifecycle(specDir, lc); err != nil {
-		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
-	}
-
-	// --- Phase 3b: Auto-commit spec files to the branch ---
+	// --- Phase 3: Auto-commit spec files to the branch ---
+	// Note: Epic creation moved to `spec approve` per ADR-0023 (epic = approval gate).
 	commitMsg := fmt.Sprintf("chore: initialize spec %s", specID)
 	if err := gitops.CommitAll(wtPath, commitMsg); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not auto-commit spec files: %v\n", err)
 	}
 
-	// --- Phase 4: Focus + hooks + recording ---
-
-	// Write focus to worktree only (per-worktree focus — hooks read local root).
-	mc := &state.Focus{
-		Mode:           state.ModeSpec,
-		ActiveSpec:     specID,
-		SpecBranch:     specBranch,
-		ActiveWorktree: wtPath,
-	}
-	if err := state.WriteFocus(wtPath, mc); err != nil {
-		return nil, fmt.Errorf("writing focus to worktree: %w", err)
-	}
+	// --- Phase 4: Hooks + recording ---
+	// Note: No focus file written per ADR-0023 (beads is single state authority).
 
 	// Install git hooks (best-effort, ensures Layer 1 enforcement).
 	if err := hooks.InstallAll(root); err != nil {

@@ -1,7 +1,7 @@
 // Package lifecycle provides beads-based lifecycle phase derivation.
 // It replaces the focus/lifecycle.yaml file-based state with queries
 // to beads (Dolt), per ADR-0023.
-package lifecycle
+package phase
 
 import (
 	"encoding/json"

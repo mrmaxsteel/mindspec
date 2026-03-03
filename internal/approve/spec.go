@@ -1,19 +1,26 @@
 package approve
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/gitops"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/validate"
 	"github.com/mindspec/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
+
+// specRunBDFn is a package-level variable for testability.
+var specRunBDFn = bead.RunBD
 
 // SpecResult holds the result of spec approval.
 type SpecResult struct {
@@ -39,14 +46,27 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
 	}
 
-	// Step 3: Transition lifecycle to plan phase.
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil || lc == nil {
-		lc = &state.Lifecycle{}
-	}
-	lc.Phase = state.ModePlan
-	if err := state.WriteLifecycle(specDir, lc); err != nil {
-		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
+	// Step 3: Create lifecycle epic in beads (ADR-0023).
+	// Epic creation = spec approval gate. The epic's existence is the durable record.
+	specNum, specTitle := parseSpecID(specID)
+	if specNum > 0 {
+		if err := phase.CheckSpecNumberCollision(specNum); err != nil {
+			return nil, fmt.Errorf("spec number collision: %w", err)
+		}
+		metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s"}`, specNum, specTitle)
+		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
+		out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
+		if epicErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", epicErr))
+		} else {
+			var created struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(out, &created) == nil && created.ID != "" {
+				// Push to Dolt so other agents see the epic immediately
+				_, _ = specRunBDFn("dolt", "push")
+			}
+		}
 	}
 
 	// Step 3b: Scaffold plan.md if it doesn't exist, so the agent has the exact
@@ -66,22 +86,7 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
 	}
 
-	// Step 4: Write focus for plan mode (per-worktree: prefer spec worktree, fallback to root).
-	mc := &state.Focus{
-		Mode:           state.ModePlan,
-		ActiveSpec:     specID,
-		SpecBranch:     state.SpecBranch(specID),
-		ActiveWorktree: specWtPath,
-	}
-	focusRoot := specWtPath
-	if _, err := os.Stat(filepath.Join(focusRoot, ".mindspec")); err != nil {
-		focusRoot = root // no worktree .mindspec — write to main root
-	}
-	if err := state.WriteFocus(focusRoot, mc); err != nil {
-		return nil, fmt.Errorf("writing focus: %w", err)
-	}
-
-	// Step 5: Emit recording phase marker (best-effort)
+	// Step 4: Emit recording phase marker (best-effort)
 	if err := recording.EmitPhaseMarker(root, specID, "spec", "plan"); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
 	}
@@ -233,4 +238,34 @@ func splitFrontmatter(content string) (frontmatter string, body string, hasFront
 	}
 
 	return strings.Join(lines[1:fmEnd], "\n"), strings.Join(lines[fmEnd+1:], "\n"), true
+}
+
+// parseSpecID extracts spec_num and spec_title from a spec ID like "060-eliminate-focus-lifecycle".
+func parseSpecID(specID string) (int, string) {
+	dashIdx := strings.Index(specID, "-")
+	if dashIdx < 0 {
+		return 0, ""
+	}
+	numStr := specID[:dashIdx]
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, ""
+	}
+	return num, specID[dashIdx+1:]
+}
+
+// titleFromSpecID derives a human-readable title from a spec ID slug.
+func titleFromSpecID(specID string) string {
+	dashIdx := strings.Index(specID, "-")
+	if dashIdx < 0 {
+		return specID
+	}
+	slug := specID[dashIdx+1:]
+	parts := strings.Split(slug, "-")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
 }

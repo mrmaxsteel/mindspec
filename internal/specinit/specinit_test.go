@@ -143,17 +143,19 @@ func TestRunSetsState(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Focus is now written to the worktree (per-worktree focus), not main root.
-	mc, err := state.ReadFocus(result.WorktreePath)
-	if err != nil {
-		t.Fatalf("state.ReadFocus(worktree) error: %v", err)
+	// Per ADR-0023: no focus file is written. State is derived from beads.
+	// Verify worktree was created and spec files exist.
+	if result.WorktreePath == "" {
+		t.Fatal("expected worktree path to be set")
+	}
+	if result.SpecBranch != "spec/012-state-test" {
+		t.Errorf("expected branch spec/012-state-test, got %q", result.SpecBranch)
 	}
 
-	if mc.Mode != state.ModeSpec {
-		t.Errorf("expected mode=%q, got %q", state.ModeSpec, mc.Mode)
-	}
-	if mc.ActiveSpec != "012-state-test" {
-		t.Errorf("expected activeSpec=%q, got %q", "012-state-test", mc.ActiveSpec)
+	// No focus file should exist in the worktree
+	mc, _ := state.ReadFocus(result.WorktreePath)
+	if mc != nil {
+		t.Errorf("expected no focus file in worktree (ADR-0023), but found one with mode=%q", mc.Mode)
 	}
 }
 
@@ -221,7 +223,7 @@ func TestTitleFromSlug(t *testing.T) {
 	}
 }
 
-func TestRunCreatesLifecycle(t *testing.T) {
+func TestRunNoLifecycleFile(t *testing.T) {
 	root := setupTestRoot(t)
 	mockSuccess(t, root)
 
@@ -230,41 +232,25 @@ func TestRunCreatesLifecycle(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Verify lifecycle.yaml was created in the worktree spec dir.
+	// Per ADR-0023: no lifecycle.yaml should be created (eliminated).
 	specDir := workspace.SpecDir(result.WorktreePath, "014-lifecycle-test")
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		t.Fatalf("ReadLifecycle() error: %v", err)
-	}
-	if lc == nil {
-		t.Fatal("expected lifecycle.yaml to be created")
-	}
-	if lc.Phase != state.ModeSpec {
-		t.Errorf("expected phase=%q, got %q", state.ModeSpec, lc.Phase)
-	}
-	if lc.EpicID != "epic-123" {
-		t.Errorf("expected epic_id=%q, got %q", "epic-123", lc.EpicID)
+	lc, _ := state.ReadLifecycle(specDir)
+	if lc != nil {
+		t.Error("expected no lifecycle.yaml (ADR-0023), but file was created")
 	}
 }
 
-func TestRunContinuesWhenBeadsUnavailable(t *testing.T) {
+func TestRunNoEpicCreation(t *testing.T) {
 	root := setupTestRoot(t)
 	mockSuccess(t, root)
-	// Override preflight to fail — Run should still succeed with a warning.
-	preflightFn = func(root string) error { return fmt.Errorf("bd unavailable") }
 
-	result, err := Run(root, "013-no-beads", "")
+	// Per ADR-0023: epic creation moved to spec approve.
+	// spec create should succeed without creating an epic.
+	result, err := Run(root, "013-no-epic", "")
 	if err != nil {
-		t.Fatalf("Run() error: %v (should succeed even without beads)", err)
+		t.Fatalf("Run() error: %v", err)
 	}
-
-	// lifecycle.yaml should still be created, but with empty epic_id.
-	specDir := workspace.SpecDir(result.WorktreePath, "013-no-beads")
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		t.Fatalf("ReadLifecycle() error: %v", err)
-	}
-	if lc.EpicID != "" {
-		t.Errorf("expected empty epic_id when beads unavailable, got %q", lc.EpicID)
+	if result.WorktreePath == "" {
+		t.Fatal("expected worktree to be created")
 	}
 }
