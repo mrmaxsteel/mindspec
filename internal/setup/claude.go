@@ -459,18 +459,6 @@ func fileExists(path string) bool {
 // Shared across Codex and Copilot setup (both use .agents/skills/).
 func skillFiles() map[string]string {
 	return map[string]string{
-		"ms-explore": `---
-name: ms-explore
-description: Enter, promote, or dismiss a MindSpec Explore Mode session
----
-
-# Explore Mode
-
-- Enter: ` + "`mindspec explore \"short description\"`" + `
-- Promote to spec: ` + "`mindspec explore promote <spec-id>`" + `
-- Dismiss: ` + "`mindspec explore dismiss`" + ` (optionally ` + "`--adr`" + ` to record decision)
-`,
-
 		"ms-spec-init": `---
 name: ms-spec-init
 description: Initialize a new MindSpec specification
@@ -559,7 +547,6 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
 | ` + "`/ms-spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |

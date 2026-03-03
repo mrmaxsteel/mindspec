@@ -101,6 +101,10 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
+	origFindLocalRoot := findLocalRootFn
+	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test") }
+	t.Cleanup(func() { findLocalRootFn = origFindLocalRoot })
+
 	state.WriteFocus(tmp, &state.Focus{
 		Mode:       state.ModeImplement,
 		ActiveSpec: "010-test",

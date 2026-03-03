@@ -5,6 +5,25 @@
 **Goal**: {{.SpecGoal}}
 {{- end}}
 
+## MindSpec Lifecycle
+
+```
+idle ── spec ── plan ── implement ──── >>> review ── idle
+```
+
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
+| spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
+| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
+
+### Git rules
+- You should not need any raw git commands — all git operations are handled by mindspec
+- Raw git is available for repair/recovery but the happy path never requires it
+
 ## Objective
 
 All implementation beads are complete. Present the work for human review before closing out.
@@ -32,12 +51,8 @@ All implementation beads are complete. Present the work for human review before 
 
 ## Human Gate
 
-- **Implementation approval**: Run `mindspec approve impl <id>` when the human accepts the implementation
+- **Implementation approval**: Run `mindspec impl approve <id>` when the human accepts the implementation
 
 ## Next Action
 
-Read the spec's acceptance criteria, verify each one, and present the review summary to the human. When they approve, run `mindspec approve impl {{.ActiveSpec}}`.
-
-## Session Close
-
-Before ending a session: commit all changes, run quality gates (tests, build), update bead status, and push to remote (if configured). Work is not complete until changes are committed and pushed.
+Read the spec's acceptance criteria, verify each one, and present the review summary to the human. When they approve, run `mindspec impl approve {{.ActiveSpec}}`.

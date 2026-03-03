@@ -28,7 +28,7 @@ var setupClaudeCmd = &cobra.Command{
 	Long: `Creates Claude Code-specific configuration:
 
   - .claude/settings.json with SessionStart and PreToolUse hooks
-  - .claude/skills/ms-*/SKILL.md workflow skills (explore, spec-init, approve, etc.)
+  - .claude/skills/ms-*/SKILL.md workflow skills (spec-init, approve, etc.)
   - CLAUDE.md with pointer to AGENTS.md and MindSpec guidance
 
 If beads (bd) is installed, also runs 'bd setup claude'.
@@ -72,7 +72,7 @@ var setupCopilotCmd = &cobra.Command{
 
   - .github/copilot-instructions.md with pointer to AGENTS.md and MindSpec guidance
   - .github/hooks/mindspec.json with sessionStart and preToolUse hooks
-  - .github/prompts/*.prompt.md workflow prompt files (spec-init, spec-approve, etc.)
+  - .github/prompts/*.prompt.md workflow prompt files (spec-approve, plan-approve, etc.)
 
 This command is idempotent — re-running it skips existing items.
 Use --check to see what would be created without writing files.`,
@@ -112,7 +112,7 @@ var setupCodexCmd = &cobra.Command{
 	Long: `Creates OpenAI Codex CLI-specific configuration:
 
   - AGENTS.md with MindSpec guidance block
-  - .agents/skills/ms-*/SKILL.md workflow skills (explore, spec-init, approve, etc.)
+  - .agents/skills/ms-*/SKILL.md workflow skills (spec-init, approve, etc.)
   - Git hooks (pre-commit branch enforcement)
 
 If beads (bd) is installed, also runs 'bd setup codex'.

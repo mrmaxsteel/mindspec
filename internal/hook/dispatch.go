@@ -176,12 +176,6 @@ func WorkflowGuard(inp *Input, st *HookState, enforce bool) Result {
 			Message: blockIdle,
 		}
 
-	case state.ModeExplore:
-		return Result{
-			Action:  Warn,
-			Message: warnExplore,
-		}
-
 	case state.ModeSpec:
 		if isCodeFile(inp.FilePath) {
 			if outsideActiveWorktree(st) {
@@ -230,14 +224,8 @@ func WorkflowGuard(inp *Input, st *HookState, enforce bool) Result {
 
 const blockIdle = "mindspec: blocked — no active work context. All edits must happen on a work branch.\n\n" +
 	"Start work via one of:\n" +
-	"  • mindspec next                  — claim a ready bead and create a worktree\n" +
-	"  • mindspec spec-init <NNN-slug>  — new feature (full spec lifecycle)\n" +
-	"  • git checkout -b <branch>       — manual branch for ad-hoc work"
-
-const warnExplore = "⚠️ WORKFLOW VIOLATION: Explore Mode is for evaluating ideas, not implementing them. " +
-	"You must stop editing files. Promote to a spec (/ms-explore promote) or dismiss (/ms-explore dismiss). " +
-	"If these are exceptional circumstances (debugging a CI failure, fixing a broken build, " +
-	"correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason."
+	"  • mindspec next                    — claim a ready bead and create a worktree\n" +
+	"  • mindspec spec create <NNN-slug>  — new feature (full spec lifecycle)"
 
 const warnOutsideWorktreeCode = "⚠️ WORKFLOW WARNING: You are editing code outside the active spec worktree. " +
 	"This is allowed for unrelated work (infrastructure, tooling, bug fixes) but make sure this is intentional. " +

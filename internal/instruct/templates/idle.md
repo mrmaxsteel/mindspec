@@ -1,36 +1,38 @@
 # MindSpec — No Active Work
 
 You are not currently working on any spec or bead.
+
+## MindSpec Lifecycle
+
+```
+>>> idle ── spec ── plan ── implement ── review ── idle
+```
+
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
+| spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
+| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
+
+### Git rules
+- You should not need any raw git commands — all git operations are handled by mindspec
+- Raw git is available for repair/recovery but the happy path never requires it
 {{- if .BranchProtection}}
 
 ## Branch Protection
 
 **main is protected.** You MUST NOT edit files or commit while on main. All changes require a branch.
 
-## How to Make Changes
-
-**All new features and non-trivial changes MUST go through `mindspec spec-init`.** The only exception is single-file bugfixes or typo corrections — for those, use the direct worktree path below.
-
-### Default: spec-driven (features, multi-file changes, new commands)
-
-Run `mindspec spec-init` — it creates the branch + worktree automatically.
-
-### Exception: trivial fixes only (typos, single-file bugfixes)
-
-1. **FIRST**: `git worktree add .worktrees/fix-<description> -b fix/<description>` then `cd .worktrees/fix-<description>`
-2. Make your changes in the worktree
-3. `git add <files>` + `git commit -m "<message>"`
-4. `git push -u origin <branch-name>`
-5. `gh pr create` — open a pull request
-
-Work is NOT complete until the PR is created. Always finish all 5 steps.
+All new features and non-trivial changes MUST go through `mindspec spec create`. The spec-create command creates the branch + worktree automatically.
 {{- end}}
 
 ## Available Actions
 
-- `mindspec explore "idea"` — evaluate whether an idea is worth pursuing
-- `mindspec spec-init` — start a new specification (creates branch + worktree)
-- `mindspec state set --mode=spec --spec=<id>` — resume work on an existing spec
+- `mindspec spec create <slug>` — start a new specification (creates branch + worktree)
+- `mindspec next` — resume work on an existing spec (claims next ready bead)
 - `mindspec doctor` — check project health
 
 ## Available Specs
@@ -53,8 +55,7 @@ If the user did NOT give a concrete task, do this in your first message:
 
 1. Greet the user
 2. Suggest these options directly:
-   - `mindspec explore "idea"` to explore whether an idea is worth pursuing
-   - `mindspec spec-init` to draft a new specification (if they already know what to build)
-   - Resuming an existing spec (if any are listed above)
+   - `mindspec spec create <slug>` to draft a new specification
+   - `mindspec next` to resume an in-progress spec (if any are listed above)
    - `mindspec doctor` to check project health
 3. Ask what they'd like to work on

@@ -154,7 +154,7 @@ func handleNoState(root, format string) error {
 	mc := &state.Focus{Mode: state.ModeIdle}
 	ctx := instruct.BuildContext(root, mc)
 	ctx.Warnings = append(ctx.Warnings,
-		"[state] No active state found. Run `mindspec spec-init` to start a new spec.",
+		"[state] No active state found. Run `mindspec spec create <slug>` to start a new spec.",
 	)
 
 	if format == "json" {

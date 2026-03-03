@@ -67,8 +67,8 @@ func BuildContext(root string, mc *state.Focus) *Context {
 		ctx.PlanApproved = isPlanApproved(root, mc.ActiveSpec)
 	}
 
-	// List available specs for idle and explore modes
-	if mc.Mode == state.ModeIdle || mc.Mode == state.ModeExplore {
+	// List available specs for idle mode
+	if mc.Mode == state.ModeIdle {
 		ctx.AvailableSpecs = listSpecs(root)
 	}
 
@@ -188,11 +188,6 @@ func gatesForMode(mode string) []string {
 	case state.ModeReview:
 		return []string{
 			"Implementation approval (run mindspec approve impl <id>)",
-		}
-	case state.ModeExplore:
-		return []string{
-			"Dismiss (run mindspec explore dismiss)",
-			"Promote to spec (run mindspec explore promote <id>)",
 		}
 	default:
 		return []string{}

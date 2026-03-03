@@ -6,6 +6,25 @@
 **Goal**: {{.SpecGoal}}
 {{- end}}
 
+## MindSpec Lifecycle
+
+```
+idle ── spec ── plan ──── >>> implement ── review ── idle
+```
+
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
+| spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
+| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
+
+### Git rules
+- You should not need any raw git commands — all git operations are handled by mindspec
+- Raw git is available for repair/recovery but the happy path never requires it
+
 ## Objective
 
 Execute the active bead in an isolated worktree. Stay within scope.
@@ -20,7 +39,7 @@ Execute the active bead in an isolated worktree. Stay within scope.
 No active worktree is recorded for this bead. Run `mindspec next` before writing code.
 {{- end}}
 
-Do NOT create manual workflow branches/worktrees in implement mode (`git checkout -b ...`, `git worktree add ...`).
+Do NOT create manual workflow branches/worktrees in implement mode.
 If `mindspec complete` reports another ready bead, run `mindspec next` immediately before further implementation.
 If no active worktree is recorded, run `mindspec next` before any code edits or commits.
 If the user asks for an interrupt fix (urgent bug + continue feature), do both:
@@ -58,24 +77,15 @@ Never report completion unless required files exist and `mindspec complete` succ
 - **ADR divergence**: If implementation requires deviation from a cited ADR, stop immediately and inform the user
 - **Scope expansion**: Discovered work must be filed as new beads, not absorbed into this bead
 
-## Commit Convention
-
-Use `impl({{.ActiveBead}}): <summary>` for implementation commits.
-
-## Completion Checklist
+## Completion
 
 When the bead is done:
 
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
-3. Commit all changes (`git add` + `git commit`) — you MUST commit before completing
-4. Run `mindspec complete` — closes the bead, removes the worktree, and advances state automatically
-5. If more beads are ready, run `mindspec next` before implementing the next bead
+3. Run `mindspec complete "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
+4. If more beads are ready, run `mindspec next` before implementing the next bead
 
 ## Next Action
 
-Implement the bead's scope, then follow the completion checklist above.
-
-## Session Close
-
-Before ending a session: commit all changes, run quality gates (tests, build), update bead status, and push to remote (if configured). Work is not complete until changes are committed and pushed.
+Implement the bead's scope, then run `mindspec complete "describe what you did"` to finish.

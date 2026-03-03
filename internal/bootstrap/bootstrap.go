@@ -221,11 +221,10 @@ make test     # Run all tests
 
 This project follows a strict spec-driven workflow with human gates:
 
-1. **Explore** — evaluate whether an idea is worth pursuing
-2. **Spec** — define the problem and acceptance criteria (no code)
-3. **Plan** — break the spec into implementation beads (no code)
-4. **Implement** — write code against the approved plan
-5. **Review** — verify implementation meets acceptance criteria
+1. **Spec** — define the problem and acceptance criteria (no code)
+2. **Plan** — break the spec into implementation beads (no code)
+3. **Implement** — write code against the approved plan
+4. **Review** — verify implementation meets acceptance criteria
 
 Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`mindspec complete`" + `.
 
@@ -249,7 +248,6 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
 | ` + "`/ms-spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
@@ -277,11 +275,10 @@ make test     # Run all tests
 
 This project follows a strict spec-driven workflow with human gates:
 
-1. **Explore** — evaluate whether an idea is worth pursuing
-2. **Spec** — define the problem and acceptance criteria (no code)
-3. **Plan** — break the spec into implementation beads (no code)
-4. **Implement** — write code against the approved plan
-5. **Review** — verify implementation meets acceptance criteria
+1. **Spec** — define the problem and acceptance criteria (no code)
+2. **Plan** — break the spec into implementation beads (no code)
+3. **Implement** — write code against the approved plan
+4. **Review** — verify implementation meets acceptance criteria
 
 Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`mindspec complete`" + `.
 
@@ -306,7 +303,6 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-explore`" + ` | Enter, promote, or dismiss an Explore Mode session |
 | ` + "`/ms-spec-init`" + ` | Initialize a new specification (enters Spec Mode) |
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |

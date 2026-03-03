@@ -458,6 +458,45 @@ func TestFindLocalRoot_NestedSubdir(t *testing.T) {
 	}
 }
 
+func TestDetectWorktreeContext_Main(t *testing.T) {
+	t.Parallel()
+	kind, specID, beadID := DetectWorktreeContext("/Users/dev/project/internal/pkg")
+	if kind != WorktreeMain {
+		t.Errorf("expected main, got %s", kind)
+	}
+	if specID != "" || beadID != "" {
+		t.Errorf("expected empty IDs, got spec=%q bead=%q", specID, beadID)
+	}
+}
+
+func TestDetectWorktreeContext_Spec(t *testing.T) {
+	t.Parallel()
+	kind, specID, beadID := DetectWorktreeContext("/Users/dev/project/.worktrees/worktree-spec-058-zero-git/internal")
+	if kind != WorktreeSpec {
+		t.Errorf("expected spec, got %s", kind)
+	}
+	if specID != "058-zero-git" {
+		t.Errorf("expected spec ID 058-zero-git, got %q", specID)
+	}
+	if beadID != "" {
+		t.Errorf("expected empty bead ID, got %q", beadID)
+	}
+}
+
+func TestDetectWorktreeContext_Bead(t *testing.T) {
+	t.Parallel()
+	kind, specID, beadID := DetectWorktreeContext("/Users/dev/project/.worktrees/worktree-mindspec-abc123/src")
+	if kind != WorktreeBead {
+		t.Errorf("expected bead, got %s", kind)
+	}
+	if specID != "" {
+		t.Errorf("expected empty spec ID, got %q", specID)
+	}
+	if beadID != "mindspec-abc123" {
+		t.Errorf("expected bead ID mindspec-abc123, got %q", beadID)
+	}
+}
+
 func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	root := "/project"
 	if got := CanonicalDocsDir(root); got != filepath.Join(root, ".mindspec", "docs") {

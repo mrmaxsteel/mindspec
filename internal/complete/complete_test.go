@@ -23,6 +23,7 @@ func saveAndRestore(t *testing.T) {
 	origExec := execCommandFn
 	origMerge := mergeBranchFn
 	origDelete := deleteBranchFn
+	origCommitAll := commitAllFn
 	origResolveTarget := resolveTargetFn
 	origResolveActiveBead := resolveActiveBeadFn
 	origFindLocalRoot := findLocalRootFn
@@ -35,6 +36,7 @@ func saveAndRestore(t *testing.T) {
 		execCommandFn = origExec
 		mergeBranchFn = origMerge
 		deleteBranchFn = origDelete
+		commitAllFn = origCommitAll
 		resolveTargetFn = origResolveTarget
 		resolveActiveBeadFn = origResolveActiveBead
 		findLocalRootFn = origFindLocalRoot
@@ -43,6 +45,7 @@ func saveAndRestore(t *testing.T) {
 	// Default stubs
 	mergeBranchFn = func(repoPath, src, dst string) error { return nil }
 	deleteBranchFn = func(branch string) error { return nil }
+	commitAllFn = func(workdir, msg string) error { return nil }
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	resolveActiveBeadFn = func(root, specID string) (string, error) { return "", fmt.Errorf("no active bead") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
@@ -110,7 +113,7 @@ func TestRun_HappyPath(t *testing.T) {
 		return nil, fmt.Errorf("unexpected args: %v", args)
 	}
 
-	result, err := Run(root, "", "")
+	result, err := Run(root, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,7 +169,7 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 		return exec.Command("echo", "M modified-file.go")
 	}
 
-	_, err := Run(root, "", "")
+	_, err := Run(root, "", "", "")
 	if err == nil {
 		t.Fatal("expected error for dirty worktree")
 	}
@@ -196,7 +199,7 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 		t.Fatalf("writing focus: %v", err)
 	}
 
-	_, err := Run(root, "", "")
+	_, err := Run(root, "", "", "")
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
 	}
@@ -302,7 +305,7 @@ func TestRun_DefaultsToActiveBead(t *testing.T) {
 	worktreeRemoveFn = func(name string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
-	_, err := Run(root, "", "") // no explicit bead ID
+	_, err := Run(root, "", "", "") // no explicit bead ID
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -336,7 +339,7 @@ func TestRun_NoWorktree(t *testing.T) {
 	}
 	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
-	result, err := Run(root, "bead-1", "")
+	result, err := Run(root, "bead-1", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +449,7 @@ func TestRun_NoBead(t *testing.T) {
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "", nil }
 
-	_, err := Run(root, "", "")
+	_, err := Run(root, "", "", "")
 	if err == nil {
 		t.Fatal("expected error when no bead ID available")
 	}
@@ -478,7 +481,7 @@ func TestRun_PositionalSpecIDTreatedAsSpecHint(t *testing.T) {
 	// No lifecycle fixture -> advanceState falls back to idle.
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	if _, err := Run(root, "008-test", ""); err != nil {
+	if _, err := Run(root, "008-test", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotSpecHint != "008-test" {
@@ -515,7 +518,7 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	result, err := Run(root, "", "")
+	result, err := Run(root, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -548,7 +551,7 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	result, err := Run(root, "", "")
+	result, err := Run(root, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

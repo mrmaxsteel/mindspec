@@ -49,7 +49,17 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 		return nil, fmt.Errorf("writing lifecycle.yaml: %w", err)
 	}
 
-	// Step 3b: Auto-commit approval changes so downstream branches see them.
+	// Step 3b: Scaffold plan.md if it doesn't exist, so the agent has the exact
+	// structure that validation requires (frontmatter, sections, bead template).
+	planPath := filepath.Join(specDir, "plan.md")
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		scaffold := scaffoldPlan(specID)
+		if err := os.WriteFile(planPath, []byte(scaffold), 0644); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not scaffold plan.md: %v", err))
+		}
+	}
+
+	// Step 3c: Auto-commit approval changes so downstream branches see them.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
 	if err := gitops.CommitAll(specWtPath, commitMsg); err != nil {
@@ -164,6 +174,45 @@ func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string
 	result = append(result, newApproval...)
 	result = append(result, lines[approvalEnd:]...)
 	return strings.Join(result, "\n")
+}
+
+// scaffoldPlan generates a plan.md skeleton with the exact structure that
+// validation expects, so the agent only needs to fill in content.
+func scaffoldPlan(specID string) string {
+	return fmt.Sprintf(`---
+status: Draft
+spec_id: %s
+version: "1"
+---
+# Plan: %s
+
+## ADR Fitness
+
+No ADRs are relevant to this work. (Update this section if ADRs apply.)
+
+## Testing Strategy
+
+Unit tests will verify the implementation.
+
+## Bead 1: <Title>
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] `+"`make test`"+` passes
+
+**Depends on**
+None
+
+## Provenance
+
+| Acceptance Criterion | Verified By |
+|---------------------|-------------|
+| (map spec criteria) | Bead 1 verification |
+`, specID, specID)
 }
 
 func splitFrontmatter(content string) (frontmatter string, body string, hasFrontmatter bool) {

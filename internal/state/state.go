@@ -15,7 +15,6 @@ import (
 // Valid mode values (used for phase in lifecycle.yaml and mode in hooks).
 const (
 	ModeIdle      = "idle"
-	ModeExplore   = "explore"
 	ModeSpec      = "spec"
 	ModePlan      = "plan"
 	ModeImplement = "implement"
@@ -23,7 +22,7 @@ const (
 )
 
 // ValidModes lists all valid mode values.
-var ValidModes = []string{ModeIdle, ModeExplore, ModeSpec, ModePlan, ModeImplement, ModeReview}
+var ValidModes = []string{ModeIdle, ModeSpec, ModePlan, ModeImplement, ModeReview}
 
 // Session holds transient per-session metadata persisted at .mindspec/session.json.
 type Session struct {

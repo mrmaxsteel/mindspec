@@ -5,6 +5,25 @@
 **Goal**: {{.SpecGoal}}
 {{- end}}
 
+## MindSpec Lifecycle
+
+```
+idle ──── >>> spec ── plan ── implement ── review ── idle
+```
+
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
+| spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
+| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
+
+### Git rules
+- You should not need any raw git commands — all git operations are handled by mindspec
+- Raw git is available for repair/recovery but the happy path never requires it
+
 ## Objective
 
 Discuss user-facing value and define what "done" means. Spec Mode is intentionally implementation-light.
@@ -34,12 +53,8 @@ A spec containing:
 
 ## Human Gates
 
-- **Spec approval**: You MUST run `mindspec approve spec {{.ActiveSpec}}` before starting any plan work. This gate resolves the spec-approve step in the lifecycle molecule. Skipping it causes mode resolution to remain stuck in spec mode.
+- **Spec approval**: You MUST run `mindspec spec approve {{.ActiveSpec}}` before starting any plan work. This gate resolves the spec-approve step in the lifecycle molecule. Skipping it causes mode resolution to remain stuck in spec mode.
 
 ## Next Action
 
-Complete the spec at `.mindspec/docs/specs/{{.ActiveSpec}}/spec.md`, then run `mindspec approve spec {{.ActiveSpec}}`. Do NOT create `plan.md` or begin planning until this command succeeds.
-
-## Session Close
-
-Before ending a session: commit all changes, run quality gates if code changed, update bead status, and push to remote (if configured). Work is not complete until changes are committed and pushed.
+Complete the spec at `.mindspec/docs/specs/{{.ActiveSpec}}/spec.md`, then run `mindspec spec approve {{.ActiveSpec}}`. Do NOT create `plan.md` or begin planning until this command succeeds.

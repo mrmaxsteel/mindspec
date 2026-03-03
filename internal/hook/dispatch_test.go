@@ -333,7 +333,7 @@ func TestWorkflowGuard_EnforcementDisabled(t *testing.T) {
 
 func TestWorkflowGuard_BashPassesAllModes(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{state.ModeIdle, "", state.ModeExplore, state.ModeSpec, state.ModePlan, state.ModeReview} {
+	for _, mode := range []string{state.ModeIdle, "", state.ModeSpec, state.ModePlan, state.ModeReview} {
 		st := &HookState{Mode: mode}
 		r := WorkflowGuard(&Input{Command: "git status"}, st, true)
 		if r.Action != Pass {
@@ -369,17 +369,11 @@ func TestWorkflowGuard_Idle_EmptyMode(t *testing.T) {
 	}
 }
 
-func TestWorkflowGuard_Explore(t *testing.T) {
-	t.Parallel()
-	st := &HookState{Mode: state.ModeExplore}
-	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
-	if r.Action != Warn {
-		t.Errorf("explore mode should warn, got %d", r.Action)
-	}
-}
-
 func TestWorkflowGuard_Spec_CodeEdit(t *testing.T) {
-	t.Parallel()
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) { return "/repo", nil }
+
 	st := &HookState{Mode: state.ModeSpec}
 	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
 	if r.Action != Block {
@@ -406,7 +400,10 @@ func TestWorkflowGuard_Spec_MarkdownFile(t *testing.T) {
 }
 
 func TestWorkflowGuard_Plan_CodeEdit(t *testing.T) {
-	t.Parallel()
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) { return "/repo", nil }
+
 	st := &HookState{Mode: state.ModePlan}
 	r := WorkflowGuard(&Input{FilePath: "cmd/main.go"}, st, true)
 	if r.Action != Block {
@@ -498,7 +495,10 @@ func TestWorkflowGuard_Spec_CodeEdit_OutsideWorktree(t *testing.T) {
 }
 
 func TestWorkflowGuard_Plan_NoWorktree_StillBlocks(t *testing.T) {
-	t.Parallel()
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) { return "/repo", nil }
+
 	st := &HookState{Mode: state.ModePlan}
 	r := WorkflowGuard(&Input{FilePath: "cmd/main.go"}, st, true)
 	if r.Action != Block {
@@ -620,22 +620,12 @@ func TestWorkflowGuard_IdleBlock_ContainsEscapePaths(t *testing.T) {
 	st := &HookState{Mode: state.ModeIdle}
 	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
 	for _, phrase := range []string{
-		"spec-init",
+		"spec create",
 		"mindspec next",
-		"git checkout -b",
 	} {
 		if !contains(r.Message, phrase) {
 			t.Errorf("idle block message should contain %q", phrase)
 		}
-	}
-}
-
-func TestWorkflowGuard_ExploreWarning_ContainsPromote(t *testing.T) {
-	t.Parallel()
-	st := &HookState{Mode: state.ModeExplore}
-	r := WorkflowGuard(&Input{FilePath: "internal/foo.go"}, st, true)
-	if !contains(r.Message, "/ms-explore promote") {
-		t.Error("explore warning should mention /ms-explore promote")
 	}
 }
 
@@ -656,14 +646,20 @@ func findSubstr(s, sub string) bool {
 // --- outsideActiveWorktree ---
 
 func TestOutsideActiveWorktree_NilState(t *testing.T) {
-	t.Parallel()
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) { return "/repo", nil }
+
 	if outsideActiveWorktree(nil) {
 		t.Error("nil state should return false (conservative)")
 	}
 }
 
 func TestOutsideActiveWorktree_NoWorktree(t *testing.T) {
-	t.Parallel()
+	origGetCwd := getCwd
+	t.Cleanup(func() { getCwd = origGetCwd })
+	getCwd = func() (string, error) { return "/repo", nil }
+
 	if outsideActiveWorktree(&HookState{Mode: state.ModePlan}) {
 		t.Error("no active worktree should return false")
 	}

@@ -49,7 +49,16 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return runEmitOnly(root, specFlag, args)
 		}
 
-		// Step 0: Session freshness gate
+		// Step 0a: Worktree scoping guard
+		kind, _, _ := workspace.DetectWorktreeContext(cwd)
+		switch kind {
+		case workspace.WorktreeMain:
+			return fmt.Errorf("mindspec next must run from a spec worktree.\nUse `mindspec spec create <slug>` or cd into an existing spec worktree")
+		case workspace.WorktreeBead:
+			return fmt.Errorf("you're already in a bead worktree — run `mindspec complete \"msg\"` when done")
+		}
+
+		// Step 0b: Session freshness gate
 		if sess, readErr := state.ReadSession(root); readErr == nil && sess.SessionStartedAt != "" {
 			stale := false
 			reason := ""
@@ -72,8 +81,8 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		if err := next.CheckCleanTree(); err != nil {
 			fmt.Fprintf(os.Stderr, "Cannot claim work: %s\n\n", err)
 			fmt.Fprintln(os.Stderr, "Recovery steps:")
-			fmt.Fprintln(os.Stderr, "  1. Commit your changes: git add -A && git commit -m \"wip\"")
-			fmt.Fprintln(os.Stderr, "  2. Or discard them: git checkout -- .")
+			fmt.Fprintln(os.Stderr, "  1. Commit your changes: mindspec complete \"wip\"")
+			fmt.Fprintln(os.Stderr, "  2. Or discard them: git restore .")
 			fmt.Fprintln(os.Stderr, "  3. Then re-run: mindspec next")
 			return fmt.Errorf("dirty working tree")
 		}
@@ -127,7 +136,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 			fmt.Println()
 			fmt.Println("Next steps:")
-			fmt.Println("  - Create a new spec: mindspec spec-init")
+			fmt.Println("  - Create a new spec: mindspec spec create <slug>")
 			fmt.Println("  - Check blocked items- bd blocked")
 			fmt.Println("  - List all open work: bd list --status=open")
 			return nil
@@ -195,6 +204,11 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		}
 		if err := state.WriteFocus(focusRoot, mc); err != nil {
 			return fmt.Errorf("writing focus: %w", err)
+		}
+		// Also update the spec worktree's focus so `mindspec complete` can
+		// auto-redirect to the bead worktree if the agent forgets to cd.
+		if localRoot, lrErr := workspace.FindLocalRoot(cwd); lrErr == nil && localRoot != focusRoot {
+			_ = state.WriteFocus(localRoot, mc)
 		}
 
 		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)

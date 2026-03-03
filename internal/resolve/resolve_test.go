@@ -96,7 +96,6 @@ func TestActiveSpecs_AllPhases(t *testing.T) {
 		phase      string
 		wantActive bool
 	}{
-		{"001-explore", state.ModeExplore, true},
 		{"002-spec", state.ModeSpec, true},
 		{"003-plan", state.ModePlan, true},
 		{"004-implement", state.ModeImplement, true},

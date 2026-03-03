@@ -5,6 +5,25 @@
 **Goal**: {{.SpecGoal}}
 {{- end}}
 
+## MindSpec Lifecycle
+
+```
+idle ── spec ──── >>> plan ── implement ── review ── idle
+```
+
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
+| spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
+| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
+
+### Git rules
+- You should not need any raw git commands — all git operations are handled by mindspec
+- Raw git is available for repair/recovery but the happy path never requires it
+
 ## Objective
 
 Turn the approved spec into bounded, executable work chunks (implementation beads).
@@ -66,7 +85,7 @@ Required plan sections:
 
 ## Human Gates
 
-- **Plan approval**: Run `mindspec approve plan <id>` when the plan is ready
+- **Plan approval**: Run `mindspec plan approve <id>` when the plan is ready
 - **ADR divergence**: If a better design would diverge from an accepted ADR, **stop planning**. Present: (1) which ADR, (2) why it should be superseded, (3) the proposed alternative. Wait for human approval before proceeding. Use `mindspec adr create --supersedes <ADR-NNNN>` to create the superseding ADR once approved.
 
 ## Next Action
@@ -75,9 +94,5 @@ Required plan sections:
 Plan is approved. Commit approval artifacts first, then run `mindspec next` to claim the first bead and enter Implementation Mode. `mindspec next` requires a clean working tree and will fail on uncommitted changes. Do NOT manually set state to implement — `mindspec next` handles bead selection and state transition together.
 {{- else}}
 
-Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec approve plan {{.ActiveSpec}}`.
+Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`.
 {{- end}}
-
-## Session Close
-
-Before ending a session: commit all changes, run quality gates if code changed, update bead status, and push to remote (if configured). Work is not complete until changes are committed and pushed.

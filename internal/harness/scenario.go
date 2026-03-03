@@ -32,7 +32,6 @@ func AllScenarios() []Scenario {
 		ScenarioSpecToIdle(),
 		ScenarioSingleBead(),
 		ScenarioMultiBeadDeps(),
-		ScenarioAbandonSpec(),
 		ScenarioInterruptForBug(),
 		ScenarioResumeAfterCrash(),
 		ScenarioSpecInit(),
@@ -49,11 +48,11 @@ func AllScenarios() []Scenario {
 	}
 }
 
-// ScenarioSpecToIdle tests the full lifecycle: explore → spec → plan → implement → review → idle.
+// ScenarioSpecToIdle tests the full lifecycle: idle → spec → plan → implement → review → idle.
 func ScenarioSpecToIdle() Scenario {
 	return Scenario{
 		Name:        "spec_to_idle",
-		Description: "Full lifecycle from explore through idle",
+		Description: "Full lifecycle from idle through spec to idle",
 		MaxTurns:    100,
 		TimeoutMin:  15,
 		Model:       "haiku",
@@ -66,15 +65,16 @@ func ScenarioSpecToIdle() Scenario {
 You are in a MindSpec project with no active work. Your task: add a simple "greeting" feature — a hello.go program that prints "Hello!". Take it from idea all the way through to a completed implementation using the mindspec workflow.
 Finish only when the project is back in idle with cleanup complete.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Agent may use explore+promote or go straight to spec-init — both are valid paths.
+			// Agent may use spec create or spec-init (hidden alias) — both are valid paths.
 			assertCommandRanEither(t, events, "mindspec",
-				[]string{"spec-init"}, []string{"explore", "promote"})
+				[]string{"spec", "create"}, []string{"spec-init"})
 			assertCommandRan(t, events, "mindspec", "next")
 			assertCommandRan(t, events, "mindspec", "complete")
 			assertNoPreApproveImplMainMergeOrPR(t, events)
 
-			// Approve commands ran during lifecycle
-			assertCommandRan(t, events, "mindspec", "approve")
+			// Approve commands ran during lifecycle (accept both old and new forms)
+			assertCommandRanEither(t, events, "mindspec",
+				[]string{"approve"}, []string{"spec", "approve"}, []string{"plan", "approve"}, []string{"impl", "approve"})
 
 			// Git state after full lifecycle
 			assertBranchIs(t, sandbox, "main")
@@ -230,26 +230,6 @@ Run 'mindspec complete' after each bead.`,
 	}
 }
 
-// ScenarioAbandonSpec tests explore → dismiss flow.
-func ScenarioAbandonSpec() Scenario {
-	return Scenario{
-		Name:        "abandon_spec",
-		Description: "Enter explore mode and dismiss without promoting",
-		MaxTurns:    10,
-		Model:       "haiku",
-		Setup: func(sandbox *Sandbox) error {
-			return nil
-		},
-		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
-
-Evaluate whether a "bad idea feature" is worth pursuing. Decide it is not worth it and abandon the idea without recording an ADR.`,
-		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			assertCommandRan(t, events, "mindspec", "explore")
-			assertCommandContains(t, events, "mindspec", "dismiss")
-		},
-	}
-}
-
 // ScenarioInterruptForBug tests mid-bead interrupt for a bug fix.
 func ScenarioInterruptForBug() Scenario {
 	return Scenario{
@@ -375,8 +355,9 @@ func ScenarioSpecInit() Scenario {
 
 /ms-spec-init 001-calculator --title "Calculator"`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Command ran
-			assertCommandRan(t, events, "mindspec", "spec-init")
+			// Command ran (accept both old and new forms)
+			assertCommandRanEither(t, events, "mindspec",
+				[]string{"spec-init"}, []string{"spec", "create"})
 
 			// Git state: spec branch created
 			assertHasBranches(t, sandbox, "spec/")

@@ -18,11 +18,11 @@ var beadCmd = &cobra.Command{
 var beadSpecCmd = &cobra.Command{
 	Use:        "spec [spec-id]",
 	Short:      "Deprecated: lifecycle managed via lifecycle.yaml (ADR-0020)",
-	Deprecated: "use 'mindspec spec-init' which creates a lifecycle epic and lifecycle.yaml",
+	Deprecated: "use 'mindspec spec create' which creates a lifecycle epic and lifecycle.yaml",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "Lifecycle state is now managed via per-spec lifecycle.yaml (ADR-0020).")
-		fmt.Fprintln(os.Stderr, "Use 'mindspec spec-init' to create a new spec with lifecycle tracking.")
+		fmt.Fprintln(os.Stderr, "Use 'mindspec spec create' to create a new spec with lifecycle tracking.")
 		return nil
 	},
 }

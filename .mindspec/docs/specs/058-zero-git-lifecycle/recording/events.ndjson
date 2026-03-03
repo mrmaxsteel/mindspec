@@ -1,0 +1,6 @@
+{"ts":"2026-03-03T08:54:09.820734Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"058-zero-git-lifecycle"}}
+{"ts":"2026-03-03T09:20:31.600604Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"058-zero-git-lifecycle","to":"plan"}}
+{"ts":"2026-03-03T09:21:20.810822Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"058-zero-git-lifecycle","to":"plan-approved"}}
+{"ts":"2026-03-03T09:21:30.31561Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-d5lm.4","spec_id":"058-zero-git-lifecycle"}}
+{"ts":"2026-03-03T11:09:46.364509Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-d5lm.4","spec_id":"058-zero-git-lifecycle"}}
+{"ts":"2026-03-03T11:10:05.132543Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-d5lm.1","spec_id":"058-zero-git-lifecycle"}}

@@ -119,16 +119,6 @@ func TestLLM_MultiBeadDeps(t *testing.T) {
 
 // --- Alternative flow scenarios ---
 
-func TestLLM_AbandonSpec(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping LLM test in short mode")
-	}
-	report, _ := runScenario(t, ScenarioAbandonSpec())
-	if len(report.WrongActions) > 0 {
-		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
-	}
-}
-
 func TestLLM_InterruptForBug(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping LLM test in short mode")

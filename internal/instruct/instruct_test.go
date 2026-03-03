@@ -75,8 +75,8 @@ func TestRender_IdleMode(t *testing.T) {
 	if !strings.Contains(output, "001-skeleton") {
 		t.Error("expected available specs to be listed")
 	}
-	if !strings.Contains(output, "mindspec spec-init") {
-		t.Error("expected mindspec spec-init suggestion")
+	if !strings.Contains(output, "mindspec spec create") {
+		t.Error("expected mindspec spec create suggestion")
 	}
 }
 
@@ -103,8 +103,8 @@ func TestRender_SpecMode(t *testing.T) {
 	if !strings.Contains(output, "Forbidden Actions") {
 		t.Error("expected forbidden actions section")
 	}
-	if !strings.Contains(output, "mindspec approve spec") {
-		t.Error("expected mindspec approve spec gate")
+	if !strings.Contains(output, "mindspec spec approve") {
+		t.Error("expected mindspec spec approve gate")
 	}
 }
 
@@ -128,8 +128,8 @@ func TestRender_PlanMode(t *testing.T) {
 	if !strings.Contains(output, "Required Review") {
 		t.Error("expected required review section")
 	}
-	if !strings.Contains(output, "mindspec approve plan") {
-		t.Error("expected mindspec approve plan gate")
+	if !strings.Contains(output, "mindspec plan approve") {
+		t.Error("expected mindspec plan approve gate")
 	}
 
 	// Plan is approved in test fixture → should show post-approval guidance
@@ -164,8 +164,8 @@ func TestRender_ImplementMode(t *testing.T) {
 	if !strings.Contains(output, "Scope discipline") {
 		t.Error("expected scope discipline obligation")
 	}
-	if !strings.Contains(output, "impl(beads-001)") {
-		t.Error("expected commit convention with bead id")
+	if !strings.Contains(output, "mindspec complete") {
+		t.Error("expected mindspec complete command")
 	}
 }
 
@@ -234,36 +234,11 @@ func TestRenderJSON_Structure(t *testing.T) {
 	}
 }
 
-func TestRender_ExploreMode(t *testing.T) {
-	mockPrimeUnavailable(t)
-	root := setupTestProject(t)
-	s := &state.Focus{Mode: state.ModeExplore}
-	ctx := BuildContext(root, s)
-
-	output, err := Render(ctx)
-	if err != nil {
-		t.Fatalf("Render failed: %v", err)
-	}
-
-	if !strings.Contains(output, "Explore Mode") {
-		t.Error("expected explore mode heading")
-	}
-	if !strings.Contains(output, "prior art") {
-		t.Error("expected prior art check guidance")
-	}
-	if !strings.Contains(output, "explore dismiss") {
-		t.Error("expected dismiss exit path")
-	}
-	if !strings.Contains(output, "explore promote") {
-		t.Error("expected promote exit path")
-	}
-}
-
 func TestRenderJSON_AllModes(t *testing.T) {
 	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 
-	modes := []string{state.ModeIdle, state.ModeExplore, state.ModeSpec, state.ModePlan, state.ModeImplement}
+	modes := []string{state.ModeIdle, state.ModeSpec, state.ModePlan, state.ModeImplement}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			s := &state.Focus{Mode: mode, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
@@ -292,7 +267,6 @@ func TestGatesForMode(t *testing.T) {
 		wantCount int
 	}{
 		{state.ModeIdle, 0},
-		{state.ModeExplore, 2},
 		{state.ModeSpec, 1},
 		{state.ModePlan, 2},
 		{state.ModeImplement, 2},

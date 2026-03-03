@@ -11,11 +11,11 @@ import (
 )
 
 var specInitCmd = &cobra.Command{
-	Use:   "spec-init [spec-id]",
-	Short: "Initialize a new specification and enter Spec Mode",
-	Long: `Creates a new spec directory with spec.md from the template,
-sets state to spec mode, and emits spec mode guidance.`,
-	Args: cobra.ExactArgs(1),
+	Use:    "spec-init [spec-id]",
+	Short:  "Initialize a new specification and enter Spec Mode",
+	Long:   `Alias for 'mindspec spec create'. Use 'mindspec spec create' instead.`,
+	Hidden: true,
+	Args:   cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID := args[0]
 		title, _ := cmd.Flags().GetString("title")

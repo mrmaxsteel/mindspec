@@ -12,6 +12,12 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestHookMatrix_WorkflowGuard(t *testing.T) {
+	// Mock getCwd to a non-worktree path so outsideActiveWorktree doesn't
+	// interfere with spec/plan code-edit tests.
+	origGetCwd := hook.ExportGetCwd()
+	t.Cleanup(func() { hook.SetGetCwd(origGetCwd) })
+	hook.SetGetCwd(func() (string, error) { return "/repo", nil })
+
 	tests := []struct {
 		name     string
 		mode     string
@@ -23,11 +29,6 @@ func TestHookMatrix_WorkflowGuard(t *testing.T) {
 		{"idle/doc", state.ModeIdle, ".mindspec/docs/spec.md", hook.Block},
 		{"idle/plan", state.ModeIdle, "docs/specs/001/plan.md", hook.Block},
 		{"idle/config", state.ModeIdle, ".mindspec/config.yaml", hook.Block},
-
-		// explore — always warns
-		{"explore/code", state.ModeExplore, "internal/foo.go", hook.Warn},
-		{"explore/doc", state.ModeExplore, ".mindspec/docs/spec.md", hook.Warn},
-		{"explore/test", state.ModeExplore, "internal/foo_test.go", hook.Warn},
 
 		// spec — blocks code, allows docs
 		{"spec/go_file", state.ModeSpec, "internal/foo.go", hook.Block},

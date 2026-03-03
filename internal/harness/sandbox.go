@@ -86,7 +86,7 @@ enforcement:
 	// Add .beads/ to .gitignore first — dolt server writes runtime files
 	// (dolt-server.activity, dolt-server.port) that would make the worktree
 	// appear dirty to mindspec complete's clean-tree check.
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n"), 0o644); err != nil {
 		t.Fatalf("writing .gitignore: %v", err)
 	}
 	mustRun(t, root, "git", "add", ".gitignore")
