@@ -20,7 +20,8 @@
       "phase": "plan-approved",
       "started_at": "2026-03-03T15:36:48Z",
       "beads": [
-        "mindspec-9dx0.2"
+        "mindspec-9dx0.2",
+        "mindspec-9dx0.3"
       ]
     }
   ]
