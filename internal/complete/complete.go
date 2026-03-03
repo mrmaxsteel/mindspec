@@ -66,7 +66,11 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 
 	// 1. Derive activeSpec from resolver, activeBead from arg or Beads query
-	specID, err := resolveTargetFn(root, specIDHint)
+	// Try localRoot first (per-worktree focus) then fall back to root.
+	specID, err := resolveTargetFn(localRoot, specIDHint)
+	if err != nil && localRoot != root {
+		specID, err = resolveTargetFn(root, specIDHint)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolving active spec: %w", err)
 	}
