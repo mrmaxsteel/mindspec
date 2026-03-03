@@ -1,0 +1,28 @@
+{
+  "spec_id": "064-stale-lifecycle-cleanup",
+  "started_at": "2026-03-03T23:16:48Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "process_name": "mindspec",
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-03-03T23:16:48Z",
+      "ended_at": "2026-03-03T23:26:00Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-03-03T23:26:00Z",
+      "ended_at": "2026-03-03T23:27:58Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-03-03T23:27:58Z",
+      "beads": [
+        "mindspec-3y4t.1",
+        "mindspec-3y4t.2"
+      ]
+    }
+  ]
+}

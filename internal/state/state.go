@@ -16,6 +16,7 @@ const (
 	ModePlan      = "plan"
 	ModeImplement = "implement"
 	ModeReview    = "review"
+	ModeDone      = "done"
 )
 
 // ValidModes lists all valid mode values.

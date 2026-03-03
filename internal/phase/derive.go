@@ -69,9 +69,21 @@ func SpecIDFromMetadata(specNum int, specTitle string) string {
 	return fmt.Sprintf("%03d-%s", specNum, specTitle)
 }
 
-// DerivePhase determines the lifecycle phase from an epic's children statuses.
+// DerivePhase determines the lifecycle phase from an epic's status and children statuses.
 // Implements the phase derivation table from ADR-0023 §3.
 func DerivePhase(epicID string) (string, error) {
+	return DerivePhaseWithStatus(epicID, "")
+}
+
+// DerivePhaseWithStatus determines the lifecycle phase, using a pre-fetched epic status
+// if available (to avoid redundant queries). If epicStatus is empty, it is looked up.
+func DerivePhaseWithStatus(epicID, epicStatus string) (string, error) {
+	if epicStatus == "" {
+		epicStatus = queryEpicStatus(epicID)
+	}
+	if strings.EqualFold(epicStatus, "closed") {
+		return state.ModeDone, nil
+	}
 	children := queryChildren(epicID)
 	return DerivePhaseFromChildren(children), nil
 }
@@ -448,6 +460,19 @@ func findActiveBeadForEpic(epicID string) string {
 	}
 
 	return ""
+}
+
+// queryEpicStatus fetches the status of a single epic by ID.
+func queryEpicStatus(epicID string) string {
+	out, err := runBDFn("show", epicID, "--json")
+	if err != nil {
+		return ""
+	}
+	var items []EpicInfo
+	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
+		return ""
+	}
+	return items[0].Status
 }
 
 func derivePhaseForSpec(epicID string) (string, error) {

@@ -261,6 +261,64 @@ func TestExtractSpecMetadata(t *testing.T) {
 // ResolveContextFromDir — path-based resolution
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// DerivePhaseWithStatus — epic-level status check
+// ---------------------------------------------------------------------------
+
+func TestDerivePhaseWithStatus_ClosedEpic(t *testing.T) {
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		// Should not be called — closed epic short-circuits before querying children
+		t.Error("unexpected bd call for closed epic")
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	got, err := DerivePhaseWithStatus("epic-1", "closed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != state.ModeDone {
+		t.Errorf("DerivePhaseWithStatus(closed) = %q, want %q", got, state.ModeDone)
+	}
+}
+
+func TestDerivePhaseWithStatus_OpenEpicFallsThrough(t *testing.T) {
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		// Return children for open epic
+		if args[0] == "list" {
+			return []byte(`[{"id":"b1","title":"bead","status":"open","issue_type":"task"}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	got, err := DerivePhaseWithStatus("epic-1", "open")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != state.ModePlan {
+		t.Errorf("DerivePhaseWithStatus(open) = %q, want %q", got, state.ModePlan)
+	}
+}
+
+func TestDerivePhase_ClosedEpicViaBDShow(t *testing.T) {
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if args[0] == "show" {
+			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic"}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	got, err := DerivePhase("epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != state.ModeDone {
+		t.Errorf("DerivePhase(closed epic) = %q, want %q", got, state.ModeDone)
+	}
+}
+
 func TestResolveContextFromDir_MainWorktree(t *testing.T) {
 	// Stub runBDFn to return no epics (idle)
 	origRunBD := runBDFn
