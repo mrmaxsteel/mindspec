@@ -1,1 +1,2 @@
 {"ts":"2026-03-03T14:24:51.026242Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"059-harness-coverage"}}
+{"ts":"2026-03-03T14:26:45.760985Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"059-harness-coverage","to":"plan"}}
