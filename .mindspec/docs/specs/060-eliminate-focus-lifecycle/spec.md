@@ -123,17 +123,17 @@ The epic's own standard fields (`created_at`, `created_by`, `status`) provide th
 
 ## Acceptance Criteria
 
-1. `make test` passes with zero references to `ReadFocus`/`WriteFocus`/`ReadLifecycle`/`WriteLifecycle` in production code
-2. `mindspec instruct` correctly derives phase from beads without any focus file
-3. `mindspec spec approve` creates an epic with `metadata.spec_num` and `metadata.spec_title` (epic existence = approval gate)
-4. `mindspec spec approve` performs `bd dolt pull` before epic creation and rejects on `spec_num` collision
-5. `mindspec plan approve` creates child beads under the existing epic (no new epic creation)
-6. `mindspec approve impl` completes without reading/writing focus or lifecycle.yaml
-7. `mindspec next` and `mindspec complete` work without reading/writing focus
-8. All LLM test assertions use beads-based state checks
-9. `grep -r "ReadFocus\|WriteFocus\|ReadLifecycle\|WriteLifecycle" internal/` returns only test cleanup code (if any)
-10. No `.mindspec/focus` or `lifecycle.yaml` files are created during a full spec lifecycle run
-11. Phase derivation matches the design table for all edge cases (tested)
+- [ ] `make test` passes with zero references to `ReadFocus`/`WriteFocus`/`ReadLifecycle`/`WriteLifecycle` in production code
+- [ ] `mindspec instruct` correctly derives phase from beads without any focus file
+- [ ] `mindspec spec approve` creates an epic with `metadata.spec_num` and `metadata.spec_title` (epic existence = approval gate)
+- [ ] `mindspec spec approve` performs `bd dolt pull` before epic creation and rejects on `spec_num` collision
+- [ ] `mindspec plan approve` creates child beads under the existing epic (no new epic creation)
+- [ ] `mindspec approve impl` completes without reading/writing focus or lifecycle.yaml
+- [ ] `mindspec next` and `mindspec complete` work without reading/writing focus
+- [ ] All LLM test assertions use beads-based state checks
+- [ ] `grep -r "ReadFocus\|WriteFocus\|ReadLifecycle\|WriteLifecycle" internal/` returns only test cleanup code (if any)
+- [ ] No `.mindspec/focus` or `lifecycle.yaml` files are created during a full spec lifecycle run
+- [ ] Phase derivation matches the design table for all edge cases (tested)
 
 ## Risks
 
