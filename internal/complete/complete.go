@@ -11,6 +11,7 @@ import (
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/next"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/resolve"
 	"github.com/mindspec/mindspec/internal/state"
@@ -77,18 +78,7 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	if beadID == "" {
 		beadID, err = resolveActiveBeadFn(root, specID)
 		if err != nil {
-			// Fallback: check focus for activeBead
-			if focus, ferr := state.ReadFocus(localRoot); ferr == nil && focus != nil && focus.ActiveBead != "" {
-				beadID = focus.ActiveBead
-			} else {
-				return nil, fmt.Errorf("resolving active bead: %w", err)
-			}
-		}
-	}
-	if beadID == "" {
-		// Final fallback: check focus for activeBead
-		if focus, ferr := state.ReadFocus(localRoot); ferr == nil && focus != nil && focus.ActiveBead != "" {
-			beadID = focus.ActiveBead
+			return nil, fmt.Errorf("resolving active bead: %w", err)
 		}
 	}
 	if beadID == "" {
@@ -132,10 +122,7 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 	if err := checkCleanWorktree(checkPath); err != nil {
 		if wtPath == "" {
-			if focus, ferr := state.ReadFocus(localRoot); ferr == nil && focus != nil &&
-				focus.Mode == state.ModeImplement && focus.ActiveWorktree == "" {
-				return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
-			}
+			return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
 		}
 		return nil, fmt.Errorf("%w\nhint: use `mindspec complete \"describe what you did\"` to auto-commit", err)
 	}
@@ -183,30 +170,9 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	result.NextBead = nextBead
 	result.NextSpec = specID
 
-	// 6.5. Write focus with next state (per-worktree: write to spec worktree or local root).
-	specWtPath := state.SpecWorktreePath(root, specID)
-	mc := &state.Focus{
-		Mode:       nextMode,
-		ActiveSpec: specID,
-		ActiveBead: nextBead,
-		SpecBranch: specBranch,
-	}
-	focusRoot := specWtPath
+	// ADR-0023: no focus write — state is derived from beads.
 	if nextMode == state.ModeIdle {
 		result.NextSpec = ""
-		mc.ActiveSpec = ""
-		mc.SpecBranch = ""
-		mc.ActiveWorktree = ""
-		focusRoot = localRoot // idle → write to wherever we are
-	} else {
-		mc.ActiveWorktree = specWtPath
-		// Fall back to localRoot if spec worktree .mindspec doesn't exist.
-		if _, err := os.Stat(filepath.Join(focusRoot, ".mindspec")); err != nil {
-			focusRoot = localRoot
-		}
-	}
-	if err := state.WriteFocus(focusRoot, mc); err != nil {
-		return result, fmt.Errorf("writing focus: %w", err)
 	}
 
 	return result, nil
@@ -345,15 +311,14 @@ func advanceState(root, specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// Read epic_id from lifecycle.yaml (SpecDir is worktree-aware per ADR-0022).
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil || lc == nil || lc.EpicID == "" {
+	// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil || epicID == "" {
 		return state.ModeIdle, ""
 	}
 
 	// Check for ready children under the epic
-	out, err := runBDFn("ready", "--parent", lc.EpicID, "--json")
+	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err == nil {
 		var ready []bead.BeadInfo
 		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {

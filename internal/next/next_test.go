@@ -362,8 +362,6 @@ func stubWorktreeHelpers(t *testing.T) {
 	origBranch := createBranchFn
 	origExists := branchExistsFn
 	origGitignore := ensureGitignore
-	origFocus := readFocusFn
-	origWriteMC := writeFocusFn
 	t.Cleanup(func() {
 		worktreeList = origList
 		worktreeCreate = origCreate
@@ -371,19 +369,13 @@ func stubWorktreeHelpers(t *testing.T) {
 		createBranchFn = origBranch
 		branchExistsFn = origExists
 		ensureGitignore = origGitignore
-		readFocusFn = origFocus
-		writeFocusFn = origWriteMC
 	})
 
-	// Defaults: config returns defaults, no spec branch, branch doesn't exist.
+	// Defaults: config returns defaults, branch doesn't exist.
 	loadConfigFn = func(root string) (*config.Config, error) { return config.DefaultConfig(), nil }
 	createBranchFn = func(name, from string) error { return nil }
 	branchExistsFn = func(name string) bool { return false }
 	ensureGitignore = func(root, entry string) error { return nil }
-	readFocusFn = func(root string) (*state.Focus, error) {
-		return &state.Focus{Mode: state.ModeImplement}, nil
-	}
-	writeFocusFn = func(root string, mc *state.Focus) error { return nil }
 }
 
 func TestEnsureWorktree_CreatesNew(t *testing.T) {
@@ -430,15 +422,12 @@ func TestEnsureWorktree_CreatesNew(t *testing.T) {
 
 func TestEnsureWorktree_BranchesFromSpecBranch(t *testing.T) {
 	stubWorktreeHelpers(t)
+	// ADR-0023: spec branch is derived from worktree path convention,
+	// not from focus file. Create a dir that DetectWorktreeContext recognizes.
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
-
-	readFocusFn = func(root string) (*state.Focus, error) {
-		return &state.Focus{
-			Mode:       state.ModeImplement,
-			SpecBranch: "spec/046-test",
-		}, nil
-	}
+	specWt := filepath.Join(root, ".worktrees", "worktree-spec-046-test")
+	os.MkdirAll(filepath.Join(specWt, ".mindspec"), 0755) // for FindLocalRoot
+	os.MkdirAll(filepath.Join(specWt, ".worktrees"), 0755)
 
 	var branchFrom string
 	createBranchFn = func(name, from string) error {
@@ -450,6 +439,12 @@ func TestEnsureWorktree_BranchesFromSpecBranch(t *testing.T) {
 		return nil, nil
 	}
 	worktreeCreate = func(name, branch string) error { return nil }
+
+	// EnsureWorktree calls workspace.FindLocalRoot(".") which resolves cwd.
+	// We need to be in the spec worktree dir for DetectWorktreeContext to work.
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(specWt)
 
 	_, err := EnsureWorktree(root, "bead-xyz")
 	if err != nil {
@@ -486,26 +481,11 @@ func TestEnsureWorktree_ReusesExisting(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktree_PropagatesFocus(t *testing.T) {
+func TestEnsureWorktree_NoFocusPropagation(t *testing.T) {
+	// ADR-0023: EnsureWorktree no longer writes focus files.
 	stubWorktreeHelpers(t)
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
-
-	readFocusFn = func(root string) (*state.Focus, error) {
-		return &state.Focus{
-			Mode:       state.ModeImplement,
-			ActiveSpec: "051-test",
-			SpecBranch: "spec/051-test",
-		}, nil
-	}
-
-	var writtenMC *state.Focus
-	var writtenRoot string
-	writeFocusFn = func(root string, mc *state.Focus) error {
-		writtenRoot = root
-		writtenMC = mc
-		return nil
-	}
 
 	worktreeList = func() ([]bead.WorktreeListEntry, error) {
 		return nil, nil
@@ -517,24 +497,10 @@ func TestEnsureWorktree_PropagatesFocus(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Mode-cache should have been written to the bead worktree
-	if writtenMC == nil {
-		t.Fatal("expected focus to be written to bead worktree")
-	}
-	if writtenRoot != wtPath {
-		t.Errorf("focus written to %q, want %q", writtenRoot, wtPath)
-	}
-	if writtenMC.ActiveBead != "bead-xyz" {
-		t.Errorf("ActiveBead = %q, want %q", writtenMC.ActiveBead, "bead-xyz")
-	}
-	if writtenMC.ActiveWorktree != wtPath {
-		t.Errorf("ActiveWorktree = %q, want %q", writtenMC.ActiveWorktree, wtPath)
-	}
-	if writtenMC.Mode != state.ModeImplement {
-		t.Errorf("Mode = %q, want %q", writtenMC.Mode, state.ModeImplement)
-	}
-	if writtenMC.SpecBranch != "spec/051-test" {
-		t.Errorf("SpecBranch = %q, want %q", writtenMC.SpecBranch, "spec/051-test")
+	// No focus file should be written to the worktree.
+	mc, readErr := state.ReadFocus(wtPath)
+	if readErr == nil && mc != nil {
+		t.Error("expected no focus file to be written to bead worktree")
 	}
 }
 
@@ -543,17 +509,15 @@ func TestEnsureWorktree_AnchorsCreationToSpecWorktree(t *testing.T) {
 	root := t.TempDir()
 	specID := "051-test"
 	specWt := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
-	if err := os.MkdirAll(specWt, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(specWt, ".mindspec"), 0755); err != nil {
 		t.Fatalf("mkdir spec worktree: %v", err)
 	}
 
-	readFocusFn = func(root string) (*state.Focus, error) {
-		return &state.Focus{
-			Mode:       state.ModeImplement,
-			ActiveSpec: specID,
-			SpecBranch: "spec/" + specID,
-		}, nil
-	}
+	// ADR-0023: spec context derived from worktree path, not focus file.
+	// Set cwd to spec worktree so DetectWorktreeContext finds specID.
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(specWt)
 
 	worktreeList = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 

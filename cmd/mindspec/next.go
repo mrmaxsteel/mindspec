@@ -8,6 +8,7 @@ import (
 
 	"github.com/mindspec/mindspec/internal/contextpack"
 	"github.com/mindspec/mindspec/internal/next"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/resolve"
 	"github.com/mindspec/mindspec/internal/state"
@@ -103,10 +104,10 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		// Step 2: Query ready work (scoped to spec's epic if available)
 		var items []next.BeadInfo
 		if specFlag != "" {
-			specDir := workspace.SpecDir(root, specFlag)
-			lc, lcErr := state.ReadLifecycle(specDir)
-			if lcErr == nil && lc != nil && lc.EpicID != "" {
-				items, err = next.QueryReadyForEpic(lc.EpicID)
+			// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
+			if epicErr == nil && epicID != "" {
+				items, err = next.QueryReadyForEpic(epicID)
 			} else {
 				items, err = next.QueryReady()
 			}
@@ -187,30 +188,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		// Note: parent status propagation handled natively by beads epics
 
-		// Step 7: Write focus
-		mc := &state.Focus{
-			Mode:       resolved.Mode,
-			ActiveSpec: resolved.SpecID,
-			ActiveBead: selected.ID,
-			SpecBranch: state.SpecBranch(resolved.SpecID),
-		}
-		if wtErr == nil && wtPath != "" {
-			mc.ActiveWorktree = wtPath
-		}
-		// Write focus to the worktree (per-worktree focus) or local root.
-		focusRoot := root
-		if wtErr == nil && wtPath != "" {
-			focusRoot = wtPath
-		}
-		if err := state.WriteFocus(focusRoot, mc); err != nil {
-			return fmt.Errorf("writing focus: %w", err)
-		}
-		// Also update the spec worktree's focus so `mindspec complete` can
-		// auto-redirect to the bead worktree if the agent forgets to cd.
-		if localRoot, lrErr := workspace.FindLocalRoot(cwd); lrErr == nil && localRoot != focusRoot {
-			_ = state.WriteFocus(localRoot, mc)
-		}
-
+		// ADR-0023: no focus write — state is derived from beads.
 		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)
 		fmt.Println()
 
@@ -262,10 +240,9 @@ func runEmitOnly(root, specFlag string, args []string) error {
 		var items []next.BeadInfo
 		var err error
 		if specFlag != "" {
-			specDir := workspace.SpecDir(root, specFlag)
-			lc, lcErr := state.ReadLifecycle(specDir)
-			if lcErr == nil && lc != nil && lc.EpicID != "" {
-				items, err = next.QueryReadyForEpic(lc.EpicID)
+			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
+			if epicErr == nil && epicID != "" {
+				items, err = next.QueryReadyForEpic(epicID)
 			} else {
 				items, err = next.QueryReady()
 			}

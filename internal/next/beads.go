@@ -10,6 +10,7 @@ import (
 	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/config"
 	"github.com/mindspec/mindspec/internal/gitops"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 	"github.com/mindspec/mindspec/internal/workspace"
 )
@@ -32,8 +33,6 @@ var (
 	runBDCombFn     = bead.RunBDCombined
 	worktreeList    = bead.WorktreeList
 	worktreeCreate  = bead.WorktreeCreate
-	readFocusFn     = state.ReadFocus
-	writeFocusFn    = state.WriteFocus
 	loadConfigFn    = config.Load
 	createBranchFn  = gitops.CreateBranch
 	branchExistsFn  = gitops.BranchExists
@@ -138,21 +137,17 @@ func filterReadyItems(items []BeadInfo) []BeadInfo {
 	return filtered
 }
 
-// ResolveActiveBead finds the currently in-progress bead for a spec by reading
-// the epic_id from lifecycle.yaml and querying bd for in-progress children.
+// ResolveActiveBead finds the currently in-progress bead for a spec by querying
+// beads for the spec's epic and then finding in-progress children.
 // Returns empty string (no error) if no bead is in progress.
 func ResolveActiveBead(root, specID string) (string, error) {
-	// SpecDir is worktree-aware per ADR-0022.
-	specDir := workspace.SpecDir(root, specID)
-	lc, err := state.ReadLifecycle(specDir)
-	if err != nil {
-		return "", fmt.Errorf("reading lifecycle for %s: %w", specID, err)
-	}
-	if lc == nil || lc.EpicID == "" {
+	// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil || epicID == "" {
 		return "", nil
 	}
 
-	out, err := runBDFn("list", "--parent", lc.EpicID, "--status=in_progress", "--json")
+	out, err := runBDFn("list", "--parent", epicID, "--status=in_progress", "--json")
 	if err != nil {
 		return "", nil // No in-progress beads
 	}
@@ -216,7 +211,7 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 }
 
 // EnsureWorktree checks for an existing worktree for the bead, or creates one.
-// It reads state for SpecBranch (to branch from spec instead of main) and config
+// It derives the spec branch from worktree context conventions (ADR-0023) and config
 // for WorktreeRoot (canonical .worktrees/ directory).
 // Returns the worktree path. Returns empty string if worktree creation is not
 // applicable (e.g., working on main).
@@ -241,18 +236,17 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Determine the base branch: use spec branch from focus if available.
-	// Read focus from local root (per-worktree focus).
+	// ADR-0023: derive spec branch from worktree context (not focus file).
 	baseBranch := "HEAD"
 	localRoot := root
 	if lr, err := workspace.FindLocalRoot("."); err == nil {
 		localRoot = lr
 	}
-	mc, mcErr := readFocusFn(localRoot)
-	if mcErr == nil && mc.SpecBranch != "" {
-		baseBranch = mc.SpecBranch
+	_, specID, _ := workspace.DetectWorktreeContext(localRoot)
+	if specID != "" {
+		baseBranch = state.SpecBranch(specID)
 	}
-	anchorRoot := resolveWorktreeAnchor(root, mc)
+	anchorRoot := resolveWorktreeAnchorFromSpec(root, specID)
 
 	// Create the bead branch from the spec branch (or HEAD).
 	if !branchExistsFn(branchName) {
@@ -293,25 +287,16 @@ func EnsureWorktree(root, beadID string) (string, error) {
 		}
 	}
 
-	// Propagate focus into the bead worktree so commands work from it.
-	if mcErr == nil && mc != nil {
-		beadMC := *mc // shallow copy
-		beadMC.ActiveWorktree = wtPath
-		beadMC.ActiveBead = beadID
-		beadMC.Mode = state.ModeImplement
-		if err := writeFocusFn(wtPath, &beadMC); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write focus to bead worktree: %v\n", err)
-		}
-	}
+	// ADR-0023: no focus propagation — state is derived from beads.
 
 	return wtPath, nil
 }
 
-func resolveWorktreeAnchor(root string, mc *state.Focus) string {
-	if mc == nil || mc.ActiveSpec == "" {
+func resolveWorktreeAnchorFromSpec(root, specID string) string {
+	if specID == "" {
 		return root
 	}
-	specWt := state.SpecWorktreePath(root, mc.ActiveSpec)
+	specWt := state.SpecWorktreePath(root, specID)
 	if fi, err := os.Stat(specWt); err == nil && fi.IsDir() {
 		return specWt
 	}

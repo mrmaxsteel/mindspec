@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -59,22 +60,38 @@ func setupTempRoot(t *testing.T) string {
 	return tmp
 }
 
-// writeLifecycleFixture creates a lifecycle.yaml for a spec in the temp root.
-func writeLifecycleFixture(t *testing.T, root, specID, epicID string) {
+// stubPhaseEpic stubs phase.FindEpicBySpecID to return the given epicID for specID.
+func stubPhaseEpic(t *testing.T, specID, epicID string) {
 	t.Helper()
-	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
-	os.MkdirAll(specDir, 0755)
-	lc := &state.Lifecycle{Phase: state.ModeImplement, EpicID: epicID}
-	if err := state.WriteLifecycle(specDir, lc); err != nil {
-		t.Fatalf("writing lifecycle fixture: %v", err)
-	}
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
+			epics := []phase.EpicInfo{{
+				ID: epicID, Title: "[SPEC " + specID + "] Test", Status: "open",
+				IssueType: "epic", Metadata: map[string]interface{}{},
+			}}
+			// Parse spec_num and spec_title from specID for metadata.
+			var num int
+			var title string
+			if idx := strings.Index(specID, "-"); idx > 0 {
+				fmt.Sscanf(specID[:idx], "%d", &num)
+				title = specID[idx+1:]
+			}
+			if num > 0 && title != "" {
+				epics[0].Metadata["spec_num"] = float64(num)
+				epics[0].Metadata["spec_title"] = title
+			}
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restore)
 }
 
 func TestRun_HappyPath(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
@@ -137,16 +154,10 @@ func TestRun_HappyPath(t *testing.T) {
 		t.Errorf("NextBead: got %q, want %q", result.NextBead, "bead-2")
 	}
 
-	// Verify focus was written
-	mc, err := state.ReadFocus(root)
-	if err != nil {
-		t.Fatalf("reading focus: %v", err)
-	}
-	if mc.Mode != state.ModeImplement {
-		t.Errorf("focus mode: got %q, want %q", mc.Mode, state.ModeImplement)
-	}
-	if mc.ActiveBead != "bead-2" {
-		t.Errorf("focus activeBead: got %q, want %q", mc.ActiveBead, "bead-2")
+	// ADR-0023: no focus file written — state derived from beads.
+	mc, readErr := state.ReadFocus(root)
+	if readErr == nil && mc != nil {
+		t.Error("expected no focus file to be written")
 	}
 }
 
@@ -191,14 +202,7 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 		return exec.Command("echo", " M hello.go")
 	}
 
-	if err := state.WriteFocus(root, &state.Focus{
-		Mode:       state.ModeImplement,
-		ActiveSpec: "008-test",
-		ActiveBead: "bead-1",
-	}); err != nil {
-		t.Fatalf("writing focus: %v", err)
-	}
-
+	// ADR-0023: no focus file — hint is now always shown when no worktree found.
 	_, err := Run(root, "", "", "")
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
@@ -284,7 +288,7 @@ func TestRun_DefaultsToActiveBead(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-from-resolver", nil }
@@ -318,7 +322,7 @@ func TestRun_NoWorktree(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 
@@ -355,19 +359,19 @@ func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "test-spec", "epic-123")
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			items := []bead.BeadInfo{
-				{ID: "next-bead", Title: "[IMPL test-spec.2] Next"},
+				{ID: "next-bead", Title: "[IMPL 001-test-spec.2] Next"},
 			}
 			return json.Marshal(items)
 		}
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModeImplement {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
 	}
@@ -380,25 +384,25 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "test-spec", "epic-123")
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			return json.Marshal([]bead.BeadInfo{}) // nothing ready
 		}
 		if len(args) > 0 && args[0] == "search" {
-			if len(args) > 1 && args[1] != "[test-spec]" {
-				t.Errorf("search prefix: got %q, want %q", args[1], "[test-spec]")
+			if len(args) > 1 && args[1] != "[001-test-spec]" {
+				t.Errorf("search prefix: got %q, want %q", args[1], "[001-test-spec]")
 			}
 			items := []bead.BeadInfo{
-				{ID: "blocked-bead", Title: "[test-spec] Bead 3: Blocked"},
+				{ID: "blocked-bead", Title: "[001-test-spec] Bead 3: Blocked"},
 			}
 			return json.Marshal(items)
 		}
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModePlan {
 		t.Errorf("mode: got %q, want %q", mode, state.ModePlan)
 	}
@@ -411,13 +415,13 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "test-spec", "epic-123")
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{}) // nothing ready, nothing open
 	}
 
-	mode, nextBead := advanceState(root, "test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModeReview {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeReview)
 	}
@@ -426,11 +430,15 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 }
 
-func TestAdvanceState_NoLifecycle(t *testing.T) {
+func TestAdvanceState_NoEpic(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	// No lifecycle.yaml → idle
+	// No epic found for spec → idle (ADR-0023: no lifecycle.yaml needed).
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil // no epics
+	})
+	t.Cleanup(restore)
 
 	mode, nextBead := advanceState(root, "test")
 	if mode != state.ModeIdle {
@@ -496,7 +504,7 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
@@ -534,7 +542,7 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
-	writeLifecycleFixture(t, root, "008-test", "mol-parent-1")
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
