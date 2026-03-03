@@ -32,6 +32,7 @@ var (
 	isAncestorFn        = gitops.IsAncestor
 	branchExistsFn      = gitops.BranchExists
 	findLocalRootFn     = defaultFindLocalRoot
+	commitAllFn         = gitops.CommitAll
 )
 
 func defaultFindLocalRoot() (string, error) {
@@ -122,6 +123,14 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 			} else {
 				result.Pushed = true
 			}
+		}
+
+		// Auto-commit any remaining changes (e.g. recording artifacts) in the
+		// spec worktree before cleanup, so worktree removal doesn't fail on
+		// a dirty tree.
+		specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+		if err := commitAllFn(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("auto-commit in spec worktree: %v", err))
 		}
 
 		// Cleanup must run from repo root. If command is invoked from inside the
