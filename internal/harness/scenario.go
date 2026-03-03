@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,7 @@ func AllScenarios() []Scenario {
 		ScenarioApproveSpecFromWorktree(),
 		ScenarioApprovePlanFromWorktree(),
 		ScenarioBugfixBranch(),
+		ScenarioBlockedBeadTransition(),
 	}
 }
 
@@ -90,6 +92,8 @@ Finish only when the project is back in idle with cleanup complete.`,
 
 // ScenarioSingleBead tests implementing a single pre-approved bead.
 func ScenarioSingleBead() Scenario {
+	// Lift IDs so both Setup and Assertions closures can access them.
+	var epicID, beadID string
 	return Scenario{
 		Name:        "single_bead",
 		Description: "Pre-approved plan, implement a single bead",
@@ -100,8 +104,8 @@ func ScenarioSingleBead() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create real beads: epic + child task
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
-			beadID := sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
+			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			beadID = sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
 			// Set up as if spec and plan are already approved
@@ -168,6 +172,17 @@ ends in review mode. Do not close beads directly with bd commands.`,
 			}
 			// Agent should have run mindspec complete
 			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Commit message follows impl(<beadID>): convention
+			assertCommitMessage(t, sandbox, `impl\(`)
+
+			// Bead branch was merged into spec branch (merge topology)
+			assertMergeTopology(t, sandbox, "spec/001-greeting")
+
+			// Bead was closed by mindspec complete
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				beadID: "closed",
+			})
 		},
 	}
 }
@@ -180,21 +195,24 @@ func ScenarioMultiBeadDeps() Scenario {
 		MaxTurns:    30,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
+			specID := "002-multi"
+			specBranch := "spec/" + specID
+
 			// Create real beads: epic + 3 child tasks
-			epicID := sandbox.CreateBead("[002-multi] Epic", "epic", "")
-			bead1 := sandbox.CreateBead("[002-multi] Core types", "task", epicID)
-			sandbox.CreateBead("[002-multi] Formatter", "task", epicID)
-			sandbox.CreateBead("[002-multi] Tests", "task", epicID)
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			bead1 := sandbox.CreateBead("["+specID+"] Core types", "task", epicID)
+			sandbox.CreateBead("["+specID+"] Formatter", "task", epicID)
+			sandbox.CreateBead("["+specID+"] Tests", "task", epicID)
 			sandbox.ClaimBead(bead1)
 
-			sandbox.WriteFile(".mindspec/docs/specs/002-multi/spec.md", `---
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Multi-bead Feature
 status: Approved
 ---
 # Multi-bead Feature
 Implement a feature in three phases.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/002-multi/plan.md", `---
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: 002-multi
 ---
@@ -206,15 +224,26 @@ Create formatter.go that formats Messages.
 ## Bead 3: Tests (depends on Bead 2)
 Create formatter_test.go with tests.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/002-multi/lifecycle.yaml",
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
-			sandbox.WriteFocus(mustJSON(map[string]string{
-				"mode":       "implement",
-				"activeSpec": "002-multi",
-				"activeBead": bead1,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
-			}))
 			sandbox.Commit("setup: multi-bead spec")
+
+			// Create spec branch, bead branch, and bead worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + bead1
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + bead1
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     specID,
+				"activeBead":     bead1,
+				"specBranch":     specBranch,
+				"activeWorktree": beadWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: implement mode with active worktree")
 			return nil
 		},
 		Prompt: `You are in implement mode for a multi-bead spec. Implement all three beads in order:
@@ -238,18 +267,31 @@ func ScenarioInterruptForBug() Scenario {
 		MaxTurns:    25,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
-			epicID := sandbox.CreateBead("[003-feature] Epic", "epic", "")
-			beadID := sandbox.CreateBead("[003-feature] Implement feature", "task", epicID)
+			specID := "003-feature"
+			specBranch := "spec/" + specID
+
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/003-feature/lifecycle.yaml",
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Feature
+status: Approved
+---
+# Feature
+Add a feature function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: Implement feature
+Create feature.go with a Feature function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
-			sandbox.WriteFocus(mustJSON(map[string]string{
-				"mode":       "implement",
-				"activeSpec": "003-feature",
-				"activeBead": beadID,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
-			}))
+			// main.go with a bug lives on main (inherited by branches)
 			sandbox.WriteFile("main.go", `package main
 
 func main() {
@@ -257,6 +299,23 @@ func main() {
 }
 `)
 			sandbox.Commit("setup: feature in progress")
+
+			// Create spec branch, bead branch, and bead worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + beadID
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + beadID
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     specID,
+				"activeBead":     beadID,
+				"specBranch":     specBranch,
+				"activeWorktree": beadWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: implement mode with active worktree")
 			return nil
 		},
 		Prompt: `You are implementing a feature bead. While working, you notice
@@ -294,33 +353,68 @@ func ScenarioResumeAfterCrash() Scenario {
 		MaxTurns:    15,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
-			epicID := sandbox.CreateBead("[004-resume] Epic", "epic", "")
-			beadID := sandbox.CreateBead("[004-resume] Process feature", "task", epicID)
+			specID := "004-resume"
+			specBranch := "spec/" + specID
+
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			beadID := sandbox.CreateBead("["+specID+"] Process feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			// Simulate a crash: focus says implement, bead is in_progress, partial work exists
-			sandbox.WriteFile(".mindspec/docs/specs/004-resume/lifecycle.yaml",
+			// Spec and plan artifacts
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Process Feature
+status: Approved
+---
+# Process Feature
+Add a process function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: Implement process
+Create partial.go with a Process function.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
-			sandbox.WriteFocus(mustJSON(map[string]string{
-				"mode":       "implement",
-				"activeSpec": "004-resume",
-				"activeBead": beadID,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
-			}))
-			sandbox.WriteFile("partial.go", `package main
+			sandbox.Commit("setup: spec and plan")
+
+			// Create spec branch, bead branch, and bead worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + beadID
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + beadID
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+
+			// Simulate a crash: partial work committed in the bead worktree
+			sandbox.WriteFile(beadWtDir+"/partial.go", `package main
 
 // TODO: finish this function
 func Process() {
 }
 `)
-			sandbox.Commit("setup: partial work before crash")
+			mustRunGit(sandbox, "-C", beadWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", beadWtDir, "commit", "-m", "wip: partial process")
+
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     specID,
+				"activeBead":     beadID,
+				"specBranch":     specBranch,
+				"activeWorktree": beadWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: implement mode with partial work")
 			return nil
 		},
 		Prompt: `You are resuming after a session crash. The project is in implement mode with
 a bead in progress. There's a partial.go file with an incomplete Process function.
 Complete the Process function (make it return "processed") and run 'mindspec complete'.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			if !sandbox.FileExists("partial.go") {
+			// partial.go should exist somewhere (may have been merged to spec branch)
+			partialObserved := sandbox.FileExists("partial.go") || fileExistsInWorktrees(sandbox.Root, "partial.go")
+			if !partialObserved {
 				t.Error("partial.go should still exist")
 			}
 			assertCommandRan(t, events, "mindspec", "complete")
@@ -368,8 +462,13 @@ func ScenarioSpecInit() Scenario {
 			// Git state: main branch still exists (CWD is main repo root)
 			assertBranchIs(t, sandbox, "main")
 
-			// Focus transitioned to spec mode
+			// Focus transitioned to spec mode with expected fields
 			assertFocusMode(t, sandbox, "spec")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "spec",
+				"activeSpec": "001-calculator",
+				"specBranch": "spec/001-calculator",
+			})
 		},
 	}
 }
@@ -480,8 +579,13 @@ Pending.
 			// Git state: spec worktree still exists (persists through plan mode)
 			assertHasWorktrees(t, sandbox)
 
-			// Focus transitioned to plan mode
+			// Focus transitioned to plan mode with correct spec fields
 			assertFocusMode(t, sandbox, "plan")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "plan",
+				"activeSpec": "001-calc",
+				"specBranch": "spec/001-calc",
+			})
 		},
 	}
 }
@@ -496,6 +600,8 @@ Pending.
 //
 //	agent CWD moved to bead worktree
 func ScenarioPlanApprove() Scenario {
+	// Lift epicID so Assertions closure can verify bead creation.
+	var epicID string
 	return Scenario{
 		Name:        "plan_approve",
 		Description: "Approve a plan and transition to implement mode",
@@ -506,7 +612,7 @@ func ScenarioPlanApprove() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
 
 			// Create spec branch and worktree (stay on main)
 			mustRunGit(sandbox, "branch", specBranch)
@@ -620,11 +726,19 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			// Git state: bead worktree created by mindspec next
 			assertHasWorktrees(t, sandbox)
 
-			// Focus transitioned to implement mode
+			// Focus transitioned to implement mode with full fields
 			assertFocusMode(t, sandbox, "implement")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "implement",
+				"activeSpec": "001-planner",
+				"specBranch": "spec/001-planner",
+			})
 
 			// Agent CWD moved to bead worktree (instruct emits worktree redirect)
 			assertEventCWDContains(t, events, ".worktrees/")
+
+			// Beads were created by plan approve (plan has 2 bead sections)
+			assertBeadsMinCount(t, sandbox, epicID, 2)
 		},
 	}
 }
@@ -635,9 +749,9 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 //
 //	focus.activeWorktree points to spec worktree, all beads closed, clean tree
 //
-// After:  approve impl ran, idle mode, spec/ branch deleted,
+// After:  approve impl ran, idle mode, spec/ branch deleted (merged to main),
 //
-//	spec worktree removed, clean tree (no merge to main — push only)
+//	spec worktree removed, implementation content merged to main, clean tree
 func ScenarioImplApprove() Scenario {
 	return Scenario{
 		Name:        "impl_approve",
@@ -722,14 +836,23 @@ func Done() string { return "done" }
 			assertCommandContains(t, events, "mindspec", "impl")
 			assertNoPreApproveImplMainMergeOrPR(t, events)
 
-			// Git state: spec branch deleted after cleanup
+			// Git state: spec branch deleted after merge
 			assertNoBranches(t, sandbox, "spec/")
 
-			// Git state: spec worktree removed after cleanup
+			// Git state: spec worktree removed after merge
 			assertNoWorktrees(t, sandbox)
 
-			// Focus transitioned to idle
+			// Git state: implementation content merged to main
+			if !sandbox.FileExists("done.go") {
+				t.Error("expected done.go to be merged to main")
+			}
+
+			// Focus transitioned to idle with cleared spec fields
 			assertFocusMode(t, sandbox, "idle")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "idle",
+				"activeSpec": "",
+			})
 		},
 	}
 }
@@ -986,33 +1109,43 @@ func ScenarioStaleWorktree() Scenario {
 		MaxTurns:    20,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
-			epicID := sandbox.CreateBead("[005-stale] Epic", "epic", "")
-			beadID := sandbox.CreateBead("[005-stale] Implement widget", "task", epicID)
+			specID := "005-stale"
+			specBranch := "spec/" + specID
+
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			beadID := sandbox.CreateBead("["+specID+"] Implement widget", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/005-stale/spec.md", `---
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Widget Feature
 status: Approved
 ---
 # Widget Feature
 Add a widget function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/005-stale/plan.md", `---
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
 status: Approved
-spec_id: 005-stale
+spec_id: `+specID+`
 ---
 # Plan
 ## Bead 1: Implement widget
 Create widget.go with a Widget function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/005-stale/lifecycle.yaml",
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
+			sandbox.Commit("setup: spec and plan")
+
+			// Create spec branch and bead branch (but NO worktree — that's the test)
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + beadID
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
 
 			// Focus references a worktree that does NOT exist on disk
 			sandbox.WriteFocus(mustJSON(map[string]string{
 				"mode":           "implement",
-				"activeSpec":     "005-stale",
+				"activeSpec":     specID,
 				"activeBead":     beadID,
+				"specBranch":     specBranch,
 				"activeWorktree": ".worktrees/worktree-" + beadID,
 				"timestamp":      time.Now().UTC().Format(time.RFC3339),
 			}))
@@ -1500,6 +1633,97 @@ func cleanupBugfixBranchPRs(t *testing.T, sandbox *Sandbox) {
 	}
 }
 
+// ScenarioBlockedBeadTransition tests that focus returns to plan mode when the
+// only remaining bead is blocked after completing the first bead.
+//
+// Before: implement mode with bead-1 claimed, bead-2 depends on bead-1
+// After:  bead-1 closed, focus mode is plan (bead-2 is blocked, so no implement)
+func ScenarioBlockedBeadTransition() Scenario {
+	// Lift IDs so Assertions closure can verify bead states.
+	var epicID, bead1, bead2 string
+	return Scenario{
+		Name:        "blocked_bead_transition",
+		Description: "Focus returns to plan when only blocked beads remain",
+		MaxTurns:    20,
+		TimeoutMin:  10,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-blocker"
+			specBranch := "spec/" + specID
+
+			// Create epic + 2 child beads with dependency
+			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			bead1 = sandbox.CreateBead("["+specID+"] Core module", "task", epicID)
+			bead2 = sandbox.CreateBead("["+specID+"] Extension (blocked)", "task", epicID)
+
+			// bead-2 depends on bead-1
+			sandbox.runBDMust("dep", "add", bead2, bead1)
+			sandbox.ClaimBead(bead1)
+
+			// Approved spec + plan
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Blocker Feature
+status: Approved
+---
+# Blocker Feature
+Test blocked bead transition.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: Core module
+Create core.go with a Core() function.
+## Bead 2: Extension (depends on Bead 1)
+Create extension.go that uses Core().
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
+
+			// Set up spec branch + bead worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + bead1
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + bead1
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     specID,
+				"activeBead":     bead1,
+				"specBranch":     specBranch,
+				"activeWorktree": beadWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: implement mode with blocked bead-2")
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+Create a file called core.go with a function Core() string that returns "core".
+Then finish the currently claimed bead using mindspec complete.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent ran mindspec complete
+			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Focus should be plan (not implement) because bead-2 is blocked
+			assertFocusMode(t, sandbox, "plan")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "plan",
+				"activeSpec": "001-blocker",
+				"specBranch": "spec/001-blocker",
+			})
+
+			// Bead-1 closed, bead-2 still open
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				bead1: "closed",
+				bead2: "open",
+			})
+		},
+	}
+}
+
 // mustRunGit runs a git command in the sandbox root, fataling on error.
 func mustRunGit(sandbox *Sandbox, args ...string) {
 	sandbox.t.Helper()
@@ -1664,10 +1888,12 @@ func assertCommandSucceeded(t *testing.T, events []ActionEvent, command string, 
 	t.Errorf("command %q with args %v was not found with exit code 0 in events", command, argSubstr)
 }
 
-// assertNoPreApproveImplMainMergeOrPR enforces that agents never run raw git
-// merge-to-main or gh PR commands before approve impl is invoked. Since impl
-// approve no longer merges to main (it only pushes + cleans up), ANY
-// merge-to-main or gh pr command is a violation.
+// assertNoPreApproveImplMainMergeOrPR enforces workflow ordering at the test
+// layer: no direct merge-to-main or PR creation before approve impl is invoked.
+//
+// Note: internal git merge commands executed *inside* `mindspec approve impl`
+// appear in event logs before the top-level `mindspec approve impl` event due to
+// wrapper timing. We treat the known canonical internal merge command as allowed.
 func assertNoPreApproveImplMainMergeOrPR(t *testing.T, events []ActionEvent) {
 	t.Helper()
 	if err := preApproveImplMainMergeOrPRViolation(events); err != nil {
@@ -1689,15 +1915,23 @@ func preApproveImplMainMergeOrPRViolation(events []ActionEvent) error {
 			continue
 		}
 
-		// Fail if gh PR creation/merge is attempted before approve impl.
+		// Fail if PR creation/merge is attempted before approve impl.
 		if e.Command == "gh" && (containsAll(args, "pr") && (containsAll(args, "create") || containsAll(args, "merge"))) {
 			return fmt.Errorf("PR command ran before approve impl: %v", args)
 		}
 
-		// Fail if any merge-to-main is attempted before approve impl.
-		// impl approve no longer merges spec→main, so no merge-to-main is expected.
+		// Fail if a non-canonical merge-to-main is attempted before approve impl.
+		// Canonical internal merge pattern (from approve impl) is allowed:
+		//   git ... merge --no-ff spec/<id> -m "Merge spec/<id> into main"
 		if e.Command == "git" && e.ExitCode == 0 && containsAll(args, "merge") && containsAll(args, "main") {
-			return fmt.Errorf("merge-to-main occurred before approve impl: %v", args)
+			isCanonicalInternal := containsAll(args, "--no-ff") &&
+				containsAll(args, "spec/") &&
+				containsAll(args, "-m") &&
+				containsAll(args, "Merge spec/") &&
+				containsAll(args, "into main")
+			if !isCanonicalInternal {
+				return fmt.Errorf("merge-to-main occurred before approve impl: %v", args)
+			}
 		}
 	}
 
@@ -1918,4 +2152,126 @@ func assertMainCommitCountUnchanged(t *testing.T, sandbox *Sandbox) {
 	if userCommits != expectedInt {
 		t.Errorf("main branch user commit count changed: expected %d, got %d (agent committed directly to main)", expectedInt, userCommits)
 	}
+}
+
+// assertFocusFields reads .mindspec/focus and asserts that each key in expected
+// matches the corresponding value. Unlike assertFocusMode (which checks only mode
+// across multiple focus files), this asserts the full field set on a specific focus.
+func assertFocusFields(t testing.TB, sandbox *Sandbox, expected map[string]string) {
+	t.Helper()
+	focusPath := filepath.Join(sandbox.Root, ".mindspec", "focus")
+	data, err := os.ReadFile(focusPath)
+	if err != nil {
+		t.Errorf("reading focus file: %v", err)
+		return
+	}
+	var focus map[string]interface{}
+	if err := json.Unmarshal(data, &focus); err != nil {
+		t.Errorf("parsing focus file: %v", err)
+		return
+	}
+	for key, want := range expected {
+		got, _ := focus[key].(string)
+		if got != want {
+			t.Errorf("focus field %q: got %q, want %q", key, got, want)
+		}
+	}
+}
+
+// beadStatus is the minimal structure returned by `bd list --json`.
+type beadStatus struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Title  string `json:"title"`
+}
+
+// assertBeadsMinCount verifies that at least minCount child beads exist under
+// the given epicID. Useful when bead IDs are created dynamically (e.g. by plan approve).
+func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount int) {
+	t.Helper()
+	out, err := sandbox.runBD("list", "--json", "--parent", epicID)
+	if err != nil {
+		t.Errorf("bd list --json --parent %s: %v\n%s", epicID, err, out)
+		return
+	}
+	var beads []beadStatus
+	if err := json.Unmarshal([]byte(out), &beads); err != nil {
+		t.Errorf("parsing bd list output: %v\n%s", err, out)
+		return
+	}
+	if len(beads) < minCount {
+		t.Errorf("expected at least %d beads under epic %s, got %d", minCount, epicID, len(beads))
+	}
+}
+
+// assertBeadsState runs `bd list --json --parent <epicID>` in the sandbox and
+// asserts that each bead ID in expectedStatuses has the expected status.
+func assertBeadsState(t testing.TB, sandbox *Sandbox, epicID string, expectedStatuses map[string]string) {
+	t.Helper()
+	out, err := sandbox.runBD("list", "--json", "--parent", epicID)
+	if err != nil {
+		t.Errorf("bd list --json --parent %s: %v\n%s", epicID, err, out)
+		return
+	}
+	var beads []beadStatus
+	if err := json.Unmarshal([]byte(out), &beads); err != nil {
+		t.Errorf("parsing bd list output: %v\n%s", err, out)
+		return
+	}
+	statusMap := make(map[string]string)
+	for _, b := range beads {
+		statusMap[b.ID] = b.Status
+	}
+	for id, want := range expectedStatuses {
+		got, ok := statusMap[id]
+		if !ok {
+			t.Errorf("bead %q not found in bd list output (have: %v)", id, statusMap)
+			continue
+		}
+		if got != want {
+			t.Errorf("bead %q status: got %q, want %q", id, got, want)
+		}
+	}
+}
+
+// assertMergeTopology checks that at least one merge commit from a bead/ branch
+// exists on the given specBranch after a bead→spec merge.
+func assertMergeTopology(t testing.TB, sandbox *Sandbox, specBranch string) {
+	t.Helper()
+	cmd := exec.Command("git", "log", "--merges", "--oneline", specBranch)
+	cmd.Dir = sandbox.Root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Errorf("git log --merges on %s: %v", specBranch, err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.Contains(line, "bead/") {
+			return
+		}
+	}
+	t.Errorf("no merge commit from a bead/ branch found on %s; merges: %s", specBranch, strings.TrimSpace(string(out)))
+}
+
+// assertCommitMessage checks that at least one commit in git log --oneline matches
+// the given regex pattern (e.g. `impl\(bead-id\):`).
+func assertCommitMessage(t testing.TB, sandbox *Sandbox, pattern string) {
+	t.Helper()
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		t.Fatalf("invalid pattern %q: %v", pattern, err)
+	}
+	cmd := exec.Command("git", "log", "--oneline", "--all")
+	cmd.Dir = sandbox.Root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Errorf("git log --oneline: %v", err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if re.MatchString(line) {
+			return
+		}
+	}
+	t.Errorf("no commit message matching %q found in git log", pattern)
 }

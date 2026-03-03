@@ -1,0 +1,32 @@
+{
+  "spec_id": "059-harness-coverage",
+  "started_at": "2026-03-03T14:24:51Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "process_name": "mindspec",
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-03-03T14:24:51Z",
+      "ended_at": "2026-03-03T14:26:45Z"
+    },
+    {
+      "phase": "plan",
+      "started_at": "2026-03-03T14:26:45Z",
+      "ended_at": "2026-03-03T15:36:48Z"
+    },
+    {
+      "phase": "plan-approved",
+      "started_at": "2026-03-03T15:36:48Z",
+      "beads": [
+        "mindspec-9dx0.2",
+        "mindspec-9dx0.3",
+        "mindspec-9dx0.1",
+        "mindspec-9dx0.4",
+        "mindspec-9dx0.5",
+        "mindspec-9dx0.6"
+      ]
+    }
+  ]
+}

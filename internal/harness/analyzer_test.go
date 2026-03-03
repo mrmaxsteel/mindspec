@@ -113,11 +113,15 @@ func TestAnalyzer_WrongAction_CodeInSpecMode(t *testing.T) {
 	a := NewAnalyzer()
 	results := a.DetectWrongActions(events)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 wrong action, got %d", len(results))
+	// Expect code_in_spec_mode + skip_next (code edit before any mindspec next).
+	hasRule := false
+	for _, r := range results {
+		if r.Rule == "code_in_spec_mode" {
+			hasRule = true
+		}
 	}
-	if results[0].Rule != "code_in_spec_mode" {
-		t.Errorf("rule = %q, want code_in_spec_mode", results[0].Rule)
+	if !hasRule {
+		t.Errorf("expected code_in_spec_mode rule to fire, got: %v", results)
 	}
 }
 
@@ -130,11 +134,15 @@ func TestAnalyzer_WrongAction_CodeInPlanMode(t *testing.T) {
 	a := NewAnalyzer()
 	results := a.DetectWrongActions(events)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 wrong action, got %d", len(results))
+	// Expect code_in_plan_mode + skip_next (code edit before any mindspec next).
+	hasRule := false
+	for _, r := range results {
+		if r.Rule == "code_in_plan_mode" {
+			hasRule = true
+		}
 	}
-	if results[0].Rule != "code_in_plan_mode" {
-		t.Errorf("rule = %q, want code_in_plan_mode", results[0].Rule)
+	if !hasRule {
+		t.Errorf("expected code_in_plan_mode rule to fire, got: %v", results)
 	}
 }
 
@@ -181,6 +189,118 @@ func TestAnalyzer_WrongAction_NoFalsePositives(t *testing.T) {
 
 	if len(results) != 0 {
 		t.Errorf("expected 0 wrong actions, got %d: %+v", len(results), results)
+	}
+}
+
+func TestSkipNext_NoViolation(t *testing.T) {
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"complete", "done"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation when next runs before code, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipNext_Violation(t *testing.T) {
+	events := []ActionEvent{
+		{Phase: "plan", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(results))
+	}
+	if results[0].Rule != "skip_next" {
+		t.Errorf("rule = %q, want skip_next", results[0].Rule)
+	}
+}
+
+func TestSkipNext_ImplementPhaseNoViolation(t *testing.T) {
+	// Agent starts in implement mode with pre-claimed bead — no next needed.
+	events := []ActionEvent{
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "greeting.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"complete", "done"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation in pre-claimed implement mode, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipNext_DocEditsIgnored(t *testing.T) {
+	// Editing docs/markdown before next should not trigger.
+	events := []ActionEvent{
+		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/docs/spec.md"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for doc edits, got %d", len(results))
+	}
+}
+
+func TestSkipComplete_NoViolation(t *testing.T) {
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"complete", "done"}},
+	}
+
+	results := detectSkipComplete(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation when complete runs after code, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipComplete_ViolationSessionEnd(t *testing.T) {
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		// Session ends without complete
+	}
+
+	results := detectSkipComplete(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(results))
+	}
+	if results[0].Rule != "skip_complete" {
+		t.Errorf("rule = %q, want skip_complete", results[0].Rule)
+	}
+}
+
+func TestSkipComplete_ViolationBeforeApprove(t *testing.T) {
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"approve", "impl", "001-test"}},
+	}
+
+	results := detectSkipComplete(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(results))
+	}
+	if results[0].Rule != "skip_complete" {
+		t.Errorf("rule = %q, want skip_complete", results[0].Rule)
+	}
+}
+
+func TestSkipComplete_NoCodeNoViolation(t *testing.T) {
+	// next without code edits — no violation
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
+		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Read", Args: map[string]string{"file_path": "internal/foo.go"}},
+	}
+
+	results := detectSkipComplete(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation without code edits, got %d", len(results))
 	}
 }
 

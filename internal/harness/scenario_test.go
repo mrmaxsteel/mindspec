@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -252,6 +254,188 @@ func TestLLM_BugfixBranch(t *testing.T) {
 		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
 	}
 }
+
+func TestLLM_BlockedBeadTransition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioBlockedBeadTransition())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+// --- Assertion helper unit tests ---
+
+func TestAssertFocusFields(t *testing.T) {
+	sandbox := newMinimalSandbox(t)
+
+	// Write a focus file with known fields.
+	focus := `{"mode":"plan","activeSpec":"042-auth","specBranch":"spec/042-auth","timestamp":"2026-01-01T00:00:00Z"}`
+	sandbox.WriteFile(".mindspec/focus", focus)
+
+	t.Run("matching fields pass", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertFocusFields(ft, sandbox, map[string]string{
+			"mode":       "plan",
+			"activeSpec": "042-auth",
+			"specBranch": "spec/042-auth",
+		})
+		if ft.failed {
+			t.Errorf("expected no failure, got: %v", ft.errors)
+		}
+	})
+
+	t.Run("mismatched field fails", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertFocusFields(ft, sandbox, map[string]string{
+			"mode": "implement",
+		})
+		if !ft.failed {
+			t.Error("expected failure for mismatched mode")
+		}
+	})
+
+	t.Run("missing field reports empty", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertFocusFields(ft, sandbox, map[string]string{
+			"activeBead": "bead-123",
+		})
+		if !ft.failed {
+			t.Error("expected failure for missing activeBead")
+		}
+	})
+}
+
+func TestAssertMergeTopology(t *testing.T) {
+	sandbox := newMinimalSandbox(t)
+
+	t.Run("no merge commits fails", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertMergeTopology(ft, sandbox, "main")
+		if !ft.failed {
+			t.Error("expected failure when no merge commits exist")
+		}
+	})
+
+	t.Run("merge from bead branch passes", func(t *testing.T) {
+		// Create a bead branch, make a commit, merge it back.
+		mustRun(t, sandbox.Root, "git", "checkout", "-b", "bead/test-bead")
+		sandbox.WriteFile("bead-file.txt", "bead work")
+		mustRun(t, sandbox.Root, "git", "add", "-A")
+		mustRun(t, sandbox.Root, "git", "commit", "-m", "impl(test-bead): bead work")
+		mustRun(t, sandbox.Root, "git", "checkout", "main")
+		mustRun(t, sandbox.Root, "git", "merge", "--no-ff", "bead/test-bead", "-m", "Merge bead/test-bead into main")
+
+		ft := &fakeTB{}
+		assertMergeTopology(ft, sandbox, "main")
+		if ft.failed {
+			t.Errorf("expected pass after bead merge, got: %v", ft.errors)
+		}
+	})
+}
+
+func TestAssertCommitMessage(t *testing.T) {
+	sandbox := newMinimalSandbox(t)
+
+	t.Run("no matching commit fails", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertCommitMessage(ft, sandbox, `impl\(bead-xyz\):`)
+		if !ft.failed {
+			t.Error("expected failure when no commit matches")
+		}
+	})
+
+	t.Run("matching commit passes", func(t *testing.T) {
+		sandbox.WriteFile("code.go", "package main")
+		mustRun(t, sandbox.Root, "git", "add", "-A")
+		mustRun(t, sandbox.Root, "git", "commit", "-m", "impl(bead-abc): add code")
+
+		ft := &fakeTB{}
+		assertCommitMessage(ft, sandbox, `impl\(bead-abc\):`)
+		if ft.failed {
+			t.Errorf("expected pass for matching commit, got: %v", ft.errors)
+		}
+	})
+}
+
+func TestAssertBeadsState(t *testing.T) {
+	sandbox := newMinimalSandbox(t)
+
+	// Check that bd is available; skip if not.
+	if _, err := sandbox.runBD("version"); err != nil {
+		t.Skip("bd not available, skipping beads state test")
+	}
+
+	// Initialize beads in the minimal sandbox.
+	initBeads(t, sandbox.Root)
+
+	// Create an epic and a child task.
+	epicID := sandbox.CreateBead("Test Epic", "epic", "")
+	taskID := sandbox.CreateBead("Task 1", "task", epicID)
+
+	t.Run("open beads match", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertBeadsState(ft, sandbox, epicID, map[string]string{
+			taskID: "open",
+		})
+		if ft.failed {
+			t.Errorf("expected open task to match, got: %v", ft.errors)
+		}
+	})
+
+	t.Run("wrong status fails", func(t *testing.T) {
+		ft := &fakeTB{}
+		assertBeadsState(ft, sandbox, epicID, map[string]string{
+			taskID: "closed",
+		})
+		if !ft.failed {
+			t.Error("expected failure for wrong status")
+		}
+	})
+}
+
+// newMinimalSandbox creates a bare-bones git sandbox (no beads, no shims)
+// for testing assertion helpers deterministically.
+func newMinimalSandbox(t *testing.T) *Sandbox {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, root, "git", "init")
+	mustRun(t, root, "git", "branch", "-M", "main")
+	mustRun(t, root, "git", "config", "user.email", "test@mindspec.dev")
+	mustRun(t, root, "git", "config", "user.name", "Test")
+	// Write a dummy file so initial commit isn't empty.
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, root, "git", "add", "-A")
+	mustRun(t, root, "git", "commit", "-m", "initial commit")
+
+	return &Sandbox{Root: root, t: t}
+}
+
+// fakeTB is a minimal testing.TB substitute that captures failures without
+// stopping the test, so we can test assertion helpers that call t.Errorf/t.Fatalf.
+type fakeTB struct {
+	testing.TB
+	failed bool
+	errors []string
+}
+
+func (f *fakeTB) Helper() {}
+func (f *fakeTB) Errorf(format string, args ...interface{}) {
+	f.failed = true
+	f.errors = append(f.errors, fmt.Sprintf(format, args...))
+}
+func (f *fakeTB) Fatalf(format string, args ...interface{}) {
+	f.failed = true
+	f.errors = append(f.errors, fmt.Sprintf(format, args...))
+	// Can't truly stop execution in a fake, but callers check f.failed.
+}
+func (f *fakeTB) Logf(format string, args ...interface{}) {}
 
 func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 	t.Run("rejects merge spec into main before approve impl", func(t *testing.T) {

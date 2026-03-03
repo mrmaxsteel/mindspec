@@ -84,22 +84,9 @@ func DefaultWrongActionRules() []WrongActionRule {
 				return false, ""
 			},
 		},
-		{
-			Name: "skip_next",
-			Check: func(e ActionEvent) (bool, string) {
-				// Agent went straight to coding without running mindspec next
-				// Detected at the session level, not per-event
-				return false, ""
-			},
-		},
-		{
-			Name: "skip_complete",
-			Check: func(e ActionEvent) (bool, string) {
-				// Agent finished coding without running mindspec complete
-				// Detected at the session level, not per-event
-				return false, ""
-			},
-		},
+		// skip_next and skip_complete are session-level checks, not per-event.
+		// They are implemented in detectSkipNext() and detectSkipComplete()
+		// and called from DetectWrongActions().
 		{
 			Name: "wrong_cwd",
 			Check: func(e ActionEvent) (bool, string) {
@@ -285,6 +272,8 @@ func (a *Analyzer) classifyTurn(turn int, events []ActionEvent, writtenFiles map
 }
 
 // DetectWrongActions scans all events for wrong-action violations.
+// Includes both per-event rule checks and session-level pattern detection
+// (skip_next, skip_complete).
 func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult {
 	var results []WrongActionResult
 	for _, e := range events {
@@ -301,7 +290,132 @@ func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult 
 			}
 		}
 	}
+
+	// Session-level checks that require scanning the full event stream.
+	results = append(results, detectSkipNext(events)...)
+	results = append(results, detectSkipComplete(events)...)
+
 	return results
+}
+
+// detectSkipNext checks if the agent wrote code before running `mindspec next`.
+// Returns a wrong action if code-modifying events appear before any `mindspec next`
+// AND the phase is not already `implement` (which implies a bead was pre-claimed).
+func detectSkipNext(events []ActionEvent) []WrongActionResult {
+	for _, e := range events {
+		if e.Blocked {
+			continue
+		}
+		// If we see `mindspec next` first, no violation.
+		if e.Command == "mindspec" && containsAll(eventArgsList(e), "next") {
+			return nil
+		}
+		// Code modification before next — but only if not already in implement
+		// phase (setup may have pre-claimed a bead).
+		if isCodeModifyingEvent(e) && e.Phase != "implement" {
+			return []WrongActionResult{{
+				Rule:   "skip_next",
+				Event:  e,
+				Reason: "code modification before mindspec next: " + describeEvent(e),
+			}}
+		}
+	}
+	return nil
+}
+
+// detectSkipComplete checks if the agent ran `mindspec next` and wrote code
+// but never ran `mindspec complete` before the session ended or the next
+// lifecycle command ran.
+func detectSkipComplete(events []ActionEvent) []WrongActionResult {
+	nextSeen := false
+	codeAfterNext := false
+	var firstCodeEvent ActionEvent
+
+	for _, e := range events {
+		if e.Blocked {
+			continue
+		}
+		args := eventArgsList(e)
+
+		if e.Command == "mindspec" && containsAll(args, "next") {
+			nextSeen = true
+			codeAfterNext = false
+			continue
+		}
+
+		if nextSeen && !codeAfterNext && isCodeModifyingEvent(e) {
+			codeAfterNext = true
+			firstCodeEvent = e
+		}
+
+		// `mindspec complete` resets the cycle.
+		if e.Command == "mindspec" && containsAll(args, "complete") {
+			nextSeen = false
+			codeAfterNext = false
+			continue
+		}
+
+		// A lifecycle command after code without complete is a violation.
+		if codeAfterNext && e.Command == "mindspec" {
+			if containsAll(args, "approve") || containsAll(args, "next") {
+				return []WrongActionResult{{
+					Rule:   "skip_complete",
+					Event:  firstCodeEvent,
+					Reason: "code written after mindspec next but mindspec complete not run before " + e.Command + " " + strings.Join(args, " "),
+				}}
+			}
+		}
+	}
+
+	// If session ended with code after next but no complete, that's a violation.
+	if codeAfterNext {
+		return []WrongActionResult{{
+			Rule:   "skip_complete",
+			Event:  firstCodeEvent,
+			Reason: "code written after mindspec next but mindspec complete never ran",
+		}}
+	}
+	return nil
+}
+
+// isCodeModifyingEvent returns true if the event represents a code modification.
+func isCodeModifyingEvent(e ActionEvent) bool {
+	if e.ToolName == "Write" || e.ToolName == "Edit" {
+		path := e.Args["file_path"]
+		if path != "" && isCodePath(path) {
+			return true
+		}
+	}
+	if e.Command == "git" {
+		args := eventArgsList(e)
+		if containsAll(args, "commit") {
+			return true
+		}
+	}
+	return false
+}
+
+// eventArgsList returns args as a list, using ArgsList if available, else flatArgs.
+func eventArgsList(e ActionEvent) []string {
+	if len(e.ArgsList) > 0 {
+		return e.ArgsList
+	}
+	return flatArgs(e.Args)
+}
+
+// describeEvent returns a short description of an event for error messages.
+func describeEvent(e ActionEvent) string {
+	if e.ToolName != "" {
+		path := e.Args["file_path"]
+		if path != "" {
+			return e.ToolName + " " + path
+		}
+		return e.ToolName
+	}
+	if e.Command != "" {
+		return e.Command + " " + strings.Join(eventArgsList(e), " ")
+	}
+	return "unknown event"
 }
 
 // WrongActionResult captures a specific rule violation.
