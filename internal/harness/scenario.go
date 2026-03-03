@@ -169,6 +169,12 @@ ends in review mode. Do not close beads directly with bd commands.`,
 			}
 			// Agent should have run mindspec complete
 			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Commit message follows impl(<beadID>): convention
+			assertCommitMessage(t, sandbox, `impl\(`)
+
+			// Bead branch was merged into spec branch (merge topology)
+			assertMergeTopology(t, sandbox, "spec/001-greeting")
 		},
 	}
 }
@@ -369,8 +375,11 @@ func ScenarioSpecInit() Scenario {
 			// Git state: main branch still exists (CWD is main repo root)
 			assertBranchIs(t, sandbox, "main")
 
-			// Focus transitioned to spec mode
+			// Focus transitioned to spec mode with expected fields
 			assertFocusMode(t, sandbox, "spec")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode": "spec",
+			})
 		},
 	}
 }
@@ -481,8 +490,13 @@ Pending.
 			// Git state: spec worktree still exists (persists through plan mode)
 			assertHasWorktrees(t, sandbox)
 
-			// Focus transitioned to plan mode
+			// Focus transitioned to plan mode with correct spec fields
 			assertFocusMode(t, sandbox, "plan")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "plan",
+				"activeSpec": "001-calc",
+				"specBranch": "spec/001-calc",
+			})
 		},
 	}
 }
@@ -621,8 +635,13 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			// Git state: bead worktree created by mindspec next
 			assertHasWorktrees(t, sandbox)
 
-			// Focus transitioned to implement mode
+			// Focus transitioned to implement mode with full fields
 			assertFocusMode(t, sandbox, "implement")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "implement",
+				"activeSpec": "001-planner",
+				"specBranch": "spec/001-planner",
+			})
 
 			// Agent CWD moved to bead worktree (instruct emits worktree redirect)
 			assertEventCWDContains(t, events, ".worktrees/")
@@ -734,8 +753,12 @@ func Done() string { return "done" }
 				t.Error("expected done.go to be merged to main")
 			}
 
-			// Focus transitioned to idle
+			// Focus transitioned to idle with cleared spec fields
 			assertFocusMode(t, sandbox, "idle")
+			assertFocusFields(t, sandbox, map[string]string{
+				"mode":       "idle",
+				"activeSpec": "",
+			})
 		},
 	}
 }
