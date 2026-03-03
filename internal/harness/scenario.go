@@ -46,6 +46,7 @@ func AllScenarios() []Scenario {
 		ScenarioApproveSpecFromWorktree(),
 		ScenarioApprovePlanFromWorktree(),
 		ScenarioBugfixBranch(),
+		ScenarioBlockedBeadTransition(),
 	}
 }
 
@@ -1526,6 +1527,84 @@ func cleanupBugfixBranchPRs(t *testing.T, sandbox *Sandbox) {
 		if delOut, err := delCmd.CombinedOutput(); err != nil {
 			t.Logf("cleanup: could not delete remote branch %s: %v\n%s", branch, err, delOut)
 		}
+	}
+}
+
+// ScenarioBlockedBeadTransition tests that focus returns to plan mode when the
+// only remaining bead is blocked after completing the first bead.
+//
+// Before: implement mode with bead-1 claimed, bead-2 depends on bead-1
+// After:  bead-1 closed, focus mode is plan (bead-2 is blocked, so no implement)
+func ScenarioBlockedBeadTransition() Scenario {
+	return Scenario{
+		Name:        "blocked_bead_transition",
+		Description: "Focus returns to plan when only blocked beads remain",
+		MaxTurns:    20,
+		TimeoutMin:  10,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-blocker"
+			specBranch := "spec/" + specID
+
+			// Create epic + 2 child beads with dependency
+			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			bead1 := sandbox.CreateBead("["+specID+"] Core module", "task", epicID)
+			bead2 := sandbox.CreateBead("["+specID+"] Extension (blocked)", "task", epicID)
+
+			// bead-2 depends on bead-1
+			sandbox.runBDMust("dep", "add", bead2, bead1)
+			sandbox.ClaimBead(bead1)
+
+			// Approved spec + plan
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Blocker Feature
+status: Approved
+---
+# Blocker Feature
+Test blocked bead transition.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: Core module
+Create core.go with a Core() function.
+## Bead 2: Extension (depends on Bead 1)
+Create extension.go that uses Core().
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
+				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
+
+			// Set up spec branch + bead worktree
+			mustRunGit(sandbox, "branch", specBranch)
+			beadBranch := "bead/" + bead1
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			beadWtDir := ".worktrees/worktree-" + bead1
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+
+			sandbox.WriteFocus(mustJSON(map[string]string{
+				"mode":           "implement",
+				"activeSpec":     specID,
+				"activeBead":     bead1,
+				"specBranch":     specBranch,
+				"activeWorktree": beadWtDir,
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+			}))
+			sandbox.Commit("setup: implement mode with blocked bead-2")
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+Create a file called core.go with a function Core() string that returns "core".
+Then finish the currently claimed bead using mindspec complete.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent ran mindspec complete
+			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Focus should be plan (not implement) because bead-2 is blocked
+			assertFocusMode(t, sandbox, "plan")
+		},
 	}
 }
 

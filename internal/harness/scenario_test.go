@@ -255,6 +255,16 @@ func TestLLM_BugfixBranch(t *testing.T) {
 	}
 }
 
+func TestLLM_BlockedBeadTransition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioBlockedBeadTransition())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
 // --- Assertion helper unit tests ---
 
 func TestAssertFocusFields(t *testing.T) {
