@@ -41,7 +41,7 @@ func Run(root, specID string, force bool) (*Result, error) {
 	specWtName := "worktree-spec-" + specID
 
 	if force {
-		return forceCleanup(root, result, specWtName, specBranch)
+		return forceCleanup(result, specWtName, specBranch)
 	}
 
 	// Derive context from beads to check if spec is still active (ADR-0023).
@@ -81,7 +81,7 @@ func Run(root, specID string, force bool) (*Result, error) {
 }
 
 // forceCleanup removes worktree and branch without checking state.
-func forceCleanup(root string, result *Result, wtName, branch string) (*Result, error) {
+func forceCleanup(result *Result, wtName, branch string) (*Result, error) {
 	if err := worktreeRemoveFn(wtName); err != nil {
 		if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "does not exist") {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not remove worktree: %v", err))
@@ -100,4 +100,3 @@ func forceCleanup(root string, result *Result, wtName, branch string) (*Result, 
 
 	return result, nil
 }
-

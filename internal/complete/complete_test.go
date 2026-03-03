@@ -358,7 +358,7 @@ func TestRun_NoWorktree(t *testing.T) {
 func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
-	root := setupTempRoot(t)
+	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
@@ -371,7 +371,7 @@ func TestAdvanceState_NextReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	mode, nextBead := advanceState("001-test-spec")
 	if mode != state.ModeImplement {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
 	}
@@ -383,7 +383,7 @@ func TestAdvanceState_NextReady(t *testing.T) {
 func TestAdvanceState_BlockedChildren(t *testing.T) {
 	saveAndRestore(t)
 
-	root := setupTempRoot(t)
+	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
@@ -402,7 +402,7 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	mode, nextBead := advanceState("001-test-spec")
 	if mode != state.ModePlan {
 		t.Errorf("mode: got %q, want %q", mode, state.ModePlan)
 	}
@@ -414,14 +414,14 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 func TestAdvanceState_AllDone(t *testing.T) {
 	saveAndRestore(t)
 
-	root := setupTempRoot(t)
+	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{}) // nothing ready, nothing open
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	mode, nextBead := advanceState("001-test-spec")
 	if mode != state.ModeReview {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeReview)
 	}
@@ -433,14 +433,14 @@ func TestAdvanceState_AllDone(t *testing.T) {
 func TestAdvanceState_NoEpic(t *testing.T) {
 	saveAndRestore(t)
 
-	root := setupTempRoot(t)
+	setupTempRoot(t)
 	// No epic found for spec → idle (ADR-0023: no lifecycle.yaml needed).
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil // no epics
 	})
 	t.Cleanup(restore)
 
-	mode, nextBead := advanceState(root, "test")
+	mode, nextBead := advanceState("test")
 	if mode != state.ModeIdle {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeIdle)
 	}

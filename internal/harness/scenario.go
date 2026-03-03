@@ -664,7 +664,6 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			// Git state: bead worktree created by mindspec next
 			assertHasWorktrees(t, sandbox)
 
-
 			// Agent CWD moved to bead worktree (instruct emits worktree redirect)
 			assertEventCWDContains(t, events, ".worktrees/")
 

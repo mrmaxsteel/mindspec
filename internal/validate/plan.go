@@ -89,7 +89,7 @@ func ValidatePlan(root, specID string) *Result {
 
 	// Check bead IDs exist in Beads
 	checkBeadIDs(r, fm.BeadIDs)
-	checkPlanApprovalGateConsistency(r, root, specID, fm)
+	checkPlanApprovalGateConsistency(r, specID, fm)
 
 	// Parse and check bead sections
 	beadSections := ParseBeadSections(content)
@@ -105,7 +105,7 @@ func ValidatePlan(root, specID string) *Result {
 	return r
 }
 
-func checkPlanApprovalGateConsistency(r *Result, root, specID string, fm *PlanFrontmatter) {
+func checkPlanApprovalGateConsistency(r *Result, specID string, fm *PlanFrontmatter) {
 	if !strings.EqualFold(strings.TrimSpace(fm.Status), "Approved") {
 		return
 	}

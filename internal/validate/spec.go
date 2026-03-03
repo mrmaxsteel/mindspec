@@ -62,7 +62,7 @@ func ValidateSpec(root, specID string) *Result {
 
 	// Check lifecycle binding (ADR-0020) — warning only, not blocking
 	checkLifecycleBinding(r, root, specID)
-	checkSpecApprovalGateConsistency(r, root, specID)
+	checkSpecApprovalGateConsistency(specID)
 
 	return r
 }
@@ -194,7 +194,7 @@ func checkLifecycleBinding(r *Result, root, specID string) {
 	}
 }
 
-func checkSpecApprovalGateConsistency(r *Result, root, specID string) {
+func checkSpecApprovalGateConsistency(specID string) {
 	// ADR-0023: derive phase from beads, not lifecycle.yaml.
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil {

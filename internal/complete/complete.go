@@ -165,7 +165,7 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 
 	// 6. Advance state
-	nextMode, nextBead := advanceState(root, specID)
+	nextMode, nextBead := advanceState(specID)
 	result.NextMode = nextMode
 	result.NextBead = nextBead
 	result.NextSpec = specID
@@ -306,7 +306,7 @@ func isIgnorableStateChange(statusLine string) bool {
 }
 
 // advanceState determines the next mode after completing a bead.
-func advanceState(root, specID string) (mode, nextBead string) {
+func advanceState(specID string) (mode, nextBead string) {
 	if specID == "" {
 		return state.ModeIdle, ""
 	}

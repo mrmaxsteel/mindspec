@@ -72,10 +72,7 @@ func SpecIDFromMetadata(specNum int, specTitle string) string {
 // DerivePhase determines the lifecycle phase from an epic's children statuses.
 // Implements the phase derivation table from ADR-0023 §3.
 func DerivePhase(epicID string) (string, error) {
-	children, err := queryChildren(epicID)
-	if err != nil {
-		return "", fmt.Errorf("querying children of %s: %w", epicID, err)
-	}
+	children := queryChildren(epicID)
 	return DerivePhaseFromChildren(children), nil
 }
 
@@ -198,8 +195,7 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 		}
 		// Check for active bead
 		if ctx.EpicID != "" {
-			activeBead, err := findActiveBeadForEpic(ctx.EpicID)
-			if err == nil && activeBead != "" {
+			if activeBead := findActiveBeadForEpic(ctx.EpicID); activeBead != "" {
 				ctx.BeadID = activeBead
 			}
 		}
@@ -279,7 +275,7 @@ func queryEpics() ([]EpicInfo, error) {
 	return epics, nil
 }
 
-func queryChildren(epicID string) ([]ChildInfo, error) {
+func queryChildren(epicID string) []ChildInfo {
 	// Query all statuses: bd list --parent defaults to open only,
 	// but phase derivation needs closed beads too.
 	var allChildren []ChildInfo
@@ -298,10 +294,7 @@ func queryChildren(epicID string) ([]ChildInfo, error) {
 		}
 		allChildren = append(allChildren, children...)
 	}
-	if len(allChildren) == 0 {
-		return nil, nil
-	}
-	return allChildren, nil
+	return allChildren
 }
 
 // ExtractSpecMetadata gets spec_num and spec_title from epic metadata or title.
@@ -416,29 +409,29 @@ func findEpicForBead(beadID string) (epicID, specID string, err error) {
 	return "", "", fmt.Errorf("no epic found for bead %s", beadID)
 }
 
-func findActiveBeadForEpic(epicID string) (string, error) {
+func findActiveBeadForEpic(epicID string) string {
 	out, err := runBDFn("list", "--parent", epicID, "--status=in_progress", "--json")
 	if err != nil {
-		return "", nil
+		return ""
 	}
 
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" || trimmed == "[]" {
-		return "", nil
+		return ""
 	}
 
 	var items []ChildInfo
 	if err := json.Unmarshal(out, &items); err != nil {
-		return "", nil
+		return ""
 	}
 
 	for _, item := range items {
 		if !strings.EqualFold(item.IssueType, "epic") {
-			return item.ID, nil
+			return item.ID
 		}
 	}
 
-	return "", nil
+	return ""
 }
 
 func derivePhaseForSpec(epicID string) (string, error) {
