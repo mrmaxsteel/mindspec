@@ -27,16 +27,12 @@ func setupCleanupTest(t *testing.T, specID string, mode string) string {
 
 func mockCleanupFns(t *testing.T) {
 	t.Helper()
-	origPRStatus := prStatusFn
 	origWorktreeRemove := worktreeRemoveFn
 	origDeleteBranch := deleteBranchFn
-	origFindPR := findPRForBranchFn
 	origFindLocalRoot := findLocalRootFn
 	t.Cleanup(func() {
-		prStatusFn = origPRStatus
 		worktreeRemoveFn = origWorktreeRemove
 		deleteBranchFn = origDeleteBranch
-		findPRForBranchFn = origFindPR
 		findLocalRootFn = origFindLocalRoot
 	})
 	// Default: fall back to root arg (no local root resolution in tests).
@@ -75,37 +71,12 @@ func TestCleanup_RefusesActiveSpec(t *testing.T) {
 	root := setupCleanupTest(t, "010-test", state.ModeImplement)
 	mockCleanupFns(t)
 
-	findPRForBranchFn = func(branch string) (string, string, error) {
-		return "", "", fmt.Errorf("no PR found")
-	}
 	worktreeRemoveFn = func(name string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 
 	_, err := Run(root, "010-test", false)
 	if err == nil {
 		t.Fatal("expected error for active spec")
-	}
-}
-
-func TestCleanup_MergedPR(t *testing.T) {
-	root := setupCleanupTest(t, "010-test", state.ModeIdle)
-	mockCleanupFns(t)
-
-	findPRForBranchFn = func(branch string) (string, string, error) {
-		return "merged", "https://github.com/test/repo/pull/1", nil
-	}
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	result, err := Run(root, "010-test", false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.PRStatus != "merged" {
-		t.Errorf("PRStatus: got %q, want %q", result.PRStatus, "merged")
-	}
-	if result.PRURL != "https://github.com/test/repo/pull/1" {
-		t.Errorf("PRURL: got %q", result.PRURL)
 	}
 }
 
@@ -138,42 +109,10 @@ func TestCleanup_ClearsFocusAfterForce(t *testing.T) {
 	}
 }
 
-func TestCleanup_ClearsFocusAfterMergedPR(t *testing.T) {
-	root := setupCleanupTest(t, "010-test", state.ModeIdle)
-	mockCleanupFns(t)
-
-	// Set focus to reference the spec (simulates stale focus after approve impl).
-	state.WriteFocus(root, &state.Focus{
-		Mode:           state.ModeIdle,
-		ActiveSpec:     "010-test",
-		ActiveWorktree: "/deleted/worktree",
-	})
-
-	findPRForBranchFn = func(branch string) (string, string, error) {
-		return "merged", "https://github.com/test/repo/pull/1", nil
-	}
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	_, err := Run(root, "010-test", false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Focus should be cleared.
-	f, _ := state.ReadFocus(root)
-	if f.ActiveSpec != "" {
-		t.Errorf("focus activeSpec should be cleared, got %q", f.ActiveSpec)
-	}
-}
-
 func TestCleanup_PreservesFocusForOtherSpec(t *testing.T) {
 	root := setupCleanupTest(t, "other-spec", state.ModeImplement)
 	mockCleanupFns(t)
 
-	findPRForBranchFn = func(branch string) (string, string, error) {
-		return "merged", "https://github.com/test/repo/pull/2", nil
-	}
 	worktreeRemoveFn = func(name string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 
@@ -190,21 +129,5 @@ func TestCleanup_PreservesFocusForOtherSpec(t *testing.T) {
 	}
 	if f.Mode != state.ModeImplement {
 		t.Errorf("focus mode should still be %q, got %q", state.ModeImplement, f.Mode)
-	}
-}
-
-func TestCleanup_OpenPRRefuses(t *testing.T) {
-	root := setupCleanupTest(t, "010-test", state.ModeIdle)
-	mockCleanupFns(t)
-
-	findPRForBranchFn = func(branch string) (string, string, error) {
-		return "open", "https://github.com/test/repo/pull/1", nil
-	}
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	_, err := Run(root, "010-test", false)
-	if err == nil {
-		t.Fatal("expected error for open PR")
 	}
 }

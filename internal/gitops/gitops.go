@@ -111,32 +111,6 @@ func PushBranch(branch string) error {
 	return nil
 }
 
-// CreatePR creates a pull request using gh CLI.
-// If body is empty, uses the repo's PR template via --template flag.
-// Returns the PR URL on success.
-func CreatePR(branch, base, title, body string) (string, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return "", fmt.Errorf("gh CLI not found — install it to create PRs, or use merge_strategy: direct")
-	}
-
-	args := []string{"pr", "create",
-		"--head", branch,
-		"--base", base,
-		"--title", title,
-	}
-	if body != "" {
-		args = append(args, "--body", body)
-	} else {
-		args = append(args, "--template", "pull_request_template.md")
-	}
-	cmd := execCommand("gh", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("creating PR: %s", strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // EnsureGitignoreEntry adds an entry to .gitignore if not already present.
 func EnsureGitignoreEntry(root, entry string) error {
 	gitignorePath := root + "/.gitignore"
@@ -189,43 +163,6 @@ func CommitCount(workdir, base, head string) (int, error) {
 		return 0, fmt.Errorf("parsing commit count: %w", err)
 	}
 	return count, nil
-}
-
-// PRStatus returns the status of a PR by URL (e.g. "open", "merged", "closed").
-func PRStatus(prURL string) (string, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return "", fmt.Errorf("gh CLI not found")
-	}
-	cmd := execCommand("gh", "pr", "view", prURL, "--json", "state", "-q", ".state")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("checking PR status: %w", err)
-	}
-	return strings.ToLower(strings.TrimSpace(string(out))), nil
-}
-
-// PRChecksWatch blocks until all PR checks complete, returning nil on success.
-func PRChecksWatch(prURL string) error {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("gh CLI not found")
-	}
-	cmd := execCommand("gh", "pr", "checks", prURL, "--watch")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// MergePR merges a PR by URL using the default merge method.
-func MergePR(prURL string) error {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("gh CLI not found")
-	}
-	cmd := execCommand("gh", "pr", "merge", prURL, "--merge", "--delete-branch")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("merging PR: %s", strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 // IsAncestor returns true if ancestor is an ancestor of descendant.

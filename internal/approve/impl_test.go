@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/config"
 	"github.com/mindspec/mindspec/internal/state"
 )
 
@@ -182,7 +181,7 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 	}
 }
 
-func TestApproveImpl_DirectMergeSummary(t *testing.T) {
+func TestApproveImpl_PushAndCleanup(t *testing.T) {
 	tmp := t.TempDir()
 	writeLifecycleSpec(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
@@ -193,39 +192,13 @@ func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 		SpecBranch: "spec/010-test",
 	})
 
-	origFindLocalRoot := findLocalRootFn
-	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test") }
-	origRunBD := implRunBDFn
-	origRunBDCombined := implRunBDCombinedFn
-	origLoadConfig := loadConfigFn
-	origMergeBranch := mergeBranchFn
-	origDeleteBranch := deleteBranchFn
-	origWorktreeRemove := worktreeRemoveFn
-	origDiffStat := diffStatFn
-	origCommitCount := commitCountFn
-	defer func() {
-		implRunBDFn = origRunBD
-		implRunBDCombinedFn = origRunBDCombined
-		loadConfigFn = origLoadConfig
-		mergeBranchFn = origMergeBranch
-		deleteBranchFn = origDeleteBranch
-		worktreeRemoveFn = origWorktreeRemove
-		diffStatFn = origDiffStat
-		commitCountFn = origCommitCount
-		findLocalRootFn = origFindLocalRoot
-	}()
+	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
 		payload := []map[string]string{{"status": "open"}}
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
 	diffStatFn = func(workdir, base, head string) (string, error) {
@@ -233,13 +206,26 @@ func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 	}
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
 
+	var pushed bool
+	hasRemoteFn = func() bool { return true }
+	pushBranchFn = func(branch string) error {
+		pushed = true
+		if branch != "spec/010-test" {
+			return fmt.Errorf("unexpected branch: %s", branch)
+		}
+		return nil
+	}
+
 	result, err := ApproveImpl(tmp, "010-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if result.MergeStrategy != "direct" {
-		t.Errorf("MergeStrategy: got %q, want %q", result.MergeStrategy, "direct")
+	if !pushed {
+		t.Error("expected branch to be pushed")
+	}
+	if !result.Pushed {
+		t.Error("result.Pushed should be true")
 	}
 	if result.SpecBranch != "spec/010-test" {
 		t.Errorf("SpecBranch: got %q, want %q", result.SpecBranch, "spec/010-test")
@@ -249,6 +235,36 @@ func TestApproveImpl_DirectMergeSummary(t *testing.T) {
 	}
 	if !strings.Contains(result.DiffStat, "3 files changed") {
 		t.Errorf("DiffStat should contain file stats, got: %q", result.DiffStat)
+	}
+}
+
+func TestApproveImpl_NoRemoteSkipsPush(t *testing.T) {
+	tmp := t.TempDir()
+	writeLifecycleSpec(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	state.WriteFocus(tmp, &state.Focus{
+		Mode:       state.ModeReview,
+		ActiveSpec: "010-test",
+		SpecBranch: "spec/010-test",
+	})
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "open"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
+	hasRemoteFn = func() bool { return false }
+
+	result, err := ApproveImpl(tmp, "010-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Pushed {
+		t.Error("expected Pushed to be false when no remote")
 	}
 }
 
@@ -284,12 +300,6 @@ func TestApproveImpl_CleanupRunsFromRoot(t *testing.T) {
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
@@ -359,12 +369,6 @@ func TestApproveImpl_WritesIdleFocusToRootAndLocalWorktree(t *testing.T) {
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
@@ -417,12 +421,6 @@ func TestApproveImpl_UsesRootFocusWhenLocalFocusMissing(t *testing.T) {
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
@@ -442,160 +440,6 @@ func TestApproveImpl_UsesRootFocusWhenLocalFocusMissing(t *testing.T) {
 	}
 }
 
-func TestApproveImpl_PRWaitFlow(t *testing.T) {
-	tmp := t.TempDir()
-	writeLifecycleSpec(t, tmp, "010-test")
-	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
-
-	state.WriteFocus(tmp, &state.Focus{
-		Mode:       state.ModeReview,
-		ActiveSpec: "010-test",
-		SpecBranch: "spec/010-test",
-	})
-
-	origFindLocalRoot := findLocalRootFn
-	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test") }
-	origRunBD := implRunBDFn
-	origRunBDCombined := implRunBDCombinedFn
-	origLoadConfig := loadConfigFn
-	origHasRemote := hasRemoteFn
-	origPushBranch := pushBranchFn
-	origCreatePR := createPRFn
-	origDeleteBranch := deleteBranchFn
-	origWorktreeRemove := worktreeRemoveFn
-	origDiffStat := diffStatFn
-	origCommitCount := commitCountFn
-	origPRChecksWatch := prChecksWatchFn
-	origMergePR := mergePRFn
-	defer func() {
-		implRunBDFn = origRunBD
-		implRunBDCombinedFn = origRunBDCombined
-		loadConfigFn = origLoadConfig
-		hasRemoteFn = origHasRemote
-		pushBranchFn = origPushBranch
-		createPRFn = origCreatePR
-		deleteBranchFn = origDeleteBranch
-		worktreeRemoveFn = origWorktreeRemove
-		diffStatFn = origDiffStat
-		commitCountFn = origCommitCount
-		prChecksWatchFn = origPRChecksWatch
-		mergePRFn = origMergePR
-		findLocalRootFn = origFindLocalRoot
-	}()
-
-	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
-		return json.Marshal(payload)
-	}
-	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "pr"
-		return cfg, nil
-	}
-	hasRemoteFn = func() bool { return true }
-	pushBranchFn = func(branch string) error { return nil }
-	createPRFn = func(branch, base, title, body string) (string, error) {
-		return "https://github.com/test/repo/pull/42", nil
-	}
-	deleteBranchFn = func(name string) error { return nil }
-	worktreeRemoveFn = func(name string) error { return nil }
-	diffStatFn = func(workdir, base, head string) (string, error) { return "1 file changed", nil }
-	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
-	prChecksWatchFn = func(url string) error { return nil }
-	mergePRFn = func(url string) error { return nil }
-
-	result, err := ApproveImpl(tmp, "010-test", ImplOpts{Wait: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.MergeStrategy != "pr" {
-		t.Errorf("MergeStrategy: got %q, want %q", result.MergeStrategy, "pr")
-	}
-	if result.PRURL != "https://github.com/test/repo/pull/42" {
-		t.Errorf("PRURL: got %q", result.PRURL)
-	}
-	if !result.PRMerged {
-		t.Error("expected PRMerged to be true with --wait")
-	}
-}
-
-func TestApproveImpl_PRNoWaitFlow(t *testing.T) {
-	tmp := t.TempDir()
-	writeLifecycleSpec(t, tmp, "010-test")
-	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
-
-	state.WriteFocus(tmp, &state.Focus{
-		Mode:       state.ModeReview,
-		ActiveSpec: "010-test",
-		SpecBranch: "spec/010-test",
-	})
-
-	origFindLocalRoot := findLocalRootFn
-	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test") }
-	origRunBD := implRunBDFn
-	origRunBDCombined := implRunBDCombinedFn
-	origLoadConfig := loadConfigFn
-	origHasRemote := hasRemoteFn
-	origPushBranch := pushBranchFn
-	origCreatePR := createPRFn
-	origDeleteBranch := deleteBranchFn
-	origWorktreeRemove := worktreeRemoveFn
-	origDiffStat := diffStatFn
-	origCommitCount := commitCountFn
-	defer func() {
-		implRunBDFn = origRunBD
-		implRunBDCombinedFn = origRunBDCombined
-		loadConfigFn = origLoadConfig
-		hasRemoteFn = origHasRemote
-		pushBranchFn = origPushBranch
-		createPRFn = origCreatePR
-		deleteBranchFn = origDeleteBranch
-		worktreeRemoveFn = origWorktreeRemove
-		diffStatFn = origDiffStat
-		commitCountFn = origCommitCount
-		findLocalRootFn = origFindLocalRoot
-	}()
-
-	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
-		return json.Marshal(payload)
-	}
-	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "pr"
-		return cfg, nil
-	}
-	hasRemoteFn = func() bool { return true }
-	pushBranchFn = func(branch string) error { return nil }
-	createPRFn = func(branch, base, title, body string) (string, error) {
-		return "https://github.com/test/repo/pull/42", nil
-	}
-	// These should NOT be called without --wait
-	var worktreeRemoved, branchDeleted bool
-	deleteBranchFn = func(name string) error { branchDeleted = true; return nil }
-	worktreeRemoveFn = func(name string) error { worktreeRemoved = true; return nil }
-	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
-	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
-
-	result, err := ApproveImpl(tmp, "010-test") // no opts = no wait
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.PRMerged {
-		t.Error("expected PRMerged to be false without --wait")
-	}
-	if worktreeRemoved {
-		t.Error("worktree should not be removed without --wait PR merge")
-	}
-	if branchDeleted {
-		t.Error("branch should not be deleted without --wait PR merge")
-	}
-}
-
 // writePlanWithBeads creates a plan.md with bead_ids in frontmatter.
 func writePlanWithBeads(t *testing.T, root, specID string, beadIDs []string) {
 	t.Helper()
@@ -612,12 +456,11 @@ func writePlanWithBeads(t *testing.T, root, specID string, beadIDs []string) {
 }
 
 // saveAndRestore saves the current values of all impl function variables and
-// returns a cleanup function that restores them.
+// restores them via t.Cleanup.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
 	origRunBD := implRunBDFn
 	origRunBDCombined := implRunBDCombinedFn
-	origLoadConfig := loadConfigFn
 	origMergeBranch := mergeBranchFn
 	origDeleteBranch := deleteBranchFn
 	origWorktreeRemove := worktreeRemoveFn
@@ -627,14 +470,10 @@ func saveAndRestore(t *testing.T) {
 	origBranchExists := branchExistsFn
 	origHasRemote := hasRemoteFn
 	origPushBranch := pushBranchFn
-	origCreatePR := createPRFn
-	origPRChecksWatch := prChecksWatchFn
-	origMergePR := mergePRFn
 	origFindLocalRoot := findLocalRootFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
-		loadConfigFn = origLoadConfig
 		mergeBranchFn = origMergeBranch
 		deleteBranchFn = origDeleteBranch
 		worktreeRemoveFn = origWorktreeRemove
@@ -644,22 +483,13 @@ func saveAndRestore(t *testing.T) {
 		branchExistsFn = origBranchExists
 		hasRemoteFn = origHasRemote
 		pushBranchFn = origPushBranch
-		createPRFn = origCreatePR
-		prChecksWatchFn = origPRChecksWatch
-		mergePRFn = origMergePR
 		findLocalRootFn = origFindLocalRoot
 	})
 
 	// Default: findLocalRoot falls back to the root arg passed to ApproveImpl.
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
 
-	// Deterministic defaults for tests that don't care about merge transport.
-	// Individual tests can override any of these as needed.
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
+	// Deterministic defaults for tests that don't care about specifics.
 	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
@@ -669,11 +499,6 @@ func saveAndRestore(t *testing.T) {
 	branchExistsFn = func(name string) bool { return false }
 	hasRemoteFn = func() bool { return false }
 	pushBranchFn = func(branch string) error { return nil }
-	createPRFn = func(branch, base, title, body string) (string, error) {
-		return "https://github.com/test/repo/pull/1", nil
-	}
-	prChecksWatchFn = func(url string) error { return nil }
-	mergePRFn = func(url string) error { return nil }
 }
 
 func TestVerifyImplContent_NoCommits(t *testing.T) {
@@ -729,12 +554,6 @@ func TestVerifyImplContent_NoCommitsButClosedBeads_AllowsCleanup(t *testing.T) {
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 0, nil }
 	branchExistsFn = func(name string) bool { return true }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
@@ -814,11 +633,6 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 	}
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
 	diffStatFn = func(workdir, base, head string) (string, error) { return "1 file changed", nil }
 
 	result, err := ApproveImpl(tmp, "010-test")
@@ -826,7 +640,7 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 		t.Fatalf("expected auto-merge to succeed, got error: %v", err)
 	}
 
-	// First merge should be bead->spec (auto-merge), second is spec->main
+	// Merge should be bead->spec (auto-merge during verifyImplContent)
 	if len(merges) < 1 {
 		t.Fatal("expected at least one merge call")
 	}
@@ -836,8 +650,8 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 	if merges[0].target != "spec/010-test" {
 		t.Errorf("expected first merge target spec/010-test, got %q", merges[0].target)
 	}
-	if result.MergeStrategy != "direct" {
-		t.Errorf("MergeStrategy: got %q, want %q", result.MergeStrategy, "direct")
+	if result.SpecBranch != "spec/010-test" {
+		t.Errorf("SpecBranch: got %q, want %q", result.SpecBranch, "spec/010-test")
 	}
 }
 
@@ -898,12 +712,6 @@ func TestVerifyImplContent_AllGood(t *testing.T) {
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
 	branchExistsFn = func(name string) bool { return true }
 	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
-	loadConfigFn = func(root string) (*config.Config, error) {
-		cfg := config.DefaultConfig()
-		cfg.MergeStrategy = "direct"
-		return cfg, nil
-	}
-	mergeBranchFn = func(workdir, source, target string) error { return nil }
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "2 files changed", nil }
@@ -912,7 +720,7 @@ func TestVerifyImplContent_AllGood(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.MergeStrategy != "direct" {
-		t.Errorf("MergeStrategy: got %q, want %q", result.MergeStrategy, "direct")
+	if result.SpecBranch != "spec/010-test" {
+		t.Errorf("SpecBranch: got %q, want %q", result.SpecBranch, "spec/010-test")
 	}
 }

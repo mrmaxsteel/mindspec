@@ -17,14 +17,14 @@ var implApproveCmd = &cobra.Command{
 	Use:   "approve <id>",
 	Short: "Approve implementation and transition to idle",
 	Long: `Verifies review mode is active for the given spec,
-transitions state to idle, and emits idle mode guidance.
+pushes the spec branch to remote (if available), cleans up
+worktrees and branches locally, and transitions state to idle.
 This is the final human gate in the spec lifecycle.`,
 	Args: cobra.ExactArgs(1),
 	RunE: approveImplRunE,
 }
 
 func init() {
-	implApproveCmd.Flags().Bool("wait", false, "Wait for CI checks to pass then merge PR (only applies to PR strategy)")
 	implCmd.AddCommand(implApproveCmd)
 }
 
@@ -37,10 +37,7 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	wait, _ := cmd.Flags().GetBool("wait")
-	opts := approve.ImplOpts{Wait: wait}
-
-	result, err := approve.ApproveImpl(root, specID, opts)
+	result, err := approve.ApproveImpl(root, specID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -51,25 +48,19 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 
-	if result.MergeStrategy != "" {
+	if result.SpecBranch != "" {
 		fmt.Println()
-		fmt.Printf("Merge summary:\n")
-		fmt.Printf("  Strategy: %s\n", result.MergeStrategy)
-		fmt.Printf("  Branch:   %s → main\n", result.SpecBranch)
+		fmt.Printf("Summary:\n")
+		fmt.Printf("  Branch:   %s\n", result.SpecBranch)
 		if result.CommitCount > 0 {
 			fmt.Printf("  Commits:  %d\n", result.CommitCount)
 		}
-		if result.PRURL != "" {
-			fmt.Printf("  PR:       %s\n", result.PRURL)
-			if result.PRMerged {
-				fmt.Printf("  Status:   merged\n")
-			} else {
-				fmt.Printf("\nACTION REQUIRED: Fill in the PR template at %s\n", result.PRURL)
-				fmt.Printf("  Update the Summary, Spec, Changes, and Test plan sections.\n")
-			}
-		}
 		if result.DiffStat != "" {
 			fmt.Printf("\n%s\n", result.DiffStat)
+		}
+		if result.Pushed {
+			fmt.Printf("\nBranch pushed to remote. Create a PR to merge into main:\n")
+			fmt.Printf("  gh pr create --head %s --base main --title \"[SPEC %s] <title>\" --body \"<description>\"\n", result.SpecBranch, specID)
 		}
 	}
 	fmt.Println()

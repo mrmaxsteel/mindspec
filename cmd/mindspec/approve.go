@@ -38,7 +38,6 @@ var approveImplCmd = &cobra.Command{
 func init() {
 	approveSpecCmd.Flags().String("approved-by", "user", "Identity of the approver")
 	approvePlanCmd.Flags().String("approved-by", "user", "Identity of the approver")
-	approveImplCmd.Flags().Bool("wait", false, "Wait for CI checks to pass then merge PR (only applies to PR strategy)")
 	approveCmd.AddCommand(approveSpecCmd)
 	approveCmd.AddCommand(approvePlanCmd)
 	approveCmd.AddCommand(approveImplCmd)

@@ -292,3 +292,30 @@
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-02T22:40:10Z","event_type":"closed","id":292,"issue_id":"mindspec-mol-lq8","new_value":"Stale lifecycle beads from pre-054 refactor","old_value":""}
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-02T23:15:16Z","event_type":"created","id":293,"issue_id":"mindspec-6yhs","new_value":"","old_value":""}
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-02T23:44:18Z","event_type":"created","id":294,"issue_id":"mindspec-s2k3","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-02T23:44:24Z","event_type":"created","id":295,"issue_id":"mindspec-e6qq","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-02T23:44:29Z","event_type":"created","id":296,"issue_id":"mindspec-pi24","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T08:54:09Z","event_type":"created","id":297,"issue_id":"mindspec-d5lm","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:19:33Z","event_type":"created","id":298,"issue_id":"mindspec-hyzh","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:19:36Z","event_type":"created","id":299,"issue_id":"mindspec-u4lq","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:19:38Z","event_type":"created","id":300,"issue_id":"mindspec-pfzp","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:19:39Z","event_type":"created","id":301,"issue_id":"mindspec-1hki","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:20:01Z","event_type":"status_changed","id":302,"issue_id":"mindspec-hyzh","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"mindspec-hyzh\",\"title\":\"[058] Auto-commit in mindspec complete\",\"description\":\"Add optional commit message param to complete.Run(). Auto-commit before clean-tree check. Update dirty-tree error hint.\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-03T09:19:34Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-03T09:19:34Z\"}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:21:20Z","event_type":"created","id":303,"issue_id":"mindspec-d5lm.1","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:21:20Z","event_type":"created","id":304,"issue_id":"mindspec-d5lm.2","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:21:20Z","event_type":"created","id":305,"issue_id":"mindspec-d5lm.3","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:21:20Z","event_type":"created","id":306,"issue_id":"mindspec-d5lm.4","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:21:29Z","event_type":"status_changed","id":307,"issue_id":"mindspec-d5lm.4","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"mindspec-d5lm.4\",\"title\":\"[058-zero-git-lifecycle] Bead 4: Harness scenario updates and integration verification\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-03T09:21:21Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-03T09:21:21Z\"}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:03Z","event_type":"closed","id":308,"issue_id":"mindspec-d5lm.4","new_value":"All implemented in single commit a4405a8","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:09Z","event_type":"closed","id":309,"issue_id":"mindspec-d5lm","new_value":"Epic complete — all beads implemented","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:09Z","event_type":"closed","id":310,"issue_id":"mindspec-hyzh","new_value":"All implemented in commit a4405a8","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:09Z","event_type":"closed","id":311,"issue_id":"mindspec-u4lq","new_value":"All implemented in commit a4405a8","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:09Z","event_type":"closed","id":312,"issue_id":"mindspec-pfzp","new_value":"All implemented in commit a4405a8","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T09:37:09Z","event_type":"closed","id":313,"issue_id":"mindspec-1hki","new_value":"All implemented in commit a4405a8","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:09:44Z","event_type":"closed","id":314,"issue_id":"mindspec-d5lm.4","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:09:56Z","event_type":"closed","id":315,"issue_id":"mindspec-d5lm.1","new_value":"implemented in prior session","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:09:56Z","event_type":"closed","id":316,"issue_id":"mindspec-d5lm.2","new_value":"implemented in prior session","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:09:56Z","event_type":"closed","id":317,"issue_id":"mindspec-d5lm.3","new_value":"implemented in prior session","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:10:01Z","event_type":"closed","id":318,"issue_id":"mindspec-d5lm","new_value":"all beads complete, spec 058 ready for review","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T11:10:05Z","event_type":"closed","id":319,"issue_id":"mindspec-d5lm.1","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T14:15:00Z","event_type":"closed","id":320,"issue_id":"mindspec-d5lm","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T14:24:50Z","event_type":"created","id":321,"issue_id":"mindspec-9dx0","new_value":"","old_value":""}

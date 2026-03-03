@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/config"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/recording"
 	"github.com/mindspec/mindspec/internal/state"
@@ -21,19 +20,14 @@ import (
 var (
 	implRunBDCombinedFn = bead.RunBDCombined
 	implRunBDFn         = bead.RunBD
-	loadConfigFn        = config.Load
 	mergeBranchFn       = gitops.MergeBranch
 	deleteBranchFn      = gitops.DeleteBranch
 	worktreeRemoveFn    = bead.WorktreeRemove
 	worktreeListFn      = bead.WorktreeList
 	hasRemoteFn         = gitops.HasRemote
 	pushBranchFn        = gitops.PushBranch
-	createPRFn          = gitops.CreatePR
 	diffStatFn          = gitops.DiffStat
 	commitCountFn       = gitops.CommitCount
-	prStatusFn          = gitops.PRStatus
-	prChecksWatchFn     = gitops.PRChecksWatch
-	mergePRFn           = gitops.MergePR
 	isAncestorFn        = gitops.IsAncestor
 	branchExistsFn      = gitops.BranchExists
 	findLocalRootFn     = defaultFindLocalRoot
@@ -44,30 +38,20 @@ func defaultFindLocalRoot() (string, error) {
 }
 
 // ImplOpts holds options for implementation approval.
-type ImplOpts struct {
-	Wait bool // If true and strategy is PR, wait for CI checks then merge.
-}
+type ImplOpts struct{}
 
 // ImplResult holds the result of implementation approval.
 type ImplResult struct {
-	SpecID        string
-	Warnings      []string
-	MergeStrategy string // "direct", "pr", or "" if no merge
-	SpecBranch    string
-	CommitCount   int
-	DiffStat      string
-	PRURL         string // set when strategy is "pr"
-	PRMerged      bool   // true if PR was merged via --wait
+	SpecID      string
+	Warnings    []string
+	SpecBranch  string
+	CommitCount int
+	DiffStat    string
+	Pushed      bool // true if branch was pushed to remote
 }
 
 // ApproveImpl transitions from review mode to idle, completing the spec lifecycle.
 func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
-	var opt ImplOpts
-	if len(opts) > 0 {
-		opt = opts[0]
-	}
-	_ = opt // used below in merge flow
-
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
@@ -123,37 +107,46 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 		}
 	}
 
-	// Merge spec branch → main (ADR-0006: one PR per spec lifecycle).
+	// Push spec branch to remote if available, then clean up locally.
 	if specBranch != "" {
-		cfg, cfgErr := loadConfigFn(root)
-		if cfgErr != nil {
-			cfg = config.DefaultConfig()
+		result.SpecBranch = specBranch
+
+		// Gather pre-push stats (best-effort).
+		if count, err := commitCountFn(root, "main", specBranch); err == nil {
+			result.CommitCount = count
+		}
+		if stat, err := diffStatFn(root, "main", specBranch); err == nil {
+			result.DiffStat = stat
 		}
 
-		mergeErr := mergeSpecToMain(root, specBranch, specID, cfg, result, opt)
-		if mergeErr != nil {
-			return nil, fmt.Errorf("spec→main merge: %w", mergeErr)
-		} else if result.MergeStrategy == "direct" || result.PRMerged {
-			// Cleanup must run from repo root. If command is invoked from inside the
-			// target spec worktree, bd refuses to remove that worktree.
-			if err := withWorkingDir(root, func() error {
-				// Clean up lingering bead worktrees/branches from this spec first.
-				if err := cleanupBeadBranchesAndWorktrees(root, specID); err != nil {
-					return fmt.Errorf("cleaning bead artifacts: %w", err)
-				}
-
-				// Clean up spec worktree and branch after successful merge.
-				specWtName := "worktree-spec-" + specID
-				if err := worktreeRemoveFn(specWtName); err != nil {
-					return fmt.Errorf("removing spec worktree %s: %w", specWtName, err)
-				}
-				if err := deleteBranchFn(specBranch); err != nil {
-					return fmt.Errorf("deleting spec branch %s: %w", specBranch, err)
-				}
-				return nil
-			}); err != nil {
-				return nil, err
+		// Push to remote if one exists.
+		if hasRemoteFn() {
+			if err := pushBranchFn(specBranch); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not push branch: %v", err))
+			} else {
+				result.Pushed = true
 			}
+		}
+
+		// Cleanup must run from repo root. If command is invoked from inside the
+		// target spec worktree, bd refuses to remove that worktree.
+		if err := withWorkingDir(root, func() error {
+			// Clean up lingering bead worktrees/branches from this spec first.
+			if err := cleanupBeadBranchesAndWorktrees(root, specID); err != nil {
+				return fmt.Errorf("cleaning bead artifacts: %w", err)
+			}
+
+			// Clean up spec worktree and branch after successful push/cleanup.
+			specWtName := "worktree-spec-" + specID
+			if err := worktreeRemoveFn(specWtName); err != nil {
+				return fmt.Errorf("removing spec worktree %s: %w", specWtName, err)
+			}
+			if err := deleteBranchFn(specBranch); err != nil {
+				return fmt.Errorf("deleting spec branch %s: %w", specBranch, err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -255,63 +248,6 @@ func readBeadStatus(id string) (string, error) {
 		return "", fmt.Errorf("no bead returned for %s", id)
 	}
 	return strings.ToLower(strings.TrimSpace(payload[0].Status)), nil
-}
-
-// mergeSpecToMain merges the spec branch to main using the configured strategy.
-// It populates result with merge metadata (strategy, stats, PR URL).
-func mergeSpecToMain(root, specBranch, specID string, cfg *config.Config, result *ImplResult, opt ImplOpts) error {
-	strategy := cfg.MergeStrategy
-
-	// "auto" resolves to "pr" if a remote exists, "direct" otherwise.
-	if strategy == "auto" {
-		if hasRemoteFn() {
-			strategy = "pr"
-		} else {
-			strategy = "direct"
-		}
-	}
-
-	result.MergeStrategy = strategy
-	result.SpecBranch = specBranch
-
-	// Gather pre-merge stats (best-effort).
-	if count, err := commitCountFn(root, "main", specBranch); err == nil {
-		result.CommitCount = count
-	}
-	if stat, err := diffStatFn(root, "main", specBranch); err == nil {
-		result.DiffStat = stat
-	}
-
-	switch strategy {
-	case "pr":
-		if err := pushBranchFn(specBranch); err != nil {
-			return fmt.Errorf("pushing spec branch: %w", err)
-		}
-		title := fmt.Sprintf("[SPEC %s] Merge spec branch to main", specID)
-		prURL, err := createPRFn(specBranch, "main", title, "")
-		if err != nil {
-			return fmt.Errorf("creating PR: %w", err)
-		}
-		result.PRURL = prURL
-
-		if opt.Wait {
-			fmt.Printf("Waiting for CI checks on %s...\n", prURL)
-			if err := prChecksWatchFn(prURL); err != nil {
-				return fmt.Errorf("CI checks failed: %w", err)
-			}
-			if err := mergePRFn(prURL); err != nil {
-				return fmt.Errorf("merging PR: %w", err)
-			}
-			result.PRMerged = true
-		}
-		return nil
-
-	case "direct":
-		return mergeBranchFn(root, specBranch, "main")
-
-	default:
-		return fmt.Errorf("unknown merge strategy: %s", strategy)
-	}
 }
 
 // verifyImplContent checks that the spec branch has real implementation content
