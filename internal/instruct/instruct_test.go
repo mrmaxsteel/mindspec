@@ -72,8 +72,8 @@ func TestRender_IdleMode(t *testing.T) {
 	if !strings.Contains(output, "No Active Work") {
 		t.Error("expected idle heading")
 	}
-	if !strings.Contains(output, "001-skeleton") {
-		t.Error("expected available specs to be listed")
+	if strings.Contains(output, "Available Specs") {
+		t.Error("idle template should not list historical specs")
 	}
 	if !strings.Contains(output, "mindspec spec create") {
 		t.Error("expected mindspec spec create suggestion")

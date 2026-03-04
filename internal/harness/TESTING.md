@@ -228,6 +228,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-03 | PASS | 167 | 5 | 52.10s | Spec 058 fixes (DetectWorktreeContext last-match, focus propagation, plan scaffold). 100% fwd ratio. |
 | 2026-03-03 | PASS | 120 | 11 | 56.92s | After sandbox .gitignore fix (added .mindspec/focus + session.json). 100% fwd ratio, clean bead→spec merge at [92]. |
 | 2026-03-04 | FAIL | 2361 | 7 | 98.92s | ADR-0023 compat: `mindspec next` exits 1, `mindspec complete` exits 1. Agent reached max turns (20). Pre-existing; not a regression from Spec 067. |
+| 2026-03-04 | PASS | ~313 | 6 | 1m22s | Fix worktree topology (nested spec→bead), guard redirect points to bead worktree, idle template cleanup, implement template fixes (no redundant cd/next), bd close forbidden, complete emits cd hint. 100% fwd ratio. (1649 raw events; ~1336 beads git internals filtered.) |
 
 ### TestLLM_SpecToIdle
 

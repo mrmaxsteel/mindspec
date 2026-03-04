@@ -100,7 +100,6 @@ func ScenarioSingleBead() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
-			specBranch := "spec/" + specID
 
 			// Create real beads: epic + child task
 			epicID = sandbox.CreateSpecEpic(specID)
@@ -125,12 +124,9 @@ Create greeting.go with a Greet function.
 `)
 			sandbox.Commit("setup: pre-approved spec and plan")
 
-			// Start in a valid implement context with an active bead worktree.
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + beadID
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			// Start in a valid implement context with nested worktree topology:
+			// main → spec worktree → bead worktree (mirrors real mindspec next).
+			setupWorktrees(sandbox, specID, beadID, "implement")
 
 			sandbox.Commit("setup: implement mode with active worktree")
 			return nil
@@ -190,7 +186,6 @@ func ScenarioMultiBeadDeps() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "002-multi"
-			specBranch := "spec/" + specID
 
 			// Create real beads: epic + 3 child tasks
 			epicID := sandbox.CreateSpecEpic(specID)
@@ -220,12 +215,7 @@ Create formatter_test.go with tests.
 `)
 			sandbox.Commit("setup: multi-bead spec")
 
-			// Create spec branch, bead branch, and bead worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + bead1
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + bead1
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			setupWorktrees(sandbox, specID, bead1, "implement")
 
 			sandbox.Commit("setup: implement mode with active worktree")
 			return nil
@@ -252,7 +242,6 @@ func ScenarioInterruptForBug() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "003-feature"
-			specBranch := "spec/" + specID
 
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
@@ -282,12 +271,7 @@ func main() {
 `)
 			sandbox.Commit("setup: feature in progress")
 
-			// Create spec branch, bead branch, and bead worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + beadID
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			setupWorktrees(sandbox, specID, beadID, "implement")
 
 			sandbox.Commit("setup: implement mode with active worktree")
 			return nil
@@ -328,7 +312,6 @@ func ScenarioResumeAfterCrash() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "004-resume"
-			specBranch := "spec/" + specID
 
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Process feature", "task", epicID)
@@ -352,22 +335,17 @@ Create partial.go with a Process function.
 `)
 			sandbox.Commit("setup: spec and plan")
 
-			// Create spec branch, bead branch, and bead worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + beadID
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
 			// Simulate a crash: partial work committed in the bead worktree
-			sandbox.WriteFile(beadWtDir+"/partial.go", `package main
+			sandbox.WriteFile(wt.BeadWtDir+"/partial.go", `package main
 
 // TODO: finish this function
 func Process() {
 }
 `)
-			mustRunGit(sandbox, "-C", beadWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", beadWtDir, "commit", "-m", "wip: partial process")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "commit", "-m", "wip: partial process")
 
 			sandbox.Commit("setup: implement mode with partial work")
 			return nil
@@ -777,33 +755,23 @@ func ScenarioSpecStatus() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-status"
-			specBranch := "spec/" + specID
 
 			// Set up in implement mode with realistic worktree structure
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			// Create spec branch and worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+			wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
 			// Write spec files in the spec worktree
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Status Feature
 status: Approved
 ---
 # Status Feature
 `)
-			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
-
-			// Create bead branch and worktree off the spec branch
-			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + beadID
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: spec files")
 
 			sandbox.Commit("setup: implement mode with active bead")
 			mainCount := mustRun(sandbox.t, sandbox.Root, "git", "rev-list", "--count", "main")
@@ -886,7 +854,6 @@ func ScenarioMultipleActiveSpecs() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-alpha"
-			specBranch := "spec/" + specID
 
 			// --- Spec 001-alpha: implement mode with a claimed bead ---
 			epicAlpha := sandbox.CreateSpecEpic("001-alpha")
@@ -926,14 +893,10 @@ spec_id: 002-beta
 TBD
 `)
 
-			// Establish an active bead worktree for 001-alpha so implementation
+			// Establish spec + nested bead worktree for 001-alpha so implementation
 			// does not start on main, while still requiring --spec disambiguation.
 			sandbox.Commit("setup: two active specs")
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + beadAlpha
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + beadAlpha
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			setupWorktrees(sandbox, specID, beadAlpha, "implement")
 
 			// Focus: implement mode with activeBead but NO activeSpec.
 			// This forces disambiguation across multiple active specs so the
@@ -1490,7 +1453,6 @@ func ScenarioBlockedBeadTransition() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-blocker"
-			specBranch := "spec/" + specID
 
 			// Create epic + 2 child beads with dependency
 			epicID = sandbox.CreateSpecEpic(specID)
@@ -1520,12 +1482,7 @@ Create core.go with a Core() function.
 Create extension.go that uses Core().
 `)
 
-			// Set up spec branch + bead worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			beadBranch := "bead/" + bead1
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := ".worktrees/worktree-" + bead1
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			setupWorktrees(sandbox, specID, bead1, "implement")
 
 			sandbox.Commit("setup: implement mode with blocked bead-2")
 			return nil
@@ -1653,6 +1610,37 @@ If mindspec next fails, read the error message carefully and follow its instruct
 func mustRunGit(sandbox *Sandbox, args ...string) {
 	sandbox.t.Helper()
 	mustRun(sandbox.t, sandbox.Root, "git", args...)
+}
+
+// worktreePaths holds the paths returned by setupWorktrees.
+type worktreePaths struct {
+	SpecWtDir string // e.g. ".worktrees/worktree-spec-001-greeting"
+	BeadWtDir string // e.g. ".worktrees/worktree-spec-001-greeting/.worktrees/worktree-<beadID>" (empty if phase != "implement")
+}
+
+// setupWorktrees creates the canonical worktree topology for a given lifecycle phase.
+// It creates the spec branch (and bead branch if phase is "implement"), plus the
+// properly nested worktrees that mirror what mindspec next produces at runtime.
+//
+// Supported phases:
+//   - "spec" or "plan": creates spec/specID branch + spec worktree
+//   - "implement":      creates spec worktree + bead worktree nested inside it
+func setupWorktrees(sandbox *Sandbox, specID, beadID, phase string) worktreePaths {
+	specBranch := "spec/" + specID
+	mustRunGit(sandbox, "branch", specBranch)
+
+	specWtDir := ".worktrees/worktree-spec-" + specID
+	mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+
+	var beadWtDir string
+	if phase == "implement" && beadID != "" {
+		beadBranch := "bead/" + beadID
+		mustRunGit(sandbox, "branch", beadBranch, specBranch)
+		beadWtDir = specWtDir + "/.worktrees/worktree-" + beadID
+		mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+	}
+
+	return worktreePaths{SpecWtDir: specWtDir, BeadWtDir: beadWtDir}
 }
 
 // --- Helpers ---

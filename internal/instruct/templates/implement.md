@@ -33,8 +33,13 @@ Execute the active bead in an isolated worktree. Stay within scope.
 {{- if .ActiveWorktree}}
 
 **Active Worktree**: `{{.ActiveWorktree}}`
+{{- if .InWorktree}}
 
-Your bead worktree is ready. `cd {{.ActiveWorktree}}` and work there. All code changes go in the worktree, not the main repo.
+You are in the bead worktree. All code changes go here, not the main repo.
+{{- else}}
+
+Run `cd {{.ActiveWorktree}}` to enter the bead worktree. All code changes go there, not the main repo.
+{{- end}}
 {{- else}}
 
 **No active worktree.** Run `mindspec next` NOW — before any other action. Do NOT create files, edit code, or run `git commit` until `mindspec next` has succeeded.
@@ -54,7 +59,6 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Test creation for the bead's scope
 - Documentation updates (doc-sync is mandatory)
 - Capturing proof/evidence (command outputs, test results)
-- Updating bead status in Beads (`bd update`, `bd close`)
 
 ## Forbidden Actions
 
@@ -63,13 +67,14 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Completing a bead without proof and doc-sync
 - Making changes outside the assigned worktree
 - Creating worktrees via raw tooling (`bd worktree create`, `git worktree add`) instead of `mindspec next`
+- Closing beads directly with `bd close` — use `mindspec complete` instead
 - Manually closing the lifecycle epic — `mindspec impl approve` handles epic closure automatically
 
 ## Obligations
 
 1. **Scope discipline**: Changes must stay within the bead's scope
 2. **Doc sync**: Every code change must update corresponding documentation
-3. **Proof of done**: Bead closes only when verification steps pass with captured evidence
+3. **Proof of done**: Bead can be completed only when verification steps pass with captured evidence
 4. **Worktree isolation**: Work in the bead-specific worktree
 5. **ADR compliance**: Follow cited ADRs; divergence triggers the divergence protocol
 
@@ -88,7 +93,13 @@ When the bead is done:
 4. **If more beads are ready, run `mindspec next` IMMEDIATELY** — do NOT write any code for the next bead until `mindspec next` has created its worktree
 
 ## Next Action
+{{- if .ActiveBead}}
 
-1. Run `mindspec next` to enter the bead worktree (if not already in one)
+1. Implement the bead's scope
+2. Run `mindspec complete "describe what you did"` to finish
+{{- else}}
+
+1. Run `mindspec next` to claim a bead and enter its worktree
 2. Implement the bead's scope
 3. Run `mindspec complete "describe what you did"` to finish
+{{- end}}

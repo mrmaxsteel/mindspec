@@ -34,18 +34,7 @@ All new features and non-trivial changes MUST go through `mindspec spec create`.
 ## Available Actions
 
 - `mindspec spec create <slug>` — start a new specification (creates branch + worktree)
-- `mindspec next` — resume work on an existing spec (claims next ready bead)
 - `mindspec doctor` — check project health
-
-## Available Specs
-
-{{- if .AvailableSpecs}}
-{{range .AvailableSpecs}}
-- `{{.}}`
-{{- end}}
-{{- else}}
-No specs found in `.mindspec/docs/specs/`.
-{{- end}}
 
 ## Next Action
 
@@ -58,6 +47,5 @@ If the user did NOT give a concrete task, do this in your first message:
 1. Greet the user
 2. Suggest these options directly:
    - `mindspec spec create <slug>` to draft a new specification
-   - `mindspec next` to resume an in-progress spec (if any are listed above)
    - `mindspec doctor` to check project health
 3. Ask what they'd like to work on

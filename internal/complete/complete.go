@@ -44,6 +44,7 @@ type Result struct {
 	NextMode        string
 	NextBead        string
 	NextSpec        string
+	SpecWorktree    string
 }
 
 func defaultFindLocalRoot() (string, error) {
@@ -154,8 +155,9 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 
 	result := &Result{
-		BeadID:     beadID,
-		BeadClosed: true,
+		BeadID:       beadID,
+		BeadClosed:   true,
+		SpecWorktree: filepath.Join(root, ".worktrees", "worktree-spec-"+specID),
 	}
 
 	// 4.7. Merge bead branch back to spec branch (ADR-0006).
@@ -208,11 +210,21 @@ func FormatResult(r *Result) string {
 	switch r.NextMode {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead: %s (mode: implement)\n", r.NextBead)
-		sb.WriteString("Run `mindspec next` to claim and start.\n")
+		if r.WorktreeRemoved && r.SpecWorktree != "" {
+			fmt.Fprintf(&sb, "Run: `cd %s && mindspec next`\n", r.SpecWorktree)
+		} else {
+			sb.WriteString("Run `mindspec next` to claim and start.\n")
+		}
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
+		if r.WorktreeRemoved && r.SpecWorktree != "" {
+			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+		}
 	case state.ModeReview:
 		fmt.Fprintf(&sb, "All beads complete. Mode: review (spec: %s)\n", r.NextSpec)
+		if r.WorktreeRemoved && r.SpecWorktree != "" {
+			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+		}
 		sb.WriteString("Review implementation against acceptance criteria, then use `/ms-impl-approve` to accept.\n")
 	default:
 		sb.WriteString("All beads complete. Mode: idle\n")

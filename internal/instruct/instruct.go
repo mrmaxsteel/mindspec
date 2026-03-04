@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/mindspec/mindspec/internal/config"
@@ -18,19 +19,27 @@ import (
 //go:embed templates/*.md
 var templateFS embed.FS
 
+// SpecInfo describes an active spec for the ambiguous template.
+type SpecInfo struct {
+	SpecID string
+	Mode   string
+}
+
 // Context holds all data needed to render guidance.
 type Context struct {
-	Mode             string   `json:"mode"`
-	ActiveSpec       string   `json:"active_spec"`
-	ActiveBead       string   `json:"active_bead"`
-	ActiveWorktree   string   `json:"active_worktree"`
-	SpecGoal         string   `json:"spec_goal,omitempty"`
-	PlanApproved     bool     `json:"plan_approved,omitempty"`
-	AvailableSpecs   []string `json:"available_specs,omitempty"`
-	BeadPrimer       string   `json:"bead_primer,omitempty"`
-	BeadsContext     string   `json:"beads_context,omitempty"`
-	BranchProtection bool     `json:"branch_protection,omitempty"`
-	Warnings         []string `json:"warnings,omitempty"`
+	Mode             string     `json:"mode"`
+	ActiveSpec       string     `json:"active_spec"`
+	ActiveBead       string     `json:"active_bead"`
+	ActiveWorktree   string     `json:"active_worktree"`
+	InWorktree       bool       `json:"in_worktree,omitempty"`
+	SpecGoal         string     `json:"spec_goal,omitempty"`
+	PlanApproved     bool       `json:"plan_approved,omitempty"`
+	AvailableSpecs   []string   `json:"available_specs,omitempty"`
+	ActiveSpecList   []SpecInfo `json:"active_spec_list,omitempty"`
+	BeadPrimer       string     `json:"bead_primer,omitempty"`
+	BeadsContext     string     `json:"beads_context,omitempty"`
+	BranchProtection bool       `json:"branch_protection,omitempty"`
+	Warnings         []string   `json:"warnings,omitempty"`
 }
 
 // JSONOutput is the structured output for --format=json.
@@ -53,6 +62,16 @@ func BuildContext(root string, mc *state.Focus) *Context {
 		ActiveWorktree: mc.ActiveWorktree,
 	}
 
+	// Check if CWD matches the active worktree
+	if mc.ActiveWorktree != "" {
+		cwd, _ := os.Getwd()
+		if cwd != "" {
+			cwdAbs, _ := filepath.Abs(cwd)
+			wtAbs, _ := filepath.Abs(mc.ActiveWorktree)
+			ctx.InWorktree = strings.HasPrefix(cwdAbs, wtAbs)
+		}
+	}
+
 	// Load config for branch protection setting
 	cfg, _ := config.Load(root)
 	ctx.BranchProtection = cfg.Enforcement.PreCommitHook
@@ -67,10 +86,8 @@ func BuildContext(root string, mc *state.Focus) *Context {
 		ctx.PlanApproved = isPlanApproved(root, mc.ActiveSpec)
 	}
 
-	// List available specs for idle mode
-	if mc.Mode == state.ModeIdle {
-		ctx.AvailableSpecs = listSpecs(root)
-	}
+	// AvailableSpecs removed — the disk directory listing was noise
+	// (showed all historical specs, not active ones).
 
 	// Build bead primer for implement mode with active bead (session recovery)
 	if mc.Mode == state.ModeImplement && mc.ActiveBead != "" && mc.ActiveSpec != "" {

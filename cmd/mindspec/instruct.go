@@ -149,9 +149,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 func handleNoState(root, format string) error {
 	mc := &state.Focus{Mode: state.ModeIdle}
 	ctx := instruct.BuildContext(root, mc)
-	ctx.Warnings = append(ctx.Warnings,
-		"[state] No active state found. Run `mindspec spec create <slug>` to start a new spec.",
-	)
+	// No warning needed — the idle template already tells the agent what to do.
 
 	if format == "json" {
 		output, err := instruct.RenderJSON(ctx)
@@ -170,13 +168,16 @@ func handleNoState(root, format string) error {
 	return nil
 }
 
-// handleAmbiguous falls back to idle guidance with a warning listing the ambiguous specs.
+// handleAmbiguous renders the ambiguous template listing all active specs.
 func handleAmbiguous(root, format string, ambErr *resolve.ErrAmbiguousTarget) error {
-	mc := &state.Focus{Mode: state.ModeIdle}
+	mc := &state.Focus{Mode: "ambiguous"}
 	ctx := instruct.BuildContext(root, mc)
-	ctx.Warnings = append(ctx.Warnings,
-		"[resolve] "+ambErr.Error()+"Use `mindspec instruct --spec <id>` to target a specific spec.",
-	)
+	for _, s := range ambErr.Active {
+		ctx.ActiveSpecList = append(ctx.ActiveSpecList, instruct.SpecInfo{
+			SpecID: s.SpecID,
+			Mode:   s.Mode,
+		})
+	}
 
 	if format == "json" {
 		output, err := instruct.RenderJSON(ctx)
