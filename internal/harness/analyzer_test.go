@@ -278,9 +278,9 @@ func TestSkipNext_ApproveFlowMixedViolation(t *testing.T) {
 func TestSkipNext_LifecycleTurnCommitExempt(t *testing.T) {
 	// Git commits in the same turn as a lifecycle command are side-effects.
 	tests := []struct {
-		name    string
-		lcVerb  string
-		lcArgs  []string
+		name   string
+		lcVerb string
+		lcArgs []string
 	}{
 		{"spec-init", "spec-init", []string{"spec-init", "001-calc", "--title", "Calculator"}},
 		{"approve-spec", "approve", []string{"approve", "spec", "001-greeting"}},
