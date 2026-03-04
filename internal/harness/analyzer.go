@@ -403,11 +403,52 @@ func isCodeModifyingEvent(e ActionEvent) bool {
 	}
 	if e.Command == "git" {
 		args := eventArgsList(e)
-		if containsAll(args, "commit") {
+		if containsAll(args, "commit") && !isLifecycleCommit(args) {
 			return true
 		}
 	}
 	return false
+}
+
+// isLifecycleCommit returns true if a git commit's message indicates it was
+// made by a lifecycle command (spec-init, approve, beads backup) rather than
+// by the agent writing implementation code. These commits are side-effects of
+// mindspec CLI operations and should not trigger skip_next violations.
+func isLifecycleCommit(args []string) bool {
+	msg := commitMessage(args)
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	lifecyclePrefixes := []string{
+		"chore: initialize spec",
+		"approve:",
+		"approve ",
+		"spec approval:",
+		"implementation approval:",
+		"bd: backup",
+		"bd: ",
+	}
+	for _, prefix := range lifecyclePrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// commitMessage extracts the -m message from git commit args.
+func commitMessage(args []string) string {
+	for i, a := range args {
+		if a == "-m" && i+1 < len(args) {
+			return args[i+1]
+		}
+		// Handle -m"message" (no space)
+		if strings.HasPrefix(a, "-m") && len(a) > 2 {
+			return a[2:]
+		}
+	}
+	return ""
 }
 
 // eventArgsList returns args as a list, using ArgsList if available, else flatArgs.

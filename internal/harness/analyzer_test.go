@@ -275,6 +275,49 @@ func TestSkipNext_ApproveFlowMixedViolation(t *testing.T) {
 	}
 }
 
+func TestSkipNext_LifecycleCommitExempt(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+	}{
+		{"spec-init", "chore: initialize spec 001-calculator"},
+		{"approve-spec", "Spec approval: 001-greeting"},
+		{"approve-plan", "Approve plan for 001-greeting"},
+		{"approve-plan-lower", "approve: plan 001-greeting approved, created implementation beads"},
+		{"impl-approval", "Implementation approval: 001-done"},
+		{"bd-backup", "bd: backup 2026-03-04 08:48 -- .beads/backup"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := []ActionEvent{
+				{Phase: "plan", ActionType: "command", Command: "git",
+					ArgsList: []string{"commit", "-m", tt.msg}},
+			}
+			results := detectSkipNext(events)
+			if len(results) != 0 {
+				t.Errorf("expected no violation for lifecycle commit %q, got %d: %v",
+					tt.msg, len(results), results)
+			}
+		})
+	}
+}
+
+func TestSkipNext_NonLifecycleCommitViolation(t *testing.T) {
+	// A real implementation commit should still trigger skip_next.
+	events := []ActionEvent{
+		{Phase: "plan", ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "Bead 1: Create types.go with Message struct"}},
+	}
+	results := detectSkipNext(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation for non-lifecycle commit, got %d", len(results))
+	}
+	if results[0].Rule != "skip_next" {
+		t.Errorf("rule = %q, want skip_next", results[0].Rule)
+	}
+}
+
 func TestSkipComplete_NoViolation(t *testing.T) {
 	events := []ActionEvent{
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
