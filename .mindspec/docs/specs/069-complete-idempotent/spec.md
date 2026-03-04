@@ -1,59 +1,69 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-04T13:46:10Z"
+approved_by: user
+status: Approved
 ---
-# Spec 069-complete-idempotent: Complete Idempotent
+# Make `mindspec complete` Idempotent and Guard `mindspec next`
 
 ## Goal
 
-<Brief description of what this spec achieves and the target user outcome>
+LLM agents frequently skip `mindspec complete` and use `bd close` directly. This loses the merge, worktree cleanup, and branch deletion. Two fixes:
+
+1. Make `mindspec complete` resilient when the bead is already closed — still perform merge, worktree removal, and branch cleanup
+2. Add a guard to `mindspec next` that warns when a predecessor bead was closed without `mindspec complete` (no merge commit on spec branch)
 
 ## Background
 
-<Context, motivation, and any relevant prior decisions>
+In LLM test harness runs, 5 of 13 failing tests fail because the agent skips `mindspec complete`. The agent either uses `bd close` directly or jumps to `impl approve`. When `mindspec complete` is skipped, the bead branch never merges into the spec branch, the worktree is orphaned, and the branch lingers.
 
 ## Impacted Domains
 
-- <domain-1>: <how it is impacted>
+- complete: Make `Run()` tolerate already-closed beads
+- next: Add guard checking for unmerged predecessor beads
 
 ## ADR Touchpoints
 
-- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+- [ADR-0023](../../adr/ADR-0023.md): State derived from beads — complete must query bead status
 
 ## Requirements
 
-1. <Requirement 1>
-2. <Requirement 2>
+1. `mindspec complete` succeeds (with warning) when the bead is already closed by `bd close`
+2. `mindspec complete` still performs merge, worktree removal, branch deletion for already-closed beads
+3. `mindspec next` warns when a closed sibling bead has no merge commit on the spec branch
+4. The warning from `mindspec next` suggests running `mindspec complete` to recover
 
 ## Scope
 
 ### In Scope
-- <File or component 1>
+- `internal/complete/complete.go` — make `closeBeadFn` failure tolerable when bead already closed
+- `cmd/mindspec/next.go` or `internal/next/` — add unmerged-bead guard
+- Unit tests for both behaviors
 
 ### Out of Scope
-- <Explicitly excluded items>
+- Changing `bd close` behavior
+- Preventing agents from calling `bd close` (that's a guidance concern)
 
 ## Non-Goals
 
-- <What this spec intentionally does not address>
+- Making `mindspec complete` work without any bead context at all
+- Auto-running `mindspec complete` from `mindspec next`
 
 ## Acceptance Criteria
 
-- [ ] <Specific, measurable criterion 1>
-- [ ] <Specific, measurable criterion 2>
+- [ ] `mindspec complete` succeeds when bead is already closed, performing merge+cleanup
+- [ ] `mindspec complete` prints a warning noting the bead was already closed
+- [ ] `mindspec next` warns when predecessor bead was closed without merge
+- [ ] `make build && go test ./... -short` passes
+- [ ] Existing complete tests still pass
 
 ## Validation Proofs
 
-- <command 1>: <Expected outcome>
-
-## Open Questions
-
-- [ ] <Question that must be resolved before planning>
+- Unit test: close bead via bd, then run `mindspec complete` — should succeed
+- Unit test: closed bead with no merge commit → `mindspec next` warns
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-04
+- **Notes**: Approved via mindspec approve spec
