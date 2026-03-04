@@ -1,59 +1,70 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-04T00:17:18Z"
+approved_by: user
+status: Approved
 ---
-# Spec 067-lifecycle-test-epic-leak: Lifecycle Test Epic Leak
+# Spec 067: Fix lifecycle tests leaking epics into shared beads DB
 
 ## Goal
 
-<Brief description of what this spec achieves and the target user outcome>
+Prevent `internal/lifecycle/scenario_test.go` from creating real beads epics/tasks in the shared `.beads` database on every test run.
 
 ## Background
 
-<Context, motivation, and any relevant prior decisions>
+`scenario_test.go` calls `approve.ApproveSpec()` and `approve.ApprovePlan()` directly. These functions invoke real `bd create` commands via `specRunBDFn` and `planRunBDFn`, creating lifecycle epics and implementation beads in the shared `.beads` database.
+
+The existing `stubNoEpics()` only stubs `phase.runBDFn` (the collision check), but doesn't stub the `approve` package's own BD functions — because they're unexported package-level vars in a different package.
+
+Each test run creates ~5 stale epics (001-test-feature, 002-main-feature, 003-hotfix-bug, 005-artifact-check, 006-plan-artifact). Over time this accumulated 49 orphaned epics that polluted `mindspec next` output.
 
 ## Impacted Domains
 
-- <domain-1>: <how it is impacted>
+- approve: needs exported test setters for `specRunBDFn` and `planRunBDFn`
+- lifecycle: `scenario_test.go` needs to call the new setters
 
 ## ADR Touchpoints
 
-- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+None — this is a test isolation bug fix.
 
 ## Requirements
 
-1. <Requirement 1>
-2. <Requirement 2>
+1. `internal/approve` MUST export setter functions for `specRunBDFn` and `planRunBDFn` (and `planRunBDCombinedFn` if used by tests)
+2. `internal/lifecycle/scenario_test.go` MUST stub all BD functions before calling `ApproveSpec`/`ApprovePlan`
+3. Running `make test` MUST NOT create any issues in the shared `.beads` database
 
 ## Scope
 
 ### In Scope
-- <File or component 1>
+- `internal/approve/spec.go` — add `SetSpecRunBDForTest()`
+- `internal/approve/plan.go` — add `SetPlanRunBDForTest()`
+- `internal/lifecycle/scenario_test.go` — call the new setters
 
 ### Out of Scope
-- <Explicitly excluded items>
+- Other test files that already stub BD functions internally (e.g., `approve/plan_test.go`)
+- LLM harness tests (they use sandboxed beads)
 
 ## Non-Goals
 
-- <What this spec intentionally does not address>
+- Replacing the package-var stubbing pattern with a different DI approach
 
 ## Acceptance Criteria
 
-- [ ] <Specific, measurable criterion 1>
-- [ ] <Specific, measurable criterion 2>
+- [ ] `make test` passes without creating any new issues in `.beads`
+- [ ] `bd list --status=open` count does not increase after `go test ./internal/lifecycle/`
+- [ ] Exported setter functions follow the `SetXxxForTest` convention with cleanup restore
 
 ## Validation Proofs
 
-- <command 1>: <Expected outcome>
+- `bd list --status=open --json | python3 -c "import json,sys; print(len(json.load(sys.stdin)))"` before and after `go test ./internal/lifecycle/ -count=3`: count stays the same
+- `make test`: all tests pass
 
 ## Open Questions
 
-- [ ] <Question that must be resolved before planning>
+None.
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-04
+- **Notes**: Approved via mindspec approve spec
