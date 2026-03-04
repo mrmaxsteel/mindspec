@@ -324,6 +324,36 @@ func TestSkipNext_CommitOutsideLifecycleTurnViolation(t *testing.T) {
 	}
 }
 
+func TestSkipNext_WorktreeCWDNoViolation(t *testing.T) {
+	// Agent in bead worktree (CWD contains .worktrees/) — Phase is empty
+	// (shims do not record phase), but CWD-based inference should exempt.
+	events := []ActionEvent{
+		{ActionType: "command", Command: "git",
+			CWD:      "/tmp/sandbox/.worktrees/worktree-bead-abc",
+			ArgsList: []string{"commit", "-m", "impl: add greeting feature"}},
+		{ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"complete", "done"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for commit in worktree CWD, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipNext_InfrastructureCommitNoViolation(t *testing.T) {
+	// A beads backup commit (bd: backup) should not trigger skip_next.
+	events := []ActionEvent{
+		{ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "bd: backup 2026-03-04 18:54 -- .beads/backup"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for bd backup commit, got %d: %v", len(results), results)
+	}
+}
+
 func TestSkipComplete_NoViolation(t *testing.T) {
 	events := []ActionEvent{
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},

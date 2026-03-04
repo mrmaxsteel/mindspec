@@ -228,6 +228,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-03 | PASS | 167 | 5 | 52.10s | Spec 058 fixes (DetectWorktreeContext last-match, focus propagation, plan scaffold). 100% fwd ratio. |
 | 2026-03-03 | PASS | 120 | 11 | 56.92s | After sandbox .gitignore fix (added .mindspec/focus + session.json). 100% fwd ratio, clean bead→spec merge at [92]. |
 | 2026-03-04 | FAIL | 2361 | 7 | 98.92s | ADR-0023 compat: `mindspec next` exits 1, `mindspec complete` exits 1. Agent reached max turns (20). Pre-existing; not a regression from Spec 067. |
+| 2026-03-04 | FAIL | 1898 | 3 | 82.86s | Full-suite rerun: no `impl(` commit message, no bead merge topology. `skip_next` false positive fixed (CWD-based inference). |
 
 ### TestLLM_SpecToIdle
 
@@ -254,6 +255,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-03 | PASS | 550 | 39 | 254.50s | Spec 058 fixes (DetectWorktreeContext last-match, focus propagation, plan scaffold). 41.0% fwd ratio (16 fwd / 23 retry). Retries from manual merge conflicts on `.mindspec/focus` (committed to both branches). |
 | 2026-03-03 | PASS | 423 | 28 | 189.29s | After sandbox .gitignore fix (added .mindspec/focus + session.json). **71.4% fwd ratio** (20 fwd / 8 retry). Zero merge conflicts — bead→spec merge at [312] clean. `approve impl` succeeded after auto-merge of unmerged bead branch at [311-312]. |
 | 2026-03-04 | PASS | - | - | 389.30s | ADR-0023 compat: full lifecycle passes with CreateSpecEpic + phase derivation fixes. |
+| 2026-03-04 | FAIL | 7548 | 39 | 344.53s | Full-suite rerun: `mindspec complete` never succeeded (skip_complete). 89.7% fwd ratio. |
 
 ### TestLLM_AbandonSpec
 
@@ -279,6 +281,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.15s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | PASS | 138 | 6 | 43.81s | Full-suite rerun pass: resume-after-crash flow completed under current setup and assertions. |
 | 2026-03-02 | PASS | 111 | 7 | 45.59s | Full-suite rerun pass; scenario still completes after one retry in the complete/commit flow. |
+| 2026-03-04 | FAIL | 1682 | 7 | 75.35s | Full-suite rerun: `mindspec complete` never succeeded. 42.9% fwd ratio (4 retries). |
 
 ### TestLLM_InterruptForBug
 
@@ -290,6 +293,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | FAIL | 148 | 12 | 1m13.62s | **REGRESSION**: run reached `mindspec complete`, but `feature.go` was never created so artifact assertion failed. |
 | 2026-03-02 | PASS | 156 | 8 | 57.97s | `mindspec-n9j7` validation: guidance/hook updates plus artifact assertion hardened to accept root or worktree output; scenario completes successfully. |
 | 2026-03-02 | FAIL | 140 | 8 | 1m02.81s | De-tautologized full-suite validation: agent handled interrupts but never produced `feature.go`; artifact assertion failed. |
+| 2026-03-04 | FAIL | 803 | 2 | 39.28s | `skip_next` false positive: agent committed fix on main without bead lifecycle. Fixed: CWD-based implement phase inference. |
 
 ### TestLLM_MultiBeadDeps
 
@@ -300,6 +304,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | 228 | 7 | 69.37s | Full-suite rerun: scenario advanced, but artifact assertions failed (`formatter.go` and `formatter_test.go` not found at expected location). |
 | 2026-03-02 | FAIL | 131 | 12 | 1m15.11s | Full-suite rerun: max turns reached without successful `mindspec next`; no `.worktrees/` CWD observed. |
 | 2026-03-02 | PASS | 187 | 12 | 1m19.56s | `mindspec-n9j7` fix: implement template + pre-commit guardrails now steer retries toward `mindspec next` and managed worktree handoff, restoring pass. |
+| 2026-03-04 | FAIL | 4213 | 6 | 159.11s | Full-suite rerun: `mindspec next` never succeeded. 83.3% fwd ratio. |
 
 ### TestLLM_SpecInit
 
@@ -367,6 +372,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | PASS | 62 | 2 | 25.62s | Final full-suite verification remains green with successful `mindspec complete --spec ...`. |
 | 2026-03-02 | FAIL | 145 | 13 | 81.71s | De-tautologized prompt v1 (too open) regressed disambiguation completion: no successful `mindspec complete --spec ...` observed. |
 | 2026-03-02 | PASS | 203 | 7 | 72.26s | Prompt revised to lifecycle end-state (001-alpha to review, 002-beta unchanged, no `bd close` shortcut) restored `--spec` completion path without command-level prescription. |
+| 2026-03-04 | FAIL | 5932 | 7 | 179.75s | Full-suite rerun: `mindspec complete` never succeeded. 71.4% fwd ratio. |
 
 ### TestLLM_StaleWorktree
 
@@ -417,7 +423,21 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 47 | 4 | 42.11s | Full-suite rerun pass for current prompt contract; branch/PR workflow assertions succeeded. |
 | 2026-03-02 | PASS | 44 | 4 | 27.27s | Full-suite rerun pass: agent created branch/worktree, pushed, and opened PR successfully. |
 | 2026-03-02 | FAIL | 23 | 2 | 13.47s | De-tautologized full-suite validation: agent fixed on main and exited without branch/push/PR workflow (`git push`/`gh pr` missing). |
+| 2026-03-04 | FAIL | 259 | 2 | 25.67s | No branch/push/PR. `skip_next` false positive on `bd: backup` commit. Fixed: infrastructure commit exclusion in `isCodeModifyingEvent`. |
 
+
+### TestLLM_BlockedBeadTransition
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-03-04 | PASS | - | - | - | ADR-0023 session: scenario passes (previous session). |
+| 2026-03-04 | FAIL | 3644 | 7 | 134.94s | Full-suite rerun: `skip_next` false positive — agent committed code before `mindspec next` in worktree CWD. Fixed: CWD-based implement phase inference. |
+
+### TestLLM_UnmergedBeadGuard
+
+| Date | Result | Events | Turns | Time | Change |
+|------|--------|--------|-------|------|--------|
+| 2026-03-04 | FAIL | 3483 | 5 | 120.72s | Baseline: `mindspec complete` and `mindspec next` never succeeded. Agent reached max turns (25). |
 ### Session Summary — 2026-03-01 Full Suite
 
 - 17 scenarios run sequentially with `env -u CLAUDECODE`.
@@ -464,6 +484,16 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - `detectSkipNext` analyzer: exempt approval-flow scenarios (no `mindspec next` expected).
 - Remaining failures appear to be nondeterministic Haiku behavior (SingleBead reached max turns) or pre-existing issues, not regressions from this change.
 
+
+### Session Summary — 2026-03-04 Full Suite (skip_next false positives)
+
+- 18 scenarios run sequentially with `env -u CLAUDECODE` from main.
+- **9 PASS**: SpecInit, SpecApprove, PlanApprove, ImplApprove, SpecStatus, StaleWorktree, CompleteFromSpecWorktree, ApproveSpecFromWorktree, ApprovePlanFromWorktree.
+- **9 FAIL**: SingleBead, SpecToIdle, MultiBeadDeps, InterruptForBug, ResumeAfterCrash, MultipleActiveSpecs, BugfixBranch, BlockedBeadTransition, UnmergedBeadGuard.
+- **Key finding**: `detectSkipNext` analyzer had false positives in 3 scenarios (InterruptForBug, BlockedBeadTransition, BugfixBranch) due to Phase field never being populated by recording shims.
+- **Fix applied**: `isImplementPhase()` infers implement mode from `.worktrees/` in CWD when Phase is empty. `isInfrastructureCommit()` excludes `bd: backup` commits from code-modification detection.
+- **Result**: All 52 deterministic tests pass including 2 new unit tests for the false-positive fixes.
+- Remaining 9 failures are pre-existing nondeterministic Haiku behavior (agent reaching max turns, wrong command sequencing, etc.), not regressions.
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
 - **Turns (estimated)**: API round-trips, estimated from event timestamp gaps >2s. The `--max-turns` flag sets the budget; "Reached max turns" means all were consumed

@@ -434,9 +434,19 @@ func isCodeModifyingEvent(e ActionEvent) bool {
 	}
 	if e.Command == "git" {
 		args := eventArgsList(e)
-		if containsAll(args, "commit") {
+		if containsAll(args, "commit") && !isInfrastructureCommit(args) {
 			return true
 		}
+	}
+	return false
+}
+
+// isInfrastructureCommit returns true if a git commit args indicate it is
+// a beads backup, not user code.
+func isInfrastructureCommit(args []string) bool {
+	msg := strings.Join(args, " ")
+	if strings.Contains(msg, "bd: backup") {
+		return true
 	}
 	return false
 }
