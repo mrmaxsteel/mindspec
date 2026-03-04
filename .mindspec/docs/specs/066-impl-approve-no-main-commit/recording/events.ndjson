@@ -1,0 +1,5 @@
+{"ts":"2026-03-04T00:02:31.869118Z","event":"lifecycle.start","data":{"phase":"spec","spec_id":"066-impl-approve-no-main-commit"}}
+{"ts":"2026-03-04T00:04:33.687696Z","event":"lifecycle.phase","data":{"from":"spec","spec_id":"066-impl-approve-no-main-commit","to":"plan"}}
+{"ts":"2026-03-04T00:05:15.932901Z","event":"lifecycle.phase","data":{"from":"plan","spec_id":"066-impl-approve-no-main-commit","to":"plan-approved"}}
+{"ts":"2026-03-04T00:05:44.329438Z","event":"lifecycle.bead.start","data":{"bead_id":"mindspec-scal.1","spec_id":"066-impl-approve-no-main-commit"}}
+{"ts":"2026-03-04T00:07:18.989723Z","event":"lifecycle.bead.complete","data":{"bead_id":"mindspec-scal.1","spec_id":"066-impl-approve-no-main-commit"}}
