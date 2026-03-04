@@ -59,32 +59,24 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 	}
 	result := &ImplResult{SpecID: specID}
 
-	// Derive context from beads (ADR-0023).
-	localRoot := root
-	if lr, err := findLocalRootFn(); err == nil {
-		localRoot = lr
+	// Find the epic for this spec directly (ADR-0023).
+	// We use FindEpicBySpecID instead of ResolveContextFromDir because the
+	// epic may have been auto-closed by beads (molecule completion), and
+	// context resolution might not surface it correctly in all cases.
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil {
+		return nil, fmt.Errorf("no epic found for spec %s: %w", specID, err)
 	}
 
-	ctx, ctxErr := phase.ResolveContextFromDir(root, localRoot)
-	if ctxErr != nil {
-		return nil, fmt.Errorf("resolving context: %w", ctxErr)
+	// Verify state is review mode: all children closed, pending final merge.
+	// Use DerivePhaseForImplApprove which treats closed epics without the
+	// done marker as review (beads auto-closed them on molecule completion).
+	epicPhase, err := phase.DerivePhase(epicID)
+	if err != nil {
+		return nil, fmt.Errorf("deriving phase for spec %s: %w", specID, err)
 	}
-
-	// Verify state is review mode for this spec
-	if ctx.Phase != state.ModeReview {
-		return nil, fmt.Errorf("expected review mode, got %q", ctx.Phase)
-	}
-	if ctx.SpecID != "" && ctx.SpecID != specID {
-		return nil, fmt.Errorf("active spec is %q, not %q", ctx.SpecID, specID)
-	}
-
-	// Close lifecycle epic via beads (ADR-0023).
-	epicID := ctx.EpicID
-	if epicID == "" {
-		// Fallback: query for epic by spec ID
-		if eid, err := phase.FindEpicBySpecID(specID); err == nil {
-			epicID = eid
-		}
+	if epicPhase != state.ModeReview && epicPhase != state.ModeDone {
+		return nil, fmt.Errorf("expected review mode, got %q", epicPhase)
 	}
 	if epicID != "" {
 		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
@@ -92,20 +84,26 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
 			}
 		}
+		// Mark epic as explicitly done so phase derivation distinguishes
+		// impl-approved closure from beads auto-close (molecule completion).
+		if _, err := implRunBDCombinedFn("update", epicID, "--metadata", `{"mindspec_done":true}`); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not set done marker on epic %s: %v", epicID, err))
+		}
 	}
 
 	// Derive spec branch from convention.
 	specBranch := state.SpecBranch(specID)
+	specBranchExists := branchExistsFn(specBranch)
 
 	// Preflight: verify spec branch has actual implementation content.
-	if specBranch != "" {
+	if specBranchExists {
 		if err := verifyImplContent(root, specBranch, specID); err != nil {
 			return nil, fmt.Errorf("preflight check failed: %w", err)
 		}
 	}
 
 	// Push spec branch to remote if available, then clean up locally.
-	if specBranch != "" {
+	if specBranchExists {
 		result.SpecBranch = specBranch
 
 		// Gather pre-push stats (best-effort).
@@ -141,13 +139,30 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 				return fmt.Errorf("cleaning bead artifacts: %w", err)
 			}
 
-			// Clean up spec worktree and branch after successful push/cleanup.
+			// Clean up spec worktree before merge (worktree locks the branch).
+			// Tolerate already-removed worktrees (agent may have cleaned up manually).
 			specWtName := "worktree-spec-" + specID
 			if err := worktreeRemoveFn(specWtName); err != nil {
-				return fmt.Errorf("removing spec worktree %s: %w", specWtName, err)
+				if !isAlreadyRemovedErr(err) {
+					return fmt.Errorf("removing spec worktree %s: %w", specWtName, err)
+				}
 			}
+
+			// Merge spec branch into main for local (no-remote) workflows.
+			// For remote workflows, the merge happens via PR.
+			if !result.Pushed {
+				if err := mergeBranchFn(root, specBranch, "main"); err != nil {
+					// Non-fatal: branch may have already been merged or may have no commits
+					result.Warnings = append(result.Warnings, fmt.Sprintf("could not merge %s into main: %v", specBranch, err))
+				}
+			}
+
+			// Delete spec branch after merge.
+			// Tolerate already-removed branches.
 			if err := deleteBranchFn(specBranch); err != nil {
-				return fmt.Errorf("deleting spec branch %s: %w", specBranch, err)
+				if !isAlreadyRemovedErr(err) {
+					return fmt.Errorf("deleting spec branch %s: %w", specBranch, err)
+				}
 			}
 			return nil
 		}); err != nil {
@@ -340,6 +355,18 @@ func readPlanBeadIDs(planPath string) ([]string, error) {
 		return nil, fmt.Errorf("no bead_ids in plan frontmatter")
 	}
 	return fm.BeadIDs, nil
+}
+
+func isAlreadyRemovedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "no such") ||
+		strings.Contains(msg, "not a valid") ||
+		strings.Contains(msg, "is not a worktree")
 }
 
 func isAlreadyClosedErr(err error) bool {

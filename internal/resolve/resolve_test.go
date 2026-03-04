@@ -12,6 +12,11 @@ import (
 // stubActiveEpics stubs phase.runBDFn to return the given epics.
 func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[string][]phase.ChildInfo) {
 	t.Helper()
+	// Build index by ID for bd show lookups (used by hasDoneMarker)
+	epicByID := map[string]phase.EpicInfo{}
+	for _, e := range epics {
+		epicByID[e.ID] = e
+	}
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
 			return json.Marshal(epics)
@@ -20,6 +25,13 @@ func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[st
 			epicID := args[2]
 			if children, ok := childrenByEpic[epicID]; ok {
 				return json.Marshal(children)
+			}
+			return []byte("[]"), nil
+		}
+		if len(args) >= 2 && args[0] == "show" {
+			epicID := args[1]
+			if e, ok := epicByID[epicID]; ok {
+				return json.Marshal([]phase.EpicInfo{e})
 			}
 			return []byte("[]"), nil
 		}
@@ -38,7 +50,7 @@ func TestActiveSpecs_DeriveFromBeads(t *testing.T) {
 		{ID: "epic-b", Title: "[SPEC 039-beta] Beta", Status: "open", IssueType: "epic",
 			Metadata: map[string]interface{}{"spec_num": float64(39), "spec_title": "beta"}},
 		{ID: "epic-c", Title: "[SPEC 040-gamma] Gamma", Status: "closed", IssueType: "epic",
-			Metadata: map[string]interface{}{"spec_num": float64(40), "spec_title": "gamma"}},
+			Metadata: map[string]interface{}{"spec_num": float64(40), "spec_title": "gamma", "mindspec_done": true}},
 	}
 	childrenByEpic := map[string][]phase.ChildInfo{
 		"epic-a": {{ID: "bead-1", Status: "in_progress", IssueType: "task"}},

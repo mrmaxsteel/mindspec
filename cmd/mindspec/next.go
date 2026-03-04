@@ -54,7 +54,32 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		kind, _, _ := workspace.DetectWorktreeContext(cwd)
 		switch kind {
 		case workspace.WorktreeMain:
-			return fmt.Errorf("mindspec next must run from a spec worktree.\nUse `mindspec spec create <slug>` or cd into an existing spec worktree")
+			// Auto-resolve: if exactly one active spec has a worktree, cd there.
+			specs, discErr := phase.DiscoverActiveSpecs()
+			if discErr == nil && len(specs) == 1 {
+				specWt := state.SpecWorktreePath(root, specs[0].SpecID)
+				if fi, statErr := os.Stat(specWt); statErr == nil && fi.IsDir() {
+					fmt.Fprintf(os.Stderr, "Auto-resolving to spec worktree: %s\n", specWt)
+					if err := os.Chdir(specWt); err == nil {
+						cwd = specWt
+						break
+					}
+				}
+			}
+			// Build helpful message listing available spec worktrees
+			msg := "mindspec next must run from a spec worktree."
+			if discErr == nil {
+				for _, s := range specs {
+					wt := state.SpecWorktreePath(root, s.SpecID)
+					if info, statErr := os.Stat(wt); statErr == nil && info.IsDir() {
+						msg += fmt.Sprintf("\n  cd %s", wt)
+					}
+				}
+			}
+			if msg == "mindspec next must run from a spec worktree." {
+				msg += "\nUse `mindspec spec create <slug>` or cd into an existing spec worktree"
+			}
+			return fmt.Errorf("%s", msg)
 		case workspace.WorktreeBead:
 			return fmt.Errorf("you're already in a bead worktree — run `mindspec complete \"msg\"` when done")
 		}

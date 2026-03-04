@@ -573,3 +573,74 @@
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T23:50:24Z","event_type":"closed","id":573,"issue_id":"mindspec-sx1h","new_value":"all steps complete","old_value":""}
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T23:51:14Z","event_type":"closed","id":574,"issue_id":"mindspec-sx1h","new_value":"Closed","old_value":""}
 {"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-03T23:51:25Z","event_type":"closed","id":575,"issue_id":"mindspec-sx1h","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:04:33Z","event_type":"created","id":576,"issue_id":"mindspec-scal","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:05:15Z","event_type":"created","id":577,"issue_id":"mindspec-scal.1","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:05:43Z","event_type":"status_changed","id":578,"issue_id":"mindspec-scal.1","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"mindspec-scal.1\",\"title\":\"[066-impl-approve-no-main-commit] Bead 1: Fix impl-approve skill and verify auto-commit coverage\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-04T00:05:16Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-04T00:05:16Z\"}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:06:33Z","event_type":"created","id":579,"issue_id":"mindspec-9lpq","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:06:33Z","event_type":"created","id":580,"issue_id":"mindspec-0eob","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:06:34Z","event_type":"created","id":581,"issue_id":"mindspec-u14c","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:06:34Z","event_type":"created","id":582,"issue_id":"mindspec-al3q","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:06:35Z","event_type":"created","id":583,"issue_id":"mindspec-dgcl","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:07:18Z","event_type":"closed","id":584,"issue_id":"mindspec-scal.1","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:07:18Z","event_type":"closed","id":585,"issue_id":"mindspec-scal","new_value":"all steps complete","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:07:29Z","event_type":"closed","id":586,"issue_id":"mindspec-scal","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:07:40Z","event_type":"closed","id":587,"issue_id":"mindspec-scal","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:07:58Z","event_type":"closed","id":588,"issue_id":"mindspec-scal","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":589,"issue_id":"mindspec-al3q","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":590,"issue_id":"mindspec-dgcl","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":591,"issue_id":"mindspec-0eob","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":592,"issue_id":"mindspec-u14c","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":593,"issue_id":"mindspec-9lpq","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":594,"issue_id":"mindspec-qdbh","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":595,"issue_id":"mindspec-rgbk","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":596,"issue_id":"mindspec-prjh","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":597,"issue_id":"mindspec-sjdv","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":598,"issue_id":"mindspec-ox95","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":599,"issue_id":"mindspec-fvih","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":600,"issue_id":"mindspec-w5h7","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":601,"issue_id":"mindspec-hm0u","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":602,"issue_id":"mindspec-optj","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":603,"issue_id":"mindspec-wb33","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:43Z","event_type":"closed","id":604,"issue_id":"mindspec-2gwt","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":605,"issue_id":"mindspec-3k1u","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":606,"issue_id":"mindspec-fy08","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":607,"issue_id":"mindspec-8dss","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":608,"issue_id":"mindspec-o23d","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":609,"issue_id":"mindspec-oteo","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":610,"issue_id":"mindspec-s3zi","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":611,"issue_id":"mindspec-thbu","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":612,"issue_id":"mindspec-y9e7","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":613,"issue_id":"mindspec-87my","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":614,"issue_id":"mindspec-e124","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":615,"issue_id":"mindspec-yixi","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":616,"issue_id":"mindspec-iutw","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":617,"issue_id":"mindspec-six4","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":618,"issue_id":"mindspec-w2i1","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":619,"issue_id":"mindspec-a812","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":620,"issue_id":"mindspec-sb7a","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":621,"issue_id":"mindspec-6uiu","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":622,"issue_id":"mindspec-r23o","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":623,"issue_id":"mindspec-yehb","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":624,"issue_id":"mindspec-ny34","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":625,"issue_id":"mindspec-ugqx","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":626,"issue_id":"mindspec-2fgc","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":627,"issue_id":"mindspec-c9wa","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":628,"issue_id":"mindspec-3ize","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":629,"issue_id":"mindspec-hmn2","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":630,"issue_id":"mindspec-ga32","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":631,"issue_id":"mindspec-mq0a","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":632,"issue_id":"mindspec-sjl1","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":633,"issue_id":"mindspec-tfl4","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":634,"issue_id":"mindspec-9rwb","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":635,"issue_id":"mindspec-pmo6","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":636,"issue_id":"mindspec-5rda","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:11:44Z","event_type":"closed","id":637,"issue_id":"mindspec-90e9","new_value":"stale test artifacts","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:17:19Z","event_type":"created","id":638,"issue_id":"mindspec-7yzq","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:17:54Z","event_type":"created","id":639,"issue_id":"mindspec-7yzq.1","new_value":"","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:18:14Z","event_type":"status_changed","id":640,"issue_id":"mindspec-7yzq.1","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"mindspec-7yzq.1\",\"title\":\"[067-lifecycle-test-epic-leak] Bead 1: Export test setters and stub BD functions in lifecycle tests\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-04T00:17:54Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-04T00:17:54Z\"}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:20:21Z","event_type":"closed","id":641,"issue_id":"mindspec-7yzq.1","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:20:21Z","event_type":"closed","id":642,"issue_id":"mindspec-7yzq","new_value":"all steps complete","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:21:19Z","event_type":"reopened","id":643,"issue_id":"mindspec-7yzq","new_value":"{\"status\":\"open\"}","old_value":"{\"id\":\"mindspec-7yzq\",\"title\":\"[SPEC 067-lifecycle-test-epic-leak] Lifecycle Test Epic Leak\",\"status\":\"closed\",\"priority\":2,\"issue_type\":\"epic\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-04T00:17:19Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-04T00:20:22Z\",\"closed_at\":\"2026-03-04T00:20:22Z\",\"close_reason\":\"all steps complete\",\"metadata\":{\"spec_num\":67,\"spec_title\":\"lifecycle-test-epic-leak\"}}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:21:23Z","event_type":"closed","id":644,"issue_id":"mindspec-7yzq","new_value":"Closed","old_value":""}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:21:51Z","event_type":"reopened","id":645,"issue_id":"mindspec-7yzq","new_value":"{\"status\":\"open\"}","old_value":"{\"id\":\"mindspec-7yzq\",\"title\":\"[SPEC 067-lifecycle-test-epic-leak] Lifecycle Test Epic Leak\",\"status\":\"closed\",\"priority\":2,\"issue_type\":\"epic\",\"owner\":\"richardmaxsteel@gmail.com\",\"created_at\":\"2026-03-04T00:17:19Z\",\"created_by\":\"mrmaxsteel\",\"updated_at\":\"2026-03-04T00:21:24Z\",\"closed_at\":\"2026-03-04T00:21:24Z\",\"close_reason\":\"Closed\",\"metadata\":{\"spec_num\":67,\"spec_title\":\"lifecycle-test-epic-leak\"}}"}
+{"actor":"mrmaxsteel","comment":null,"created_at":"2026-03-04T00:21:56Z","event_type":"closed","id":646,"issue_id":"mindspec-7yzq","new_value":"Closed","old_value":""}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/phase"
 )
 
@@ -42,14 +43,12 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 
 	var closed []string
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
-		if len(args) == 2 && args[0] == "close" {
+		if len(args) >= 2 && args[0] == "close" {
 			closed = append(closed, args[1])
-			return []byte("ok"), nil
 		}
-		return nil, fmt.Errorf("unexpected args: %v", args)
+		return []byte("ok"), nil
 	}
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
-	branchExistsFn = func(name string) bool { return false }
 
 	result, err := ApproveImpl(tmp, "010-test")
 	if err != nil {
@@ -121,8 +120,8 @@ func TestApproveImpl_WrongSpec(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong spec")
 	}
-	if !strings.Contains(err.Error(), "active spec") {
-		t.Errorf("error should mention active spec mismatch: %v", err)
+	if !strings.Contains(err.Error(), "no epic found") {
+		t.Errorf("error should mention no epic found: %v", err)
 	}
 }
 
@@ -145,7 +144,6 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 		return []byte("ok"), nil
 	}
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
-	branchExistsFn = func(name string) bool { return false }
 
 	result, err := ApproveImpl(tmp, "010-test")
 	if err != nil {
@@ -154,7 +152,13 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 	if len(result.Warnings) == 0 {
 		t.Fatal("expected warning for failed epic close")
 	}
-	if !strings.Contains(strings.Join(result.Warnings, "\n"), "epic-parent") {
+	foundEpicWarning := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "epic-parent") {
+			foundEpicWarning = true
+		}
+	}
+	if !foundEpicWarning {
 		t.Errorf("expected warning to mention epic: %v", result.Warnings)
 	}
 }
@@ -261,7 +265,6 @@ func TestApproveImpl_CleanupRunsFromRoot(t *testing.T) {
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
-	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
 
 	var worktreeRemoved bool
@@ -363,12 +366,14 @@ func saveAndRestore(t *testing.T) {
 	origPushBranch := pushBranchFn
 	origFindLocalRoot := findLocalRootFn
 	origCommitAll := commitAllFn
+	origWorktreeList := worktreeListFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
 		mergeBranchFn = origMergeBranch
 		deleteBranchFn = origDeleteBranch
 		worktreeRemoveFn = origWorktreeRemove
+		worktreeListFn = origWorktreeList
 		diffStatFn = origDiffStat
 		commitCountFn = origCommitCount
 		isAncestorFn = origIsAncestor
@@ -392,10 +397,11 @@ func saveAndRestore(t *testing.T) {
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
-	branchExistsFn = func(name string) bool { return false }
+	branchExistsFn = func(name string) bool { return true }
 	hasRemoteFn = func() bool { return false }
 	pushBranchFn = func(branch string) error { return nil }
 	commitAllFn = func(workdir, message string) error { return nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 }
 
 func TestVerifyImplContent_NoCommits(t *testing.T) {
@@ -469,9 +475,8 @@ func TestVerifyImplContent_OpenBeads(t *testing.T) {
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 5, nil }
-	branchExistsFn = func(name string) bool { return false }
 
-	_, err := ApproveImpl(tmp, "010-test")
+	err := verifyImplContent(tmp, "spec/010-test", "010-test")
 	if err == nil {
 		t.Fatal("expected error when beads are still open")
 	}
@@ -504,11 +509,8 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 		merges = append(merges, mergeCall{source, target})
 		return nil
 	}
-	deleteBranchFn = func(name string) error { return nil }
-	worktreeRemoveFn = func(name string) error { return nil }
-	diffStatFn = func(workdir, base, head string) (string, error) { return "1 file changed", nil }
 
-	result, err := ApproveImpl(tmp, "010-test")
+	err := verifyImplContent(tmp, "spec/010-test", "010-test")
 	if err != nil {
 		t.Fatalf("expected auto-merge to succeed, got error: %v", err)
 	}
@@ -522,9 +524,6 @@ func TestVerifyImplContent_BeadBranchAutoMerged(t *testing.T) {
 	}
 	if merges[0].target != "spec/010-test" {
 		t.Errorf("expected first merge target spec/010-test, got %q", merges[0].target)
-	}
-	if result.SpecBranch != "spec/010-test" {
-		t.Errorf("SpecBranch: got %q, want %q", result.SpecBranch, "spec/010-test")
 	}
 }
 
@@ -548,7 +547,7 @@ func TestVerifyImplContent_BeadBranchMergeFails(t *testing.T) {
 		return fmt.Errorf("merge conflict")
 	}
 
-	_, err := ApproveImpl(tmp, "010-test")
+	err := verifyImplContent(tmp, "spec/010-test", "010-test")
 	if err == nil {
 		t.Fatal("expected error when auto-merge fails")
 	}
@@ -570,7 +569,6 @@ func TestApproveImpl_AutoCommitsSpecWorktree(t *testing.T) {
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
-	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }
@@ -616,7 +614,6 @@ func TestApproveImpl_AutoCommitFailureWarns(t *testing.T) {
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
 	commitCountFn = func(workdir, base, head string) (int, error) { return 3, nil }
-	branchExistsFn = func(name string) bool { return false }
 	diffStatFn = func(workdir, base, head string) (string, error) { return "", nil }
 	deleteBranchFn = func(name string) error { return nil }
 	worktreeRemoveFn = func(name string) error { return nil }

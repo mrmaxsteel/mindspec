@@ -29,19 +29,19 @@ idle ── spec ── plan ──── >>> implement ── review ── idl
 
 Execute the active bead in an isolated worktree. Stay within scope.
 
-## Worktree Bootstrap
-
-`mindspec next` is the only supported way to enter/manage bead worktrees.
-
+## Worktree Bootstrap — MANDATORY
 {{- if .ActiveWorktree}}
+
 **Active Worktree**: `{{.ActiveWorktree}}`
+
+Your bead worktree is ready. `cd {{.ActiveWorktree}}` and work there. All code changes go in the worktree, not the main repo.
 {{- else}}
-No active worktree is recorded for this bead. Run `mindspec next` before writing code.
+
+**No active worktree.** Run `mindspec next` NOW — before any other action. Do NOT create files, edit code, or run `git commit` until `mindspec next` has succeeded.
 {{- end}}
 
 Do NOT create manual workflow branches/worktrees in implement mode.
-If `mindspec complete` reports another ready bead, run `mindspec next` immediately before further implementation.
-If no active worktree is recorded, run `mindspec next` before any code edits or commits.
+After `mindspec complete` succeeds, run `mindspec next` immediately to claim the next bead — do NOT write code for the next bead without it.
 If the user asks for an interrupt fix (urgent bug + continue feature), do both:
 1. Apply and commit the urgent fix.
 2. Resume bead scope and produce the requested feature artifact(s).
@@ -63,6 +63,7 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Completing a bead without proof and doc-sync
 - Making changes outside the assigned worktree
 - Creating worktrees via raw tooling (`bd worktree create`, `git worktree add`) instead of `mindspec next`
+- Manually closing the lifecycle epic — `mindspec impl approve` handles epic closure automatically
 
 ## Obligations
 
@@ -84,8 +85,10 @@ When the bead is done:
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
 3. Run `mindspec complete "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
-4. If more beads are ready, run `mindspec next` before implementing the next bead
+4. **If more beads are ready, run `mindspec next` IMMEDIATELY** — do NOT write any code for the next bead until `mindspec next` has created its worktree
 
 ## Next Action
 
-Implement the bead's scope, then run `mindspec complete "describe what you did"` to finish.
+1. Run `mindspec next` to enter the bead worktree (if not already in one)
+2. Implement the bead's scope
+3. Run `mindspec complete "describe what you did"` to finish

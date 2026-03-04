@@ -102,7 +102,7 @@ func ScenarioSingleBead() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create real beads: epic + child task
-			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID = sandbox.CreateSpecEpic(specID)
 			beadID = sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -189,7 +189,7 @@ func ScenarioMultiBeadDeps() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create real beads: epic + 3 child tasks
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			bead1 := sandbox.CreateBead("["+specID+"] Core types", "task", epicID)
 			sandbox.CreateBead("["+specID+"] Formatter", "task", epicID)
 			sandbox.CreateBead("["+specID+"] Tests", "task", epicID)
@@ -232,7 +232,7 @@ Create formatter_test.go with tests.
 1. Create types.go with a Message struct (fields: From, To, Body string)
 2. Create formatter.go with FormatMessage(m Message) string
 3. Create formatter_test.go that tests FormatMessage
-Run 'mindspec complete' after each bead.`,
+Finish each bead through the MindSpec lifecycle before starting the next one.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Workflow adherence: the agent must progress through at least one
 			// multi-bead handoff using mindspec next from dependency-ordered work.
@@ -252,7 +252,7 @@ func ScenarioInterruptForBug() Scenario {
 			specID := "003-feature"
 			specBranch := "spec/" + specID
 
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -295,7 +295,7 @@ func main() {
 		Prompt: `You are implementing a feature bead. While working, you notice
 main.go has a critical bug — the main function doesn't print anything.
 Fix main.go to add fmt.Println("hello") and commit the fix, then continue your feature work
-by creating feature.go with a Feature() function. Run 'mindspec complete' when done.`,
+by creating feature.go with a Feature() function. Finish the bead when done.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			featureObserved := sandbox.FileExists("feature.go") || fileExistsInWorktrees(sandbox.Root, "feature.go")
 			if !featureObserved {
@@ -330,7 +330,7 @@ func ScenarioResumeAfterCrash() Scenario {
 			specID := "004-resume"
 			specBranch := "spec/" + specID
 
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Process feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -376,7 +376,7 @@ func Process() {
 		},
 		Prompt: `You are resuming after a session crash. The project is in implement mode with
 a bead in progress. There's a partial.go file with an incomplete Process function.
-Complete the Process function (make it return "processed") and run 'mindspec complete'.`,
+Complete the Process function (make it return "processed") and finish the bead through the MindSpec lifecycle.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// partial.go should exist somewhere (may have been merged to spec branch)
 			partialObserved := sandbox.FileExists("partial.go") || fileExistsInWorktrees(sandbox.Root, "partial.go")
@@ -457,7 +457,7 @@ func ScenarioSpecApprove() Scenario {
 			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Create epic for lifecycle
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 
 			// Write spec file in the worktree — must pass ValidateSpec
 			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -557,7 +557,7 @@ func ScenarioPlanApprove() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic
-			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID = sandbox.CreateSpecEpic(specID)
 
 			// Create spec branch and worktree (stay on main)
 			mustRunGit(sandbox, "branch", specBranch)
@@ -693,7 +693,7 @@ func ScenarioImplApprove() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic + bead (already closed)
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
@@ -792,7 +792,7 @@ func ScenarioSpecStatus() Scenario {
 			specBranch := "spec/" + specID
 
 			// Set up in implement mode with realistic worktree structure
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -904,7 +904,7 @@ func ScenarioMultipleActiveSpecs() Scenario {
 			specBranch := "spec/" + specID
 
 			// --- Spec 001-alpha: implement mode with a claimed bead ---
-			epicAlpha := sandbox.CreateBead("[001-alpha] Epic", "epic", "")
+			epicAlpha := sandbox.CreateSpecEpic("001-alpha")
 			beadAlpha := sandbox.CreateBead("[001-alpha] Implement greeting", "task", epicAlpha)
 			sandbox.ClaimBead(beadAlpha)
 
@@ -927,7 +927,7 @@ Create greeting.go with a Greet function.
 				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicAlpha))
 
 			// --- Spec 002-beta: plan mode (no beads yet) ---
-			epicBeta := sandbox.CreateBead("[002-beta] Epic", "epic", "")
+			epicBeta := sandbox.CreateSpecEpic("002-beta")
 			sandbox.WriteFile(".mindspec/docs/specs/002-beta/spec.md", `---
 title: Beta Feature
 status: Approved
@@ -1013,7 +1013,7 @@ func ScenarioStaleWorktree() Scenario {
 			specID := "005-stale"
 			specBranch := "spec/" + specID
 
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement widget", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -1052,7 +1052,7 @@ Create widget.go with a Widget function.
 		},
 		Prompt: `You are resuming work in implement mode. The state references a worktree that may not exist.
 Your task: create a file called widget.go with a function Widget() string that returns "widget".
-Then run 'mindspec complete' to finish the bead.`,
+Finish the bead through the MindSpec lifecycle when done.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent should have created the file
 			if !sandbox.FileExists("widget.go") {
@@ -1111,7 +1111,7 @@ func ScenarioCompleteFromSpecWorktree() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic + bead
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
@@ -1167,7 +1167,7 @@ func Greet(name string) string { return "Hello, " + name + "!" }
 
 You are in implement mode. The implementation is already complete and committed in the bead worktree.
 Your CWD may be the spec worktree, not the bead worktree.
-Run 'mindspec complete' to close the bead and finish implementation.
+Close the bead and finish implementation.
 If it fails, diagnose the issue and find a way to complete successfully.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent should have run mindspec complete successfully (exit code 0)
@@ -1282,7 +1282,7 @@ func ScenarioApprovePlanFromWorktree() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic for bead parenting
-			epicID := sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID := sandbox.CreateSpecEpic(specID)
 
 			// Create spec branch and worktree
 			mustRunGit(sandbox, "branch", specBranch)
@@ -1523,7 +1523,7 @@ func ScenarioBlockedBeadTransition() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic + 2 child beads with dependency
-			epicID = sandbox.CreateBead("["+specID+"] Epic", "epic", "")
+			epicID = sandbox.CreateSpecEpic(specID)
 			bead1 = sandbox.CreateBead("["+specID+"] Core module", "task", epicID)
 			bead2 = sandbox.CreateBead("["+specID+"] Extension (blocked)", "task", epicID)
 
@@ -1565,7 +1565,7 @@ Create extension.go that uses Core().
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
 Create a file called core.go with a function Core() string that returns "core".
-Then finish the currently claimed bead using mindspec complete.`,
+Then finish the currently claimed bead through the MindSpec lifecycle.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent ran mindspec complete
 			assertCommandRan(t, events, "mindspec", "complete")
@@ -1952,18 +1952,21 @@ type beadStatus struct {
 // the given epicID. Useful when bead IDs are created dynamically (e.g. by plan approve).
 func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount int) {
 	t.Helper()
-	out, err := sandbox.runBD("list", "--json", "--parent", epicID)
-	if err != nil {
-		t.Errorf("bd list --json --parent %s: %v\n%s", epicID, err, out)
-		return
+	// Query all statuses to count beads regardless of lifecycle state.
+	var allBeads []beadStatus
+	for _, status := range []string{"open", "in_progress", "closed"} {
+		out, err := sandbox.runBD("list", "--json", "--parent", epicID, "--status="+status)
+		if err != nil {
+			continue
+		}
+		var beads []beadStatus
+		if err := json.Unmarshal([]byte(out), &beads); err != nil {
+			continue
+		}
+		allBeads = append(allBeads, beads...)
 	}
-	var beads []beadStatus
-	if err := json.Unmarshal([]byte(out), &beads); err != nil {
-		t.Errorf("parsing bd list output: %v\n%s", err, out)
-		return
-	}
-	if len(beads) < minCount {
-		t.Errorf("expected at least %d beads under epic %s, got %d", minCount, epicID, len(beads))
+	if len(allBeads) < minCount {
+		t.Errorf("expected at least %d beads under epic %s, got %d", minCount, epicID, len(allBeads))
 	}
 }
 
@@ -1971,19 +1974,20 @@ func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount
 // asserts that each bead ID in expectedStatuses has the expected status.
 func assertBeadsState(t testing.TB, sandbox *Sandbox, epicID string, expectedStatuses map[string]string) {
 	t.Helper()
-	out, err := sandbox.runBD("list", "--json", "--parent", epicID)
-	if err != nil {
-		t.Errorf("bd list --json --parent %s: %v\n%s", epicID, err, out)
-		return
-	}
-	var beads []beadStatus
-	if err := json.Unmarshal([]byte(out), &beads); err != nil {
-		t.Errorf("parsing bd list output: %v\n%s", err, out)
-		return
-	}
+	// Query all statuses since beads may be open, in_progress, or closed.
 	statusMap := make(map[string]string)
-	for _, b := range beads {
-		statusMap[b.ID] = b.Status
+	for _, status := range []string{"open", "in_progress", "closed"} {
+		out, err := sandbox.runBD("list", "--json", "--parent", epicID, "--status="+status)
+		if err != nil {
+			continue
+		}
+		var beads []beadStatus
+		if err := json.Unmarshal([]byte(out), &beads); err != nil {
+			continue
+		}
+		for _, b := range beads {
+			statusMap[b.ID] = b.Status
+		}
 	}
 	for id, want := range expectedStatuses {
 		got, ok := statusMap[id]

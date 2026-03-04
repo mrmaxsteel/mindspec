@@ -246,6 +246,84 @@ func TestSkipNext_DocEditsIgnored(t *testing.T) {
 	}
 }
 
+func TestSkipNext_ApproveFlowExempt(t *testing.T) {
+	// Code edits before an approve command are part of the approval flow.
+	events := []ActionEvent{
+		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"spec", "approve", "010-test"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for code edits before approve, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipNext_ApproveFlowMixedViolation(t *testing.T) {
+	// Code edits AFTER approve but before next should still trigger.
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec", ArgsList: []string{"spec", "approve", "010-test"}},
+		{Phase: "plan", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/bar.go"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation for code after approve without next, got %d", len(results))
+	}
+	if results[0].Rule != "skip_next" {
+		t.Errorf("rule = %q, want skip_next", results[0].Rule)
+	}
+}
+
+func TestSkipNext_LifecycleTurnCommitExempt(t *testing.T) {
+	// Git commits in the same turn as a lifecycle command are side-effects.
+	tests := []struct {
+		name   string
+		lcVerb string
+		lcArgs []string
+	}{
+		{"spec-init", "spec-init", []string{"spec-init", "001-calc", "--title", "Calculator"}},
+		{"approve-spec", "approve", []string{"approve", "spec", "001-greeting"}},
+		{"approve-plan", "approve", []string{"approve", "plan", "001-greeting"}},
+		{"approve-impl", "approve", []string{"approve", "impl", "001-done"}},
+		{"complete", "complete", []string{"complete", "done"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Lifecycle command and git commit in same turn (turn=1).
+			events := []ActionEvent{
+				{Turn: 1, Phase: "plan", ActionType: "command", Command: "mindspec",
+					ArgsList: tt.lcArgs},
+				{Turn: 1, Phase: "plan", ActionType: "command", Command: "git",
+					ArgsList: []string{"commit", "-m", "any message whatsoever"}},
+			}
+			results := detectSkipNext(events)
+			if len(results) != 0 {
+				t.Errorf("expected no violation for commit in lifecycle turn, got %d: %v",
+					len(results), results)
+			}
+		})
+	}
+}
+
+func TestSkipNext_CommitOutsideLifecycleTurnViolation(t *testing.T) {
+	// A git commit in a different turn from any lifecycle command is still flagged.
+	events := []ActionEvent{
+		{Turn: 1, Phase: "plan", ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"approve", "plan", "001-test"}},
+		{Turn: 2, Phase: "plan", ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "Bead 1: Create types.go"}},
+	}
+	results := detectSkipNext(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation for commit outside lifecycle turn, got %d", len(results))
+	}
+	if results[0].Rule != "skip_next" {
+		t.Errorf("rule = %q, want skip_next", results[0].Rule)
+	}
+}
+
 func TestSkipComplete_NoViolation(t *testing.T) {
 	events := []ActionEvent{
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},

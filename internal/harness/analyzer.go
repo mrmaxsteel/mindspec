@@ -302,7 +302,23 @@ func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult 
 // Returns a wrong action if code-modifying events appear before any `mindspec next`
 // AND the phase is not already `implement` (which implies a bead was pre-claimed).
 func detectSkipNext(events []ActionEvent) []WrongActionResult {
-	for _, e := range events {
+	// Build a set of turns that contain lifecycle commands. Git commits in
+	// these turns are side-effects of the lifecycle operation (e.g. approve
+	// auto-commits state changes) and should not count as "agent wrote code."
+	lifecycleTurns := lifecycleTurnSet(events)
+
+	// Find the last approve command index. Code modifications before an
+	// approve are part of the approval flow (e.g. updating a spec file
+	// before approve) and don't require `mindspec next`. But code
+	// modifications AFTER the last approve still need `next`.
+	lastApproveIdx := -1
+	for i, e := range events {
+		if e.Command == "mindspec" && containsAll(eventArgsList(e), "approve") {
+			lastApproveIdx = i
+		}
+	}
+
+	for i, e := range events {
 		if e.Blocked {
 			continue
 		}
@@ -311,8 +327,17 @@ func detectSkipNext(events []ActionEvent) []WrongActionResult {
 			return nil
 		}
 		// Code modification before next — but only if not already in implement
-		// phase (setup may have pre-claimed a bead).
+		// phase (setup may have pre-claimed a bead) and not before an approve
+		// command (approval flows don't require next).
 		if isCodeModifyingEvent(e) && e.Phase != "implement" {
+			if lastApproveIdx >= 0 && i <= lastApproveIdx {
+				continue // code edit is part of the approval flow
+			}
+			// Git commits in the same turn as a lifecycle command are
+			// side-effects, not agent implementation code.
+			if e.Command == "git" && lifecycleTurns[e.Turn] {
+				continue
+			}
 			return []WrongActionResult{{
 				Rule:   "skip_next",
 				Event:  e,
@@ -321,6 +346,27 @@ func detectSkipNext(events []ActionEvent) []WrongActionResult {
 		}
 	}
 	return nil
+}
+
+// lifecycleTurnSet returns the set of turn numbers that contain a mindspec
+// lifecycle command (spec-init, approve, complete). Commits in these turns
+// are side-effects of the lifecycle operation, not agent code.
+func lifecycleTurnSet(events []ActionEvent) map[int]bool {
+	turns := make(map[int]bool)
+	lifecycleVerbs := []string{"approve", "spec-init", "complete"}
+	for _, e := range events {
+		if e.Command != "mindspec" {
+			continue
+		}
+		args := eventArgsList(e)
+		for _, verb := range lifecycleVerbs {
+			if containsAll(args, verb) {
+				turns[e.Turn] = true
+				break
+			}
+		}
+	}
+	return turns
 }
 
 // detectSkipComplete checks if the agent ran `mindspec next` and wrote code

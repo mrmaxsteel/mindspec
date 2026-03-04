@@ -55,23 +55,31 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 
 	// Step 3: Create lifecycle epic in beads (ADR-0023).
 	// Epic creation = spec approval gate. The epic's existence is the durable record.
-	specNum, specTitle := parseSpecID(specID)
+	// Idempotent: if the epic already exists (e.g., pre-created by test setup or
+	// a previous approval attempt), skip creation.
+	specNum, _ := parseSpecID(specID)
 	if specNum > 0 {
-		if err := phase.CheckSpecNumberCollision(specNum); err != nil {
-			return nil, fmt.Errorf("spec number collision: %w", err)
-		}
-		metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s"}`, specNum, specTitle)
-		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
-		out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
-		if epicErr != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", epicErr))
+		existingEpicID, _ := phase.FindEpicBySpecID(specID)
+		if existingEpicID != "" {
+			// Epic already exists — skip creation (idempotent).
+			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
 		} else {
-			var created struct {
-				ID string `json:"id"`
+			if err := phase.CheckSpecNumberCollision(specNum); err != nil {
+				return nil, fmt.Errorf("spec number collision: %w", err)
 			}
-			if json.Unmarshal(out, &created) == nil && created.ID != "" {
-				// Push to Dolt so other agents see the epic immediately
-				_, _ = specRunBDFn("dolt", "push")
+			metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s"}`, specNum, titleFromSpecID(specID))
+			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
+			out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
+			if epicErr != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", epicErr))
+			} else {
+				var created struct {
+					ID string `json:"id"`
+				}
+				if json.Unmarshal(out, &created) == nil && created.ID != "" {
+					// Push to Dolt so other agents see the epic immediately
+					_, _ = specRunBDFn("dolt", "push")
+				}
 			}
 		}
 	}

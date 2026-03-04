@@ -40,6 +40,7 @@ All implementation beads are complete. Present the work for human review before 
 - New feature work (create a new spec instead)
 - Significant refactoring beyond the spec's scope
 - Closing out without human approval
+- Manually closing the lifecycle epic via `bd close` — `mindspec impl approve` handles this automatically
 
 ## Review Checklist
 

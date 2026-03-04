@@ -82,7 +82,15 @@ func DerivePhaseWithStatus(epicID, epicStatus string) (string, error) {
 		epicStatus = queryEpicStatus(epicID)
 	}
 	if strings.EqualFold(epicStatus, "closed") {
-		return state.ModeDone, nil
+		// Check for explicit done marker set by impl approve.
+		// Without this marker, a closed epic means beads auto-closed it
+		// when the last child was closed (molecule completion). In that case,
+		// derive phase from children: all closed = review (pending impl approve).
+		if hasDoneMarker(epicID) {
+			return state.ModeDone, nil
+		}
+		children := queryChildren(epicID)
+		return DerivePhaseFromChildren(children), nil
 	}
 	children := queryChildren(epicID)
 	return DerivePhaseFromChildren(children), nil
@@ -133,9 +141,6 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 
 	var active []ActiveSpec
 	for _, epic := range epics {
-		if !strings.EqualFold(epic.Status, "open") {
-			continue
-		}
 
 		specNum, specTitle := ExtractSpecMetadata(epic)
 		if specNum == 0 && specTitle == "" {
@@ -268,6 +273,29 @@ func FindEpicBySpecID(specID string) (string, error) {
 }
 
 // --- Internal helpers ---
+
+// hasDoneMarker checks if an epic has the mindspec_done metadata flag,
+// which is set by impl approve to distinguish explicitly finalized specs
+// from epics auto-closed by beads molecule completion.
+func hasDoneMarker(epicID string) bool {
+	out, err := runBDFn("show", epicID, "--json")
+	if err != nil {
+		return false
+	}
+	var items []EpicInfo
+	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
+		return false
+	}
+	if items[0].Metadata == nil {
+		return false
+	}
+	done, ok := items[0].Metadata["mindspec_done"]
+	if !ok {
+		return false
+	}
+	b, ok := done.(bool)
+	return ok && b
+}
 
 func queryEpics() ([]EpicInfo, error) {
 	// Query all statuses: bd list --type=epic defaults to open only,

@@ -266,9 +266,32 @@ func TestExtractSpecMetadata(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDerivePhaseWithStatus_ClosedEpic(t *testing.T) {
+	// Closed epic WITHOUT done marker → derives from children (auto-closed by beads)
 	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
-		// Should not be called — closed epic short-circuits before querying children
-		t.Error("unexpected bd call for closed epic")
+		if args[0] == "show" {
+			// No mindspec_done metadata
+			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic"}]`), nil
+		}
+		// No children → plan
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	got, err := DerivePhaseWithStatus("epic-1", "closed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != state.ModePlan {
+		t.Errorf("DerivePhaseWithStatus(closed, no done marker) = %q, want %q", got, state.ModePlan)
+	}
+}
+
+func TestDerivePhaseWithStatus_ClosedEpicWithDoneMarker(t *testing.T) {
+	// Closed epic WITH done marker → done (explicitly finalized by impl approve)
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if args[0] == "show" {
+			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic","metadata":{"mindspec_done":true}}]`), nil
+		}
 		return []byte("[]"), nil
 	})
 	defer restore()
@@ -278,7 +301,7 @@ func TestDerivePhaseWithStatus_ClosedEpic(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != state.ModeDone {
-		t.Errorf("DerivePhaseWithStatus(closed) = %q, want %q", got, state.ModeDone)
+		t.Errorf("DerivePhaseWithStatus(closed, done marker) = %q, want %q", got, state.ModeDone)
 	}
 }
 
@@ -302,9 +325,13 @@ func TestDerivePhaseWithStatus_OpenEpicFallsThrough(t *testing.T) {
 }
 
 func TestDerivePhase_ClosedEpicViaBDShow(t *testing.T) {
+	// Closed epic via bd show, no done marker, with closed children → review
 	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if args[0] == "show" {
 			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic"}]`), nil
+		}
+		if args[0] == "list" {
+			return []byte(`[{"id":"b1","title":"bead","status":"closed","issue_type":"task"}]`), nil
 		}
 		return []byte("[]"), nil
 	})
@@ -314,8 +341,8 @@ func TestDerivePhase_ClosedEpicViaBDShow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != state.ModeDone {
-		t.Errorf("DerivePhase(closed epic) = %q, want %q", got, state.ModeDone)
+	if got != state.ModeReview {
+		t.Errorf("DerivePhase(closed epic, no done marker) = %q, want %q", got, state.ModeReview)
 	}
 }
 

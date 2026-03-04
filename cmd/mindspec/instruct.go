@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/config"
 	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/guard"
@@ -103,6 +104,12 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			}
 		}
 
+		// ADR-0023: ActiveWorktree is no longer stored in focus files.
+		// Resolve it from git worktree list if we have an active bead.
+		if mc.ActiveBead != "" && mc.ActiveWorktree == "" {
+			mc.ActiveWorktree = resolveBeadWorktree(mc.ActiveBead)
+		}
+
 		ctx := instruct.BuildContext(mainRoot, mc)
 
 		// Add worktree check when an active worktree is set.
@@ -186,6 +193,23 @@ func handleAmbiguous(root, format string, ambErr *resolve.ErrAmbiguousTarget) er
 	}
 	fmt.Print(output)
 	return nil
+}
+
+// resolveBeadWorktree finds the worktree path for a bead by checking
+// git worktree list for a matching bead branch or worktree name.
+func resolveBeadWorktree(beadID string) string {
+	entries, err := bead.WorktreeList()
+	if err != nil {
+		return ""
+	}
+	wtName := "worktree-" + beadID
+	branchName := "bead/" + beadID
+	for _, e := range entries {
+		if e.Name == wtName || e.Branch == branchName {
+			return e.Path
+		}
+	}
+	return ""
 }
 
 func init() {

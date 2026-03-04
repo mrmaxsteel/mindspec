@@ -27,6 +27,8 @@ You are not currently working on any spec or bead.
 **main is protected.** You MUST NOT edit files or commit while on main. All changes require a branch.
 
 All new features and non-trivial changes MUST go through `mindspec spec create`. The spec-create command creates the branch + worktree automatically.
+
+**For quick bug fixes or small changes**: Create a branch FIRST with `git checkout -b fix/<description>`, make changes there, then push and create a PR. NEVER commit directly to main.
 {{- end}}
 
 ## Available Actions

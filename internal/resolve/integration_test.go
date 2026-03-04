@@ -136,7 +136,7 @@ func TestMixedRepo_ActiveAndDone(t *testing.T) {
 		{ID: "epic-a", Title: "[SPEC 038-active] Active", Status: "open", IssueType: "epic",
 			Metadata: map[string]interface{}{"spec_num": float64(38), "spec_title": "active"}},
 		{ID: "epic-d", Title: "[SPEC 005-done] Done", Status: "closed", IssueType: "epic",
-			Metadata: map[string]interface{}{"spec_num": float64(5), "spec_title": "done"}},
+			Metadata: map[string]interface{}{"spec_num": float64(5), "spec_title": "done", "mindspec_done": true}},
 	}
 	stubActiveEpics(t, epics, map[string][]phase.ChildInfo{
 		"epic-a": {{ID: "b1", Status: "in_progress", IssueType: "task"}},
