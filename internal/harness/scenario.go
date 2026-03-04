@@ -423,20 +423,15 @@ func ScenarioSpecApprove() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-calc"
-			specBranch := "spec/" + specID
-
-			// Create the branch (stay on main)
-			mustRunGit(sandbox, "branch", specBranch)
-
-			// Create worktree from the branch
-			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Create epic for lifecycle
 			_ = sandbox.CreateSpecEpic(specID)
 
+			// Create spec branch + worktree via shared helper
+			wt := setupWorktrees(sandbox, specID, "", "spec")
+
 			// Write spec file in the worktree — must pass ValidateSpec
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Calculator Feature
 status: Draft
 ---
@@ -475,8 +470,8 @@ Pending.
 `)
 
 			// Commit in the worktree
-			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "setup: draft spec")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: draft spec")
 
 			// Set focus to spec mode (in main repo)
 			sandbox.Commit("setup: spec mode focus")
@@ -527,18 +522,15 @@ func ScenarioPlanApprove() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-planner"
-			specBranch := "spec/" + specID
 
 			// Create epic
 			epicID = sandbox.CreateSpecEpic(specID)
 
-			// Create spec branch and worktree (stay on main)
-			mustRunGit(sandbox, "branch", specBranch)
-			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
+			// Create spec branch + worktree via shared helper
+			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write approved spec
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Planner Feature
 status: Approved
 ---
@@ -552,7 +544,7 @@ Add a planning feature.
 `)
 			// Write draft plan with bead sections (must pass ValidatePlan: version, ADR Fitness,
 			// Testing Strategy, 3+ steps per bead, verification with test artifact references)
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", `---
 status: Draft
 spec_id: 001-planner
 version: "1"
@@ -597,8 +589,8 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 `)
 
 			// Commit in worktree
-			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "setup: draft plan")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: draft plan")
 
 			// Commit focus in main
 			sandbox.Commit("setup: plan mode focus")
@@ -658,7 +650,6 @@ func ScenarioImplApprove() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-done"
-			specBranch := "spec/" + specID
 
 			// Create epic + bead (already closed)
 			epicID := sandbox.CreateSpecEpic(specID)
@@ -666,20 +657,18 @@ func ScenarioImplApprove() Scenario {
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
 
-			// Create spec branch and worktree (stay on main)
-			mustRunGit(sandbox, "branch", specBranch)
-			wtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
+			// Create spec branch + worktree via shared helper (review = spec worktree only)
+			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write spec files in the worktree (where they'd be in real workflow)
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Done Feature
 status: Approved
 ---
 # Done Feature
 A completed feature.
 `)
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -691,12 +680,12 @@ Create done.go.
 `, specID, beadID))
 
 			// Write actual implementation file in the worktree
-			sandbox.WriteFile(wtDir+"/done.go", `package main
+			sandbox.WriteFile(wt.SpecWtDir+"/done.go", `package main
 
 func Done() string { return "done" }
 `)
-			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", wtDir, "commit", "-m", "impl: implement feature")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "impl: implement feature")
 
 			// Set focus to review mode with activeWorktree (as mindspec complete would)
 			sandbox.Commit("setup: review mode focus")
@@ -1048,27 +1037,24 @@ func ScenarioCompleteFromSpecWorktree() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
-			specBranch := "spec/" + specID
 
 			// Create epic + bead
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			// Create spec branch and worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+			// Create spec + bead worktrees via shared helper
+			wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
 			// Write spec files in the spec worktree (where they live during implementation)
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Greeting Feature
 status: Approved
 ---
 # Greeting Feature
 Add a greeting function.
 `)
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 ---
@@ -1078,22 +1064,16 @@ Create greeting.go with a Greet function.
 `, specID))
 
 			// Commit in spec worktree
-			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
-
-			// Create bead branch and worktree off spec branch
-			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
-			beadWtDir := specWtDir + "/.worktrees/worktree-" + beadID
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: spec files")
 
 			// Write implementation in bead worktree (already committed — clean tree)
-			sandbox.WriteFile(beadWtDir+"/greeting.go", `package main
+			sandbox.WriteFile(wt.BeadWtDir+"/greeting.go", `package main
 
 func Greet(name string) string { return "Hello, " + name + "!" }
 `)
-			mustRunGit(sandbox, "-C", beadWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", beadWtDir, "commit", "-m", "impl: greeting")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "commit", "-m", "impl: greeting")
 
 			// Set focus: implement mode, activeWorktree points to BEAD worktree,
 			// but the bug is that the agent's CWD ends up at the SPEC worktree.
@@ -1126,15 +1106,12 @@ func ScenarioApproveSpecFromWorktree() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
-			specBranch := "spec/" + specID
 
-			// Create spec branch and worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+			// Create spec branch + worktree via shared helper
+			wt := setupWorktrees(sandbox, specID, "", "spec")
 
 			// Write spec files ONLY in the spec worktree
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
 spec_id: %s
 status: Draft
 version: 1
@@ -1187,8 +1164,8 @@ None.
 `, specID, specID))
 
 			// Commit in spec worktree
-			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: spec files")
 
 			// Set focus: spec mode, CWD is main repo
 			sandbox.Commit("setup: spec mode focus")
@@ -1215,18 +1192,15 @@ func ScenarioApprovePlanFromWorktree() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
-			specBranch := "spec/" + specID
 
 			// Create epic for bead parenting
 			_ = sandbox.CreateSpecEpic(specID)
 
-			// Create spec branch and worktree
-			mustRunGit(sandbox, "branch", specBranch)
-			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+			// Create spec branch + worktree via shared helper
+			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write spec + plan ONLY in the spec worktree
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
 spec_id: %s
 status: Approved
 version: 1
@@ -1253,7 +1227,7 @@ Users can generate personalized greetings.
 None.
 `, specID, specID))
 
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 spec_id: %s
 status: Draft
 version: 1
@@ -1291,8 +1265,8 @@ None
 `, specID, specID))
 
 			// Commit in spec worktree
-			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec+plan files")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "setup: spec+plan files")
 
 			// Set focus: plan mode
 			sandbox.Commit("setup: plan mode focus")
@@ -1525,7 +1499,6 @@ func ScenarioUnmergedBeadGuard() Scenario {
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-guard"
-			specBranch := "spec/" + specID
 
 			// Create epic + 2 child beads
 			epicID = sandbox.CreateSpecEpic(specID)
@@ -1559,28 +1532,19 @@ Create second.go with a Second() function.
 `)
 			sandbox.Commit("setup: approved spec and plan")
 
-			// Create spec branch and worktree (spec files already on main, inherited by branch)
-			mustRunGit(sandbox, "branch", specBranch)
-			specWtDir := ".worktrees/worktree-spec-" + specID
-			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
-
-			// Create bead branch (simulating what mindspec next would have done)
-			// but do NOT create a worktree — the bead is already closed
-			beadBranch := "bead/" + bead1
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			// Create spec + bead worktrees via shared helper
+			wt := setupWorktrees(sandbox, specID, bead1, "implement")
 
 			// Write implementation on bead branch (simulating work that was done)
-			beadWtDir := specWtDir + "/.worktrees/worktree-" + bead1
-			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
-			sandbox.WriteFile(beadWtDir+"/first.go", `package main
+			sandbox.WriteFile(wt.BeadWtDir+"/first.go", `package main
 
 func First() string { return "first" }
 `)
-			mustRunGit(sandbox, "-C", beadWtDir, "add", "-A")
-			mustRunGit(sandbox, "-C", beadWtDir, "commit", "-m", "impl: first feature")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", wt.BeadWtDir, "commit", "-m", "impl: first feature")
 
 			// Remove the bead worktree but keep the branch (simulating bd close without complete)
-			mustRunGit(sandbox, "worktree", "remove", beadWtDir)
+			mustRunGit(sandbox, "worktree", "remove", wt.BeadWtDir)
 
 			sandbox.Commit("setup: bead-1 closed without mindspec complete")
 			return nil
