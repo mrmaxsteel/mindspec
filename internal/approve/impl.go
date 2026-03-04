@@ -174,18 +174,29 @@ func cleanupBeadBranchesAndWorktrees(root, specID string) error {
 		return nil // nothing to clean if bead_ids are unavailable
 	}
 
-	entries, _ := worktreeListFn()          // best-effort; branch deletion still runs
-	branchToWorktree := map[string]string{} // bead branch -> worktree name
+	entries, _ := worktreeListFn() // best-effort; branch deletion still runs
+	type wtInfo struct {
+		Name string
+		Path string
+	}
+	branchToWorktree := map[string]wtInfo{} // bead branch -> worktree info
 	for _, e := range entries {
-		branchToWorktree[e.Branch] = e.Name
+		branchToWorktree[e.Branch] = wtInfo{Name: e.Name, Path: e.Path}
 	}
 
 	var errs []string
 	for _, beadID := range beadIDs {
 		beadBranch := "bead/" + beadID
-		if wtName := branchToWorktree[beadBranch]; wtName != "" {
-			if err := worktreeRemoveFn(wtName); err != nil {
-				errs = append(errs, fmt.Sprintf("remove worktree %s: %v", wtName, err))
+		if wt := branchToWorktree[beadBranch]; wt.Name != "" {
+			// Auto-commit any remaining changes before removing worktree.
+			if wt.Path != "" {
+				if err := commitAllFn(wt.Path, "chore: commit remaining bead artifacts"); err != nil {
+					// Best-effort: log but don't block cleanup.
+					errs = append(errs, fmt.Sprintf("auto-commit in bead worktree %s: %v", wt.Name, err))
+				}
+			}
+			if err := worktreeRemoveFn(wt.Name); err != nil {
+				errs = append(errs, fmt.Sprintf("remove worktree %s: %v", wt.Name, err))
 			}
 		}
 		if err := deleteBranchFn(beadBranch); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
