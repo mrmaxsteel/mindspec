@@ -45,6 +45,7 @@ func AllScenarios() []Scenario {
 		ScenarioApprovePlanFromWorktree(),
 		ScenarioBugfixBranch(),
 		ScenarioBlockedBeadTransition(),
+		ScenarioUnmergedBeadGuard(),
 	}
 }
 
@@ -1538,6 +1539,106 @@ Then finish the currently claimed bead through the MindSpec lifecycle.`,
 			assertBeadsState(t, sandbox, epicID, map[string]string{
 				bead1: "closed",
 				bead2: "open",
+			})
+		},
+	}
+}
+
+// ScenarioUnmergedBeadGuard tests that `mindspec next` blocks when a predecessor
+// bead was closed via `bd close` without `mindspec complete` (bead branch lingers).
+// The agent must run `mindspec complete` to recover merge topology before proceeding.
+//
+// Before: spec worktree with bead-1 closed (bd close) but bead/ID branch still exists,
+//
+//	bead-2 is ready, agent CWD is spec worktree
+//
+// After:  agent ran mindspec complete to fix bead-1, then mindspec next for bead-2
+func ScenarioUnmergedBeadGuard() Scenario {
+	var epicID, bead1, bead2 string
+	return Scenario{
+		Name:        "unmerged_bead_guard",
+		Description: "mindspec next blocks when predecessor bead closed without complete",
+		MaxTurns:    25,
+		TimeoutMin:  10,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-guard"
+			specBranch := "spec/" + specID
+
+			// Create epic + 2 child beads
+			epicID = sandbox.CreateSpecEpic(specID)
+			bead1 = sandbox.CreateBead("["+specID+"] First feature", "task", epicID)
+			bead2 = sandbox.CreateBead("["+specID+"] Second feature", "task", epicID)
+
+			// bead-2 depends on bead-1
+			sandbox.runBDMust("dep", "add", bead2, bead1)
+
+			// Claim bead-1 and close it via bd close (simulating agent skipping mindspec complete)
+			sandbox.ClaimBead(bead1)
+			sandbox.runBDMust("close", bead1)
+
+			// Approved spec + plan
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Guard Feature
+status: Approved
+---
+# Guard Feature
+Test unmerged bead guard.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: First feature
+Create first.go with a First() function.
+## Bead 2: Second feature
+Create second.go with a Second() function.
+`)
+			sandbox.Commit("setup: approved spec and plan")
+
+			// Create spec branch and worktree (spec files already on main, inherited by branch)
+			mustRunGit(sandbox, "branch", specBranch)
+			specWtDir := ".worktrees/worktree-spec-" + specID
+			mustRunGit(sandbox, "worktree", "add", specWtDir, specBranch)
+
+			// Create bead branch (simulating what mindspec next would have done)
+			// but do NOT create a worktree — the bead is already closed
+			beadBranch := "bead/" + bead1
+			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+
+			// Write implementation on bead branch (simulating work that was done)
+			beadWtDir := specWtDir + "/.worktrees/worktree-" + bead1
+			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
+			sandbox.WriteFile(beadWtDir+"/first.go", `package main
+
+func First() string { return "first" }
+`)
+			mustRunGit(sandbox, "-C", beadWtDir, "add", "-A")
+			mustRunGit(sandbox, "-C", beadWtDir, "commit", "-m", "impl: first feature")
+
+			// Remove the bead worktree but keep the branch (simulating bd close without complete)
+			mustRunGit(sandbox, "worktree", "remove", beadWtDir)
+
+			sandbox.Commit("setup: bead-1 closed without mindspec complete")
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+You are in implement mode for spec 001-guard. Bead 2 should be ready to work on.
+Claim the next bead and implement it. Create second.go with a function Second() string
+that returns "second". Complete the bead through the MindSpec lifecycle.
+If mindspec next fails, read the error message carefully and follow its instructions.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent should have run mindspec complete (to fix the unmerged bead)
+			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Agent should have run mindspec next (to claim bead-2)
+			assertCommandRan(t, events, "mindspec", "next")
+
+			// Bead-1 should be closed
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				bead1: "closed",
 			})
 		},
 	}

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mindspec/mindspec/internal/bead"
 	"github.com/mindspec/mindspec/internal/contextpack"
+	"github.com/mindspec/mindspec/internal/gitops"
 	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/recording"
@@ -123,6 +126,14 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 				// Non-ambiguous errors are OK — next will query all ready work
 			} else {
 				specFlag = targetSpec
+			}
+		}
+
+		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
+		// without `mindspec complete` (bead branch still exists).
+		if specFlag != "" {
+			if err := checkUnmergedBeads(specFlag); err != nil {
+				return err
 			}
 		}
 
@@ -317,6 +328,34 @@ func runEmitOnly(root, specFlag string, args []string) error {
 // containsSpecID checks if a bead title references the given spec ID.
 func containsSpecID(title, specID string) bool {
 	return strings.Contains(title, specID)
+}
+
+// checkUnmergedBeads checks for closed sibling beads that still have a bead/<id>
+// branch, indicating they were closed via `bd close` without `mindspec complete`.
+// Returns an error to block `mindspec next` until cleanup is performed.
+func checkUnmergedBeads(specID string) error {
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil || epicID == "" {
+		return nil
+	}
+
+	out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
+	if err != nil {
+		return nil
+	}
+
+	var items []bead.BeadInfo
+	if json.Unmarshal(out, &items) != nil {
+		return nil
+	}
+
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id != "" && gitops.BranchExists("bead/"+id) {
+			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete --spec=%s` to recover, then retry `mindspec next`.", id, specID)
+		}
+	}
+	return nil
 }
 
 func init() {

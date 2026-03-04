@@ -265,6 +265,16 @@ func TestLLM_BlockedBeadTransition(t *testing.T) {
 	}
 }
 
+func TestLLM_UnmergedBeadGuard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioUnmergedBeadGuard())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
 // --- Assertion helper unit tests ---
 
 func TestAssertMergeTopology(t *testing.T) {

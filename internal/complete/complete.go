@@ -32,6 +32,8 @@ var (
 	resolveTargetFn     = resolve.ResolveTarget
 	resolveActiveBeadFn = next.ResolveActiveBead
 	findLocalRootFn     = defaultFindLocalRoot
+	fetchBeadByIDFn     = next.FetchBeadByID
+	findRecentClosedFn  = findRecentClosed
 )
 
 // Result summarizes what mindspec complete did.
@@ -77,6 +79,14 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 	if beadID == "" {
 		beadID, err = resolveActiveBeadFn(root, specID)
+		if err != nil {
+			return nil, fmt.Errorf("resolving active bead: %w", err)
+		}
+	}
+	// If no in-progress bead found, check for recently closed beads that
+	// may need cleanup (e.g., agent ran `bd close` directly).
+	if beadID == "" {
+		beadID, err = findRecentClosedFn(specID)
 		if err != nil {
 			return nil, fmt.Errorf("resolving active bead: %w", err)
 		}
@@ -127,9 +137,15 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 		return nil, fmt.Errorf("%w\nhint: use `mindspec complete \"describe what you did\"` to auto-commit", err)
 	}
 
-	// 4. Close bead
+	// 4. Close bead (idempotent: tolerate already-closed beads)
 	if err := closeBeadFn(beadID); err != nil {
-		return nil, fmt.Errorf("closing bead: %w", err)
+		// Check if the bead is already closed — if so, warn and continue cleanup.
+		info, fetchErr := fetchBeadByIDFn(beadID)
+		if fetchErr == nil && strings.EqualFold(strings.TrimSpace(info.Status), "closed") {
+			fmt.Printf("Warning: bead %s already closed — performing merge and cleanup.\n", beadID)
+		} else {
+			return nil, fmt.Errorf("closing bead: %w", err)
+		}
 	}
 
 	// 4.5. Emit recording bead marker (best-effort)
@@ -304,6 +320,34 @@ func isIgnorableStateChange(statusLine string) bool {
 		return true
 	}
 	return false
+}
+
+// findRecentClosed looks for a recently closed bead under the spec's epic
+// that still has a bead branch (indicating it was closed without cleanup).
+func findRecentClosed(specID string) (string, error) {
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil || epicID == "" {
+		return "", nil
+	}
+
+	out, err := runBDFn("list", "--parent", epicID, "--status=closed", "--json")
+	if err != nil {
+		return "", nil
+	}
+
+	var items []bead.BeadInfo
+	if json.Unmarshal(out, &items) != nil {
+		return "", nil
+	}
+
+	// Return the first closed bead that still has a bead branch (unmerged).
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id != "" && gitops.BranchExists("bead/"+id) {
+			return id, nil
+		}
+	}
+	return "", nil
 }
 
 // advanceState determines the next mode after completing a bead.

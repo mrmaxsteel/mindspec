@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mindspec/mindspec/internal/next"
 	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
 )
@@ -28,6 +29,8 @@ func saveAndRestore(t *testing.T) {
 	origResolveTarget := resolveTargetFn
 	origResolveActiveBead := resolveActiveBeadFn
 	origFindLocalRoot := findLocalRootFn
+	origFetchBeadByID := fetchBeadByIDFn
+	origFindRecentClosed := findRecentClosedFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -41,6 +44,8 @@ func saveAndRestore(t *testing.T) {
 		resolveTargetFn = origResolveTarget
 		resolveActiveBeadFn = origResolveActiveBead
 		findLocalRootFn = origFindLocalRoot
+		fetchBeadByIDFn = origFetchBeadByID
+		findRecentClosedFn = origFindRecentClosed
 	})
 
 	// Default stubs
@@ -50,6 +55,8 @@ func saveAndRestore(t *testing.T) {
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	resolveActiveBeadFn = func(root, specID string) (string, error) { return "", fmt.Errorf("no active bead") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{}, fmt.Errorf("not found") }
+	findRecentClosedFn = func(specID string) (string, error) { return "", nil }
 }
 
 // setupTempRoot creates a temp dir with .mindspec/.
@@ -622,5 +629,105 @@ func TestFormatResult_Review(t *testing.T) {
 	}
 	if !strings.Contains(out, "/ms-impl-approve") {
 		t.Errorf("should mention /ms-impl-approve: %s", out)
+	}
+}
+
+func TestRun_AlreadyClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	resolveActiveBeadFn = func(r, specID string) (string, error) { return "", nil }
+
+	// findRecentClosedFn returns the closed bead (simulating bd close already ran)
+	findRecentClosedFn = func(specID string) (string, error) { return "bead-1", nil }
+
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+
+	// Clean worktree
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "")
+	}
+
+	// closeBeadFn fails because bead is already closed
+	closeBeadFn = func(ids ...string) error {
+		return fmt.Errorf("bd close failed: issue already closed")
+	}
+
+	// fetchBeadByIDFn confirms bead is closed
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: "bead-1", Status: "closed"}, nil
+	}
+
+	// Create spec worktree dir so merge path is found
+	specWtDir := filepath.Join(root, ".worktrees", "worktree-spec-008-test")
+	os.MkdirAll(specWtDir, 0755)
+
+	var mergedBranch string
+	mergeIntoFn = func(targetWorkdir, sourceBranch string) error {
+		mergedBranch = sourceBranch
+		return nil
+	}
+
+	var removedName string
+	worktreeRemoveFn = func(name string) error {
+		removedName = name
+		return nil
+	}
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	result, err := Run(root, "", "", "")
+	if err != nil {
+		t.Fatalf("expected success for already-closed bead, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+	if mergedBranch != "bead/bead-1" {
+		t.Errorf("expected merge of bead/bead-1, got %q", mergedBranch)
+	}
+	if removedName != "worktree-bead-1" {
+		t.Errorf("expected worktree removal, got %q", removedName)
+	}
+}
+
+func TestRun_CloseFailsNonIdempotent(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
+
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "")
+	}
+
+	// closeBeadFn fails with a non-"already closed" error
+	closeBeadFn = func(ids ...string) error {
+		return fmt.Errorf("bd close failed: network error")
+	}
+
+	// fetchBeadByIDFn says bead is still open — not an idempotent case
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: "bead-1", Status: "open"}, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "")
+	if err == nil {
+		t.Fatal("expected error when close fails and bead is not closed")
+	}
+	if !strings.Contains(err.Error(), "closing bead") {
+		t.Errorf("expected 'closing bead' error, got: %v", err)
 	}
 }
