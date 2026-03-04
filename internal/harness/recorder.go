@@ -4,22 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // shimScript is the template for a recording shim. It logs the invocation
 // to a JSONL file, then delegates to the real binary.
-// Placeholders: %s = log path, %s = real binary path, %s = command name, %s = mindspec binary path.
+// Placeholders: %s = log path, %s = real binary path, %s = command name,
+//               %s = mindspec binary path, %s = original PATH (without shim dir).
 const shimScript = `#!/bin/sh
 # Recording shim for %[3]s — logs invocations to JSONL before delegating.
 LOG_PATH="%[1]s"
 REAL_BIN="%[2]s"
 CMD_NAME="%[3]s"
 MINDSPEC_BIN="%[4]s"
-# Internal phase queries set MINDSPEC_SHIM_NOLOG to avoid recursive logging.
-if [ -n "$MINDSPEC_SHIM_NOLOG" ]; then
-  "$REAL_BIN" "$@"
-  exit $?
-fi
+ORIG_PATH="%[5]s"
 START_NS=$(date +%%s%%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))" 2>/dev/null || echo 0)
 "$REAL_BIN" "$@"
 EXIT_CODE=$?
@@ -35,7 +33,22 @@ import sys, json
 args = [line.rstrip() for line in sys.stdin]
 print(json.dumps(args))
 " 2>/dev/null || echo '[]')
-PHASE=$(MINDSPEC_SHIM_NOLOG=1 "$MINDSPEC_BIN" state show --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || echo "")
+# Phase cache: avoid expensive mindspec state show on every shim call.
+# Cache is valid for 5 seconds — phase changes are infrequent.
+PHASE_CACHE="${LOG_PATH}.phase-cache"
+PHASE=""
+if [ -f "$PHASE_CACHE" ]; then
+  CACHE_LINE=$(cat "$PHASE_CACHE" 2>/dev/null)
+  CACHE_TS=$(echo "$CACHE_LINE" | cut -d' ' -f1)
+  NOW=$(date +%%s)
+  if [ -n "$CACHE_TS" ] && [ $((NOW - CACHE_TS)) -lt 5 ]; then
+    PHASE=$(echo "$CACHE_LINE" | cut -d' ' -f2-)
+  fi
+fi
+if [ -z "$PHASE" ]; then
+  PHASE=$(PATH="$ORIG_PATH" "$MINDSPEC_BIN" state show 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || echo "")
+  echo "$(date +%%s) $PHASE" > "$PHASE_CACHE" 2>/dev/null
+fi
 printf '{"timestamp":"%%s","action_type":"command","command":"%[3]s","args_list":%%s,"cwd":"%%s","exit_code":%%d,"duration_ms":%%d,"phase":"%%s"}\n' \
   "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ 2>/dev/null || echo unknown)" \
   "$ARGS" \
@@ -50,7 +63,8 @@ exit $EXIT_CODE
 // shimScriptPinCWD is like shimScript but forces CWD to a fixed directory
 // before executing the real binary. Used for bd to ensure .beads/ resolution
 // always finds the sandbox's database, not the host project's.
-// Placeholders: %s = log path, %s = real binary path, %s = command name, %s = pinned CWD, %s = mindspec binary path.
+// Placeholders: %s = log path, %s = real binary path, %s = command name,
+//               %s = pinned CWD, %s = mindspec binary path, %s = original PATH.
 const shimScriptPinCWD = `#!/bin/sh
 # Recording shim for %[3]s — CWD-pinned to sandbox root for .beads/ isolation.
 LOG_PATH="%[1]s"
@@ -58,13 +72,8 @@ REAL_BIN="%[2]s"
 CMD_NAME="%[3]s"
 PIN_CWD="%[4]s"
 MINDSPEC_BIN="%[5]s"
+ORIG_PATH="%[6]s"
 ORIG_CWD=$(pwd)
-# Internal phase queries set MINDSPEC_SHIM_NOLOG to avoid recursive logging.
-if [ -n "$MINDSPEC_SHIM_NOLOG" ]; then
-  cd "$PIN_CWD"
-  "$REAL_BIN" "$@"
-  exit $?
-fi
 cd "$PIN_CWD"
 START_NS=$(date +%%s%%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))" 2>/dev/null || echo 0)
 "$REAL_BIN" "$@"
@@ -80,7 +89,22 @@ import sys, json
 args = [line.rstrip() for line in sys.stdin]
 print(json.dumps(args))
 " 2>/dev/null || echo '[]')
-PHASE=$(MINDSPEC_SHIM_NOLOG=1 "$MINDSPEC_BIN" state show --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || echo "")
+# Phase cache: avoid expensive mindspec state show on every shim call.
+# Cache is valid for 5 seconds — phase changes are infrequent.
+PHASE_CACHE="${LOG_PATH}.phase-cache"
+PHASE=""
+if [ -f "$PHASE_CACHE" ]; then
+  CACHE_LINE=$(cat "$PHASE_CACHE" 2>/dev/null)
+  CACHE_TS=$(echo "$CACHE_LINE" | cut -d' ' -f1)
+  NOW=$(date +%%s)
+  if [ -n "$CACHE_TS" ] && [ $((NOW - CACHE_TS)) -lt 5 ]; then
+    PHASE=$(echo "$CACHE_LINE" | cut -d' ' -f2-)
+  fi
+fi
+if [ -z "$PHASE" ]; then
+  PHASE=$(PATH="$ORIG_PATH" "$MINDSPEC_BIN" state show 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || echo "")
+  echo "$(date +%%s) $PHASE" > "$PHASE_CACHE" 2>/dev/null
+fi
 printf '{"timestamp":"%%s","action_type":"command","command":"%[3]s","args_list":%%s,"cwd":"%%s","exit_code":%%d,"duration_ms":%%d,"phase":"%%s"}\n' \
   "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ 2>/dev/null || echo unknown)" \
   "$ARGS" \
@@ -110,13 +134,17 @@ func InstallShims(binDir, logPath string) error {
 		return fmt.Errorf("mindspec binary required for phase recording: %w", err)
 	}
 
+	// Compute PATH without shim dir — phase queries use this to bypass shims
+	// so mindspec's internal bd/git calls go directly to real binaries.
+	origPath := pathWithout(binDir)
+
 	for _, cmd := range DefaultShimCommands {
 		realPath, err := findRealBinary(cmd, binDir)
 		if err != nil {
 			// If the real binary isn't found, skip (e.g. bd not installed in test env)
 			continue
 		}
-		if err := writeShim(binDir, logPath, cmd, realPath, mindspecPath); err != nil {
+		if err := writeShim(binDir, logPath, cmd, realPath, mindspecPath, origPath); err != nil {
 			return fmt.Errorf("writing shim for %s: %w", cmd, err)
 		}
 	}
@@ -124,8 +152,8 @@ func InstallShims(binDir, logPath string) error {
 }
 
 // writeShim creates a single shim script.
-func writeShim(binDir, logPath, cmdName, realPath, mindspecPath string) error {
-	script := fmt.Sprintf(shimScript, logPath, realPath, cmdName, mindspecPath)
+func writeShim(binDir, logPath, cmdName, realPath, mindspecPath, origPath string) error {
+	script := fmt.Sprintf(shimScript, logPath, realPath, cmdName, mindspecPath, origPath)
 	shimPath := filepath.Join(binDir, cmdName)
 	if err := os.WriteFile(shimPath, []byte(script), 0o755); err != nil {
 		return err
@@ -145,7 +173,8 @@ func WritePinnedShim(binDir, logPath, cmdName, pinCWD string) error {
 	if err != nil {
 		return fmt.Errorf("mindspec binary required for phase recording: %w", err)
 	}
-	script := fmt.Sprintf(shimScriptPinCWD, logPath, realPath, cmdName, pinCWD, mindspecPath)
+	origPath := pathWithout(binDir)
+	script := fmt.Sprintf(shimScriptPinCWD, logPath, realPath, cmdName, pinCWD, mindspecPath, origPath)
 	shimPath := filepath.Join(binDir, cmdName)
 	if err := os.WriteFile(shimPath, []byte(script), 0o755); err != nil {
 		return err
@@ -169,6 +198,20 @@ func findRealBinary(cmdName, excludeDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s not found in PATH", cmdName)
+}
+
+// pathWithout returns the current PATH with binDir removed.
+// Used to give phase queries a clean PATH that bypasses shims.
+func pathWithout(binDir string) string {
+	absExclude, _ := filepath.Abs(binDir)
+	var dirs []string
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		absDir, _ := filepath.Abs(dir)
+		if absDir != absExclude {
+			dirs = append(dirs, dir)
+		}
+	}
+	return strings.Join(dirs, string(filepath.ListSeparator))
 }
 
 // ShimEnv returns environment variables that prepend binDir to PATH.
