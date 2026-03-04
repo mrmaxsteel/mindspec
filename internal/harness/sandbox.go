@@ -356,6 +356,38 @@ type bdCreateIssue struct {
 	ID string `json:"id"`
 }
 
+// CreateSpecEpic creates a lifecycle epic for a spec in the [SPEC NNN-slug] format
+// with proper metadata for ADR-0023 phase derivation. Returns the epic ID.
+func (s *Sandbox) CreateSpecEpic(specID string) string {
+	s.t.Helper()
+
+	// Parse spec num and title from specID (e.g., "001-calc" → 1, "calc")
+	dashIdx := strings.Index(specID, "-")
+	if dashIdx < 0 {
+		s.t.Fatalf("invalid specID %q: expected NNN-slug format", specID)
+	}
+	numStr := specID[:dashIdx]
+	slug := specID[dashIdx+1:]
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		s.t.Fatalf("invalid spec number in %q: %v", specID, err)
+	}
+
+	epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, slug)
+	metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s"}`, num, slug)
+
+	args := []string{"create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--priority", "2", "--json"}
+	out, err := s.runBD(args...)
+	if err != nil {
+		s.t.Fatalf("bd create spec epic %q: %v\n%s", specID, err, out)
+	}
+	var issue bdCreateIssue
+	if err := json.Unmarshal([]byte(out), &issue); err != nil {
+		s.t.Fatalf("parsing bd create output: %v\n%s", err, out)
+	}
+	return issue.ID
+}
+
 // CreateBead creates a beads issue in the sandbox and returns its ID.
 // issueType is "epic" or "task". parentID is optional.
 func (s *Sandbox) CreateBead(title, issueType, parentID string) string {
