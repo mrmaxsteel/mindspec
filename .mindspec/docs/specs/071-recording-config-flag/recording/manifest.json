@@ -1,0 +1,14 @@
+{
+  "spec_id": "071-recording-config-flag",
+  "started_at": "2026-03-04T18:07:39Z",
+  "collector_pid": 0,
+  "collector_port": 4318,
+  "process_name": "mindspec",
+  "status": "recording",
+  "phases": [
+    {
+      "phase": "spec",
+      "started_at": "2026-03-04T18:07:39Z"
+    }
+  ]
+}
