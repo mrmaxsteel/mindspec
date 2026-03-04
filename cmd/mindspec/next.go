@@ -129,10 +129,12 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 		}
 
-		// Step 1.7: Unmerged-bead guard — warn if a predecessor bead was closed
+		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
 		// without `mindspec complete` (bead branch still exists).
 		if specFlag != "" {
-			warnUnmergedBeads(specFlag)
+			if err := checkUnmergedBeads(specFlag); err != nil {
+				return err
+			}
 		}
 
 		// Step 2: Query ready work (scoped to spec's epic if available)
@@ -328,30 +330,32 @@ func containsSpecID(title, specID string) bool {
 	return strings.Contains(title, specID)
 }
 
-// warnUnmergedBeads checks for closed sibling beads that still have a bead/<id>
+// checkUnmergedBeads checks for closed sibling beads that still have a bead/<id>
 // branch, indicating they were closed via `bd close` without `mindspec complete`.
-func warnUnmergedBeads(specID string) {
+// Returns an error to block `mindspec next` until cleanup is performed.
+func checkUnmergedBeads(specID string) error {
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
-		return
+		return nil
 	}
 
 	out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
 	if err != nil {
-		return
+		return nil
 	}
 
 	var items []bead.BeadInfo
 	if json.Unmarshal(out, &items) != nil {
-		return
+		return nil
 	}
 
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id != "" && gitops.BranchExists("bead/"+id) {
-			fmt.Fprintf(os.Stderr, "Warning: bead %s was closed without `mindspec complete`. Run `mindspec complete --spec=%s` to recover merge topology.\n", id, specID)
+			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete --spec=%s` to recover, then retry `mindspec next`.", id, specID)
 		}
 	}
+	return nil
 }
 
 func init() {
