@@ -25,6 +25,18 @@ func stubNoEpics(t *testing.T) {
 	t.Cleanup(restore)
 }
 
+// stubApproveBeads stubs all BD functions in the approve package so that
+// ApproveSpec and ApprovePlan don't create real beads in the shared database.
+func stubApproveBeads(t *testing.T) {
+	t.Helper()
+	noopBD := func(args ...string) ([]byte, error) {
+		return []byte(`{"id":"fake-test-bead"}`), nil
+	}
+	t.Cleanup(approve.SetSpecRunBDForTest(noopBD))
+	t.Cleanup(approve.SetPlanRunBDForTest(noopBD))
+	t.Cleanup(approve.SetPlanRunBDCombinedForTest(noopBD))
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -256,6 +268,7 @@ func simulateApproveImpl(t *testing.T, root, specID string) {
 
 func TestScenario_HappyPath(t *testing.T) {
 	stubNoEpics(t)
+	stubApproveBeads(t)
 	root := testRepo(t)
 	specID := "001-test-feature"
 
@@ -312,6 +325,7 @@ func TestScenario_IdleStartsClean(t *testing.T) {
 
 func TestScenario_InterruptForBug(t *testing.T) {
 	stubNoEpics(t)
+	stubApproveBeads(t)
 	root := testRepo(t)
 	specID := "002-main-feature"
 	bugSpecID := "003-hotfix-bug"
@@ -401,6 +415,7 @@ func TestScenario_InvalidTransition(t *testing.T) {
 
 func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
 	stubNoEpics(t)
+	stubApproveBeads(t)
 	root := testRepo(t)
 	specID := "005-artifact-check"
 
@@ -465,6 +480,7 @@ func TestValidateFromWorktree(t *testing.T) {
 
 func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 	stubNoEpics(t)
+	stubApproveBeads(t)
 	root := testRepo(t)
 	specID := "006-plan-artifact"
 

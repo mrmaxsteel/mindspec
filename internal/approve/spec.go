@@ -22,6 +22,13 @@ import (
 // specRunBDFn is a package-level variable for testability.
 var specRunBDFn = bead.RunBD
 
+// SetSpecRunBDForTest swaps specRunBDFn for testing and returns a restore function.
+func SetSpecRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
+	orig := specRunBDFn
+	specRunBDFn = fn
+	return func() { specRunBDFn = orig }
+}
+
 // SpecResult holds the result of spec approval.
 type SpecResult struct {
 	SpecID   string

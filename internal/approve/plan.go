@@ -27,6 +27,20 @@ var planRunBDCombinedFn = bead.RunBDCombined
 // planRunBDFn is for JSON-returning bd commands (stdout only, no stderr mixing).
 var planRunBDFn = bead.RunBD
 
+// SetPlanRunBDForTest swaps planRunBDFn for testing and returns a restore function.
+func SetPlanRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
+	orig := planRunBDFn
+	planRunBDFn = fn
+	return func() { planRunBDFn = orig }
+}
+
+// SetPlanRunBDCombinedForTest swaps planRunBDCombinedFn for testing and returns a restore function.
+func SetPlanRunBDCombinedForTest(fn func(args ...string) ([]byte, error)) func() {
+	orig := planRunBDCombinedFn
+	planRunBDCombinedFn = fn
+	return func() { planRunBDCombinedFn = orig }
+}
+
 // PlanResult holds the result of plan approval.
 type PlanResult struct {
 	SpecID   string
