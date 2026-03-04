@@ -2,7 +2,7 @@
 adr_citations: []
 approved_at: "2026-03-04T17:05:19Z"
 approved_by: user
-bead_ids: []
+bead_ids: ["mindspec-frlj.1", "mindspec-frlj.2"]
 last_updated: "2026-03-04"
 spec_id: 070-sandbox-beads-isolation
 status: Approved
