@@ -343,23 +343,6 @@ func TestRecordingDir_WorktreeAware(t *testing.T) {
 	}
 }
 
-func TestLifecyclePath_WorktreeAware(t *testing.T) {
-	root := t.TempDir()
-
-	// Create spec dir only in worktree
-	specID := "044-launch-website"
-	wtSpec := filepath.Join(root, ".worktrees", "worktree-spec-"+specID, ".mindspec", "docs", "specs", specID)
-	if err := os.MkdirAll(wtSpec, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LifecyclePath(root, specID)
-	want := filepath.Join(wtSpec, "lifecycle.yaml")
-	if got != want {
-		t.Errorf("LifecyclePath worktree: got %q, want %q", got, want)
-	}
-}
-
 func TestFindLocalRoot_ReturnsWorktreeDir(t *testing.T) {
 	// FindLocalRoot should return the worktree directory itself, NOT the main repo.
 	mainRepo := t.TempDir()

@@ -129,7 +129,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		// Step 2: Query ready work (scoped to spec's epic if available)
 		var items []next.BeadInfo
 		if specFlag != "" {
-			// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+			// Find epic via beads metadata query (ADR-0023).
 			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
 			if epicErr == nil && epicID != "" {
 				items, err = next.QueryReadyForEpic(epicID)

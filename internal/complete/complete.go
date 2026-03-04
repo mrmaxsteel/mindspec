@@ -303,9 +303,6 @@ func isIgnorableStateChange(statusLine string) bool {
 	if strings.Contains(path, "/recording/") {
 		return true
 	}
-	if strings.HasSuffix(path, "/lifecycle.yaml") && strings.Contains(path, ".mindspec/docs/specs/") {
-		return true
-	}
 	return false
 }
 
@@ -315,7 +312,7 @@ func advanceState(specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+	// Find epic via beads metadata query (ADR-0023).
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
 		return state.ModeIdle, ""

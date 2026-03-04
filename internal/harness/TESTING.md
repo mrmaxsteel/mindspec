@@ -52,7 +52,7 @@ Every LLM test must follow these rules. Violating them produces tautological tes
 
 - **Config**: `.mindspec/config.yaml` with appropriate `agent_hooks` setting
 - **Hooks**: `setupClaudeForSandbox()` installs CLAUDE.md, `.claude/settings.json`, slash commands
-- **State files**: `.mindspec/focus`, `.mindspec/session.json`, lifecycle.yaml
+- **State files**: `.mindspec/session.json` (lifecycle state derived from beads per ADR-0023)
 - **Beads**: Real beads via `sandbox.CreateBead()` / `sandbox.ClaimBead()`
 - **Specs/plans**: Pre-written and pre-approved if the scenario starts mid-lifecycle
 - **Worktrees**: Created if the scenario starts in a worktree context
@@ -578,7 +578,6 @@ sandbox.CreateBead(title, issueType, parentID) string  // Create real beads issu
 sandbox.ClaimBead(beadID)                                // Set to in_progress
 sandbox.WriteFile(relPath, content)                      // Write file in sandbox
 sandbox.WriteFocus(content)                              // Write .mindspec/focus
-sandbox.WriteLifecycle(specID, content)                  // Write lifecycle.yaml
 sandbox.Commit(msg)                                      // git add -A && commit
 sandbox.FileExists(relPath) bool                         // Check file exists
 sandbox.ReadFile(relPath) string                         // Read file content

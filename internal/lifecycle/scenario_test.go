@@ -459,8 +459,6 @@ func TestValidateFromWorktree(t *testing.T) {
 	must(t, os.MkdirAll(wtSpecDir, 0o755))
 	must(t, os.WriteFile(filepath.Join(wtSpecDir, "spec.md"),
 		[]byte(validSpecMD(specID)), 0o644))
-	must(t, os.WriteFile(filepath.Join(wtSpecDir, "lifecycle.yaml"),
-		[]byte("phase: spec\n"), 0o644))
 
 	// Validate spec should find it via worktree-aware SpecDir
 	result := validate.ValidateSpec(root, specID)

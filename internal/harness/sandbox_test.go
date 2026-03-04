@@ -137,18 +137,6 @@ func TestSandboxWriteFocusIsNoOp(t *testing.T) {
 	}
 }
 
-func TestSandboxWriteLifecycleIsNoOp(t *testing.T) {
-	s := NewSandbox(t)
-
-	// WriteLifecycle is a no-op after ADR-0023
-	s.WriteLifecycle("001-test", "phase: spec\nepic_id: mindspec-abc\n")
-
-	// lifecycle.yaml should NOT be created
-	if s.FileExists(".mindspec/docs/specs/001-test/lifecycle.yaml") {
-		t.Error("lifecycle.yaml should not be created (ADR-0023)")
-	}
-}
-
 func TestSandboxListWorktreesExcludesMainAcrossPathAliases(t *testing.T) {
 	s := NewSandbox(t)
 

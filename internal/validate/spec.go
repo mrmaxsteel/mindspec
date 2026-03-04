@@ -186,7 +186,7 @@ func checkLifecycleBinding(r *Result, root, specID string) {
 		r.AddWarning("lifecycle-binding", "spec has no beads epic; run spec approve to create one")
 	}
 
-	// Detect stale lifecycle.yaml files (ADR-0023 migration).
+	// Detect stale lifecycle.yaml files from pre-ADR-0023 repos.
 	specDir := workspace.SpecDir(root, specID)
 	lcPath := filepath.Join(specDir, "lifecycle.yaml")
 	if _, statErr := os.Stat(lcPath); statErr == nil {
@@ -195,7 +195,7 @@ func checkLifecycleBinding(r *Result, root, specID string) {
 }
 
 func checkSpecApprovalGateConsistency(specID string) {
-	// ADR-0023: derive phase from beads, not lifecycle.yaml.
+	// Derive phase from beads (ADR-0023).
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil {
 		// No epic → can't check gate consistency

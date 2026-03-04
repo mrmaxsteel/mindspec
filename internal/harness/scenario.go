@@ -122,8 +122,6 @@ spec_id: `+specID+`
 ## Bead 1: Implement greeting
 Create greeting.go with a Greet function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.Commit("setup: pre-approved spec and plan")
 
 			// Start in a valid implement context with an active bead worktree.
@@ -214,8 +212,6 @@ Create formatter.go that formats Messages.
 ## Bead 3: Tests (depends on Bead 2)
 Create formatter_test.go with tests.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.Commit("setup: multi-bead spec")
 
 			// Create spec branch, bead branch, and bead worktree
@@ -271,8 +267,6 @@ spec_id: `+specID+`
 ## Bead 1: Implement feature
 Create feature.go with a Feature function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			// main.go with a bug lives on main (inherited by branches)
 			sandbox.WriteFile("main.go", `package main
 
@@ -350,8 +344,6 @@ spec_id: `+specID+`
 ## Bead 1: Implement process
 Create partial.go with a Process function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.Commit("setup: spec and plan")
 
 			// Create spec branch, bead branch, and bead worktree
@@ -457,7 +449,7 @@ func ScenarioSpecApprove() Scenario {
 			mustRunGit(sandbox, "worktree", "add", wtDir, specBranch)
 
 			// Create epic for lifecycle
-			epicID := sandbox.CreateSpecEpic(specID)
+			_ = sandbox.CreateSpecEpic(specID)
 
 			// Write spec file in the worktree — must pass ValidateSpec
 			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -497,9 +489,6 @@ None applicable.
 ## Approval
 Pending.
 `)
-			// Write lifecycle in worktree
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: spec\nepic_id: %s\n", epicID))
 
 			// Commit in the worktree
 			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
@@ -622,11 +611,6 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 
 **Depends on**: Bead 1
 `)
-			// Write lifecycle in plan phase
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: plan\nepic_id: %s\n", epicID))
-
-			// Set focus to plan mode
 
 			// Commit in worktree
 			mustRunGit(sandbox, "-C", wtDir, "add", "-A")
@@ -721,8 +705,6 @@ bead_ids:
 ## Bead 1: Implement feature
 Create done.go.
 `, specID, beadID))
-			sandbox.WriteFile(wtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: review\nepic_id: %s\n", epicID))
 
 			// Write actual implementation file in the worktree
 			sandbox.WriteFile(wtDir+"/done.go", `package main
@@ -808,8 +790,6 @@ status: Approved
 ---
 # Status Feature
 `)
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
 			mustRunGit(sandbox, "-C", specWtDir, "commit", "-m", "setup: spec files")
 
@@ -819,7 +799,6 @@ status: Approved
 			beadWtDir := ".worktrees/worktree-" + beadID
 			mustRunGit(sandbox, "worktree", "add", beadWtDir, beadBranch)
 
-			// Set focus to implement mode with bead worktree
 			sandbox.Commit("setup: implement mode with active bead")
 			mainCount := mustRun(sandbox.t, sandbox.Root, "git", "rev-list", "--count", "main")
 			sandbox.WriteFile(".harness/main_commit_count", strings.TrimSpace(mainCount))
@@ -923,11 +902,9 @@ spec_id: 001-alpha
 ## Bead 1: Implement greeting
 Create greeting.go with a Greet function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicAlpha))
 
 			// --- Spec 002-beta: plan mode (no beads yet) ---
-			epicBeta := sandbox.CreateSpecEpic("002-beta")
+			_ = sandbox.CreateSpecEpic("002-beta")
 			sandbox.WriteFile(".mindspec/docs/specs/002-beta/spec.md", `---
 title: Beta Feature
 status: Approved
@@ -942,8 +919,6 @@ spec_id: 002-beta
 # Plan — Draft
 TBD
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/002-beta/lifecycle.yaml",
-				fmt.Sprintf("phase: plan\nepic_id: %s\n", epicBeta))
 
 			// Establish an active bead worktree for 001-alpha so implementation
 			// does not start on main, while still requiring --spec disambiguation.
@@ -1032,8 +1007,6 @@ spec_id: `+specID+`
 ## Bead 1: Implement widget
 Create widget.go with a Widget function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 			sandbox.Commit("setup: spec and plan")
 
 			// Create spec branch and bead branch (but NO worktree — that's the test)
@@ -1091,11 +1064,9 @@ Finish the bead through the MindSpec lifecycle when done.`,
 
 // ScenarioCompleteFromSpecWorktree reproduces the bug where `mindspec complete`
 // fails when the agent's CWD is the spec worktree (.worktrees/worktree-spec-XXX/)
-// instead of the nested bead worktree. The root cause: lifecycle.yaml only exists
-// in the spec worktree, but ActiveSpecs() scans the main repo root and finds nothing,
-// returning "no active specs found".
+// instead of the nested bead worktree.
 //
-// Before: spec worktree with lifecycle.yaml + bead worktree with committed code,
+// Before: spec worktree + bead worktree with committed code,
 //
 //	implement mode, agent CWD is the spec worktree (not bead worktree)
 //
@@ -1136,8 +1107,6 @@ spec_id: %s
 ## Bead 1: Implement greeting
 Create greeting.go with a Greet function.
 `, specID))
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 
 			// Commit in spec worktree
 			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
@@ -1247,8 +1216,6 @@ Pending.
 
 None.
 `, specID, specID))
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				"phase: spec\n")
 
 			// Commit in spec worktree
 			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
@@ -1282,7 +1249,7 @@ func ScenarioApprovePlanFromWorktree() Scenario {
 			specBranch := "spec/" + specID
 
 			// Create epic for bead parenting
-			epicID := sandbox.CreateSpecEpic(specID)
+			_ = sandbox.CreateSpecEpic(specID)
 
 			// Create spec branch and worktree
 			mustRunGit(sandbox, "branch", specBranch)
@@ -1353,9 +1320,6 @@ None
 |:-|:-|:-|
 | Greet("World") returns "Hello, World!" | Bead 1 | greeting_test.go |
 `, specID, specID))
-
-			sandbox.WriteFile(specWtDir+"/.mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: plan\nepic_id: %s\n", epicID))
 
 			// Commit in spec worktree
 			mustRunGit(sandbox, "-C", specWtDir, "add", "-A")
@@ -1549,8 +1513,6 @@ Create core.go with a Core() function.
 ## Bead 2: Extension (depends on Bead 1)
 Create extension.go that uses Core().
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/lifecycle.yaml",
-				fmt.Sprintf("phase: implement\nepic_id: %s\n", epicID))
 
 			// Set up spec branch + bead worktree
 			mustRunGit(sandbox, "branch", specBranch)

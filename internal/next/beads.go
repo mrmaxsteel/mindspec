@@ -141,7 +141,7 @@ func filterReadyItems(items []BeadInfo) []BeadInfo {
 // beads for the spec's epic and then finding in-progress children.
 // Returns empty string (no error) if no bead is in progress.
 func ResolveActiveBead(root, specID string) (string, error) {
-	// ADR-0023: find epic via beads metadata query (not lifecycle.yaml).
+	// Find epic via beads metadata query (ADR-0023).
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
 		return "", nil

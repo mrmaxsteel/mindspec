@@ -20,7 +20,7 @@ import (
 var instructCmd = &cobra.Command{
 	Use:   "instruct",
 	Short: "Emit agent instructions for the current mode and active work",
-	Long: `Derives mode from lifecycle.yaml and emits mode-appropriate operating
+	Long: `Derives mode from beads state (ADR-0023) and emits mode-appropriate operating
 guidance for agent consumption.
 
 If --spec is omitted and exactly one active spec exists, it is auto-selected.

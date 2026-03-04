@@ -18,7 +18,6 @@ type SpecStatus struct {
 }
 
 // ActiveSpecs discovers all specs with active lifecycles by querying beads for open epics.
-// ADR-0023: lifecycle phase is derived from beads state, not lifecycle.yaml files.
 // Returns specs sorted by spec ID for deterministic output.
 func ActiveSpecs(root string) ([]SpecStatus, error) {
 	activeSpecs, err := phase.DiscoverActiveSpecs()
@@ -41,7 +40,6 @@ func ActiveSpecs(root string) ([]SpecStatus, error) {
 }
 
 // ResolveMode returns the current lifecycle phase for a spec by querying beads.
-// ADR-0023: derived from beads state, not lifecycle.yaml.
 // Returns ModeIdle if no epic exists for the spec.
 func ResolveMode(root, specID string) (string, error) {
 	epicID, err := phase.FindEpicBySpecID(specID)

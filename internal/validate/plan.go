@@ -110,7 +110,7 @@ func checkPlanApprovalGateConsistency(r *Result, specID string, fm *PlanFrontmat
 		return
 	}
 
-	// ADR-0023: derive lifecycle phase from beads, not lifecycle.yaml.
+	// Derive lifecycle phase from beads (ADR-0023).
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil {
 		return // no epic → skip check

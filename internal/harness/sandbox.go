@@ -318,14 +318,6 @@ func (s *Sandbox) WriteFocus(content string) {
 	// State is derived from beads.
 }
 
-// WriteLifecycle is deprecated. Lifecycle files are no longer used (ADR-0023).
-// Kept as a no-op for backward compatibility with scenario setup code.
-func (s *Sandbox) WriteLifecycle(specID, content string) {
-	s.t.Helper()
-	// No-op: lifecycle.yaml is no longer written (ADR-0023).
-	// State is derived from beads.
-}
-
 // initBeads runs bd init in sandbox mode within the given root directory.
 // Uses --server-port 0 so dolt picks a random free port (avoids collisions
 // between parallel test sandboxes and the main project's dolt server).
