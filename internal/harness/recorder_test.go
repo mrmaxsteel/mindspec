@@ -109,7 +109,7 @@ func TestRecorderShimCapturesInvocation(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeShim(binDir, logPath, "echo", echoPath); err != nil {
+	if err := writeShim(binDir, logPath, "echo", echoPath, "/nonexistent/mindspec", os.Getenv("PATH")); err != nil {
 		t.Fatalf("writeShim: %v", err)
 	}
 

@@ -31,7 +31,6 @@ Ask which scenario if they choose option 1 or 4.
 ### Before running any test:
 ```bash
 make build                    # CRITICAL — tests use ./bin/mindspec via shims
-bd dolt killall 2>/dev/null   # Kill orphan dolt servers
 ```
 
 ### Running a test:
@@ -102,6 +101,5 @@ git push
 
 - `env -u CLAUDECODE` is REQUIRED for all test runs
 - `make build` before testing — the shims call ./bin/mindspec
-- Kill dolt orphans before testing: `bd dolt killall`
 - Haiku prompts must be imperative or the agent responds conversationally
 - Always check SingleBead still passes after changing shared infrastructure

@@ -324,6 +324,22 @@ func TestSkipNext_CommitOutsideLifecycleTurnViolation(t *testing.T) {
 	}
 }
 
+func TestSkipNext_ImplementPhaseCommitNoViolation(t *testing.T) {
+	// Agent in implement phase (recorded by shim via mindspec state show).
+	// Git commits in implement phase are legitimate — no skip_next violation.
+	events := []ActionEvent{
+		{ActionType: "command", Command: "git", Phase: "implement",
+			ArgsList: []string{"commit", "-m", "impl: add greeting feature"}},
+		{ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"complete", "done"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for commit in implement phase, got %d: %v", len(results), results)
+	}
+}
+
 func TestSkipComplete_NoViolation(t *testing.T) {
 	events := []ActionEvent{
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
