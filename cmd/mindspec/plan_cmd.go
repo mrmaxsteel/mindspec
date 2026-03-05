@@ -76,8 +76,8 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 	if !noNext {
 		fmt.Println("--- Claiming next bead ---")
 		fmt.Println()
-		nextCmd.Flags().Set("spec", specID)
-		nextCmd.Flags().Set("force", "true")
+		_ = nextCmd.Flags().Set("spec", specID)
+		_ = nextCmd.Flags().Set("force", "true")
 		if nextErr := nextCmd.RunE(nextCmd, nil); nextErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: auto-next failed: %v\n", nextErr)
 			fmt.Fprintf(os.Stderr, "Run `mindspec next --spec %s` manually to claim work.\n", specID)
