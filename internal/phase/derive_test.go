@@ -126,6 +126,9 @@ func TestSpecIDFromMetadata(t *testing.T) {
 		{1, "init", "001-init"},
 		{999, "big-number", "999-big-number"},
 		{0, "zero", "000-zero"},
+		{73, "Llm Test Coverage", "073-llm-test-coverage"},
+		{72, "Hook Cleanup", "072-hook-cleanup"},
+		{1, "Multi Word Slug", "001-multi-word-slug"},
 	}
 
 	for _, tt := range tests {

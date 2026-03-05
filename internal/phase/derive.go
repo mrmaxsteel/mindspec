@@ -63,8 +63,10 @@ type Context struct {
 }
 
 // SpecIDFromMetadata constructs a spec ID from num and title.
+// The title is slugified (lowercased, spaces→hyphens) to match the spec ID format.
 func SpecIDFromMetadata(specNum int, specTitle string) string {
-	return fmt.Sprintf("%03d-%s", specNum, specTitle)
+	slug := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(specTitle), " ", "-"))
+	return fmt.Sprintf("%03d-%s", specNum, slug)
 }
 
 // DerivePhase determines the lifecycle phase from an epic's status and children statuses.
