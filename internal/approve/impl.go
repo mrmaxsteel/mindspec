@@ -86,7 +86,21 @@ func ApproveImpl(root, specID string, opts ...ImplOpts) (*ImplResult, error) {
 		}
 		// Mark epic as explicitly done so phase derivation distinguishes
 		// impl-approved closure from beads auto-close (molecule completion).
-		if _, err := implRunBDCombinedFn("update", epicID, "--metadata", `{"mindspec_done":true}`); err != nil {
+		// Read existing metadata first and merge to avoid clobbering spec_num/spec_title.
+		doneMetadata := `{"mindspec_done":true}`
+		if out, err := implRunBDFn("show", epicID, "--json"); err == nil {
+			var items []struct {
+				Metadata map[string]interface{} `json:"metadata"`
+			}
+			if json.Unmarshal(out, &items) == nil && len(items) > 0 && items[0].Metadata != nil {
+				merged := items[0].Metadata
+				merged["mindspec_done"] = true
+				if b, err := json.Marshal(merged); err == nil {
+					doneMetadata = string(b)
+				}
+			}
+		}
+		if _, err := implRunBDCombinedFn("update", epicID, "--metadata", doneMetadata); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not set done marker on epic %s: %v", epicID, err))
 		}
 	}

@@ -168,13 +168,13 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 		if phase == state.ModeDone {
 			continue // spec lifecycle complete, not active
 		}
-		// Closed epic with no children is an orphan (e.g. stale test artifact
-		// or epic created but plan never approved). Not active.
-		if strings.EqualFold(epic.Status, "closed") {
-			children := queryChildren(epic.ID)
-			if len(children) == 0 {
-				continue
-			}
+		// Epic with no children is an orphan (e.g. stale test artifact,
+		// or epic created but plan never approved/beads never created).
+		// DerivePhaseFromChildren returns "plan" for these, but they're
+		// not actually active work. Skip them.
+		children := queryChildren(epic.ID)
+		if len(children) == 0 {
+			continue
 		}
 
 		active = append(active, ActiveSpec{
