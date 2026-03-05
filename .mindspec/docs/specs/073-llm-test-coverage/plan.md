@@ -83,8 +83,8 @@ ADR-0023 (beads-based phase derivation) is the primary touchpoint. The `skip_nex
 3. Compare pass count vs baseline (11/18 from 2026-03-04)
 
 **Verification**
+- [ ] `env -u CLAUDECODE go test ./internal/harness/ -v -run '^TestLLM_' -timeout 180m -count=1` — full suite pass count >= 14/18
 - [ ] TESTING.md updated with new history rows for each changed scenario
-- [ ] At least 14/18 pass (3+ improvement over baseline)
 - [ ] No regressions in previously-passing scenarios
 
 **Depends on**: Bead 1, Bead 2, Bead 3, Bead 4
