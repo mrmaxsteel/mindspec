@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -417,12 +416,6 @@ func (f *fakeTB) Logf(format string, args ...interface{}) {}
 func TestInstructPhaseDetection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping instruct test in short mode (requires beads + mindspec binary)")
-	}
-	if _, err := exec.LookPath("mindspec"); err != nil {
-		t.Skip("skipping: mindspec binary not in PATH")
-	}
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("skipping: bd binary not in PATH")
 	}
 
 	// parseInstructJSON extracts mode (or "redirect") from mindspec instruct JSON output.
