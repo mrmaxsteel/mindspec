@@ -12,8 +12,8 @@ You are not currently working on any spec or bead.
 |-------|---------|--------------|
 | idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
-| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
-| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-claims first bead |
+| per bead | `mindspec next` | Claims next bead, creates bead worktree |
 | bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 

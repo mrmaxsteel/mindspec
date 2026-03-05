@@ -38,6 +38,7 @@ var approveImplCmd = &cobra.Command{
 func init() {
 	approveSpecCmd.Flags().String("approved-by", "user", "Identity of the approver")
 	approvePlanCmd.Flags().String("approved-by", "user", "Identity of the approver")
+	approvePlanCmd.Flags().Bool("no-next", false, "Approve without auto-claiming the first bead")
 	approveCmd.AddCommand(approveSpecCmd)
 	approveCmd.AddCommand(approvePlanCmd)
 	approveCmd.AddCommand(approveImplCmd)

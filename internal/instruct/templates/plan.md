@@ -15,8 +15,8 @@ idle ── spec ──── >>> plan ── implement ── review ── idl
 |-------|---------|--------------|
 | idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
-| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-commits |
-| per bead | `mindspec next` | Claims bead, creates bead worktree |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-claims first bead |
+| per bead | `mindspec next` | Claims next bead, creates bead worktree |
 | bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 
@@ -91,8 +91,8 @@ Required plan sections:
 ## Next Action
 {{- if .PlanApproved}}
 
-Plan is approved. Commit approval artifacts first, then run `mindspec next` to claim the first bead and enter Implementation Mode. `mindspec next` requires a clean working tree and will fail on uncommitted changes. Do NOT manually set state to implement — `mindspec next` handles bead selection and state transition together.
+Plan is approved. Run `mindspec next` to claim the next bead.
 {{- else}}
 
-Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`.
+Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. This will approve the plan AND automatically claim the first bead.
 {{- end}}

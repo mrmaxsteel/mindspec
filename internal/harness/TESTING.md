@@ -233,6 +233,9 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-05 | PASS | 1386 | 6 | 1m48s | Targeted rerun: 100% fwd ratio. No regressions. |
 | 2026-03-05 | PASS | 971 | 6 | 2m18s | Spec 072 worktree run: 100% fwd ratio. Clean pass — instruct, commit, complete all succeeded. |
 | 2026-03-05 | PASS | 814 | 5 | 93.49s | Spec 073 validation full-suite: stable. |
+| 2026-03-05 | PASS | 992 | 3 | 96.13s | Targeted rerun: 100% fwd ratio. Stable. |
+| 2026-03-05 | 2/2 PASS | 992 | 3 | 87-116s | Parallel reliability run: consistent 3 turns, 992 events, 100% fwd ratio across both. |
+| 2026-03-05 | 5/5 PASS | 803-1332 | 3-6 | 78-130s | 5x parallel reliability: 3/5 at 100% fwd, 2/5 had 1 retry (83%/80% fwd). Median 3 turns, 992 events. |
 
 ### TestLLM_SpecToIdle
 
@@ -262,6 +265,8 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-04 | FAIL | 7548 | 39 | 344.53s | Full-suite rerun: `mindspec complete` never succeeded (skip_complete). 89.7% fwd ratio. |
 | 2026-03-04 | FAIL | 5993 | 35 | 10m18s | setupWorktrees refactor full-suite: agent skipped `mindspec complete` (wrote code after `mindspec next` but never completed). 82.9% fwd ratio. Pre-existing haiku behavior, not a regression. |
 | 2026-03-05 | FAIL | 1361 | 31 | 6m10s | Spec 073 validation: `mindspec complete` never succeeded. Pre-existing. |
+| 2026-03-05 | FAIL | 1199 | 27 | 260.15s | Targeted rerun: agent completed lifecycle via raw git (merge+cleanup) but `mindspec complete` never called. 59.3% fwd ratio (16 fwd / 11 retry). Pre-existing. |
+| 2026-03-05 | **PASS** | 1399 | 12 | 221.70s | **Sonnet model**: full lifecycle completed incl. `mindspec impl approve`. 41.7% fwd ratio (5 fwd / 7 retry). Sonnet retains lifecycle commands in context where Haiku loses them. |
 
 ### TestLLM_AbandonSpec
 
