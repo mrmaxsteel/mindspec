@@ -44,7 +44,47 @@ func InstallPreCommit(root string) error {
 	return os.WriteFile(hookPath, []byte(preCommitScript), 0755)
 }
 
-// InstallAll installs all MindSpec git hooks.
+// InstallAll installs all MindSpec git hooks and cleans stale artifacts.
 func InstallAll(root string) error {
-	return InstallPreCommit(root)
+	if err := InstallPreCommit(root); err != nil {
+		return err
+	}
+	CleanStaleGitHooks(root)
+	return nil
+}
+
+// retiredHooks lists git hook files that MindSpec previously installed but no longer uses.
+var retiredHooks = []string{"post-checkout"}
+
+// CleanStaleGitHooks removes backup files and retired hooks left by previous MindSpec versions.
+// Stale artifacts: *.backup, *.pre-mindspec, and hooks listed in retiredHooks.
+func CleanStaleGitHooks(root string) {
+	hooksDir := filepath.Join(root, ".git", "hooks")
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		return // no hooks dir — nothing to clean
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		remove := false
+		if strings.HasSuffix(name, ".backup") || strings.HasSuffix(name, ".pre-mindspec") {
+			remove = true
+		}
+		for _, retired := range retiredHooks {
+			if name == retired {
+				// Only remove if it's a MindSpec hook (contains our marker)
+				data, err := os.ReadFile(filepath.Join(hooksDir, name))
+				if err == nil && strings.Contains(string(data), "MindSpec") {
+					remove = true
+				}
+			}
+		}
+		if remove {
+			os.Remove(filepath.Join(hooksDir, name))
+		}
+	}
 }
