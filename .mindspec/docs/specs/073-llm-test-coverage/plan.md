@@ -3,7 +3,9 @@ status: Draft
 spec_id: 073-llm-test-coverage
 version: "1"
 last_updated: "2026-03-05"
-adr_citations: [ADR-0023]
+adr_citations:
+  - id: ADR-0023
+    sections: [Bead 1, Bead 2]
 ---
 # Plan: 073-llm-test-coverage — Improve LLM test coverage and iteration
 
