@@ -42,6 +42,16 @@
 {"created_at":"2026-03-04T17:05:30Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-frlj","issue_id":"mindspec-frlj.1","type":"parent-child"}
 {"created_at":"2026-03-04T17:05:30Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-frlj","issue_id":"mindspec-frlj.2","type":"parent-child"}
 {"created_at":"2026-03-03T09:19:45Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-d5lm","issue_id":"mindspec-hyzh","type":"blocks"}
+{"created_at":"2026-03-05T09:15:25Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj","issue_id":"mindspec-jfgj.1","type":"parent-child"}
+{"created_at":"2026-03-05T09:15:27Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj","issue_id":"mindspec-jfgj.2","type":"parent-child"}
+{"created_at":"2026-03-05T09:15:38Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj.1","issue_id":"mindspec-jfgj.2","type":"blocks"}
+{"created_at":"2026-03-05T09:15:30Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj","issue_id":"mindspec-jfgj.3","type":"parent-child"}
+{"created_at":"2026-03-05T09:15:31Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj","issue_id":"mindspec-jfgj.4","type":"parent-child"}
+{"created_at":"2026-03-05T09:15:33Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj","issue_id":"mindspec-jfgj.5","type":"parent-child"}
+{"created_at":"2026-03-05T09:15:38Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj.1","issue_id":"mindspec-jfgj.5","type":"blocks"}
+{"created_at":"2026-03-05T09:15:38Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj.2","issue_id":"mindspec-jfgj.5","type":"blocks"}
+{"created_at":"2026-03-05T09:15:38Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj.3","issue_id":"mindspec-jfgj.5","type":"blocks"}
+{"created_at":"2026-03-05T09:15:38Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-jfgj.4","issue_id":"mindspec-jfgj.5","type":"blocks"}
 {"created_at":"2026-03-03T23:01:03Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-l8s9","issue_id":"mindspec-l8s9.1","type":"parent-child"}
 {"created_at":"2026-02-26T08:15:08Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-mol-7d0","issue_id":"mindspec-mol-19e","type":"parent-child"}
 {"created_at":"2026-02-26T08:15:08Z","created_by":"mrmaxsteel","depends_on_id":"mindspec-mol-otu","issue_id":"mindspec-mol-19e","type":"blocks"}

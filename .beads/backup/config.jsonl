@@ -1,4 +1,5 @@
 {"key":"auto_compact_enabled","value":"false"}
+{"key":"backup.enabled","value":"false"}
 {"key":"compact_batch_size","value":"50"}
 {"key":"compact_parallel_workers","value":"5"}
 {"key":"compact_tier1_days","value":"30"}
