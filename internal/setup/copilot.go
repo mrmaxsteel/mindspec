@@ -181,30 +181,8 @@ func copilotHooksConfig() map[string]any {
 			"sessionStart": []map[string]any{
 				{
 					"type":       "command",
-					"bash":       `source=$(cat | jq -r '.source // "unknown"'); mindspec state write-session --source="$source" 2>/dev/null; mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'`,
+					"bash":       "mindspec hook session-start --format copilot",
 					"timeoutSec": 10,
-				},
-			},
-			"preToolUse": []map[string]any{
-				{
-					"type":       "command",
-					"bash":       "mindspec hook worktree-file --format copilot",
-					"timeoutSec": 5,
-				},
-				{
-					"type":       "command",
-					"bash":       "mindspec hook worktree-bash --format copilot",
-					"timeoutSec": 5,
-				},
-				{
-					"type":       "command",
-					"bash":       "mindspec hook needs-clear --format copilot",
-					"timeoutSec": 5,
-				},
-				{
-					"type":       "command",
-					"bash":       "mindspec hook workflow-guard --format copilot",
-					"timeoutSec": 5,
 				},
 			},
 		},

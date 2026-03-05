@@ -154,6 +154,12 @@ func ensureSettings(root string, check bool, r *Result) error {
 			hooks[event] = existing
 		}
 
+		// Remove stale PreToolUse entries that reference mindspec commands.
+		// These guard hooks were removed in spec-072.
+		if cleaned := removeStalePreToolUse(hooks); cleaned {
+			anyChanged = true
+		}
+
 		if !anyChanged {
 			r.Skipped = append(r.Skipped, relPath)
 			return nil
@@ -201,80 +207,8 @@ func wantedHooks() map[string][]map[string]any {
 				"hooks": []map[string]any{
 					{
 						"type":          "command",
-						"command":       "source=$(cat | jq -r '.source // \"unknown\"'); mindspec state write-session --source=\"$source\" 2>/dev/null; mindspec instruct 2>/dev/null || echo 'mindspec instruct unavailable — run make build'",
+						"command":       "mindspec hook session-start",
 						"statusMessage": "Loading mode guidance...",
-					},
-				},
-			},
-		},
-		"PreToolUse": {
-			{
-				"matcher": "ExitPlanMode",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook plan-gate-exit",
-						"statusMessage": "Checking MindSpec plan gate...",
-					},
-				},
-			},
-			{
-				"matcher": "EnterPlanMode",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook plan-gate-enter",
-						"statusMessage": "Checking MindSpec plan gate...",
-					},
-				},
-			},
-			{
-				"matcher": "Write",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook worktree-file",
-						"statusMessage": "Checking worktree enforcement...",
-					},
-					{
-						"type":          "command",
-						"command":       "mindspec hook workflow-guard",
-						"statusMessage": "Checking workflow guard...",
-					},
-				},
-			},
-			{
-				"matcher": "Edit",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook worktree-file",
-						"statusMessage": "Checking worktree enforcement...",
-					},
-					{
-						"type":          "command",
-						"command":       "mindspec hook workflow-guard",
-						"statusMessage": "Checking workflow guard...",
-					},
-				},
-			},
-			{
-				"matcher": "Bash",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook worktree-bash",
-						"statusMessage": "Checking worktree enforcement...",
-					},
-					{
-						"type":          "command",
-						"command":       "mindspec hook needs-clear",
-						"statusMessage": "Checking context clear gate...",
-					},
-					{
-						"type":          "command",
-						"command":       "mindspec hook workflow-guard",
-						"statusMessage": "Checking workflow guard...",
 					},
 				},
 			},
@@ -348,6 +282,55 @@ func replaceHookEntry(existing []any, entry map[string]any) []any {
 		}
 	}
 	return append(existing, entry)
+}
+
+// removeStalePreToolUse removes PreToolUse entries that reference mindspec
+// hook commands. Returns true if any entries were removed.
+func removeStalePreToolUse(hooks map[string]any) bool {
+	preToolUse, ok := hooks["PreToolUse"].([]any)
+	if !ok || len(preToolUse) == 0 {
+		return false
+	}
+
+	var kept []any
+	for _, entry := range preToolUse {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			kept = append(kept, entry)
+			continue
+		}
+		if isMindspecHookEntry(m) {
+			continue // drop it
+		}
+		kept = append(kept, entry)
+	}
+
+	if len(kept) == len(preToolUse) {
+		return false // nothing removed
+	}
+
+	if len(kept) == 0 {
+		delete(hooks, "PreToolUse")
+	} else {
+		hooks["PreToolUse"] = kept
+	}
+	return true
+}
+
+// isMindspecHookEntry returns true if a hook entry references a mindspec command.
+func isMindspecHookEntry(entry map[string]any) bool {
+	hooksList, _ := entry["hooks"].([]any)
+	for _, h := range hooksList {
+		hm, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, _ := hm["command"].(string)
+		if strings.Contains(cmd, "mindspec hook") || strings.Contains(cmd, "mindspec instruct") {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureClaudeMD creates or appends MindSpec block to CLAUDE.md.

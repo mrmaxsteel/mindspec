@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/mindspec/mindspec/internal/hook"
@@ -13,10 +14,9 @@ var hookFormat string
 
 var hookCmd = &cobra.Command{
 	Use:   "hook <name>",
-	Short: "Run a PreToolUse hook by name",
-	Long: `Run a MindSpec PreToolUse hook. Reads tool context from stdin (JSON),
-checks workflow state, and emits the appropriate response for the caller's
-protocol (Claude Code or Copilot, auto-detected from stdin format).
+	Short: "Run a hook by name",
+	Long: `Run a MindSpec hook. Reads context from stdin (JSON) or environment,
+checks workflow state, and emits the appropriate response.
 
 Use --list to see available hook names.
 Use --format to override protocol auto-detection.`,
@@ -41,26 +41,28 @@ Use --format to override protocol auto-detection.`,
 
 		inp, proto, err := hook.ParseInput(os.Stdin)
 		if err != nil {
-			// Graceful: parse errors are not fatal, treat as empty input
 			inp = &hook.Input{}
 		}
 
-		// Override protocol if --format is set
 		switch hookFormat {
 		case "claude":
 			proto = hook.ProtocolClaude
 		case "copilot":
 			proto = hook.ProtocolCopilot
 		case "":
-			// auto-detect (already set by ParseInput)
+			// auto-detect
 		default:
 			return fmt.Errorf("unknown format %q (use claude or copilot)", hookFormat)
 		}
 
-		st := hook.ReadState()
-		enforce := hook.EnforcementEnabled()
+		// session-start is special: it writes session metadata and
+		// runs instruct, rather than the pass/block/warn pattern.
+		if name == "session-start" {
+			return runSessionStartHook(inp)
+		}
 
-		result := hook.Run(name, inp, st, enforce)
+		st := hook.ReadState()
+		result := hook.Run(name, inp, st, true)
 		code := hook.Emit(result, proto)
 		if code != 0 {
 			os.Exit(code)
@@ -78,9 +80,48 @@ func isValidHook(name string) bool {
 	return false
 }
 
+// runSessionStartHook handles the session-start hook:
+// 1. Writes session metadata (source + timestamp) from stdin JSON
+// 2. Runs `mindspec instruct` and prints its output
+func runSessionStartHook(inp *hook.Input) error {
+	// Extract source from stdin JSON (Claude Code sends {"source": "startup|clear|resume|compact"})
+	source := "unknown"
+	if inp.Raw != nil {
+		if s, ok := inp.Raw["source"].(string); ok && s != "" {
+			source = s
+		}
+	}
+
+	// Find root for running commands
+	root, err := findRoot()
+	if err != nil {
+		// Can't find root — still try instruct
+		fmt.Fprintln(os.Stderr, "warning: could not find mindspec root")
+	}
+
+	// Write session metadata (best-effort)
+	if root != "" {
+		writeSession := exec.Command(os.Args[0], "state", "write-session", "--source="+source)
+		writeSession.Dir = root
+		writeSession.Stderr = os.Stderr
+		_ = writeSession.Run()
+	}
+
+	// Run instruct and emit its output
+	instruct := exec.Command(os.Args[0], "instruct")
+	if root != "" {
+		instruct.Dir = root
+	}
+	instruct.Stdout = os.Stdout
+	instruct.Stderr = os.Stderr
+	if err := instruct.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "mindspec instruct unavailable — run make build")
+	}
+	return nil
+}
+
 func init() {
 	hookCmd.Flags().Bool("list", false, "List available hook names")
 	hookCmd.Flags().StringVar(&hookFormat, "format", "", "Override protocol auto-detection (claude or copilot)")
-	// Hide from default help since these are internal flags
 	hookCmd.SetUsageTemplate(strings.Replace(hookCmd.UsageTemplate(), "{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}", "{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}", 1))
 }

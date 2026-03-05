@@ -57,5 +57,6 @@ func Run(root string) *Report {
 	checkDocs(r, root)
 	checkBeads(r, root)
 	checkGit(r, root)
+	checkHooks(r, root)
 	return r
 }

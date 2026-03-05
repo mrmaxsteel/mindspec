@@ -61,10 +61,7 @@ func NewSandbox(t *testing.T) *Sandbox {
 		}
 	}
 
-	// Write default config. agent_hooks: false makes PreToolUse enforcement hooks
-	// no-op — non-enforcement scenarios run from the main repo root (not a worktree),
-	// so worktree-file and worktree-bash guards would incorrectly block tool calls.
-	// Enforcement scenarios (HookBlocks*) can override this in their Setup func.
+	// Write default config.
 	configContent := `protected_branches: [main]
 merge_strategy: direct
 worktree_root: .worktrees
@@ -77,15 +74,23 @@ enforcement:
 		t.Fatalf("writing config: %v", err)
 	}
 
-	// Set up Claude Code integration: CLAUDE.md, slash commands, and full hooks
-	// (SessionStart runs mindspec instruct; PreToolUse hooks installed but no-op)
+	// Resolve project bin/ directory for mindspec binary — needed BEFORE initial
+	// commit so the pre-commit hook shim can find `mindspec hook pre-commit`.
+	binDir := projectBinDir()
+	if binDir == "" && testing.Short() {
+		t.Skip("skipping sandbox test: no mindspec binary (run make build)")
+	}
+
+	// Set up Claude Code integration: CLAUDE.md, slash commands, and hooks
+	// (SessionStart runs mindspec instruct)
 	if err := setupClaudeForSandbox(root); err != nil {
 		t.Logf("warning: setup claude: %v", err)
 	}
 
-	// Initial commit (includes .mindspec/ and Claude Code setup files)
-	mustRun(t, root, "git", "add", "-A")
-	mustRun(t, root, "git", "commit", "-m", "initial commit")
+	// Initial commit (includes .mindspec/ and Claude Code setup files).
+	// Must have mindspec in PATH for the pre-commit hook shim.
+	mustRunWithBin(t, root, binDir, "git", "add", "-A")
+	mustRunWithBin(t, root, binDir, "git", "commit", "-m", "initial commit")
 
 	// Initialize beads in sandbox mode (no auto-sync, no git hooks).
 	// Add .beads/ to .gitignore first — dolt server writes runtime files
@@ -97,9 +102,6 @@ enforcement:
 	mustRun(t, root, "git", "add", ".gitignore")
 	mustRun(t, root, "git", "commit", "-m", "add gitignore")
 	doltPort := initBeads(t, root)
-
-	// Resolve project bin/ directory for mindspec binary
-	binDir := projectBinDir()
 
 	// Set up recording shims — temporarily extend PATH so mindspec shim is created
 	shimDir := filepath.Join(root, ".harness", "bin")
@@ -211,6 +213,21 @@ func mustRun(t *testing.T, dir string, name string, args ...string) string { //n
 		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+// mustRunWithBin is like mustRun but prepends binDir to PATH so that
+// git hooks (e.g. pre-commit shim) can resolve the mindspec binary.
+func mustRunWithBin(t *testing.T, dir, binDir string, name string, args ...string) { //nolint:unparam // name kept for call-site clarity
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if binDir != "" {
+		cmd.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, out)
+	}
 }
 
 // Env returns the environment variables for running commands in the sandbox,
@@ -503,11 +520,8 @@ func (s *Sandbox) runBD(args ...string) (string, error) {
 }
 
 // setupClaudeForSandbox installs CLAUDE.md, slash commands, and hooks via
-// setup.RunClaude(). This gives the agent the full SessionStart hook (runs
-// `mindspec instruct`) and PreToolUse hooks. The PreToolUse enforcement hooks
-// are no-ops because config.yaml has agent_hooks: false — non-enforcement
-// scenarios work from the main repo root (not a worktree), so worktree/file
-// guards would incorrectly block tool calls.
+// setup.RunClaude(). This gives the agent the SessionStart hook (runs
+// `mindspec instruct`) and installs the pre-commit git hook shim.
 func setupClaudeForSandbox(root string) error {
 	_, err := setup.RunClaude(root, false)
 	return err

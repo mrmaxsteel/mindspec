@@ -1,7 +1,6 @@
 package hook
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
@@ -103,16 +102,6 @@ func TestEmit_Pass(t *testing.T) {
 	if code != 0 {
 		t.Errorf("Pass should return exit code 0, got %d", code)
 	}
-}
-
-// captureOutput runs a function and returns what was written to stdout.
-func captureOutput(t *testing.T, fn func()) string {
-	t.Helper()
-	old := bytes.Buffer{}
-	// We can't easily capture os.Stdout in unit tests without more plumbing,
-	// so we test the format functions directly instead.
-	_ = old
-	return ""
 }
 
 func TestEmitClaude_Block(t *testing.T) {

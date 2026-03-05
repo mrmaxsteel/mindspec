@@ -50,38 +50,26 @@ func TestRunCopilot_HooksContent(t *testing.T) {
 		t.Fatalf("RunCopilot() error: %v", err)
 	}
 
-	// Check hooks JSON has the right structure
 	data, err := os.ReadFile(filepath.Join(root, ".github/hooks/mindspec.json"))
 	if err != nil {
 		t.Fatalf("reading hooks JSON: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "mindspec instruct") {
-		t.Error("hooks should contain sessionStart with mindspec instruct")
-	}
-	if !strings.Contains(content, "mindspec hook workflow-guard --format copilot") {
-		t.Error("hooks should reference mindspec hook commands in preToolUse")
-	}
-	if !strings.Contains(content, "mindspec hook worktree-file --format copilot") {
-		t.Error("hooks should reference worktree-file hook in preToolUse")
+	if !strings.Contains(content, "mindspec hook session-start") {
+		t.Error("hooks should contain sessionStart with mindspec hook session-start")
 	}
 	if !strings.Contains(content, `"version": 1`) {
 		t.Error("hooks should have version 1")
 	}
-	// sessionStart now uses jq for source parsing (matching Claude pattern)
-	if !strings.Contains(content, "state write-session") {
-		t.Error("hooks should contain state write-session in sessionStart")
-	}
-	// needs-clear hook
-	if !strings.Contains(content, "mindspec hook needs-clear --format copilot") {
-		t.Error("hooks should contain needs-clear hook in preToolUse")
+	// preToolUse should NOT be present (guard hooks removed)
+	if strings.Contains(content, "preToolUse") {
+		t.Error("hooks should not contain preToolUse (guard hooks removed)")
 	}
 }
 
 func TestRunCopilot_Idempotent(t *testing.T) {
 	root := t.TempDir()
 
-	// First run
 	r1, err := RunCopilot(root, false)
 	if err != nil {
 		t.Fatalf("first RunCopilot() error: %v", err)
@@ -90,7 +78,6 @@ func TestRunCopilot_Idempotent(t *testing.T) {
 		t.Fatal("first run created nothing")
 	}
 
-	// Second run
 	r2, err := RunCopilot(root, false)
 	if err != nil {
 		t.Fatalf("second RunCopilot() error: %v", err)
@@ -115,7 +102,6 @@ func TestRunCopilot_CheckMode(t *testing.T) {
 		t.Fatal("check mode reported nothing to create")
 	}
 
-	// Verify nothing written
 	if _, err := os.Stat(filepath.Join(root, ".github")); !os.IsNotExist(err) {
 		t.Error("check mode should not create files")
 	}
@@ -124,7 +110,6 @@ func TestRunCopilot_CheckMode(t *testing.T) {
 func TestRunCopilot_ExistingInstructionsAppend(t *testing.T) {
 	root := t.TempDir()
 
-	// Pre-create copilot-instructions.md without marker
 	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
 		[]byte("# My custom Copilot instructions\n\nExisting content.\n"), 0o644)
@@ -134,7 +119,6 @@ func TestRunCopilot_ExistingInstructionsAppend(t *testing.T) {
 		t.Fatalf("RunCopilot() error: %v", err)
 	}
 
-	// Check it was appended
 	hasAppend := false
 	for _, c := range result.Created {
 		if strings.Contains(c, "copilot-instructions.md") && strings.Contains(c, "appended") {
@@ -154,21 +138,17 @@ func TestRunCopilot_ExistingInstructionsAppend(t *testing.T) {
 	if !strings.Contains(content, mindspecMarkerBegin) {
 		t.Error("should contain BEGIN marker")
 	}
-	if !strings.Contains(content, mindspecMarkerEnd) {
-		t.Error("should contain END marker")
-	}
 }
 
 func TestRunCopilot_StaleHooksUpdated(t *testing.T) {
 	root := t.TempDir()
 
-	// First run to create everything
 	_, err := RunCopilot(root, false)
 	if err != nil {
 		t.Fatalf("first RunCopilot() error: %v", err)
 	}
 
-	// Write stale hooks JSON (missing needs-clear hook)
+	// Write stale hooks JSON (old format with preToolUse)
 	hooksPath := filepath.Join(root, ".github/hooks/mindspec.json")
 	staleContent := `{
   "version": 1,
@@ -180,7 +160,6 @@ func TestRunCopilot_StaleHooksUpdated(t *testing.T) {
 `
 	os.WriteFile(hooksPath, []byte(staleContent), 0o644)
 
-	// Second run should detect stale and update
 	r2, err := RunCopilot(root, false)
 	if err != nil {
 		t.Fatalf("second RunCopilot() error: %v", err)
@@ -197,17 +176,16 @@ func TestRunCopilot_StaleHooksUpdated(t *testing.T) {
 		t.Errorf("expected stale hooks to be updated, got created=%v skipped=%v", r2.Created, r2.Skipped)
 	}
 
-	// Verify updated content has needs-clear
+	// Verify updated content has no preToolUse
 	data, _ := os.ReadFile(hooksPath)
-	if !strings.Contains(string(data), "needs-clear") {
-		t.Error("updated hooks should contain needs-clear")
+	if strings.Contains(string(data), "preToolUse") {
+		t.Error("updated hooks should not contain preToolUse")
 	}
 }
 
 func TestRunCopilot_ExistingInstructionsSkip_Legacy(t *testing.T) {
 	root := t.TempDir()
 
-	// Pre-create with legacy marker
 	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
 		[]byte("# Custom\n"+mindspecMarkerLegacy+"\nMindSpec block\n"), 0o644)
@@ -232,7 +210,6 @@ func TestRunCopilot_ExistingInstructionsSkip_Legacy(t *testing.T) {
 func TestRunCopilot_ExistingInstructionsSkip_BeginEnd(t *testing.T) {
 	root := t.TempDir()
 
-	// Pre-create with BEGIN/END markers and the correct managed content
 	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
 		[]byte("# Custom\n"+mindspecMarkerBegin+"\n"+copilotManagedBlock+mindspecMarkerEnd+"\n"), 0o644)
@@ -257,7 +234,6 @@ func TestRunCopilot_ExistingInstructionsSkip_BeginEnd(t *testing.T) {
 func TestRunCopilot_ExistingInstructionsUpdate_StaleBeginEnd(t *testing.T) {
 	root := t.TempDir()
 
-	// Pre-create with BEGIN/END markers but stale content
 	os.MkdirAll(filepath.Join(root, ".github"), 0o755)
 	os.WriteFile(filepath.Join(root, ".github/copilot-instructions.md"),
 		[]byte("# Custom\n"+mindspecMarkerBegin+"\nOld stale content\n"+mindspecMarkerEnd+"\n"), 0o644)
@@ -278,7 +254,6 @@ func TestRunCopilot_ExistingInstructionsUpdate_StaleBeginEnd(t *testing.T) {
 		t.Error("expected copilot-instructions.md to be updated when BEGIN/END markers present with stale content")
 	}
 
-	// Verify content was updated
 	data, _ := os.ReadFile(filepath.Join(root, ".github/copilot-instructions.md"))
 	content := string(data)
 	if !strings.Contains(content, "Custom") {

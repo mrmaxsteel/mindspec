@@ -1,6 +1,6 @@
-// Package hook implements PreToolUse hook logic for Claude Code and Copilot.
-// Each hook reads tool context from stdin, checks workflow state, and emits
-// a response in the caller's protocol format.
+// Package hook implements hook logic for Claude Code, Copilot, and git hooks.
+// Each hook reads context from stdin or environment, checks workflow state,
+// and emits a response in the caller's protocol format.
 package hook
 
 import (
@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/mindspec/mindspec/internal/phase"
 	"github.com/mindspec/mindspec/internal/state"
@@ -49,12 +47,8 @@ type Input struct {
 
 // Names lists all registered hook names.
 var Names = []string{
-	"needs-clear",
-	"plan-gate-enter",
-	"plan-gate-exit",
-	"workflow-guard",
-	"worktree-bash",
-	"worktree-file",
+	"pre-commit",
+	"session-start",
 }
 
 // ParseInput reads stdin JSON and auto-detects the protocol.
@@ -157,7 +151,7 @@ func emitCopilot(r Result) int {
 	return 0
 }
 
-// ReadState constructs a HookState from focus and session.json.
+// ReadState constructs a HookState from beads phase context and session.json.
 // Returns nil (not error) if state cannot be determined.
 func ReadState() *HookState {
 	root, err := workspace.FindLocalRoot(".")
@@ -167,12 +161,10 @@ func ReadState() *HookState {
 
 	hs := &HookState{}
 
-	// ADR-0023: derive mode/spec/worktree from beads, not focus file.
 	ctx, ctxErr := phase.ResolveContext(root)
 	if ctxErr == nil && ctx != nil {
 		hs.Mode = ctx.Phase
 		hs.ActiveSpec = ctx.SpecID
-		// Derive worktree path from context
 		if ctx.BeadID != "" && ctx.SpecID != "" {
 			specWt := state.SpecWorktreePath(root, ctx.SpecID)
 			wt := state.BeadWorktreePath(specWt, ctx.BeadID)
@@ -187,7 +179,6 @@ func ReadState() *HookState {
 		}
 	}
 
-	// Read session.json for freshness fields
 	sess, err := state.ReadSession(root)
 	if err == nil {
 		hs.SessionSource = sess.SessionSource
@@ -195,24 +186,9 @@ func ReadState() *HookState {
 		hs.BeadClaimedAt = sess.BeadClaimedAt
 	}
 
-	// If focus is missing, no useful state
 	if hs.Mode == "" && hs.SessionStartedAt == "" {
 		return nil
 	}
 
 	return hs
-}
-
-// EnforcementEnabled checks whether agent_hooks enforcement is enabled.
-func EnforcementEnabled() bool {
-	root, err := workspace.FindRoot(".")
-	if err != nil {
-		return true // enforce by default
-	}
-	configPath := filepath.Join(root, ".mindspec", "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return true
-	}
-	return !strings.Contains(string(data), "agent_hooks: false")
 }

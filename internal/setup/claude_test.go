@@ -40,8 +40,9 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Error("missing SessionStart hook")
 	}
-	if _, ok := hooks["PreToolUse"]; !ok {
-		t.Error("missing PreToolUse hook")
+	// PreToolUse should NOT be present
+	if _, ok := hooks["PreToolUse"]; ok {
+		t.Error("PreToolUse should not be present (guard hooks removed)")
 	}
 
 	// Verify skill files exist
@@ -71,7 +72,6 @@ func TestRunClaude_Idempotent(t *testing.T) {
 
 	root := t.TempDir()
 
-	// First run
 	r1, err := RunClaude(root, false)
 	if err != nil {
 		t.Fatalf("first RunClaude: %v", err)
@@ -80,7 +80,6 @@ func TestRunClaude_Idempotent(t *testing.T) {
 		t.Fatal("first run should create files")
 	}
 
-	// Second run
 	r2, err := RunClaude(root, false)
 	if err != nil {
 		t.Fatalf("second RunClaude: %v", err)
@@ -103,12 +102,10 @@ func TestRunClaude_CheckMode(t *testing.T) {
 		t.Fatalf("RunClaude check: %v", err)
 	}
 
-	// Should report items to create
 	if len(r.Created) == 0 {
 		t.Error("check mode should report items to create")
 	}
 
-	// But nothing should actually exist
 	settingsPath := filepath.Join(root, ".claude", "settings.json")
 	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
 		t.Error("check mode should not create settings.json")
@@ -124,7 +121,6 @@ func TestRunClaude_MergesExistingSettings(t *testing.T) {
 
 	root := t.TempDir()
 
-	// Create existing settings.json with a custom hook
 	claudeDir := filepath.Join(root, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -157,7 +153,6 @@ func TestRunClaude_MergesExistingSettings(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should have merged (not skipped) settings.json
 	found := false
 	for _, c := range r.Created {
 		if strings.Contains(c, "settings.json") {
@@ -168,7 +163,6 @@ func TestRunClaude_MergesExistingSettings(t *testing.T) {
 		t.Error("expected settings.json to be in Created list (merged hooks)")
 	}
 
-	// Read back and verify both old and new hooks exist
 	settingsData, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -185,203 +179,14 @@ func TestRunClaude_MergesExistingSettings(t *testing.T) {
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Error("SessionStart hook not added during merge")
 	}
-	if _, ok := hooks["PreToolUse"]; !ok {
-		t.Error("PreToolUse hook not added during merge")
-	}
 
-	// Verify env was preserved
 	env := merged["env"].(map[string]any)
 	if env["MY_VAR"] != "value" {
 		t.Error("custom env var was lost during merge")
 	}
 }
 
-func TestWantedHooks_UseMindspecHookCommands(t *testing.T) {
-	t.Parallel()
-
-	hooks := wantedHooks()
-	preToolUse, ok := hooks["PreToolUse"]
-	if !ok {
-		t.Fatal("missing PreToolUse hooks")
-	}
-
-	// Collect all commands from all PreToolUse entries
-	var allCommands []string
-	for _, entry := range preToolUse {
-		hooksList, ok := entry["hooks"].([]map[string]any)
-		if !ok {
-			continue
-		}
-		for _, h := range hooksList {
-			cmd, _ := h["command"].(string)
-			allCommands = append(allCommands, cmd)
-		}
-	}
-
-	// All PreToolUse hooks should use mindspec hook commands, not inline shell
-	for _, cmd := range allCommands {
-		if !strings.HasPrefix(cmd, "mindspec hook ") {
-			t.Errorf("PreToolUse hook should use 'mindspec hook' command, got: %s", cmd)
-		}
-	}
-
-	// Should have no jq references
-	for _, cmd := range allCommands {
-		if strings.Contains(cmd, "jq") {
-			t.Errorf("hooks should not contain jq references, got: %s", cmd)
-		}
-	}
-}
-
-func TestHookEntryStale_DetectsChangedCommand(t *testing.T) {
-	t.Parallel()
-
-	existing := []any{
-		map[string]any{
-			"matcher": "Bash",
-			"hooks": []any{
-				map[string]any{
-					"type":    "command",
-					"command": "old command",
-				},
-			},
-		},
-	}
-
-	wanted := map[string]any{
-		"matcher": "Bash",
-		"hooks": []map[string]any{
-			{
-				"type":    "command",
-				"command": "new command",
-			},
-		},
-	}
-
-	if !hookEntryStale(existing, wanted) {
-		t.Error("should detect stale hook when command differs")
-	}
-}
-
-func TestHookEntryStale_NotStaleWhenSame(t *testing.T) {
-	t.Parallel()
-
-	existing := []any{
-		map[string]any{
-			"matcher": "Bash",
-			"hooks": []any{
-				map[string]any{
-					"type":    "command",
-					"command": "same command",
-				},
-			},
-		},
-	}
-
-	wanted := map[string]any{
-		"matcher": "Bash",
-		"hooks": []map[string]any{
-			{
-				"type":    "command",
-				"command": "same command",
-			},
-		},
-	}
-
-	if hookEntryStale(existing, wanted) {
-		t.Error("should not detect stale hook when command is the same")
-	}
-}
-
-func TestRunClaude_UpdatesStaleHooks(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-
-	// First run: create settings with hooks
-	if _, err := RunClaude(root, false); err != nil {
-		t.Fatalf("first RunClaude: %v", err)
-	}
-
-	// Tamper with a hook command to simulate stale state
-	settingsPath := filepath.Join(root, ".claude", "settings.json")
-	data, _ := os.ReadFile(settingsPath)
-	// Replace a known substring to make it stale
-	tampered := strings.Replace(string(data), "mindspec hook worktree-file", "STALE_OLD_SCRIPT", 1)
-	os.WriteFile(settingsPath, []byte(tampered), 0o644)
-
-	// Second run: should detect and update stale hooks
-	r2, err := RunClaude(root, false)
-	if err != nil {
-		t.Fatalf("second RunClaude: %v", err)
-	}
-
-	// Should report hooks were merged (updated), not skipped
-	foundMerged := false
-	for _, c := range r2.Created {
-		if strings.Contains(c, "settings.json") && strings.Contains(c, "merged") {
-			foundMerged = true
-		}
-	}
-	if !foundMerged {
-		t.Errorf("expected stale hooks to be updated (merged), got created=%v skipped=%v", r2.Created, r2.Skipped)
-	}
-
-	// Verify the updated file no longer has the stale content
-	updated, _ := os.ReadFile(settingsPath)
-	if strings.Contains(string(updated), "STALE_OLD_SCRIPT") {
-		t.Error("stale hook command was not replaced")
-	}
-	if !strings.Contains(string(updated), "mindspec hook worktree-file") {
-		t.Error("updated hook should contain mindspec hook worktree-file")
-	}
-}
-
-func TestWantedHooks_BashPreToolUseIncludesNeedsClearGuard(t *testing.T) {
-	t.Parallel()
-
-	hooks := wantedHooks()
-	preToolUse, ok := hooks["PreToolUse"]
-	if !ok {
-		t.Fatal("missing PreToolUse hooks")
-	}
-
-	// Find the Bash matcher entry
-	var bashEntry map[string]any
-	for _, entry := range preToolUse {
-		if m, _ := entry["matcher"].(string); m == "Bash" {
-			bashEntry = entry
-			break
-		}
-	}
-	if bashEntry == nil {
-		t.Fatal("missing Bash matcher in PreToolUse")
-	}
-
-	// Should have at least 3 hooks (worktree-bash + needs-clear + workflow-guard)
-	hooksList, ok := bashEntry["hooks"].([]map[string]any)
-	if !ok {
-		t.Fatal("Bash hooks is not []map[string]any")
-	}
-	if len(hooksList) < 3 {
-		t.Fatalf("expected at least 3 Bash hooks, got %d", len(hooksList))
-	}
-
-	// Verify needs-clear guard is present
-	found := false
-	for _, h := range hooksList {
-		cmd, _ := h["command"].(string)
-		if cmd == "mindspec hook needs-clear" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("Bash PreToolUse hooks missing mindspec hook needs-clear")
-	}
-}
-
-func TestWantedHooks_SessionStartIncludesClearFlag(t *testing.T) {
+func TestWantedHooks_SessionStartUsesShim(t *testing.T) {
 	t.Parallel()
 
 	hooks := wantedHooks()
@@ -400,11 +205,219 @@ func TestWantedHooks_SessionStartIncludesClearFlag(t *testing.T) {
 	}
 
 	cmd, _ := hooksList[0]["command"].(string)
-	if !strings.Contains(cmd, "state write-session") {
-		t.Errorf("SessionStart command should include 'state write-session', got: %s", cmd)
+	if cmd != "mindspec hook session-start" {
+		t.Errorf("SessionStart command should be 'mindspec hook session-start', got: %s", cmd)
 	}
-	if !strings.Contains(cmd, "mindspec instruct") {
-		t.Error("SessionStart command should still include 'mindspec instruct'")
+}
+
+func TestWantedHooks_NoPreToolUse(t *testing.T) {
+	t.Parallel()
+
+	hooks := wantedHooks()
+	if _, ok := hooks["PreToolUse"]; ok {
+		t.Error("wantedHooks should not include PreToolUse (guard hooks removed)")
+	}
+}
+
+func TestHookEntryStale_DetectsChangedCommand(t *testing.T) {
+	t.Parallel()
+
+	existing := []any{
+		map[string]any{
+			"matcher": "SessionStart",
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": "old command",
+				},
+			},
+		},
+	}
+
+	wanted := map[string]any{
+		"matcher": "SessionStart",
+		"hooks": []map[string]any{
+			{
+				"type":    "command",
+				"command": "new command",
+			},
+		},
+	}
+
+	if !hookEntryStale(existing, wanted) {
+		t.Error("should detect stale hook when command differs")
+	}
+}
+
+func TestHookEntryStale_NotStaleWhenSame(t *testing.T) {
+	t.Parallel()
+
+	existing := []any{
+		map[string]any{
+			"matcher": "SessionStart",
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": "same command",
+				},
+			},
+		},
+	}
+
+	wanted := map[string]any{
+		"matcher": "SessionStart",
+		"hooks": []map[string]any{
+			{
+				"type":    "command",
+				"command": "same command",
+			},
+		},
+	}
+
+	if hookEntryStale(existing, wanted) {
+		t.Error("should not detect stale hook when command is the same")
+	}
+}
+
+func TestRemoveStalePreToolUse_RemovesMindspecEntries(t *testing.T) {
+	t.Parallel()
+
+	hooks := map[string]any{
+		"PreToolUse": []any{
+			map[string]any{
+				"matcher": "Write",
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "mindspec hook worktree-file",
+					},
+				},
+			},
+			map[string]any{
+				"matcher": "Bash",
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "mindspec hook worktree-bash",
+					},
+				},
+			},
+		},
+	}
+
+	if !removeStalePreToolUse(hooks) {
+		t.Error("should have removed stale entries")
+	}
+	if _, ok := hooks["PreToolUse"]; ok {
+		t.Error("PreToolUse should be completely removed when all entries are mindspec hooks")
+	}
+}
+
+func TestRemoveStalePreToolUse_PreservesNonMindspecEntries(t *testing.T) {
+	t.Parallel()
+
+	hooks := map[string]any{
+		"PreToolUse": []any{
+			map[string]any{
+				"matcher": "Write",
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "echo custom hook",
+					},
+				},
+			},
+			map[string]any{
+				"matcher": "Bash",
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "mindspec hook worktree-bash",
+					},
+				},
+			},
+		},
+	}
+
+	if !removeStalePreToolUse(hooks) {
+		t.Error("should have removed stale entries")
+	}
+	remaining, ok := hooks["PreToolUse"].([]any)
+	if !ok || len(remaining) != 1 {
+		t.Fatalf("expected 1 remaining entry, got %v", hooks["PreToolUse"])
+	}
+	m := remaining[0].(map[string]any)
+	if m["matcher"] != "Write" {
+		t.Error("non-mindspec entry should be preserved")
+	}
+}
+
+func TestRemoveStalePreToolUse_NoOpWhenNoPreToolUse(t *testing.T) {
+	t.Parallel()
+
+	hooks := map[string]any{
+		"SessionStart": []any{},
+	}
+
+	if removeStalePreToolUse(hooks) {
+		t.Error("should return false when no PreToolUse")
+	}
+}
+
+func TestRunClaude_CleansStalePreToolUse(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	// First run to create settings
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("first RunClaude: %v", err)
+	}
+
+	// Manually inject stale PreToolUse entries
+	settingsPath := filepath.Join(root, ".claude", "settings.json")
+	data, _ := os.ReadFile(settingsPath)
+	var settings map[string]any
+	json.Unmarshal(data, &settings)
+	hooks := settings["hooks"].(map[string]any)
+	hooks["PreToolUse"] = []any{
+		map[string]any{
+			"matcher": "Write",
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": "mindspec hook worktree-file",
+				},
+			},
+		},
+	}
+	settings["hooks"] = hooks
+	out, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(settingsPath, append(out, '\n'), 0o644)
+
+	// Second run should clean stale entries
+	r2, err := RunClaude(root, false)
+	if err != nil {
+		t.Fatalf("second RunClaude: %v", err)
+	}
+
+	hasCleanup := false
+	for _, c := range r2.Created {
+		if strings.Contains(c, "settings.json") {
+			hasCleanup = true
+		}
+	}
+	if !hasCleanup {
+		t.Error("expected settings.json to be updated (stale PreToolUse cleaned)")
+	}
+
+	// Verify PreToolUse is removed
+	data, _ = os.ReadFile(settingsPath)
+	var updated map[string]any
+	json.Unmarshal(data, &updated)
+	updatedHooks := updated["hooks"].(map[string]any)
+	if _, ok := updatedHooks["PreToolUse"]; ok {
+		t.Error("PreToolUse should have been removed")
 	}
 }
 
@@ -413,7 +426,6 @@ func TestRunClaude_AppendExistingClaudeMD(t *testing.T) {
 
 	root := t.TempDir()
 
-	// Create existing CLAUDE.md without marker
 	original := "# My Project\n\nExisting instructions.\n"
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -424,7 +436,6 @@ func TestRunClaude_AppendExistingClaudeMD(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Check CLAUDE.md was appended to
 	appended := false
 	for _, c := range r.Created {
 		if strings.Contains(c, "CLAUDE.md") && strings.Contains(c, "appended") {
