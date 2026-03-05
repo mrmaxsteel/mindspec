@@ -126,6 +126,13 @@ func TestSpecIDFromMetadata(t *testing.T) {
 		{1, "init", "001-init"},
 		{999, "big-number", "999-big-number"},
 		{0, "zero", "000-zero"},
+		// Slugification: titles from beads metadata need lowercasing + hyphenation
+		{73, "Llm Test Coverage", "073-llm-test-coverage"},
+		{72, "Hook Cleanup", "072-hook-cleanup"},
+		{71, "Recording Config Flag", "071-recording-config-flag"},
+		{68, "Lifecycle Yaml Cleanup", "068-lifecycle-yaml-cleanup"},
+		{1, "Test Feature", "001-test-feature"},
+		{5, "Some_Underscored_Title", "005-some-underscored-title"},
 	}
 
 	for _, tt := range tests {

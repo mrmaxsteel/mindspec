@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,71 @@ enforcement:
 	r := Run("pre-commit", &Input{}, st, true)
 	if r.Action != Pass {
 		t.Errorf("expected pass when enforcement disabled, got %v", r.Action)
+	}
+}
+
+func TestPreCommit_BlockOnSpecBranchDuringImplement(t *testing.T) {
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	// Create and switch to a spec/ branch
+	cmd := exec.Command("git", "checkout", "-b", "spec/042-greeting-feature")
+	cmd.Dir = root
+	cmd.CombinedOutput()
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	st := &HookState{
+		Mode:           "implement",
+		ActiveWorktree: "/some/bead-worktree",
+	}
+	r := Run("pre-commit", &Input{}, st, true)
+	if r.Action != Block {
+		t.Errorf("expected block on spec/ branch during implement, got %v", r.Action)
+	}
+	if r.Message == "" {
+		t.Error("block message should not be empty")
+	}
+	if !strings.Contains(r.Message, "mindspec next") {
+		t.Error("block message should suggest mindspec next")
+	}
+}
+
+func TestPreCommit_AllowOnSpecBranchDuringSpec(t *testing.T) {
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	cmd := exec.Command("git", "checkout", "-b", "spec/042-greeting-feature")
+	cmd.Dir = root
+	cmd.CombinedOutput()
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	// Spec mode — commits on spec/ branches are fine
+	st := &HookState{Mode: "spec"}
+	r := Run("pre-commit", &Input{}, st, true)
+	if r.Action != Pass {
+		t.Errorf("expected pass on spec/ branch during spec mode, got %v", r.Action)
 	}
 }
 

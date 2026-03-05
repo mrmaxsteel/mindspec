@@ -302,6 +302,26 @@ func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult 
 // Returns a wrong action if code-modifying events appear before any `mindspec next`
 // AND the phase is not already `implement` (which implies a bead was pre-claimed).
 func detectSkipNext(events []ActionEvent) []WrongActionResult {
+	// Early bail-out: if this session never enters implement phase and never
+	// runs `mindspec next`, then skip_next is irrelevant (e.g. spec-only or
+	// plan-only sessions where commits are legitimate lifecycle artifacts).
+	hasImplement := false
+	hasNextOrApprove := false
+	for _, e := range events {
+		if e.Phase == "implement" {
+			hasImplement = true
+		}
+		if e.Command == "mindspec" {
+			args := eventArgsList(e)
+			if containsAll(args, "next") || containsAll(args, "approve") {
+				hasNextOrApprove = true
+			}
+		}
+	}
+	if !hasImplement && !hasNextOrApprove {
+		return nil
+	}
+
 	// Build a set of turns that contain lifecycle commands. Git commits in
 	// these turns are side-effects of the lifecycle operation (e.g. approve
 	// auto-commits state changes) and should not count as "agent wrote code."

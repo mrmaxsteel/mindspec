@@ -66,6 +66,17 @@ func runPreCommit(st *HookState) Result {
 		return Result{Action: Pass}
 	}
 
+	// Block: on a spec/ branch during implement mode — code belongs on bead branches.
+	if st.Mode == "implement" && strings.HasPrefix(branch, "spec/") {
+		msg := fmt.Sprintf("mindspec: commits on spec branch '%s' are blocked during implement mode.\n  Implementation code belongs on bead branches.", branch)
+		msg += "\n  Run: mindspec next   (to claim a bead and create a bead worktree)"
+		if st.ActiveWorktree != "" {
+			msg += fmt.Sprintf("\n  Or switch to your bead worktree: cd %s", st.ActiveWorktree)
+		}
+		msg += "\n  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ..."
+		return Result{Action: Block, Message: msg}
+	}
+
 	// Check if branch is protected
 	if !cfg.IsProtectedBranch(branch) {
 		return Result{Action: Pass}

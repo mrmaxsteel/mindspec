@@ -63,8 +63,23 @@ type Context struct {
 }
 
 // SpecIDFromMetadata constructs a spec ID from num and title.
+// The title is slugified (lowercased, spaces/underscores → hyphens) to match
+// the original slug format used by spec-init (e.g. "Llm Test Coverage" → "llm-test-coverage").
 func SpecIDFromMetadata(specNum int, specTitle string) string {
-	return fmt.Sprintf("%03d-%s", specNum, specTitle)
+	return fmt.Sprintf("%03d-%s", specNum, slugify(specTitle))
+}
+
+// slugify converts a title to a URL-safe slug: lowercase, spaces/underscores → hyphens,
+// collapse runs of hyphens, trim leading/trailing hyphens.
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	s = strings.NewReplacer(" ", "-", "_", "-").Replace(s)
+	// Collapse multiple hyphens
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	return s
 }
 
 // DerivePhase determines the lifecycle phase from an epic's status and children statuses.
@@ -146,9 +161,20 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 		}
 
 		specID := SpecIDFromMetadata(specNum, specTitle)
-		phase, err := DerivePhase(epic.ID)
+		phase, err := DerivePhaseWithStatus(epic.ID, epic.Status)
 		if err != nil {
 			continue // skip epics we can't derive phase for
+		}
+		if phase == state.ModeDone {
+			continue // spec lifecycle complete, not active
+		}
+		// Epic with no children is an orphan (e.g. stale test artifact,
+		// or epic created but plan never approved/beads never created).
+		// DerivePhaseFromChildren returns "plan" for these, but they're
+		// not actually active work. Skip them.
+		children := queryChildren(epic.ID)
+		if len(children) == 0 {
+			continue
 		}
 
 		active = append(active, ActiveSpec{

@@ -233,6 +233,49 @@ func TestSkipNext_ImplementPhaseNoViolation(t *testing.T) {
 	}
 }
 
+func TestSkipNext_NonImplementSessionNoViolation(t *testing.T) {
+	// A session with only spec/plan phase events and git commits (no implement
+	// phase, no mindspec next) should NOT trigger skip_next. These commits are
+	// lifecycle artifacts (e.g. spec-init auto-commit, plan approval commit).
+	events := []ActionEvent{
+		{Turn: 1, Phase: "spec", ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"spec-init", "010-test", "--title", "Test"}},
+		{Turn: 1, Phase: "spec", ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "chore: initialize spec"}},
+		{Turn: 2, Phase: "spec", ActionType: "tool_invoke", ToolName: "Write",
+			Args: map[string]string{"file_path": ".mindspec/docs/specs/010-test/spec.md"}},
+		{Turn: 3, Phase: "plan", ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"approve", "spec", "010-test"}},
+		{Turn: 3, Phase: "plan", ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "chore: approve spec"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation in non-implement session, got %d: %v", len(results), results)
+	}
+}
+
+func TestSkipNext_NonImplementWithNextStillChecks(t *testing.T) {
+	// If `mindspec next` appears in the event stream, skip_next should still
+	// be checked even without implement phase events — next implies the agent
+	// intended to enter implement mode.
+	events := []ActionEvent{
+		{Turn: 1, Phase: "plan", ActionType: "tool_invoke", ToolName: "Write",
+			Args: map[string]string{"file_path": "internal/foo.go"}},
+		{Turn: 2, ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"next"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation when next is present, got %d", len(results))
+	}
+	if results[0].Rule != "skip_next" {
+		t.Errorf("rule = %q, want skip_next", results[0].Rule)
+	}
+}
+
 func TestSkipNext_DocEditsIgnored(t *testing.T) {
 	// Editing docs/markdown before next should not trigger.
 	events := []ActionEvent{

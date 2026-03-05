@@ -106,6 +106,65 @@ func TestInstallPreCommit_NoGitDir(t *testing.T) {
 	}
 }
 
+func TestCleanStaleGitHooks(t *testing.T) {
+	root := t.TempDir()
+	hooksDir := filepath.Join(root, ".git", "hooks")
+	os.MkdirAll(hooksDir, 0755)
+
+	// Create stale files that should be removed
+	staleFiles := map[string]string{
+		"pre-commit.backup":       "#!/bin/bash\nold hook",
+		"pre-commit.pre-mindspec": "#!/bin/bash\noriginal hook",
+		"post-checkout":           "#!/bin/bash\n# MindSpec post-checkout hook\nexec mindspec hook post-checkout",
+	}
+	for name, content := range staleFiles {
+		os.WriteFile(filepath.Join(hooksDir, name), []byte(content), 0755)
+	}
+
+	// Create files that should NOT be removed
+	keepFiles := map[string]string{
+		"pre-commit": preCommitScript,
+		"commit-msg": "#!/bin/bash\nsome other hook",
+	}
+	for name, content := range keepFiles {
+		os.WriteFile(filepath.Join(hooksDir, name), []byte(content), 0755)
+	}
+
+	CleanStaleGitHooks(root)
+
+	for name := range staleFiles {
+		if _, err := os.Stat(filepath.Join(hooksDir, name)); !os.IsNotExist(err) {
+			t.Errorf("stale file %q should have been removed", name)
+		}
+	}
+	for name := range keepFiles {
+		if _, err := os.Stat(filepath.Join(hooksDir, name)); os.IsNotExist(err) {
+			t.Errorf("file %q should have been kept", name)
+		}
+	}
+}
+
+func TestCleanStaleGitHooks_NonMindspecRetiredHook(t *testing.T) {
+	root := t.TempDir()
+	hooksDir := filepath.Join(root, ".git", "hooks")
+	os.MkdirAll(hooksDir, 0755)
+
+	// A post-checkout that is NOT a MindSpec hook should NOT be removed
+	path := filepath.Join(hooksDir, "post-checkout")
+	os.WriteFile(path, []byte("#!/bin/bash\nuser's own hook"), 0755)
+
+	CleanStaleGitHooks(root)
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Error("non-MindSpec post-checkout hook should NOT have been removed")
+	}
+}
+
+func TestCleanStaleGitHooks_NoHooksDir(t *testing.T) {
+	root := t.TempDir()
+	CleanStaleGitHooks(root) // should not panic
+}
+
 func TestInstallAll(t *testing.T) {
 	root := t.TempDir()
 	hooksDir := filepath.Join(root, ".git", "hooks")

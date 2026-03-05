@@ -7,83 +7,11 @@
     "OTEL_METRICS_EXPORTER": "otlp"
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "mindspec hook plan-gate-exit",
-            "statusMessage": "Checking MindSpec plan gate...",
-            "type": "command"
-          }
-        ],
-        "matcher": "ExitPlanMode"
-      },
-      {
-        "hooks": [
-          {
-            "command": "mindspec hook plan-gate-enter",
-            "statusMessage": "Checking MindSpec plan gate...",
-            "type": "command"
-          }
-        ],
-        "matcher": "EnterPlanMode"
-      },
-      {
-        "hooks": [
-          {
-            "command": "mindspec hook worktree-file",
-            "statusMessage": "Checking worktree enforcement...",
-            "type": "command"
-          },
-          {
-            "command": "mindspec hook workflow-guard",
-            "statusMessage": "Checking workflow guard...",
-            "type": "command"
-          }
-        ],
-        "matcher": "Write"
-      },
-      {
-        "hooks": [
-          {
-            "command": "mindspec hook worktree-file",
-            "statusMessage": "Checking worktree enforcement...",
-            "type": "command"
-          },
-          {
-            "command": "mindspec hook workflow-guard",
-            "statusMessage": "Checking workflow guard...",
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit"
-      },
-      {
-        "hooks": [
-          {
-            "command": "mindspec hook worktree-bash",
-            "statusMessage": "Checking worktree enforcement...",
-            "type": "command"
-          },
-          {
-            "command": "mindspec hook needs-clear",
-            "statusMessage": "Checking context clear gate...",
-            "type": "command"
-          },
-          {
-            "command": "mindspec hook workflow-guard",
-            "statusMessage": "Checking workflow guard...",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
           {
-            "command": "source=$(cat | jq -r '.source // \"unknown\"'); mindspec state write-session --source=\"$source\" 2\u003e/dev/null; mindspec instruct 2\u003e/dev/null || echo 'mindspec instruct unavailable — run make build'",
+            "command": "mindspec hook session-start",
             "statusMessage": "Loading mode guidance...",
             "type": "command"
           }
