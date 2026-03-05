@@ -210,7 +210,7 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 		}
 		// Check for active bead
 		if ctx.EpicID != "" {
-			if activeBead := findActiveBeadForEpic(ctx.EpicID); activeBead != "" {
+			if activeBead := FindActiveBeadForEpic(ctx.EpicID); activeBead != "" {
 				ctx.BeadID = activeBead
 			}
 		}
@@ -463,7 +463,10 @@ func findEpicForBead(beadID string) (epicID, specID string, err error) {
 	return "", "", fmt.Errorf("no epic found for bead %s", beadID)
 }
 
-func findActiveBeadForEpic(epicID string) string {
+// FindActiveBeadForEpic returns the ID of an in_progress bead under the given epic, or "".
+// Returns "" if zero or multiple beads are in_progress (ambiguous — caller should
+// fall back to the spec worktree).
+func FindActiveBeadForEpic(epicID string) string {
 	out, err := runBDFn("list", "--parent", epicID, "--status=in_progress", "--json")
 	if err != nil {
 		return ""
@@ -479,12 +482,19 @@ func findActiveBeadForEpic(epicID string) string {
 		return ""
 	}
 
+	// Filter out epics (only want beads).
+	var beads []ChildInfo
 	for _, item := range items {
 		if !strings.EqualFold(item.IssueType, "epic") {
-			return item.ID
+			beads = append(beads, item)
 		}
 	}
 
+	// Only return a bead when exactly one is in_progress.
+	// Multiple in_progress beads (parallel agents) → ambiguous, return "".
+	if len(beads) == 1 {
+		return beads[0].ID
+	}
 	return ""
 }
 

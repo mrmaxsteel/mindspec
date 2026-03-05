@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,7 +53,8 @@ func runScenario(t *testing.T, scenario Scenario) (*Report, *Sandbox) {
 	// Log recorded shim events for observability (before assertions, so we see
 	// them even if assertions fatal). This is the primary diagnostic for
 	// understanding how far the agent got.
-	t.Logf("--- Recorded events (%d) ---", len(events))
+	agentEvents := NewEventLog(events).AgentEvents()
+	t.Logf("--- Recorded events (%d total, %d agent) ---", len(events), len(agentEvents))
 	for i, ev := range events {
 		args := strings.Join(ev.ArgsList, " ")
 		if args == "" {
@@ -406,6 +408,95 @@ func (f *fakeTB) Fatalf(format string, args ...interface{}) {
 	// Can't truly stop execution in a fake, but callers check f.failed.
 }
 func (f *fakeTB) Logf(format string, args ...interface{}) {}
+
+// TestInstructPhaseDetection validates that `mindspec instruct --format=json`
+// correctly identifies the lifecycle phase for each worktree setup scenario.
+// This is a deterministic test (no LLM) — it creates a sandbox, sets up beads
+// state for each phase, and checks the JSON output.
+func TestInstructPhaseDetection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping instruct test in short mode (requires beads + mindspec binary)")
+	}
+
+	// parseInstructJSON extracts mode (or "redirect") from mindspec instruct JSON output.
+	parseInstructJSON := func(t *testing.T, out string) (mode string) {
+		t.Helper()
+		jsonStart := strings.Index(out, "{")
+		if jsonStart < 0 {
+			t.Fatalf("no JSON found in instruct output:\n%s", out)
+		}
+		jsonStr := out[jsonStart:]
+
+		var result struct {
+			Mode     string `json:"mode"`
+			Redirect bool   `json:"redirect,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			t.Fatalf("parsing instruct JSON: %v\nraw: %s", err, jsonStr)
+		}
+		if result.Redirect {
+			return "redirect"
+		}
+		return result.Mode
+	}
+
+	t.Run("idle", func(t *testing.T) {
+		sandbox := NewSandbox(t)
+		out, err := sandbox.Run("mindspec", "instruct", "--format=json")
+		if err != nil {
+			t.Logf("mindspec instruct exit: %v", err)
+		}
+		mode := parseInstructJSON(t, out)
+		if mode != "idle" {
+			t.Errorf("expected idle, got %q\nraw: %s", mode, out)
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		sandbox := NewSandbox(t)
+		specID := "001-plan-test"
+
+		// Epic with no children → plan phase (spec approved, plan being drafted)
+		sandbox.CreateSpecEpic(specID)
+		setupWorktrees(sandbox, specID, "", "plan")
+		sandbox.Commit("setup: plan mode")
+
+		out, err := sandbox.Run("mindspec", "instruct", "--format=json")
+		if err != nil {
+			t.Logf("mindspec instruct exit: %v", err)
+		}
+		mode := parseInstructJSON(t, out)
+		// From main CWD with spec worktree active, instruct emits a redirect
+		// telling the agent to cd into the worktree. Both are acceptable —
+		// redirect proves it detected the active worktree correctly.
+		if mode != "plan" && mode != "redirect" {
+			t.Errorf("expected plan or redirect, got %q\nraw: %s", mode, out)
+		}
+	})
+
+	t.Run("implement", func(t *testing.T) {
+		sandbox := NewSandbox(t)
+		specID := "001-impl-test"
+
+		epicID := sandbox.CreateSpecEpic(specID)
+		beadID := sandbox.CreateBead("["+specID+"] Test task", "task", epicID)
+		sandbox.ClaimBead(beadID)
+
+		setupWorktrees(sandbox, specID, beadID, "implement")
+		sandbox.Commit("setup: implement mode")
+
+		out, err := sandbox.Run("mindspec", "instruct", "--format=json")
+		if err != nil {
+			t.Logf("mindspec instruct exit: %v", err)
+		}
+		mode := parseInstructJSON(t, out)
+		// From main CWD with nested bead worktree active, instruct emits a
+		// redirect. Both are acceptable — redirect proves correct detection.
+		if mode != "implement" && mode != "redirect" {
+			t.Errorf("expected implement or redirect, got %q\nraw: %s", mode, out)
+		}
+	})
+}
 
 func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 	t.Run("rejects merge spec into main before approve impl", func(t *testing.T) {

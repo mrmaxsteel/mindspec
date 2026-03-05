@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -119,6 +120,33 @@ func (l *EventLog) ByTurn() map[int][]ActionEvent {
 		m[ev.Turn] = append(m[ev.Turn], ev)
 	}
 	return m
+}
+
+// AgentEvents returns events that represent agent-initiated actions,
+// filtering out beads/dolt git internals (git -C .beads, git remote,
+// git config user.name, git rev-parse without agent-relevant args).
+// Use this for the reported event count metric.
+func (l *EventLog) AgentEvents() []ActionEvent {
+	return l.Filter(func(ev ActionEvent) bool {
+		if ev.Command != "git" {
+			return true
+		}
+		args := strings.Join(ev.ArgsList, " ")
+		// Filter out beads dolt git internals
+		if strings.Contains(args, ".beads") {
+			return false
+		}
+		// Filter out git plumbing that beads triggers repeatedly
+		switch {
+		case strings.HasPrefix(args, "remote"):
+			return false
+		case strings.HasPrefix(args, "config user.name"):
+			return false
+		case strings.HasPrefix(args, "rev-parse --git-dir --git-common-dir"):
+			return false
+		}
+		return true
+	})
 }
 
 // MaxTurn returns the highest turn number seen.

@@ -29,15 +29,31 @@ func defaultReadGuardState(root string) (*guardState, error) {
 	if err != nil || ctx == nil {
 		return &guardState{}, nil
 	}
+	// WorktreeMain path in ResolveContext doesn't populate BeadID.
+	// Query for an active bead so the redirect points to the bead
+	// worktree (not just the spec worktree).
+	if ctx.BeadID == "" && ctx.EpicID != "" {
+		ctx.BeadID = phase.FindActiveBeadForEpic(ctx.EpicID)
+	}
 	gs := &guardState{
 		ActiveSpec: ctx.SpecID,
 	}
-	// Derive worktree path from context
-	if ctx.BeadID != "" && ctx.SpecID != "" {
+	// Derive worktree path from context.
+	// Validate existence at each level: prefer bead worktree > spec worktree.
+	// If neither exists on disk (both deleted during crash/cleanup),
+	// leave ActiveWorktree empty so no redirect fires.
+	if ctx.SpecID != "" {
 		specWt := state.SpecWorktreePath(root, ctx.SpecID)
-		gs.ActiveWorktree = state.BeadWorktreePath(specWt, ctx.BeadID)
-	} else if ctx.SpecID != "" {
-		gs.ActiveWorktree = state.SpecWorktreePath(root, ctx.SpecID)
+		if ctx.BeadID != "" {
+			beadWt := state.BeadWorktreePath(specWt, ctx.BeadID)
+			if dirExists(beadWt) {
+				gs.ActiveWorktree = beadWt
+			} else if dirExists(specWt) {
+				gs.ActiveWorktree = specWt
+			}
+		} else if dirExists(specWt) {
+			gs.ActiveWorktree = specWt
+		}
 	}
 	return gs, nil
 }
@@ -104,4 +120,9 @@ func ActiveWorktreePath(root string) string {
 		return ""
 	}
 	return gs.ActiveWorktree
+}
+
+func dirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }

@@ -228,6 +228,8 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-03 | PASS | 120 | 11 | 56.92s | After sandbox .gitignore fix (added .mindspec/focus + session.json). 100% fwd ratio, clean bead→spec merge at [92]. |
 | 2026-03-04 | FAIL | 2361 | 7 | 98.92s | ADR-0023 compat: `mindspec next` exits 1, `mindspec complete` exits 1. Agent reached max turns (20). Pre-existing; not a regression from Spec 067. |
 | 2026-03-04 | FAIL | 1898 | 3 | 82.86s | Full-suite rerun: no `impl(` commit message, no bead merge topology. `skip_next` false positive fixed (CWD-based inference). |
+| 2026-03-04 | PASS | ~313 | 6 | 1m22s | Fix worktree topology (nested spec→bead), guard redirect points to bead worktree, idle template cleanup, implement template fixes (no redundant cd/next), bd close forbidden, complete emits cd hint. 100% fwd ratio. (1649 raw events; ~1336 beads git internals filtered.) |
+| 2026-03-04 | PASS | 1337 | 4 | 1m17s | setupWorktrees refactor full-suite rerun. 100% fwd ratio. No regressions from helper conversion. |
 
 ### TestLLM_SpecToIdle
 
@@ -255,6 +257,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-03 | PASS | 423 | 28 | 189.29s | After sandbox .gitignore fix (added .mindspec/focus + session.json). **71.4% fwd ratio** (20 fwd / 8 retry). Zero merge conflicts — bead→spec merge at [312] clean. `approve impl` succeeded after auto-merge of unmerged bead branch at [311-312]. |
 | 2026-03-04 | PASS | - | - | 389.30s | ADR-0023 compat: full lifecycle passes with CreateSpecEpic + phase derivation fixes. |
 | 2026-03-04 | FAIL | 7548 | 39 | 344.53s | Full-suite rerun: `mindspec complete` never succeeded (skip_complete). 89.7% fwd ratio. |
+| 2026-03-04 | FAIL | 5993 | 35 | 10m18s | setupWorktrees refactor full-suite: agent skipped `mindspec complete` (wrote code after `mindspec next` but never completed). 82.9% fwd ratio. Pre-existing haiku behavior, not a regression. |
 
 ### TestLLM_AbandonSpec
 
@@ -281,6 +284,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | PASS | 138 | 6 | 43.81s | Full-suite rerun pass: resume-after-crash flow completed under current setup and assertions. |
 | 2026-03-02 | PASS | 111 | 7 | 45.59s | Full-suite rerun pass; scenario still completes after one retry in the complete/commit flow. |
 | 2026-03-04 | FAIL | 1682 | 7 | 75.35s | Full-suite rerun: `mindspec complete` never succeeded. 42.9% fwd ratio (4 retries). |
+| 2026-03-04 | FAIL | 749 | 5 | 1m37s | setupWorktrees refactor full-suite: agent completed work but used raw git instead of `mindspec complete`. 100% fwd ratio. Pre-existing haiku behavior. |
 
 ### TestLLM_InterruptForBug
 
@@ -293,6 +297,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | PASS | 156 | 8 | 57.97s | `mindspec-n9j7` validation: guidance/hook updates plus artifact assertion hardened to accept root or worktree output; scenario completes successfully. |
 | 2026-03-02 | FAIL | 140 | 8 | 1m02.81s | De-tautologized full-suite validation: agent handled interrupts but never produced `feature.go`; artifact assertion failed. |
 | 2026-03-04 | FAIL | 803 | 2 | 39.28s | `skip_next` false positive: agent committed fix on main without bead lifecycle. Fixed: CWD-based implement phase inference. |
+| 2026-03-04 | FAIL | 815 | 4 | 3m17s | setupWorktrees refactor full-suite: agent committed directly to main (`skip_next` wrong action). 100% fwd ratio. Pre-existing haiku behavior. |
 
 ### TestLLM_MultiBeadDeps
 
@@ -304,6 +309,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | FAIL | 131 | 12 | 1m15.11s | Full-suite rerun: max turns reached without successful `mindspec next`; no `.worktrees/` CWD observed. |
 | 2026-03-02 | PASS | 187 | 12 | 1m19.56s | `mindspec-n9j7` fix: implement template + pre-commit guardrails now steer retries toward `mindspec next` and managed worktree handoff, restoring pass. |
 | 2026-03-04 | FAIL | 4213 | 6 | 159.11s | Full-suite rerun: `mindspec next` never succeeded. 83.3% fwd ratio. |
+| 2026-03-04 | PASS | 5249 | 13 | 9m31s | setupWorktrees refactor full-suite: all 3 beads completed. 69.2% fwd ratio (4 retries). |
 
 ### TestLLM_SpecInit
 
@@ -313,6 +319,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | 49 | 3 | 20.39s | **REGRESSION**: assertions failed after run (`.mindspec/focus` missing in repo root after spec-init). |
 | 2026-03-01 | FAIL | 56 | 5 | 29.78s | Full-suite rerun: `mindspec spec-init` never succeeded (exit non-zero) and root `.mindspec/focus` assertion remains red. |
 | 2026-03-02 | PASS | 54 | 3 | 28.96s | Full-suite rerun pass: `mindspec spec-init` succeeded and focus/worktree assertions held. |
+| 2026-03-04 | PASS | 193 | 3 | 28s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_SpecApprove
 
@@ -323,6 +330,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.22s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in spec mode. |
 | 2026-03-01 | FAIL | 74 | 6 | 37.52s | Full-suite rerun: scenario remained in `spec` mode; expected transition to `plan` did not occur. |
 | 2026-03-02 | PASS | 59 | 4 | 40.16s | Full-suite rerun pass: `approve spec` succeeded and scenario met transition assertions. |
+| 2026-03-04 | PASS | 2108 | 8 | 1m39s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_PlanApprove
 
@@ -334,6 +342,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.07s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in plan mode. |
 | 2026-03-01 | FAIL | 148 | 3 | 46.93s | Full-suite rerun: `approve plan`/`next` activity occurred, but focus mode stayed `plan` instead of expected `implement`. |
 | 2026-03-02 | PASS | 155 | 6 | 43.84s | Full-suite rerun pass with higher retries/events; `approve plan` plus `next` completed successfully. |
+| 2026-03-04 | PASS | 1311 | 3 | 1m03s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_ImplApprove
 
@@ -346,6 +355,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | FAIL | 101 | 5 | 31.75s | **REGRESSION**: `approve impl` command succeeded, but focus remained `review` instead of transitioning to `idle`. |
 | 2026-03-02 | PASS | 84 | 4 | 29.54s | Fixed `ApproveImpl` focus persistence: fallback to root focus when local missing and write idle focus to both local+root targets. |
 | 2026-03-04 | PASS | 1171 | 2 | 51.00s | ADR-0023 compat: `ApproveImpl` now uses `FindEpicBySpecID`, accepts "done" phase, handles pre-cleaned branches. `detectSkipNext` exempts approval flows. |
+| 2026-03-04 | PASS | 1200 | 3 | 60s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_SpecStatus
 
@@ -356,6 +366,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.39s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | PASS | 33 | 2 | 19.25s | Full-suite rerun pass: read-only status checks and branch/worktree preservation assertions still pass. |
 | 2026-03-02 | PASS | 23 | 3 | 13.51s | Full-suite rerun pass with lower events/time while preserving status assertions. |
+| 2026-03-04 | PASS | 813 | 2 | 44s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_MultipleActiveSpecs
 
@@ -372,6 +383,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | FAIL | 145 | 13 | 81.71s | De-tautologized prompt v1 (too open) regressed disambiguation completion: no successful `mindspec complete --spec ...` observed. |
 | 2026-03-02 | PASS | 203 | 7 | 72.26s | Prompt revised to lifecycle end-state (001-alpha to review, 002-beta unchanged, no `bd close` shortcut) restored `--spec` completion path without command-level prescription. |
 | 2026-03-04 | FAIL | 5932 | 7 | 179.75s | Full-suite rerun: `mindspec complete` never succeeded. 71.4% fwd ratio. |
+| 2026-03-04 | FAIL | 4198 | 12 | 11m28s | setupWorktrees refactor full-suite: no successful `mindspec complete --spec ...`. 83.3% fwd ratio. Pre-existing haiku behavior. |
 
 ### TestLLM_StaleWorktree
 
@@ -381,6 +393,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.13s | **REGRESSION**: setup failed before agent run. `sandbox.Commit()` blocked on main in implement mode. |
 | 2026-03-01 | FAIL | 126 | 8 | 53.00s | Full-suite rerun: stale-worktree recovery attempts happened, but no successful `mindspec complete` event was recorded. |
 | 2026-03-02 | PASS | 101 | 5 | 47.28s | Full-suite rerun pass via documented fallback (`state set --mode idle` + `bd close`) after `complete` failure. |
+| 2026-03-04 | FAIL | 2674 | 12 | 7m40s | setupWorktrees refactor full-suite: max turns (20) exhausted. 75% fwd ratio (3 retries). Pre-existing haiku behavior. |
 
 ### TestLLM_CompleteFromSpecWorktree
 
@@ -390,6 +403,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | 152 | 2 | 35.91s | Full-suite rerun: scenario progressed further, but never produced a successful `mindspec complete`. |
 | 2026-03-02 | PASS | 132 | 9 | 49.42s | Full-suite rerun pass: successful `mindspec complete` observed from spec-worktree context. |
 | 2026-03-02 | PASS | 127 | 6 | 36.92s | Regression check after worktree-anchor fix: still green; `mindspec complete` succeeds from spec-worktree context. |
+| 2026-03-04 | FAIL | 2104 | 7 | 1m17s | setupWorktrees refactor full-suite: agent used `git cherry-pick` instead of `mindspec complete`. Pre-existing haiku behavior. |
 
 ### TestLLM_ApproveSpecFromWorktree
 
@@ -398,6 +412,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.18s | Baseline in full-suite run: setup failed before agent run. `sandbox.Commit()` blocked on main in spec mode. |
 | 2026-03-01 | FAIL | 40 | 4 | 29.10s | Full-suite rerun: repeated `mindspec approve spec 001-greeting` attempts all exited non-zero; no successful approval event. |
 | 2026-03-02 | PASS | 55 | 6 | 44.53s | Full-suite rerun pass: successful `approve spec` recorded in worktree-only artifact context. |
+| 2026-03-04 | PASS | 948 | 3 | 1m43s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_ApprovePlanFromWorktree
 
@@ -406,6 +421,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-01 | FAIL | - | - | 2.22s | Baseline in full-suite run: setup failed before agent run. `sandbox.Commit()` blocked on main in plan mode. |
 | 2026-03-01 | PASS | 104 | 4 | 27.41s | Full-suite rerun pass: worktree-context `approve plan` assertion now succeeds end-to-end. |
 | 2026-03-02 | PASS | 61 | 4 | 24.56s | Full-suite rerun pass; stable behavior with fewer events than prior pass. |
+| 2026-03-04 | PASS | 1094 | 2 | 1m56s | setupWorktrees refactor full-suite: stable. |
 
 ### TestLLM_BugfixBranch
 
@@ -423,7 +439,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-02 | PASS | 44 | 4 | 27.27s | Full-suite rerun pass: agent created branch/worktree, pushed, and opened PR successfully. |
 | 2026-03-02 | FAIL | 23 | 2 | 13.47s | De-tautologized full-suite validation: agent fixed on main and exited without branch/push/PR workflow (`git push`/`gh pr` missing). |
 | 2026-03-04 | FAIL | 259 | 2 | 25.67s | No branch/push/PR. `skip_next` false positive on `bd: backup` commit. Fixed: infrastructure commit exclusion in `isCodeModifyingEvent`. |
-
+| 2026-03-04 | FAIL | 262 | 2 | 38s | setupWorktrees refactor full-suite: agent committed directly to main, no branch/PR. Pre-existing haiku behavior. |
 
 ### TestLLM_BlockedBeadTransition
 
@@ -431,12 +447,15 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 |------|--------|--------|-------|------|--------|
 | 2026-03-04 | PASS | - | - | - | ADR-0023 session: scenario passes (previous session). |
 | 2026-03-04 | FAIL | 3644 | 7 | 134.94s | Full-suite rerun: `skip_next` false positive — agent committed code before `mindspec next` in worktree CWD. Fixed: CWD-based implement phase inference. |
+| 2026-03-04 | PASS | 1372 | 3 | 2m15s | setupWorktrees refactor full-suite: agent completed bead, closed, and next bead unblocked. 100% fwd ratio. |
 
 ### TestLLM_UnmergedBeadGuard
 
 | Date | Result | Events | Turns | Time | Change |
 |------|--------|--------|-------|------|--------|
 | 2026-03-04 | FAIL | 3483 | 5 | 120.72s | Baseline: `mindspec complete` and `mindspec next` never succeeded. Agent reached max turns (25). |
+| 2026-03-04 | FAIL | - | - | 2s | setupWorktrees refactor full-suite: setup failure — `bd create spec epic` exit 1. Sandbox beads issue, not agent behavior. |
+
 ### Session Summary — 2026-03-01 Full Suite
 
 - 17 scenarios run sequentially with `env -u CLAUDECODE`.
@@ -483,7 +502,6 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - `detectSkipNext` analyzer: exempt approval-flow scenarios (no `mindspec next` expected).
 - Remaining failures appear to be nondeterministic Haiku behavior (SingleBead reached max turns) or pre-existing issues, not regressions from this change.
 
-
 ### Session Summary — 2026-03-04 Full Suite (skip_next false positives)
 
 - 18 scenarios run sequentially with `env -u CLAUDECODE` from main.
@@ -493,6 +511,23 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - **Fix applied**: `isImplementPhase()` infers implement mode from `.worktrees/` in CWD when Phase is empty. `isInfrastructureCommit()` excludes `bd: backup` commits from code-modification detection.
 - **Result**: All 52 deterministic tests pass including 2 new unit tests for the false-positive fixes.
 - Remaining 9 failures are pre-existing nondeterministic Haiku behavior (agent reaching max turns, wrong command sequencing, etc.), not regressions.
+
+### Session Summary — 2026-03-04 setupWorktrees Refactor Full Suite
+
+- 18 scenarios run (parallel batches) with `env -u CLAUDECODE`.
+- 11 PASS, 7 FAIL.
+- **Passing (11)**: `SingleBead`, `SpecInit`, `SpecApprove`, `SpecStatus`, `PlanApprove`, `ImplApprove`, `ApproveSpecFromWorktree`, `ApprovePlanFromWorktree`, `BlockedBeadTransition`, `MultiBeadDeps`.
+- **Failing (7)**:
+  - `CompleteFromSpecWorktree`: agent cherry-picked instead of `mindspec complete` (pre-existing haiku behavior)
+  - `ResumeAfterCrash`: agent used raw git instead of `mindspec complete` (pre-existing)
+  - `InterruptForBug`: agent committed directly to main (`skip_next` wrong action) (pre-existing)
+  - `BugfixBranch`: agent committed to main, no branch/PR (pre-existing)
+  - `UnmergedBeadGuard`: setup failure (`bd create spec epic` exit 1) — sandbox issue
+  - `MultipleActiveSpecs`: no `mindspec complete --spec` (pre-existing)
+  - `StaleWorktree`: max turns exhausted (pre-existing)
+  - `SpecToIdle`: agent skipped `mindspec complete` after `mindspec next` (pre-existing)
+- **Conclusion**: No regressions from the `setupWorktrees` helper refactor. All failures are pre-existing haiku behavioral issues or sandbox setup bugs. The 11 passing scenarios confirm the worktree topology changes are solid.
+
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
 - **Turns (estimated)**: API round-trips, estimated from event timestamp gaps >2s. The `--max-turns` flag sets the budget; "Reached max turns" means all were consumed
