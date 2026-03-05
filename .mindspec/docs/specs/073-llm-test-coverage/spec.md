@@ -95,9 +95,9 @@ SingleBead, SpecInit, SpecApprove, PlanApprove, ImplApprove, SpecStatus, Approve
 
 ## Open Questions
 
-- [ ] Which failing scenarios are most impactable via guidance changes vs. inherent Haiku limitations?
-- [ ] Should `StaleWorktree` MaxTurns be increased, or is the scenario too complex for Haiku?
-- [ ] Is `BugfixBranch` a realistic test for Haiku (agent must discover branch policy from guidance alone)?
+- [x] Which failing scenarios are most impactable via guidance changes vs. inherent Haiku limitations? — Resolved: SpecInit, PlanApprove, ApproveSpecFromWorktree are analyzer/setup bugs, not Haiku limitations. SpecToIdle, ResumeAfterCrash, InterruptForBug, BugfixBranch are Haiku behavioral issues addressable via guidance. StaleWorktree and MultipleActiveSpecs may be inherent complexity limits.
+- [x] Should `StaleWorktree` MaxTurns be increased, or is the scenario too complex for Haiku? — Resolved: Try guidance improvements first; increase MaxTurns only if needed. Out of scope if still failing after guidance fixes.
+- [x] Is `BugfixBranch` a realistic test for Haiku (agent must discover branch policy from guidance alone)? — Resolved: Yes, but it's a stretch goal. Focus on fixing analyzer/setup bugs first (higher ROI).
 
 ## Approval
 
