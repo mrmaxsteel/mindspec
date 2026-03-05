@@ -56,6 +56,18 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
 	vr := validate.ValidatePlan(root, specID)
 	if vr.HasFailures() {
+		// If plan.md doesn't exist, check if the spec needs approval first.
+		// This guides agents that pick the wrong approve subcommand.
+		specDir := workspace.SpecDir(root, specID)
+		planPath := filepath.Join(specDir, "plan.md")
+		if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
+			specPath := filepath.Join(specDir, "spec.md")
+			if specData, readErr := os.ReadFile(specPath); readErr == nil {
+				if !strings.Contains(string(specData), "status: Approved") {
+					return nil, fmt.Errorf("spec %s has not been approved yet — no plan.md exists.\nRun: mindspec approve spec %s", specID, specID)
+				}
+			}
+		}
 		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
 	}
 

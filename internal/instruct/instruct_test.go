@@ -3,33 +3,12 @@ package instruct
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mindspec/mindspec/internal/state"
 )
-
-// mockPrimeUnavailable sets execPrime to simulate bd not being installed.
-func mockPrimeUnavailable(t *testing.T) {
-	t.Helper()
-	orig := execPrime
-	execPrime = func() *exec.Cmd {
-		return exec.Command("false")
-	}
-	t.Cleanup(func() { execPrime = orig })
-}
-
-// mockPrimeAvailable sets execPrime to return the given content.
-func mockPrimeAvailable(t *testing.T, content string) {
-	t.Helper()
-	orig := execPrime
-	execPrime = func() *exec.Cmd {
-		return exec.Command("echo", content)
-	}
-	t.Cleanup(func() { execPrime = orig })
-}
 
 func setupTestProject(t *testing.T) string {
 	t.Helper()
@@ -59,7 +38,6 @@ func setupTestProject(t *testing.T) string {
 }
 
 func TestRender_IdleMode(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModeIdle}
 	ctx := BuildContext(root, s)
@@ -81,7 +59,6 @@ func TestRender_IdleMode(t *testing.T) {
 }
 
 func TestRender_SpecMode(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
@@ -109,7 +86,6 @@ func TestRender_SpecMode(t *testing.T) {
 }
 
 func TestRender_PlanMode(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
@@ -142,7 +118,6 @@ func TestRender_PlanMode(t *testing.T) {
 }
 
 func TestRender_ImplementMode(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
 	ctx := BuildContext(root, s)
@@ -170,7 +145,6 @@ func TestRender_ImplementMode(t *testing.T) {
 }
 
 func TestRender_SpecGoalExtracted(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
@@ -181,7 +155,6 @@ func TestRender_SpecGoalExtracted(t *testing.T) {
 }
 
 func TestRender_Warnings(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	// Spec mode but spec is already approved → should produce drift warning
 	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
@@ -202,7 +175,6 @@ func TestRender_Warnings(t *testing.T) {
 }
 
 func TestRenderJSON_Structure(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	ctx := BuildContext(root, s)
@@ -235,7 +207,6 @@ func TestRenderJSON_Structure(t *testing.T) {
 }
 
 func TestRenderJSON_AllModes(t *testing.T) {
-	mockPrimeUnavailable(t)
 	root := setupTestProject(t)
 
 	modes := []string{state.ModeIdle, state.ModeSpec, state.ModePlan, state.ModeImplement}
@@ -299,129 +270,10 @@ func TestReadSpecGoal_Missing(t *testing.T) {
 	}
 }
 
-func TestCapturePrime_Available(t *testing.T) {
-	mockPrimeAvailable(t, "# Beads Workflow Context\nSome content here")
-	result := CapturePrime()
-	if !strings.Contains(result, "Beads Workflow Context") {
-		t.Errorf("expected beads content, got %q", result)
-	}
-}
-
-func TestCapturePrime_Unavailable(t *testing.T) {
-	mockPrimeUnavailable(t)
-	result := CapturePrime()
-	if result != "" {
-		t.Errorf("expected empty string on failure, got %q", result)
-	}
-}
-
-func TestBuildContext_PopulatesBeadsContext(t *testing.T) {
-	mockPrimeAvailable(t, "# Beads Workflow Context")
-	root := setupTestProject(t)
-	s := &state.Focus{Mode: state.ModeIdle}
-	ctx := BuildContext(root, s)
-
-	if !strings.Contains(ctx.BeadsContext, "Beads Workflow Context") {
-		t.Errorf("expected BeadsContext to be populated, got %q", ctx.BeadsContext)
-	}
-
-	// Should NOT have the beads unavailable warning
-	for _, w := range ctx.Warnings {
-		if strings.Contains(w, "bd prime unavailable") {
-			t.Error("should not have beads unavailable warning when prime succeeds")
-		}
-	}
-}
-
-func TestBuildContext_WarnsWhenPrimeUnavailable(t *testing.T) {
-	mockPrimeUnavailable(t)
-	root := setupTestProject(t)
-	s := &state.Focus{Mode: state.ModeIdle}
-	ctx := BuildContext(root, s)
-
-	if ctx.BeadsContext != "" {
-		t.Errorf("expected empty BeadsContext, got %q", ctx.BeadsContext)
-	}
-
-	found := false
-	for _, w := range ctx.Warnings {
-		if strings.Contains(w, "bd prime unavailable") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected beads unavailable warning")
-	}
-}
-
-func TestRender_IncludesBeadsContext(t *testing.T) {
+func TestRenderJSON_ExcludesBeadsContext(t *testing.T) {
 	ctx := &Context{
-		Mode:         state.ModeIdle,
-		BeadsContext: "# Beads Workflow\nSession close: bd sync --flush-only",
-	}
-
-	output, err := Render(ctx)
-	if err != nil {
-		t.Fatalf("Render failed: %v", err)
-	}
-
-	if !strings.Contains(output, "# Beads Workflow") {
-		t.Error("expected Beads context in rendered output")
-	}
-	if !strings.Contains(output, "bd sync --flush-only") {
-		t.Error("expected session close protocol in rendered output")
-	}
-}
-
-func TestRender_BeadsContextBeforeWarnings(t *testing.T) {
-	ctx := &Context{
-		Mode:         state.ModeIdle,
-		BeadsContext: "BEADS_MARKER",
-		Warnings:     []string{"WARNING_MARKER"},
-	}
-
-	output, err := Render(ctx)
-	if err != nil {
-		t.Fatalf("Render failed: %v", err)
-	}
-
-	beadsIdx := strings.Index(output, "BEADS_MARKER")
-	warningIdx := strings.Index(output, "WARNING_MARKER")
-
-	if beadsIdx == -1 {
-		t.Fatal("BEADS_MARKER not found in output")
-	}
-	if warningIdx == -1 {
-		t.Fatal("WARNING_MARKER not found in output")
-	}
-	if beadsIdx >= warningIdx {
-		t.Error("Beads context should appear before warnings")
-	}
-}
-
-func TestRender_NoBeadsContext(t *testing.T) {
-	ctx := &Context{
-		Mode:         state.ModeIdle,
-		BeadsContext: "",
-	}
-
-	output, err := Render(ctx)
-	if err != nil {
-		t.Fatalf("Render failed: %v", err)
-	}
-
-	// Should not have a dangling separator for empty beads context
-	if strings.Contains(output, "\n---\n\n\n") {
-		t.Error("should not have empty beads section separator")
-	}
-}
-
-func TestRenderJSON_IncludesBeadsContext(t *testing.T) {
-	ctx := &Context{
-		Mode:         state.ModePlan,
-		ActiveSpec:   "test-spec",
-		BeadsContext: "# Beads Workflow Context\nContent here",
+		Mode:       state.ModePlan,
+		ActiveSpec: "test-spec",
 	}
 
 	output, err := RenderJSON(ctx)
@@ -434,7 +286,7 @@ func TestRenderJSON_IncludesBeadsContext(t *testing.T) {
 		t.Fatalf("JSON parse failed: %v", err)
 	}
 
-	if parsed.BeadsContext != "# Beads Workflow Context\nContent here" {
-		t.Errorf("beads_context: got %q, want beads content", parsed.BeadsContext)
+	if strings.Contains(output, "\"beads_context\"") {
+		t.Errorf("beads_context should not be present in JSON output: %s", output)
 	}
 }

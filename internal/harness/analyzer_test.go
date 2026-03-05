@@ -383,6 +383,22 @@ func TestSkipNext_ImplementPhaseCommitNoViolation(t *testing.T) {
 	}
 }
 
+func TestSkipNext_FailedCommitIgnored(t *testing.T) {
+	// A git commit that failed (exit=1) should not be flagged as code modification.
+	// This happens when the agent tries to commit after approve impl (nothing to commit).
+	events := []ActionEvent{
+		{ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"approve", "impl", "001-greeting"}, ExitCode: 0},
+		{ActionType: "command", Command: "git", ExitCode: 1,
+			ArgsList: []string{"commit", "-m", "Approve implementation"}},
+	}
+
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for failed git commit, got %d: %v", len(results), results)
+	}
+}
+
 func TestSkipComplete_NoViolation(t *testing.T) {
 	events := []ActionEvent{
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},

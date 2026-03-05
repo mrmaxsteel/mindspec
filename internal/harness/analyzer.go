@@ -452,7 +452,7 @@ func isCodeModifyingEvent(e ActionEvent) bool {
 			return true
 		}
 	}
-	if e.Command == "git" {
+	if e.Command == "git" && e.ExitCode == 0 {
 		args := eventArgsList(e)
 		if containsAll(args, "commit") {
 			return true

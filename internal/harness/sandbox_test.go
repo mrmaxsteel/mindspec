@@ -15,13 +15,13 @@ func TestSandboxCreatesValidRepo(t *testing.T) {
 		t.Error(".git directory missing")
 	}
 
-	// .mindspec structure
+	// .mindspec structure (from bootstrap.Run + sandbox config overlay)
 	for _, path := range []string{
 		".mindspec",
 		".mindspec/config.yaml",
 		".mindspec/docs",
 		".mindspec/docs/specs",
-		".mindspec/docs/adr",
+		"AGENTS.md",
 	} {
 		if !s.FileExists(path) {
 			t.Errorf("%s missing", path)

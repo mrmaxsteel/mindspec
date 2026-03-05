@@ -37,20 +37,18 @@ type Context struct {
 	AvailableSpecs   []string   `json:"available_specs,omitempty"`
 	ActiveSpecList   []SpecInfo `json:"active_spec_list,omitempty"`
 	BeadPrimer       string     `json:"bead_primer,omitempty"`
-	BeadsContext     string     `json:"beads_context,omitempty"`
 	BranchProtection bool       `json:"branch_protection,omitempty"`
 	Warnings         []string   `json:"warnings,omitempty"`
 }
 
 // JSONOutput is the structured output for --format=json.
 type JSONOutput struct {
-	Mode         string   `json:"mode"`
-	ActiveSpec   string   `json:"active_spec"`
-	ActiveBead   string   `json:"active_bead"`
-	Guidance     string   `json:"guidance"`
-	BeadsContext string   `json:"beads_context"`
-	Gates        []string `json:"gates"`
-	Warnings     []string `json:"warnings"`
+	Mode       string   `json:"mode"`
+	ActiveSpec string   `json:"active_spec"`
+	ActiveBead string   `json:"active_bead"`
+	Guidance   string   `json:"guidance"`
+	Gates      []string `json:"gates"`
+	Warnings   []string `json:"warnings"`
 }
 
 // BuildContext creates a rendering context from focus state and project root.
@@ -97,12 +95,6 @@ func BuildContext(root string, mc *state.Focus) *Context {
 		}
 	}
 
-	// Capture Beads workflow context
-	ctx.BeadsContext = CapturePrime()
-	if ctx.BeadsContext == "" {
-		ctx.Warnings = append(ctx.Warnings, "[beads] bd prime unavailable — Beads workflow context not included")
-	}
-
 	// Run cross-validation and collect warnings
 	warnings := state.CrossValidate(root, mc)
 	for _, w := range warnings {
@@ -142,11 +134,6 @@ func Render(ctx *Context) (string, error) {
 		result += "\n---\n\n" + ctx.BeadPrimer
 	}
 
-	// Append Beads context if available
-	if ctx.BeadsContext != "" {
-		result += "\n---\n\n" + ctx.BeadsContext + "\n"
-	}
-
 	// Append warnings if any
 	if len(ctx.Warnings) > 0 {
 		result += "\n---\n\n## Warnings\n\n"
@@ -166,13 +153,12 @@ func RenderJSON(ctx *Context) (string, error) {
 	}
 
 	out := JSONOutput{
-		Mode:         ctx.Mode,
-		ActiveSpec:   ctx.ActiveSpec,
-		ActiveBead:   ctx.ActiveBead,
-		Guidance:     guidance,
-		BeadsContext: ctx.BeadsContext,
-		Gates:        gatesForMode(ctx.Mode),
-		Warnings:     ctx.Warnings,
+		Mode:       ctx.Mode,
+		ActiveSpec: ctx.ActiveSpec,
+		ActiveBead: ctx.ActiveBead,
+		Guidance:   guidance,
+		Gates:      gatesForMode(ctx.Mode),
+		Warnings:   ctx.Warnings,
 	}
 
 	if out.Warnings == nil {

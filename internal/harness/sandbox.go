@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mindspec/mindspec/internal/bootstrap"
 	"github.com/mindspec/mindspec/internal/setup"
 )
 
@@ -47,21 +48,14 @@ func NewSandbox(t *testing.T) *Sandbox {
 	mustRun(t, root, "git", "config", "user.email", "test@mindspec.dev")
 	mustRun(t, root, "git", "config", "user.name", "MindSpec Test")
 
-	// Create .mindspec structure
-	mindspecDir := filepath.Join(root, ".mindspec")
-	docsDir := filepath.Join(mindspecDir, "docs")
-	for _, dir := range []string{
-		mindspecDir,
-		docsDir,
-		filepath.Join(docsDir, "specs"),
-		filepath.Join(docsDir, "adr"),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("creating %s: %v", dir, err)
-		}
+	// Bootstrap MindSpec project structure (creates .mindspec/, AGENTS.md,
+	// CLAUDE.md, .gitignore — same as `mindspec init`).
+	if _, err := bootstrap.Run(root, false); err != nil {
+		t.Fatalf("bootstrap.Run: %v", err)
 	}
 
-	// Write default config.
+	// Write sandbox-specific config (overrides any bootstrap defaults).
+	mindspecDir := filepath.Join(root, ".mindspec")
 	configContent := `protected_branches: [main]
 merge_strategy: direct
 worktree_root: .worktrees
