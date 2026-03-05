@@ -45,7 +45,7 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	}
 
 	// Verify skill files exist
-	for _, name := range []string{"ms-spec-init", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve", "ms-spec-status"} {
+	for _, name := range []string{"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve", "ms-spec-status"} {
 		skillPath := filepath.Join(root, ".claude", "skills", name, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 			t.Errorf("missing skill file: %s", name)

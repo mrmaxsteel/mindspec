@@ -45,7 +45,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 
 **1. Start a specification**
 
-Use the `/ms-spec-init` custom command (or `mindspec spec-init 001-my-feature`). This creates `docs/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
+Use the `/ms-spec-create` custom command (or `mindspec spec create 001-my-feature`). This creates `docs/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
 
 **2. Draft the spec collaboratively**
 
@@ -92,7 +92,7 @@ Type `/ms-impl-approve`. This verifies the work against acceptance criteria and 
 | Skill | What It Does |
 |:------|:-------------|
 | `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification (enters Spec Mode) |
+| `/ms-spec-create` | Create a new specification (enters Spec Mode) |
 | `/ms-spec-approve` | Approve spec → Plan Mode |
 | `/ms-plan-approve` | Approve plan → Implementation Mode |
 | `/ms-impl-approve` | Approve implementation → Idle |

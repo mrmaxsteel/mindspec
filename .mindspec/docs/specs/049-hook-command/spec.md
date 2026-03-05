@@ -81,7 +81,7 @@ Additionally, there is no enforcement that prevents an agent from editing code f
 
    | Mode | Target is code file | Target is doc/spec file | Response |
    |:-----|:-------------------|:----------------------|:---------|
-   | `idle` | any edit | any edit | **warn** — "You are editing files with no active spec. You must stop and go through the spec lifecycle (`/ms-spec-init` or `/ms-explore`). If these are exceptional circumstances (debugging a CI failure, fixing a broken build, correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason." |
+   | `idle` | any edit | any edit | **warn** — "You are editing files with no active spec. You must stop and go through the spec lifecycle (`/ms-spec-create` or `/ms-explore`). If these are exceptional circumstances (debugging a CI failure, fixing a broken build, correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason." |
    | `explore` | any edit | any edit | **warn** — same message adapted for explore (exploration is for evaluation, not implementation) |
    | `spec` | code edit | doc edit ok | **block** code edits; allow doc/spec edits silently |
    | `plan` | code edit | doc edit ok | **block** code edits; allow doc/plan edits silently |
@@ -127,7 +127,7 @@ Additionally, there is no enforcement that prevents an agent from editing code f
 - [ ] `mindspec hook workflow-guard` passes silently for doc edits during `spec` and `plan` modes
 - [ ] `mindspec hook workflow-guard` passes silently during `implement` mode for in-scope edits
 - [ ] `mindspec hook workflow-guard` emits warning during `review` mode
-- [ ] Warning messages clearly state the agent is in breach of the workflow, list the expected action (`/ms-spec-init` or `/ms-explore`), and enumerate legitimate exceptions (CI fix, broken build, config typo, urgent operational fix)
+- [ ] Warning messages clearly state the agent is in breach of the workflow, list the expected action (`/ms-spec-create` or `/ms-explore`), and enumerate legitimate exceptions (CI fix, broken build, config typo, urgent operational fix)
 - [ ] `mindspec hook --list` prints all available hook names
 
 **Protocol support:**

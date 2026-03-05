@@ -18,7 +18,7 @@ make test     # Run all tests
 | Skill | Purpose |
 |:------|:--------|
 | `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification (enters Spec Mode) |
+| `/ms-spec-create` | Create a new specification (enters Spec Mode) |
 | `/ms-spec-approve` | Approve spec → Plan Mode |
 | `/ms-plan-approve` | Approve plan → Implementation Mode |
 | `/ms-impl-approve` | Approve implementation → Idle |

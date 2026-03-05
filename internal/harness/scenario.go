@@ -364,7 +364,7 @@ Complete the Process function (make it return "processed") and finish the bead t
 	}
 }
 
-// ScenarioSpecInit tests the /ms-spec-init flow: idle → spec-init → spec mode with worktree.
+// ScenarioSpecInit tests the /ms-spec-create flow: idle → spec create → spec mode with worktree.
 //
 // Before: main branch, no worktrees, no spec/ branches, clean tree, idle mode
 // After:  main branch (CWD), spec/ branch created, worktree created, spec mode in focus
@@ -389,7 +389,7 @@ func ScenarioSpecInit() Scenario {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-init 001-calculator --title "Calculator"`,
+/ms-spec-create 001-calculator --title "Calculator"`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran (accept both old and new forms)
 			assertCommandRanEither(t, events, "mindspec",

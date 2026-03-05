@@ -88,7 +88,7 @@ Bead 1
    - `config`: `.mindspec/config.yaml`, `.claude/`, `.github/`
    - `unknown`: everything else (treated as code for safety)
 2. Implement `WorkflowGuard(input *Input, st *state.State, cwd string) Result` with the decision table:
-   - `idle`: warn for any edit — message includes: "You are editing files with no active spec. You must stop and go through the spec lifecycle (/ms-spec-init or /ms-explore). If these are exceptional circumstances (debugging a CI failure, fixing a broken build, correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason."
+   - `idle`: warn for any edit — message includes: "You are editing files with no active spec. You must stop and go through the spec lifecycle (/ms-spec-create or /ms-explore). If these are exceptional circumstances (debugging a CI failure, fixing a broken build, correcting a typo in config, or other urgent operational fix), you may proceed but must note the reason."
    - `explore`: warn for any edit — adapted message about exploration being for evaluation, not implementation
    - `spec`: block code edits, pass doc edits
    - `plan`: block code edits, pass doc edits

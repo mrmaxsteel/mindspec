@@ -82,7 +82,7 @@ func CheckWorktree(activeBead string) string
 | Skill | Purpose |
 |:------|:--------|
 | `/ms-explore` | Enter, promote, or dismiss an Explore Mode session |
-| `/ms-spec-init` | Initialize a new specification |
+| `/ms-spec-create` | Create a new specification |
 | `/ms-spec-approve` | Request Spec -> Plan transition |
 | `/ms-plan-approve` | Request Plan -> Implementation transition |
 | `/ms-spec-status` | Check current mode and state |

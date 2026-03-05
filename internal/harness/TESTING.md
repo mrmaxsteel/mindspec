@@ -230,6 +230,7 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-04 | FAIL | 1898 | 3 | 82.86s | Full-suite rerun: no `impl(` commit message, no bead merge topology. `skip_next` false positive fixed (CWD-based inference). |
 | 2026-03-04 | PASS | ~313 | 6 | 1m22s | Fix worktree topology (nested spec→bead), guard redirect points to bead worktree, idle template cleanup, implement template fixes (no redundant cd/next), bd close forbidden, complete emits cd hint. 100% fwd ratio. (1649 raw events; ~1336 beads git internals filtered.) |
 | 2026-03-04 | PASS | 1337 | 4 | 1m17s | setupWorktrees refactor full-suite rerun. 100% fwd ratio. No regressions from helper conversion. |
+| 2026-03-05 | PASS | 1386 | 6 | 1m48s | Targeted rerun: 100% fwd ratio. No regressions. |
 
 ### TestLLM_SpecToIdle
 

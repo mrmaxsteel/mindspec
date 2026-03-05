@@ -132,7 +132,7 @@ your-project/
 ├── .claude/                    # Claude Code config (created by mindspec setup claude)
 │   ├── settings.json           # Hooks (SessionStart, PreToolUse gates)
 │   ├── commands/               # Custom slash commands
-│   └── skills/                 # Skills (/ms-spec-init, /ms-spec-approve, etc.)
+│   └── skills/                 # Skills (/ms-spec-create, /ms-spec-approve, etc.)
 ├── AGENTS.md                   # Cross-agent workflow conventions
 └── CLAUDE.md                   # Claude Code-specific config
 ```

@@ -41,7 +41,7 @@ This creates:
 - `.github/copilot-instructions.md` — workspace instructions pointing to `AGENTS.md`
 - `.github/hooks/mindspec.json` — hooks for session start guidance and plan mode gate enforcement
 - `.github/hooks/mindspec-plan-gate.sh` — preToolUse script that blocks code edits during plan mode
-- `.agents/skills/` — workflow skills (`/ms-spec-init`, `/ms-spec-approve`, etc.)
+- `.agents/skills/` — workflow skills (`/ms-spec-create`, `/ms-spec-approve`, etc.)
 
 ### 4. Verify
 
@@ -73,7 +73,7 @@ Copilot Chat reads `.github/copilot-instructions.md` automatically for workspace
 
 **Running commands**: Use VS Code's integrated terminal to run `mindspec` CLI commands. Copilot Chat can execute terminal commands when you ask it to.
 
-**Skills**: Use `/ms-spec-init`, `/ms-spec-approve`, etc. in the chat panel — these are defined in `.agents/skills/` and instruct Copilot to run the corresponding `mindspec` CLI command.
+**Skills**: Use `/ms-spec-create`, `/ms-spec-approve`, etc. in the chat panel — these are defined in `.agents/skills/` and instruct Copilot to run the corresponding `mindspec` CLI command.
 
 **Workspace awareness**: Use `@workspace` to give Copilot context about the codebase when drafting specs or plans.
 
@@ -93,7 +93,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 mindspec spec-init 001-my-feature
 ```
 
-Or use `/ms-spec-init` in Copilot Chat.
+Or use `/ms-spec-create` in Copilot Chat.
 
 **2. Draft the spec collaboratively**
 
