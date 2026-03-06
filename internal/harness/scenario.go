@@ -1381,7 +1381,7 @@ func main() {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-There is a division-by-zero bug in calculator.go — Divide(10, 0) panics. Fix it by adding a zero-divisor check that returns 0 when b is 0.`,
+There is a division-by-zero bug in calculator.go — Divide(10, 0) panics. Fix it by adding a zero-divisor check that returns 0 when b is 0. Submit the fix for review.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent must have created a branch (any non-main branch)
 			assertHasNonMainBranch(t, sandbox)

@@ -32,7 +32,7 @@ func Run(name string, inp *Input, st *HookState, enforce bool) Result {
 }
 
 // runPreCommit implements branch protection: blocks commits on protected
-// branches when mindspec is active (mode != idle).
+// branches regardless of mode (including idle).
 // Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit
 func runPreCommit(st *HookState) Result {
 	// Escape hatch
@@ -40,8 +40,8 @@ func runPreCommit(st *HookState) Result {
 		return Result{Action: Pass}
 	}
 
-	// No state or idle mode → allow
-	if st == nil || st.Mode == "" || st.Mode == "idle" {
+	// No state at all → mindspec not initialized, allow
+	if st == nil {
 		return Result{Action: Pass}
 	}
 
@@ -66,6 +66,28 @@ func runPreCommit(st *HookState) Result {
 		return Result{Action: Pass}
 	}
 
+	// Block: commits on protected branches in ANY mode (including idle).
+	// The guidance says "main is protected" — the hook enforces it.
+	if cfg.IsProtectedBranch(branch) {
+		mode := st.Mode
+		if mode == "" {
+			mode = "idle"
+		}
+		msg := fmt.Sprintf("mindspec: commits on '%s' are blocked (mode: %s).", branch, mode)
+		msg += "\n  For bug fixes: git checkout -b fix/<description>"
+		msg += "\n  For features: mindspec spec create <slug>"
+		if st.ActiveWorktree != "" {
+			msg += fmt.Sprintf("\n  Or switch to your worktree: cd %s", st.ActiveWorktree)
+		}
+		msg += "\n  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ..."
+		return Result{Action: Block, Message: msg}
+	}
+
+	// Non-protected branch: idle mode has no further restrictions
+	if st.Mode == "" || st.Mode == "idle" {
+		return Result{Action: Pass}
+	}
+
 	// Block: on a spec/ branch during implement mode — code belongs on bead branches.
 	if st.Mode == "implement" && strings.HasPrefix(branch, "spec/") {
 		msg := fmt.Sprintf("mindspec: commits on spec branch '%s' are blocked during implement mode.\n  Implementation code belongs on bead branches.", branch)
@@ -77,18 +99,7 @@ func runPreCommit(st *HookState) Result {
 		return Result{Action: Block, Message: msg}
 	}
 
-	// Check if branch is protected
-	if !cfg.IsProtectedBranch(branch) {
-		return Result{Action: Pass}
-	}
-
-	// Block: on a protected branch while mindspec is active
-	msg := fmt.Sprintf("mindspec: commits on '%s' are blocked while mindspec is active (mode: %s).", branch, st.Mode)
-	if st.ActiveWorktree != "" {
-		msg += fmt.Sprintf("\n  Switch to your worktree: cd %s", st.ActiveWorktree)
-	}
-	msg += "\n  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ..."
-	return Result{Action: Block, Message: msg}
+	return Result{Action: Pass}
 }
 
 // getCurrentBranch returns the current git branch name.
