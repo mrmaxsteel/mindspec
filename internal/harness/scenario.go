@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -1585,7 +1586,16 @@ If mindspec next fails, read the error message carefully and follow its instruct
 // mustRunGit runs a git command in the sandbox root, fataling on error.
 func mustRunGit(sandbox *Sandbox, args ...string) {
 	sandbox.t.Helper()
-	mustRun(sandbox.t, sandbox.Root, "git", args...)
+	// Setup commits bypass pre-commit guards (which block commits on spec/bead
+	// branches in certain modes). All mustRunGit calls are scenario setup, not
+	// agent behavior, so the escape hatch is appropriate.
+	cmd := exec.Command("git", args...)
+	cmd.Dir = sandbox.Root
+	cmd.Env = append(os.Environ(), "MINDSPEC_ALLOW_MAIN=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		sandbox.t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
 }
 
 // worktreePaths holds the paths returned by setupWorktrees.

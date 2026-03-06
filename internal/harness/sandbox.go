@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,6 +245,10 @@ func (s *Sandbox) Env() []string {
 		}
 	}
 	env = append(env, "PATH="+newPath)
+	// Route the agent's bd commands to this sandbox's dolt server.
+	if s.DoltPort > 0 {
+		env = append(env, fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", s.DoltPort))
+	}
 	return env
 }
 
@@ -342,8 +347,8 @@ func (s *Sandbox) WriteFocus(content string) {
 }
 
 // initBeads runs bd init in sandbox mode within the given root directory.
-// Uses --server-port 0 so dolt picks a random free port (avoids collisions
-// between parallel test sandboxes and the main project's dolt server).
+// Each sandbox gets its own dolt server on a unique random port to avoid
+// collisions with the host project's dolt server or other test sandboxes.
 // Returns the dolt server port (0 if init failed or port unreadable).
 // Registers t.Cleanup() to stop the sandbox's dolt server on test teardown.
 func initBeads(t *testing.T, root string) int {
@@ -356,10 +361,27 @@ func initBeads(t *testing.T, root string) int {
 
 	// NOTE: We intentionally do NOT call `bd dolt killall` here.
 	// It kills ALL dolt servers system-wide, including the host project's.
-	// Each sandbox gets its own server on a random port via --server-port 0.
 
-	cmd := exec.Command(bdPath, "init", "--sandbox", "--skip-hooks", "-q", "--server-port", "0")
+	// Find a free port for this sandbox's dolt server. We use a listener
+	// to get an OS-assigned port, close it, then pass the port to bd init.
+	// This avoids collisions with the host project's server on port 3307.
+	ln, listenErr := net.Listen("tcp", "127.0.0.1:0")
+	if listenErr != nil {
+		t.Logf("warning: finding free port: %v", listenErr)
+		return 0
+	}
+	freePort := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	// Use explicit --database beads and BEADS_DOLT_SERVER_PORT to avoid:
+	// 1. Auto-detect database name from CWD ("repo" in sandboxes)
+	// 2. Connecting to the host project's dolt server on port 3307
+	cmd := exec.Command(bdPath, "init", "--sandbox", "--skip-hooks", "-q",
+		"--database", "beads", "--server-port", strconv.Itoa(freePort))
 	cmd.Dir = root
+	// Set BEADS_DOLT_SERVER_PORT so all bd subprocesses (including auto-start)
+	// use the sandbox-specific port, not the host project's port.
+	cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", freePort))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("warning: bd init: %v\n%s", err, out)
@@ -509,6 +531,10 @@ func (s *Sandbox) runBD(args ...string) (string, error) {
 	}
 	cmd := exec.Command(bdPath, args...)
 	cmd.Dir = s.Root
+	// Route bd commands to this sandbox's dolt server, not the host project's.
+	if s.DoltPort > 0 {
+		cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", s.DoltPort))
+	}
 	out, err := cmd.Output() // stdout only (bd emits warnings to stderr)
 	return string(out), err
 }
