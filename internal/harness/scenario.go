@@ -1322,8 +1322,11 @@ The plan for 001-greeting is finished. Advance to the next phase.`,
 			// Plan approval creates implementation beads
 			assertBeadsMinCount(t, sandbox, epicID, 1)
 
-			// Branch persists through approval
-			assertHasBranches(t, sandbox, "spec/")
+			// Branch persists through approval — unless the agent completed
+			// the full lifecycle (approve impl cleans up branches).
+			if !commandRanSuccessfully(events, "mindspec", "approve", "impl") {
+				assertHasBranches(t, sandbox, "spec/")
+			}
 		},
 	}
 }
