@@ -1032,22 +1032,9 @@ Finish the bead through the MindSpec lifecycle when done.`,
 				t.Error("widget.go was not created (checked main and worktrees)")
 			}
 
-			// Preferred: agent ran mindspec complete successfully
-			for _, e := range events {
-				if e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "complete") {
-					return
-				}
-			}
-
-			// Acceptable: agent closed bead directly as recovery
-			for _, e := range events {
-				if e.Command == "bd" && e.ExitCode == 0 && containsAll(eventArgs(e), "close") {
-					return
-				}
-			}
-
-			// Fallback: assert complete was at least attempted
-			assertCommandRan(t, events, "mindspec", "complete")
+			// Agent must use mindspec complete (not bd close) — complete handles
+			// merge topology, worktree cleanup, branch deletion, and state advance.
+			assertCommandSucceeded(t, events, "mindspec", "complete")
 		},
 	}
 }
@@ -1120,22 +1107,9 @@ Your CWD may be the spec worktree, not the bead worktree.
 Close the bead and finish implementation.
 If it fails, diagnose the issue and find a way to complete successfully.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Preferred: mindspec complete succeeded
-			for _, e := range events {
-				if e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "complete") {
-					return
-				}
-			}
-
-			// Acceptable: agent closed bead directly (navigated to bead worktree or used bd close)
-			for _, e := range events {
-				if e.Command == "bd" && e.ExitCode == 0 && containsAll(eventArgs(e), "close") {
-					return
-				}
-			}
-
-			// Fallback: at least attempted mindspec complete
-			assertCommandRan(t, events, "mindspec", "complete")
+			// Agent must use mindspec complete (not bd close) — complete handles
+			// merge topology, worktree cleanup, branch deletion, and state advance.
+			assertCommandSucceeded(t, events, "mindspec", "complete")
 		},
 	}
 }
