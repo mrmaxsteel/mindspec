@@ -161,19 +161,22 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 		}
 
 		specID := SpecIDFromMetadata(specNum, specTitle)
-		phase, err := DerivePhaseWithStatus(epic.ID, epic.Status)
-		if err != nil {
-			continue // skip epics we can't derive phase for
-		}
-		if phase == state.ModeDone {
-			continue // spec lifecycle complete, not active
-		}
-		// Epic with no children AND closed status is an orphan (stale test
-		// artifact or abandoned spec). Skip those. But open/in_progress
-		// childless epics are legitimate — they represent spec-approved
-		// specs in plan phase (plan being drafted, beads not yet created).
+
+		// Query children once and reuse for both phase derivation and orphan check.
 		children := queryChildren(epic.ID)
-		if len(children) == 0 && strings.EqualFold(epic.Status, "closed") {
+
+		// Check done marker for closed epics before deriving phase.
+		if strings.EqualFold(epic.Status, "closed") {
+			if hasDoneMarker(epic.ID) {
+				continue // spec lifecycle complete
+			}
+			if len(children) == 0 {
+				continue // orphan: closed epic with no children
+			}
+		}
+
+		phase := DerivePhaseFromChildren(children)
+		if phase == state.ModeDone {
 			continue
 		}
 
