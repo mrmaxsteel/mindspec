@@ -372,8 +372,8 @@ Complete the Process function (make it return "processed") and finish the bead t
 func ScenarioSpecInit() Scenario {
 	return Scenario{
 		Name:        "spec_init",
-		Description: "Initialize a new spec from idle mode",
-		MaxTurns:    15,
+		Description: "Initialize a new spec from idle mode via guidance discovery",
+		MaxTurns:    20,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			// Verify preconditions
@@ -390,11 +390,28 @@ func ScenarioSpecInit() Scenario {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-create 001-calculator --title "Calculator"`,
+Start a new specification called "001-calculator" for adding basic arithmetic operations.
+Create it through the MindSpec lifecycle. Stop after the spec is initialized.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Command ran (accept both old and new forms)
+			// Agent discovered and ran mindspec spec create (not raw git)
 			assertCommandRanEither(t, events, "mindspec",
 				[]string{"spec-init"}, []string{"spec", "create"})
+
+			// Agent should NOT have created spec branch manually with raw git
+			for _, e := range events {
+				if e.Command != "git" || e.ExitCode != 0 {
+					continue
+				}
+				args := eventArgs(e)
+				if containsAll(args, "branch") && containsAll(args, "spec/") {
+					t.Error("agent created spec branch with raw git instead of mindspec spec create")
+					break
+				}
+				if containsAll(args, "checkout") && containsAll(args, "-b") && containsAll(args, "spec/") {
+					t.Error("agent created spec branch with raw git checkout -b instead of mindspec spec create")
+					break
+				}
+			}
 
 			// Git state: spec branch created
 			assertHasBranches(t, sandbox, "spec/")
@@ -402,9 +419,13 @@ func ScenarioSpecInit() Scenario {
 			// Git state: worktree created
 			assertHasWorktrees(t, sandbox)
 
+			// Spec template created in worktree
+			if !fileExistsInWorktrees(sandbox.Root, "spec.md") {
+				t.Error("spec.md was not created in worktree")
+			}
+
 			// Git state: main branch still exists (CWD is main repo root)
 			assertBranchIs(t, sandbox, "main")
-
 		},
 	}
 }
