@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 )
 
 // RunConfig holds the configuration for a full benchmark run.

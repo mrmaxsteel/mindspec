@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/setup"
+	"github.com/mrmaxsteel/mindspec/internal/setup"
 	"github.com/spf13/cobra"
 )
 

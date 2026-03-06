@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/trace"
+	"github.com/mrmaxsteel/mindspec/internal/trace"
 )
 
 // execCommand is a package-level variable for testability.

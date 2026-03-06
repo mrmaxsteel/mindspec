@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/adr"
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // runBDFn is a package-level variable for testability.

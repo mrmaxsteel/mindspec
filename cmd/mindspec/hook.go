@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/hook"
+	"github.com/mrmaxsteel/mindspec/internal/hook"
 	"github.com/spf13/cobra"
 )
 

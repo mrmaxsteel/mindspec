@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/trace"
+	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/spf13/cobra"
 )
 

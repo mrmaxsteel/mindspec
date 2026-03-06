@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/resolve"
-	"github.com/mindspec/mindspec/internal/state"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/resolve"
+	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

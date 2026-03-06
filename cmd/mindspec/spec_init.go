@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mindspec/mindspec/internal/specinit"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/specinit"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

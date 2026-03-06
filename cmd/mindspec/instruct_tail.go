@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/guard"
-	"github.com/mindspec/mindspec/internal/instruct"
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/instruct"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
 // emitInstruct derives state from beads and prints mode-appropriate guidance.

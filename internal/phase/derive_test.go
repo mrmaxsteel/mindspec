@@ -3,7 +3,7 @@ package phase
 import (
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
 // ---------------------------------------------------------------------------

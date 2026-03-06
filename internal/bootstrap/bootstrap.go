@@ -204,7 +204,7 @@ const starterGitignore = `# MindSpec local runtime files (not version-controlled
 const starterAgentsMD = `# AGENTS.md — MindSpec Project
 <!-- BEGIN mindspec:managed -->
 
-This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
+This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
 
 ## Workflow
 
@@ -260,7 +260,7 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 const appendAgentsBlock = `
 ## MindSpec
 
-This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
+This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
 

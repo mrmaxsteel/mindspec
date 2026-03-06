@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Show reads and returns a single ADR by ID.

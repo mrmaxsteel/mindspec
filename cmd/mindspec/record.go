@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/spf13/cobra"
 )
 

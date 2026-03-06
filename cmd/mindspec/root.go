@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/trace"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/trace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

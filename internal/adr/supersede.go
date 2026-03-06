@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Supersede updates the old ADR's Superseded-by field to point to newID.

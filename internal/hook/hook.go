@@ -9,9 +9,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Protocol identifies the calling agent platform.

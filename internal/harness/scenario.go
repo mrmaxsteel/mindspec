@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
 // Scenario defines a behavioral test scenario for an agent session.

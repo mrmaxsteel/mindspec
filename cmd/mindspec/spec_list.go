@@ -6,7 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/mindspec/mindspec/internal/speclist"
+	"github.com/mrmaxsteel/mindspec/internal/speclist"
 	"github.com/spf13/cobra"
 )
 

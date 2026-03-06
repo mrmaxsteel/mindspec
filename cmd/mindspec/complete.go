@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/complete"
-	"github.com/mindspec/mindspec/internal/validate"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

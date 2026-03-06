@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/contextpack"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // BoundedContext represents a parsed entry from the context map's Bounded Contexts section.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func TestList_ScansSpecDirs(t *testing.T) {

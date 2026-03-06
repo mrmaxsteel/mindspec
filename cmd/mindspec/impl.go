@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mindspec/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/spf13/cobra"
 )
 

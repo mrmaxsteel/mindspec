@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
 const (

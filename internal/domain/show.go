@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/contextpack"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // RelInfo represents a relationship to another domain.

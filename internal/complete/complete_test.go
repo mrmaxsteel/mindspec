@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/next"
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
 // saveAndRestore saves all function variables and returns a restore function.

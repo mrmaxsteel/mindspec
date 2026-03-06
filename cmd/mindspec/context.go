@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/mindspec/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/spf13/cobra"
 )
 

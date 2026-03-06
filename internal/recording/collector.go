@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 )
 
 // StartCollector launches AgentMind as a detached background process

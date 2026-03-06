@@ -10,10 +10,10 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/mindspec/mindspec/internal/config"
-	"github.com/mindspec/mindspec/internal/contextpack"
-	"github.com/mindspec/mindspec/internal/state"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 //go:embed templates/*.md

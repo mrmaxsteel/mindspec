@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)

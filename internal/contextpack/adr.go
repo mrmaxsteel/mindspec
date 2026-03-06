@@ -1,7 +1,7 @@
 package contextpack
 
 import (
-	"github.com/mindspec/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 )
 
 // Re-export types and functions from the adr package for backward compatibility.

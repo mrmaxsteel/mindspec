@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 // --- ParseBeadsJSON tests ---

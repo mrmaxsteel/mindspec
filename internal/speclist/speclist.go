@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // SpecEntry represents a single spec with its status and lifecycle phase.

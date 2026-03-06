@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bootstrap"
-	"github.com/mindspec/mindspec/internal/setup"
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
+	"github.com/mrmaxsteel/mindspec/internal/setup"
 )
 
 // Sandbox is an isolated git repository with recording shims installed,

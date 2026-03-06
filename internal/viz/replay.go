@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // Replay reads a NDJSON file and streams events to the graph and hub.

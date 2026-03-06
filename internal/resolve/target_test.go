@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func TestResolveTarget_ExplicitFlag(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/spf13/cobra"
 )
 

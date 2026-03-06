@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
 // --- Multi-spec integration tests ---

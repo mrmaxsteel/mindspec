@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // SessionDef describes one benchmark session configuration.

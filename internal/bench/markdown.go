@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // BenchmarkDir returns the benchmark artifact directory for a spec.

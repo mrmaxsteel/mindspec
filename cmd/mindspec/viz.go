@@ -9,10 +9,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/validate"
-	"github.com/mindspec/mindspec/internal/viz"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/viz"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

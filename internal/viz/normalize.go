@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // resolveAgentID derives an agent identity from OTLP resource attributes and event data.

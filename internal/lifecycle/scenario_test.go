@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/approve"
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
-	"github.com/mindspec/mindspec/internal/validate"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // stubNoEpics stubs phase.runBDFn so that CheckSpecNumberCollision finds no collisions.

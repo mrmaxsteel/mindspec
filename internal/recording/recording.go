@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 // IsEnabled checks the project config to determine if recording is active.

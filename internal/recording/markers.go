@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // EmitMarker appends a lifecycle marker event to events.ndjson.

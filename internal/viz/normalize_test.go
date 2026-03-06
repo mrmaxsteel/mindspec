@@ -3,7 +3,7 @@ package viz
 import (
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 func TestNormalizeAPIRequest(t *testing.T) {

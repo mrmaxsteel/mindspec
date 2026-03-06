@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/config"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func mockSuccess(t *testing.T, testRoot string) {

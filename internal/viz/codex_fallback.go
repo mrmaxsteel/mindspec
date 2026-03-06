@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // CodexFallbackStats reports conversion outcomes for a Codex session import.

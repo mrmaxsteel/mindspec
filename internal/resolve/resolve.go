@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/phase"
-	"github.com/mindspec/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
 // SpecStatus holds the resolved state for a single spec.

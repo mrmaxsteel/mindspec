@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func writeSpecDir(t *testing.T, root, specID string) {

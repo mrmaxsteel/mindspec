@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 func stubGuard(t *testing.T) {

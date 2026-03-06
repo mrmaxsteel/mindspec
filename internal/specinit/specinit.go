@@ -7,13 +7,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/bead"
-	"github.com/mindspec/mindspec/internal/config"
-	"github.com/mindspec/mindspec/internal/gitops"
-	"github.com/mindspec/mindspec/internal/hooks"
-	"github.com/mindspec/mindspec/internal/recording"
-	"github.com/mindspec/mindspec/internal/templates"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitops"
+	"github.com/mrmaxsteel/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/templates"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // specIDPattern matches NNN-kebab-case where NNN is 3+ digits.

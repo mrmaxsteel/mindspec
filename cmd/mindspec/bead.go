@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mindspec/mindspec/internal/approve"
-	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/spf13/cobra"
 )
 

@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 	"github.com/spf13/cobra"
 )
 

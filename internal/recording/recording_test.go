@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bench"
+	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // enableRecording writes a config that enables recording in the temp root.

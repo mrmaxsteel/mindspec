@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/adr"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

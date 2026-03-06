@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mindspec/mindspec/internal/templates"
-	"github.com/mindspec/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/templates"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // CreateOpts configures ADR creation.

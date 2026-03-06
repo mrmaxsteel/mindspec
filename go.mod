@@ -1,4 +1,4 @@
-module github.com/mindspec/mindspec
+module github.com/mrmaxsteel/mindspec
 
 go 1.22
 

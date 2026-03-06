@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mindspec/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
 // RunCodex sets up OpenAI Codex CLI integration at root.
@@ -129,7 +129,7 @@ func chainBeadsSetupCodex(r *Result) {
 
 // agentsMDManagedBlock is the canonical content placed between BEGIN/END markers.
 const agentsMDManagedBlock = `
-This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
+This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mindspec/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
 
 func setupPrimerTestProject(t *testing.T) string {
