@@ -7,6 +7,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -40,12 +42,27 @@ The bead ID is auto-resolved from state if not provided.`,
 		cwd, _ := os.Getwd()
 		kind, _, _ := workspace.DetectWorktreeContext(cwd)
 
-		// Worktree scoping guard (checked after auto-redirect)
+		// Worktree scoping guard with auto-resolve.
+		// From main: auto-resolve to spec worktree if exactly one active spec.
+		// From spec worktree: allowed (bead cleanup/recovery path).
 		switch kind {
 		case workspace.WorktreeMain:
-			return fmt.Errorf("mindspec complete must run from a bead worktree.\nUse `mindspec next` to claim a bead and create a worktree first, then cd into it")
+			specs, discErr := phase.DiscoverActiveSpecs()
+			if discErr == nil && len(specs) == 1 {
+				specWt := state.SpecWorktreePath(root, specs[0].SpecID)
+				if fi, statErr := os.Stat(specWt); statErr == nil && fi.IsDir() {
+					fmt.Fprintf(os.Stderr, "Auto-resolving to spec worktree: %s\n", specWt)
+					if err := os.Chdir(specWt); err == nil {
+						cwd = specWt
+						kind = workspace.WorktreeSpec
+					}
+				}
+			}
+			if kind == workspace.WorktreeMain {
+				return fmt.Errorf("mindspec complete must run from a bead or spec worktree.\nUse `mindspec next` to claim a bead and create a worktree first, then cd into it")
+			}
 		case workspace.WorktreeSpec:
-			return fmt.Errorf("you're in a spec worktree — run `mindspec next` to claim a bead first, then `mindspec complete` from the bead worktree")
+			// OK — spec worktree is allowed for bead cleanup/recovery
 		}
 
 		if err := bead.Preflight(root); err != nil {
