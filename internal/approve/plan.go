@@ -344,7 +344,9 @@ func handleExistingBeads(parentID, planContent string) error {
 		// Close via bd close with reason
 		args := append([]string{"close"}, ids...)
 		args = append(args, "--reason", reason)
-		planRunBDCombinedFn(args...)
+		if _, err := planRunBDCombinedFn(args...); err != nil {
+			return fmt.Errorf("closing superseded beads: %w", err)
+		}
 	}
 
 	return nil

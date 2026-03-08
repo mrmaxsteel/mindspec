@@ -50,7 +50,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		// Emit-only mode: build and print primer without claiming or state changes
 		if emitOnly {
-			return runEmitOnly(root, specFlag, args)
+			return runEmitOnly(specFlag, args)
 		}
 
 		// Step 0a: Worktree scoping guard
@@ -261,7 +261,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 }
 
 // runEmitOnly handles the --emit-only path: build and print primer without claiming.
-func runEmitOnly(root, specFlag string, args []string) error {
+func runEmitOnly(specFlag string, args []string) error {
 	var selected next.BeadInfo
 
 	if len(args) > 0 {
