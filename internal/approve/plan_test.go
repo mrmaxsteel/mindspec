@@ -332,6 +332,233 @@ None
 	}
 }
 
+func TestCreateImplementationBeads_PopulatesFields(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create spec.md with Requirements, Acceptance Criteria, and ADR Touchpoints
+	specContent := `---
+status: Approved
+---
+# Spec 042-test
+
+## Goal
+Test the bead population.
+
+## Impacted Domains
+- core
+
+## ADR Touchpoints
+None applicable.
+
+## Requirements
+1. Widget must frob
+2. Widget must grob
+
+## Scope
+### In Scope
+- internal/widget/
+
+### Out of Scope
+- external stuff
+
+## Acceptance Criteria
+- [ ] Widget frobs correctly
+- [ ] Widget grobs correctly
+
+## Approval
+- **Status**: APPROVED
+`
+	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(specContent), 0644)
+
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: Implement widget frobbing
+
+**Steps**
+1. Create ` + "`internal/widget/frob.go`" + `
+2. Add frob logic
+
+**Verification**
+- [ ] ` + "`go test ./internal/widget/...`" + ` passes
+
+**Depends on**
+None
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var capturedArgs [][]string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		argsCopy := make([]string, len(args))
+		copy(argsCopy, args)
+		capturedArgs = append(capturedArgs, argsCopy)
+		return []byte(`{"id":"test-bead-1"}`), nil
+	}
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(beadIDs) != 1 {
+		t.Fatalf("expected 1 bead, got %d", len(beadIDs))
+	}
+
+	// Find the create call
+	if len(capturedArgs) == 0 {
+		t.Fatal("no bd calls captured")
+	}
+	createArgs := capturedArgs[0]
+
+	// Helper to find flag value
+	findFlag := func(flag string) string {
+		for i, a := range createArgs {
+			if a == flag && i+1 < len(createArgs) {
+				return createArgs[i+1]
+			}
+		}
+		return ""
+	}
+
+	// Verify --description contains the work chunk
+	desc := findFlag("--description")
+	if desc == "" {
+		t.Error("--description flag not passed")
+	} else {
+		if !strings.Contains(desc, "internal/widget/frob.go") {
+			t.Error("description should contain file path from work chunk")
+		}
+		if !strings.Contains(desc, "frob logic") {
+			t.Error("description should contain step content")
+		}
+	}
+
+	// Verify --acceptance-criteria from spec
+	ac := findFlag("--acceptance-criteria")
+	if ac == "" {
+		t.Error("--acceptance-criteria flag not passed")
+	} else {
+		if !strings.Contains(ac, "Widget frobs correctly") {
+			t.Error("acceptance criteria should contain spec AC")
+		}
+	}
+
+	// Verify --design contains requirements
+	design := findFlag("--design")
+	if design == "" {
+		t.Error("--design flag not passed")
+	} else {
+		if !strings.Contains(design, "Widget must frob") {
+			t.Error("design should contain spec requirements")
+		}
+	}
+
+	// Verify --metadata contains spec_id and file_paths
+	meta := findFlag("--metadata")
+	if meta == "" {
+		t.Error("--metadata flag not passed")
+	} else {
+		if !strings.Contains(meta, `"spec_id":"042-test"`) {
+			t.Errorf("metadata should contain spec_id, got: %s", meta)
+		}
+		if !strings.Contains(meta, "internal/widget/frob.go") {
+			t.Errorf("metadata should contain file_paths, got: %s", meta)
+		}
+	}
+}
+
+func TestExtractBeadSectionContents(t *testing.T) {
+	content := `# Plan
+
+## ADR Fitness
+Some text.
+
+## Bead 1: First
+
+**Steps**
+1. Do thing one
+2. Do thing two
+
+**Verification**
+- [ ] Tests pass
+
+**Depends on**
+None
+
+## Bead 2: Second
+
+**Steps**
+1. Do other thing
+
+**Depends on**
+Bead 1
+
+## Provenance
+
+Some provenance table.
+`
+	result := extractBeadSectionContents(content)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(result))
+	}
+
+	bead1 := result["Bead 1: First"]
+	if !strings.Contains(bead1, "Do thing one") {
+		t.Error("bead 1 content should include steps")
+	}
+	if !strings.Contains(bead1, "Tests pass") {
+		t.Error("bead 1 content should include verification")
+	}
+
+	bead2 := result["Bead 2: Second"]
+	if !strings.Contains(bead2, "Do other thing") {
+		t.Error("bead 2 content should include steps")
+	}
+}
+
+func TestParseADRIDs(t *testing.T) {
+	touchpoints := `- [ADR-0023](../../adr/ADR-0023.md): Extends beads as state store
+- [ADR-0012](../../adr/ADR-0012.md): Compose with external CLIs
+`
+	ids := parseADRIDs(touchpoints)
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 ADR IDs, got %d: %v", len(ids), ids)
+	}
+	if ids[0] != "ADR-0023" || ids[1] != "ADR-0012" {
+		t.Errorf("unexpected ADR IDs: %v", ids)
+	}
+
+	// Dedup
+	ids2 := parseADRIDs("ADR-0001 and ADR-0001 again")
+	if len(ids2) != 1 {
+		t.Errorf("expected dedup to 1, got %d", len(ids2))
+	}
+
+	// None
+	ids3 := parseADRIDs("None applicable.")
+	if len(ids3) != 0 {
+		t.Errorf("expected 0 for 'None', got %d", len(ids3))
+	}
+}
+
+func TestBuildBeadMetadata(t *testing.T) {
+	meta := buildBeadMetadata("074-test", []string{"internal/foo.go", "cmd/bar.go"})
+	if !strings.Contains(meta, `"spec_id":"074-test"`) {
+		t.Errorf("metadata missing spec_id: %s", meta)
+	}
+	if !strings.Contains(meta, "internal/foo.go") {
+		t.Errorf("metadata missing file_paths: %s", meta)
+	}
+}
+
 func TestWriteBeadIDsToFrontmatter(t *testing.T) {
 	tmp := t.TempDir()
 	planContent := `---

@@ -20,7 +20,7 @@ type HygieneReport struct {
 
 // AuditWorkset analyzes open beads for hygiene issues.
 func AuditWorkset(staleDays int) (*HygieneReport, error) {
-	out, err := RunBD("list", "--status=open", "--json")
+	out, err := ListJSON("--status=open")
 	if err != nil {
 		return nil, fmt.Errorf("listing open beads: %w", err)
 	}
@@ -107,7 +107,7 @@ func FormatReport(r *HygieneReport) string {
 // FixHygiene closes beads that have status "done".
 // If dryRun is true, returns what would be done without executing.
 func FixHygiene(dryRun bool) ([]string, error) {
-	out, err := RunBD("list", "--status=open", "--json")
+	out, err := ListJSON("--status=open")
 	if err != nil {
 		return nil, fmt.Errorf("listing open beads: %w", err)
 	}
