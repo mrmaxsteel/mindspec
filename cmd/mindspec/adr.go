@@ -42,7 +42,8 @@ var adrCreateCmd = &cobra.Command{
 			}
 		}
 
-		path, err := adr.Create(root, args[0], adr.CreateOpts{
+		store := adr.NewFileStore(root)
+		path, err := store.Create(args[0], adr.CreateOpts{
 			Domains:    domains,
 			Supersedes: supersedes,
 		})
@@ -76,7 +77,8 @@ var adrListCmd = &cobra.Command{
 		status, _ := cmd.Flags().GetString("status")
 		domain, _ := cmd.Flags().GetString("domain")
 
-		adrs, err := adr.List(root, adr.ListOpts{
+		store := adr.NewFileStore(root)
+		adrs, err := store.List(adr.ListOpts{
 			Status: status,
 			Domain: domain,
 		})
@@ -111,7 +113,8 @@ var adrShowCmd = &cobra.Command{
 
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 
-		a, err := adr.Show(root, args[0])
+		store := adr.NewFileStore(root)
+		a, err := store.Get(args[0])
 		if err != nil {
 			return err
 		}

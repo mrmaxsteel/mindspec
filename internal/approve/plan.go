@@ -381,16 +381,12 @@ func buildDesignField(specDir, specContent, requirements string) string {
 	if len(adrIDs) > 0 {
 		// specDir is e.g. .mindspec/docs/specs/074-slug; root is 3 levels up
 		root := filepath.Join(specDir, "..", "..", "..")
-		allADRs, _ := adr.ScanADRs(root)
-		adrByID := make(map[string]adr.ADR)
-		for _, a := range allADRs {
-			adrByID[a.ID] = a
-		}
+		store := adr.NewFileStore(root)
 
 		var decisions []string
 		for _, id := range adrIDs {
-			a, ok := adrByID[id]
-			if !ok {
+			a, err := store.Get(id)
+			if err != nil {
 				continue
 			}
 			decision := contextpack.ExtractSection(a.Content, "Decision")

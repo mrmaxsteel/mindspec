@@ -70,7 +70,8 @@ func ValidatePlan(root, specID string) *Result {
 			r.AddError("adr-citations", "no ADR citations in frontmatter and no ## ADR Fitness section — plan shows no evidence of architectural evaluation")
 		}
 	} else {
-		checkADRCitations(r, root, fm.ADRCitations)
+		store := adr.NewFileStore(root)
+		checkADRCitations(r, store, fm.ADRCitations)
 	}
 
 	// Check ADR Fitness section (Spec 039: promoted to error)
@@ -311,17 +312,11 @@ func ParseBeadSections(content string) []BeadSection {
 }
 
 // checkADRCitations validates that each cited ADR exists and has appropriate status.
-func checkADRCitations(r *Result, root string, citations []ADRCitation) {
+func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation) {
 	for _, cite := range citations {
-		path := filepath.Join(workspace.ADRDir(root), cite.ID+".md")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			r.AddError("adr-cite-missing", fmt.Sprintf("cited ADR %s does not exist", cite.ID))
-			continue
-		}
-
-		a, err := adr.ParseADR(path)
+		a, err := store.Get(cite.ID)
 		if err != nil {
-			r.AddWarning("adr-cite-parse", fmt.Sprintf("cannot parse cited ADR %s: %v", cite.ID, err))
+			r.AddError("adr-cite-missing", fmt.Sprintf("cited ADR %s does not exist", cite.ID))
 			continue
 		}
 
