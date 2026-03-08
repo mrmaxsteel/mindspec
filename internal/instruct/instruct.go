@@ -87,11 +87,11 @@ func BuildContext(root string, mc *state.Focus) *Context {
 	// AvailableSpecs removed — the disk directory listing was noise
 	// (showed all historical specs, not active ones).
 
-	// Build bead primer for implement mode with active bead (session recovery)
-	if mc.Mode == state.ModeImplement && mc.ActiveBead != "" && mc.ActiveSpec != "" {
-		primer, err := contextpack.BuildBeadPrimer(root, mc.ActiveSpec, mc.ActiveBead)
+	// Build bead context for implement mode with active bead (session recovery)
+	if mc.Mode == state.ModeImplement && mc.ActiveBead != "" {
+		rendered, err := contextpack.RenderBeadContext(mc.ActiveBead)
 		if err == nil {
-			ctx.BeadPrimer = contextpack.RenderBeadPrimer(primer)
+			ctx.BeadPrimer = rendered
 		}
 	}
 

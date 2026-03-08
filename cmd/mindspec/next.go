@@ -238,14 +238,14 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 		}
 
-		// Step 8: Emit bead primer (falls back to instruct-tail)
-		if resolved.SpecID != "" && selected.ID != "" {
-			primer, primerErr := contextpack.BuildBeadPrimer(root, resolved.SpecID, selected.ID)
-			if primerErr == nil {
+		// Step 8: Emit bead context from bd show (Spec 074)
+		if selected.ID != "" {
+			rendered, renderErr := contextpack.RenderBeadContext(selected.ID)
+			if renderErr == nil {
 				fmt.Println()
-				fmt.Print(contextpack.RenderBeadPrimer(primer))
+				fmt.Print(rendered)
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not build bead primer: %v (falling back to generic guidance)\n", primerErr)
+				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
 				if err := emitInstruct(root); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
 				}
@@ -305,23 +305,12 @@ func runEmitOnly(root, specFlag string, args []string) error {
 		selected = items[0]
 	}
 
-	// Resolve spec ID from bead title or flag
-	specID := specFlag
-	if specID == "" {
-		resolved := next.ResolveMode(root, selected)
-		specID = resolved.SpecID
-	}
-
-	if specID == "" {
-		return fmt.Errorf("could not determine spec ID for bead %s; use --spec", selected.ID)
-	}
-
-	primer, err := contextpack.BuildBeadPrimer(root, specID, selected.ID)
+	rendered, err := contextpack.RenderBeadContext(selected.ID)
 	if err != nil {
-		return fmt.Errorf("building bead primer: %w", err)
+		return fmt.Errorf("rendering bead context: %w", err)
 	}
 
-	fmt.Print(contextpack.RenderBeadPrimer(primer))
+	fmt.Print(rendered)
 	return nil
 }
 
