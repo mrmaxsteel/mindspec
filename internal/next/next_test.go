@@ -7,8 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
 // --- ParseBeadsJSON tests ---
@@ -352,216 +351,75 @@ func TestClaimBead_PropagatesError(t *testing.T) {
 
 // --- EnsureWorktree tests ---
 
-// stubWorktreeHelpers saves and restores function variables used by EnsureWorktree.
-func stubWorktreeHelpers(t *testing.T) {
-	t.Helper()
-	origList := worktreeList
-	origCreate := worktreeCreate
-	origConfig := loadConfigFn
-	origBranch := createBranchFn
-	origExists := branchExistsFn
-	origGitignore := ensureGitignore
-	t.Cleanup(func() {
-		worktreeList = origList
-		worktreeCreate = origCreate
-		loadConfigFn = origConfig
-		createBranchFn = origBranch
-		branchExistsFn = origExists
-		ensureGitignore = origGitignore
-	})
-
-	// Defaults: config returns defaults, branch doesn't exist.
-	loadConfigFn = func(root string) (*config.Config, error) { return config.DefaultConfig(), nil }
-	createBranchFn = func(name, from string) error { return nil }
-	branchExistsFn = func(name string) bool { return false }
-	ensureGitignore = func(root, entry string) error { return nil }
-}
-
-func TestEnsureWorktree_CreatesNew(t *testing.T) {
-	stubWorktreeHelpers(t)
+func TestEnsureWorktree_DelegatesToExecutor(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
-
-	listCallCount := 0
-	worktreeList = func() ([]bead.WorktreeListEntry, error) {
-		listCallCount++
-		if listCallCount == 1 {
-			return []bead.WorktreeListEntry{
-				{Name: "mindspec", Path: root, Branch: "main", IsMain: true},
-			}, nil
-		}
-		return []bead.WorktreeListEntry{
-			{Name: "mindspec", Path: root, Branch: "main", IsMain: true},
-			{Name: "worktree-bead-abc", Path: filepath.Join(root, ".worktrees", "worktree-bead-abc"), Branch: "bead/bead-abc", IsMain: false},
-		}, nil
-	}
-
-	var createdName, createdBranch string
-	worktreeCreate = func(name, branch string) error {
-		createdName = name
-		createdBranch = branch
-		return nil
-	}
-
-	path, err := EnsureWorktree(root, "bead-abc")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	expectedPath := filepath.Join(root, ".worktrees", "worktree-bead-abc")
+
+	mock := &executor.MockExecutor{
+		DispatchBeadResult: executor.WorkspaceInfo{
+			Path:   expectedPath,
+			Branch: "bead/bead-abc",
+		},
+	}
+
+	path, err := EnsureWorktree(root, "bead-abc", "046-test", mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if path != expectedPath {
 		t.Errorf("path: got %q, want %q", path, expectedPath)
 	}
-	if createdName != ".worktrees/worktree-bead-abc" {
-		t.Errorf("created name: got %q, want %q", createdName, ".worktrees/worktree-bead-abc")
-	}
-	if createdBranch != "bead/bead-abc" {
-		t.Errorf("created branch: got %q, want %q", createdBranch, "bead/bead-abc")
-	}
-}
 
-func TestEnsureWorktree_BranchesFromSpecBranch(t *testing.T) {
-	stubWorktreeHelpers(t)
-	// ADR-0023: spec branch is derived from worktree path convention,
-	// not from focus file. Create a dir that DetectWorktreeContext recognizes.
-	root := t.TempDir()
-	specWt := filepath.Join(root, ".worktrees", "worktree-spec-046-test")
-	os.MkdirAll(filepath.Join(specWt, ".mindspec"), 0755) // for FindLocalRoot
-	os.MkdirAll(filepath.Join(specWt, ".worktrees"), 0755)
-
-	var branchFrom string
-	createBranchFn = func(name, from string) error {
-		branchFrom = from
-		return nil
+	// Verify executor was called with correct args.
+	calls := mock.CallsTo("DispatchBead")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 DispatchBead call, got %d", len(calls))
 	}
-
-	worktreeList = func() ([]bead.WorktreeListEntry, error) {
-		return nil, nil
+	if calls[0].Args[0] != "bead-abc" {
+		t.Errorf("DispatchBead beadID = %v, want bead-abc", calls[0].Args[0])
 	}
-	worktreeCreate = func(name, branch string) error { return nil }
-
-	// EnsureWorktree calls workspace.FindLocalRoot(".") which resolves cwd.
-	// We need to be in the spec worktree dir for DetectWorktreeContext to work.
-	origDir, _ := os.Getwd()
-	t.Cleanup(func() { os.Chdir(origDir) })
-	os.Chdir(specWt)
-
-	_, err := EnsureWorktree(root, "bead-xyz")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if branchFrom != "spec/046-test" {
-		t.Errorf("branch created from %q, want %q", branchFrom, "spec/046-test")
+	if calls[0].Args[1] != "046-test" {
+		t.Errorf("DispatchBead specID = %v, want 046-test", calls[0].Args[1])
 	}
 }
 
-func TestEnsureWorktree_ReusesExisting(t *testing.T) {
-	stubWorktreeHelpers(t)
+func TestEnsureWorktree_PropagatesError(t *testing.T) {
+	mock := &executor.MockExecutor{
+		DispatchBeadErr: fmt.Errorf("worktree creation failed"),
+	}
+
+	_, err := EnsureWorktree(t.TempDir(), "bead-xyz", "", mock)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !contains(err.Error(), "worktree creation failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureWorktree_EmptySpecID(t *testing.T) {
 	root := t.TempDir()
-
-	worktreeList = func() ([]bead.WorktreeListEntry, error) {
-		return []bead.WorktreeListEntry{
-			{Name: "mindspec", Path: root, Branch: "main", IsMain: true},
-			{Name: "worktree-bead-abc", Path: filepath.Join(root, ".worktrees", "worktree-bead-abc"), Branch: "bead/bead-abc", IsMain: false},
-		}, nil
-	}
-
-	worktreeCreate = func(name, branch string) error {
-		t.Error("worktreeCreate should not be called when worktree exists")
-		return nil
-	}
-
-	path, err := EnsureWorktree(root, "bead-abc")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	expectedPath := filepath.Join(root, ".worktrees", "worktree-bead-abc")
-	if path != expectedPath {
-		t.Errorf("path: got %q, want %q", path, expectedPath)
+
+	mock := &executor.MockExecutor{
+		DispatchBeadResult: executor.WorkspaceInfo{
+			Path:   expectedPath,
+			Branch: "bead/bead-abc",
+		},
 	}
-}
 
-func TestEnsureWorktree_NoFocusPropagation(t *testing.T) {
-	// ADR-0023: EnsureWorktree no longer writes focus files.
-	stubWorktreeHelpers(t)
-	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".worktrees"), 0755)
-
-	worktreeList = func() ([]bead.WorktreeListEntry, error) {
-		return nil, nil
-	}
-	worktreeCreate = func(name, branch string) error { return nil }
-
-	wtPath, err := EnsureWorktree(root, "bead-xyz")
+	path, err := EnsureWorktree(root, "bead-abc", "", mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	// No focus file should exist in the worktree (ADR-0023: focus files eliminated).
-	focusPath := filepath.Join(wtPath, ".mindspec", "focus")
-	if _, statErr := os.Stat(focusPath); statErr == nil {
-		t.Error("expected no focus file to be written to bead worktree")
-	}
-}
-
-func TestEnsureWorktree_AnchorsCreationToSpecWorktree(t *testing.T) {
-	stubWorktreeHelpers(t)
-	root := t.TempDir()
-	specID := "051-test"
-	specWt := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
-	if err := os.MkdirAll(filepath.Join(specWt, ".mindspec"), 0755); err != nil {
-		t.Fatalf("mkdir spec worktree: %v", err)
-	}
-
-	// ADR-0023: spec context derived from worktree path, not focus file.
-	// Set cwd to spec worktree so DetectWorktreeContext finds specID.
-	origDir, _ := os.Getwd()
-	t.Cleanup(func() { os.Chdir(origDir) })
-	os.Chdir(specWt)
-
-	worktreeList = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
-
-	var gitignoreRoot string
-	ensureGitignore = func(root, entry string) error {
-		gitignoreRoot = root
-		return nil
-	}
-
-	var createdName, createdBranch, createCWD string
-	worktreeCreate = func(name, branch string) error {
-		wd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		createCWD = wd
-		createdName = name
-		createdBranch = branch
-		return nil
-	}
-
-	path, err := EnsureWorktree(root, "bead-xyz")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	expectedPath := filepath.Join(specWt, ".worktrees", "worktree-bead-xyz")
 	if path != expectedPath {
 		t.Errorf("path: got %q, want %q", path, expectedPath)
 	}
-	if gitignoreRoot != specWt {
-		t.Errorf("ensureGitignore root: got %q, want %q", gitignoreRoot, specWt)
-	}
-	if gotInfo, gotErr := os.Stat(createCWD); gotErr != nil {
-		t.Errorf("stat createCWD %q: %v", createCWD, gotErr)
-	} else if wantInfo, wantErr := os.Stat(specWt); wantErr != nil {
-		t.Errorf("stat specWt %q: %v", specWt, wantErr)
-	} else if !os.SameFile(gotInfo, wantInfo) {
-		t.Errorf("worktreeCreate cwd: got %q, want %q", createCWD, specWt)
-	}
-	if createdName != ".worktrees/worktree-bead-xyz" {
-		t.Errorf("created name: got %q, want %q", createdName, ".worktrees/worktree-bead-xyz")
-	}
-	if createdBranch != "bead/bead-xyz" {
-		t.Errorf("created branch: got %q, want %q", createdBranch, "bead/bead-xyz")
+
+	// Empty specID should be passed through to executor.
+	calls := mock.CallsTo("DispatchBead")
+	if calls[0].Args[1] != "" {
+		t.Errorf("DispatchBead specID = %v, want empty string", calls[0].Args[1])
 	}
 }
 

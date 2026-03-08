@@ -46,7 +46,8 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		_ = os.Chdir(specWtPath)
 	}
 
-	result, err := approve.ApproveImpl(root, specID)
+	exec := newExecutor(root)
+	result, err := approve.ApproveImpl(root, specID, exec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

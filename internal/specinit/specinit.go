@@ -7,9 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/config"
-	"github.com/mrmaxsteel/mindspec/internal/gitops"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/templates"
@@ -18,17 +16,6 @@ import (
 
 // specIDPattern matches NNN-kebab-case where NNN is 3+ digits.
 var specIDPattern = regexp.MustCompile(`^\d{3,}-[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
-
-var (
-	preflightFn      = bead.Preflight
-	runBDFn          = bead.RunBD
-	runBDCombined    = bead.RunBDCombined
-	loadConfigFn     = config.Load
-	createBranchFn   = gitops.CreateBranch
-	branchExistsFn   = gitops.BranchExists
-	worktreeCreateFn = bead.WorktreeCreate
-	ensureGitignore  = gitops.EnsureGitignoreEntry
-)
 
 // Result holds the output of a spec-init operation.
 type Result struct {
@@ -41,9 +28,12 @@ type Result struct {
 // then sets state to spec mode. If title is empty, it is derived from
 // the slug portion of specID (e.g. "010-spec-init-cmd" → "Spec Init Cmd").
 //
-// ADR-0006 (zero-on-main): the worktree is created FIRST, then spec files
-// are written into the worktree — never to the main worktree.
-func Run(root, specID, title string) (*Result, error) {
+// ADR-0006 (zero-on-main): the workspace is created FIRST, then spec files
+// are written into the workspace — never to the main worktree.
+//
+// The exec parameter provides workspace creation and git operations;
+// enforcement content (spec files, hooks, recording) stays here.
+func Run(root, specID, title string, exec executor.Executor) (*Result, error) {
 	if !specIDPattern.MatchString(specID) {
 		return nil, fmt.Errorf("invalid spec ID %q: must match NNN-kebab-case (e.g. 010-my-feature)", specID)
 	}
@@ -52,47 +42,22 @@ func Run(root, specID, title string) (*Result, error) {
 		title = titleFromSlug(specID)
 	}
 
-	// --- Phase 1: Create worktree (before any file writes) ---
+	// --- Phase 1: Create workspace (branch + worktree via executor) ---
 
-	cfg, cfgErr := loadConfigFn(root)
-	if cfgErr != nil {
-		return nil, fmt.Errorf("could not load config (required for worktree creation): %w", cfgErr)
-	}
-
-	specBranch := "spec/" + specID
-	wtName := "worktree-spec-" + specID
-	wtPath := cfg.WorktreePath(root, wtName)
-
-	// Ensure .worktrees/ dir exists and is gitignored.
-	if err := os.MkdirAll(filepath.Join(root, cfg.WorktreeRoot), 0755); err != nil {
-		return nil, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
-	}
-	if err := ensureGitignore(root, cfg.WorktreeRoot); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
-	}
-
-	// Create spec branch from HEAD if it doesn't exist.
-	if !branchExistsFn(specBranch) {
-		if err := createBranchFn(specBranch, "HEAD"); err != nil {
-			return nil, fmt.Errorf("creating branch %s: %w", specBranch, err)
-		}
-	}
-
-	// Create worktree via beads (sets up .beads/redirect for shared DB).
-	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
-	if err := worktreeCreateFn(relWtPath, specBranch); err != nil {
-		return nil, fmt.Errorf("creating worktree: %w", err)
+	ws, err := exec.InitSpecWorkspace(specID)
+	if err != nil {
+		return nil, fmt.Errorf("creating spec workspace: %w", err)
 	}
 
 	result := &Result{
-		WorktreePath: wtPath,
-		SpecBranch:   specBranch,
+		WorktreePath: ws.Path,
+		SpecBranch:   ws.Branch,
 	}
 
-	// --- Phase 2: Write spec files into the worktree (not main) ---
+	// --- Phase 2: Write spec files into the workspace (not main) ---
 
-	// Check for existing spec dir in the worktree.
-	specDir := workspace.SpecDir(wtPath, specID)
+	// Check for existing spec dir in the workspace.
+	specDir := workspace.SpecDir(ws.Path, specID)
 	if _, err := os.Stat(specDir); err == nil {
 		return nil, fmt.Errorf("spec directory already exists: %s", specDir)
 	}
@@ -113,7 +78,7 @@ func Run(root, specID, title string) (*Result, error) {
 	// --- Phase 3: Auto-commit spec files to the branch ---
 	// Note: Epic creation moved to `spec approve` per ADR-0023 (epic = approval gate).
 	commitMsg := fmt.Sprintf("chore: initialize spec %s", specID)
-	if err := gitops.CommitAll(wtPath, commitMsg); err != nil {
+	if err := exec.CommitAll(ws.Path, commitMsg); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not auto-commit spec files: %v\n", err)
 	}
 
@@ -125,14 +90,14 @@ func Run(root, specID, title string) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "warning: could not install git hooks: %v\n", err)
 	}
 
-	// Start recording in the worktree (best-effort).
-	if wrote, err := recording.EnsureOTLP(wtPath); err != nil {
+	// Start recording in the workspace (best-effort).
+	if wrote, err := recording.EnsureOTLP(ws.Path); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not configure OTLP: %v\n", err)
 	} else if wrote {
 		fmt.Fprintln(os.Stderr, "OTLP telemetry enabled. Restart Claude Code to begin recording.")
 	}
 
-	if err := recording.StartRecording(wtPath, specID); err != nil {
+	if err := recording.StartRecording(ws.Path, specID); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not start recording: %v\n", err)
 	}
 

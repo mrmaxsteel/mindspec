@@ -84,7 +84,8 @@ The bead ID is auto-resolved from state if not provided.`,
 			}
 		}
 
-		result, err := complete.Run(root, beadID, specID, commitMsg)
+		exec := newExecutor(root)
+		result, err := complete.Run(root, beadID, specID, commitMsg, exec)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
-	"github.com/mrmaxsteel/mindspec/internal/gitops"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -47,6 +47,8 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		if err != nil {
 			return err
 		}
+
+		exec := newExecutor(root)
 
 		// Emit-only mode: build and print primer without claiming or state changes
 		if emitOnly {
@@ -107,7 +109,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		}
 
 		// Step 1: Check clean tree
-		if err := next.CheckCleanTree(); err != nil {
+		if err := exec.IsTreeClean(cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "Cannot claim work: %s\n\n", err)
 			fmt.Fprintln(os.Stderr, "Recovery steps:")
 			fmt.Fprintln(os.Stderr, "  1. Commit your changes: mindspec complete \"wip\"")
@@ -173,7 +175,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 				activeBead, resolveErr := next.ResolveActiveBead(root, specFlag)
 				if resolveErr == nil && activeBead != "" {
 					fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", activeBead)
-					wtPath, wtErr := next.EnsureWorktree(root, activeBead)
+					wtPath, wtErr := next.EnsureWorktree(root, activeBead, specFlag, exec)
 					if wtErr != nil {
 						return fmt.Errorf("recovering worktree for in-progress bead %s: %w", activeBead, wtErr)
 					}
@@ -227,7 +229,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		}
 
 		// Step 5.5: Create or reuse worktree
-		wtPath, wtErr := next.EnsureWorktree(root, selected.ID)
+		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
 		if wtErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: worktree setup failed: %v\n", wtErr)
 		} else if wtPath != "" {
@@ -360,7 +362,7 @@ func checkUnmergedBeads(specID string) error {
 
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
-		if id != "" && gitops.BranchExists("bead/"+id) {
+		if id != "" && gitutil.BranchExists("bead/"+id) {
 			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete --spec=%s` to recover, then retry `mindspec next`.", id, specID)
 		}
 	}

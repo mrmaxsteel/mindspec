@@ -1,4 +1,4 @@
-package gitops
+package gitutil
 
 import (
 	"fmt"

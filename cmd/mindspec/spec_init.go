@@ -25,7 +25,8 @@ var specInitCmd = &cobra.Command{
 			return err
 		}
 
-		result, err := specinit.Run(root, specID, title)
+		exec := newExecutor(root)
+		result, err := specinit.Run(root, specID, title, exec)
 		if err != nil {
 			return err
 		}

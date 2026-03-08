@@ -6,7 +6,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
-	"github.com/mrmaxsteel/mindspec/internal/gitops"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -59,7 +59,7 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 
 		// Protected branch check: main/master → always idle (focus file is stale).
 		if specFlag == "" {
-			branch, _ := gitops.CurrentBranch()
+			branch, _ := gitutil.CurrentBranch()
 			cfg, cfgErr := config.Load(mainRoot)
 			if cfgErr != nil {
 				cfg = config.DefaultConfig()

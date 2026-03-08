@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -280,7 +281,7 @@ func TestScenario_HappyPath(t *testing.T) {
 	assertState(t, root, specID, state.ModeSpec, "spec")
 
 	// Phase 2: Approve Spec (called directly — no bd needed)
-	result, err := approve.ApproveSpec(root, specID, "test-user")
+	result, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
@@ -295,7 +296,7 @@ func TestScenario_HappyPath(t *testing.T) {
 	gitRun(t, root, "commit", "-m", "add plan")
 
 	// Phase 3: Approve Plan (called directly — no epic_id means bead creation skipped)
-	planResult, err := approve.ApprovePlan(root, specID, "test-user")
+	planResult, err := approve.ApprovePlan(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
@@ -336,7 +337,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	// Set up: in the middle of implementing spec 002
 	simulateSpecInit(t, root, specID)
 	// Approve spec
-	_, err := approve.ApproveSpec(root, specID, "test-user")
+	_, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
-	_, err = approve.ApprovePlan(root, specID, "test-user")
+	_, err = approve.ApprovePlan(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
@@ -362,7 +363,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	simulateSpecInit(t, root, bugSpecID)
 
 	// Approve bug spec
-	_, err = approve.ApproveSpec(root, bugSpecID, "test-user")
+	_, err = approve.ApproveSpec(root, bugSpecID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApproveSpec(bug): %v", err)
 	}
@@ -372,7 +373,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add bug plan")
 
-	_, err = approve.ApprovePlan(root, bugSpecID, "test-user")
+	_, err = approve.ApprovePlan(root, bugSpecID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApprovePlan(bug): %v", err)
 	}
@@ -410,7 +411,7 @@ func TestScenario_InvalidTransition(t *testing.T) {
 	root := testRepo(t)
 
 	// Attempting approve-spec when no spec exists should fail
-	_, err := approve.ApproveSpec(root, "999-nonexistent", "test-user")
+	_, err := approve.ApproveSpec(root, "999-nonexistent", "test-user", &executor.MockExecutor{})
 	if err == nil {
 		t.Fatal("expected error approving nonexistent spec")
 	}
@@ -424,7 +425,7 @@ func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
 
 	simulateSpecInit(t, root, specID)
 
-	_, err := approve.ApproveSpec(root, specID, "artifact-tester")
+	_, err := approve.ApproveSpec(root, specID, "artifact-tester", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
@@ -487,7 +488,7 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 
 	simulateSpecInit(t, root, specID)
 
-	_, err := approve.ApproveSpec(root, specID, "test-user")
+	_, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
@@ -496,7 +497,7 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
-	_, err = approve.ApprovePlan(root, specID, "test-user")
+	_, err = approve.ApprovePlan(root, specID, "test-user", &executor.MockExecutor{})
 	if err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}

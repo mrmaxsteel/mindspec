@@ -13,6 +13,7 @@ type Config struct {
 	ProtectedBranches []string    `yaml:"protected_branches"`
 	MergeStrategy     string      `yaml:"merge_strategy"`
 	WorktreeRoot      string      `yaml:"worktree_root"`
+	AutoFinalize      bool        `yaml:"auto_finalize"`
 	Enforcement       Enforcement `yaml:"enforcement"`
 	Recording         Recording   `yaml:"recording"`
 }

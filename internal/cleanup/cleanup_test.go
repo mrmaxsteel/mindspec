@@ -7,28 +7,21 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
-	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
-func setupCleanupTest(t *testing.T, specID string, mode string) string {
+func setupCleanupTest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
-	// ADR-0023: no focus file written; state derived from beads.
-	_ = specID
-	_ = mode
 	return root
 }
 
 func mockCleanupFns(t *testing.T) {
 	t.Helper()
-	origWorktreeRemove := worktreeRemoveFn
-	origDeleteBranch := deleteBranchFn
 	origFindLocalRoot := findLocalRootFn
 	t.Cleanup(func() {
-		worktreeRemoveFn = origWorktreeRemove
-		deleteBranchFn = origDeleteBranch
 		findLocalRootFn = origFindLocalRoot
 	})
 	// Default: fall back to root arg (no local root resolution in tests).
@@ -36,36 +29,38 @@ func mockCleanupFns(t *testing.T) {
 }
 
 func TestCleanup_ForceRemovesWorktreeAndBranch(t *testing.T) {
-	root := setupCleanupTest(t, "010-test", state.ModeIdle)
+	root := setupCleanupTest(t)
 	mockCleanupFns(t)
+	mock := &executor.MockExecutor{}
 
-	var wtRemoved, branchDeleted bool
-	worktreeRemoveFn = func(name string) error {
-		wtRemoved = true
-		return nil
-	}
-	deleteBranchFn = func(name string) error {
-		branchDeleted = true
-		return nil
-	}
-
-	result, err := Run(root, "010-test", true)
+	result, err := Run(root, "010-test", true, mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !wtRemoved {
-		t.Error("expected worktree to be removed")
-	}
-	if result.WorktreeRemoved != true {
+	if !result.WorktreeRemoved {
 		t.Error("result.WorktreeRemoved should be true")
 	}
-	// Branch may not exist in test (BranchExists returns false), so deletion is skipped.
-	_ = branchDeleted
+	if !result.BranchDeleted {
+		t.Error("result.BranchDeleted should be true")
+	}
+
+	// Verify executor.Cleanup was called with force=true
+	calls := mock.CallsTo("Cleanup")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Cleanup call, got %d", len(calls))
+	}
+	if calls[0].Args[0] != "010-test" {
+		t.Errorf("Cleanup specID: got %q, want %q", calls[0].Args[0], "010-test")
+	}
+	if calls[0].Args[1] != true {
+		t.Errorf("Cleanup force: got %v, want true", calls[0].Args[1])
+	}
 }
 
 func TestCleanup_RefusesActiveSpec(t *testing.T) {
-	root := setupCleanupTest(t, "010-test", state.ModeImplement)
+	root := setupCleanupTest(t)
 	mockCleanupFns(t)
+	mock := &executor.MockExecutor{}
 
 	// Stub phase to return implement mode for 010-test
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
@@ -88,25 +83,18 @@ func TestCleanup_RefusesActiveSpec(t *testing.T) {
 	})
 	t.Cleanup(restore)
 
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	_, err := Run(root, "010-test", false)
+	_, err := Run(root, "010-test", false, mock)
 	if err == nil {
 		t.Fatal("expected error for active spec")
 	}
 }
 
 func TestCleanup_ForceBypassesActiveCheck(t *testing.T) {
-	// Per ADR-0023: force cleanup no longer clears focus (no focus files).
-	// It just removes worktree and branch regardless of state.
-	root := setupCleanupTest(t, "010-test", state.ModeImplement)
+	root := setupCleanupTest(t)
 	mockCleanupFns(t)
+	mock := &executor.MockExecutor{}
 
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	result, err := Run(root, "010-test", true)
+	result, err := Run(root, "010-test", true, mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,9 +104,9 @@ func TestCleanup_ForceBypassesActiveCheck(t *testing.T) {
 }
 
 func TestCleanup_DifferentSpecAllowed(t *testing.T) {
-	// Cleaning up spec "010-test" while "other-spec" is active should succeed.
-	root := setupCleanupTest(t, "other-spec", state.ModeImplement)
+	root := setupCleanupTest(t)
 	mockCleanupFns(t)
+	mock := &executor.MockExecutor{}
 
 	// Phase returns a different active spec
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
@@ -139,10 +127,7 @@ func TestCleanup_DifferentSpecAllowed(t *testing.T) {
 	})
 	t.Cleanup(restore)
 
-	worktreeRemoveFn = func(name string) error { return nil }
-	deleteBranchFn = func(name string) error { return nil }
-
-	_, err := Run(root, "010-test", false)
+	_, err := Run(root, "010-test", false, mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

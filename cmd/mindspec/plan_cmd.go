@@ -49,7 +49,8 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", err)
 	}
 
-	result, err := approve.ApprovePlan(root, specID, approvedBy)
+	exec := newExecutor(root)
+	result, err := approve.ApprovePlan(root, specID, approvedBy, exec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

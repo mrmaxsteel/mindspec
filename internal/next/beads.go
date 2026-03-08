@@ -3,16 +3,11 @@ package next
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/config"
-	"github.com/mrmaxsteel/mindspec/internal/gitops"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
-	"github.com/mrmaxsteel/mindspec/internal/state"
-	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // BeadInfo represents a work item from Beads.
@@ -29,15 +24,9 @@ type BeadInfo struct {
 
 // Package-level function variables for testability.
 var (
-	runBDFn         = bead.RunBD
-	runBDCombFn     = bead.RunBDCombined
-	listJSONFn      = bead.ListJSON
-	worktreeList    = bead.WorktreeList
-	worktreeCreate  = bead.WorktreeCreate
-	loadConfigFn    = config.Load
-	createBranchFn  = gitops.CreateBranch
-	branchExistsFn  = gitops.BranchExists
-	ensureGitignore = gitops.EnsureGitignoreEntry
+	runBDFn     = bead.RunBD
+	runBDCombFn = bead.RunBDCombined
+	listJSONFn  = bead.ListJSON
 )
 
 // QueryReady discovers ready work via global bd ready.
@@ -205,112 +194,14 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 	return item, nil
 }
 
-// EnsureWorktree checks for an existing worktree for the bead, or creates one.
-// It derives the spec branch from worktree context conventions (ADR-0023) and config
-// for WorktreeRoot (canonical .worktrees/ directory).
-// Returns the worktree path. Returns empty string if worktree creation is not
-// applicable (e.g., working on main).
-func EnsureWorktree(root, beadID string) (string, error) {
-	entries, err := worktreeList()
+// EnsureWorktree creates or reuses a workspace for the given bead via the
+// Executor interface. The specID is passed so the executor can branch from
+// the spec branch; the branching strategy is the executor's concern.
+// Returns the workspace path.
+func EnsureWorktree(root, beadID, specID string, exec executor.Executor) (string, error) {
+	ws, err := exec.DispatchBead(beadID, specID)
 	if err != nil {
-		return "", fmt.Errorf("listing worktrees: %w", err)
+		return "", err
 	}
-
-	// Load config for worktree root path.
-	cfg, cfgErr := loadConfigFn(root)
-	if cfgErr != nil {
-		cfg = config.DefaultConfig()
-	}
-
-	// Check for existing worktree matching this bead
-	wtName := "worktree-" + beadID
-	branchName := "bead/" + beadID
-	for _, e := range entries {
-		if e.Name == wtName || e.Branch == branchName {
-			return e.Path, nil
-		}
-	}
-
-	// ADR-0023: derive spec branch from worktree context (not focus file).
-	baseBranch := "HEAD"
-	localRoot := root
-	if lr, err := workspace.FindLocalRoot("."); err == nil {
-		localRoot = lr
-	}
-	_, specID, _ := workspace.DetectWorktreeContext(localRoot)
-	if specID != "" {
-		baseBranch = state.SpecBranch(specID)
-	}
-	anchorRoot := resolveWorktreeAnchorFromSpec(root, specID)
-
-	// Create the bead branch from the spec branch (or HEAD).
-	if !branchExistsFn(branchName) {
-		if err := createBranchFn(branchName, baseBranch); err != nil {
-			return "", fmt.Errorf("creating branch %s from %s: %w", branchName, baseBranch, err)
-		}
-	}
-
-	// Ensure .worktrees/ directory exists and is gitignored at the anchor root.
-	// In implement mode we anchor bead worktrees under the spec worktree so
-	// repeated `mindspec next` calls do not recurse from the current CWD.
-	if err := os.MkdirAll(filepath.Join(anchorRoot, cfg.WorktreeRoot), 0755); err != nil {
-		return "", fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
-	}
-	if err := ensureGitignore(anchorRoot, cfg.WorktreeRoot); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
-	}
-
-	// Create new worktree via bd worktree create under .worktrees/
-	// from the anchor root (spec worktree or main root).
-	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
-	if err := withWorkingDir(anchorRoot, func() error {
-		return worktreeCreate(relWtPath, branchName)
-	}); err != nil {
-		return "", fmt.Errorf("creating worktree: %w", err)
-	}
-
-	wtPath := cfg.WorktreePath(anchorRoot, wtName)
-
-	// Read back path from worktree list to confirm
-	entries, err = worktreeList()
-	if err == nil {
-		for _, e := range entries {
-			if e.Name == wtName || strings.HasSuffix(e.Path, wtName) {
-				wtPath = e.Path
-				break
-			}
-		}
-	}
-
-	// ADR-0023: no focus propagation — state is derived from beads.
-
-	return wtPath, nil
-}
-
-func resolveWorktreeAnchorFromSpec(root, specID string) string {
-	if specID == "" {
-		return root
-	}
-	specWt := state.SpecWorktreePath(root, specID)
-	if fi, err := os.Stat(specWt); err == nil && fi.IsDir() {
-		return specWt
-	}
-	return root
-}
-
-func withWorkingDir(dir string, fn func() error) error {
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	if filepath.Clean(wd) == filepath.Clean(dir) {
-		return fn()
-	}
-	if err := os.Chdir(dir); err != nil {
-		return err
-	}
-	defer func() {
-		_ = os.Chdir(wd)
-	}()
-	return fn()
+	return ws.Path, nil
 }

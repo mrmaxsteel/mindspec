@@ -1,56 +1,24 @@
 package specinit
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-func mockSuccess(t *testing.T, testRoot string) {
-	t.Helper()
-	origPreflight := preflightFn
-	origRunBD := runBDFn
-	origRunBDCombined := runBDCombined
-	origLoadConfig := loadConfigFn
-	origCreateBranch := createBranchFn
-	origBranchExists := branchExistsFn
-	origWorktreeCreate := worktreeCreateFn
-	origEnsureGitignore := ensureGitignore
-	t.Cleanup(func() {
-		preflightFn = origPreflight
-		runBDFn = origRunBD
-		runBDCombined = origRunBDCombined
-		loadConfigFn = origLoadConfig
-		createBranchFn = origCreateBranch
-		branchExistsFn = origBranchExists
-		worktreeCreateFn = origWorktreeCreate
-		ensureGitignore = origEnsureGitignore
-	})
-
-	preflightFn = func(root string) error { return nil }
-	runBDFn = func(args ...string) ([]byte, error) {
-		// Stub epic creation: return a JSON object with an ID.
-		return []byte(`{"id":"epic-123"}`), nil
+// newMockExecutor creates a MockExecutor that returns a workspace under testRoot.
+func newMockExecutor(testRoot, specID string) *executor.MockExecutor {
+	wtPath := filepath.Join(testRoot, ".worktrees", "worktree-spec-"+specID)
+	return &executor.MockExecutor{
+		InitSpecWorkspaceResult: executor.WorkspaceInfo{
+			Path:   wtPath,
+			Branch: "spec/" + specID,
+		},
 	}
-	runBDCombined = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
-	// Stub out git/worktree operations for unit tests.
-	loadConfigFn = func(root string) (*config.Config, error) { return config.DefaultConfig(), nil }
-	createBranchFn = func(name, from string) error { return nil }
-	branchExistsFn = func(name string) bool { return false }
-	worktreeCreateFn = func(relPath, branch string) error {
-		// Simulate worktree creation by creating the absolute directory.
-		absPath := filepath.Join(testRoot, relPath)
-		if err := os.MkdirAll(absPath, 0755); err != nil {
-			return fmt.Errorf("mock worktree create: %w", err)
-		}
-		return nil
-	}
-	ensureGitignore = func(root, entry string) error { return nil }
 }
 
 // setupTestRoot creates a minimal project root with the spec template.
@@ -69,11 +37,18 @@ func setupTestRoot(t *testing.T) string {
 	return root
 }
 
+// ensureWorktreeDir creates the mock worktree directory so file operations succeed.
+func ensureWorktreeDir(t *testing.T, mock *executor.MockExecutor) {
+	t.Helper()
+	os.MkdirAll(mock.InitSpecWorkspaceResult.Path, 0755)
+}
+
 func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "010-my-feature")
+	ensureWorktreeDir(t, mock)
 
-	result, err := Run(root, "010-my-feature", "")
+	result, err := Run(root, "010-my-feature", "", mock)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -89,13 +64,23 @@ func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	if !strings.Contains(content, "# Spec 010-my-feature: My Feature") {
 		t.Errorf("expected slug-derived title, got:\n%s", content)
 	}
+
+	// Verify executor was called correctly.
+	calls := mock.CallsTo("InitSpecWorkspace")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 InitSpecWorkspace call, got %d", len(calls))
+	}
+	if calls[0].Args[0] != "010-my-feature" {
+		t.Errorf("InitSpecWorkspace called with %v, want 010-my-feature", calls[0].Args[0])
+	}
 }
 
 func TestRunWithExplicitTitle(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "011-custom")
+	ensureWorktreeDir(t, mock)
 
-	result, err := Run(root, "011-custom", "Custom Title")
+	result, err := Run(root, "011-custom", "Custom Title", mock)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -115,16 +100,14 @@ func TestRunWithExplicitTitle(t *testing.T) {
 
 func TestRunErrorsOnExistingDirectory(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "010-exists")
+	ensureWorktreeDir(t, mock)
 
 	// Pre-create the spec directory in the worktree path (where Run() now checks).
-	cfg := config.DefaultConfig()
-	wtName := "worktree-spec-010-exists"
-	wtPath := cfg.WorktreePath(root, wtName)
-	specDir := workspace.SpecDir(wtPath, "010-exists")
+	specDir := workspace.SpecDir(mock.InitSpecWorkspaceResult.Path, "010-exists")
 	os.MkdirAll(specDir, 0755)
 
-	_, err := Run(root, "010-exists", "")
+	_, err := Run(root, "010-exists", "", mock)
 	if err == nil {
 		t.Fatal("expected error for existing directory, got nil")
 	}
@@ -135,9 +118,10 @@ func TestRunErrorsOnExistingDirectory(t *testing.T) {
 
 func TestRunSetsState(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "012-state-test")
+	ensureWorktreeDir(t, mock)
 
-	result, err := Run(root, "012-state-test", "")
+	result, err := Run(root, "012-state-test", "", mock)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -160,7 +144,6 @@ func TestRunSetsState(t *testing.T) {
 
 func TestRunRejectsInvalidSpecID(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
 
 	tests := []struct {
 		id      string
@@ -194,7 +177,9 @@ func TestRunRejectsInvalidSpecID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		_, err := Run(root, tt.id, "")
+		mock := newMockExecutor(root, tt.id)
+		ensureWorktreeDir(t, mock)
+		_, err := Run(root, tt.id, "", mock)
 		if tt.wantErr && err == nil {
 			t.Errorf("Run(%q): expected error, got nil", tt.id)
 		}
@@ -224,9 +209,10 @@ func TestTitleFromSlug(t *testing.T) {
 
 func TestRunNoLifecycleFile(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "014-lifecycle-test")
+	ensureWorktreeDir(t, mock)
 
-	result, err := Run(root, "014-lifecycle-test", "")
+	result, err := Run(root, "014-lifecycle-test", "", mock)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -241,15 +227,36 @@ func TestRunNoLifecycleFile(t *testing.T) {
 
 func TestRunNoEpicCreation(t *testing.T) {
 	root := setupTestRoot(t)
-	mockSuccess(t, root)
+	mock := newMockExecutor(root, "013-no-epic")
+	ensureWorktreeDir(t, mock)
 
 	// Per ADR-0023: epic creation moved to spec approve.
 	// spec create should succeed without creating an epic.
-	result, err := Run(root, "013-no-epic", "")
+	result, err := Run(root, "013-no-epic", "", mock)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 	if result.WorktreePath == "" {
 		t.Fatal("expected worktree to be created")
+	}
+}
+
+func TestRunCommitsViaExecutor(t *testing.T) {
+	root := setupTestRoot(t)
+	mock := newMockExecutor(root, "015-commit-test")
+	ensureWorktreeDir(t, mock)
+
+	_, err := Run(root, "015-commit-test", "", mock)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Verify CommitAll was called on the workspace path.
+	commits := mock.CallsTo("CommitAll")
+	if len(commits) != 1 {
+		t.Fatalf("expected 1 CommitAll call, got %d", len(commits))
+	}
+	if commits[0].Args[0] != mock.InitSpecWorkspaceResult.Path {
+		t.Errorf("CommitAll path = %v, want %v", commits[0].Args[0], mock.InitSpecWorkspaceResult.Path)
 	}
 }

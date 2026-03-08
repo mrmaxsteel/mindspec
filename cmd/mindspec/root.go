@@ -5,10 +5,17 @@ import (
 	"os"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
+
+// newExecutor creates a GitExecutor rooted at the given path.
+// Used as a factory function across CLI commands.
+func newExecutor(root string) executor.Executor {
+	return executor.NewGitExecutor(root)
+}
 
 // Set by goreleaser ldflags.
 var (
