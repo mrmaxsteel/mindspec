@@ -7,7 +7,6 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/specinit"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -33,7 +32,7 @@ creates a branch and worktree, sets state to spec mode, and emits guidance.`,
 			return err
 		}
 
-		exec := executor.NewGitExecutor(root)
+		exec := newExecutor(root)
 		result, err := specinit.Run(root, specID, title, exec)
 		if err != nil {
 			return err
@@ -93,7 +92,8 @@ func approveSpecRunE(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", err)
 	}
 
-	result, err := approve.ApproveSpec(root, specID, approvedBy)
+	exec := newExecutor(root)
+	result, err := approve.ApproveSpec(root, specID, approvedBy, exec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

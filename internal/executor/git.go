@@ -246,7 +246,8 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 }
 
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
-// branches. Mirrors the logic in internal/approve/impl.go.
+// branches. Handles bead branch auto-merge into the spec branch before
+// cleanup, ensuring all bead work is integrated.
 func (g *GitExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
 	result := FinalizeResult{}
 
@@ -254,7 +255,38 @@ func (g *GitExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeR
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
 	}
 
-	// Gather stats.
+	// Auto-commit any remaining spec artifacts.
+	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
+	if err := g.CommitAllFn(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
+	}
+
+	// Auto-merge unmerged bead branches into spec branch before cleanup.
+	// This handles beads that were closed via `bd close` without `mindspec complete`.
+	if entries, listErr := g.WorktreeListFn(); listErr == nil {
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Branch, "bead/") {
+				continue
+			}
+			// Auto-commit any remaining bead artifacts.
+			if e.Path != "" {
+				_ = g.CommitAllFn(e.Path, "chore: commit remaining bead artifacts")
+			}
+			// Merge bead branch into spec branch if not already an ancestor.
+			if _, statErr := os.Stat(specWtPath); statErr == nil {
+				isAnc, ancErr := g.IsAncestorFn(g.Root, e.Branch, specBranch)
+				if ancErr == nil && !isAnc {
+					if mergeErr := g.MergeIntoFn(specWtPath, e.Branch); mergeErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", e.Branch, specBranch, mergeErr)
+					} else {
+						fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
+					}
+				}
+			}
+		}
+	}
+
+	// Gather stats (after bead merges so counts are accurate).
 	if count, err := g.CommitCountFn(g.Root, "main", specBranch); err == nil {
 		result.CommitCount = count
 	}
@@ -272,21 +304,12 @@ func (g *GitExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeR
 		result.MergeStrategy = "direct"
 	}
 
-	// Auto-commit any remaining spec artifacts.
-	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
-	if err := g.CommitAllFn(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
-	}
-
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
 		// Clean up lingering bead worktrees/branches.
 		if entries, listErr := g.WorktreeListFn(); listErr == nil {
 			for _, e := range entries {
 				if strings.HasPrefix(e.Branch, "bead/") {
-					if e.Path != "" {
-						_ = g.CommitAllFn(e.Path, "chore: commit remaining bead artifacts")
-					}
 					_ = g.WorktreeRemoveFn(e.Name)
 					_ = g.DeleteBranchFn(e.Branch)
 				}

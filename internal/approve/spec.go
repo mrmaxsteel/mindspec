@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -36,7 +36,7 @@ type SpecResult struct {
 }
 
 // ApproveSpec validates and approves a spec, updating lifecycle and setting state.
-func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
+func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*SpecResult, error) {
 	result := &SpecResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
@@ -97,7 +97,7 @@ func ApproveSpec(root, specID, approvedBy string) (*SpecResult, error) {
 	// Step 3c: Auto-commit approval changes so downstream branches see them.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
-	if err := gitutil.CommitAll(specWtPath, commitMsg); err != nil {
+	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
 	}
 

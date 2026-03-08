@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/specinit"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -26,7 +25,7 @@ var specInitCmd = &cobra.Command{
 			return err
 		}
 
-		exec := executor.NewGitExecutor(root)
+		exec := newExecutor(root)
 		result, err := specinit.Run(root, specID, title, exec)
 		if err != nil {
 			return err

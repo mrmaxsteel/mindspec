@@ -9,7 +9,6 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
-	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -49,7 +48,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return err
 		}
 
-		exec := executor.NewGitExecutor(root)
+		exec := newExecutor(root)
 
 		// Emit-only mode: build and print primer without claiming or state changes
 		if emitOnly {

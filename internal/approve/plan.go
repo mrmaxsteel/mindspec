@@ -13,7 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -55,7 +55,7 @@ type PlanResult struct {
 }
 
 // ApprovePlan validates and approves a plan, creating beads and setting state.
-func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
+func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*PlanResult, error) {
 	result := &PlanResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
@@ -111,11 +111,19 @@ func ApprovePlan(root, specID, approvedBy string) (*PlanResult, error) {
 	// worktrees that branch from spec/<id> contain the approved artifacts.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
-	if err := gitutil.CommitAll(specWtPath, commitMsg); err != nil {
+	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
 	}
 
-	// Step 5: Emit recording phase marker (best-effort)
+	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
+	// For GitExecutor this is a no-op. Other executors may use this to schedule work.
+	if parentID != "" && len(result.BeadIDs) > 0 {
+		if err := exec.HandoffEpic(parentID, specID, result.BeadIDs); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("handoff epic failed: %v", err))
+		}
+	}
+
+	// Step 6: Emit recording phase marker (best-effort)
 	if err := recording.EmitPhaseMarker(root, specID, "plan", "plan-approved"); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
 	}
