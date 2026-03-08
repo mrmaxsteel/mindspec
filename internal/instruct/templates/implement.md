@@ -92,6 +92,8 @@ When the bead is done:
 3. Run `mindspec complete "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
 4. **If more beads are ready, run `mindspec next` IMMEDIATELY** — do NOT write any code for the next bead until `mindspec next` has created its worktree
 
+**Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
+
 ## Next Action
 {{- if .ActiveBead}}
 

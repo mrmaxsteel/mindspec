@@ -87,10 +87,14 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 	}
 	// If no in-progress bead found, check for recently closed beads that
 	// may need cleanup (e.g., agent ran `bd close` directly).
+	recoveryMode := false
 	if beadID == "" {
 		beadID, err = findRecentClosedFn(specID)
 		if err != nil {
 			return nil, fmt.Errorf("resolving active bead: %w", err)
+		}
+		if beadID != "" {
+			recoveryMode = true
 		}
 	}
 	if beadID == "" {
@@ -127,16 +131,20 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 		}
 	}
 
-	// 3. Check clean tree
-	checkPath := wtPath
-	if checkPath == "" {
-		checkPath = root // No worktree — check main tree
-	}
-	if err := checkCleanWorktree(checkPath); err != nil {
-		if wtPath == "" {
-			return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
+	// 3. Check clean tree — skip in recovery mode (already-closed bead
+	// with lingering branch). The dirty files are unrelated new work; the
+	// recovery merge only touches the bead branch, not the working tree.
+	if !recoveryMode {
+		checkPath := wtPath
+		if checkPath == "" {
+			checkPath = root // No worktree — check main tree
 		}
-		return nil, fmt.Errorf("%w\nhint: use `mindspec complete \"describe what you did\"` to auto-commit", err)
+		if err := checkCleanWorktree(checkPath); err != nil {
+			if wtPath == "" {
+				return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
+			}
+			return nil, fmt.Errorf("%w\nhint: use `mindspec complete \"describe what you did\"` to auto-commit", err)
+		}
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)

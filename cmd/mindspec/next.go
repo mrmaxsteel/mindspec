@@ -165,8 +165,28 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			items = filtered
 		}
 
-		// Step 3: Handle no-work case
+		// Step 3: Handle no-work case — also check for in-progress bead with
+		// missing worktree (stale recovery). If a bead is in_progress but its
+		// worktree was deleted, recreate the worktree so the agent can resume.
 		if len(items) == 0 {
+			if specFlag != "" {
+				activeBead, resolveErr := next.ResolveActiveBead(root, specFlag)
+				if resolveErr == nil && activeBead != "" {
+					fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", activeBead)
+					wtPath, wtErr := next.EnsureWorktree(root, activeBead)
+					if wtErr != nil {
+						return fmt.Errorf("recovering worktree for in-progress bead %s: %w", activeBead, wtErr)
+					}
+					if wtPath != "" {
+						fmt.Printf("Worktree recovered: %s\n", wtPath)
+						fmt.Printf("  cd %s\n", wtPath)
+					}
+					resolved := next.ResolveMode(root, next.BeadInfo{ID: activeBead, Title: "[" + specFlag + "] recovered"})
+					resolved.SpecID = specFlag
+					fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, activeBead)
+					return nil
+				}
+			}
 			fmt.Println("No ready work found.")
 			if specFlag != "" {
 				fmt.Printf("(filtered to spec: %s)\n", specFlag)
@@ -174,7 +194,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			fmt.Println()
 			fmt.Println("Next steps:")
 			fmt.Println("  - Create a new spec: mindspec spec create <slug>")
-			fmt.Println("  - Check blocked items- bd blocked")
+			fmt.Println("  - Check blocked items: bd blocked")
 			fmt.Println("  - List all open work: bd list --status=open")
 			return nil
 		}

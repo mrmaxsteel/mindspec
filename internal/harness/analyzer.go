@@ -116,6 +116,9 @@ func DefaultWrongActionRules() []WrongActionRule {
 				return false, ""
 			},
 		},
+		// bd_close_shortcut is a session-level check (see detectBdCloseShortcut),
+		// not per-event, because the agent may use bd close during exploration
+		// before ultimately running mindspec complete.
 	}
 }
 
@@ -294,6 +297,7 @@ func (a *Analyzer) DetectWrongActions(events []ActionEvent) []WrongActionResult 
 	// Session-level checks that require scanning the full event stream.
 	results = append(results, detectSkipNext(events)...)
 	results = append(results, detectSkipComplete(events)...)
+	results = append(results, detectBdCloseShortcut(events)...)
 
 	return results
 }
@@ -442,6 +446,37 @@ func detectSkipComplete(events []ActionEvent) []WrongActionResult {
 		}}
 	}
 	return nil
+}
+
+// detectBdCloseShortcut checks if the agent used `bd close` to close a bead
+// without ever running `mindspec complete`. If `mindspec complete` ran
+// successfully at any point, `bd close` calls are tolerated (the agent
+// explored before finding the right command).
+func detectBdCloseShortcut(events []ActionEvent) []WrongActionResult {
+	var bdCloseEvents []ActionEvent
+	completeSeen := false
+
+	for _, e := range events {
+		if e.Blocked {
+			continue
+		}
+		if e.Command == "bd" && e.ExitCode == 0 && containsAll(eventArgsList(e), "close") {
+			bdCloseEvents = append(bdCloseEvents, e)
+		}
+		if e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgsList(e), "complete") {
+			completeSeen = true
+		}
+	}
+
+	if completeSeen || len(bdCloseEvents) == 0 {
+		return nil
+	}
+
+	return []WrongActionResult{{
+		Rule:   "bd_close_shortcut",
+		Event:  bdCloseEvents[0],
+		Reason: "used bd close instead of mindspec complete — skips merge, cleanup, and state transitions",
+	}}
 }
 
 // isCodeModifyingEvent returns true if the event represents a code modification.

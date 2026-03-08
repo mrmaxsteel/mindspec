@@ -16,11 +16,54 @@ func TestRun_UnknownHook(t *testing.T) {
 	}
 }
 
-func TestPreCommit_AllowWhenIdle(t *testing.T) {
-	t.Parallel()
+func TestPreCommit_BlockWhenIdleOnProtectedBranch(t *testing.T) {
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	r := Run("pre-commit", &Input{}, &HookState{Mode: "idle"}, true)
+	if r.Action != Block {
+		t.Errorf("expected block for idle mode on protected branch, got %v", r.Action)
+	}
+	if !strings.Contains(r.Message, "git checkout -b fix/") {
+		t.Error("block message should suggest creating a fix branch")
+	}
+}
+
+func TestPreCommit_AllowWhenIdleOnNonProtectedBranch(t *testing.T) {
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	cmd := exec.Command("git", "checkout", "-b", "fix/something")
+	cmd.Dir = root
+	cmd.CombinedOutput()
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
 	r := Run("pre-commit", &Input{}, &HookState{Mode: "idle"}, true)
 	if r.Action != Pass {
-		t.Errorf("expected pass for idle mode, got %v", r.Action)
+		t.Errorf("expected pass for idle mode on non-protected branch, got %v", r.Action)
 	}
 }
 
