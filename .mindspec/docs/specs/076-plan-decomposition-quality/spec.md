@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-08T16:08:52Z"
+approved_by: user
+status: Approved
 ---
 # Spec 076-plan-decomposition-quality: Research-Informed Plan Decomposition Guidance
 
@@ -148,7 +148,7 @@ The plan-mode instruct template (`internal/instruct/templates/plan.md`) specifie
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-08
+- **Notes**: Approved via mindspec approve spec
