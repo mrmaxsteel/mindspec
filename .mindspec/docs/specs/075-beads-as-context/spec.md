@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-03-08T16:35:44Z"
+approved_by: user
+status: Approved
 ---
 # Spec 075-beads-as-context: Beads as Context Authority — Self-Contained Work Units with Decision Links
 
@@ -26,7 +26,7 @@ This system parses metadata from markdown conventions (`**Status**:`, `**Domain(
 
 ### The UX tension: git vs Dolt for decisions
 
-The vision document (`vision-enterprise-knowledge.md`) proposes migrating ADRs to beads `decision` issues in Dolt. At enterprise scale this is clearly right — structured queryability, federation, dependency graphs. But the current developer experience is excellent: open `ADR-NNNN.md` in VSCode, hit preview, read nicely rendered markdown. This is fast, zero-infrastructure, works offline, and leverages the editor the developer is already in.
+The vision document (`~/enterprise-knowledge/vision-enterprise-knowledge.md`) proposes migrating ADRs to beads `decision` issues in Dolt. At enterprise scale this is clearly right — structured queryability, federation, dependency graphs. But the current developer experience is excellent: open `ADR-NNNN.md` in VSCode, hit preview, read nicely rendered markdown. This is fast, zero-infrastructure, works offline, and leverages the editor the developer is already in.
 
 Moving ADRs to Dolt would break this workflow. The alternatives (terminal output via `bd show`, a VSCode extension, self-hosted DoltLab) are all worse for a solo developer or small team. See [ADR-0024](../../adr/ADR-0024.md) for the full analysis.
 
@@ -51,7 +51,7 @@ Spec 074 snapshots ADR Decision sections as text into the bead `design` field at
 
 ### Forward-looking: enterprise knowledge layer
 
-This interface is the foundation for a portfolio-wide knowledge layer where decisions are shared across repositories via Dolt federation. See the companion vision document (`vision-enterprise-knowledge.md`) for the full architectural picture, and [ADR-0024](../../adr/ADR-0024.md) for why the interface-first approach was chosen.
+This interface is the foundation for a portfolio-wide knowledge layer where decisions are shared across repositories via Dolt federation. See the companion vision document (`~/enterprise-knowledge/vision-enterprise-knowledge.md`) for the full architectural picture, and [ADR-0024](../../adr/ADR-0024.md) for why the interface-first approach was chosen.
 
 ## Impacted Domains
 
@@ -149,12 +149,12 @@ This interface is the foundation for a portfolio-wide knowledge layer where deci
 
 ## Open Questions
 
-- [ ] Should the interface live in `internal/adr/` (refactored in place) or a new `internal/decision/` package (cleaner name for the dual-backend future)?
-- [ ] Should `Search` accept structured filters (by domain, status) or just a text query?
+- [x] Should the interface live in `internal/adr/` (refactored in place) or a new `internal/decision/` package (cleaner name for the dual-backend future)? **Resolved**: Keep in `internal/adr/`. The package already owns the types and code. A rename adds churn with no value until the beads backend exists. Can rename later if needed.
+- [x] Should `Search` accept structured filters (by domain, status) or just a text query? **Resolved**: Text query only (`Search(query string) []ADR`). The existing `List` already supports status/domain filtering. Structured search is premature — matches `bd search` contract.
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: Governed by ADR-0024. Depends on Spec 074-self-contained-beads.
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-03-08
+- **Notes**: Approved via mindspec approve spec
