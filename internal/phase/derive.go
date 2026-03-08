@@ -14,7 +14,8 @@ import (
 
 // Package-level function variables for testability.
 var (
-	runBDFn = bead.RunBD
+	runBDFn    = bead.RunBD
+	listJSONFn = bead.ListJSON
 )
 
 // RunBDFunc is the function signature for bd command execution.
@@ -26,6 +27,13 @@ func SetRunBDForTest(fn RunBDFunc) func() {
 	orig := runBDFn
 	runBDFn = fn
 	return func() { runBDFn = orig }
+}
+
+// SetListJSONForTest allows tests to stub the ListJSON runner.
+func SetListJSONForTest(fn RunBDFunc) func() {
+	orig := listJSONFn
+	listJSONFn = fn
+	return func() { listJSONFn = orig }
 }
 
 // EpicInfo represents a beads epic with spec metadata.
@@ -331,13 +339,9 @@ func queryEpics() ([]EpicInfo, error) {
 	seen := map[string]bool{}
 	var lastErr error
 	for _, status := range []string{"open", "in_progress", "closed"} {
-		out, err := runBDFn("list", "--type=epic", "--status="+status, "--json")
+		out, err := listJSONFn("--type=epic", "--status="+status)
 		if err != nil {
 			lastErr = err
-			continue
-		}
-		trimmed := strings.TrimSpace(string(out))
-		if trimmed == "" || trimmed == "[]" {
 			continue
 		}
 		var epics []EpicInfo
@@ -363,12 +367,8 @@ func queryChildren(epicID string) []ChildInfo {
 	// but phase derivation needs closed beads too.
 	var allChildren []ChildInfo
 	for _, status := range []string{"open", "in_progress", "closed"} {
-		out, err := runBDFn("list", "--parent", epicID, "--status="+status, "--json")
+		out, err := listJSONFn("--parent", epicID, "--status="+status)
 		if err != nil {
-			continue
-		}
-		trimmed := strings.TrimSpace(string(out))
-		if trimmed == "" || trimmed == "[]" {
 			continue
 		}
 		var children []ChildInfo
@@ -496,13 +496,8 @@ func findEpicForBead(beadID string) (epicID, specID string, err error) {
 // Returns "" if zero or multiple beads are in_progress (ambiguous — caller should
 // fall back to the spec worktree).
 func FindActiveBeadForEpic(epicID string) string {
-	out, err := runBDFn("list", "--parent", epicID, "--status=in_progress", "--json")
+	out, err := listJSONFn("--parent", epicID, "--status=in_progress")
 	if err != nil {
-		return ""
-	}
-
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" || trimmed == "[]" {
 		return ""
 	}
 

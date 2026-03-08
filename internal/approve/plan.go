@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/gitops"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -190,17 +192,33 @@ var beadNumRe = regexp.MustCompile(`^Bead\s+(\d+)`)
 
 // createImplementationBeads parses plan.md for ## Bead sections, creates child
 // beads under the lifecycle epic, and wires inter-bead dependencies.
+// Each bead is populated with description, acceptance criteria, design, and metadata
+// so agents can work from `bd show <id>` alone (Spec 074).
 // Returns the ordered list of created bead IDs.
 func createImplementationBeads(planPath, specID, parentID string) ([]string, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading plan: %w", err)
 	}
+	planContent := string(data)
 
-	sections := validate.ParseBeadSections(string(data))
+	sections := validate.ParseBeadSections(planContent)
 	if len(sections) == 0 {
 		return nil, nil
 	}
+
+	// --- Assemble shared context from spec.md ---
+	specDir := filepath.Dir(planPath)
+	specContent := readFileOrEmpty(filepath.Join(specDir, "spec.md"))
+
+	requirements := contextpack.ExtractSection(specContent, "Requirements")
+	acceptanceCriteria := contextpack.ExtractSection(specContent, "Acceptance Criteria")
+
+	// Build design field: spec requirements + ADR decision snapshots
+	design := buildDesignField(specDir, specContent, requirements)
+
+	// --- Extract raw bead section content from plan.md ---
+	sectionContent := extractBeadSectionContents(planContent)
 
 	// Map from bead number (from heading) to created bead ID for dependency wiring.
 	numToID := make(map[int]string)
@@ -208,7 +226,27 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 
 	for _, sec := range sections {
 		title := fmt.Sprintf("[%s] %s", specID, sec.Heading)
-		args := []string{"create", "--title", title, "--type", "task", "--parent", parentID, "--json"}
+
+		// Get the raw work chunk for this bead
+		workChunk := sectionContent[sec.Heading]
+
+		// Extract file paths from the work chunk
+		filePaths := contextpack.ExtractFilePathsFromText(workChunk)
+
+		// Build metadata JSON
+		metadataJSON := buildBeadMetadata(specID, filePaths)
+
+		args := []string{
+			"create",
+			"--title", title,
+			"--type", "task",
+			"--parent", parentID,
+			"--description", workChunk,
+			"--acceptance-criteria", acceptanceCriteria,
+			"--design", design,
+			"--metadata", metadataJSON,
+			"--json",
+		}
 		out, err := planRunBDFn(args...)
 		if err != nil {
 			return beadIDs, fmt.Errorf("creating bead for %q: %w", sec.Heading, err)
@@ -261,6 +299,122 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	}
 
 	return beadIDs, nil
+}
+
+// buildDesignField assembles the design field content: spec requirements + ADR decision snapshots.
+func buildDesignField(specDir, specContent, requirements string) string {
+	var parts []string
+
+	if requirements != "" {
+		parts = append(parts, "## Requirements\n\n"+requirements)
+	}
+
+	// Parse ADR IDs from the spec's ADR Touchpoints section
+	touchpoints := contextpack.ExtractSection(specContent, "ADR Touchpoints")
+	adrIDs := parseADRIDs(touchpoints)
+
+	if len(adrIDs) > 0 {
+		// specDir is e.g. .mindspec/docs/specs/074-slug; root is 3 levels up
+		root := filepath.Join(specDir, "..", "..", "..")
+		allADRs, _ := adr.ScanADRs(root)
+		adrByID := make(map[string]adr.ADR)
+		for _, a := range allADRs {
+			adrByID[a.ID] = a
+		}
+
+		var decisions []string
+		for _, id := range adrIDs {
+			a, ok := adrByID[id]
+			if !ok {
+				continue
+			}
+			decision := contextpack.ExtractSection(a.Content, "Decision")
+			if decision != "" {
+				decisions = append(decisions, fmt.Sprintf("### %s\n\n%s", id, decision))
+			}
+		}
+		if len(decisions) > 0 {
+			parts = append(parts, "## ADR Decisions\n\n"+strings.Join(decisions, "\n\n"))
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+// adrIDRe matches ADR IDs like "ADR-0023" in markdown links or plain text.
+var adrIDRe = regexp.MustCompile(`ADR-(\d{4})`)
+
+// parseADRIDs extracts ADR IDs (e.g., "ADR-0023") from the ADR Touchpoints section text.
+func parseADRIDs(touchpoints string) []string {
+	matches := adrIDRe.FindAllString(touchpoints, -1)
+	seen := make(map[string]bool)
+	var ids []string
+	for _, id := range matches {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// extractBeadSectionContents extracts the raw markdown content for each ## Bead section.
+// Returns a map from heading text (e.g., "Bead 1: Populate Fields") to section content.
+func extractBeadSectionContents(content string) map[string]string {
+	result := make(map[string]string)
+	lines := strings.Split(content, "\n")
+
+	var currentHeading string
+	var currentLines []string
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## Bead ") {
+			// Save previous section
+			if currentHeading != "" {
+				result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+			}
+			currentHeading = strings.TrimPrefix(line, "## ")
+			currentLines = nil
+			continue
+		}
+		// A non-bead ## heading ends the current bead section
+		if strings.HasPrefix(line, "## ") && currentHeading != "" {
+			result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+			currentHeading = ""
+			currentLines = nil
+			continue
+		}
+		if currentHeading != "" {
+			currentLines = append(currentLines, line)
+		}
+	}
+	if currentHeading != "" {
+		result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+	}
+
+	return result
+}
+
+// buildBeadMetadata constructs the metadata JSON string for a bead.
+func buildBeadMetadata(specID string, filePaths []string) string {
+	meta := map[string]interface{}{
+		"spec_id":    specID,
+		"file_paths": filePaths,
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Sprintf(`{"spec_id":"%s"}`, specID)
+	}
+	return string(data)
+}
+
+// readFileOrEmpty reads a file and returns its content, or empty string on error.
+func readFileOrEmpty(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // writeBeadIDsToFrontmatter adds the bead_ids list to the plan's YAML frontmatter.

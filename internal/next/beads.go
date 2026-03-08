@@ -31,6 +31,7 @@ type BeadInfo struct {
 var (
 	runBDFn         = bead.RunBD
 	runBDCombFn     = bead.RunBDCombined
+	listJSONFn      = bead.ListJSON
 	worktreeList    = bead.WorktreeList
 	worktreeCreate  = bead.WorktreeCreate
 	loadConfigFn    = config.Load
@@ -147,19 +148,13 @@ func ResolveActiveBead(root, specID string) (string, error) {
 		return "", nil
 	}
 
-	out, err := runBDFn("list", "--parent", epicID, "--status=in_progress", "--json")
+	out, err := listJSONFn("--parent", epicID, "--status=in_progress")
 	if err != nil {
 		return "", nil // No in-progress beads
 	}
 
-	// Parse directly — don't use filterReadyItems which excludes in_progress status
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return "", nil
-	}
-
 	var items []BeadInfo
-	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+	if err := json.Unmarshal(out, &items); err != nil {
 		return "", nil
 	}
 	for _, item := range items {

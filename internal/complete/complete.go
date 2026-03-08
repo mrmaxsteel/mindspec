@@ -25,6 +25,7 @@ var (
 	worktreeListFn      = bead.WorktreeList
 	worktreeRemoveFn    = bead.WorktreeRemove
 	runBDFn             = bead.RunBD
+	listJSONFn          = bead.ListJSON
 	execCommandFn       = exec.Command
 	mergeIntoFn         = gitops.MergeInto
 	deleteBranchFn      = gitops.DeleteBranch
@@ -342,7 +343,7 @@ func findRecentClosed(specID string) (string, error) {
 		return "", nil
 	}
 
-	out, err := runBDFn("list", "--parent", epicID, "--status=closed", "--json")
+	out, err := listJSONFn("--parent", epicID, "--status=closed")
 	if err != nil {
 		return "", nil
 	}

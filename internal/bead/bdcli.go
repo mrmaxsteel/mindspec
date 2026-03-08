@@ -148,6 +148,64 @@ func hasGitRemote() bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
+// ListJSON runs `bd list <args> --json` and returns valid JSON bytes (a JSON array).
+// Works around bd versions where --json is ignored by falling back to
+// parsing IDs from human-readable output and fetching each with `bd show --json`.
+func ListJSON(args ...string) ([]byte, error) {
+	fullArgs := append(append([]string{"list"}, args...), "--json")
+	out, err := tracedOutput("list", fullArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := strings.TrimSpace(string(out))
+
+	// Handle empty results
+	if trimmed == "" || trimmed == "[]" || trimmed == "No issues found." {
+		return []byte("[]"), nil
+	}
+
+	// If output is valid JSON, use it directly
+	if json.Valid([]byte(trimmed)) {
+		return []byte(trimmed), nil
+	}
+
+	// Fallback: parse IDs from human-readable output, fetch each with bd show --json
+	var ids []string
+	for _, line := range strings.Split(trimmed, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "Total:") || strings.HasPrefix(line, "Status:") {
+			continue
+		}
+		// Human-readable format: "<emoji> <id> <emoji> P<N> <type> <title>"
+		// The ID is the second whitespace-separated field.
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.Contains(fields[1], "-") {
+			ids = append(ids, fields[1])
+		}
+	}
+
+	if len(ids) == 0 {
+		return []byte("[]"), nil
+	}
+
+	// Fetch each issue with bd show --json (which works correctly)
+	var results []json.RawMessage
+	for _, id := range ids {
+		showOut, showErr := tracedOutput("show-fallback", []string{"show", id, "--json"})
+		if showErr != nil {
+			continue
+		}
+		// bd show returns a JSON array with one element: [{"id": ...}]
+		var items []json.RawMessage
+		if json.Unmarshal(showOut, &items) == nil {
+			results = append(results, items...)
+		}
+	}
+
+	return json.Marshal(results)
+}
+
 // tracedOutput runs a bd command via cmd.Output() with trace instrumentation.
 func tracedOutput(op string, args []string) ([]byte, error) {
 	start := time.Now()
