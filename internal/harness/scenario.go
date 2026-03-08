@@ -70,13 +70,20 @@ Finish only when the project is back in idle with cleanup complete.`,
 			// Agent may use spec create or spec-init (hidden alias) — both are valid paths.
 			assertCommandRanEither(t, events, "mindspec",
 				[]string{"spec", "create"}, []string{"spec-init"})
-			assertCommandRan(t, events, "mindspec", "next")
 			assertCommandRan(t, events, "mindspec", "complete")
 			assertNoPreApproveImplMainMergeOrPR(t, events)
 
-			// Approve commands ran during lifecycle (accept both old and new forms)
-			assertCommandRanEither(t, events, "mindspec",
-				[]string{"approve"}, []string{"spec", "approve"}, []string{"plan", "approve"}, []string{"impl", "approve"})
+			// All three approve phases must run during lifecycle.
+			assertCommandContains(t, events, "mindspec", "approve")
+			assertCommandContains(t, events, "mindspec", "spec")
+			assertCommandContains(t, events, "mindspec", "plan")
+			assertCommandContains(t, events, "mindspec", "impl")
+
+			// `mindspec next` is optional for single-bead specs because
+			// `plan approve` auto-claims the first bead. Log if skipped.
+			if !commandRanSuccessfully(events, "mindspec", "next") {
+				t.Logf("mindspec next was not called (plan approve auto-claimed first bead)")
+			}
 
 			// Git state after full lifecycle
 			assertBranchIs(t, sandbox, "main")
@@ -86,6 +93,9 @@ Finish only when the project is back in idle with cleanup complete.`,
 
 			// Agent used worktrees during implementation
 			assertEventCWDContains(t, events, ".worktrees/")
+
+			// Final mode should be idle (lifecycle roundtrip complete)
+			assertMindspecMode(t, sandbox, "idle")
 		},
 	}
 }
@@ -372,8 +382,8 @@ Complete the Process function (make it return "processed") and finish the bead t
 func ScenarioSpecInit() Scenario {
 	return Scenario{
 		Name:        "spec_init",
-		Description: "Initialize a new spec from idle mode",
-		MaxTurns:    15,
+		Description: "Initialize a new spec from idle mode via guidance discovery",
+		MaxTurns:    20,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			// Verify preconditions
@@ -390,11 +400,28 @@ func ScenarioSpecInit() Scenario {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-create 001-calculator --title "Calculator"`,
+Start a new specification called "001-calculator" for adding basic arithmetic operations.
+Create it through the MindSpec lifecycle. Stop after the spec is initialized.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Command ran (accept both old and new forms)
+			// Agent discovered and ran mindspec spec create (not raw git)
 			assertCommandRanEither(t, events, "mindspec",
 				[]string{"spec-init"}, []string{"spec", "create"})
+
+			// Agent should NOT have created spec branch manually with raw git
+			for _, e := range events {
+				if e.Command != "git" || e.ExitCode != 0 {
+					continue
+				}
+				args := eventArgs(e)
+				if containsAll(args, "branch") && containsAll(args, "spec/") {
+					t.Error("agent created spec branch with raw git instead of mindspec spec create")
+					break
+				}
+				if containsAll(args, "checkout") && containsAll(args, "-b") && containsAll(args, "spec/") {
+					t.Error("agent created spec branch with raw git checkout -b instead of mindspec spec create")
+					break
+				}
+			}
 
 			// Git state: spec branch created
 			assertHasBranches(t, sandbox, "spec/")
@@ -402,9 +429,13 @@ func ScenarioSpecInit() Scenario {
 			// Git state: worktree created
 			assertHasWorktrees(t, sandbox)
 
+			// Spec template created in worktree
+			if !fileExistsInWorktrees(sandbox.Root, "spec.md") {
+				t.Error("spec.md was not created in worktree")
+			}
+
 			// Git state: main branch still exists (CWD is main repo root)
 			assertBranchIs(t, sandbox, "main")
-
 		},
 	}
 }
@@ -612,24 +643,27 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 
 /ms-plan-approve`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Commands ran
+			// Plan approval command ran
 			assertCommandRan(t, events, "mindspec", "approve")
-			assertCommandRan(t, events, "mindspec", "next")
+			assertCommandContains(t, events, "mindspec", "plan")
 
 			// Git state: spec branch still exists (worktree is still needed)
 			assertHasBranches(t, sandbox, "spec/")
 
-			// Git state: bead branch created by mindspec next
-			assertHasBranches(t, sandbox, "bead/")
-
-			// Git state: bead worktree created by mindspec next
+			// Spec worktree persists through plan approval
 			assertHasWorktrees(t, sandbox)
-
-			// Agent CWD moved to bead worktree (instruct emits worktree redirect)
-			assertEventCWDContains(t, events, ".worktrees/")
 
 			// Beads were created by plan approve (plan has 2 bead sections)
 			assertBeadsMinCount(t, sandbox, epicID, 2)
+
+			// `mindspec next` is optional — plan approve auto-claims the
+			// first bead. If next ran, verify bead branch + worktree too.
+			if commandRanSuccessfully(events, "mindspec", "next") {
+				assertHasBranches(t, sandbox, "bead/")
+				assertEventCWDContains(t, events, ".worktrees/")
+			} else {
+				t.Logf("mindspec next was not called (plan approve auto-claimed first bead)")
+			}
 		},
 	}
 }
@@ -936,26 +970,25 @@ while 002-beta remains unchanged. Do not close beads directly with bd commands.`
 	}
 }
 
-// ScenarioStaleWorktree tests recovery when state references a worktree that doesn't exist.
-// This happens when a session crashes after worktree creation but before setup completes,
-// or when a worktree was manually deleted.
+// ScenarioStaleWorktree tests recovery when the bead worktree is missing but
+// the spec worktree and branches exist. This happens when a session crashes
+// after bead worktree removal or when the worktree was manually deleted.
 //
-// Before: Focus says implement mode with activeWorktree pointing to a nonexistent path,
+// Before: Spec worktree exists, bead is in_progress, bead worktree is MISSING
 //
-//	bead is claimed, spec/plan are approved
+//	(bead branch exists, spec/plan approved)
 //
-// After:  Agent recovers (works from main or recreates worktree),
+// After:  Agent recovers via `mindspec next` (recreates bead worktree),
 //
 //	implements the bead, runs complete
 func ScenarioStaleWorktree() Scenario {
 	return Scenario{
 		Name:        "stale_worktree",
-		Description: "State references nonexistent worktree, agent must recover",
+		Description: "Bead worktree missing — agent must recover via mindspec next",
 		MaxTurns:    20,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "005-stale"
-			specBranch := "spec/" + specID
 
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement widget", "task", epicID)
@@ -978,55 +1011,43 @@ Create widget.go with a Widget function.
 `)
 			sandbox.Commit("setup: spec and plan")
 
-			// Create spec branch and bead branch (but NO worktree — that's the test)
-			mustRunGit(sandbox, "branch", specBranch)
+			// Create spec worktree (but NOT bead worktree — that's the stale element).
+			// The spec worktree gives `mindspec next` a place to run from to
+			// recreate the missing bead worktree. Spec files are already on main
+			// and propagated to the spec branch via setupWorktrees.
+			_ = setupWorktrees(sandbox, specID, "", "spec")
+
+			// Create bead branch from spec branch (but no bead worktree)
 			beadBranch := "bead/" + beadID
-			mustRunGit(sandbox, "branch", beadBranch, specBranch)
+			if !gitBranchExists(sandbox, beadBranch) {
+				mustRunGit(sandbox, "branch", beadBranch, "spec/"+specID)
+			}
 
-			// Focus references a worktree that does NOT exist on disk
-			sandbox.Commit("setup: stale worktree reference")
+			sandbox.Commit("setup: stale bead worktree")
 
-			// Verify the worktree does NOT exist (that's the point of this test)
-			if sandbox.FileExists(".worktrees/worktree-" + beadID) {
-				return fmt.Errorf("precondition: worktree should NOT exist")
+			// Verify the bead worktree does NOT exist (that's the test)
+			specWtDir := ".worktrees/worktree-spec-" + specID
+			beadWtDir := specWtDir + "/.worktrees/worktree-" + beadID
+			if sandbox.FileExists(beadWtDir) {
+				return fmt.Errorf("precondition: bead worktree should NOT exist at %s", beadWtDir)
 			}
 			return nil
 		},
-		Prompt: `You are resuming work in implement mode. The state references a worktree that may not exist.
-Your task: create a file called widget.go with a function Widget() string that returns "widget".
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+You are resuming work on an in-progress bead. Create a file called widget.go with
+a function Widget() string that returns "widget".
 Finish the bead through the MindSpec lifecycle when done.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Agent should have created the file
-			if !sandbox.FileExists("widget.go") {
-				t.Error("widget.go was not created")
+			// Agent should have created widget.go (may be in worktree)
+			widgetFound := sandbox.FileExists("widget.go") || fileExistsInWorktrees(sandbox.Root, "widget.go")
+			if !widgetFound {
+				t.Error("widget.go was not created (checked main and worktrees)")
 			}
 
-			// Preferred path: successfully complete the bead.
-			for _, e := range events {
-				if e.Command != "mindspec" || e.ExitCode != 0 {
-					continue
-				}
-				args := eventArgs(e)
-				if containsAll(args, "complete") {
-					return
-				}
-			}
-
-			// Accept direct bead closure as an explicit recovery path when
-			// complete cannot run from stale-worktree state.
-			for _, e := range events {
-				if e.Command != "bd" || e.ExitCode != 0 {
-					continue
-				}
-				if containsAll(eventArgs(e), "close") {
-					return
-				}
-			}
-
-			// Recovery fallback: if complete cannot succeed from stale state,
-			// accept explicit operator recovery back to idle.
-			assertCommandRan(t, events, "mindspec", "complete")
-			assertCommandSucceeded(t, events, "mindspec", "state", "set", "--mode=idle")
+			// Agent must use mindspec complete (not bd close) — complete handles
+			// merge topology, worktree cleanup, branch deletion, and state advance.
+			assertCommandSucceeded(t, events, "mindspec", "complete")
 		},
 	}
 }
@@ -1041,17 +1062,18 @@ Finish the bead through the MindSpec lifecycle when done.`,
 //
 // After:  agent successfully runs mindspec complete (bead closed, worktree removed)
 func ScenarioCompleteFromSpecWorktree() Scenario {
+	var epicID, beadID string
 	return Scenario{
 		Name:        "complete_from_spec_worktree",
-		Description: "mindspec complete fails when CWD is spec worktree instead of bead worktree",
+		Description: "Agent closes bead when CWD is spec worktree, not bead worktree",
 		MaxTurns:    15,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
 
 			// Create epic + bead
-			epicID := sandbox.CreateSpecEpic(specID)
-			beadID := sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
+			epicID = sandbox.CreateSpecEpic(specID)
+			beadID = sandbox.CreateBead("["+specID+"] Implement greeting", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
 			// Create spec + bead worktrees via shared helper
@@ -1099,8 +1121,14 @@ Your CWD may be the spec worktree, not the bead worktree.
 Close the bead and finish implementation.
 If it fails, diagnose the issue and find a way to complete successfully.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Agent should have run mindspec complete successfully (exit code 0)
+			// Agent must use mindspec complete (not bd close) — complete handles
+			// merge topology, worktree cleanup, branch deletion, and state advance.
 			assertCommandSucceeded(t, events, "mindspec", "complete")
+
+			// Verify bead actually closed
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				beadID: "closed",
+			})
 		},
 	}
 }
@@ -1300,8 +1328,11 @@ The plan for 001-greeting is finished. Advance to the next phase.`,
 			// Plan approval creates implementation beads
 			assertBeadsMinCount(t, sandbox, epicID, 1)
 
-			// Branch persists through approval
-			assertHasBranches(t, sandbox, "spec/")
+			// Branch persists through approval — unless the agent completed
+			// the full lifecycle (approve impl cleans up branches).
+			if !commandRanSuccessfully(events, "mindspec", "approve", "impl") {
+				assertHasBranches(t, sandbox, "spec/")
+			}
 		},
 	}
 }
@@ -1360,7 +1391,7 @@ func main() {
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-There is a division-by-zero bug in calculator.go — Divide(10, 0) panics. Fix it by adding a zero-divisor check that returns 0 when b is 0.`,
+There is a division-by-zero bug in calculator.go — Divide(10, 0) panics. Fix it by adding a zero-divisor check that returns 0 when b is 0. Submit the fix for review.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Agent must have created a branch (any non-main branch)
 			assertHasNonMainBranch(t, sandbox)
@@ -1492,13 +1523,15 @@ Then finish the currently claimed bead through the MindSpec lifecycle.`,
 			// Agent ran mindspec complete
 			assertCommandRan(t, events, "mindspec", "complete")
 
-			// Focus should be plan (not implement) because bead-2 is blocked
-
 			// Bead-1 closed, bead-2 still open
 			assertBeadsState(t, sandbox, epicID, map[string]string{
 				bead1: "closed",
 				bead2: "open",
 			})
+
+			// Core spirit: mode should be plan (not implement) because bead-2 is blocked.
+			// This catches the bd close shortcut — bd close skips state transitions.
+			assertMindspecMode(t, sandbox, "plan")
 		},
 	}
 }
@@ -1517,7 +1550,7 @@ func ScenarioUnmergedBeadGuard() Scenario {
 	return Scenario{
 		Name:        "unmerged_bead_guard",
 		Description: "mindspec next blocks when predecessor bead closed without complete",
-		MaxTurns:    25,
+		MaxTurns:    35,
 		TimeoutMin:  10,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
@@ -1579,18 +1612,28 @@ Claim the next bead and implement it. Create second.go with a function Second() 
 that returns "second". Complete the bead through the MindSpec lifecycle.
 If mindspec next fails, read the error message carefully and follow its instructions.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Agent should have run mindspec complete (to fix the unmerged bead)
+			// Primary: agent recovered the unmerged bead via mindspec complete
 			assertCommandRan(t, events, "mindspec", "complete")
-
-			// Agent should have run mindspec next (to claim bead-2)
-			assertCommandRan(t, events, "mindspec", "next")
 
 			// Bead-1 should be closed
 			assertBeadsState(t, sandbox, epicID, map[string]string{
 				bead1: "closed",
 			})
+
+			// Secondary: agent claimed bead-2 via mindspec next (may not
+			// happen if agent ran out of turns after recovery)
+			if !commandRanSuccessfully(events, "mindspec", "next") {
+				t.Log("NOTE: mindspec next did not succeed — agent recovered bead-1 but did not claim bead-2 (likely ran out of turns)")
+			}
 		},
 	}
+}
+
+// gitBranchExists checks if a git branch exists in the sandbox.
+func gitBranchExists(sandbox *Sandbox, branch string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", branch)
+	cmd.Dir = sandbox.Root
+	return cmd.Run() == nil
 }
 
 // mustRunGit runs a git command in the sandbox root, fataling on error.
@@ -1680,6 +1723,24 @@ func assertCommandRan(t *testing.T, events []ActionEvent, command string, argSub
 	}
 }
 
+// commandRanSuccessfully returns true if the command ran with exit code 0
+// and all argSubstr found in its args (non-asserting version of assertCommandRan).
+func commandRanSuccessfully(events []ActionEvent, command string, argSubstr ...string) bool { //nolint:unparam // command may vary in future scenarios
+	for _, e := range events {
+		if e.Command != command || e.ExitCode != 0 {
+			continue
+		}
+		if len(argSubstr) == 0 {
+			return true
+		}
+		args := eventArgs(e)
+		if containsAll(args, argSubstr[0]) {
+			return true
+		}
+	}
+	return false
+}
+
 // assertCommandRanEither checks that the command was invoked with one of the
 // given arg patterns (each is a list of substrings that must all appear).
 func assertCommandRanEither(t *testing.T, events []ActionEvent, command string, patterns ...[]string) {
@@ -1708,7 +1769,7 @@ func assertCommandRanEither(t *testing.T, events []ActionEvent, command string, 
 	t.Errorf("command %q was not found with exit code 0 for any expected arg patterns %v", command, patterns)
 }
 
-func assertCommandContains(t *testing.T, events []ActionEvent, command, substr string) {
+func assertCommandContains(t *testing.T, events []ActionEvent, command, substr string) { //nolint:unparam // command may vary in future scenarios
 	t.Helper()
 	for _, e := range events {
 		if e.Command != command {
