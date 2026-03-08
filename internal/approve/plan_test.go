@@ -475,6 +475,196 @@ None
 	}
 }
 
+func TestCreateImplementationBeads_PerBeadAcceptanceCriteria(t *testing.T) {
+	tmp := t.TempDir()
+
+	specContent := `---
+status: Approved
+---
+# Spec 042-test
+
+## Requirements
+1. Widget must frob
+2. Widget must grob
+
+## Acceptance Criteria
+- [ ] Widget frobs correctly
+- [ ] Widget grobs correctly
+`
+	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(specContent), 0644)
+
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: Implement frobbing
+
+**Steps**
+1. Create frob.go
+2. Add frob logic
+3. Add frob tests
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Acceptance Criteria**
+- [ ] Widget frobs correctly
+
+**Depends on**
+None
+
+## Bead 2: Implement grobbing
+
+**Steps**
+1. Create grob.go
+2. Add grob logic
+3. Add grob tests
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Acceptance Criteria**
+- [ ] Widget grobs correctly
+
+**Depends on**
+Bead 1
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var capturedArgs [][]string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			argsCopy := make([]string, len(args))
+			copy(argsCopy, args)
+			capturedArgs = append(capturedArgs, argsCopy)
+			id := fmt.Sprintf("test-bead-%d", len(capturedArgs))
+			return []byte(fmt.Sprintf(`{"id":"%s"}`, id)), nil
+		}
+		return nil, nil // dep calls
+	}
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(beadIDs) != 2 {
+		t.Fatalf("expected 2 beads, got %d", len(beadIDs))
+	}
+
+	findFlag := func(args []string, flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	// Bead 1 should get per-bead AC, not spec-level AC
+	ac1 := findFlag(capturedArgs[0], "--acceptance")
+	if !strings.Contains(ac1, "Widget frobs correctly") {
+		t.Errorf("bead 1 AC should contain 'Widget frobs correctly', got: %q", ac1)
+	}
+	if strings.Contains(ac1, "Widget grobs correctly") {
+		t.Errorf("bead 1 AC should NOT contain 'Widget grobs correctly', got: %q", ac1)
+	}
+
+	// Bead 2 should get its own per-bead AC
+	ac2 := findFlag(capturedArgs[1], "--acceptance")
+	if !strings.Contains(ac2, "Widget grobs correctly") {
+		t.Errorf("bead 2 AC should contain 'Widget grobs correctly', got: %q", ac2)
+	}
+	if strings.Contains(ac2, "Widget frobs correctly") {
+		t.Errorf("bead 2 AC should NOT contain 'Widget frobs correctly', got: %q", ac2)
+	}
+}
+
+func TestCreateImplementationBeads_FallsBackToSpecAC(t *testing.T) {
+	tmp := t.TempDir()
+
+	specContent := `---
+status: Approved
+---
+# Spec 042-test
+
+## Requirements
+1. Widget must frob
+
+## Acceptance Criteria
+- [ ] Widget frobs correctly
+- [ ] Widget grobs correctly
+`
+	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(specContent), 0644)
+
+	// Plan without per-bead acceptance criteria
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: Implement widget
+
+**Steps**
+1. Create widget
+2. Add logic
+3. Add tests
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+None
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var capturedArgs [][]string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		argsCopy := make([]string, len(args))
+		copy(argsCopy, args)
+		capturedArgs = append(capturedArgs, argsCopy)
+		return []byte(`{"id":"test-bead-1"}`), nil
+	}
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(beadIDs) != 1 {
+		t.Fatalf("expected 1 bead, got %d", len(beadIDs))
+	}
+
+	// Should fall back to spec-level AC
+	findFlag := func(args []string, flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	ac := findFlag(capturedArgs[0], "--acceptance")
+	if !strings.Contains(ac, "Widget frobs correctly") {
+		t.Errorf("expected fallback to spec AC containing 'Widget frobs correctly', got: %q", ac)
+	}
+	if !strings.Contains(ac, "Widget grobs correctly") {
+		t.Errorf("expected fallback to spec AC containing 'Widget grobs correctly', got: %q", ac)
+	}
+}
+
 func TestExtractBeadSectionContents(t *testing.T) {
 	content := `# Plan
 

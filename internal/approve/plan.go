@@ -240,6 +240,12 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	numToID := make(map[int]string)
 	var beadIDs []string
 
+	// Build a map from heading to parsed bead section for per-bead AC lookup.
+	sectionByHeading := make(map[string]validate.BeadSection, len(sections))
+	for _, sec := range sections {
+		sectionByHeading[sec.Heading] = sec
+	}
+
 	for _, sec := range sections {
 		title := fmt.Sprintf("[%s] %s", specID, sec.Heading)
 
@@ -252,13 +258,19 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		// Build metadata JSON
 		metadataJSON := buildBeadMetadata(specID, filePaths)
 
+		// Use per-bead acceptance criteria if available, fall back to spec-level AC (Spec 078)
+		beadAC := acceptanceCriteria
+		if parsed, ok := sectionByHeading[sec.Heading]; ok && parsed.AcceptanceCriteria != "" {
+			beadAC = parsed.AcceptanceCriteria
+		}
+
 		args := []string{
 			"create",
 			"--title", title,
 			"--type", "task",
 			"--parent", parentID,
 			"--description", workChunk,
-			"--acceptance", acceptanceCriteria,
+			"--acceptance", beadAC,
 			"--design", design,
 			"--metadata", metadataJSON,
 			"--json",

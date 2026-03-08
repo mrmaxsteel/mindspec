@@ -678,6 +678,98 @@ None
 	}
 }
 
+// --- Spec 078: Per-bead acceptance criteria ---
+
+func TestParseBeadSections_AcceptanceCriteria(t *testing.T) {
+	content := `---
+status: Draft
+---
+
+# Plan
+
+## Bead 1: Widget
+
+**Steps**
+1. Create widget
+2. Add tests
+3. Wire up
+
+**Verification**
+- [ ] ` + "`go test ./internal/widget/...`" + ` passes
+
+**Acceptance Criteria**
+- [ ] Widget frobs correctly
+- [ ] Widget handles nil input
+
+**Depends on**
+None
+
+## Bead 2: Gadget
+
+**Steps**
+1. Create gadget
+2. Add tests
+3. Wire up
+
+**Verification**
+- [ ] ` + "`go test ./internal/gadget/...`" + ` passes
+
+**Depends on**
+Bead 1
+`
+
+	sections := ParseBeadSections(content)
+	if len(sections) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(sections))
+	}
+
+	// Bead 1 has AC
+	if sections[0].AcceptanceCriteria == "" {
+		t.Error("expected bead 1 to have acceptance criteria")
+	}
+	if sections[0].AcceptanceCriteria != "- [ ] Widget frobs correctly\n- [ ] Widget handles nil input" {
+		t.Errorf("unexpected AC for bead 1: %q", sections[0].AcceptanceCriteria)
+	}
+
+	// Bead 2 has no AC
+	if sections[1].AcceptanceCriteria != "" {
+		t.Errorf("expected bead 2 to have empty acceptance criteria, got %q", sections[1].AcceptanceCriteria)
+	}
+}
+
+func TestParseBeadSections_AcceptanceCriteria_H3(t *testing.T) {
+	content := `---
+status: Draft
+---
+
+# Plan
+
+## Bead 1: Widget
+
+**Steps**
+1. Create widget
+2. Add tests
+3. Wire up
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+### Acceptance Criteria
+- [ ] Widget works
+
+**Depends on**
+None
+`
+
+	sections := ParseBeadSections(content)
+	if len(sections) != 1 {
+		t.Fatalf("expected 1 section, got %d", len(sections))
+	}
+	if sections[0].AcceptanceCriteria != "- [ ] Widget works" {
+		t.Errorf("unexpected AC: %q", sections[0].AcceptanceCriteria)
+	}
+}
+
 // --- Spec 076: ExtractPathRefs ---
 
 func TestExtractPathRefs(t *testing.T) {

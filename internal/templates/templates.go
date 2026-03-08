@@ -192,6 +192,9 @@ work_chunks:
 **Verification**:
 - [ ] <Specific, testable criterion>
 
+**Acceptance Criteria**
+- [ ] <Bead-specific acceptance criterion derived from spec AC>
+
 **Depends on**: nothing
 
 ---

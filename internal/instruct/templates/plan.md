@@ -55,6 +55,7 @@ Implementation beads, each with:
 - Small scope (one slice of value)
 - 3-7 step micro-plan
 - Explicit verification steps that reference **concrete test artifacts** (test file paths like `_test.go`, test commands like `make test`, `go test`, `pytest`, or `mindspec validate`)
+- **Per-bead acceptance criteria** — decompose the spec's acceptance criteria into bead-specific criteria scoped to each bead's work. Each bead should only list the criteria it is responsible for satisfying, not the full spec AC.
 - Dependencies between beads
 - ADR citations
 
@@ -73,6 +74,10 @@ Each bead must use this exact structure (the validator parses these markers):
 **Verification**
 - [ ] `go test ./internal/foo/...` passes
 - [ ] `mindspec validate plan <id>` passes
+
+**Acceptance Criteria**
+- [ ] <Criterion from spec AC that this bead satisfies>
+- [ ] <Another bead-specific criterion>
 
 **Depends on**
 None (or: Bead 1)

@@ -189,14 +189,15 @@ func checkFrontmatterFields(r *Result, fm *PlanFrontmatter) {
 
 // BeadSection represents a parsed bead section from a plan.
 type BeadSection struct {
-	Heading      string
-	StepsCount   int
-	StepLines    []string // raw text of numbered step lines
-	HasVerify    bool
-	VerifyCount  int
-	VerifyLines  []string // raw text of verification items
-	HasDependsOn bool
-	DependsOn    string // raw text after "Depends on" marker
+	Heading            string
+	StepsCount         int
+	StepLines          []string // raw text of numbered step lines
+	HasVerify          bool
+	VerifyCount        int
+	VerifyLines        []string // raw text of verification items
+	HasDependsOn       bool
+	DependsOn          string // raw text after "Depends on" marker
+	AcceptanceCriteria string // per-bead acceptance criteria text
 }
 
 // testArtifactPatterns are substrings that indicate a concrete test artifact reference.
@@ -221,18 +222,25 @@ func ParseBeadSections(content string) []BeadSection {
 	inSteps := false
 	inVerify := false
 	inDependsOn := false
+	inAC := false
+	var acLines []string
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		if strings.HasPrefix(line, "## Bead ") {
 			if current != nil {
+				if len(acLines) > 0 {
+					current.AcceptanceCriteria = strings.TrimSpace(strings.Join(acLines, "\n"))
+				}
 				sections = append(sections, *current)
 			}
 			current = &BeadSection{Heading: strings.TrimPrefix(line, "## ")}
 			inSteps = false
 			inVerify = false
 			inDependsOn = false
+			inAC = false
+			acLines = nil
 			continue
 		}
 
@@ -246,13 +254,22 @@ func ParseBeadSections(content string) []BeadSection {
 			inSteps = true
 			inVerify = false
 			inDependsOn = false
+			inAC = false
 			continue
 		}
 		if strings.HasPrefix(trimmed, "**Verification**") || trimmed == "### Verification" {
 			inVerify = true
 			inSteps = false
 			inDependsOn = false
+			inAC = false
 			current.HasVerify = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "**Acceptance Criteria**") || trimmed == "### Acceptance Criteria" {
+			inAC = true
+			inSteps = false
+			inVerify = false
+			inDependsOn = false
 			continue
 		}
 		if strings.HasPrefix(trimmed, "**Depends on**") || trimmed == "### Depends on" {
@@ -260,6 +277,7 @@ func ParseBeadSections(content string) []BeadSection {
 			inSteps = false
 			inVerify = false
 			inDependsOn = true
+			inAC = false
 			// Capture inline text after colon, e.g. "**Depends on**: Bead 1"
 			if idx := strings.Index(trimmed, ":"); idx >= 0 {
 				after := strings.TrimSpace(trimmed[idx+1:])
@@ -274,18 +292,23 @@ func ParseBeadSections(content string) []BeadSection {
 			inSteps = false
 			inVerify = false
 			inDependsOn = false
+			inAC = false
 			continue
 		}
 
 		// New top-level section ends bead
 		if strings.HasPrefix(line, "## ") && !strings.HasPrefix(line, "## Bead ") {
 			if current != nil {
+				if len(acLines) > 0 {
+					current.AcceptanceCriteria = strings.TrimSpace(strings.Join(acLines, "\n"))
+				}
 				sections = append(sections, *current)
 				current = nil
 			}
 			inSteps = false
 			inVerify = false
 			inDependsOn = false
+			inAC = false
 			continue
 		}
 
@@ -298,6 +321,9 @@ func ParseBeadSections(content string) []BeadSection {
 			current.VerifyCount++
 			current.VerifyLines = append(current.VerifyLines, trimmed)
 		}
+		if inAC && trimmed != "" {
+			acLines = append(acLines, trimmed)
+		}
 		if inDependsOn && trimmed != "" {
 			current.DependsOn = trimmed
 			inDependsOn = false
@@ -305,6 +331,9 @@ func ParseBeadSections(content string) []BeadSection {
 	}
 
 	if current != nil {
+		if len(acLines) > 0 {
+			current.AcceptanceCriteria = strings.TrimSpace(strings.Join(acLines, "\n"))
+		}
 		sections = append(sections, *current)
 	}
 
@@ -358,6 +387,11 @@ func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
 	// Spec 039: check verification testability
 	if bs.HasVerify && bs.VerifyCount > 0 && !isApproved {
 		checkVerificationTestability(r, bs)
+	}
+
+	// Spec 078: warn on missing per-bead acceptance criteria
+	if bs.AcceptanceCriteria == "" && !isApproved {
+		r.AddWarning("bead-acceptance-criteria", fmt.Sprintf("%s: no per-bead acceptance criteria — each bead should have criteria scoped to its own work", bs.Heading))
 	}
 
 	if !bs.HasDependsOn {
