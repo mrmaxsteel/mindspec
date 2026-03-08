@@ -83,6 +83,22 @@ Required plan sections:
 - `## Testing Strategy` — declare the overall test approach (unit, integration, e2e) and shared test infrastructure
 - `## Provenance` — map each spec acceptance criterion to the bead verification steps that satisfy it (output provenance)
 
+## Decomposition Heuristics
+
+Apply these research-backed questions while decomposing the spec into beads (see `.mindspec/docs/research/scaling-agent-systems.md` for full context).
+
+1. **Independence test**: Can this bead be completed without reading the output of another bead? If yes, don't add a dependency edge. Shared source files are not dependencies — only state produced by one bead and consumed by another is. *Why: sequential dependency chains degrade multi-agent performance by -39% to -70% due to coordination overhead.*
+
+2. **Merge signal**: Do 3+ beads touch the same files? They should probably be one bead. High file overlap (R_scope > 0.50) means agents duplicate context rather than divide work. *Why: redundancy above R≈0.50 correlates with negative returns (r=-0.136, p=0.004).*
+
+3. **Trivial-work test**: Does this bead have only 1-2 trivial steps (rename a variable, update a config value)? It doesn't justify a separate agent session — fold it into an adjacent bead. *Why: when a single agent can already handle a task (~45% baseline), splitting it yields negative returns (β=-0.404, p<0.001).*
+
+4. **Target count**: Is the total bead count between 3 and 5? More than 6 needs justification — coordination overhead grows super-linearly with agent count. *Why: turn scaling follows a power law with exponent 1.724; per-agent reasoning thins beyond 3-4 agents.*
+
+5. **Serial chain limit**: Is the longest dependency chain deeper than 3 (A→B→C→D)? That's a red flag. Look for false dependencies or restructure so beads can run in parallel. *Why: each link in a serial chain compounds coordination overhead without decomposition benefit.*
+
+6. **Tool grouping**: Does an operation require many tools or commands in concert (CI setup, build config, multi-file refactors)? Keep it in a single bead rather than splitting across beads that each need the full tool context. *Why: tool-heavy tasks suffer a 6.3x efficiency penalty under multi-agent fragmentation (β=-0.267, p<0.001).*
+
 ## Human Gates
 
 - **Plan approval**: Run `mindspec plan approve <id>` when the plan is ready

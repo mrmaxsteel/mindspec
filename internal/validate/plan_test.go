@@ -1,8 +1,10 @@
 package validate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -641,6 +643,101 @@ func TestValidatePlan_VerificationMixed_OneTestable(t *testing.T) {
 	}
 }
 
+// --- Spec 076: ParseBeadSections StepLines ---
+
+func TestParseBeadSections_StepLines(t *testing.T) {
+	content := `---
+status: Draft
+---
+
+# Plan
+
+## Bead 1: Widget
+
+**Steps**
+1. Create internal/widget/widget.go with Widget function
+2. Add tests in internal/widget/widget_test.go
+3. Wire into cmd/mindspec/root.go
+
+**Verification**
+- [ ] ` + "`go test ./internal/widget/...`" + ` passes
+
+**Depends on**
+None
+`
+
+	sections := ParseBeadSections(content)
+	if len(sections) != 1 {
+		t.Fatalf("expected 1 section, got %d", len(sections))
+	}
+	if len(sections[0].StepLines) != 3 {
+		t.Fatalf("expected 3 step lines, got %d", len(sections[0].StepLines))
+	}
+	if sections[0].StepLines[0] != "1. Create internal/widget/widget.go with Widget function" {
+		t.Errorf("unexpected step line 0: %s", sections[0].StepLines[0])
+	}
+}
+
+// --- Spec 076: ExtractPathRefs ---
+
+func TestExtractPathRefs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "go file path",
+			input:    "Create internal/widget/widget.go with Widget function",
+			expected: []string{"internal/widget/widget.go"},
+		},
+		{
+			name:     "multiple paths",
+			input:    "Modify cmd/mindspec/root.go and internal/validate/plan.go",
+			expected: []string{"cmd/mindspec/root.go", "internal/validate/plan.go"},
+		},
+		{
+			name:     "package path with dots",
+			input:    "`go test ./internal/validate/...` passes",
+			expected: []string{"./internal/validate/..."},
+		},
+		{
+			name:     "dotted prefix",
+			input:    "Edit ./internal/foo/bar.go",
+			expected: []string{"./internal/foo/bar.go"},
+		},
+		{
+			name:     "deduplication",
+			input:    "internal/foo/bar.go and then internal/foo/bar.go again",
+			expected: []string{"internal/foo/bar.go"},
+		},
+		{
+			name:     "no paths",
+			input:    "Just some plain text with no file references",
+			expected: nil,
+		},
+		{
+			name:     "package path no extension",
+			input:    "Update internal/validate/plan module",
+			expected: []string{"internal/validate/plan"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractPathRefs(tt.input)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("expected %d paths, got %d: %v", len(tt.expected), len(got), got)
+			}
+			for i, exp := range tt.expected {
+				if got[i] != exp {
+					t.Errorf("path[%d]: expected %q, got %q", i, exp, got[i])
+				}
+			}
+		})
+	}
+}
+
 // --- Spec 039: Backwards compatibility ---
 
 func TestValidatePlan_ApprovedPlan_SkipsNewChecks(t *testing.T) {
@@ -658,10 +755,203 @@ func TestValidatePlan_ApprovedPlan_SkipsNewChecks(t *testing.T) {
 		"bead-verification-testability",
 	}
 
+	// Include decomposition checks in the skip list
+	newChecks = append(newChecks,
+		"decomposition-bead-count",
+		"decomposition-scope-redundancy",
+		"decomposition-chain-depth",
+		"decomposition-parallelism",
+	)
+
 	for _, issue := range r.Issues {
 		for _, check := range newChecks {
 			if issue.Name == check {
 				t.Errorf("approved plan should skip new check %s, but got: [%s] %s", check, issue.Severity, issue.Message)
+			}
+		}
+	}
+}
+
+// --- Spec 076: Decomposition quality checks ---
+
+func TestDecompositionQuality_HighBeadCount(t *testing.T) {
+	r := &Result{}
+	sections := make([]BeadSection, 7)
+	for i := range sections {
+		sections[i] = BeadSection{
+			Heading:      fmt.Sprintf("Bead %d: Task", i+1),
+			StepsCount:   3,
+			HasDependsOn: true,
+			DependsOn:    "None",
+		}
+	}
+	checkDecompositionQuality(r, sections)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-bead-count" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected decomposition-bead-count warning for 7 beads")
+	}
+}
+
+func TestDecompositionQuality_HighScopeRedundancy(t *testing.T) {
+	r := &Result{}
+	// All 3 beads reference the same files → R=1.0
+	sections := []BeadSection{
+		{
+			Heading:      "Bead 1: A",
+			StepLines:    []string{"1. Modify internal/validate/plan.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 2: B",
+			StepLines:    []string{"1. Modify internal/validate/plan.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 3: C",
+			StepLines:    []string{"1. Modify internal/validate/plan.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+	}
+	checkDecompositionQuality(r, sections)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-scope-redundancy" && strings.Contains(issue.Message, "exceeds threshold 0.50") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected scope redundancy warning for R > 0.50")
+	}
+}
+
+func TestDecompositionQuality_LowScopeRedundancy(t *testing.T) {
+	r := &Result{}
+	// 3 beads, each with unique files → R=0.0
+	sections := []BeadSection{
+		{
+			Heading:      "Bead 1: A",
+			StepLines:    []string{"1. Create internal/foo/foo.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 2: B",
+			StepLines:    []string{"1. Create internal/bar/bar.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 3: C",
+			StepLines:    []string{"1. Create internal/baz/baz.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+	}
+	checkDecompositionQuality(r, sections)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-scope-redundancy" && strings.Contains(issue.Message, "below threshold 0.15") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected scope redundancy warning for R < 0.15 with >2 beads")
+	}
+}
+
+func TestDecompositionQuality_DeepChain(t *testing.T) {
+	r := &Result{}
+	// Chain: Bead 1 → Bead 2 → Bead 3 → Bead 4 (depth 4)
+	sections := []BeadSection{
+		{Heading: "Bead 1: A", HasDependsOn: true, DependsOn: "None"},
+		{Heading: "Bead 2: B", HasDependsOn: true, DependsOn: "Bead 1"},
+		{Heading: "Bead 3: C", HasDependsOn: true, DependsOn: "Bead 2"},
+		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 3"},
+	}
+	checkDecompositionQuality(r, sections)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-chain-depth" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected decomposition-chain-depth warning for chain depth > 3")
+	}
+}
+
+func TestDecompositionQuality_LowParallelism(t *testing.T) {
+	r := &Result{}
+	// 4 beads, only 1 has zero inbound deps → parallelism = 0.25
+	// Actually 0.25 is exactly at threshold, need < 0.25
+	// 5 beads, only 1 root → 0.20
+	sections := []BeadSection{
+		{Heading: "Bead 1: A", HasDependsOn: true, DependsOn: "None"},
+		{Heading: "Bead 2: B", HasDependsOn: true, DependsOn: "Bead 1"},
+		{Heading: "Bead 3: C", HasDependsOn: true, DependsOn: "Bead 1"},
+		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 2"},
+		{Heading: "Bead 5: E", HasDependsOn: true, DependsOn: "Bead 3"},
+	}
+	checkDecompositionQuality(r, sections)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-parallelism" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected decomposition-parallelism warning for parallelism ratio < 0.25")
+	}
+}
+
+func TestDecompositionQuality_NoWarnings(t *testing.T) {
+	r := &Result{}
+	// 3 beads, moderate overlap, shallow deps, good parallelism
+	sections := []BeadSection{
+		{
+			Heading:      "Bead 1: A",
+			StepLines:    []string{"1. Create internal/foo/foo.go", "2. Update internal/shared/util.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 2: B",
+			StepLines:    []string{"1. Create internal/bar/bar.go", "2. Update internal/shared/util.go"},
+			HasDependsOn: true,
+			DependsOn:    "None",
+		},
+		{
+			Heading:      "Bead 3: C",
+			StepLines:    []string{"1. Wire cmd/mindspec/root.go", "2. Update internal/shared/util.go"},
+			HasDependsOn: true,
+			DependsOn:    "Bead 1",
+		},
+	}
+	checkDecompositionQuality(r, sections)
+
+	decompositionChecks := []string{
+		"decomposition-bead-count",
+		"decomposition-scope-redundancy",
+		"decomposition-chain-depth",
+		"decomposition-parallelism",
+	}
+	for _, issue := range r.Issues {
+		for _, check := range decompositionChecks {
+			if issue.Name == check {
+				t.Errorf("unexpected decomposition warning: %s: %s", issue.Name, issue.Message)
 			}
 		}
 	}

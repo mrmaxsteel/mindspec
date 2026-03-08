@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
@@ -102,6 +103,11 @@ func ValidatePlan(root, specID string) *Result {
 		checkBeadSection(r, bs, isApproved)
 	}
 
+	// Spec 076: cross-bead decomposition quality checks
+	if !isApproved {
+		checkDecompositionQuality(r, beadSections)
+	}
+
 	return r
 }
 
@@ -184,6 +190,7 @@ func checkFrontmatterFields(r *Result, fm *PlanFrontmatter) {
 type BeadSection struct {
 	Heading      string
 	StepsCount   int
+	StepLines    []string // raw text of numbered step lines
 	HasVerify    bool
 	VerifyCount  int
 	VerifyLines  []string // raw text of verification items
@@ -284,6 +291,7 @@ func ParseBeadSections(content string) []BeadSection {
 		// Count items
 		if inSteps && len(trimmed) > 2 && trimmed[0] >= '1' && trimmed[0] <= '9' && trimmed[1] == '.' {
 			current.StepsCount++
+			current.StepLines = append(current.StepLines, trimmed)
 		}
 		if inVerify && (strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "- [x]")) {
 			current.VerifyCount++
@@ -374,4 +382,163 @@ func checkVerificationTestability(r *Result, bs BeadSection) {
 	}
 	r.AddError("bead-verification-testability",
 		fmt.Sprintf("%s: verification steps must reference at least one test artifact (e.g., _test.go, make test, go test, pytest)", bs.Heading))
+}
+
+// pathRefRe matches Go file paths (internal/foo/bar.go), package paths
+// (./internal/foo/...), and dotted paths (cmd/mindspec/root.go).
+var pathRefRe = regexp.MustCompile(`(?:\./)?\b(?:[a-zA-Z0-9_]+/)+[a-zA-Z0-9_]+(?:\.go|/\.\.\.)?`)
+
+// ExtractPathRefs extracts file and package path references from text.
+// It returns deduplicated path strings found via regex.
+func ExtractPathRefs(text string) []string {
+	matches := pathRefRe.FindAllString(text, -1)
+	seen := make(map[string]bool, len(matches))
+	var result []string
+	for _, m := range matches {
+		if !seen[m] {
+			seen[m] = true
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+// beadDepRe matches "Bead N" references in dependency text.
+var beadDepRe = regexp.MustCompile(`(?i)bead\s+(\d+)`)
+
+// checkDecompositionQuality computes cross-bead metrics and emits warnings
+// when the plan structure correlates with known degradation patterns.
+func checkDecompositionQuality(r *Result, sections []BeadSection) {
+	if len(sections) == 0 {
+		return
+	}
+
+	// 1. Bead count check
+	if len(sections) > 6 {
+		r.AddWarning("decomposition-bead-count",
+			fmt.Sprintf("plan has %d beads — consider whether decomposition is too fine-grained; 3-5 is optimal", len(sections)))
+	}
+
+	// 2. Scope redundancy (R_scope)
+	beadPaths := make([]map[string]bool, len(sections))
+	allPaths := make(map[string]bool)
+	for i, bs := range sections {
+		paths := make(map[string]bool)
+		// Extract from steps and verification
+		for _, line := range bs.StepLines {
+			for _, p := range ExtractPathRefs(line) {
+				paths[p] = true
+				allPaths[p] = true
+			}
+		}
+		for _, line := range bs.VerifyLines {
+			for _, p := range ExtractPathRefs(line) {
+				paths[p] = true
+				allPaths[p] = true
+			}
+		}
+		beadPaths[i] = paths
+	}
+
+	if len(allPaths) > 0 {
+		// Count paths referenced by more than one bead
+		sharedCount := 0
+		for p := range allPaths {
+			refCount := 0
+			for _, bp := range beadPaths {
+				if bp[p] {
+					refCount++
+				}
+			}
+			if refCount > 1 {
+				sharedCount++
+			}
+		}
+
+		rScope := float64(sharedCount) / float64(len(allPaths))
+		if rScope > 0.50 {
+			r.AddWarning("decomposition-scope-redundancy",
+				fmt.Sprintf("scope redundancy R=%.2f exceeds threshold 0.50 — high bead overlap, consider merging beads that share most files", rScope))
+		}
+		if rScope < 0.15 && len(sections) > 2 {
+			r.AddWarning("decomposition-scope-redundancy",
+				fmt.Sprintf("scope redundancy R=%.2f below threshold 0.15 with %d beads — beads may lack shared context", rScope, len(sections)))
+		}
+	}
+
+	// 3. Dependency chain depth and parallelism ratio
+	// Build adjacency list from DependsOn text
+	inDegree := make(map[int]int, len(sections))
+	adj := make(map[int][]int, len(sections))
+	for i := range sections {
+		inDegree[i] = 0
+	}
+
+	for i, bs := range sections {
+		if bs.DependsOn == "" {
+			continue
+		}
+		lower := strings.ToLower(bs.DependsOn)
+		if lower == "none" || lower == "nothing" || lower == "n/a" {
+			continue
+		}
+		matches := beadDepRe.FindAllStringSubmatch(bs.DependsOn, -1)
+		for _, m := range matches {
+			depNum := 0
+			fmt.Sscanf(m[1], "%d", &depNum)
+			depIdx := depNum - 1 // beads are 1-indexed
+			if depIdx >= 0 && depIdx < len(sections) && depIdx != i {
+				adj[depIdx] = append(adj[depIdx], i)
+				inDegree[i]++
+			}
+		}
+	}
+
+	// Compute longest path (chain depth) via BFS/topological order
+	chainDepth := computeChainDepth(adj, len(sections))
+	if chainDepth > 3 {
+		r.AddWarning("decomposition-chain-depth",
+			fmt.Sprintf("dependency chain depth %d exceeds threshold 3 — deep serial chain, coordination overhead grows super-linearly", chainDepth))
+	}
+
+	// Parallelism ratio: beads with zero inbound deps / total
+	zeroInbound := 0
+	for i := 0; i < len(sections); i++ {
+		if inDegree[i] == 0 {
+			zeroInbound++
+		}
+	}
+	parallelism := float64(zeroInbound) / float64(len(sections))
+	if parallelism < 0.25 {
+		r.AddWarning("decomposition-parallelism",
+			fmt.Sprintf("parallelism ratio %.2f below threshold 0.25 — most beads are serial, check for false dependencies", parallelism))
+	}
+}
+
+// computeChainDepth returns the longest path length in the DAG.
+func computeChainDepth(adj map[int][]int, n int) int {
+	// Use DFS with memoization
+	memo := make(map[int]int, n)
+	var dfs func(node int) int
+	dfs = func(node int) int {
+		if v, ok := memo[node]; ok {
+			return v
+		}
+		maxChild := 0
+		for _, next := range adj[node] {
+			if d := dfs(next); d > maxChild {
+				maxChild = d
+			}
+		}
+		memo[node] = maxChild + 1
+		return maxChild + 1
+	}
+
+	maxDepth := 0
+	for i := 0; i < n; i++ {
+		if d := dfs(i); d > maxDepth {
+			maxDepth = d
+		}
+	}
+	return maxDepth
 }
