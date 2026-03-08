@@ -9,25 +9,35 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
-// stubActiveEpics stubs phase.runBDFn to return the given epics.
+// stubActiveEpics stubs phase list/show functions to return the given epics.
 func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[string][]phase.ChildInfo) {
 	t.Helper()
-	// Build index by ID for bd show lookups (used by hasDoneMarker)
 	epicByID := map[string]phase.EpicInfo{}
 	for _, e := range epics {
 		epicByID[e.ID] = e
 	}
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			return json.Marshal(epics)
-		}
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--parent" {
-			epicID := args[2]
-			if children, ok := childrenByEpic[epicID]; ok {
-				return json.Marshal(children)
+	// queryEpics and queryChildren use listJSONFn
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
 			}
-			return []byte("[]"), nil
 		}
+		// --parent <epicID>
+		for i, a := range args {
+			if a == "--parent" && i+1 < len(args) {
+				epicID := args[i+1]
+				if children, ok := childrenByEpic[epicID]; ok {
+					return json.Marshal(children)
+				}
+				return []byte("[]"), nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	// bd show, bd dolt pull, etc. use runBDFn
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "show" {
 			epicID := args[1]
 			if e, ok := epicByID[epicID]; ok {
@@ -37,7 +47,7 @@ func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[st
 		}
 		return []byte("[]"), nil
 	})
-	t.Cleanup(restore)
+	t.Cleanup(restoreRun)
 }
 
 func TestActiveSpecs_DeriveFromBeads(t *testing.T) {

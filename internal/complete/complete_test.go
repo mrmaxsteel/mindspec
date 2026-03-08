@@ -70,28 +70,35 @@ func setupTempRoot(t *testing.T) string {
 // stubPhaseEpic stubs phase.FindEpicBySpecID to return the given epicID for specID.
 func stubPhaseEpic(t *testing.T, specID, epicID string) {
 	t.Helper()
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			epics := []phase.EpicInfo{{
-				ID: epicID, Title: "[SPEC " + specID + "] Test", Status: "open",
-				IssueType: "epic", Metadata: map[string]interface{}{},
-			}}
-			// Parse spec_num and spec_title from specID for metadata.
-			var num int
-			var title string
-			if idx := strings.Index(specID, "-"); idx > 0 {
-				fmt.Sscanf(specID[:idx], "%d", &num)
-				title = specID[idx+1:]
+	// queryEpics() uses listJSONFn, so stub that for epic discovery.
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: epicID, Title: "[SPEC " + specID + "] Test", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{},
+				}}
+				var num int
+				var title string
+				if idx := strings.Index(specID, "-"); idx > 0 {
+					fmt.Sscanf(specID[:idx], "%d", &num)
+					title = specID[idx+1:]
+				}
+				if num > 0 && title != "" {
+					epics[0].Metadata["spec_num"] = float64(num)
+					epics[0].Metadata["spec_title"] = title
+				}
+				return json.Marshal(epics)
 			}
-			if num > 0 && title != "" {
-				epics[0].Metadata["spec_num"] = float64(num)
-				epics[0].Metadata["spec_title"] = title
-			}
-			return json.Marshal(epics)
 		}
 		return []byte("[]"), nil
 	})
-	t.Cleanup(restore)
+	t.Cleanup(restoreList)
+	// runBDFn is still used for bd show, bd dolt pull, etc.
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
 }
 
 func TestRun_HappyPath(t *testing.T) {

@@ -1,7 +1,6 @@
 package contextpack
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -102,65 +101,5 @@ func TestExtractFilePathsFromText_Dedup(t *testing.T) {
 	}
 }
 
-func TestRenderBeadPrimer_AllSections(t *testing.T) {
-	p := &BeadPrimer{
-		BeadID:             "bead-123",
-		BeadTitle:          "Test Bead",
-		BeadDescription:    "Do the thing",
-		SpecID:             "047-test",
-		Requirements:       "1. Req one",
-		AcceptanceCriteria: "- AC1",
-		PlanWorkChunk:      "Step 1\nStep 2",
-		FilePaths:          []string{"internal/foo.go", "cmd/bar.go"},
-		ADRDecisions:       []ADRDecision{{ID: "ADR-0001", Decision: "Use DDD"}},
-		DomainOverviews:    []DomainOverview{{Domain: "core", Overview: "Core overview"}},
-		EstimatedTokens:    500,
-	}
-
-	rendered := RenderBeadPrimer(p)
-
-	checks := []string{
-		"# Bead Context: Test Bead",
-		"**Spec**: 047-test",
-		"**Bead**: bead-123",
-		"~500 tokens",
-		"## Scope",
-		"Do the thing",
-		"## Requirements",
-		"1. Req one",
-		"## Acceptance Criteria",
-		"- AC1",
-		"## Work Chunk",
-		"Step 1",
-		"## Key File Paths",
-		"internal/foo.go",
-		"## ADR Decisions",
-		"ADR-0001",
-		"Use DDD",
-		"## Domain Context",
-		"### core",
-		"Core overview",
-	}
-	for _, check := range checks {
-		if !strings.Contains(rendered, check) {
-			t.Errorf("rendered primer missing %q", check)
-		}
-	}
-}
-
-func TestRenderBeadPrimer_MinimalFields(t *testing.T) {
-	p := &BeadPrimer{
-		BeadID:    "bead-1",
-		BeadTitle: "Minimal",
-		SpecID:    "001",
-	}
-
-	rendered := RenderBeadPrimer(p)
-	if !strings.Contains(rendered, "# Bead Context: Minimal") {
-		t.Error("missing header")
-	}
-	// Should not contain sections with no data
-	if strings.Contains(rendered, "## Scope") {
-		t.Error("should not include empty Scope section")
-	}
-}
+// RenderBeadPrimer tests removed — primer.go deleted in Spec 074.
+// See beadctx_test.go for the replacement tests.

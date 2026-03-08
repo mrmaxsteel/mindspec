@@ -274,12 +274,16 @@ func TestExtractSpecMetadata(t *testing.T) {
 
 func TestDerivePhaseWithStatus_ClosedEpic(t *testing.T) {
 	// Closed epic WITHOUT done marker → derives from children (auto-closed by beads)
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// queryChildren: no children → plan
+		return []byte("[]"), nil
+	})
+	defer restoreList()
 	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if args[0] == "show" {
 			// No mindspec_done metadata
 			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic"}]`), nil
 		}
-		// No children → plan
 		return []byte("[]"), nil
 	})
 	defer restore()
@@ -313,14 +317,15 @@ func TestDerivePhaseWithStatus_ClosedEpicWithDoneMarker(t *testing.T) {
 }
 
 func TestDerivePhaseWithStatus_OpenEpicFallsThrough(t *testing.T) {
-	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
-		// Return children for open epic
-		if args[0] == "list" {
-			return []byte(`[{"id":"b1","title":"bead","status":"open","issue_type":"task"}]`), nil
-		}
-		return []byte("[]"), nil
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// queryChildren: return open child
+		return []byte(`[{"id":"b1","title":"bead","status":"open","issue_type":"task"}]`), nil
 	})
 	defer restore()
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	defer restoreRun()
 
 	got, err := DerivePhaseWithStatus("epic-1", "open")
 	if err != nil {
@@ -333,12 +338,14 @@ func TestDerivePhaseWithStatus_OpenEpicFallsThrough(t *testing.T) {
 
 func TestDerivePhase_ClosedEpicViaBDShow(t *testing.T) {
 	// Closed epic via bd show, no done marker, with closed children → review
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// queryChildren: return closed child
+		return []byte(`[{"id":"b1","title":"bead","status":"closed","issue_type":"task"}]`), nil
+	})
+	defer restoreList()
 	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if args[0] == "show" {
 			return []byte(`[{"id":"epic-1","title":"test","status":"closed","issue_type":"epic"}]`), nil
-		}
-		if args[0] == "list" {
-			return []byte(`[{"id":"b1","title":"bead","status":"closed","issue_type":"task"}]`), nil
 		}
 		return []byte("[]"), nil
 	})
@@ -354,10 +361,15 @@ func TestDerivePhase_ClosedEpicViaBDShow(t *testing.T) {
 }
 
 func TestResolveContextFromDir_MainWorktree(t *testing.T) {
-	// Stub runBDFn to return no epics (idle)
+	// Stub both listJSONFn and runBDFn to return no epics (idle)
+	origList := listJSONFn
+	defer func() { listJSONFn = origList }()
+	listJSONFn = func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}
+
 	origRunBD := runBDFn
 	defer func() { runBDFn = origRunBD }()
-
 	runBDFn = func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	}
@@ -372,15 +384,12 @@ func TestResolveContextFromDir_MainWorktree(t *testing.T) {
 }
 
 func TestFindEpicBySpecID_ClosedEpic(t *testing.T) {
-	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			// Only the "closed" status query returns the epic
-			for _, a := range args {
-				if a == "--status=closed" {
-					return []byte(`[{"id":"epic-99","title":"[SPEC 099-done] Done","status":"closed","issue_type":"epic","metadata":{"spec_num":99,"spec_title":"done"}}]`), nil
-				}
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// queryEpics uses listJSONFn; only return epic for closed status
+		for _, a := range args {
+			if a == "--status=closed" {
+				return []byte(`[{"id":"epic-99","title":"[SPEC 099-done] Done","status":"closed","issue_type":"epic","metadata":{"spec_num":99,"spec_title":"done"}}]`), nil
 			}
-			return []byte("[]"), nil
 		}
 		return []byte("[]"), nil
 	})
@@ -396,10 +405,12 @@ func TestFindEpicBySpecID_ClosedEpic(t *testing.T) {
 }
 
 func TestFindEpicBySpecID_DeduplicatesAcrossStatuses(t *testing.T) {
-	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			// Return same epic for both open and in_progress queries
-			return []byte(`[{"id":"epic-1","title":"[SPEC 001-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// queryEpics uses listJSONFn; return same epic for all status queries
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte(`[{"id":"epic-1","title":"[SPEC 001-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
+			}
 		}
 		return []byte("[]"), nil
 	})
@@ -415,9 +426,14 @@ func TestFindEpicBySpecID_DeduplicatesAcrossStatuses(t *testing.T) {
 }
 
 func TestResolveContextFromDir_SpecWorktree_NoEpic(t *testing.T) {
+	origList := listJSONFn
+	defer func() { listJSONFn = origList }()
+	listJSONFn = func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}
+
 	origRunBD := runBDFn
 	defer func() { runBDFn = origRunBD }()
-
 	runBDFn = func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	}
@@ -436,19 +452,23 @@ func TestResolveContextFromDir_SpecWorktree_NoEpic(t *testing.T) {
 }
 
 func TestResolveContextFromDir_BeadWorktree(t *testing.T) {
+	origList := listJSONFn
+	defer func() { listJSONFn = origList }()
+	listJSONFn = func(args ...string) ([]byte, error) {
+		// queryEpics uses listJSONFn
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte(`[{"id":"epic-1","title":"[SPEC 060-test-spec] Test","status":"open","issue_type":"epic","metadata":{"spec_num":60,"spec_title":"test-spec"}}]`), nil
+			}
+		}
+		return []byte("[]"), nil
+	}
+
 	origRunBD := runBDFn
 	defer func() { runBDFn = origRunBD }()
-
-	callIdx := 0
 	runBDFn = func(args ...string) ([]byte, error) {
-		callIdx++
-		// First call: show bead
 		if len(args) > 0 && args[0] == "show" {
 			return []byte(`[{"title":"[060] Bead 1","dependencies":[]}]`), nil
-		}
-		// List epics
-		if len(args) > 0 && args[0] == "list" {
-			return []byte(`[{"id":"epic-1","title":"[SPEC 060-test-spec] Test","status":"open","issue_type":"epic","metadata":{"spec_num":60,"spec_title":"test-spec"}}]`), nil
 		}
 		return []byte("[]"), nil
 	}

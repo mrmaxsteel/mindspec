@@ -15,11 +15,14 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-// stubNoEpics stubs phase.runBDFn so that CheckSpecNumberCollision finds no collisions.
+// stubNoEpics stubs phase functions so that CheckSpecNumberCollision finds no collisions.
 func stubNoEpics(t *testing.T) {
 	t.Helper()
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		// Return empty list for all queries — no epics exist.
 		return []byte("[]"), nil
 	})
 	t.Cleanup(restore)

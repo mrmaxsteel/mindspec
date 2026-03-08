@@ -77,22 +77,24 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 	t.Cleanup(func() { findLocalRootFn = origFindLocalRoot })
 
 	// Stub phase to return implement mode (not review)
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			epics := []phase.EpicInfo{{
-				ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
-				IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
-			}}
-			return json.Marshal(epics)
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+				}}
+				return json.Marshal(epics)
+			}
 		}
-		if len(args) >= 2 && args[0] == "list" && contains(args, "--parent") {
+		if contains(args, "--parent") {
 			// One child in_progress → implement mode
 			children := []phase.ChildInfo{{ID: "bead-1", Status: "in_progress", IssueType: "task"}}
 			return json.Marshal(children)
 		}
 		return []byte("[]"), nil
 	})
-	t.Cleanup(restore)
+	t.Cleanup(restoreList)
 
 	_, err := ApproveImpl(tmp, "010-test")
 	if err == nil {
@@ -318,26 +320,33 @@ func writePlanWithBeads(t *testing.T, root, specID string, beadIDs []string) {
 // stubPhaseForReview sets up the phase package to return review mode for "010-test".
 func stubPhaseForReview(t *testing.T) {
 	t.Helper()
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		// bd list --type=epic --json → return epic for 010-test
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			epics := []phase.EpicInfo{{
-				ID:        "epic-parent",
-				Title:     "[SPEC 010-test] Test",
-				Status:    "open",
-				IssueType: "epic",
-				Metadata:  map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
-			}}
-			return json.Marshal(epics)
+	// queryEpics and queryChildren now use listJSONFn, not runBDFn
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID:        "epic-parent",
+					Title:     "[SPEC 010-test] Test",
+					Status:    "open",
+					IssueType: "epic",
+					Metadata:  map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+				}}
+				return json.Marshal(epics)
+			}
 		}
-		// bd list --parent epic-parent --json → all children closed (review)
-		if len(args) >= 2 && args[0] == "list" && contains(args, "--parent") {
+		// queryChildren: --parent flag → all children closed (review)
+		if contains(args, "--parent") {
 			children := []phase.ChildInfo{{ID: "bead-1", Status: "closed", IssueType: "task"}}
 			return json.Marshal(children)
 		}
 		return []byte("[]"), nil
 	})
-	t.Cleanup(restore)
+	t.Cleanup(restoreList)
+	// runBDFn still used for bd show, bd dolt pull, etc.
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
 }
 
 func contains(args []string, s string) bool {

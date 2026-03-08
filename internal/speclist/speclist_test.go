@@ -15,6 +15,10 @@ func TestList_ScansSpecDirs(t *testing.T) {
 	)
 
 	// Stub beads to return no epics
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})
@@ -54,6 +58,10 @@ func TestList_SortsBySpecID(t *testing.T) {
 		specDir("007-mike", "Approved"),
 	)
 
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})
@@ -80,6 +88,10 @@ func TestList_EmptySpecsDir(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0755)
 
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})

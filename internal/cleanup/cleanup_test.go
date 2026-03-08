@@ -68,18 +68,22 @@ func TestCleanup_RefusesActiveSpec(t *testing.T) {
 	mockCleanupFns(t)
 
 	// Stub phase to return implement mode for 010-test
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: "epic-1", Title: "[SPEC 010-test] Test", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+				}}
+				return json.Marshal(epics)
+			}
+		}
+		// queryChildren: one in_progress child
+		children := []phase.ChildInfo{{ID: "bead-1", Status: "in_progress", IssueType: "task"}}
+		return json.Marshal(children)
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			epics := []phase.EpicInfo{{
-				ID: "epic-1", Title: "[SPEC 010-test] Test", Status: "open",
-				IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
-			}}
-			return json.Marshal(epics)
-		}
-		if len(args) >= 2 && args[0] == "list" {
-			children := []phase.ChildInfo{{ID: "bead-1", Status: "in_progress", IssueType: "task"}}
-			return json.Marshal(children)
-		}
 		return []byte("[]"), nil
 	})
 	t.Cleanup(restore)
@@ -117,14 +121,20 @@ func TestCleanup_DifferentSpecAllowed(t *testing.T) {
 	mockCleanupFns(t)
 
 	// Phase returns a different active spec
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "list" && args[1] == "--type=epic" {
-			epics := []phase.EpicInfo{{
-				ID: "epic-other", Title: "[SPEC 999-other-spec] Other", Status: "open",
-				IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(999), "spec_title": "other-spec"},
-			}}
-			return json.Marshal(epics)
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: "epic-other", Title: "[SPEC 999-other-spec] Other", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(999), "spec_title": "other-spec"},
+				}}
+				return json.Marshal(epics)
+			}
 		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})
 	t.Cleanup(restore)

@@ -159,6 +159,10 @@ func TestLegacyRepo_NoEpics(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, ".mindspec"), 0755)
 
 	// No epics → no active specs
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})

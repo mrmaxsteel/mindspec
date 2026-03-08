@@ -41,6 +41,10 @@ func TestErrAmbiguousTarget_Message(t *testing.T) {
 
 func TestResolveTarget_NoActiveSpecs(t *testing.T) {
 	// Stub bd to return no epics
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})
@@ -57,6 +61,10 @@ func TestResolveTarget_NoActiveSpecs(t *testing.T) {
 
 func TestResolveTarget_NoActiveSpecs_SuggestsFlag(t *testing.T) {
 	// Stub bd to return no epics
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
 	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	})
