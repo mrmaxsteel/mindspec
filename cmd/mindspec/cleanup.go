@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/mrmaxsteel/mindspec/internal/cleanup"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,8 @@ Use --force to skip PR status checks and clean up unconditionally.`,
 			return err
 		}
 
-		result, err := cleanup.Run(root, specID, force)
+		exec := executor.NewGitExecutor(root)
+		result, err := cleanup.Run(root, specID, force, exec)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

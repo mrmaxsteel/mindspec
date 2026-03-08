@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -20,12 +20,7 @@ func saveAndRestore(t *testing.T) {
 	t.Helper()
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
-	origWtRemove := worktreeRemoveFn
 	origRunBD := runBDFn
-	origExec := execCommandFn
-	origMerge := mergeIntoFn
-	origDelete := deleteBranchFn
-	origCommitAll := commitAllFn
 	origResolveTarget := resolveTargetFn
 	origResolveActiveBead := resolveActiveBeadFn
 	origFindLocalRoot := findLocalRootFn
@@ -35,12 +30,7 @@ func saveAndRestore(t *testing.T) {
 	t.Cleanup(func() {
 		closeBeadFn = origClose
 		worktreeListFn = origWtList
-		worktreeRemoveFn = origWtRemove
 		runBDFn = origRunBD
-		execCommandFn = origExec
-		mergeIntoFn = origMerge
-		deleteBranchFn = origDelete
-		commitAllFn = origCommitAll
 		resolveTargetFn = origResolveTarget
 		resolveActiveBeadFn = origResolveActiveBead
 		findLocalRootFn = origFindLocalRoot
@@ -49,14 +39,16 @@ func saveAndRestore(t *testing.T) {
 	})
 
 	// Default stubs
-	mergeIntoFn = func(targetWorkdir, sourceBranch string) error { return nil }
-	deleteBranchFn = func(branch string) error { return nil }
-	commitAllFn = func(workdir, msg string) error { return nil }
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	resolveActiveBeadFn = func(root, specID string) (string, error) { return "", fmt.Errorf("no active bead") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
 	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{}, fmt.Errorf("not found") }
 	findRecentClosedFn = func(specID string) (string, error) { return "", nil }
+}
+
+// newMockExec creates a MockExecutor with defaults suitable for complete tests.
+func newMockExec() *executor.MockExecutor {
+	return &executor.MockExecutor{}
 }
 
 // setupTempRoot creates a temp dir with .mindspec/.
@@ -106,11 +98,12 @@ func TestRun_HappyPath(t *testing.T) {
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 
-	// Create spec worktree dir so merge path is found
+	// Create spec worktree dir so executor's CompleteBead merge path is found
 	specWtDir := filepath.Join(root, ".worktrees", "worktree-spec-008-test")
 	os.MkdirAll(specWtDir, 0755)
 
@@ -120,28 +113,9 @@ func TestRun_HappyPath(t *testing.T) {
 		}, nil
 	}
 
-	// Clean worktree
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "") // empty = clean
-	}
-
 	var closedID string
 	closeBeadFn = func(ids ...string) error {
 		closedID = ids[0]
-		return nil
-	}
-
-	var removedName string
-	worktreeRemoveFn = func(name string) error {
-		removedName = name
-		return nil
-	}
-
-	// Verify merge targets spec worktree, not bead worktree
-	var mergedWorkdir, mergedBranch string
-	mergeIntoFn = func(targetWorkdir, sourceBranch string) error {
-		mergedWorkdir = targetWorkdir
-		mergedBranch = sourceBranch
 		return nil
 	}
 
@@ -156,16 +130,13 @@ func TestRun_HappyPath(t *testing.T) {
 		return nil, fmt.Errorf("unexpected args: %v", args)
 	}
 
-	result, err := Run(root, "", "", "")
+	result, err := Run(root, "", "", "", mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if closedID != "bead-1" {
 		t.Errorf("closed ID: got %q, want %q", closedID, "bead-1")
-	}
-	if removedName != "worktree-bead-1" {
-		t.Errorf("removed worktree: got %q, want %q", removedName, "worktree-bead-1")
 	}
 	if !result.BeadClosed {
 		t.Error("expected BeadClosed=true")
@@ -180,12 +151,13 @@ func TestRun_HappyPath(t *testing.T) {
 		t.Errorf("NextBead: got %q, want %q", result.NextBead, "bead-2")
 	}
 
-	// Verify merge targeted the spec worktree (not the bead worktree)
-	if mergedWorkdir != specWtDir {
-		t.Errorf("merge workdir: got %q, want %q", mergedWorkdir, specWtDir)
+	// Verify executor was called with CompleteBead
+	completeCalls := mock.CallsTo("CompleteBead")
+	if len(completeCalls) != 1 {
+		t.Fatalf("expected 1 CompleteBead call, got %d", len(completeCalls))
 	}
-	if mergedBranch != "bead/bead-1" {
-		t.Errorf("merge branch: got %q, want %q", mergedBranch, "bead/bead-1")
+	if completeCalls[0].Args[0] != "bead-1" {
+		t.Errorf("CompleteBead beadID: got %q, want %q", completeCalls[0].Args[0], "bead-1")
 	}
 
 	// ADR-0023: no focus file written — state derived from beads.
@@ -199,6 +171,8 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	mock := newMockExec()
+	mock.IsTreeCleanErr = fmt.Errorf("workspace has uncommitted changes:\n M modified-file.go")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
@@ -209,12 +183,7 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 		}, nil
 	}
 
-	// Dirty worktree
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "M modified-file.go")
-	}
-
-	_, err := Run(root, "", "", "")
+	_, err := Run(root, "", "", "", mock)
 	if err == nil {
 		t.Fatal("expected error for dirty worktree")
 	}
@@ -227,17 +196,15 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	mock := newMockExec()
+	mock.IsTreeCleanErr = fmt.Errorf("workspace has uncommitted changes:\n M hello.go")
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", " M hello.go")
-	}
-
 	// ADR-0023: no focus file — hint is now always shown when no worktree found.
-	_, err := Run(root, "", "", "")
+	_, err := Run(root, "", "", "", mock)
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
 	}
@@ -246,83 +213,12 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	}
 }
 
-func TestCheckCleanWorktree_IgnoresGeneratedStateFiles(t *testing.T) {
-	saveAndRestore(t)
-
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf ' M .mindspec/focus\n?? .mindspec/session.json\n'")
-	}
-
-	if err := checkCleanWorktree("/tmp/ignored"); err != nil {
-		t.Fatalf("expected state-only changes to be ignored, got: %v", err)
-	}
-}
-
-func TestCheckCleanWorktree_ReportsUserChanges(t *testing.T) {
-	saveAndRestore(t)
-
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf ' M .mindspec/focus\n M hello.go\n'")
-	}
-
-	err := checkCleanWorktree("/tmp/mixed")
-	if err == nil {
-		t.Fatal("expected user change to block completion")
-	}
-	if !strings.Contains(err.Error(), "hello.go") {
-		t.Fatalf("expected error to mention blocking file, got: %v", err)
-	}
-	if strings.Contains(err.Error(), ".mindspec/focus") {
-		t.Fatalf("expected ignorable state file to be filtered, got: %v", err)
-	}
-}
-
-func TestCheckCleanWorktree_ManualWorktreeHint(t *testing.T) {
-	saveAndRestore(t)
-
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf ' M .gitignore\n?? .worktrees/worktree-bead-1/tmp.txt\n'")
-	}
-
-	err := checkCleanWorktree("/tmp/worktree")
-	if err == nil {
-		t.Fatal("expected dirty tree error")
-	}
-	if !strings.Contains(err.Error(), "mindspec next") {
-		t.Fatalf("expected manual worktree recovery hint, got: %v", err)
-	}
-}
-
-func TestCheckCleanWorktree_LinkedWorktreeDirHint(t *testing.T) {
-	saveAndRestore(t)
-
-	root := t.TempDir()
-	wt := filepath.Join(root, "impl-002-multi")
-	if err := os.MkdirAll(wt, 0755); err != nil {
-		t.Fatalf("mkdir worktree dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: /tmp/fake\n"), 0644); err != nil {
-		t.Fatalf("write .git marker: %v", err)
-	}
-
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf '?? impl-002-multi\n'")
-	}
-
-	err := checkCleanWorktree(root)
-	if err == nil {
-		t.Fatal("expected dirty tree error")
-	}
-	if !strings.Contains(err.Error(), "mindspec next") {
-		t.Fatalf("expected linked worktree hint, got: %v", err)
-	}
-}
-
 func TestRun_DefaultsToActiveBead(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-from-resolver", nil }
@@ -331,19 +227,14 @@ func TestRun_DefaultsToActiveBead(t *testing.T) {
 		return nil, nil // no worktrees
 	}
 
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
-
 	var closedID string
 	closeBeadFn = func(ids ...string) error {
 		closedID = ids[0]
 		return nil
 	}
-	worktreeRemoveFn = func(name string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
-	_, err := Run(root, "", "", "") // no explicit bead ID
+	_, err := Run(root, "", "", "", mock) // no explicit bead ID
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -357,6 +248,7 @@ func TestRun_NoWorktree(t *testing.T) {
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 
@@ -365,24 +257,12 @@ func TestRun_NoWorktree(t *testing.T) {
 		return nil, nil
 	}
 
-	// Clean main tree
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
-
 	closeBeadFn = func(ids ...string) error { return nil }
-	worktreeRemoveFn = func(name string) error {
-		t.Error("should not try to remove worktree when none exists")
-		return nil
-	}
 	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
-	result, err := Run(root, "bead-1", "", "")
+	result, err := Run(root, "bead-1", "", "", mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.WorktreeRemoved {
-		t.Error("should not have removed worktree")
 	}
 	if !result.BeadClosed {
 		t.Error("bead should be closed")
@@ -487,11 +367,12 @@ func TestRun_NoBead(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "", nil }
 
-	_, err := Run(root, "", "", "")
+	_, err := Run(root, "", "", "", mock)
 	if err == nil {
 		t.Fatal("expected error when no bead ID available")
 	}
@@ -504,6 +385,7 @@ func TestRun_PositionalSpecIDTreatedAsSpecHint(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	mock := newMockExec()
 
 	var gotSpecHint string
 	resolveTargetFn = func(r, flag string) (string, error) {
@@ -512,7 +394,6 @@ func TestRun_PositionalSpecIDTreatedAsSpecHint(t *testing.T) {
 	}
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "repo-abc.1", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
-	execCommandFn = func(name string, args ...string) *exec.Cmd { return exec.Command("echo", "") }
 
 	var closedID string
 	closeBeadFn = func(ids ...string) error {
@@ -523,7 +404,7 @@ func TestRun_PositionalSpecIDTreatedAsSpecHint(t *testing.T) {
 	// No lifecycle fixture -> advanceState falls back to idle.
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	if _, err := Run(root, "008-test", "", ""); err != nil {
+	if _, err := Run(root, "008-test", "", "", mock); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotSpecHint != "008-test" {
@@ -539,16 +420,13 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
 	closeBeadFn = func(ids ...string) error { return nil }
-	worktreeRemoveFn = func(name string) error { return nil }
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
@@ -560,7 +438,7 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	result, err := Run(root, "", "", "")
+	result, err := Run(root, "", "", "", mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -577,23 +455,20 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
 	closeBeadFn = func(ids ...string) error { return nil }
-	worktreeRemoveFn = func(name string) error { return nil }
 
 	// No ready beads, no open beads → review
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	result, err := Run(root, "", "", "")
+	result, err := Run(root, "", "", "", mock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -644,6 +519,7 @@ func TestRun_AlreadyClosed(t *testing.T) {
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "", nil }
@@ -655,11 +531,6 @@ func TestRun_AlreadyClosed(t *testing.T) {
 		return []bead.WorktreeListEntry{
 			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
 		}, nil
-	}
-
-	// Clean worktree
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
 	}
 
 	// closeBeadFn fails because bead is already closed
@@ -676,49 +547,39 @@ func TestRun_AlreadyClosed(t *testing.T) {
 	specWtDir := filepath.Join(root, ".worktrees", "worktree-spec-008-test")
 	os.MkdirAll(specWtDir, 0755)
 
-	var mergedBranch string
-	mergeIntoFn = func(targetWorkdir, sourceBranch string) error {
-		mergedBranch = sourceBranch
-		return nil
-	}
-
-	var removedName string
-	worktreeRemoveFn = func(name string) error {
-		removedName = name
-		return nil
-	}
-
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	result, err := Run(root, "", "", "")
+	result, err := Run(root, "", "", "", mock)
 	if err != nil {
 		t.Fatalf("expected success for already-closed bead, got: %v", err)
 	}
 	if !result.BeadClosed {
 		t.Error("expected BeadClosed=true")
 	}
-	if mergedBranch != "bead/bead-1" {
-		t.Errorf("expected merge of bead/bead-1, got %q", mergedBranch)
+
+	// Verify CompleteBead was called (merge+cleanup)
+	completeCalls := mock.CallsTo("CompleteBead")
+	if len(completeCalls) != 1 {
+		t.Fatalf("expected 1 CompleteBead call, got %d", len(completeCalls))
 	}
-	if removedName != "worktree-bead-1" {
-		t.Errorf("expected worktree removal, got %q", removedName)
+	if completeCalls[0].Args[0] != "bead-1" {
+		t.Errorf("CompleteBead beadID: got %q, want %q", completeCalls[0].Args[0], "bead-1")
 	}
+	_ = specWtDir
 }
 
 func TestRun_CloseFailsNonIdempotent(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
-	execCommandFn = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
 
 	// closeBeadFn fails with a non-"already closed" error
 	closeBeadFn = func(ids ...string) error {
@@ -730,11 +591,40 @@ func TestRun_CloseFailsNonIdempotent(t *testing.T) {
 		return next.BeadInfo{ID: "bead-1", Status: "open"}, nil
 	}
 
-	_, err := Run(root, "bead-1", "", "")
+	_, err := Run(root, "bead-1", "", "", mock)
 	if err == nil {
 		t.Fatal("expected error when close fails and bead is not closed")
 	}
 	if !strings.Contains(err.Error(), "closing bead") {
 		t.Errorf("expected 'closing bead' error, got: %v", err)
+	}
+}
+
+func TestRun_AutoCommitUsesExecutor(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	resolveActiveBeadFn = func(r, specID string) (string, error) { return "bead-1", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	_, err := Run(root, "", "", "add feature X", mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify CommitAll was called via executor
+	commitCalls := mock.CallsTo("CommitAll")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 CommitAll call, got %d", len(commitCalls))
+	}
+	msg := commitCalls[0].Args[1].(string)
+	if !strings.Contains(msg, "impl(bead-1)") || !strings.Contains(msg, "add feature X") {
+		t.Errorf("CommitAll msg: got %q", msg)
 	}
 }

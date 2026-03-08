@@ -3,13 +3,11 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -23,13 +21,8 @@ import (
 var (
 	closeBeadFn         = bead.Close
 	worktreeListFn      = bead.WorktreeList
-	worktreeRemoveFn    = bead.WorktreeRemove
 	runBDFn             = bead.RunBD
 	listJSONFn          = bead.ListJSON
-	execCommandFn       = exec.Command
-	mergeIntoFn         = gitutil.MergeInto
-	deleteBranchFn      = gitutil.DeleteBranch
-	commitAllFn         = gitutil.CommitAll
 	resolveTargetFn     = resolve.ResolveTarget
 	resolveActiveBeadFn = next.ResolveActiveBead
 	findLocalRootFn     = defaultFindLocalRoot
@@ -54,9 +47,9 @@ func defaultFindLocalRoot() (string, error) {
 
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
-// Focus is read from localRoot (per-worktree focus).
+// exec is the Executor used for all git/workspace operations.
 // specIDHint is optional and typically comes from --spec for disambiguation.
-func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
+func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*Result, error) {
 	// Backward-compatible UX: `mindspec complete <spec-id>` should behave like
 	// `mindspec complete --spec=<spec-id>`, not treat the spec ID as a bead ID.
 	if beadID != "" && specIDHint == "" && validate.SpecID(beadID) == nil {
@@ -101,32 +94,31 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 		return nil, fmt.Errorf("no bead ID provided and no in-progress bead found for spec %s", specID)
 	}
 
-	// Derive spec branch and worktree paths from conventions
+	// Derive spec branch from conventions
 	specBranch := state.SpecBranch(specID)
 
-	// 2. Find worktree matching bead
-	var wtName, wtPath string
+	// 2. Find worktree matching bead (needed for commit/clean-tree paths)
+	var wtPath string
 	entries, err := worktreeListFn()
 	if err == nil {
 		expectedName := "worktree-" + beadID
 		expectedBranch := "bead/" + beadID
 		for _, e := range entries {
 			if e.Name == expectedName || e.Branch == expectedBranch {
-				wtName = e.Name
 				wtPath = e.Path
 				break
 			}
 		}
 	}
 
-	// 2.5. Auto-commit if commit message provided
+	// 2.5. Auto-commit if commit message provided (via Executor)
 	commitPath := wtPath
 	if commitPath == "" {
 		commitPath = root
 	}
 	if commitMsg != "" {
 		msg := fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
-		if err := commitAllFn(commitPath, msg); err != nil {
+		if err := exec.CommitAll(commitPath, msg); err != nil {
 			return nil, fmt.Errorf("auto-commit failed: %w", err)
 		}
 	}
@@ -139,7 +131,7 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 		if checkPath == "" {
 			checkPath = root // No worktree — check main tree
 		}
-		if err := checkCleanWorktree(checkPath); err != nil {
+		if err := exec.IsTreeClean(checkPath); err != nil {
 			if wtPath == "" {
 				return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
 			}
@@ -169,30 +161,12 @@ func Run(root, beadID, specIDHint, commitMsg string) (*Result, error) {
 		SpecWorktree: filepath.Join(root, ".worktrees", "worktree-spec-"+specID),
 	}
 
-	// 4.7. Merge bead branch back to spec branch (ADR-0006).
-	// Use MergeInto targeting the spec worktree (which already has specBranch
-	// checked out) instead of MergeBranch (which tries to checkout specBranch
-	// and fails when the bead worktree is nested inside the spec worktree).
-	beadBranch := "bead/" + beadID
-	specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
-	if _, err := os.Stat(specWtPath); err == nil {
-		if err := mergeIntoFn(specWtPath, beadBranch); err != nil {
-			fmt.Printf("Warning: could not merge %s → %s: %v\n", beadBranch, specBranch, err)
-		}
-	}
-
-	// 5. Remove worktree (if found)
-	if wtName != "" {
-		if err := worktreeRemoveFn(wtName); err != nil {
-			fmt.Printf("Warning: could not remove worktree %s: %v\n", wtName, err)
-		} else {
-			result.WorktreeRemoved = true
-		}
-	}
-
-	// 5.5. Delete the bead branch after merge + worktree removal (best-effort).
-	if err := deleteBranchFn(beadBranch); err != nil {
-		fmt.Printf("Warning: could not delete branch %s: %v\n", beadBranch, err)
+	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
+	// Pass empty msg since we already handled commit+clean-tree above.
+	if err := exec.CompleteBead(beadID, specBranch, ""); err != nil {
+		fmt.Printf("Warning: bead cleanup: %v\n", err)
+	} else {
+		result.WorktreeRemoved = true
 	}
 
 	// 6. Advance state
@@ -241,110 +215,8 @@ func FormatResult(r *Result) string {
 	return sb.String()
 }
 
-// autoCommitStateFiles stages and commits any dirty .mindspec/ state files
-// so they don't block the clean-worktree check. These files are written by
-// `mindspec next` and are not user content.
-func autoCommitStateFiles(path string) error {
-	// Stage .mindspec/ files
-	add := execCommandFn("git", "-C", path, "add", ".mindspec/")
-	if err := add.Run(); err != nil {
-		return nil // .mindspec/ may not exist — not an error
-	}
-	// Check if anything was staged
-	diff := execCommandFn("git", "-C", path, "diff", "--cached", "--quiet")
-	if diff.Run() == nil {
-		return nil // nothing staged
-	}
-	// Commit the staged state files
-	commit := execCommandFn("git", "-C", path, "commit", "-m", "mindspec: state checkpoint")
-	if out, err := commit.CombinedOutput(); err != nil {
-		return fmt.Errorf("committing state files: %s", strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// checkCleanWorktree verifies a worktree has no uncommitted changes.
-func checkCleanWorktree(path string) error {
-	cmd := execCommandFn("git", "-C", path, "status", "--porcelain")
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("checking worktree status: %w", err)
-	}
-	rawOut := strings.TrimRight(string(out), "\n")
-	if strings.TrimSpace(rawOut) == "" {
-		return nil
-	}
-	lines := strings.Split(rawOut, "\n")
-	var blocking []string
-	for _, line := range lines {
-		raw := strings.TrimRight(line, "\r")
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		if !isIgnorableStateChange(raw) {
-			blocking = append(blocking, strings.TrimSpace(raw))
-		}
-	}
-	if len(blocking) > 0 {
-		msg := fmt.Sprintf("worktree has uncommitted changes — commit before completing:\n%s", strings.Join(blocking, "\n"))
-		if hasManualWorktreeMeta(path, blocking) {
-			msg += "\nhint: worktree metadata changes detected. If you created a worktree manually, clean those changes and use `mindspec next` to claim/switch work."
-		}
-		return fmt.Errorf("%s", msg)
-	}
-	return nil
-}
-
-func hasManualWorktreeMeta(basePath string, blocking []string) bool {
-	for _, line := range blocking {
-		statusPath := line
-		if len(statusPath) >= 3 {
-			statusPath = strings.TrimSpace(statusPath[3:])
-		}
-		if strings.Contains(statusPath, " -> ") {
-			parts := strings.Split(statusPath, " -> ")
-			statusPath = strings.TrimSpace(parts[len(parts)-1])
-		}
-		if strings.Contains(statusPath, ".gitignore") ||
-			strings.Contains(statusPath, ".worktrees/") ||
-			strings.Contains(strings.ToLower(statusPath), "worktree") {
-			return true
-		}
-
-		absPath := filepath.Join(basePath, statusPath)
-		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
-			if _, err := os.Stat(filepath.Join(absPath, ".git")); err == nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func isIgnorableStateChange(statusLine string) bool {
-	// Porcelain format: XY<space>PATH (or XY<space>OLD -> NEW)
-	path := strings.TrimRight(statusLine, "\r")
-	if len(path) >= 3 {
-		path = strings.TrimSpace(path[3:])
-	} else {
-		path = strings.TrimSpace(path)
-	}
-	if strings.Contains(path, " -> ") {
-		parts := strings.Split(path, " -> ")
-		path = strings.TrimSpace(parts[len(parts)-1])
-	}
-
-	if path == ".mindspec/focus" || path == ".mindspec/session.json" {
-		return true
-	}
-	if strings.Contains(path, "/recording/") {
-		return true
-	}
-	return false
-}
-
 // findRecentClosed looks for a recently closed bead under the spec's epic
-// that still has a bead branch (indicating it was closed without cleanup).
+// that still has a worktree entry (indicating it was closed without cleanup).
 func findRecentClosed(specID string) (string, error) {
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
@@ -361,10 +233,20 @@ func findRecentClosed(specID string) (string, error) {
 		return "", nil
 	}
 
-	// Return the first closed bead that still has a bead branch (unmerged).
+	// Build a set of bead branches from worktree list.
+	entries, listErr := worktreeListFn()
+	if listErr != nil {
+		return "", nil
+	}
+	branchSet := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		branchSet[e.Branch] = true
+	}
+
+	// Return the first closed bead that still has a worktree (unmerged).
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
-		if id != "" && gitutil.BranchExists("bead/"+id) {
+		if id != "" && branchSet["bead/"+id] {
 			return id, nil
 		}
 	}

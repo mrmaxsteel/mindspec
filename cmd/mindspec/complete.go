@@ -7,6 +7,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -84,7 +85,8 @@ The bead ID is auto-resolved from state if not provided.`,
 			}
 		}
 
-		result, err := complete.Run(root, beadID, specID, commitMsg)
+		exec := executor.NewGitExecutor(root)
+		result, err := complete.Run(root, beadID, specID, commitMsg, exec)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

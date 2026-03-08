@@ -198,7 +198,9 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 		}
 	}
 
-	// Auto-commit if message provided.
+	// Auto-commit if message provided, then verify clean tree.
+	// When msg is empty the caller is responsible for commit/clean-tree
+	// checks (e.g. complete.Run handles recovery-mode skip).
 	if msg != "" {
 		commitPath := wtPath
 		if commitPath == "" {
@@ -208,15 +210,14 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 		if err := g.CommitAllFn(commitPath, commitMsg); err != nil {
 			return fmt.Errorf("auto-commit failed: %w", err)
 		}
-	}
 
-	// Check clean tree.
-	checkPath := wtPath
-	if checkPath == "" {
-		checkPath = g.Root
-	}
-	if err := g.IsTreeClean(checkPath); err != nil {
-		return fmt.Errorf("%w\nhint: use commit message to auto-commit", err)
+		checkPath := wtPath
+		if checkPath == "" {
+			checkPath = g.Root
+		}
+		if err := g.IsTreeClean(checkPath); err != nil {
+			return fmt.Errorf("%w\nhint: use commit message to auto-commit", err)
+		}
 	}
 
 	// Merge bead branch into spec branch via spec worktree.
