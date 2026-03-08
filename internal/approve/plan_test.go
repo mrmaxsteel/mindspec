@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -595,5 +596,131 @@ version: "1.0"
 	// Body preserved
 	if !strings.Contains(content, "# Plan body") {
 		t.Error("plan body lost")
+	}
+}
+
+func TestHandleExistingBeads_NoChildren(t *testing.T) {
+	// Stub ListJSON to return empty
+	origList := planListJSONFn
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}
+	defer func() { planListJSONFn = origList }()
+
+	err := handleExistingBeads("epic-123", "version: 2\n")
+	if err != nil {
+		t.Fatalf("expected nil error for no children, got: %v", err)
+	}
+}
+
+func TestHandleExistingBeads_AllOpen_ClosesAndProceeds(t *testing.T) {
+	children := []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}{
+		{ID: "bead-old-1", Status: "open"},
+		{ID: "bead-old-2", Status: "open"},
+	}
+	childJSON, _ := json.Marshal(children)
+
+	origList := planListJSONFn
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		return childJSON, nil
+	}
+	defer func() { planListJSONFn = origList }()
+
+	var closedArgs []string
+	origCombined := planRunBDCombinedFn
+	planRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		closedArgs = append(closedArgs, args...)
+		return nil, nil
+	}
+	defer func() { planRunBDCombinedFn = origCombined }()
+
+	err := handleExistingBeads("epic-123", "---\nversion: 2\n---\n# Plan\n")
+	if err != nil {
+		t.Fatalf("expected nil error for all-open children, got: %v", err)
+	}
+
+	// Should have closed both beads
+	if len(closedArgs) == 0 {
+		t.Fatal("expected close call, got none")
+	}
+	joined := strings.Join(closedArgs, " ")
+	if !strings.Contains(joined, "bead-old-1") || !strings.Contains(joined, "bead-old-2") {
+		t.Errorf("expected both bead IDs in close call, got: %s", joined)
+	}
+	if !strings.Contains(joined, "superseded by plan v2") {
+		t.Errorf("expected supersede reason, got: %s", joined)
+	}
+}
+
+func TestHandleExistingBeads_InProgress_ReturnsError(t *testing.T) {
+	children := []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}{
+		{ID: "bead-ok", Status: "open"},
+		{ID: "bead-active", Status: "in_progress"},
+	}
+	childJSON, _ := json.Marshal(children)
+
+	origList := planListJSONFn
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		return childJSON, nil
+	}
+	defer func() { planListJSONFn = origList }()
+
+	err := handleExistingBeads("epic-123", "version: 1\n")
+	if err == nil {
+		t.Fatal("expected error for in-progress bead")
+	}
+	if !strings.Contains(err.Error(), "bead-active") {
+		t.Errorf("error should mention bead ID: %v", err)
+	}
+	if !strings.Contains(err.Error(), "in_progress") {
+		t.Errorf("error should mention status: %v", err)
+	}
+}
+
+func TestHandleExistingBeads_Closed_ReturnsError(t *testing.T) {
+	children := []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}{
+		{ID: "bead-done", Status: "closed"},
+	}
+	childJSON, _ := json.Marshal(children)
+
+	origList := planListJSONFn
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		return childJSON, nil
+	}
+	defer func() { planListJSONFn = origList }()
+
+	err := handleExistingBeads("epic-123", "version: 1\n")
+	if err == nil {
+		t.Fatal("expected error for closed bead")
+	}
+	if !strings.Contains(err.Error(), "bead-done") {
+		t.Errorf("error should mention bead ID: %v", err)
+	}
+}
+
+func TestExtractPlanVersion(t *testing.T) {
+	tests := []struct {
+		content  string
+		expected string
+	}{
+		{"version: 2\n", "2"},
+		{"version: \"1.0\"\n", "1.0"},
+		{"---\nstatus: Draft\nversion: 3\n---\n", "3"},
+		{"no version here\n", "unknown"},
+	}
+	for _, tt := range tests {
+		got := extractPlanVersion(tt.content)
+		if got != tt.expected {
+			t.Errorf("extractPlanVersion(%q) = %q, want %q", tt.content, got, tt.expected)
+		}
 	}
 }

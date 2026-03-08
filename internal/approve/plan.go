@@ -29,6 +29,9 @@ var planRunBDCombinedFn = bead.RunBDCombined
 // planRunBDFn is for JSON-returning bd commands (stdout only, no stderr mixing).
 var planRunBDFn = bead.RunBD
 
+// planListJSONFn wraps bead.ListJSON for testability.
+var planListJSONFn = bead.ListJSON
+
 // SetPlanRunBDForTest swaps planRunBDFn for testing and returns a restore function.
 func SetPlanRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
 	orig := planRunBDFn
@@ -207,6 +210,11 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		return nil, nil
 	}
 
+	// --- Re-approval safeguard: close-and-recreate existing beads (Spec 074) ---
+	if err := handleExistingBeads(parentID, planContent); err != nil {
+		return nil, err
+	}
+
 	// --- Assemble shared context from spec.md ---
 	specDir := filepath.Dir(planPath)
 	specContent := readFileOrEmpty(filepath.Join(specDir, "spec.md"))
@@ -299,6 +307,61 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	}
 
 	return beadIDs, nil
+}
+
+// handleExistingBeads checks if beads already exist under the epic (re-approval).
+// If any are in_progress or closed, returns an error. If all are open, closes them.
+func handleExistingBeads(parentID, planContent string) error {
+	out, err := planListJSONFn("--parent", parentID)
+	if err != nil {
+		return nil // Can't query — proceed with creation (first approval case)
+	}
+
+	var children []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(out, &children) != nil || len(children) == 0 {
+		return nil // No existing children — first approval
+	}
+
+	// Check for in-progress or closed beads
+	for _, c := range children {
+		status := strings.ToLower(c.Status)
+		if status == "in_progress" || status == "closed" {
+			return fmt.Errorf("cannot re-approve plan: bead %s is %s — close or complete active work first", c.ID, c.Status)
+		}
+	}
+
+	// All open — close them with supersede reason
+	version := extractPlanVersion(planContent)
+	reason := fmt.Sprintf("superseded by plan v%s", version)
+	var ids []string
+	for _, c := range children {
+		ids = append(ids, c.ID)
+	}
+	if len(ids) > 0 {
+		// Close via bd close with reason
+		args := append([]string{"close"}, ids...)
+		args = append(args, "--reason", reason)
+		planRunBDCombinedFn(args...)
+	}
+
+	return nil
+}
+
+// extractPlanVersion reads the version field from plan frontmatter.
+func extractPlanVersion(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "version:") {
+			v := strings.TrimPrefix(trimmed, "version:")
+			v = strings.TrimSpace(v)
+			v = strings.Trim(v, `"'`)
+			return v
+		}
+	}
+	return "unknown"
 }
 
 // buildDesignField assembles the design field content: spec requirements + ADR decision snapshots.
