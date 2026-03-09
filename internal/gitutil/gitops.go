@@ -69,7 +69,7 @@ func MergeInto(targetWorkdir, sourceBranch string) error {
 
 // DeleteBranch deletes a local branch.
 func DeleteBranch(name string) error {
-	cmd := execCommand("git", "branch", "-d", name)
+	cmd := execCommand("git", "branch", "-D", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("deleting branch %s: %s", name, strings.TrimSpace(string(out)))

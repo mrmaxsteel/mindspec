@@ -150,6 +150,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 	result.NextBead = nextBead
 	result.NextSpec = specID
 
+	// 6.5. Sync stored phase (Spec 080): keep epic mindspec_phase in sync
+	// so that DerivePhase (metadata-first) returns the correct phase for
+	// downstream commands like `mindspec impl approve`.
+	if nextMode != "" {
+		if eid, findErr := phase.FindEpicBySpecID(specID); findErr == nil && eid != "" {
+			_ = bead.MergeMetadata(eid, map[string]interface{}{"mindspec_phase": nextMode})
+		}
+	}
+
 	// ADR-0023: no focus write — state is derived from beads.
 	if nextMode == state.ModeIdle {
 		result.NextSpec = ""

@@ -253,6 +253,12 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			if renderErr == nil {
 				fmt.Println()
 				fmt.Print(rendered)
+				// Completion reminder — ensures agents see "how to finish" right
+				// before they start coding. Without this, the implement template's
+				// completion section may scroll out of small-context models.
+				fmt.Println("---")
+				fmt.Printf("**When done**: `cd` into the worktree, then run `mindspec complete %s \"describe what you did\"` to close this bead.\n", selected.ID)
+				fmt.Println("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.")
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
 				if err := emitInstruct(root); err != nil {
