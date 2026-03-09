@@ -7,15 +7,13 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
-	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
-	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 var completeCmd = &cobra.Command{
-	Use:   "complete [bead-id]",
+	Use:   "complete <bead-id> [commit message...]",
 	Short: "Close a bead, remove its worktree, and advance state",
 	Long: `Orchestrates the full bead close-out:
   1. Auto-commits changes if a commit message is provided
@@ -25,11 +23,11 @@ var completeCmd = &cobra.Command{
   5. Advances state (next bead, plan, or idle)
 
 Usage:
-  mindspec complete "describe what you did"    # auto-commit + close
-  mindspec complete                            # close (tree must be clean)
+  mindspec complete <bead-id> "describe what you did"    # auto-commit + close
+  mindspec complete <bead-id>                            # close (tree must be clean)
 
-The bead ID is auto-resolved from state if not provided.`,
-	Args: cobra.ArbitraryArgs,
+The bead ID is required as the first argument.`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := findRoot()
 		if err != nil {
@@ -37,32 +35,13 @@ The bead ID is auto-resolved from state if not provided.`,
 		}
 		specID, _ := cmd.Flags().GetString("spec")
 
-		// CWD auto-redirect: if not in a bead worktree, try to find one via worktree list.
-		// ADR-0023: no focus file needed — use bead worktree discovery.
-		cwd, _ := os.Getwd()
-		kind, _, _ := workspace.DetectWorktreeContext(cwd)
-
-		// Worktree scoping guard with auto-resolve.
-		// From main: auto-resolve to spec worktree if exactly one active spec.
-		// From spec worktree: allowed (bead cleanup/recovery path).
-		switch kind {
-		case workspace.WorktreeMain:
-			specs, discErr := phase.DiscoverActiveSpecs()
-			if discErr == nil && len(specs) == 1 {
-				specWt := state.SpecWorktreePath(root, specs[0].SpecID)
-				if fi, statErr := os.Stat(specWt); statErr == nil && fi.IsDir() {
-					fmt.Fprintf(os.Stderr, "Auto-resolving to spec worktree: %s\n", specWt)
-					if err := os.Chdir(specWt); err == nil {
-						cwd = specWt
-						kind = workspace.WorktreeSpec
-					}
-				}
+		// Resolve --spec prefix (e.g. "079" → "079-location-agnostic-commands")
+		if specID != "" {
+			resolved, err := resolve.ResolveSpecPrefix(specID)
+			if err != nil {
+				return fmt.Errorf("resolving --spec prefix: %w", err)
 			}
-			if kind == workspace.WorktreeMain {
-				return fmt.Errorf("mindspec complete must run from a bead or spec worktree.\nUse `mindspec next` to claim a bead and create a worktree first, then cd into it")
-			}
-		case workspace.WorktreeSpec:
-			// OK — spec worktree is allowed for bead cleanup/recovery
+			specID = resolved
 		}
 
 		if err := bead.Preflight(root); err != nil {
@@ -70,17 +49,20 @@ The bead ID is auto-resolved from state if not provided.`,
 			os.Exit(1)
 		}
 
-		// Parse args: first arg may be a bead ID or part of a commit message.
-		// If it looks like a spec/bead ID, treat as bead ID; otherwise treat all args as commit message.
-		var beadID, commitMsg string
-		if len(args) > 0 {
-			if validate.SpecID(args[0]) == nil || strings.HasPrefix(args[0], "mindspec-") {
-				beadID = args[0]
-				if len(args) > 1 {
-					commitMsg = strings.Join(args[1:], " ")
-				}
+		// Parse args: first arg is always bead ID, remaining args are commit message.
+		beadID := args[0]
+		var commitMsg string
+		if len(args) > 1 {
+			commitMsg = strings.Join(args[1:], " ")
+		}
+
+		// Auto-chdir to spec worktree or main root before calling Run.
+		if specID != "" {
+			specWtPath := state.SpecWorktreePath(root, specID)
+			if fi, err := os.Stat(specWtPath); err == nil && fi.IsDir() {
+				os.Chdir(specWtPath)
 			} else {
-				commitMsg = strings.Join(args, " ")
+				os.Chdir(root)
 			}
 		}
 

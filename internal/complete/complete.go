@@ -13,21 +13,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
-	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Package-level function variables for testability.
 var (
-	closeBeadFn         = bead.Close
-	worktreeListFn      = bead.WorktreeList
-	runBDFn             = bead.RunBD
-	listJSONFn          = bead.ListJSON
-	resolveTargetFn     = resolve.ResolveTarget
-	resolveActiveBeadFn = next.ResolveActiveBead
-	findLocalRootFn     = defaultFindLocalRoot
-	fetchBeadByIDFn     = next.FetchBeadByID
-	findRecentClosedFn  = findRecentClosed
+	closeBeadFn     = bead.Close
+	worktreeListFn  = bead.WorktreeList
+	runBDFn         = bead.RunBD
+	listJSONFn      = bead.ListJSON
+	resolveTargetFn = resolve.ResolveTarget
+	findLocalRootFn = defaultFindLocalRoot
+	fetchBeadByIDFn = next.FetchBeadByID
 )
 
 // Result summarizes what mindspec complete did.
@@ -47,24 +44,18 @@ func defaultFindLocalRoot() (string, error) {
 
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
+// beadID is required — it must always be provided by the caller.
 // exec is the Executor used for all git/workspace operations.
 // specIDHint is optional and typically comes from --spec for disambiguation.
 func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*Result, error) {
-	// Backward-compatible UX: `mindspec complete <spec-id>` should behave like
-	// `mindspec complete --spec=<spec-id>`, not treat the spec ID as a bead ID.
-	if beadID != "" && specIDHint == "" && validate.SpecID(beadID) == nil {
-		specIDHint = beadID
-		beadID = ""
-	}
-
-	// Determine local root for per-worktree focus reads.
+	// Determine local root for per-worktree context resolution.
 	localRoot := root
 	if lr, err := findLocalRootFn(); err == nil {
 		localRoot = lr
 	}
 
-	// 1. Derive activeSpec from resolver, activeBead from arg or Beads query
-	// Try localRoot first (per-worktree focus) then fall back to root.
+	// 1. Derive activeSpec from resolver.
+	// Try localRoot first (per-worktree context) then fall back to root.
 	specID, err := resolveTargetFn(localRoot, specIDHint)
 	if err != nil && localRoot != root {
 		specID, err = resolveTargetFn(root, specIDHint)
@@ -72,26 +63,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 	if err != nil {
 		return nil, fmt.Errorf("resolving active spec: %w", err)
 	}
-	if beadID == "" {
-		beadID, err = resolveActiveBeadFn(root, specID)
-		if err != nil {
-			return nil, fmt.Errorf("resolving active bead: %w", err)
+
+	// 1.5. Impl-only guard: verify the epic phase is implement or review.
+	epicID, epicErr := phase.FindEpicBySpecID(specID)
+	if epicErr == nil && epicID != "" {
+		epicPhase, phaseErr := phase.DerivePhase(epicID)
+		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
+			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", beadID, specID, epicPhase)
 		}
-	}
-	// If no in-progress bead found, check for recently closed beads that
-	// may need cleanup (e.g., agent ran `bd close` directly).
-	recoveryMode := false
-	if beadID == "" {
-		beadID, err = findRecentClosedFn(specID)
-		if err != nil {
-			return nil, fmt.Errorf("resolving active bead: %w", err)
-		}
-		if beadID != "" {
-			recoveryMode = true
-		}
-	}
-	if beadID == "" {
-		return nil, fmt.Errorf("no bead ID provided and no in-progress bead found for spec %s", specID)
 	}
 
 	// Derive spec branch from conventions
@@ -123,20 +102,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 		}
 	}
 
-	// 3. Check clean tree — skip in recovery mode (already-closed bead
-	// with lingering branch). The dirty files are unrelated new work; the
-	// recovery merge only touches the bead branch, not the working tree.
-	if !recoveryMode {
-		checkPath := wtPath
-		if checkPath == "" {
-			checkPath = root // No worktree — check main tree
+	// 3. Check clean tree
+	checkPath := wtPath
+	if checkPath == "" {
+		checkPath = root // No worktree — check main tree
+	}
+	if err := exec.IsTreeClean(checkPath); err != nil {
+		if wtPath == "" {
+			return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
 		}
-		if err := exec.IsTreeClean(checkPath); err != nil {
-			if wtPath == "" {
-				return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
-			}
-			return nil, fmt.Errorf("%w\nhint: use `mindspec complete \"describe what you did\"` to auto-commit", err)
-		}
+		return nil, fmt.Errorf("%w\nhint: use `mindspec complete %s \"describe what you did\"` to auto-commit", err, beadID)
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -215,57 +190,18 @@ func FormatResult(r *Result) string {
 	return sb.String()
 }
 
-// findRecentClosed looks for a recently closed bead under the spec's epic
-// that still has a worktree entry (indicating it was closed without cleanup).
-func findRecentClosed(specID string) (string, error) {
-	epicID, err := phase.FindEpicBySpecID(specID)
-	if err != nil || epicID == "" {
-		return "", nil
-	}
-
-	out, err := listJSONFn("--parent", epicID, "--status=closed")
-	if err != nil {
-		return "", nil
-	}
-
-	var items []bead.BeadInfo
-	if json.Unmarshal(out, &items) != nil {
-		return "", nil
-	}
-
-	// Build a set of bead branches from worktree list.
-	entries, listErr := worktreeListFn()
-	if listErr != nil {
-		return "", nil
-	}
-	branchSet := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		branchSet[e.Branch] = true
-	}
-
-	// Return the first closed bead that still has a worktree (unmerged).
-	for _, item := range items {
-		id := strings.TrimSpace(item.ID)
-		if id != "" && branchSet["bead/"+id] {
-			return id, nil
-		}
-	}
-	return "", nil
-}
-
 // advanceState determines the next mode after completing a bead.
 func advanceState(specID string) (mode, nextBead string) {
 	if specID == "" {
 		return state.ModeIdle, ""
 	}
 
-	// Find epic via beads metadata query (ADR-0023).
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
 		return state.ModeIdle, ""
 	}
 
-	// Check for ready children under the epic
+	// Query truly ready beads (unblocked + open)
 	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err == nil {
 		var ready []bead.BeadInfo
@@ -274,9 +210,8 @@ func advanceState(specID string) (mode, nextBead string) {
 		}
 	}
 
-	// Check for open (but blocked) children — match actual title format [specID]
-	implPrefix := "[" + specID + "]"
-	out, err = runBDFn("search", implPrefix, "--json", "--status=open")
+	// Check for any open children (blocked or otherwise)
+	out, err = listJSONFn("--parent", epicID, "--status=open")
 	if err == nil {
 		var open []bead.BeadInfo
 		if json.Unmarshal(out, &open) == nil && len(open) > 0 {
@@ -284,6 +219,5 @@ func advanceState(specID string) (mode, nextBead string) {
 		}
 	}
 
-	// All beads done → review gate (human must approve before idle)
 	return state.ModeReview, ""
 }
