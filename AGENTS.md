@@ -135,6 +135,17 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 <!-- END BEADS INTEGRATION -->
 
+## Architecture: Workflow/Execution Boundary
+
+MindSpec has a two-layer architecture separating *what* from *how*:
+
+- **Workflow layer** (`internal/approve/`, `internal/complete/`, `internal/next/`, `internal/cleanup/`, `internal/specinit/`) — decides what operations should happen (approval gates, phase transitions, bead selection)
+- **Execution layer** (`internal/executor/`, `internal/gitutil/`) — performs git, worktree, and filesystem operations
+
+**Import rule**: Workflow packages call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This keeps enforcement logic testable with `MockExecutor` and decouples workflow decisions from git mechanics.
+
+See `.mindspec/docs/domains/execution/` and `.mindspec/docs/domains/workflow/` for full documentation.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

@@ -2,10 +2,10 @@
 
 ## Key Patterns
 
-### Three-Mode Lifecycle
+### Five-Mode Lifecycle
 
 ```
-Intent -> [Spec Mode] -> approval -> [Plan Mode] -> approval -> [Implementation Mode] -> validation -> Done
+Explore -> [Spec Mode] -> approval -> [Plan Mode] -> approval -> [Implement Mode] -> [Review] -> Done
 ```
 
 Each mode gates:
@@ -13,24 +13,40 @@ Each mode gates:
 - **Required context** — what must be reviewed before proceeding
 - **Transition gates** — what conditions must hold to advance
 
-### Beads as Tracking Substrate (ADR-0002)
+### Beads as Single State Store (ADR-0023)
 
-MindSpec layers its structured operating model on top of Beads:
+All lifecycle state is derived from Beads — no filesystem state files (no `focus`, no `lifecycle.yaml`):
 
 | Concern | Owner |
 |:--------|:------|
 | Execution tracking (issues, dependencies) | Beads |
 | Workflow orchestration (modes, gates) | MindSpec (this domain) |
+| Phase derivation (spec lifecycle stage) | MindSpec, from Beads statuses |
 | Long-form specs, ADRs, domain docs | Documentation system |
 
-Beads entries must remain **concise and execution-oriented**. Spec beads contain a summary + link to the canonical spec file.
+Phase is derived from epic metadata and child bead statuses:
 
-### Worktree Isolation
+| Condition | Derived phase |
+|:----------|:-------------|
+| No epic for spec | spec |
+| Epic exists, no children | plan |
+| Any child in_progress | implement |
+| All children closed | review |
+| Epic closed with done marker | done |
 
-All implementation work runs in isolated git worktrees:
-- Named with bead ID: `worktree-<bead-id>`
-- One worktree per implementation bead
-- Closing a bead requires evidence + doc updates + clean state sync
+### Workflow/Execution Boundary (Spec 077)
+
+Workflow packages determine *what* should happen and delegate *how* to the Executor:
+
+```
+approve/spec.go   ──▶ exec.InitSpecWorkspace()
+approve/plan.go   ──▶ exec.HandoffEpic(), exec.DispatchBead()
+complete/         ──▶ exec.CompleteBead(), exec.CommitAll()
+approve/impl.go   ──▶ exec.FinalizeEpic()
+cleanup/          ──▶ exec.Cleanup()
+```
+
+**Import rule**: Workflow packages (`approve/`, `complete/`, `next/`, `cleanup/`, `specinit/`) call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly.
 
 ### ADR Governance
 
@@ -44,4 +60,5 @@ All implementation work runs in isolated git worktrees:
 2. Implementation scope cannot widen — discovered work becomes new beads.
 3. ADR divergence always triggers a human gate.
 4. Bead closure requires proof-of-done + doc-sync.
-5. Active Beads workset must be kept intentionally small.
+5. Beads is the single state store — no filesystem state files.
+6. Workflow packages never import `internal/gitutil/` — all execution goes through `Executor`.

@@ -55,41 +55,22 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return runEmitOnly(specFlag, args)
 		}
 
-		// Step 0a: Worktree scoping guard
-		kind, _, _ := workspace.DetectWorktreeContext(cwd)
-		switch kind {
-		case workspace.WorktreeMain:
-			// Auto-resolve: if exactly one active spec has a worktree, cd there.
-			specs, discErr := phase.DiscoverActiveSpecs()
-			if discErr == nil && len(specs) == 1 {
-				specWt := state.SpecWorktreePath(root, specs[0].SpecID)
-				if fi, statErr := os.Stat(specWt); statErr == nil && fi.IsDir() {
-					fmt.Fprintf(os.Stderr, "Auto-resolving to spec worktree: %s\n", specWt)
-					if err := os.Chdir(specWt); err == nil {
-						cwd = specWt
-						break
-					}
-				}
+		// Step 0a: --spec prefix resolution (e.g., "079" → "079-location-agnostic-commands")
+		if specFlag != "" {
+			resolved, resolveErr := resolve.ResolveSpecPrefix(specFlag)
+			if resolveErr != nil {
+				return resolveErr
 			}
-			// Build helpful message listing available spec worktrees
-			msg := "mindspec next must run from a spec worktree."
-			if discErr == nil {
-				for _, s := range specs {
-					wt := state.SpecWorktreePath(root, s.SpecID)
-					if info, statErr := os.Stat(wt); statErr == nil && info.IsDir() {
-						msg += fmt.Sprintf("\n  cd %s", wt)
-					}
-				}
-			}
-			if msg == "mindspec next must run from a spec worktree." {
-				msg += "\nUse `mindspec spec create <slug>` or cd into an existing spec worktree"
-			}
-			return fmt.Errorf("%s", msg)
-		case workspace.WorktreeBead:
-			return fmt.Errorf("you're already in a bead worktree — run `mindspec complete \"msg\"` when done")
+			specFlag = resolved
 		}
 
-		// Step 0b: Session freshness gate
+		// Step 0b: Bead worktree informational note
+		kind, _, _ := workspace.DetectWorktreeContext(cwd)
+		if kind == workspace.WorktreeBead {
+			fmt.Fprintf(os.Stderr, "Note: you're in a bead worktree. Run `mindspec complete <bead-id>` when done.\n")
+		}
+
+		// Step 0c: Session freshness gate
 		if sess, readErr := state.ReadSession(root); readErr == nil && sess.SessionStartedAt != "" {
 			stale := false
 			reason := ""
@@ -122,8 +103,14 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		if specFlag == "" {
 			targetSpec, err := resolve.ResolveTarget(root, "")
 			if err != nil {
-				if _, ok := err.(*resolve.ErrAmbiguousTarget); ok {
-					return fmt.Errorf("multiple active specs found; use --spec to target one:\n%s", err)
+				if ambErr, ok := err.(*resolve.ErrAmbiguousTarget); ok {
+					fmt.Fprintf(os.Stderr, "Multiple active specs have ready beads:\n\n")
+					for i, s := range ambErr.Active {
+						fmt.Fprintf(os.Stderr, "  %d. %s  (phase: %s)\n", i+1, s.SpecID, s.Mode)
+					}
+					fmt.Fprintf(os.Stderr, "\nAsk the user which spec to work on, then re-run:\n")
+					fmt.Fprintf(os.Stderr, "  mindspec next --spec=<number>\n")
+					os.Exit(1)
 				}
 				// Non-ambiguous errors are OK — next will query all ready work
 			} else {
@@ -363,7 +350,7 @@ func checkUnmergedBeads(specID string) error {
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id != "" && gitutil.BranchExists("bead/"+id) {
-			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete --spec=%s` to recover, then retry `mindspec next`.", id, specID)
+			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", id, id)
 		}
 	}
 	return nil

@@ -230,16 +230,20 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 		}
 	}
 
-	// Remove worktree.
-	if wtName != "" {
-		if err := g.WorktreeRemoveFn(wtName); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", wtName, err)
+	// Remove worktree and delete branch from repo root (not from inside the
+	// worktree being removed). Matches the pattern in FinalizeEpic().
+	if err := withWorkingDir(g.Root, func() error {
+		if wtName != "" {
+			if err := g.WorktreeRemoveFn(wtName); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", wtName, err)
+			}
 		}
-	}
-
-	// Delete bead branch.
-	if err := g.DeleteBranchFn(beadBranch); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+		if err := g.DeleteBranchFn(beadBranch); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	return nil

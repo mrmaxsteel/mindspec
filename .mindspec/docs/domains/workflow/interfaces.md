@@ -2,30 +2,34 @@
 
 ## Provided Interfaces
 
-### State Management (Spec 004)
+### Phase Derivation (ADR-0023)
 
 ```go
-package state
+package phase
 
-// State represents the MindSpec workflow state at .mindspec/state.json.
-type State struct {
-    Mode        string // idle | spec | plan | implement
-    ActiveSpec  string // e.g. "004-instruct"
-    ActiveBead  string // e.g. "beads-001"
-    LastUpdated string // RFC3339 timestamp
-}
+// DiscoverActiveSpecs queries beads for all open epics and derives phase for each.
+func DiscoverActiveSpecs() ([]ActiveSpec, error)
 
-// Read loads state from .mindspec/state.json.
-func Read(root string) (*State, error)
+// FindEpicBySpecID finds the epic ID for a given spec ID by querying metadata.
+func FindEpicBySpecID(specID string) (string, error)
 
-// Write persists state to .mindspec/state.json.
-func Write(root string, s *State) error
+// DerivePhase determines the lifecycle phase from an epic's children statuses.
+func DerivePhase(epicID string) (string, error)
 
-// SetMode validates and writes a new state.
-func SetMode(root, mode, spec, bead string) error
+// ResolveContext determines the current spec, bead, phase from working directory.
+func ResolveContext(root string) (*Context, error)
+```
 
-// CrossValidate checks state against artifact state, returns warnings.
-func CrossValidate(root string, s *State) []Warning
+### Target Resolution (Spec 079)
+
+```go
+package resolve
+
+// ResolveTarget determines which spec to operate on via --spec flag, CWD, or auto-select.
+func ResolveTarget(root, specFlag string) (string, error)
+
+// ResolveSpecPrefix resolves a numeric prefix (e.g. "079") to a full spec ID.
+func ResolveSpecPrefix(prefix string) (string, error)
 ```
 
 ### Guidance Emission (Spec 004)
@@ -34,48 +38,40 @@ func CrossValidate(root string, s *State) []Warning
 package instruct
 
 // BuildContext creates a rendering context from state and project root.
-func BuildContext(root string, s *state.State) *Context
+func BuildContext(root string) *Context
 
 // Render produces markdown guidance for the given context.
 func Render(ctx *Context) (string, error)
-
-// RenderJSON produces structured JSON output.
-func RenderJSON(ctx *Context) (string, error)
-
-// CheckWorktree verifies the current worktree matches the active bead.
-func CheckWorktree(activeBead string) string
 ```
 
-### Worktree Lifecycle (Planned — Spec 008)
+### Beads Adapter (`internal/bead/`)
 
 ```go
-// WorktreeManager (planned)
-// Create(beadID string) (string, error)
-// List() ([]Worktree, error)
-// Cleanup(beadID string) error
-```
+package bead
 
-### Beads Adapter (Planned — Spec 007)
-
-```go
-// BeadsAdapter (planned)
-// CreateSpecBead(specID, summary string) (string, error)
-// CreateImplBead(specBead, scope string) (string, error)
-// CloseBead(beadID string, evidence Evidence) error
+func RunBD(args ...string) ([]byte, error)   // Execute bd commands
+func ListJSON(args ...string) ([]byte, error) // List with JSON output
+func Close(ids ...string) error               // Close beads
+func WorktreeList() ([]WorktreeListEntry, error)
 ```
 
 ## Consumed Interfaces
 
-- **core**: `workspace.FindRoot()`, `workspace.StatePath()`, `workspace.MindspecDir()` for locating state and specs
-- **context-system**: `ContextPackBuilder.Build()` for loading mode-appropriate context
+- **core**: `workspace.FindRoot()`, `workspace.DetectWorktreeContext()` for locating state and worktrees
+- **execution**: `executor.Executor` for all git/worktree operations
+- **context-system**: `contextpack.RenderBeadContext()` for bead primers
 
 ## CLI Commands
 
 | Command | Purpose |
 |:--------|:--------|
-| `mindspec state set` | Set current mode and active work (ADR-0005) |
+| `mindspec state set` | Set current mode and active work |
 | `mindspec state show` | Display current state |
-| `mindspec instruct` | Emit mode-appropriate operating guidance (ADR-0003) |
+| `mindspec instruct` | Emit mode-appropriate operating guidance |
+| `mindspec next` | Discover, claim, and start next bead |
+| `mindspec complete` | Close bead, remove worktree, advance state |
+| `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
+| `mindspec cleanup` | Remove stale worktrees and branches |
 
 ## Agent Skills
 
@@ -85,4 +81,5 @@ func CheckWorktree(activeBead string) string
 | `/ms-spec-create` | Create a new specification |
 | `/ms-spec-approve` | Request Spec -> Plan transition |
 | `/ms-plan-approve` | Request Plan -> Implementation transition |
+| `/ms-impl-approve` | Request Implementation -> Done transition |
 | `/ms-spec-status` | Check current mode and state |

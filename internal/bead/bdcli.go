@@ -170,18 +170,29 @@ func ListJSON(args ...string) ([]byte, error) {
 		return []byte(trimmed), nil
 	}
 
-	// Fallback: parse IDs from human-readable output, fetch each with bd show --json
+	// Fallback: parse IDs from human-readable output, fetch each with bd show --json.
+	// Handles both flat format ("○ id ● P2 ...") and tree format ("├── ✓ id ● P2 ...").
 	var ids []string
 	for _, line := range strings.Split(trimmed, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "Total:") || strings.HasPrefix(line, "Status:") {
 			continue
 		}
-		// Human-readable format: "<emoji> <id> <emoji> P<N> <type> <title>"
-		// The ID is the second whitespace-separated field.
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.Contains(fields[1], "-") {
-			ids = append(ids, fields[1])
+		for _, f := range fields {
+			// Skip tree-drawing characters (├──, └──, │)
+			if strings.ContainsAny(f, "├└│─") {
+				continue
+			}
+			// Skip flag-like strings
+			if strings.HasPrefix(f, "--") {
+				continue
+			}
+			// First field containing "-" is the issue ID
+			if strings.Contains(f, "-") {
+				ids = append(ids, f)
+				break
+			}
 		}
 	}
 

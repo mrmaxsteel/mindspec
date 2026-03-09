@@ -289,6 +289,48 @@ func TestCompleteBead_AutoCommits(t *testing.T) {
 	}
 }
 
+func TestCompleteBead_WorktreeRemoveRunsFromRepoRoot(t *testing.T) {
+	g := newTestExecutor(t)
+
+	// Create a subdirectory to simulate being inside a bead worktree.
+	beadWtPath := filepath.Join(g.Root, ".worktrees", "worktree-mindspec-x.1")
+	os.MkdirAll(beadWtPath, 0o755)
+
+	g.WorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{{
+			Name:   "worktree-mindspec-x.1",
+			Path:   beadWtPath,
+			Branch: "bead/mindspec-x.1",
+		}}, nil
+	}
+
+	// Capture CWD at the moment WorktreeRemoveFn is called.
+	var cwdDuringRemove string
+	g.WorktreeRemoveFn = func(name string) error {
+		wd, _ := os.Getwd()
+		cwdDuringRemove = wd
+		return nil
+	}
+
+	// Start from inside the bead worktree.
+	origWd, _ := os.Getwd()
+	os.Chdir(beadWtPath)
+	defer os.Chdir(origWd)
+
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// CWD during worktree removal must be repo root, not inside the worktree.
+	// Resolve symlinks to handle macOS /var -> /private/var.
+	realCwd, _ := filepath.EvalSymlinks(cwdDuringRemove)
+	realRoot, _ := filepath.EvalSymlinks(g.Root)
+	if realCwd != realRoot {
+		t.Errorf("CWD during WorktreeRemoveFn = %q, want repo root %q", cwdDuringRemove, g.Root)
+	}
+}
+
 // --- FinalizeEpic ---
 
 func TestFinalizeEpic_DirectMerge(t *testing.T) {
