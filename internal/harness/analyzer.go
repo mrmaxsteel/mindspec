@@ -407,7 +407,7 @@ func detectSkipComplete(events []ActionEvent) []WrongActionResult {
 		}
 		args := eventArgsList(e)
 
-		if e.Command == "mindspec" && containsAll(args, "next") {
+		if e.Command == "mindspec" && e.ExitCode == 0 && containsAll(args, "next") {
 			nextSeen = true
 			codeAfterNext = false
 			continue

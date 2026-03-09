@@ -54,6 +54,10 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 | 2026-03-06 | PASS | 1127 | 6 | 100s | Dolt port isolation fix full-suite. 83.3% fwd ratio. Stable. |
 | 2026-03-06 | PASS | 613 | 3 | 66.79s | Full-suite rerun (Opus): 100% fwd ratio. Stable. |
 | 2026-03-06 | PASS | 845 | 3 | 1m42s | Full-suite rerun #2 (Opus): 100% fwd ratio. Stable. |
+| 2026-03-09 | FAIL | - | - | timeout | Baseline after Spec 080 merge: agent ran `mindspec complete "msg"` (missing bead-id) due to incorrect syntax in implement.md template. Timed out at 10m. |
+| 2026-03-09 | FAIL | - | - | timeout | Second baseline: same root cause — template showed `mindspec complete "msg"` but CLI requires `mindspec complete <bead-id> "msg"`. |
+| 2026-03-09 | PASS | ~900 | 5 | 2m08s | Fix: updated all 6 instruct templates to include `<bead-id>` in complete syntax, implement.md uses `{{.ActiveBead}}`. Also fixed `detectSkipComplete` false positive (require exit=0 for `mindspec next`) and `assertBeadsState` (`bd show <id> --json` instead of broken `bd list --json --parent`). |
+| 2026-03-09 | 3/3 PASS | 800-1100 | 4-6 | 1m30-2m30 | Verification: fwd ratios 92.6%, 86.4%, 96.7%. Agent still uses `bd close` before `mindspec complete` (Haiku limitation, tolerated by analyzer). |
 
 ### TestLLM_SpecToIdle
 
