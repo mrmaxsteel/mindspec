@@ -95,3 +95,62 @@ func isAmbiguousError(err error, target **ErrAmbiguousTarget) bool {
 	}
 	return ok
 }
+
+// stubActiveSpecs sets up the list+runBD stubs to return the given epics (with metadata)
+// and no children (so phase derives to "plan"). Returns a cleanup function.
+func stubActiveSpecs(t *testing.T, epicsJSON string) {
+	t.Helper()
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(epicsJSON), nil
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}))
+}
+
+func TestResolveSpecPrefix_NumericMatch(t *testing.T) {
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+
+	got, err := ResolveSpecPrefix("077")
+	if err != nil {
+		t.Fatalf("ResolveSpecPrefix(\"077\") error: %v", err)
+	}
+	if got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefix(\"077\") = %q, want %q", got, "077-execution-layer-interface")
+	}
+}
+
+func TestResolveSpecPrefix_FullIDPassthrough(t *testing.T) {
+	// Full spec ID with hyphen should pass through without querying beads.
+	got, err := ResolveSpecPrefix("077-execution-layer-interface")
+	if err != nil {
+		t.Fatalf("ResolveSpecPrefix() error: %v", err)
+	}
+	if got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefix() = %q, want %q", got, "077-execution-layer-interface")
+	}
+}
+
+func TestResolveSpecPrefix_NoMatch(t *testing.T) {
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+
+	_, err := ResolveSpecPrefix("999")
+	if err == nil {
+		t.Fatal("expected error for non-matching prefix")
+	}
+	if !strings.Contains(err.Error(), "999") {
+		t.Errorf("error should mention the prefix: %v", err)
+	}
+}
+
+func TestResolveTarget_PrefixResolution(t *testing.T) {
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+
+	got, err := ResolveTarget(t.TempDir(), "077")
+	if err != nil {
+		t.Fatalf("ResolveTarget(root, \"077\") error: %v", err)
+	}
+	if got != "077-execution-layer-interface" {
+		t.Errorf("ResolveTarget(root, \"077\") = %q, want %q", got, "077-execution-layer-interface")
+	}
+}
