@@ -73,11 +73,10 @@ Finish only when the project is back in idle with cleanup complete.`,
 			assertCommandRan(t, events, "mindspec", "complete")
 			assertNoPreApproveImplMainMergeOrPR(t, events)
 
-			// All three approve phases must run during lifecycle.
-			assertCommandContains(t, events, "mindspec", "approve")
-			assertCommandContains(t, events, "mindspec", "spec")
-			assertCommandContains(t, events, "mindspec", "plan")
-			assertCommandContains(t, events, "mindspec", "impl")
+			// All three approve phases must run as distinct commands.
+			assertCommandSucceeded(t, events, "mindspec", "approve", "spec")
+			assertCommandSucceeded(t, events, "mindspec", "approve", "plan")
+			assertCommandSucceeded(t, events, "mindspec", "approve", "impl")
 
 			// `mindspec next` is optional for single-bead specs because
 			// `plan approve` auto-claims the first bead. Log if skipped.
@@ -2083,33 +2082,30 @@ func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount
 	}
 }
 
-// assertBeadsState runs `bd list --json --parent <epicID>` in the sandbox and
-// asserts that each bead ID in expectedStatuses has the expected status.
+// assertBeadsState queries individual bead statuses via `bd show <id> --json`
+// and asserts each matches the expected status. Uses per-bead queries instead
+// of `bd list --json --parent` which has a known bug where --json is ignored
+// when combined with --parent/--status filters.
 func assertBeadsState(t testing.TB, sandbox *Sandbox, epicID string, expectedStatuses map[string]string) {
 	t.Helper()
-	// Query all statuses since beads may be open, in_progress, or closed.
-	statusMap := make(map[string]string)
-	for _, status := range []string{"open", "in_progress", "closed"} {
-		out, err := sandbox.runBD("list", "--json", "--parent", epicID, "--status="+status)
-		if err != nil {
-			continue
-		}
-		var beads []beadStatus
-		if err := json.Unmarshal([]byte(out), &beads); err != nil {
-			continue
-		}
-		for _, b := range beads {
-			statusMap[b.ID] = b.Status
-		}
-	}
 	for id, want := range expectedStatuses {
-		got, ok := statusMap[id]
-		if !ok {
-			t.Errorf("bead %q not found in bd list output (have: %v)", id, statusMap)
+		out, err := sandbox.runBD("show", id, "--json")
+		if err != nil {
+			t.Errorf("bead %q: bd show failed: %v", id, err)
 			continue
 		}
-		if got != want {
-			t.Errorf("bead %q status: got %q, want %q", id, got, want)
+		// bd show --json returns an array, not a single object.
+		var infos []beadStatus
+		if err := json.Unmarshal([]byte(out), &infos); err != nil {
+			t.Errorf("bead %q: unmarshal bd show: %v (raw: %.200s)", id, err, out)
+			continue
+		}
+		if len(infos) == 0 {
+			t.Errorf("bead %q: bd show returned empty array", id)
+			continue
+		}
+		if infos[0].Status != want {
+			t.Errorf("bead %q status: got %q, want %q", id, infos[0].Status, want)
 		}
 	}
 }

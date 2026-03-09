@@ -18,7 +18,7 @@ idle ── spec ── plan ──── >>> implement ── review ── idl
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
 | plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-claims first bead |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
-| bead done | `mindspec complete "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 
 ### Git rules
@@ -68,6 +68,7 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Making changes outside the assigned worktree
 - Creating worktrees via raw tooling (`bd worktree create`, `git worktree add`) instead of `mindspec next`
 - Closing beads directly with `bd close` — use `mindspec complete` instead
+- Running `bd update --metadata` on lifecycle epics — phase metadata is managed by `mindspec complete` and `mindspec approve`
 - Manually closing the lifecycle epic — `mindspec impl approve` handles epic closure automatically
 
 ## Obligations
@@ -89,19 +90,20 @@ When the bead is done:
 
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
-3. Run `mindspec complete "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
+3. Run `mindspec complete {{.ActiveBead}} "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
 4. **STOP and report completion** — do NOT automatically continue to the next bead. The user will run `mindspec next` when ready
 
 **Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
+**Do NOT use `bd update` on lifecycle epics.** Phase metadata is managed automatically by `mindspec complete`.
 
 ## Next Action
 {{- if .ActiveBead}}
 
 1. Implement the bead's scope
-2. Run `mindspec complete "describe what you did"` to finish
+2. Run `mindspec complete {{.ActiveBead}} "describe what you did"` to finish
 {{- else}}
 
 1. Run `mindspec next` to claim a bead and enter its worktree
 2. Implement the bead's scope
-3. Run `mindspec complete "describe what you did"` to finish
+3. Run `mindspec complete <bead-id> "describe what you did"` to finish
 {{- end}}
