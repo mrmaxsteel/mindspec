@@ -113,7 +113,7 @@ The execution engine implements the plan by reading beads and dispatching agents
 - **Merge topology** — bead branches merge into the spec branch; the spec branch merges to main via PR
 - **Finalization** — once all beads close, the spec lifecycle completes with a single PR
 
-MindSpec ships with a built-in execution engine (`MindspecExecutor`) that drives Claude Code, Codex, or Copilot through implementation with human control between steps. But the `Executor` interface is pluggable — a multi-agent orchestrator like [Gastown](https://github.com/steveyegge/gastown) can implement the same interface to dispatch beads to parallel agents, run its own quality gates, and auto-finalize when all beads close.
+MindSpec ships with a built-in execution engine (`MindspecExecutor`) that drives Claude Code, Codex, or Copilot through implementation with human control between steps. But the `Executor` interface is pluggable — MindSpec's planning and governance layer can readily plug into multi-agent orchestrators like [Gastown](https://github.com/steveyegge/gastown), dispatching beads to parallel agents with their own quality gates and auto-finalization.
 
 **MindSpec doesn't compete with agent orchestrators — it makes them better.** An orchestrator running MindSpec-planned beads gets architecture-validated, well-decomposed work packets instead of a vague prompt. The orchestrator focuses on execution; MindSpec ensures there's something worth executing.
 
