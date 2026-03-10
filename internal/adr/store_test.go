@@ -100,7 +100,7 @@ func TestFileStore_Get(t *testing.T) {
 
 func TestFileStore_Search(t *testing.T) {
 	root := t.TempDir()
-	writeADR(t, root, "ADR-0001", "Worktree Management", "Accepted", []string{"gitops"})
+	writeADR(t, root, "ADR-0001", "Worktree Management", "Accepted", []string{"execution"})
 	writeADR(t, root, "ADR-0002", "Bead Lifecycle", "Accepted", []string{"workflow"})
 
 	store := NewFileStore(root)

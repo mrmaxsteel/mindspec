@@ -123,7 +123,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	}
 
 	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
-	// For GitExecutor this is a no-op. Other executors may use this to schedule work.
+	// For MindspecExecutor this is a no-op. Other executors may use this to schedule work.
 	if parentID != "" && len(result.BeadIDs) > 0 {
 		if err := exec.HandoffEpic(parentID, specID, result.BeadIDs); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("handoff epic failed: %v", err))
