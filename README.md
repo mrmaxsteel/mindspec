@@ -79,9 +79,9 @@ The work graph is tracked by [Beads](https://github.com/steveyegge/beads), a git
 
 Documentation stays current because the system won't let you skip it — beads can't close without doc-sync, architecture decisions are tracked as ADRs that plans must cite, and every spec produces versioned artifacts that persist alongside the code.
 
-## Architecture: Two Layers
+## Architecture
 
-MindSpec separates **planning** from **execution** — and this separation is the core idea. [Beads](https://github.com/steveyegge/beads) is the substrate that connects them.
+MindSpec separates **planning** from **execution**, with [Beads](https://github.com/steveyegge/beads) as the substrate that connects them.
 
 ### Planning & Governance Layer
 
