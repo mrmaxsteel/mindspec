@@ -13,7 +13,11 @@ Each mode gates:
 - **Required context** — what must be reviewed before proceeding
 - **Transition gates** — what conditions must hold to advance
 
-### Beads as Single State Store (ADR-0023)
+### Beads as Substrate (ADR-0023)
+
+Beads is both the single state store and the **contract between the planning and execution layers**. Each bead is a self-contained work packet that encapsulates requirements, context (impacted domains, ADR citations), dependencies, and acceptance criteria. A fresh agent picking up a bead doesn't need session history — the bead carries everything it needs.
+
+This is what makes execution pluggable: any orchestrator that can read beads can dispatch work. The planning layer writes beads; the execution engine reads them.
 
 All lifecycle state is derived from Beads — no filesystem state files (no `focus`, no `lifecycle.yaml`):
 

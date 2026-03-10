@@ -153,9 +153,13 @@ The workflow layer owns the spec-driven development lifecycle — deciding which
 
 Key packages: `internal/approve/`, `internal/complete/`, `internal/next/`, `internal/spec/`, `internal/cleanup/`, `internal/phase/`, `internal/validate/`, `internal/bead/`
 
+### Beads: The Substrate
+
+[Beads](https://github.com/steveyegge/beads) is the interface between the two layers. Each bead is a self-contained work packet — requirements, context, dependencies, acceptance criteria — that a fresh agent can pick up without session history. The planning layer writes beads; the execution engine reads them. This is what makes the `Executor` interface pluggable: any orchestrator that can read a bead can dispatch work.
+
 ### Execution Engine (the "how")
 
-The execution engine implements operations delegated by the workflow layer — it never decides *what* should happen:
+The execution engine reads beads and implements them — it never decides *what* should happen:
 
 - **`MindspecExecutor`** (`internal/executor/`) — dispatches beads to worktrees, merges completed bead branches, finalizes specs via PR or direct merge
 - **`MockExecutor`** (`internal/executor/`) — test double for enforcement testing without git side effects

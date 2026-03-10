@@ -21,6 +21,8 @@ Workflow Layer                    Execution Engine
 - **MockExecutor** — test double for enforcement testing without git side effects
 - **DI wiring** — `cmd/mindspec/root.go` has `newExecutor(root)` factory
 
+The execution engine reads beads produced by the planning layer. Each bead is a self-contained work packet — requirements, context, dependencies, acceptance criteria — so a fresh agent can pick it up without session history. Beads are the substrate that makes the `Executor` interface pluggable: any orchestrator that can read a bead can dispatch work.
+
 ### withWorkingDir Safety
 
 Worktree removal and branch deletion require CWD to be outside the target worktree. `MindspecExecutor` uses `withWorkingDir(root, func)` to temporarily chdir to the repo root before destructive operations, then restores the original CWD. This prevents "cannot remove worktree: in use" errors.
