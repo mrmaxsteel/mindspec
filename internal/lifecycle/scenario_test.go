@@ -241,7 +241,7 @@ Bead 1
 `, specID, specID)
 }
 
-// simulateSpecInit creates the spec directory and files that specinit.Run
+// simulateSpecInit creates the spec directory and files that spec.Run
 // would produce, without calling bd or creating worktrees.
 func simulateSpecInit(t *testing.T, root, specID string) {
 	t.Helper()
@@ -286,7 +286,7 @@ func TestScenario_HappyPath(t *testing.T) {
 	root := testRepo(t)
 	specID := "001-test-feature"
 
-	// Phase 1: Spec Init (simulated — specinit.Run needs bd + worktree mocks)
+	// Phase 1: Spec Init (simulated — spec.Run needs bd + worktree mocks)
 	simulateSpecInit(t, root, specID)
 	assertState(t, root, specID, state.ModeSpec, "spec")
 
