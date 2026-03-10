@@ -7,27 +7,27 @@
 The `Executor` interface separates enforcement ("what") from execution ("how"):
 
 ```
-Workflow Layer                    Execution Layer
-┌─────────────────┐              ┌──────────────────┐
-│ approve/         │──Executor──▶│ executor/git.go   │
-│ complete/        │   interface │ (GitExecutor)     │
-│ next/            │              │                  │
-│ specinit/        │              │ gitutil/         │
-│ cleanup/         │              │ (low-level ops)  │
-└─────────────────┘              └──────────────────┘
+Workflow Layer                    Execution Engine
+┌─────────────────┐              ┌─────────────────────────────┐
+│ approve/         │──Executor──▶│ executor/mindspec_executor.go│
+│ complete/        │   interface │ (MindspecExecutor)           │
+│ next/            │              │                             │
+│ spec/            │              │ gitutil/                    │
+│ cleanup/         │              │ (low-level ops)             │
+└─────────────────┘              └─────────────────────────────┘
 ```
 
-- **GitExecutor** — concrete implementation wrapping git+worktree operations
+- **MindspecExecutor** — concrete implementation wrapping git+worktree operations (dispatches beads to worktrees, merges completed bead branches, finalizes specs)
 - **MockExecutor** — test double for enforcement testing without git side effects
 - **DI wiring** — `cmd/mindspec/root.go` has `newExecutor(root)` factory
 
 ### withWorkingDir Safety
 
-Worktree removal and branch deletion require CWD to be outside the target worktree. `GitExecutor` uses `withWorkingDir(root, func)` to temporarily chdir to the repo root before destructive operations, then restores the original CWD. This prevents "cannot remove worktree: in use" errors.
+Worktree removal and branch deletion require CWD to be outside the target worktree. `MindspecExecutor` uses `withWorkingDir(root, func)` to temporarily chdir to the repo root before destructive operations, then restores the original CWD. This prevents "cannot remove worktree: in use" errors.
 
 ### Function Injection for Testability
 
-`GitExecutor` exposes function variables (`WorktreeRemoveFn`, `DeleteBranchFn`, `MergeBranchFn`, etc.) that can be replaced in tests. This avoids requiring a real git repository for unit tests while keeping the production code straightforward.
+`MindspecExecutor` exposes function variables (`WorktreeRemoveFn`, `DeleteBranchFn`, `MergeBranchFn`, etc.) that can be replaced in tests. This avoids requiring a real git repository for unit tests while keeping the production code straightforward.
 
 ### Branch Conventions
 

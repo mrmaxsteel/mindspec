@@ -2,7 +2,7 @@
 
 ## What This Domain Owns
 
-The **execution** domain owns all git, worktree, and filesystem operations — the "how" layer that performs operations delegated by the workflow layer.
+The **execution engine** owns all git, worktree, and filesystem operations — the "how" layer that implements operations delegated by the workflow layer. It dispatches beads to worktrees, executes code changes, merges results, and finalizes specs.
 
 - **Git operations** — branching, merging, diffstat, commit counting, push/PR creation
 - **Worktree lifecycle** — creating, removing, and switching between isolated workspaces
@@ -14,6 +14,7 @@ The **execution** domain owns all git, worktree, and filesystem operations — t
 Execution does **not** own:
 - Lifecycle phase derivation or mode enforcement (workflow)
 - Approval gates or validation logic (workflow)
+- Plan decomposition or quality assessment (workflow)
 - Beads integration or epic/bead queries (workflow)
 - CLI infrastructure or project health checks (core)
 
@@ -23,9 +24,9 @@ Execution **receives** instructions from the workflow layer via the `Executor` i
 
 | Package | Purpose |
 |:--------|:--------|
-| `internal/executor/` | `Executor` interface + `GitExecutor` + `MockExecutor` |
-| `internal/gitutil/` | Low-level git helpers (branch, merge, PR, diffstat) |
+| `internal/executor/` | `Executor` interface + `MindspecExecutor` (production) + `MockExecutor` (testing) |
+| `internal/gitutil/` | Low-level git helpers (branch, merge, PR, diffstat) — used only by `MindspecExecutor` |
 
 ## Import Rule
 
-Workflow packages (`internal/approve/`, `internal/complete/`, `internal/next/`, `internal/cleanup/`, `internal/specinit/`) MUST call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This boundary is enforced by convention and checked by `mindspec doctor`.
+Workflow packages (`internal/approve/`, `internal/complete/`, `internal/next/`, `internal/cleanup/`, `internal/spec/`) MUST call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This boundary is enforced by convention and checked by `mindspec doctor`.

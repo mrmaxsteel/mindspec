@@ -139,10 +139,33 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 MindSpec has a two-layer architecture separating *what* from *how*:
 
-- **Workflow layer** (`internal/approve/`, `internal/complete/`, `internal/next/`, `internal/cleanup/`, `internal/specinit/`) — decides what operations should happen (approval gates, phase transitions, bead selection)
-- **Execution layer** (`internal/executor/`, `internal/gitutil/`) — performs git, worktree, and filesystem operations
+### Workflow Layer (the "what")
 
-**Import rule**: Workflow packages call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This keeps enforcement logic testable with `MockExecutor` and decouples workflow decisions from git mechanics.
+The workflow layer owns the spec-driven development lifecycle — deciding which operations should happen and enforcing quality at every gate:
+
+- **Spec creation** — `internal/spec/` creates spec branches, worktrees, and template files
+- **Plan decomposition** — breaks specs into bitesize beads with clear acceptance criteria. Well-decomposed plans are critical for AI agent success (see [arXiv:2512.08296](https://arxiv.org/abs/2512.08296) on task decomposition quality)
+- **Validation** — `internal/validate/` checks ADR compliance, doc-sync, and structural requirements
+- **Quality gates** — `internal/approve/` enforces human-in-the-loop approval at spec, plan, and impl transitions
+- **Phase enforcement** — `internal/phase/` derives lifecycle phase from beads epic/child statuses (ADR-0023)
+- **Work selection** — `internal/next/` selects ready beads, `internal/complete/` orchestrates bead close-out
+- **Cleanup** — `internal/cleanup/` handles post-lifecycle worktree/branch removal
+
+Key packages: `internal/approve/`, `internal/complete/`, `internal/next/`, `internal/spec/`, `internal/cleanup/`, `internal/phase/`, `internal/validate/`, `internal/bead/`
+
+### Execution Engine (the "how")
+
+The execution engine implements operations delegated by the workflow layer — it never decides *what* should happen:
+
+- **`MindspecExecutor`** (`internal/executor/`) — dispatches beads to worktrees, merges completed bead branches, finalizes specs via PR or direct merge
+- **`MockExecutor`** (`internal/executor/`) — test double for enforcement testing without git side effects
+- **`internal/gitutil/`** — low-level git helpers (branch, merge, PR, diffstat) used only by `MindspecExecutor`
+
+DI wiring: `cmd/mindspec/root.go` has `newExecutor(root)` factory.
+
+### Import Rule
+
+Workflow packages call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This keeps enforcement logic testable with `MockExecutor` and decouples workflow decisions from git mechanics.
 
 See `.mindspec/docs/domains/execution/` and `.mindspec/docs/domains/workflow/` for full documentation.
 

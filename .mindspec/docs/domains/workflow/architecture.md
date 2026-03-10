@@ -46,7 +46,19 @@ approve/impl.go   ──▶ exec.FinalizeEpic()
 cleanup/          ──▶ exec.Cleanup()
 ```
 
-**Import rule**: Workflow packages (`approve/`, `complete/`, `next/`, `cleanup/`, `specinit/`) call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly.
+**Import rule**: Workflow packages (`approve/`, `complete/`, `next/`, `cleanup/`, `spec/`) call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly.
+
+### Plan Quality Responsibility
+
+The workflow layer ensures plans are well-decomposed before handoff to the execution engine. This is critical because AI agents perform significantly better on well-structured, bitesize tasks than on vague or monolithic ones (see [arXiv:2512.08296](https://arxiv.org/abs/2512.08296)).
+
+Workflow enforces:
+- **Bead decomposition** — each bead must be a focused, independently completable unit of work
+- **Clear acceptance criteria** — every bead has verifiable completion conditions
+- **Dependency ordering** — beads declare dependencies so the execution engine dispatches them in the right order
+- **Validation gates** — `internal/validate/` checks structural requirements and ADR compliance before plan approval
+
+The execution engine trusts that approved plans are well-decomposed and simply executes them — it does not assess plan quality.
 
 ### ADR Governance
 
