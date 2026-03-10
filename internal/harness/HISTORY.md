@@ -536,10 +536,12 @@ Reviewed all 18 scenarios in `scenario.go` against:
 ### Per-Scenario Findings
 
 #### 1. SpecToIdle — Full lifecycle (idle → spec → plan → implement → review → idle)
-- **Status**: Current, no issues
-- **Assumptions valid**: Manual `mindspec next` (optional — plan approve auto-claims first bead), STOP after complete, all 3 approve phases
+- **Status**: Current, **design tension identified**
+- **Assumptions**: Prompt says "finish only when the project is back in idle" — agent must power through the entire lifecycle in one session
+- **Tension with STOP instruction**: `implement.md` (lines 49, 94) says "After `mindspec complete` succeeds, STOP. Do NOT automatically continue to the next bead." The prompt intentionally overrides this by asking for idle end-state. For single-bead specs, "next bead" is inapplicable (the agent needs `approve impl`, not `mindspec next`), so the STOP is technically about a different action. But the word "STOP" is ambiguous — Opus reasons past it ("don't continue to next bead" ≠ "don't run approve impl"), while Haiku interprets it as "stop everything." This is likely the root cause of Haiku's consistent SpecToIdle failures.
 - **MaxTurns**: 100 — appropriate. Opus needs ~14-39 turns, Haiku needs up to 53
 - **Assertions**: Comprehensive — branch cleanup, worktree removal, mode=idle, pre-approve merge guard
+- **Recommendation**: Either (a) clarify STOP wording in implement.md to specify "do not claim the next bead" instead of bare "STOP", or (b) accept that SpecToIdle is an Opus-tier test that validates the agent can reconcile prompt-level goals with template guidance. Currently PASS on Opus, consistently FAIL on Haiku.
 - **Note**: `assertCommandRanEither` correctly handles `spec create` vs `spec-init` alias
 
 #### 2. SingleBead — Single pre-approved bead implementation
@@ -672,7 +674,10 @@ Reviewed all 18 scenarios in `scenario.go` against:
 
 ### Overall Assessment
 
-**All 18 scenarios are current and have correct assumptions.** No scenarios test behavior that no longer exists. No broken test expectations found in scenario code.
+**17/18 scenarios have correct assumptions with no issues. 1 scenario (SpecToIdle) has a design tension** between the implement.md STOP instruction and the prompt's end-to-end lifecycle goal. No scenarios test behavior that no longer exists. No broken test expectations found in scenario code.
+
+**Design tension — SpecToIdle vs STOP instruction:**
+The implement.md template says "STOP" after `mindspec complete`. SpecToIdle asks the agent to continue past this to `approve impl` and return to idle. This works because (a) the STOP is about "next bead" not "next phase", and (b) the prompt explicitly overrides with an idle end-state goal. But the bare "STOP" wording is ambiguous enough to confuse Haiku. Recommended fix: clarify STOP wording to "do not claim the next bead" or "do not run `mindspec next`" rather than a bare "STOP".
 
 **Key behavioral invariants correctly tested:**
 - STOP after `mindspec complete` (implement.md lines 49, 94) — validated by MultiBeadDeps, SpecToIdle
