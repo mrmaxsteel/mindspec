@@ -325,7 +325,7 @@ func TestWorktreeRemove_ArgsConstruction(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := []string{"bd", "worktree", "remove", "worktree-bead-abc"}
+	expected := []string{"bd", "worktree", "remove", "worktree-bead-abc", "--force"}
 	if len(capturedArgs) != len(expected) {
 		t.Fatalf("args: got %v, want %v", capturedArgs, expected)
 	}
