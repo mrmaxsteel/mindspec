@@ -186,7 +186,7 @@ func FormatResult(r *Result) string {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead ready: %s\n", r.NextBead)
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", r.NextSpec)
-		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nReport completion to the user and wait for instructions.\n")
+		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
 		if r.WorktreeRemoved && r.SpecWorktree != "" {

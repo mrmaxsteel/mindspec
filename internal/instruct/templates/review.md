@@ -17,7 +17,7 @@ idle ── spec ── plan ── implement ──── >>> review ── idl
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
 | plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads. STOP after this — run `/clear` then `mindspec next` |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
-| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree. STOP after this — run `/clear` then `mindspec next` |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 
 ### Git rules
