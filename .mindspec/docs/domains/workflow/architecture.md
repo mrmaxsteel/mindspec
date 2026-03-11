@@ -13,7 +13,11 @@ Each mode gates:
 - **Required context** — what must be reviewed before proceeding
 - **Transition gates** — what conditions must hold to advance
 
-### Beads as Single State Store (ADR-0023)
+### Beads as Substrate (ADR-0023)
+
+Beads is both the single state store and the **contract between the planning and execution layers**. Each bead is a self-contained work packet that encapsulates requirements, context (impacted domains, ADR citations), dependencies, and acceptance criteria. A fresh agent picking up a bead doesn't need session history — the bead carries everything it needs.
+
+This is what makes execution pluggable: any orchestrator that can read beads can dispatch work. The planning layer writes beads; the execution engine reads them.
 
 All lifecycle state is derived from Beads — no filesystem state files (no `focus`, no `lifecycle.yaml`):
 
@@ -46,7 +50,19 @@ approve/impl.go   ──▶ exec.FinalizeEpic()
 cleanup/          ──▶ exec.Cleanup()
 ```
 
-**Import rule**: Workflow packages (`approve/`, `complete/`, `next/`, `cleanup/`, `specinit/`) call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly.
+**Import rule**: Workflow packages (`approve/`, `complete/`, `next/`, `cleanup/`, `spec/`) call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly.
+
+### Plan Quality Responsibility
+
+The workflow layer ensures plans are well-decomposed before handoff to the execution engine. This is critical because AI agents perform significantly better on well-structured, bitesize tasks than on vague or monolithic ones (see [arXiv:2512.08296](https://arxiv.org/abs/2512.08296)).
+
+Workflow enforces:
+- **Bead decomposition** — each bead must be a focused, independently completable unit of work
+- **Clear acceptance criteria** — every bead has verifiable completion conditions
+- **Dependency ordering** — beads declare dependencies so the execution engine dispatches them in the right order
+- **Validation gates** — `internal/validate/` checks structural requirements and ADR compliance before plan approval
+
+The execution engine trusts that approved plans are well-decomposed and simply executes them — it does not assess plan quality.
 
 ### ADR Governance
 

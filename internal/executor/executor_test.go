@@ -13,11 +13,11 @@ import (
 
 // --- Helpers ---
 
-func newTestExecutor(t *testing.T) *GitExecutor {
+func newTestExecutor(t *testing.T) *MindspecExecutor {
 	t.Helper()
 	root := t.TempDir()
 
-	g := &GitExecutor{
+	g := &MindspecExecutor{
 		Root: root,
 		// Defaults: all no-op / success.
 		CreateBranchFn:    func(name, from string) error { return nil },
@@ -43,8 +43,8 @@ func newTestExecutor(t *testing.T) *GitExecutor {
 
 // --- Interface compliance ---
 
-func TestGitExecutorImplementsExecutor(t *testing.T) {
-	var _ Executor = (*GitExecutor)(nil)
+func TestMindspecExecutorImplementsExecutor(t *testing.T) {
+	var _ Executor = (*MindspecExecutor)(nil)
 }
 
 func TestMockExecutorImplementsExecutor(t *testing.T) {

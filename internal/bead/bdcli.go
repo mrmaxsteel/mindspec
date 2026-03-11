@@ -122,30 +122,17 @@ func WorktreeList() ([]WorktreeListEntry, error) {
 	return entries, nil
 }
 
-// WorktreeRemove removes a worktree via `bd worktree remove`.
-// Beads performs safety checks (uncommitted changes, unpushed commits).
-// When no git remote is configured, --force is passed to skip the
-// unpushed-commits check (which would always fail without a remote).
+// WorktreeRemove removes a worktree via `bd worktree remove --force`.
+// The --force flag skips the "unpushed commits" safety check, which is
+// appropriate because mindspec always merges bead work into the spec
+// branch before removing the worktree.
 func WorktreeRemove(name string) error {
-	args := []string{"worktree", "remove", name}
-	if !hasGitRemote() {
-		args = append(args, "--force")
-	}
+	args := []string{"worktree", "remove", name, "--force"}
 	out, err := tracedCombined("worktree-remove", args)
 	if err != nil {
 		return fmt.Errorf("bd worktree remove failed: %s", string(out))
 	}
 	return nil
-}
-
-// hasGitRemote returns true if at least one git remote is configured.
-func hasGitRemote() bool {
-	cmd := execCommand("git", "remote")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) != ""
 }
 
 // ListJSON runs `bd list <args> --json` and returns valid JSON bytes (a JSON array).

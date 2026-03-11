@@ -18,13 +18,14 @@ import (
 
 // Package-level function variables for testability.
 var (
-	closeBeadFn     = bead.Close
-	worktreeListFn  = bead.WorktreeList
-	runBDFn         = bead.RunBD
-	listJSONFn      = bead.ListJSON
-	resolveTargetFn = resolve.ResolveTarget
-	findLocalRootFn = defaultFindLocalRoot
-	fetchBeadByIDFn = next.FetchBeadByID
+	closeBeadFn       = bead.Close
+	worktreeListFn    = bead.WorktreeList
+	runBDFn           = bead.RunBD
+	listJSONFn        = bead.ListJSON
+	resolveTargetFn   = resolve.ResolveTarget
+	findLocalRootFn   = defaultFindLocalRoot
+	fetchBeadByIDFn   = next.FetchBeadByID
+	findEpicForBeadFn = phase.FindEpicForBead
 )
 
 // Result summarizes what mindspec complete did.
@@ -59,6 +60,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 	specID, err := resolveTargetFn(localRoot, specIDHint)
 	if err != nil && localRoot != root {
 		specID, err = resolveTargetFn(root, specIDHint)
+	}
+	// If still ambiguous but we have a bead ID, resolve spec from the bead's parent epic.
+	if err != nil && beadID != "" {
+		if _, derivedSpec, beadErr := findEpicForBeadFn(beadID); beadErr == nil && derivedSpec != "" {
+			specID = derivedSpec
+			err = nil
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolving active spec: %w", err)
@@ -178,6 +186,7 @@ func FormatResult(r *Result) string {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead ready: %s\n", r.NextBead)
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", r.NextSpec)
+		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nReport completion to the user and wait for instructions.\n")
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
 		if r.WorktreeRemoved && r.SpecWorktree != "" {

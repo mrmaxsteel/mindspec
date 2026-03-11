@@ -282,6 +282,28 @@ func TestLLM_UnmergedBeadGuard(t *testing.T) {
 	}
 }
 
+// --- Stop behavior scenarios ---
+
+func TestLLM_StopAfterComplete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioStopAfterComplete())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
+func TestLLM_StopDoesNotBlockApproveImpl(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioStopDoesNotBlockApproveImpl())
+	if len(report.WrongActions) > 0 {
+		t.Errorf("unexpected wrong actions: %d", len(report.WrongActions))
+	}
+}
+
 // --- Assertion helper unit tests ---
 
 func TestAssertMergeTopology(t *testing.T) {

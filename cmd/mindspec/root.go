@@ -11,10 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newExecutor creates a GitExecutor rooted at the given path.
+// newExecutor creates a MindspecExecutor rooted at the given path.
 // Used as a factory function across CLI commands.
 func newExecutor(root string) executor.Executor {
-	return executor.NewGitExecutor(root)
+	return executor.NewMindspecExecutor(root)
 }
 
 // Set by goreleaser ldflags.

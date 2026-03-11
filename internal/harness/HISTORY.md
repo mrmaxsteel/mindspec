@@ -518,6 +518,182 @@ Track each test run with: scenario, date, pass/fail, recorded events count, turn
 - **Key observation**: The `bd close` shortcut issue is intermittent on Opus (both scenarios passed in the previous Opus run). The guidance tells the agent to use `mindspec complete`, but `bd close` also works at the beads level. The agent occasionally takes the shorter path.
 - **Total wall time**: ~35 minutes for 18 scenarios (comparable to previous run).
 
+## Test Audit (Spec 081)
+
+**Date**: 2026-03-10
+**Audited by**: Spec 081 Bead 4
+**Context**: Post-ADR-0023 (beads-derived phases), post-Spec 080 (template `{{.ActiveBead}}` fix), post-Bead 1-2 renames (`GitExecutor` → `MindspecExecutor`, `specinit/` → `spec/`, `gitops` → `gitutil`)
+
+### Methodology
+
+Reviewed all 18 scenarios in `scenario.go` against:
+1. Current implement.md template behavior (STOP after complete, manual `mindspec next`)
+2. ADR-0023 phase derivation rules (beads-derived, no focus files)
+3. Bead 1-2 rename impacts on test code
+4. MaxTurns/timeout realism based on HISTORY data
+5. Assertion correctness vs current CLI behavior
+
+### Per-Scenario Findings
+
+#### 1. SpecToIdle — Full lifecycle (idle → spec → plan → implement → review → idle)
+- **Status**: Current, **design tension identified**
+- **Assumptions**: Prompt says "finish only when the project is back in idle" — agent must power through the entire lifecycle in one session
+- **Tension with STOP instruction**: `implement.md` (lines 49, 94) says "After `mindspec complete` succeeds, STOP. Do NOT automatically continue to the next bead." The prompt intentionally overrides this by asking for idle end-state. For single-bead specs, "next bead" is inapplicable (the agent needs `approve impl`, not `mindspec next`), so the STOP is technically about a different action. But the word "STOP" is ambiguous — Opus reasons past it ("don't continue to next bead" ≠ "don't run approve impl"), while Haiku interprets it as "stop everything." This is likely the root cause of Haiku's consistent SpecToIdle failures.
+- **MaxTurns**: 100 — appropriate. Opus needs ~14-39 turns, Haiku needs up to 53
+- **Assertions**: Comprehensive — branch cleanup, worktree removal, mode=idle, pre-approve merge guard
+- **Recommendation**: Either (a) clarify STOP wording in implement.md to specify "do not claim the next bead" instead of bare "STOP", or (b) accept that SpecToIdle is an Opus-tier test that validates the agent can reconcile prompt-level goals with template guidance. Currently PASS on Opus, consistently FAIL on Haiku.
+- **Note**: `assertCommandRanEither` correctly handles `spec create` vs `spec-init` alias
+
+#### 2. SingleBead — Single pre-approved bead implementation
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent creates file, runs `mindspec complete`, bead closes
+- **MaxTurns**: 20 — appropriate. Typically completes in 3-6 turns
+- **Assertions**: greeting.go artifact (with worktree fallback), complete ran, impl( commit message, merge topology, bead state
+- **Note**: Artifact detection includes event-log git-add fallback — robust against worktree cleanup
+
+#### 3. MultiBeadDeps — Three beads with dependency chain
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent uses `mindspec next` between beads (matches STOP-after-complete behavior)
+- **MaxTurns**: 30 — appropriate for 3 beads
+- **Assertions**: Minimal (only checks `mindspec next` ran) — intentional for cost/reliability
+- **Potential improvement**: Could assert at least 2 beads closed, but Haiku reliability makes this fragile
+
+#### 4. InterruptForBug — Mid-bead interrupt for bug fix
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent can handle interrupts within a bead context
+- **MaxTurns**: 25 — appropriate
+- **Assertions**: feature.go artifact only — doesn't verify bug fix commit, but acceptable scope
+
+#### 5. ResumeAfterCrash — Resume in-progress bead with partial work
+- **Status**: Current, no issues
+- **Assumptions valid**: Bead worktree with partial.go exists, agent completes the function
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: partial.go exists, mindspec complete ran
+
+#### 6. SpecInit — Idle → spec create → spec mode
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent discovers `mindspec spec create` from guidance (not raw git)
+- **MaxTurns**: 20 — appropriate
+- **Assertions**: Robust — detects raw git branch/checkout as violations, verifies spec/ branch, worktree, spec.md
+- **Note**: Handles both `spec-init` and `spec create` command forms
+
+#### 7. SpecApprove — Spec → plan mode transition
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent runs approve spec from worktree context
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: approve ran, spec/ branch persists, worktree persists, mode=plan
+
+#### 8. PlanApprove — Plan → implement mode transition
+- **Status**: Current, no issues
+- **Assumptions valid**: Plan approve auto-claims first bead, `mindspec next` is optional
+- **MaxTurns**: 20 — appropriate
+- **Assertions**: approve plan ran, beads created (min 2), optional next/bead checks
+- **Note**: Correctly handles Opus behavior of completing full lifecycle (approve→impl)
+
+#### 9. ImplApprove — Review → idle transition
+- **Status**: Current, no issues
+- **Assumptions valid**: All beads closed, spec branch merged/deleted, worktree removed
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: approve impl ran, pre-approve merge guard, branch deleted, worktree removed, done.go merged
+- **Note**: `preApproveImplMainMergeOrPRViolation` correctly exempts canonical internal merge pattern
+
+#### 10. SpecStatus — Read-only status check
+- **Status**: Current, no issues
+- **Assumptions valid**: No state changes from status command
+- **MaxTurns**: 10 — appropriate
+- **Assertions**: Thorough — no user files modified, main commit count unchanged, worktrees/branches preserved
+- **Note**: `assertMainCommitCountUnchanged` correctly excludes .beads/ infrastructure commits
+
+#### 11. MultipleActiveSpecs — Two specs active, implement one
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent completes 001-alpha without disrupting 002-beta
+- **MaxTurns**: 30 — appropriate
+- **Assertions**: greeting.go, complete ran, bead closed, merge topology, 002-beta children empty
+- **Note**: `--spec` flag assertion was correctly removed (worktree resolution supersedes)
+
+#### 12. StaleWorktree — Recovery when bead worktree missing
+- **Status**: Current, no issues
+- **Assumptions valid**: Spec worktree exists but bead worktree is missing, agent recovers
+- **MaxTurns**: 20 — appropriate
+- **Assertions**: widget.go created, mindspec complete succeeded
+- **Setup note**: Correctly creates bead branch without worktree via `setupWorktrees(sandbox, specID, "", "spec")` + manual branch creation
+
+#### 13. CompleteFromSpecWorktree — Bead completion from spec worktree CWD
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent can complete bead even when CWD is spec worktree (auto-redirect)
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: complete succeeded, bead closed
+
+#### 14. ApproveSpecFromWorktree — Spec approval with artifacts only in worktree
+- **Status**: Current, no issues
+- **Assumptions valid**: Worktree-aware resolution finds spec artifacts
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: approve spec succeeded, branches/worktrees persist
+
+#### 15. ApprovePlanFromWorktree — Plan approval with artifacts only in worktree
+- **Status**: Current, no issues
+- **Assumptions valid**: Plan approval works from worktree context
+- **MaxTurns**: 15 — appropriate
+- **Assertions**: approve plan succeeded, beads created, branch persists (unless full lifecycle completed)
+- **Note**: Relaxed branch assertion correctly handles Opus completing full lifecycle
+
+#### 16. BugfixBranch — Bug fix on branch + PR, not directly on main
+- **Status**: Current, no issues
+- **Assumptions valid**: Agent creates branch, pushes, opens PR — doesn't commit to main
+- **MaxTurns**: 25 — appropriate
+- **Assertions**: non-main branch, main unchanged, git push, gh pr create
+- **Network dependency**: Uses real GitHub remote (`mrmaxsteel/test-mindspec`) — test may fail if GitHub is unreachable
+- **Cleanup**: `cleanupBugfixBranchPRs` handles PR/branch cleanup after test
+
+#### 17. BlockedBeadTransition — Mode → plan when only blocked beads remain
+- **Status**: Current, no issues
+- **Assumptions valid**: After completing bead-1, mode returns to plan (bead-2 blocked by dependency)
+- **MaxTurns**: 20, **TimeoutMin**: 10 — appropriate
+- **Assertions**: complete ran, bead-1 closed, bead-2 open, **mode=plan** (critical assertion)
+- **Key test**: `assertMindspecMode(t, sandbox, "plan")` catches `bd close` shortcut — bd close skips state transitions
+- **Matches ADR-0023**: "Some children closed, some open, some blocked → plan"
+
+#### 18. UnmergedBeadGuard — Recovery after bd close without mindspec complete
+- **Status**: Current, no issues
+- **Assumptions valid**: `mindspec next` blocks when predecessor bead has unmerged branch, agent runs `mindspec complete` to recover
+- **MaxTurns**: 35, **TimeoutMin**: 10 — appropriate (recovery flow is expensive)
+- **Assertions**: complete ran, bead-1 closed, mindspec next is optional (t.Log not t.Error)
+- **Note**: Product fix (skip dirty-tree check in recovery mode) was needed to make this scenario passable
+
+### Code-Level Findings
+
+| Check | Result |
+|:------|:-------|
+| References to `GitExecutor` in harness code | None found |
+| References to `specinit` in harness code | None found |
+| References to `gitops` in harness code | One in HISTORY.md (historical note, line 686) — left as-is (closed artifact) |
+| `setupWorktrees` helper usage | All 18 scenarios use it correctly |
+| `assertBeadsState` uses `bd show <id> --json` | Correct (avoids known `bd list --json --parent` bug) |
+| `assertMergeTopology` fallback to `--all` | Correct (handles post-impl-approve branch deletion) |
+| `assertMainCommitCountUnchanged` infra exclusion | Correct (excludes .beads/ commits) |
+
+### Overall Assessment
+
+**17/18 scenarios have correct assumptions with no issues. 1 scenario (SpecToIdle) has a design tension** between the implement.md STOP instruction and the prompt's end-to-end lifecycle goal. No scenarios test behavior that no longer exists. No broken test expectations found in scenario code.
+
+**Design tension — SpecToIdle vs STOP instruction:**
+The implement.md template says "STOP" after `mindspec complete`. SpecToIdle asks the agent to continue past this to `approve impl` and return to idle. This works because (a) the STOP is about "next bead" not "next phase", and (b) the prompt explicitly overrides with an idle end-state goal. But the bare "STOP" wording is ambiguous enough to confuse Haiku. Recommended fix: clarify STOP wording to "do not claim the next bead" or "do not run `mindspec next`" rather than a bare "STOP".
+
+**Key behavioral invariants correctly tested:**
+- STOP after `mindspec complete` (implement.md lines 49, 94) — validated by MultiBeadDeps, SpecToIdle
+- Manual `mindspec next` between beads — validated by MultiBeadDeps, SpecToIdle
+- `plan approve` auto-claims first bead — correctly optional `next` in SpecToIdle, PlanApprove
+- `implement → plan` when only blocked beads remain — validated by BlockedBeadTransition
+- Unmerged bead guard — validated by UnmergedBeadGuard
+- Pre-approve merge/PR prohibition — validated by ImplApprove, SpecToIdle
+
+**Haiku vs Opus reliability:**
+- Opus: 16/18 pass rate (latest full suite), reliable lifecycle command adherence
+- Haiku: ~8/18 pass rate, frequently bypasses lifecycle commands (`bd close` shortcut, raw git instead of `mindspec complete`)
+- All Haiku failures are pre-existing behavioral issues, not test design problems
+
+**No changes required.** Scenarios are well-designed and match current behavior.
+
 ### Key Metrics to Track Per Run
 - **Events**: total shim-recorded commands (multiple per turn -- measures total agent activity)
 - **Turns (estimated)**: API round-trips, estimated from event timestamp gaps >2s. The `--max-turns` flag sets the budget; "Reached max turns" means all were consumed
@@ -709,3 +885,17 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 ### Worktree CWD Sensitivity (RESOLVED — 2026-03-02)
 **Problem**: Running `git worktree add` from inside an existing worktree can create the new worktree relative to CWD, causing recursive `.worktrees/.../.worktrees/...` nesting and cleanup leakage.
 **Status (2026-03-02)**: Fixed in `internal/next/beads.go`: `mindspec next` now anchors worktree creation to the spec worktree (when active) or main root, independent of caller CWD. Added deterministic unit coverage in `internal/next/next_test.go` and validated with LLM reruns (`SpecToIdle` pass, `CompleteFromSpecWorktree` regression check pass).
+
+### TestLLM_StopAfterComplete (NEW — Spec 081)
+
+| Date | Result | Events | Turns | Time | Model | Change |
+|------|--------|--------|-------|------|-------|--------|
+| 2026-03-10 | FAIL | ~1500 | 40 | ~8m | Haiku | Baseline: Haiku ran `mindspec next` after completing bead (SOP violation). Also closed bead-2 instead of bead-1. |
+| 2026-03-10 | FAIL | ~3500 | 40 | ~8m | Opus | Switched to Opus. Agent still ran `mindspec next` after `mindspec complete`. Issue: `mindspec complete` failed (exit=1) on some beads, agent never saw STOP output. Also, assertion was too broad (caught pre-completion `mindspec next`). |
+| 2026-03-10 | **PASS** | 1671 | 19 | 4m35s | Opus | Fixed temporal assertion (only flag `mindspec next` after first bead closure), strengthened CLI STOP message ("STOP HERE. Do NOT run `mindspec next`..."), removed ambiguous "/clear then mindspec next" hint. 94.7% fwd ratio. |
+
+### TestLLM_StopDoesNotBlockApproveImpl (NEW — Spec 081)
+
+| Date | Result | Events | Turns | Time | Model | Change |
+|------|--------|--------|-------|------|-------|--------|
+| 2026-03-10 | **PASS** | 1871 | 23 | 5m2s | Opus | Baseline: agent completed bead, then correctly continued to `approve impl` (not blocked by STOP instruction). 95.7% fwd ratio. |

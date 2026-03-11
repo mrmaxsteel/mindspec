@@ -15,7 +15,7 @@ idle ── spec ──── >>> plan ── implement ── review ── idl
 |-------|---------|--------------|
 | idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
-| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-claims first bead |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads. STOP after this — run `/clear` then `mindspec next` |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
 | bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
@@ -115,5 +115,5 @@ Apply these research-backed questions while decomposing the spec into beads (see
 Plan is approved. Run `mindspec next` to claim the next bead.
 {{- else}}
 
-Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. This will approve the plan AND automatically claim the first bead.
+Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. After approval, STOP — run `/clear`, then `mindspec next` to claim your first bead.
 {{- end}}

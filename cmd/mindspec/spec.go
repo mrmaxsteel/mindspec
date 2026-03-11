@@ -7,7 +7,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/specinit"
+	"github.com/mrmaxsteel/mindspec/internal/spec"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -33,7 +33,7 @@ creates a branch and worktree, sets state to spec mode, and emits guidance.`,
 		}
 
 		exec := newExecutor(root)
-		result, err := specinit.Run(root, specID, title, exec)
+		result, err := spec.Run(root, specID, title, exec)
 		if err != nil {
 			return err
 		}

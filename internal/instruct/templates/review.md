@@ -15,7 +15,7 @@ idle ── spec ── plan ── implement ──── >>> review ── idl
 |-------|---------|--------------|
 | idle → spec | `mindspec spec create <slug>` | Creates branch + worktree + spec template |
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
-| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads, auto-claims first bead |
+| plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads. STOP after this — run `/clear` then `mindspec next` |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
 | bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |

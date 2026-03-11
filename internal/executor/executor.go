@@ -7,10 +7,10 @@
 package executor
 
 // Executor abstracts workspace lifecycle operations. Implementations include
-// GitExecutor (local git+worktrees) and MockExecutor (testing).
+// MindspecExecutor (local git+worktrees) and MockExecutor (testing).
 //
 // Terminology: "workspace" means an isolated working copy (git worktree in
-// GitExecutor, no-op directory in MockExecutor). "Epic" is a group of beads
+// MindspecExecutor, no-op directory in MockExecutor). "Epic" is a group of beads
 // (implementation tasks) belonging to a single spec lifecycle.
 type Executor interface {
 	// InitSpecWorkspace creates a workspace for spec authoring.
@@ -18,7 +18,7 @@ type Executor interface {
 	InitSpecWorkspace(specID string) (WorkspaceInfo, error)
 
 	// HandoffEpic notifies the execution layer that beads are ready for
-	// dispatch. For GitExecutor this is a no-op (beads are already created
+	// dispatch. For MindspecExecutor this is a no-op (beads are already created
 	// by the enforcement layer). Other executors may use this to schedule
 	// work distribution.
 	HandoffEpic(epicID, specID string, beadIDs []string) error

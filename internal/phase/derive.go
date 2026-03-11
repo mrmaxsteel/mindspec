@@ -289,7 +289,7 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 	switch kind {
 	case workspace.WorktreeBead:
 		ctx.BeadID = beadID
-		epicID, derivedSpecID, err := findEpicForBead(beadID)
+		epicID, derivedSpecID, err := FindEpicForBead(beadID)
 		if err == nil && derivedSpecID != "" {
 			ctx.SpecID = derivedSpecID
 			ctx.EpicID = epicID
@@ -525,7 +525,9 @@ func ParseSpecFromTitle(title string) (int, string) {
 	return num, slug
 }
 
-func findEpicForBead(beadID string) (epicID, specID string, err error) {
+// FindEpicForBead looks up the parent epic for a bead and returns the epic ID
+// and derived spec ID. Used by complete to resolve the spec from just a bead ID.
+func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 	out, err := runBDFn("show", beadID, "--json")
 	if err != nil {
 		return "", "", fmt.Errorf("bd show %s failed: %w", beadID, err)

@@ -47,6 +47,8 @@ func AllScenarios() []Scenario {
 		ScenarioBugfixBranch(),
 		ScenarioBlockedBeadTransition(),
 		ScenarioUnmergedBeadGuard(),
+		ScenarioStopAfterComplete(),
+		ScenarioStopDoesNotBlockApproveImpl(),
 	}
 }
 
@@ -78,10 +80,10 @@ Finish only when the project is back in idle with cleanup complete.`,
 			assertCommandSucceeded(t, events, "mindspec", "approve", "plan")
 			assertCommandSucceeded(t, events, "mindspec", "approve", "impl")
 
-			// `mindspec next` is optional for single-bead specs because
-			// `plan approve` auto-claims the first bead. Log if skipped.
+			// `mindspec next` may be skipped if the agent navigates directly
+			// to the bead worktree created by plan approve + next in sequence.
 			if !commandRanSuccessfully(events, "mindspec", "next") {
-				t.Logf("mindspec next was not called (plan approve auto-claimed first bead)")
+				t.Logf("mindspec next was not explicitly called")
 			}
 
 			// Git state after full lifecycle
@@ -655,13 +657,13 @@ Unit tests via `+"`go test`"+` covering the Plan() function and edge cases.
 			// Beads were created by plan approve (plan has 2 bead sections)
 			assertBeadsMinCount(t, sandbox, epicID, 2)
 
-			// `mindspec next` is optional — plan approve auto-claims the
-			// first bead. If next ran, verify bead branch + worktree too.
+			// `mindspec next` should be called after plan approve to claim a bead.
+			// If next ran, verify bead branch + worktree too.
 			if commandRanSuccessfully(events, "mindspec", "next") {
 				assertHasBranches(t, sandbox, "bead/")
 				assertEventCWDContains(t, events, ".worktrees/")
 			} else {
-				t.Logf("mindspec next was not called (plan approve auto-claimed first bead)")
+				t.Logf("mindspec next was not explicitly called")
 			}
 		},
 	}
@@ -1628,6 +1630,168 @@ If mindspec next fails, read the error message carefully and follow its instruct
 	}
 }
 
+// ScenarioStopAfterComplete tests the SOP: after completing a bead, the agent
+// STOPS and does NOT automatically claim the next bead via `mindspec next`.
+//
+// Before: Multi-bead spec (2 beads), bead-1 claimed, implement mode
+// After:  Agent completes bead-1 and STOPS — does NOT run `mindspec next` for bead-2
+func ScenarioStopAfterComplete() Scenario {
+	var epicID, bead1, bead2 string
+	return Scenario{
+		Name:        "stop_after_complete",
+		Description: "Agent stops after completing a bead, does not auto-claim next",
+		MaxTurns:    25,
+		Model:       "opus",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-stop"
+
+			epicID = sandbox.CreateSpecEpic(specID)
+			bead1 = sandbox.CreateBead("["+specID+"] First task", "task", epicID)
+			bead2 = sandbox.CreateBead("["+specID+"] Second task", "task", epicID)
+			sandbox.ClaimBead(bead1)
+
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Stop Test
+status: Approved
+---
+# Stop Test
+Two tasks.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+status: Approved
+spec_id: `+specID+`
+---
+# Plan
+## Bead 1: First task
+Create first.go with a First() function.
+## Bead 2: Second task
+Create second.go with a Second() function.
+`)
+			sandbox.Commit("setup: two-bead spec")
+			setupWorktrees(sandbox, specID, bead1, "implement")
+			sandbox.Commit("setup: implement mode")
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+Create a file called first.go with a function First() string that returns "first".
+Then finish the currently claimed bead through the MindSpec lifecycle.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Find the first bead-close event (mindspec complete or bd close).
+			firstCloseIdx := -1
+			for i, e := range events {
+				if e.ExitCode != 0 {
+					continue
+				}
+				args := eventArgs(e)
+				isMSComplete := e.Command == "mindspec" && containsAll(args, "complete")
+				isBDClose := e.Command == "bd" && containsAll(args, "close")
+				if isMSComplete || isBDClose {
+					firstCloseIdx = i
+					break
+				}
+			}
+			if firstCloseIdx == -1 {
+				t.Fatal("agent never completed any bead (no mindspec complete or bd close succeeded)")
+			}
+
+			// CRITICAL: Agent did NOT run mindspec next AFTER closing a bead.
+			// Running `mindspec next` before the first completion is OK (agent orienting).
+			for _, e := range events[firstCloseIdx+1:] {
+				if e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "next") {
+					t.Error("agent ran 'mindspec next' after completing a bead — should have STOPPED (SOP violation)")
+					break
+				}
+			}
+
+			// Exactly one bead closed, the other still open.
+			// The agent might complete bead-1 (as prompted) or bead-2 (via mindspec next).
+			// Either way, only one should be closed if the agent stopped.
+			b1Status := beadStatusStr(sandbox, bead1)
+			b2Status := beadStatusStr(sandbox, bead2)
+			closedCount := 0
+			if b1Status == "closed" {
+				closedCount++
+			}
+			if b2Status == "closed" {
+				closedCount++
+			}
+			if closedCount == 0 {
+				t.Error("no beads were closed — agent failed to complete any bead")
+			} else if closedCount == 2 {
+				t.Error("both beads were closed — agent should have STOPPED after closing the first one")
+			}
+
+			// Preferred: agent used mindspec complete (not bd close).
+			if !commandRanSuccessfully(events, "mindspec", "complete") {
+				t.Log("NOTE: agent used bd close instead of mindspec complete")
+			}
+		},
+	}
+}
+
+// ScenarioStopDoesNotBlockApproveImpl tests that the STOP instruction after
+// `mindspec complete` does not prevent the agent from running `approve impl`
+// when the prompt explicitly asks for the spec to reach idle/review.
+//
+// Before: Single-bead spec, bead-1 claimed, implement mode
+// After:  Agent completes bead-1 AND runs approve impl to reach idle
+func ScenarioStopDoesNotBlockApproveImpl() Scenario {
+	var epicID, beadID string
+	return Scenario{
+		Name:        "stop_does_not_block_approve_impl",
+		Description: "STOP after complete does not prevent approve impl when prompted",
+		MaxTurns:    25,
+		Model:       "opus",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-approve"
+
+			epicID = sandbox.CreateSpecEpic(specID)
+			beadID = sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
+			sandbox.ClaimBead(beadID)
+
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Approve Test
+status: Approved
+---
+# Approve Test
+Single feature.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+status: Approved
+spec_id: %s
+bead_ids:
+- %s
+---
+# Plan
+## Bead 1: Implement feature
+Create feature.go with a Feature() function.
+`, specID, beadID))
+			sandbox.Commit("setup: single-bead spec")
+			setupWorktrees(sandbox, specID, beadID, "implement")
+			sandbox.Commit("setup: implement mode")
+			return nil
+		},
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+Create a file called feature.go with a function Feature() string that returns "feature".
+Finish the bead and take this spec all the way to idle — complete the bead, then
+approve the implementation so the project returns to idle mode.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// Agent completed the bead
+			assertCommandRan(t, events, "mindspec", "complete")
+
+			// Agent continued past STOP to run approve impl
+			assertCommandSucceeded(t, events, "mindspec", "approve", "impl")
+
+			// Bead was closed
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				beadID: "closed",
+			})
+		},
+	}
+}
+
 // gitBranchExists checks if a git branch exists in the sandbox.
 func gitBranchExists(sandbox *Sandbox, branch string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", branch)
@@ -2058,6 +2222,19 @@ type beadStatus struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
 	Title  string `json:"title"`
+}
+
+// beadStatusStr returns the status of a bead by ID, or "unknown" on error.
+func beadStatusStr(sandbox *Sandbox, beadID string) string {
+	out, err := sandbox.runBD("show", beadID, "--json")
+	if err != nil {
+		return "unknown"
+	}
+	var infos []beadStatus
+	if err := json.Unmarshal([]byte(out), &infos); err != nil || len(infos) == 0 {
+		return "unknown"
+	}
+	return strings.TrimSpace(strings.ToLower(infos[0].Status))
 }
 
 // assertBeadsMinCount verifies that at least minCount child beads exist under

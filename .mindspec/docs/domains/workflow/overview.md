@@ -29,7 +29,7 @@ Workflow **uses** context packs (from context-system) to provide mode-appropriat
 | `internal/approve/` | Spec, plan, and impl approval enforcement |
 | `internal/complete/` | Bead close-out orchestration |
 | `internal/next/` | Work selection, claiming, worktree dispatch |
-| `internal/specinit/` | Spec creation (worktree-first flow) |
+| `internal/spec/` | Spec creation (worktree-first flow) |
 | `internal/cleanup/` | Post-lifecycle worktree/branch cleanup |
 | `internal/phase/` | Phase derivation from beads (ADR-0023) |
 | `internal/resolve/` | Target spec resolution and prefix matching |

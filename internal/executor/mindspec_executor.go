@@ -12,12 +12,12 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
-// GitExecutor implements Executor using local git operations and beads
+// MindspecExecutor implements Executor using local git operations and beads
 // worktree CLI. It preserves all current behavior: worktree-first creation,
 // --no-ff merges, .gitignore management.
 //
 // Function fields are exposed for testability via injection.
-type GitExecutor struct {
+type MindspecExecutor struct {
 	Root string // Main repo root (absolute path)
 
 	// Git operations (default to gitutil package functions).
@@ -46,9 +46,9 @@ type GitExecutor struct {
 	ExecCommandFn func(name string, arg ...string) *exec.Cmd
 }
 
-// NewGitExecutor creates a GitExecutor with default function bindings.
-func NewGitExecutor(root string) *GitExecutor {
-	return &GitExecutor{
+// NewMindspecExecutor creates a MindspecExecutor with default function bindings.
+func NewMindspecExecutor(root string) *MindspecExecutor {
+	return &MindspecExecutor{
 		Root:              root,
 		CreateBranchFn:    gitutil.CreateBranch,
 		BranchExistsFn:    gitutil.BranchExists,
@@ -71,8 +71,8 @@ func NewGitExecutor(root string) *GitExecutor {
 }
 
 // InitSpecWorkspace creates a workspace for spec authoring.
-// Mirrors the logic in internal/specinit/specinit.go (Phase 1).
-func (g *GitExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {
+// Mirrors the logic in internal/spec/create.go (Phase 1).
+func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {
 	cfg, err := g.LoadConfigFn(g.Root)
 	if err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("loading config: %w", err)
@@ -106,16 +106,16 @@ func (g *GitExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {
 	return WorkspaceInfo{Path: wtPath, Branch: specBranch}, nil
 }
 
-// HandoffEpic is a no-op for GitExecutor. Beads are already created by the
+// HandoffEpic is a no-op for MindspecExecutor. Beads are already created by the
 // enforcement layer (plan approve). Other executor implementations (e.g.
 // Gastown) may use this to schedule work distribution.
-func (g *GitExecutor) HandoffEpic(epicID, specID string, beadIDs []string) error {
+func (g *MindspecExecutor) HandoffEpic(epicID, specID string, beadIDs []string) error {
 	return nil
 }
 
 // DispatchBead creates a workspace for a bead implementation.
 // Mirrors the logic in internal/next/beads.go EnsureWorktree().
-func (g *GitExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, error) {
+func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, error) {
 	cfg, err := g.LoadConfigFn(g.Root)
 	if err != nil {
 		cfg = config.DefaultConfig()
@@ -182,7 +182,7 @@ func (g *GitExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, error)
 
 // CompleteBead closes out a bead: commits, merges into spec, removes worktree,
 // deletes branch. Mirrors the logic in internal/complete/complete.go.
-func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
+func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	beadBranch := "bead/" + beadID
 	wtName := "worktree-" + beadID
 
@@ -230,6 +230,15 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 		}
 	}
 
+	// Safety check: verify bead branch is merged into spec branch before cleanup.
+	// This prevents data loss if the merge above failed silently.
+	if g.BranchExistsFn(beadBranch) {
+		isAnc, ancErr := g.IsAncestorFn(g.Root, beadBranch, specBranch)
+		if ancErr != nil || !isAnc {
+			return fmt.Errorf("bead branch %s is NOT merged into %s — aborting cleanup to prevent data loss", beadBranch, specBranch)
+		}
+	}
+
 	// Remove worktree and delete branch from repo root (not from inside the
 	// worktree being removed). Matches the pattern in FinalizeEpic().
 	if err := withWorkingDir(g.Root, func() error {
@@ -252,7 +261,7 @@ func (g *GitExecutor) CompleteBead(beadID, specBranch, msg string) error {
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
 // branches. Handles bead branch auto-merge into the spec branch before
 // cleanup, ensuring all bead work is integrated.
-func (g *GitExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
+func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
 	result := FinalizeResult{}
 
 	if !g.BranchExistsFn(specBranch) {
@@ -352,7 +361,7 @@ func (g *GitExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeR
 
 // Cleanup removes stale workspaces and branches for a spec.
 // Mirrors the logic in internal/cleanup/cleanup.go.
-func (g *GitExecutor) Cleanup(specID string, force bool) error {
+func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
 	specBranch := "spec/" + specID
 	specWtName := "worktree-spec-" + specID
 
@@ -374,7 +383,7 @@ func (g *GitExecutor) Cleanup(specID string, force bool) error {
 }
 
 // IsTreeClean returns nil if the workspace at path has no uncommitted changes.
-func (g *GitExecutor) IsTreeClean(path string) error {
+func (g *MindspecExecutor) IsTreeClean(path string) error {
 	cmd := g.ExecCommandFn("git", "-C", path, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
@@ -387,23 +396,23 @@ func (g *GitExecutor) IsTreeClean(path string) error {
 }
 
 // DiffStat returns a short diffstat summary between two refs.
-func (g *GitExecutor) DiffStat(base, head string) (string, error) {
+func (g *MindspecExecutor) DiffStat(base, head string) (string, error) {
 	return g.DiffStatFn(g.Root, base, head)
 }
 
 // CommitCount returns the number of commits between base and head.
-func (g *GitExecutor) CommitCount(base, head string) (int, error) {
+func (g *MindspecExecutor) CommitCount(base, head string) (int, error) {
 	return g.CommitCountFn(g.Root, base, head)
 }
 
 // CommitAll stages all changes and commits with the given message.
-func (g *GitExecutor) CommitAll(path, msg string) error {
+func (g *MindspecExecutor) CommitAll(path, msg string) error {
 	return g.CommitAllFn(path, msg)
 }
 
 // resolveAnchorRoot returns the spec worktree path if it exists, otherwise
 // the main repo root. Bead worktrees are anchored under the spec worktree.
-func (g *GitExecutor) resolveAnchorRoot(specID string) string {
+func (g *MindspecExecutor) resolveAnchorRoot(specID string) string {
 	if specID == "" {
 		return g.Root
 	}

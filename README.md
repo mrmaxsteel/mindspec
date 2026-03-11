@@ -1,16 +1,14 @@
 # MindSpec
 
-**Spec-driven development and real-time observability for AI coding agents.**
+**A planning and governance layer for AI coding agents.**
 
-AI coding agents are powerful but unstructured. Without guardrails they:
+AI coding agents are powerful executors but poor planners. Without structure, they drift from intent, steamroll architecture decisions, and let scope creep turn a small feature into a three-subsystem refactor.
 
-- **Drift from intent** — the agent builds what it infers, not what you specified
-- **Ignore architecture** — existing design decisions and ADRs get steamrolled
-- **Lose context between sessions** — every conversation starts from scratch
-- **Skip documentation** — code ships, docs rot
-- **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
+The fix isn't better prompting — it's better planning.
 
-MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+MindSpec is the **planning and governance layer** that sits upstream of your agent orchestrator. It breaks work into spec → plan → bitesize beads, validates each bead against your architecture (ADRs, domain boundaries), and enforces quality gates before any code gets written. The result is a structured plan with clear acceptance criteria that any execution engine — Claude Code working solo, a multi-agent orchestrator like [Gastown](https://github.com/steveyegge/gastown), or OpenAI Codex — can implement reliably.
+
+Research on scaling agent systems ([arXiv:2512.08296](https://arxiv.org/abs/2512.08296)) confirms what we've seen in practice: **task decomposition quality is the #1 predictor of agent execution success.** MindSpec exists to get the decomposition right.
 
 <p align="center">
   <img src="agentmind.png" alt="AgentMind — AI Agent Observability UI" width="800" />
@@ -80,6 +78,44 @@ Idle ──→ [Explore Mode]
 The work graph is tracked by [Beads](https://github.com/steveyegge/beads), a git-native issue tracker that survives across sessions without external services.
 
 Documentation stays current because the system won't let you skip it — beads can't close without doc-sync, architecture decisions are tracked as ADRs that plans must cite, and every spec produces versioned artifacts that persist alongside the code.
+
+## Architecture
+
+MindSpec separates **planning** from **execution**, with [Beads](https://github.com/steveyegge/beads) as the substrate that connects them.
+
+### Planning & Governance Layer
+
+The planning layer owns everything *before* code gets written:
+
+- **Specification** — defines what "done" looks like with acceptance criteria and impacted domains
+- **Decomposition** — breaks specs into bitesize beads, each independently completable with clear scope
+- **Architecture validation** — plans must cite ADRs; divergence is blocked until a human approves a superseding ADR
+- **Quality gates** — every phase transition (spec → plan → implement → review) requires human approval
+- **Context engineering** — deterministic, token-budgeted context packs so the agent gets exactly the right information
+
+The planning layer doesn't write code. It produces a validated plan — a directed graph of beads with dependencies, acceptance criteria, and scoped documentation — then hands it off.
+
+### Beads: The Substrate
+
+[Beads](https://github.com/steveyegge/beads) is the interface between the two layers. Each bead is a self-contained work packet that encapsulates everything a fresh agent needs:
+
+- **Requirements** — what to build, with acceptance criteria and verification steps
+- **Context** — which domains are impacted, which ADRs apply, what dependencies exist
+- **Status** — lifecycle phase, blocking relationships, proof of completion
+
+This is what makes pluggable orchestration possible. The planning layer writes beads; the execution engine reads them. A fresh agent picking up a bead doesn't need session history or tribal knowledge — the bead carries the plan and the context. Any orchestrator that can read a bead can dispatch work.
+
+### Execution Engine
+
+The execution engine implements the plan by reading beads and dispatching agents:
+
+- **Bead dispatch** — each bead runs in an isolated git worktree, scoped to exactly what the plan defined
+- **Merge topology** — bead branches merge into the spec branch; the spec branch merges to main via PR
+- **Finalization** — once all beads close, the spec lifecycle completes with a single PR
+
+MindSpec ships with a built-in execution engine (`MindspecExecutor`) that drives Claude Code, Codex, or Copilot through implementation with human control between steps. But the `Executor` interface is pluggable — MindSpec's planning and governance layer can readily plug into multi-agent orchestrators like [Gastown](https://github.com/steveyegge/gastown), dispatching beads to parallel agents with their own quality gates and auto-finalization.
+
+**MindSpec doesn't compete with agent orchestrators — it makes them better.** An orchestrator running MindSpec-planned beads gets architecture-validated, well-decomposed work packets instead of a vague prompt. The orchestrator focuses on execution; MindSpec ensures there's something worth executing.
 
 ---
 
@@ -151,6 +187,7 @@ MindSpec's workflow is continuously validated by a behavioral test harness that 
 6. **Dynamic over static** — runtime guidance beats static files that drift
 7. **CLI-first** — logic lives in testable, versionable Go; IDE integrations are thin shims
 8. **Deterministic context** — token-budgeted context packs, not "go read this file" prompting
+9. **Planning over prompting** — structured decomposition beats prompt engineering at scale
 
 ## Requirements
 

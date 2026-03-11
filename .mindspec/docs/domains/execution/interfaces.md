@@ -13,7 +13,7 @@ type Executor interface {
     FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error)
     Cleanup(specID string, force bool) error
 
-    // Epic handoff (notification hook — no-op for GitExecutor)
+    // Epic handoff (notification hook — no-op for MindspecExecutor)
     HandoffEpic(epicID, specID string, beadIDs []string) error
 
     // Query methods
@@ -26,7 +26,7 @@ type Executor interface {
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
-Low-level git operations used only by `GitExecutor`:
+Low-level git operations used only by `MindspecExecutor`:
 
 | Function | Purpose |
 |:---------|:--------|
@@ -49,5 +49,5 @@ Low-level git operations used only by `GitExecutor`:
 
 | Type | Package | Purpose |
 |:-----|:--------|:--------|
-| `GitExecutor` | `internal/executor/git.go` | Production: real git+worktree operations |
+| `MindspecExecutor` | `internal/executor/mindspec_executor.go` | Production: real git+worktree operations |
 | `MockExecutor` | `internal/executor/mock.go` | Testing: records calls, returns configured errors |

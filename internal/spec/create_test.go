@@ -1,4 +1,4 @@
-package specinit
+package spec
 
 import (
 	"os"
