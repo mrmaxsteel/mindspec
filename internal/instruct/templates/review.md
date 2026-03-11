@@ -56,4 +56,6 @@ All implementation beads are complete. Present the work for human review before 
 
 ## Next Action
 
-Read the spec's acceptance criteria, verify each one, and present the review summary to the human. When they approve, run `mindspec impl approve {{.ActiveSpec}}`.
+1. Read the spec's acceptance criteria and verify each one
+2. Present the review summary to the human
+3. **STOP and wait** — do NOT run `mindspec approve impl` until the human explicitly approves

@@ -197,7 +197,7 @@ func FormatResult(r *Result) string {
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
 			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
 		}
-		sb.WriteString("Review implementation against acceptance criteria, then use `/ms-impl-approve` to accept.\n")
+		sb.WriteString("Run `mindspec instruct` for review guidance and next steps.\n")
 	default:
 		sb.WriteString("All beads complete. Mode: idle\n")
 	}
