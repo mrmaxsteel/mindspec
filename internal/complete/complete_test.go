@@ -474,8 +474,8 @@ func TestFormatResult_Review(t *testing.T) {
 	if !strings.Contains(out, "review") {
 		t.Errorf("should mention review: %s", out)
 	}
-	if !strings.Contains(out, "/ms-impl-approve") {
-		t.Errorf("should mention /ms-impl-approve: %s", out)
+	if !strings.Contains(out, "mindspec instruct") {
+		t.Errorf("should mention mindspec instruct: %s", out)
 	}
 }
 

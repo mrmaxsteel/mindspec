@@ -17,7 +17,7 @@ idle ── spec ── plan ── implement ──── >>> review ── idl
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
 | plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads. STOP after this — run `/clear` then `mindspec next` |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
-| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree. STOP after this — run `/clear` then `mindspec next` |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 
 ### Git rules
@@ -56,4 +56,6 @@ All implementation beads are complete. Present the work for human review before 
 
 ## Next Action
 
-Read the spec's acceptance criteria, verify each one, and present the review summary to the human. When they approve, run `mindspec impl approve {{.ActiveSpec}}`.
+1. Read the spec's acceptance criteria and verify each one
+2. Present the review summary to the human
+3. **STOP and wait** — do NOT run `mindspec approve impl` until the human explicitly approves

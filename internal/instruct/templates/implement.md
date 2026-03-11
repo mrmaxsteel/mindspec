@@ -18,7 +18,7 @@ idle ── spec ── plan ──── >>> implement ── review ── idl
 | spec → plan | `mindspec spec approve <id>` | Validates spec, auto-commits |
 | plan → impl | `mindspec plan approve <id>` | Validates plan, auto-creates beads. STOP after this — run `/clear` then `mindspec next` |
 | per bead | `mindspec next` | Claims next bead, creates bead worktree |
-| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree |
+| bead done | `mindspec complete <bead-id> "msg"` | Auto-commits, closes bead, merges bead→spec, removes worktree. STOP after this — run `/clear` then `mindspec next` |
 | review → idle | `mindspec impl approve <id>` | Merges spec→main, removes all worktrees + branches |
 
 ### Git rules
@@ -46,7 +46,7 @@ Run `cd {{.ActiveWorktree}}` to enter the bead worktree. All code changes go the
 {{- end}}
 
 Do NOT create manual workflow branches/worktrees in implement mode.
-After `mindspec complete` succeeds, do NOT run `mindspec next` or claim another bead. Report completion and let the user decide when to proceed.
+After `mindspec complete` succeeds, do NOT run `mindspec next` or claim another bead. Tell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.
 If the user asks for an interrupt fix (urgent bug + continue feature), do both:
 1. Apply and commit the urgent fix.
 2. Resume bead scope and produce the requested feature artifact(s).
@@ -91,7 +91,7 @@ When the bead is done:
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
 3. Run `mindspec complete {{.ActiveBead}} "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
-4. **Report completion** — do NOT run `mindspec next` or claim another bead. The user will run `mindspec next` when ready
+4. **STOP** — do NOT run `mindspec next` or claim another bead. Tell the user: run `/clear` (or start a fresh agent), then `mindspec next`
 
 **Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
 **Do NOT use `bd update` on lifecycle epics.** Phase metadata is managed automatically by `mindspec complete`.

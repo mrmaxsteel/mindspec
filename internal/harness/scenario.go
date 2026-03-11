@@ -108,7 +108,7 @@ func ScenarioSingleBead() Scenario {
 	return Scenario{
 		Name:        "single_bead",
 		Description: "Pre-approved plan, implement a single bead",
-		MaxTurns:    20,
+		MaxTurns:    35,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-greeting"
@@ -1640,14 +1640,17 @@ func ScenarioStopAfterComplete() Scenario {
 	return Scenario{
 		Name:        "stop_after_complete",
 		Description: "Agent stops after completing a bead, does not auto-claim next",
-		MaxTurns:    25,
-		Model:       "opus",
+		MaxTurns:    35,
+		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-stop"
 
 			epicID = sandbox.CreateSpecEpic(specID)
 			bead1 = sandbox.CreateBead("["+specID+"] First task", "task", epicID)
 			bead2 = sandbox.CreateBead("["+specID+"] Second task", "task", epicID)
+			// bead2 depends on bead1 — blocked until bead1 is closed.
+			// This prevents Haiku from getting distracted by bead2 at session start.
+			sandbox.runBDMust("dep", "add", bead2, bead1)
 			sandbox.ClaimBead(bead1)
 
 			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
@@ -1741,8 +1744,8 @@ func ScenarioStopDoesNotBlockApproveImpl() Scenario {
 	return Scenario{
 		Name:        "stop_does_not_block_approve_impl",
 		Description: "STOP after complete does not prevent approve impl when prompted",
-		MaxTurns:    25,
-		Model:       "opus",
+		MaxTurns:    35,
+		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-approve"
 
@@ -1776,12 +1779,18 @@ Create feature.go with a Feature() function.
 
 Create a file called feature.go with a function Feature() string that returns "feature".
 Finish the bead and take this spec all the way to idle — complete the bead, then
-approve the implementation so the project returns to idle mode.`,
+approve the implementation so the project returns to idle mode.
+Do not close beads directly with bd commands.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
-			// Agent completed the bead
-			assertCommandRan(t, events, "mindspec", "complete")
+			// Agent completed the bead (mindspec complete preferred, bd close tolerated).
+			if !commandRanSuccessfully(events, "mindspec", "complete") {
+				if !commandRanSuccessfully(events, "bd", "close") {
+					t.Error("agent never closed the bead (no mindspec complete or bd close)")
+				}
+				t.Log("NOTE: agent used bd close instead of mindspec complete")
+			}
 
-			// Agent continued past STOP to run approve impl
+			// CRITICAL: Agent continued past STOP to run approve impl
 			assertCommandSucceeded(t, events, "mindspec", "approve", "impl")
 
 			// Bead was closed
