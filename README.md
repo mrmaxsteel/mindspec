@@ -121,12 +121,40 @@ MindSpec ships with a built-in execution engine (`MindspecExecutor`) that drives
 
 ## Quickstart
 
-```bash
-# 1. Install (download from GitHub Releases)
-# https://github.com/mrmaxsteel/mindspec/releases
-# or build from source: make build && cp ./bin/mindspec /usr/local/bin/
+### Installation
 
-# 2. Bootstrap your project
+**Linux/macOS:**
+```bash
+# Quick install
+curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh
+
+# Custom install directory
+curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | INSTALL_DIR=~/.local/bin sh
+
+# Force reinstall/upgrade
+curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh -s -- --force
+```
+
+**Windows (PowerShell):**
+```powershell
+# Quick install
+irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex
+
+# Custom install directory
+irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -InstallDir "$env:USERPROFILE\bin"
+
+# Force reinstall/upgrade
+irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -Force
+```
+
+**Alternative methods:**
+- Download from [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases)
+- Build from source: `make build && cp ./bin/mindspec /usr/local/bin/`
+
+### Setup
+
+```bash
+# Bootstrap your project
 cd your-project
 mindspec init
 mindspec setup claude   # Or: codex, copilot — configures hooks + skills
