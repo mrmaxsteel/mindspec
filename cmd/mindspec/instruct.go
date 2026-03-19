@@ -5,8 +5,6 @@ import (
 	"os"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/config"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -44,6 +42,14 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 			mainRoot = localRoot
 		}
 
+		// Protected branch check FIRST: main/master → always idle.
+		// This must run before guard/worktree checks which query beads (slow dolt cold start).
+		if specFlag == "" {
+			if _, ok := instruct.RenderIdleIfProtected(mainRoot); ok {
+				return handleNoState(mainRoot, format)
+			}
+		}
+
 		// CWD redirect: if running from main with an active worktree,
 		// emit ONLY the redirect message — no normal guidance.
 		if wtPath := guard.ActiveWorktreePath(mainRoot); wtPath != "" && guard.IsMainCWD(mainRoot) {
@@ -55,18 +61,6 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 				fmt.Print(msg)
 			}
 			return nil
-		}
-
-		// Protected branch check: main/master → always idle (focus file is stale).
-		if specFlag == "" {
-			branch, _ := gitutil.CurrentBranch()
-			cfg, cfgErr := config.Load(mainRoot)
-			if cfgErr != nil {
-				cfg = config.DefaultConfig()
-			}
-			if branch != "" && cfg.IsProtectedBranch(branch) {
-				return handleNoState(mainRoot, format)
-			}
 		}
 
 		// ADR-0023: derive state from beads, not focus files.

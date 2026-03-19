@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -49,6 +50,49 @@ type Input struct {
 var Names = []string{
 	"pre-commit",
 	"session-start",
+}
+
+// ParseInputNonBlocking reads available stdin without blocking.
+// If stdin is a terminal or has no data ready within 100ms, returns an empty Input.
+// Used by session-start which must not hang if the caller doesn't close stdin.
+// Note: on timeout, the reader goroutine is intentionally leaked — the process
+// exits shortly after so this is harmless in practice.
+func ParseInputNonBlocking(r io.Reader) *Input {
+	f, ok := r.(*os.File)
+	if !ok {
+		return &Input{}
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		return &Input{}
+	}
+	// If stdin is a terminal (CharDevice), skip reading.
+	if stat.Mode()&os.ModeCharDevice != 0 {
+		return &Input{}
+	}
+	// It's a pipe/file — read with a short timeout in case the pipe is open but empty.
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(f)
+		ch <- readResult{data, err}
+	}()
+	select {
+	case res := <-ch:
+		if res.err != nil || len(res.data) == 0 {
+			return &Input{}
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(res.data, &raw); err != nil {
+			return &Input{}
+		}
+		return &Input{Raw: raw}
+	case <-time.After(100 * time.Millisecond):
+		return &Input{}
+	}
 }
 
 // ParseInput reads stdin JSON and auto-detects the protocol.

@@ -330,7 +330,7 @@ func TestClaimBead_CallsRunBDCombined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(capturedArgs) != 3 || capturedArgs[0] != "update" || capturedArgs[1] != "bead-abc" || capturedArgs[2] != "--status=in_progress" {
+	if len(capturedArgs) != 3 || capturedArgs[0] != "update" || capturedArgs[1] != "bead-abc" || capturedArgs[2] != "--claim" {
 		t.Errorf("unexpected args: %v", capturedArgs)
 	}
 }

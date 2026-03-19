@@ -62,13 +62,13 @@ func TestDerivePhaseFromChildren(t *testing.T) {
 			want: state.ModeReview,
 		},
 		{
-			name: "some closed, some open, none in_progress → plan (next bead ready)",
+			name: "some closed, some open, none in_progress → implement (between beads)",
 			children: []ChildInfo{
 				{ID: "b1", Status: "closed"},
 				{ID: "b2", Status: "open"},
 				{ID: "b3", Status: "closed"},
 			},
-			want: state.ModePlan,
+			want: state.ModeImplement,
 		},
 		{
 			name: "some closed, one in_progress → implement",

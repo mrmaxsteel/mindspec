@@ -3,6 +3,7 @@ package resolve
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -16,10 +17,23 @@ func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[st
 	for _, e := range epics {
 		epicByID[e.ID] = e
 	}
-	// queryEpics and queryChildren use listJSONFn
+	// queryEpics/queryActiveEpics and queryChildren use listJSONFn
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--type=epic" {
+				// Filter epics by --status arg to match queryActiveEpics behavior
+				for _, s := range args {
+					if strings.HasPrefix(s, "--status=") {
+						status := strings.TrimPrefix(s, "--status=")
+						var filtered []phase.EpicInfo
+						for _, e := range epics {
+							if strings.EqualFold(e.Status, status) {
+								filtered = append(filtered, e)
+							}
+						}
+						return json.Marshal(filtered)
+					}
+				}
 				return json.Marshal(epics)
 			}
 		}
