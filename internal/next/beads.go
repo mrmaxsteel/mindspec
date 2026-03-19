@@ -156,10 +156,15 @@ func ResolveActiveBead(root, specID string) (string, error) {
 	return "", nil
 }
 
-// ClaimBead marks a bead as in_progress via bd update.
+// ClaimBead atomically claims a bead via bd update --claim.
+// Fails if the bead was already claimed by another agent, preventing
+// two concurrent agents from working on the same bead.
 func ClaimBead(id string) error {
-	_, err := runBDCombFn("update", id, "--status=in_progress")
-	return err
+	out, err := runBDCombFn("update", id, "--claim")
+	if err != nil {
+		return fmt.Errorf("claim failed (may already be claimed): %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // FetchBeadByID retrieves a single bead by its ID via bd show --json.
