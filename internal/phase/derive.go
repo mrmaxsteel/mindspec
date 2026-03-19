@@ -203,8 +203,14 @@ func DerivePhaseFromChildren(children []ChildInfo) string {
 		return state.ModeReview
 	}
 
+	// Some closed + some open, none in_progress → implement (between beads).
+	// Closed beads prove implementation has started; the agent is between
+	// completing one bead and claiming the next.
+	if totalClosed > 0 {
+		return state.ModeImplement
+	}
+
 	// All children open (none claimed) → plan
-	// Some closed, some open, none in_progress → plan (next bead ready)
 	return state.ModePlan
 }
 
