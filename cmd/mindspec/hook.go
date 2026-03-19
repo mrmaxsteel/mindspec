@@ -152,29 +152,21 @@ func prewarmDolt(root string) {
 }
 
 // isDoltServerMode checks whether beads is configured for dolt server mode.
-// Follows beads config priority: env var > metadata.json > config.yaml > default (embedded).
+// Mirrors beads' own IsDoltServerMode(): env var > metadata.json dolt_mode field.
+// config.yaml is NOT consulted for dolt mode — metadata.json is the source of truth.
 func isDoltServerMode(root string) bool {
 	// 1. Environment variable (highest priority)
-	if v := os.Getenv("BEADS_DOLT_SERVER_MODE"); v == "1" || v == "true" {
+	if os.Getenv("BEADS_DOLT_SERVER_MODE") == "1" {
 		return true
 	}
 
-	// 2. metadata.json
+	// 2. metadata.json dolt_mode field
 	if data, err := os.ReadFile(filepath.Join(root, ".beads", "metadata.json")); err == nil {
 		var meta map[string]any
 		if json.Unmarshal(data, &meta) == nil {
 			if mode, ok := meta["dolt_mode"].(string); ok {
 				return mode == "server"
 			}
-		}
-	}
-
-	// 3. config.yaml (check for "mode: server" in dolt section)
-	if data, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml")); err == nil {
-		// Simple check — avoid pulling in a yaml dependency
-		content := string(data)
-		if strings.Contains(content, "mode: server") || strings.Contains(content, "mode: \"server\"") {
-			return true
 		}
 	}
 
