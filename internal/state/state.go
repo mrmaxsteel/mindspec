@@ -88,7 +88,8 @@ func BeadWorktreePath(specWorktree, beadID string) string {
 	return filepath.Join(specWorktree, ".worktrees", "worktree-"+beadID)
 }
 
-// IsValidMode reports whether mode is a recognized lifecycle mode.
+// IsValidMode reports whether mode is a recognized operating mode
+// (excludes terminal states like "done").
 func IsValidMode(mode string) bool {
 	for _, m := range ValidModes {
 		if m == mode {
@@ -96,4 +97,11 @@ func IsValidMode(mode string) bool {
 		}
 	}
 	return false
+}
+
+// IsValidPhase reports whether phase is a recognized lifecycle phase,
+// including terminal states like "done" that are valid in metadata
+// but not valid operating modes.
+func IsValidPhase(phase string) bool {
+	return IsValidMode(phase) || phase == ModeDone
 }

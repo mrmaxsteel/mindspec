@@ -149,7 +149,7 @@ func readStoredPhase(epicID string) string {
 		return ""
 	}
 	phase, ok := raw.(string)
-	if !ok || !state.IsValidMode(phase) {
+	if !ok || !state.IsValidPhase(phase) {
 		return ""
 	}
 	return phase
@@ -208,9 +208,12 @@ func DerivePhaseFromChildren(children []ChildInfo) string {
 	return state.ModePlan
 }
 
-// DiscoverActiveSpecs queries beads for all open epics and derives phase for each.
+// DiscoverActiveSpecs queries beads for open/in_progress epics and derives phase for each.
+// Only queries non-closed statuses to minimize bd calls and avoid dolt server contention
+// (closed epics with mindspec_phase: done are not active; legacy closed epics without the
+// marker are an edge case that callers like FindEpicBySpecID handle separately).
 func DiscoverActiveSpecs() ([]ActiveSpec, error) {
-	epics, err := queryEpics()
+	epics, err := queryActiveEpics()
 	if err != nil {
 		return nil, err
 	}
@@ -241,16 +244,6 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 
 		// Fallback for pre-080 epics: derive from children.
 		children := queryChildren(epic.ID)
-
-		// Check done marker for closed epics before deriving phase.
-		if strings.EqualFold(epic.Status, "closed") {
-			if hasDoneMarker(epic.ID) {
-				continue // spec lifecycle complete
-			}
-			if len(children) == 0 {
-				continue // orphan: closed epic with no children
-			}
-		}
 
 		phase := DerivePhaseFromChildren(children)
 		if phase == state.ModeDone {
@@ -419,15 +412,45 @@ func extractPhaseFromMetadata(epic EpicInfo) string {
 		return ""
 	}
 	phase, ok := raw.(string)
-	if !ok || !state.IsValidMode(phase) {
+	if !ok || !state.IsValidPhase(phase) {
 		return ""
 	}
 	return phase
 }
 
+// queryActiveEpics returns only open and in_progress epics (2 bd calls).
+// Used by DiscoverActiveSpecs where closed epics are not needed.
+func queryActiveEpics() ([]EpicInfo, error) {
+	var allEpics []EpicInfo
+	seen := map[string]bool{}
+	var lastErr error
+	for _, status := range []string{"open", "in_progress"} {
+		out, err := listJSONFn("--type=epic", "--status="+status)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var epics []EpicInfo
+		if err := json.Unmarshal(out, &epics); err != nil {
+			lastErr = err
+			continue
+		}
+		for _, e := range epics {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				allEpics = append(allEpics, e)
+			}
+		}
+	}
+	if len(allEpics) == 0 && lastErr != nil {
+		return nil, fmt.Errorf("bd list --type=epic failed: %w", lastErr)
+	}
+	return allEpics, nil
+}
+
 func queryEpics() ([]EpicInfo, error) {
 	// Query all statuses: bd list --type=epic defaults to open only,
-	// but phase derivation needs closed epics too (e.g. impl approve).
+	// but phase derivation needs closed epics too (e.g. impl approve, FindEpicBySpecID).
 	var allEpics []EpicInfo
 	seen := map[string]bool{}
 	var lastErr error

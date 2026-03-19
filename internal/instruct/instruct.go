@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -143,6 +144,30 @@ func Render(ctx *Context) (string, error) {
 	}
 
 	return result, nil
+}
+
+// RenderIdleIfProtected checks if the current branch is protected (main/master)
+// and returns rendered idle guidance if so. Returns ("", false) if the branch is
+// not protected or on error. This avoids beads queries for the common main-branch case.
+func RenderIdleIfProtected(root string) (string, bool) {
+	branch, err := gitutil.CurrentBranch()
+	if err != nil || branch == "" {
+		return "", false
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		cfg = config.DefaultConfig()
+	}
+	if !cfg.IsProtectedBranch(branch) {
+		return "", false
+	}
+	mc := &state.Focus{Mode: state.ModeIdle}
+	ctx := BuildContext(root, mc)
+	output, err := Render(ctx)
+	if err != nil {
+		return "", false
+	}
+	return output, true
 }
 
 // RenderJSON produces structured JSON output.

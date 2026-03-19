@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/hook"
+	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/spf13/cobra"
 )
 
@@ -39,6 +42,15 @@ Use --format to override protocol auto-detection.`,
 			return fmt.Errorf("unknown hook %q (use --list to see available hooks)", name)
 		}
 
+		// session-start is special: it writes session metadata and
+		// runs instruct, rather than the pass/block/warn pattern.
+		// Handle it before ParseInput to avoid blocking on stdin
+		// (io.ReadAll hangs if the caller doesn't close stdin).
+		if name == "session-start" {
+			inp := hook.ParseInputNonBlocking(os.Stdin)
+			return runSessionStartHook(inp)
+		}
+
 		inp, proto, err := hook.ParseInput(os.Stdin)
 		if err != nil {
 			inp = &hook.Input{}
@@ -53,12 +65,6 @@ Use --format to override protocol auto-detection.`,
 			// auto-detect
 		default:
 			return fmt.Errorf("unknown format %q (use claude or copilot)", hookFormat)
-		}
-
-		// session-start is special: it writes session metadata and
-		// runs instruct, rather than the pass/block/warn pattern.
-		if name == "session-start" {
-			return runSessionStartHook(inp)
 		}
 
 		st := hook.ReadState()
@@ -82,9 +88,8 @@ func isValidHook(name string) bool {
 
 // runSessionStartHook handles the session-start hook:
 // 1. Writes session metadata (source + timestamp) from stdin JSON
-// 2. Runs `mindspec instruct` and prints its output
+// 2. Emits mode guidance (fast-path inline for protected branches, subprocess fallback)
 func runSessionStartHook(inp *hook.Input) error {
-	// Extract source from stdin JSON (Claude Code sends {"source": "startup|clear|resume|compact"})
 	source := "unknown"
 	if inp.Raw != nil {
 		if s, ok := inp.Raw["source"].(string); ok && s != "" {
@@ -92,32 +97,52 @@ func runSessionStartHook(inp *hook.Input) error {
 		}
 	}
 
-	// Find root for running commands
 	root, err := findRoot()
 	if err != nil {
-		// Can't find root — still try instruct
 		fmt.Fprintln(os.Stderr, "warning: could not find mindspec root")
+		return nil
 	}
 
 	// Write session metadata (best-effort)
-	if root != "" {
-		writeSession := exec.Command(os.Args[0], "state", "write-session", "--source="+source)
-		writeSession.Dir = root
-		writeSession.Stderr = os.Stderr
-		_ = writeSession.Run()
+	writeSession := exec.Command(os.Args[0], "state", "write-session", "--source="+source)
+	writeSession.Dir = root
+	writeSession.Stderr = os.Stderr
+	_ = writeSession.Run()
+
+	// Pre-warm dolt server in the background so bd calls don't pay the
+	// 5s+ cold-start penalty. Idempotent — no-ops if already running.
+	prewarmDolt(root)
+
+	// Fast path: on a protected branch (main/master), emit idle guidance
+	// inline without spawning a subprocess or querying beads.
+	if output, ok := instruct.RenderIdleIfProtected(root); ok {
+		fmt.Print(output)
+		return nil
 	}
 
-	// Run instruct and emit its output
-	instruct := exec.Command(os.Args[0], "instruct")
-	if root != "" {
-		instruct.Dir = root
-	}
-	instruct.Stdout = os.Stdout
-	instruct.Stderr = os.Stderr
-	if err := instruct.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "mindspec instruct unavailable — run make build")
+	// Slow path: spawn instruct subprocess with a timeout for non-protected branches.
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "instruct")
+	cmd.Dir = root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Fprintln(os.Stderr, "warning: mindspec instruct timed out (bd/dolt may be slow — try `bd dolt start`)")
+		} else {
+			fmt.Fprintln(os.Stderr, "mindspec instruct unavailable — run make build")
+		}
 	}
 	return nil
+}
+
+// prewarmDolt starts the dolt server in the background (fire-and-forget, ~300ms).
+// Subsequent bd calls connect to the running server instead of cold-starting (~50ms vs ~5.5s).
+func prewarmDolt(root string) {
+	cmd := exec.Command("bd", "dolt", "start")
+	cmd.Dir = root
+	_ = cmd.Start()
 }
 
 func init() {
