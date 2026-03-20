@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -137,12 +139,38 @@ func runSessionStartHook(inp *hook.Input) error {
 	return nil
 }
 
-// prewarmDolt starts the dolt server in the background (fire-and-forget, ~300ms).
-// Subsequent bd calls connect to the running server instead of cold-starting (~50ms vs ~5.5s).
+// prewarmDolt starts the dolt server in the background if server mode is configured.
+// Only relevant for server mode — embedded mode has no server to start.
+// Checks env var, metadata.json, and config.yaml (matching beads config priority).
 func prewarmDolt(root string) {
+	if !isDoltServerMode(root) {
+		return
+	}
 	cmd := exec.Command("bd", "dolt", "start")
 	cmd.Dir = root
-	_ = cmd.Start()
+	_ = cmd.Start() // fire-and-forget; ~300ms
+}
+
+// isDoltServerMode checks whether beads is configured for dolt server mode.
+// Mirrors beads' own IsDoltServerMode(): env var > metadata.json dolt_mode field.
+// config.yaml is NOT consulted for dolt mode — metadata.json is the source of truth.
+func isDoltServerMode(root string) bool {
+	// 1. Environment variable (highest priority)
+	if os.Getenv("BEADS_DOLT_SERVER_MODE") == "1" {
+		return true
+	}
+
+	// 2. metadata.json dolt_mode field
+	if data, err := os.ReadFile(filepath.Join(root, ".beads", "metadata.json")); err == nil {
+		var meta map[string]any
+		if json.Unmarshal(data, &meta) == nil {
+			if mode, ok := meta["dolt_mode"].(string); ok {
+				return mode == "server"
+			}
+		}
+	}
+
+	return false // default: embedded
 }
 
 func init() {
