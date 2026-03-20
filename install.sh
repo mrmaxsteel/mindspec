@@ -6,7 +6,7 @@ set -e
 #        curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh -s -- --force
 
 REPO="mrmaxsteel/mindspec"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="mindspec"
 FORCE_INSTALL="${FORCE_INSTALL:-false}"
 LOG_FILE="${HOME}/.mindspec/install.log"
@@ -258,17 +258,19 @@ Got:      $ACTUAL_CHECKSUM"
     info "Extracting..."
     tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$TMP_DIR"
     
+    # Ensure install directory exists before privilege check
+    mkdir -p "$INSTALL_DIR"
+
     # Check privileges before attempting install
     if ! check_privileges; then
         error "Cannot write to $INSTALL_DIR"
     fi
-    
+
     # Check for existing installation
     check_existing_installation
-    
+
     # Install binary
     info "Installing to ${INSTALL_DIR}/${BINARY_NAME}..."
-    mkdir -p "$INSTALL_DIR"
     mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
     
