@@ -100,10 +100,22 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	}
 
 	// Step 3c: Auto-commit approval changes so downstream branches see them.
+	// Hard-fail on commit failure so the spec worktree is guaranteed clean
+	// before plan approval and bead merges.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit spec approval: %v", err))
+		return nil, fmt.Errorf("auto-commit spec approval failed: %w\n\nFix the issue in %s and re-run 'mindspec spec approve %s'", err, specWtPath, specID)
+	}
+
+	// Pre-commit hooks (beads, etc.) can modify tracked files as a side
+	// effect. A second pass captures any residual changes.
+	if err := exec.CommitAll(specWtPath, fmt.Sprintf("chore: sync beads state after spec approval for %s", specID)); err != nil {
+		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec spec approve %s'", err, specWtPath, specID)
+	}
+
+	if err := exec.IsTreeClean(specWtPath); err != nil {
+		return nil, fmt.Errorf("spec worktree has uncommitted changes after spec approval: %w\n\ncd %s && git status", err, specWtPath)
 	}
 
 	// Step 4: Emit recording phase marker (best-effort)

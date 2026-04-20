@@ -524,3 +524,87 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 		t.Error("plan.md should contain 'Approved' after approval")
 	}
 }
+
+// TestScenario_PlanApprovalCommitFailureIsHardError guards the regression
+// where a failed auto-commit during plan approval left the spec worktree
+// dirty, causing downstream `mindspec complete` merges to fail.
+func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
+	stubNoEpics(t)
+	stubApproveBeads(t)
+	root := testRepo(t)
+	specID := "007-plan-commit-fail"
+
+	simulateSpecInit(t, root, specID)
+
+	_, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
+	if err != nil {
+		t.Fatalf("ApproveSpec: %v", err)
+	}
+
+	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-m", "add plan")
+
+	mock := &executor.MockExecutor{CommitAllErr: fmt.Errorf("simulated commit failure")}
+	_, err = approve.ApprovePlan(root, specID, "test-user", mock)
+	if err == nil {
+		t.Fatal("expected ApprovePlan to fail when CommitAll fails")
+	}
+	if !strings.Contains(err.Error(), "auto-commit plan approval failed") {
+		t.Errorf("error should explain the commit failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "simulated commit failure") {
+		t.Errorf("error should include the underlying cause, got: %v", err)
+	}
+}
+
+// TestScenario_PlanApprovalDirtyTreeIsHardError guards the case where the
+// commit succeeds but the spec worktree is still dirty (e.g. a pre-commit
+// hook touched tracked files without staging them). The approval must
+// refuse to advance rather than leave the next merge broken.
+func TestScenario_PlanApprovalDirtyTreeIsHardError(t *testing.T) {
+	stubNoEpics(t)
+	stubApproveBeads(t)
+	root := testRepo(t)
+	specID := "008-plan-dirty-tree"
+
+	simulateSpecInit(t, root, specID)
+
+	_, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
+	if err != nil {
+		t.Fatalf("ApproveSpec: %v", err)
+	}
+
+	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-m", "add plan")
+
+	mock := &executor.MockExecutor{IsTreeCleanErr: fmt.Errorf("stray uncommitted changes")}
+	_, err = approve.ApprovePlan(root, specID, "test-user", mock)
+	if err == nil {
+		t.Fatal("expected ApprovePlan to fail when spec worktree is still dirty")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Errorf("error should explain the dirty state, got: %v", err)
+	}
+}
+
+// TestScenario_SpecApprovalCommitFailureIsHardError mirrors the plan
+// regression on spec approval — same class of bug, same requirement.
+func TestScenario_SpecApprovalCommitFailureIsHardError(t *testing.T) {
+	stubNoEpics(t)
+	stubApproveBeads(t)
+	root := testRepo(t)
+	specID := "009-spec-commit-fail"
+
+	simulateSpecInit(t, root, specID)
+
+	mock := &executor.MockExecutor{CommitAllErr: fmt.Errorf("simulated commit failure")}
+	_, err := approve.ApproveSpec(root, specID, "test-user", mock)
+	if err == nil {
+		t.Fatal("expected ApproveSpec to fail when CommitAll fails")
+	}
+	if !strings.Contains(err.Error(), "auto-commit spec approval failed") {
+		t.Errorf("error should explain the commit failure, got: %v", err)
+	}
+}
