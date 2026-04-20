@@ -2,5 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_database": "mindspec"
+  "dolt_database": "mindspec",
+  "project_id": "2d9c2e5d-2892-4cbe-9b9f-67c6e8230733"
 }
