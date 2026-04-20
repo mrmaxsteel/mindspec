@@ -308,10 +308,29 @@ func stubChildrenByStatus(byStatus map[string][]bead.BeadInfo) {
 	}
 }
 
+// writeBeadsCustomStatus creates .beads/config.yaml under root with the
+// given custom-status declaration so queryAllChildren's bead.AllStatuses
+// lookup will iterate it. Pass "" to skip custom statuses entirely (useful
+// for tests that only care about built-in ones).
+func writeBeadsCustomStatus(t *testing.T, root, customLine string) {
+	t.Helper()
+	if customLine == "" {
+		return
+	}
+	dir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "status.custom: \"" + customLine + "\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
-	setupTempRoot(t)
+	root := setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	// One closed + one open child → DerivePhaseFromChildren returns implement.
@@ -329,7 +348,7 @@ func TestAdvanceState_NextReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState("001-test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModeImplement {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
 	}
@@ -341,7 +360,7 @@ func TestAdvanceState_NextReady(t *testing.T) {
 func TestAdvanceState_BlockedChildren(t *testing.T) {
 	saveAndRestore(t)
 
-	setupTempRoot(t)
+	root := setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	// All children open, none closed/in_progress → plan mode.
@@ -356,7 +375,7 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState("001-test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModePlan {
 		t.Errorf("mode: got %q, want %q", mode, state.ModePlan)
 	}
@@ -368,7 +387,7 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 func TestAdvanceState_AllDone(t *testing.T) {
 	saveAndRestore(t)
 
-	setupTempRoot(t)
+	root := setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	// All children closed → review mode.
@@ -383,7 +402,7 @@ func TestAdvanceState_AllDone(t *testing.T) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	mode, nextBead := advanceState("001-test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModeReview {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeReview)
 	}
@@ -400,7 +419,7 @@ func TestAdvanceState_AllDone(t *testing.T) {
 func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 	saveAndRestore(t)
 
-	setupTempRoot(t)
+	root := setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	// One closed (just completed) + one in_progress (peer claim) → implement.
@@ -417,7 +436,7 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState("001-test-spec")
+	mode, nextBead := advanceState(root, "001-test-spec")
 	if mode != state.ModeImplement {
 		t.Errorf("in_progress bead must hold phase in implement: got %q, want %q (not review)", mode, state.ModeImplement)
 	}
@@ -426,14 +445,15 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 	}
 }
 
-// TestAdvanceState_CustomResolvedStatusHoldsPhase confirms the fix also
-// covers custom bd statuses. This repo's .beads/config.yaml declares
-// `status.custom: "resolved"` for gates. A child in any non-closed status
+// TestAdvanceState_CustomResolvedStatusHoldsPhase confirms queryAllChildren
+// reads custom statuses from .beads/config.yaml at runtime instead of
+// hardcoding specific strings. A child in any project-declared custom status
 // must prevent a premature flip to review.
 func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
 	saveAndRestore(t)
 
-	setupTempRoot(t)
+	root := setupTempRoot(t)
+	writeBeadsCustomStatus(t, root, "resolved")
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	// One closed, one in a custom `resolved` status. Derivation treats any
@@ -450,9 +470,37 @@ func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, _ := advanceState("001-test-spec")
+	mode, _ := advanceState(root, "001-test-spec")
 	if mode == state.ModeReview {
 		t.Errorf("custom-status child must prevent review flip: got %q", mode)
+	}
+}
+
+// TestAdvanceState_UndeclaredCustomStatusIsNotIterated is the negative case:
+// if a project doesn't declare a status in status.custom, queryAllChildren
+// must not iterate it (a bead sitting in an unknown status would be missed,
+// which is the correct behaviour — it is literally an unknown status to the
+// project and deserves human attention, not a silent special case).
+func TestAdvanceState_UndeclaredCustomStatusIsNotIterated(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	// No .beads/config.yaml — only built-in statuses are iterated.
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
+
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed":    {{ID: "done-1", Title: "[IMPL 001-test-spec.1] Done"}},
+		"undeclared": {{ID: "mystery", Title: "[???] Undeclared status"}},
+	})
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	mode, _ := advanceState(root, "001-test-spec")
+	// Only the `closed` bead is seen → all closed → review.
+	if mode != state.ModeReview {
+		t.Errorf("undeclared custom status must not be iterated: got mode %q, want %q", mode, state.ModeReview)
 	}
 }
 
@@ -466,7 +514,7 @@ func TestAdvanceState_NoEpic(t *testing.T) {
 	})
 	t.Cleanup(restore)
 
-	mode, nextBead := advanceState("test")
+	mode, nextBead := advanceState("", "test")
 	if mode != state.ModeIdle {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeIdle)
 	}
