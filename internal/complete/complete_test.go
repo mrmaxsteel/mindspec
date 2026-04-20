@@ -161,7 +161,11 @@ func TestRun_HappyPath(t *testing.T) {
 		return nil
 	}
 
-	// Next ready bead exists
+	// Next ready bead exists; children mix (closed + open) → implement phase.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done"}},
+		"open":   {{ID: "bead-2", Title: "[IMPL 008-test.2] Next chunk"}},
+	})
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			items := []bead.BeadInfo{
@@ -280,18 +284,47 @@ func TestRun_NoWorktree(t *testing.T) {
 	}
 }
 
+// stubChildrenByStatus installs a listJSONFn that returns children keyed by
+// their --status=<name> filter. Each returned child's Status field is
+// overwritten to match the requested filter so that phase.DerivePhaseFromChildren
+// counts them correctly. Any status not in the map returns [].
+func stubChildrenByStatus(byStatus map[string][]bead.BeadInfo) {
+	listJSONFn = func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			const prefix = "--status="
+			if strings.HasPrefix(a, prefix) {
+				status := strings.TrimPrefix(a, prefix)
+				if items, ok := byStatus[status]; ok {
+					stamped := make([]bead.BeadInfo, len(items))
+					for i := range items {
+						stamped[i] = items[i]
+						stamped[i].Status = status
+					}
+					return json.Marshal(stamped)
+				}
+			}
+		}
+		return []byte("[]"), nil
+	}
+}
+
 func TestAdvanceState_NextReady(t *testing.T) {
 	saveAndRestore(t)
 
 	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
+	// One closed + one open child → DerivePhaseFromChildren returns implement.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "done-bead", Title: "[IMPL 001-test-spec.1] Done"}},
+		"open":   {{ID: "next-bead", Title: "[IMPL 001-test-spec.2] Next"}},
+	})
+
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
-			items := []bead.BeadInfo{
+			return json.Marshal([]bead.BeadInfo{
 				{ID: "next-bead", Title: "[IMPL 001-test-spec.2] Next"},
-			}
-			return json.Marshal(items)
+			})
 		}
 		return nil, fmt.Errorf("unexpected")
 	}
@@ -311,25 +344,16 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
-	// No ready beads
+	// All children open, none closed/in_progress → plan mode.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"open": {{ID: "blocked-bead", Title: "[001-test-spec] Bead 3: Blocked"}},
+	})
+
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			return json.Marshal([]bead.BeadInfo{})
 		}
 		return nil, fmt.Errorf("unexpected")
-	}
-
-	// Open (blocked) children via listJSONFn
-	listJSONFn = func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--status=open" {
-				items := []bead.BeadInfo{
-					{ID: "blocked-bead", Title: "[001-test-spec] Bead 3: Blocked"},
-				}
-				return json.Marshal(items)
-			}
-		}
-		return []byte("[]"), nil
 	}
 
 	mode, nextBead := advanceState("001-test-spec")
@@ -347,12 +371,17 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
-	// No ready beads
+	// All children closed → review mode.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {
+			{ID: "done-1", Title: "[IMPL 001-test-spec.1] Done"},
+			{ID: "done-2", Title: "[IMPL 001-test-spec.2] Done"},
+		},
+	})
+
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
-
-	// listJSONFn default stub returns empty → no open children → review
 
 	mode, nextBead := advanceState("001-test-spec")
 	if mode != state.ModeReview {
@@ -366,15 +395,21 @@ func TestAdvanceState_AllDone(t *testing.T) {
 // TestAdvanceState_InProgressBeadHoldsImplementPhase pins the fix for the
 // premature review-mode bug. If any remaining bead is in_progress (e.g. a
 // parallel agent has it claimed) when another bead completes, advanceState
-// must stay in plan/implement — not flip the spec to review. Earlier code
-// only queried `--status=open` and silently missed in_progress beads.
+// must stay in implement — not flip the spec to review. Earlier code queried
+// only `--status=open` and silently missed in_progress beads.
 func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 	saveAndRestore(t)
 
 	setupTempRoot(t)
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
-	// No ready beads (the in_progress one isn't ready because it's already claimed).
+	// One closed (just completed) + one in_progress (peer claim) → implement.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed":      {{ID: "just-closed", Title: "[IMPL 001-test-spec.1] Just closed"}},
+		"in_progress": {{ID: "claimed-bead", Title: "[IMPL 001-test-spec.2] Claimed by peer"}},
+	})
+
+	// No ready beads (the in_progress one is already claimed; nothing unblocked).
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			return json.Marshal([]bead.BeadInfo{})
@@ -382,25 +417,42 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	// One in_progress bead exists; nothing open or blocked.
-	listJSONFn = func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--status=in_progress" {
-				items := []bead.BeadInfo{
-					{ID: "claimed-bead", Title: "[IMPL 001-test-spec.2] Claimed by peer"},
-				}
-				return json.Marshal(items)
-			}
-		}
-		return []byte("[]"), nil
-	}
-
 	mode, nextBead := advanceState("001-test-spec")
-	if mode != state.ModePlan {
-		t.Errorf("in_progress bead must hold phase: got %q, want %q (not review)", mode, state.ModePlan)
+	if mode != state.ModeImplement {
+		t.Errorf("in_progress bead must hold phase in implement: got %q, want %q (not review)", mode, state.ModeImplement)
 	}
 	if nextBead != "" {
-		t.Errorf("nextBead should be empty, got %q", nextBead)
+		t.Errorf("nextBead should be empty when no ready bead, got %q", nextBead)
+	}
+}
+
+// TestAdvanceState_CustomResolvedStatusHoldsPhase confirms the fix also
+// covers custom bd statuses. This repo's .beads/config.yaml declares
+// `status.custom: "resolved"` for gates. A child in any non-closed status
+// must prevent a premature flip to review.
+func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
+	saveAndRestore(t)
+
+	setupTempRoot(t)
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
+
+	// One closed, one in a custom `resolved` status. Derivation treats any
+	// non-closed/in_progress status as open, so this is closed + open → implement.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed":   {{ID: "done-1", Title: "[IMPL 001-test-spec.1] Done"}},
+		"resolved": {{ID: "gate-1", Title: "[GATE] pending resolution"}},
+	})
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return json.Marshal([]bead.BeadInfo{})
+		}
+		return nil, fmt.Errorf("unexpected")
+	}
+
+	mode, _ := advanceState("001-test-spec")
+	if mode == state.ModeReview {
+		t.Errorf("custom-status child must prevent review flip: got %q", mode)
 	}
 }
 
@@ -434,6 +486,12 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	closeBeadFn = func(ids ...string) error { return nil }
+
+	// One just-closed + one open child → phase derives to implement.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done"}},
+		"open":   {{ID: "bead-2", Title: "[IMPL 008-test.2] Next"}},
+	})
 
 	runBDFn = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ready" {
@@ -469,7 +527,11 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	closeBeadFn = func(ids ...string) error { return nil }
 
-	// No ready beads, no open beads → review
+	// All children closed → review mode.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done"}},
+	})
+
 	runBDFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}

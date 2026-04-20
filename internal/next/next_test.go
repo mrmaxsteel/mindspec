@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 // --- ParseBeadsJSON tests ---
@@ -244,6 +245,72 @@ func TestResolveMode_Feature_DraftSpec(t *testing.T) {
 	result := ResolveMode(tmp, bead)
 	if result.Mode != "spec" {
 		t.Errorf("expected spec, got %s", result.Mode)
+	}
+}
+
+// TestResolveMode_Feature_EpicMetadataPrimary exercises the authoritative
+// path — when a beads epic exists, its mindspec_phase metadata is the signal,
+// not the spec.md frontmatter. This is the ZFC-compliant replacement for the
+// old raw-markdown "Status: APPROVED" substring check.
+func TestResolveMode_Feature_EpicMetadataPrimary(t *testing.T) {
+	cases := []struct {
+		name       string
+		phase      string
+		wantMode   string
+	}{
+		{"spec-phase → spec", "spec", "spec"},
+		{"plan-phase → plan", "plan", "plan"},
+		{"implement-phase → plan", "implement", "plan"},
+		{"review-phase → plan", "review", "plan"},
+		{"done-phase → idle", "done", "idle"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Stub phase-layer bd calls. FindEpicBySpecID enumerates epics
+			// via bd list --type=epic; DerivePhase reads mindspec_phase via
+			// bd show <id> --json. Our stubs answer just enough for both.
+			restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+				for _, a := range args {
+					if a == "--type=epic" {
+						epics := []phase.EpicInfo{{
+							ID:        "epic-999",
+							Title:     "[SPEC 011-metatest] Metadata test",
+							Status:    "open",
+							IssueType: "epic",
+							Metadata: map[string]interface{}{
+								"spec_num":       float64(11),
+								"spec_title":     "metatest",
+								"mindspec_phase": tc.phase,
+							},
+						}}
+						return json.Marshal(epics)
+					}
+				}
+				return []byte("[]"), nil
+			})
+			defer restoreList()
+
+			restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) > 0 && args[0] == "show" {
+					items := []phase.EpicInfo{{
+						ID: "epic-999",
+						Metadata: map[string]interface{}{
+							"mindspec_phase": tc.phase,
+						},
+					}}
+					return json.Marshal(items)
+				}
+				return []byte("[]"), nil
+			})
+			defer restoreRun()
+
+			bead := BeadInfo{ID: "x", Title: "011-metatest: Metadata-driven route", IssueType: "feature"}
+			result := ResolveMode(t.TempDir(), bead)
+			if result.Mode != tc.wantMode {
+				t.Errorf("phase=%q: got mode %q, want %q", tc.phase, result.Mode, tc.wantMode)
+			}
+		})
 	}
 }
 

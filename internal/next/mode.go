@@ -1,14 +1,11 @@
 package next
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
-	"github.com/mrmaxsteel/mindspec/internal/workspace"
-	"gopkg.in/yaml.v3"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
 // ResolvedWork holds the result of mode resolution for a claimed bead.
@@ -126,42 +123,18 @@ func resolveFeatureMode(root, specID string) string {
 				return state.ModeSpec
 			case state.ModePlan, state.ModeImplement, state.ModeReview:
 				return state.ModePlan
+			case state.ModeDone:
+				// Spec lifecycle already closed — the feature bead is a stray
+				// follow-up. Route to idle so the caller surfaces the
+				// ambiguity rather than silently re-opening plan mode.
+				return state.ModeIdle
 			}
 		}
 	}
 
 	// Fallback: parse spec.md YAML frontmatter.
-	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
-	data, err := os.ReadFile(specPath)
-	if err != nil {
-		return state.ModeSpec
-	}
-	if specFrontmatterIsApproved(data) {
+	if strings.EqualFold(validate.SpecStatus(root, specID), "Approved") {
 		return state.ModePlan
 	}
 	return state.ModeSpec
-}
-
-// specFrontmatterIsApproved reports whether the spec.md YAML frontmatter has
-// a `status` field set to "Approved" (case-insensitive). Returns false for
-// malformed or missing frontmatter.
-func specFrontmatterIsApproved(data []byte) bool {
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return false
-	}
-	var fmLines []string
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		fmLines = append(fmLines, line)
-	}
-	var fm struct {
-		Status string `yaml:"status"`
-	}
-	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(fm.Status), "Approved")
 }

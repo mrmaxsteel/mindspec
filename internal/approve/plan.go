@@ -612,37 +612,15 @@ func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
 
 // specIsApproved reports whether a spec has progressed past Spec Mode. The
 // authoritative signal is the epic's mindspec_phase metadata in Beads
-// (ADR-0023). If no epic is found we fall back to parsing the spec.md YAML
-// frontmatter. Substring matching on raw markdown is avoided because it
-// silently misclassifies casing variations and frontmatter value changes.
+// (ADR-0023). If no epic is found we fall back to the spec.md YAML
+// frontmatter via validate.SpecStatusAt. Substring matching on raw markdown
+// is avoided — it silently misclassifies casing variations and frontmatter
+// value changes (ZFC violation).
 func specIsApproved(specDir, specID string) bool {
 	if epicID, err := phase.FindEpicBySpecID(specID); err == nil && epicID != "" {
-		if p, derr := phase.DerivePhase(epicID); derr == nil {
-			return p != state.ModeSpec && p != ""
+		if p, derr := phase.DerivePhase(epicID); derr == nil && p != "" {
+			return p != state.ModeSpec
 		}
 	}
-
-	specPath := filepath.Join(specDir, "spec.md")
-	data, err := os.ReadFile(specPath)
-	if err != nil {
-		return false
-	}
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return false
-	}
-	var fmLines []string
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		fmLines = append(fmLines, line)
-	}
-	var fm struct {
-		Status string `yaml:"status"`
-	}
-	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(fm.Status), "Approved")
+	return strings.EqualFold(validate.SpecStatusAt(specDir), "Approved")
 }

@@ -206,13 +206,16 @@ func FormatResult(r *Result) string {
 
 // advanceState determines the next mode after completing a bead.
 //
-// Order:
-//  1. A ready (unblocked + open) bead → implement + that bead.
-//  2. Any remaining non-closed bead (open, in_progress, or blocked) → plan.
-//     Earlier revisions only queried `--status=open` and silently skipped
-//     in_progress beads held by a parallel agent, which caused a premature
-//     flip to review mode whenever two beads were being worked concurrently.
-//  3. Otherwise → review.
+// Phase is derived authoritatively via phase.DerivePhaseFromChildren against
+// the full child-status mix (open, in_progress, blocked, closed, and any
+// custom bd statuses the repo declares — e.g. this repo's `resolved` gate
+// status). Earlier revisions only queried `--status=open`, which silently
+// dropped in_progress beads held by a parallel agent and any custom status,
+// causing premature flips to review mode.
+//
+// If phase derives to implement, a `bd ready` call resolves a specific next
+// bead; otherwise nextBead stays empty and the caller prints the right
+// guidance for plan / review / idle.
 func advanceState(specID string) (mode, nextBead string) {
 	if specID == "" {
 		return state.ModeIdle, ""
@@ -223,29 +226,53 @@ func advanceState(specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// 1. Ready (unblocked + open).
-	if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
-		var ready []bead.BeadInfo
-		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-			return state.ModeImplement, ready[0].ID
+	children := queryAllChildren(epicID)
+	derivedPhase := phase.DerivePhaseFromChildren(children)
+
+	if derivedPhase == state.ModeImplement {
+		if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
+			var ready []bead.BeadInfo
+			if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+				return state.ModeImplement, ready[0].ID
+			}
 		}
+		// Implement phase without a ready bead: we're between beads (next one
+		// is blocked on a dep that just closed but hasn't propagated, or the
+		// only remaining work is in_progress with a peer). Stay in implement
+		// without a concrete next bead rather than flipping to review.
+		return state.ModeImplement, ""
 	}
 
-	// 2. Any remaining non-closed children across every active status.
-	for _, status := range []string{"open", "in_progress", "blocked"} {
-		out, lerr := listJSONFn("--parent", epicID, "--status="+status)
-		if lerr != nil {
+	return derivedPhase, ""
+}
+
+// queryAllChildren pulls child beads under an epic across every status bd
+// recognises — including custom statuses declared in the project's
+// .beads/config.yaml. Mirrors phase.queryChildren (package-private there).
+func queryAllChildren(epicID string) []phase.ChildInfo {
+	var all []phase.ChildInfo
+	seen := map[string]bool{}
+
+	// Fast path: one list call with no status filter returns every child.
+	// bd list without --status defaults to open-only, so we still fall
+	// through to per-status fan-out for complete coverage if that ever
+	// changes. The extra cost is a handful of Dolt calls, amortised by
+	// Dolt's in-memory cache on the mindspec server.
+	for _, status := range []string{"open", "in_progress", "blocked", "closed", "resolved"} {
+		out, err := listJSONFn("--parent", epicID, "--status="+status)
+		if err != nil {
 			continue
 		}
-		var batch []bead.BeadInfo
+		var batch []phase.ChildInfo
 		if json.Unmarshal(out, &batch) != nil {
 			continue
 		}
-		if len(batch) > 0 {
-			return state.ModePlan, ""
+		for _, c := range batch {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				all = append(all, c)
+			}
 		}
 	}
-
-	// 3. Nothing left → review.
-	return state.ModeReview, ""
+	return all
 }

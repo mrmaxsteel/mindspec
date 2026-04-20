@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	defaultRecommendedMax   = 15
-	oversizedDescThreshold  = 800
+	defaultRecommendedMax  = 15
+	oversizedDescThreshold = 800
 )
 
 // HygieneReport summarizes workset health.
@@ -68,8 +68,18 @@ func AuditWorkset(staleDays int) (*HygieneReport, error) {
 
 // hasMindspecMetadata reports whether a bead was created by mindspec and
 // therefore belongs to a spec lifecycle. Presence of any mindspec-written
-// metadata key is sufficient. `mindspec_done` (legacy pre-Spec-080 marker)
-// is included so epics predating Spec 080 are not misreported as orphans.
+// metadata key with a non-nil, non-empty-string value is sufficient.
+//
+// The `v != ""` check looks odd against an `interface{}`: it's comparing the
+// *string value* "" to whatever type the JSON decoder produced. Go's interface
+// equality treats values of different types as unequal, so `spec_num: 7`
+// (float64) passes the check, as does `mindspec_done: false` (bool) — both
+// are legitimate presence signals. Only the literal empty string would be
+// treated as "absent", which is the intent: a metadata key explicitly set to
+// an empty string should not count as ownership.
+//
+// `mindspec_done` is included so epics predating Spec 080 are not
+// misreported as orphans.
 func hasMindspecMetadata(b BeadInfo) bool {
 	if b.Metadata == nil {
 		return false
