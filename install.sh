@@ -127,9 +127,20 @@ download() {
     fi
 }
 
-# Check if running with sufficient privileges
+# Check if running with sufficient privileges.
+# When $INSTALL_DIR doesn't exist yet, walk up to the nearest existing ancestor
+# and test writability there — otherwise a pre-created $INSTALL_DIR would always
+# pass, silently letting unprivileged users target system paths like /usr/local/bin.
 check_privileges() {
-    if [ ! -w "$INSTALL_DIR" ]; then
+    target="$INSTALL_DIR"
+    while [ ! -d "$target" ]; do
+        parent=$(dirname "$target")
+        if [ "$parent" = "$target" ]; then
+            break
+        fi
+        target="$parent"
+    done
+    if [ ! -w "$target" ]; then
         if [ "$(id -u)" -ne 0 ]; then
             warn "Installation directory $INSTALL_DIR is not writable."
             warn "You may need to run this script with sudo or set INSTALL_DIR to a writable location."
@@ -258,13 +269,13 @@ Got:      $ACTUAL_CHECKSUM"
     info "Extracting..."
     tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$TMP_DIR"
     
-    # Ensure install directory exists before privilege check
-    mkdir -p "$INSTALL_DIR"
-
-    # Check privileges before attempting install
+    # Check privileges before creating the install directory or touching the target
     if ! check_privileges; then
         error "Cannot write to $INSTALL_DIR"
     fi
+
+    # Now safe to create the install directory
+    mkdir -p "$INSTALL_DIR"
 
     # Check for existing installation
     check_existing_installation
@@ -275,27 +286,36 @@ Got:      $ACTUAL_CHECKSUM"
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
     
     # Verify installation
-    if command -v "$BINARY_NAME" >/dev/null 2>&1; then
-        info "Successfully installed MindSpec ${VERSION}"
-        info "Run 'mindspec --help' to get started"
-        log "Installation completed successfully: version ${VERSION}"
-        
-        echo ""
-        info "IMPORTANT: MindSpec requires additional dependencies:"
-        echo ""
-        echo "  1. Beads (issue tracker):"
-        echo "     curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash"
-        echo ""
-        echo "  2. Dolt (database for Beads):"
-        echo "     sudo bash -c \"curl --proto '=https' --tlsv1.2 -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash\""
-        echo ""
-        echo "  Verify installation with: bd --version && dolt version"
-        echo ""
-    else
-        warn "Installation complete, but ${BINARY_NAME} is not in PATH"
-        warn "Add ${INSTALL_DIR} to your PATH or run: export PATH=\"\$PATH:${INSTALL_DIR}\""
-        log "Installation completed but binary not in PATH"
-    fi
+    info "Successfully installed MindSpec ${VERSION}"
+    log "Installation completed successfully: version ${VERSION}"
+
+    # Check whether $INSTALL_DIR is on PATH; warn with a hint if not.
+    # Use a case match against $PATH rather than `command -v`, which would also
+    # match binaries installed elsewhere and miss the "not on PATH" case.
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*)
+            ;;
+        *)
+            warn "${INSTALL_DIR} is not on your PATH."
+            warn "Add it with: export PATH=\"\$PATH:${INSTALL_DIR}\""
+            warn "Add that line to your shell profile (~/.zshrc, ~/.bashrc, etc.) to persist it."
+            log "Installed successfully but ${INSTALL_DIR} is not on PATH"
+            ;;
+    esac
+
+    info "Run 'mindspec --help' to get started"
+
+    echo ""
+    info "IMPORTANT: MindSpec requires additional dependencies:"
+    echo ""
+    echo "  1. Beads (issue tracker):"
+    echo "     curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash"
+    echo ""
+    echo "  2. Dolt (database for Beads):"
+    echo "     sudo bash -c \"curl --proto '=https' --tlsv1.2 -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash\""
+    echo ""
+    echo "  Verify installation with: bd --version && dolt version"
+    echo ""
     
     log "Installation finished"
     log ""
