@@ -65,3 +65,8 @@ status.custom: "resolved"
 # - linear.api-key
 # - github.org
 # - github.repo
+
+# Disable bd's auto git-add during export. The redirect to main's .beads/
+# makes this unnecessary, and misaligned CWD during git hooks was causing
+# stray issues.jsonl writes at the worktree root.
+export.git-add: false
