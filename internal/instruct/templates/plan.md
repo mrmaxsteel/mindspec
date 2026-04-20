@@ -54,7 +54,7 @@ Turn the approved spec into bounded, executable work chunks (implementation bead
 Implementation beads, each with:
 - Small scope (one slice of value)
 - 3-7 step micro-plan
-- Explicit verification steps that reference **concrete test artifacts** (test file paths like `_test.go`, test commands like `make test`, `go test`, `pytest`, or `mindspec validate`)
+- Explicit verification steps that reference **concrete, runnable artefacts** — the specific command, file, HTTP call, query, or assertion a reviewer can execute to confirm the bead is done. A line like "Confirm it works" is not acceptable; a line like "`cargo test --package foo` passes", "`pytest tests/foo.py -k new_case` green", or "`curl -f http://localhost:8080/healthz` returns 200" is. Use whatever toolchain the repo uses — the validator does not enforce a specific framework, but the plan reviewer will reject vague verification
 - **Per-bead acceptance criteria** — decompose the spec's acceptance criteria into bead-specific criteria scoped to each bead's work. Each bead should only list the criteria it is responsible for satisfying, not the full spec AC.
 - Dependencies between beads
 - ADR citations

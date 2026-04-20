@@ -61,16 +61,15 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
 	vr := validate.ValidatePlan(root, specID)
 	if vr.HasFailures() {
-		// If plan.md doesn't exist, check if the spec needs approval first.
-		// This guides agents that pick the wrong approve subcommand.
+		// If plan.md doesn't exist, check whether the spec itself still needs
+		// approval so we can guide agents that pick the wrong subcommand.
+		// The authoritative phase signal is the epic's mindspec_phase metadata
+		// (ADR-0023); falling back to YAML frontmatter only when no epic exists.
 		specDir := workspace.SpecDir(root, specID)
 		planPath := filepath.Join(specDir, "plan.md")
 		if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
-			specPath := filepath.Join(specDir, "spec.md")
-			if specData, readErr := os.ReadFile(specPath); readErr == nil {
-				if !strings.Contains(string(specData), "status: Approved") {
-					return nil, fmt.Errorf("spec %s has not been approved yet — no plan.md exists.\nRun: mindspec approve spec %s", specID, specID)
-				}
+			if !specIsApproved(specDir, specID) {
+				return nil, fmt.Errorf("spec %s has not been approved yet — no plan.md exists.\nRun: mindspec approve spec %s", specID, specID)
 			}
 		}
 		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
@@ -609,4 +608,41 @@ func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
 	}
 
 	return result, nil
+}
+
+// specIsApproved reports whether a spec has progressed past Spec Mode. The
+// authoritative signal is the epic's mindspec_phase metadata in Beads
+// (ADR-0023). If no epic is found we fall back to parsing the spec.md YAML
+// frontmatter. Substring matching on raw markdown is avoided because it
+// silently misclassifies casing variations and frontmatter value changes.
+func specIsApproved(specDir, specID string) bool {
+	if epicID, err := phase.FindEpicBySpecID(specID); err == nil && epicID != "" {
+		if p, derr := phase.DerivePhase(epicID); derr == nil {
+			return p != state.ModeSpec && p != ""
+		}
+	}
+
+	specPath := filepath.Join(specDir, "spec.md")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	var fmLines []string
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		fmLines = append(fmLines, line)
+	}
+	var fm struct {
+		Status string `yaml:"status"`
+	}
+	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(fm.Status), "Approved")
 }

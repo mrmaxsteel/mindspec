@@ -555,93 +555,50 @@ func TestValidatePlan_ProvenancePresent(t *testing.T) {
 	}
 }
 
-// --- Spec 039: Bead verification testability ---
+// --- Bead verification testability (Spec 039, removed as ZFC violation) ---
+//
+// The deterministic `bead-verification-testability` check was removed: it
+// encoded a framework keyword allowlist (`go test`, `pytest`, `_test.go`, …),
+// which is the exact "keyword-based routing" that Yegge flags as a Zero
+// Framework Cognition violation. Quality judgement of verification items
+// (is it concrete? is it testable?) now lives in the plan-approve AI review
+// and in the plan instruct template — the validator only enforces the
+// structural requirement that the **Verification** section exists with at
+// least one checkbox item (covered by TestValidatePlan_BeadMissingVerification).
+//
+// A regression test pins this behaviour: a plan with vague verification
+// ("Confirm it works correctly") must still pass structural validation —
+// failing it would reintroduce the cognitive heuristic.
 
-func TestValidatePlan_VerificationTestable_GoTest(t *testing.T) {
-	tmp := t.TempDir()
-	makePlanWithSections(t, tmp, "", true, true, true, "", "- [ ] `go test ./internal/validate/...` passes")
-
-	r := ValidatePlan(tmp, "999-test")
-
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			t.Error("unexpected testability error when verification references go test")
-		}
+func TestValidatePlan_VerificationTestability_IsNotEnforced(t *testing.T) {
+	cases := []struct {
+		name       string
+		verifyLine string
+	}{
+		{"vague prose", "- [ ] Confirm it works correctly"},
+		{"rust", "- [ ] `cargo test --package foo` passes"},
+		{"ruby", "- [ ] `bundle exec rspec spec/foo_spec.rb` green"},
+		{"elixir", "- [ ] `mix test test/foo_test.exs` passes"},
+		{"swift", "- [ ] `swift test --filter FooTests` green"},
+		{"dotnet", "- [ ] `dotnet test --filter FullyQualifiedName~FooTests` green"},
+		{"bazel", "- [ ] `bazel test //pkg/foo:all` passes"},
+		{"http no backticks", "- [ ] The GET /healthz endpoint returns 200"},
+		{"plain path", "- [ ] New file src/foo/bar.rb exists and is imported"},
 	}
-}
 
-func TestValidatePlan_VerificationTestable_TestFile(t *testing.T) {
-	tmp := t.TempDir()
-	makePlanWithSections(t, tmp, "", true, true, true, "", "- [ ] New tests in `plan_test.go` pass")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			makePlanWithSections(t, tmp, "", true, true, true, "", tc.verifyLine)
 
-	r := ValidatePlan(tmp, "999-test")
+			r := ValidatePlan(tmp, "999-test")
 
-	// _test.go is the pattern, plan_test.go doesn't contain it literally
-	// but let's check — "plan_test.go" does NOT contain "_test.go" substring... actually it does: plan_test.go
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			t.Error("unexpected testability error when verification references _test.go file")
-		}
-	}
-}
-
-func TestValidatePlan_VerificationTestable_MakeTest(t *testing.T) {
-	tmp := t.TempDir()
-	makePlanWithSections(t, tmp, "", true, true, true, "", "- [ ] `make test` passes with no regressions")
-
-	r := ValidatePlan(tmp, "999-test")
-
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			t.Error("unexpected testability error when verification references make test")
-		}
-	}
-}
-
-func TestValidatePlan_VerificationTestable_MindspecValidate(t *testing.T) {
-	tmp := t.TempDir()
-	makePlanWithSections(t, tmp, "", true, true, true, "", "- [ ] `mindspec validate plan 039` passes")
-
-	r := ValidatePlan(tmp, "999-test")
-
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			t.Error("unexpected testability error when verification references mindspec validate")
-		}
-	}
-}
-
-func TestValidatePlan_VerificationNotTestable(t *testing.T) {
-	tmp := t.TempDir()
-	makePlanWithSections(t, tmp, "", true, true, true, "", "- [ ] Confirm it works correctly")
-
-	r := ValidatePlan(tmp, "999-test")
-
-	found := false
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected bead-verification-testability error for vague verification")
-	}
-}
-
-func TestValidatePlan_VerificationMixed_OneTestable(t *testing.T) {
-	tmp := t.TempDir()
-	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
-	os.MkdirAll(specDir, 0o755)
-
-	plan := "---\nstatus: Draft\nspec_id: \"999-test\"\nversion: \"1.0\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNone.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 999-A: Test\n\n**Steps**:\n1. Step one\n2. Step two\n3. Step three\n\n**Verification**:\n- [ ] Confirm it looks right\n- [ ] `go test ./...` passes\n\n**Depends on**: nothing\n"
-	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0o644)
-
-	r := ValidatePlan(tmp, "999-test")
-
-	for _, issue := range r.Issues {
-		if issue.Name == "bead-verification-testability" {
-			t.Error("unexpected testability error when at least one verification item is testable")
-		}
+			for _, issue := range r.Issues {
+				if issue.Name == "bead-verification-testability" {
+					t.Errorf("unexpected testability error for %s: the validator must not judge verification quality (ZFC). Got: %s", tc.name, issue.Message)
+				}
+			}
+		})
 	}
 }
 

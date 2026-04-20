@@ -7,6 +7,10 @@
 # This rule catches any stray runtime files outside .beads/
 **/bd.sock
 
+# Stray beads export that the bd pre-commit hook occasionally drops at the
+# repo root (the canonical copy lives at .beads/issues.jsonl).
+/issues.jsonl
+
 # Python
 __pycache__/
 *.py[cod]

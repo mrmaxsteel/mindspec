@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const defaultRecommendedMax = 15
+const (
+	defaultRecommendedMax   = 15
+	oversizedDescThreshold  = 800
+)
 
 // HygieneReport summarizes workset health.
 type HygieneReport struct {
@@ -18,7 +21,12 @@ type HygieneReport struct {
 	RecommendedMax int
 }
 
-// AuditWorkset analyzes open beads for hygiene issues.
+// AuditWorkset analyzes open beads for hygiene issues. A bead is classified
+// as mindspec-owned when it carries explicit metadata (`mindspec_phase` or
+// `spec_num`/`spec_id`) written by spec-create or plan-approve — we no longer
+// infer ownership from title-prefix substrings like `[SPEC ` / `[IMPL `,
+// which would misclassify any bead whose title drifted from the convention
+// or whose tooling wrote a different prefix.
 func AuditWorkset(staleDays int) (*HygieneReport, error) {
 	out, err := ListJSON("--status=open")
 	if err != nil {
@@ -39,7 +47,6 @@ func AuditWorkset(staleDays int) (*HygieneReport, error) {
 	staleThreshold := now.AddDate(0, 0, -staleDays)
 
 	for _, b := range beads {
-		// Stale check: updated_at older than threshold
 		if b.UpdatedAt != "" {
 			updated, err := time.Parse(time.RFC3339, b.UpdatedAt)
 			if err == nil && updated.Before(staleThreshold) {
@@ -47,21 +54,32 @@ func AuditWorkset(staleDays int) (*HygieneReport, error) {
 			}
 		}
 
-		// Orphan check: no [SPEC or [IMPL prefix
-		if !strings.HasPrefix(b.Title, "[SPEC ") && !strings.HasPrefix(b.Title, "[IMPL ") {
+		if !hasMindspecMetadata(b) {
 			report.Orphaned = append(report.Orphaned, b)
 		}
 
-		// Oversized check
-		descLen := len(b.Description)
-		if strings.HasPrefix(b.Title, "[SPEC ") && descLen > 400 {
-			report.Oversized = append(report.Oversized, b)
-		} else if descLen > 800 {
+		if len(b.Description) > oversizedDescThreshold {
 			report.Oversized = append(report.Oversized, b)
 		}
 	}
 
 	return report, nil
+}
+
+// hasMindspecMetadata reports whether a bead was created by mindspec and
+// therefore belongs to a spec lifecycle. Presence of any mindspec-written
+// metadata key is sufficient. `mindspec_done` (legacy pre-Spec-080 marker)
+// is included so epics predating Spec 080 are not misreported as orphans.
+func hasMindspecMetadata(b BeadInfo) bool {
+	if b.Metadata == nil {
+		return false
+	}
+	for _, key := range []string{"mindspec_phase", "spec_id", "spec_num", "mindspec_done"} {
+		if v, ok := b.Metadata[key]; ok && v != nil && v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // FormatReport produces a human-readable hygiene report.
@@ -82,7 +100,7 @@ func FormatReport(r *HygieneReport) string {
 	}
 
 	if len(r.Orphaned) > 0 {
-		fmt.Fprintf(&sb, "Orphaned beads (%d) — no [SPEC] or [IMPL] prefix:\n", len(r.Orphaned))
+		fmt.Fprintf(&sb, "Orphaned beads (%d) — no mindspec metadata (spec_id / mindspec_phase):\n", len(r.Orphaned))
 		for _, b := range r.Orphaned {
 			fmt.Fprintf(&sb, "  - %s: %s\n", b.ID, b.Title)
 		}

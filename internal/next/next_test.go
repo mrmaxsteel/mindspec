@@ -214,7 +214,10 @@ func TestResolveMode_Feature_ApprovedSpec(t *testing.T) {
 	if err := os.MkdirAll(specDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	specContent := "# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"
+	// YAML frontmatter `status: Approved` is the contract — the resolver
+	// no longer substring-matches "Status: APPROVED" in prose (ZFC: a
+	// markdown body heuristic is not a reliable workflow signal).
+	specContent := "---\nstatus: Approved\nspec_id: \"010-test\"\n---\n\n# Spec\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +235,7 @@ func TestResolveMode_Feature_DraftSpec(t *testing.T) {
 	if err := os.MkdirAll(specDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	specContent := "# Spec\n\n## Approval\n\n- **Status**: DRAFT\n"
+	specContent := "---\nstatus: Draft\nspec_id: \"010-test\"\n---\n\n# Spec\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specContent), 0644); err != nil {
 		t.Fatal(err)
 	}

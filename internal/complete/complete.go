@@ -205,6 +205,14 @@ func FormatResult(r *Result) string {
 }
 
 // advanceState determines the next mode after completing a bead.
+//
+// Order:
+//  1. A ready (unblocked + open) bead → implement + that bead.
+//  2. Any remaining non-closed bead (open, in_progress, or blocked) → plan.
+//     Earlier revisions only queried `--status=open` and silently skipped
+//     in_progress beads held by a parallel agent, which caused a premature
+//     flip to review mode whenever two beads were being worked concurrently.
+//  3. Otherwise → review.
 func advanceState(specID string) (mode, nextBead string) {
 	if specID == "" {
 		return state.ModeIdle, ""
@@ -215,23 +223,29 @@ func advanceState(specID string) (mode, nextBead string) {
 		return state.ModeIdle, ""
 	}
 
-	// Query truly ready beads (unblocked + open)
-	out, err := runBDFn("ready", "--parent", epicID, "--json")
-	if err == nil {
+	// 1. Ready (unblocked + open).
+	if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
 		var ready []bead.BeadInfo
 		if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
 			return state.ModeImplement, ready[0].ID
 		}
 	}
 
-	// Check for any open children (blocked or otherwise)
-	out, err = listJSONFn("--parent", epicID, "--status=open")
-	if err == nil {
-		var open []bead.BeadInfo
-		if json.Unmarshal(out, &open) == nil && len(open) > 0 {
+	// 2. Any remaining non-closed children across every active status.
+	for _, status := range []string{"open", "in_progress", "blocked"} {
+		out, lerr := listJSONFn("--parent", epicID, "--status="+status)
+		if lerr != nil {
+			continue
+		}
+		var batch []bead.BeadInfo
+		if json.Unmarshal(out, &batch) != nil {
+			continue
+		}
+		if len(batch) > 0 {
 			return state.ModePlan, ""
 		}
 	}
 
+	// 3. Nothing left → review.
 	return state.ModeReview, ""
 }

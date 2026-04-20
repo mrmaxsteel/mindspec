@@ -200,19 +200,6 @@ type BeadSection struct {
 	AcceptanceCriteria string // per-bead acceptance criteria text
 }
 
-// testArtifactPatterns are substrings that indicate a concrete test artifact reference.
-var testArtifactPatterns = []string{
-	"_test.go",
-	".test.ts",
-	".test.js",
-	".spec.ts",
-	"make test",
-	"go test",
-	"pytest",
-	"npm test",
-	"mindspec validate",
-}
-
 // ParseBeadSections finds and parses ## Bead ... sections from plan content.
 func ParseBeadSections(content string) []BeadSection {
 	var sections []BeadSection
@@ -384,10 +371,13 @@ func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
 		r.AddError("bead-verification", fmt.Sprintf("%s: missing verification steps", bs.Heading))
 	}
 
-	// Spec 039: check verification testability
-	if bs.HasVerify && bs.VerifyCount > 0 && !isApproved {
-		checkVerificationTestability(r, bs)
-	}
+	// Verification *quality* (is it concrete? is it testable?) is delegated to
+	// the AI reviewer at plan-approve time and to the author via the instruct
+	// template. The validator's job is structural: the section exists with at
+	// least one checkbox item. Hardcoding keyword allowlists ("go test",
+	// "pytest", backtick counts, etc.) is a ZFC violation — it bakes
+	// framework/style assumptions into the deterministic shell and fails
+	// silently for every toolchain the author didn't anticipate.
 
 	// Spec 080: per-bead acceptance criteria is a structural requirement (error, not warning).
 	// Applies regardless of approval status — plans must always have per-bead AC.
@@ -398,20 +388,6 @@ func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
 	if !bs.HasDependsOn {
 		r.AddWarning("bead-depends", fmt.Sprintf("%s: no 'Depends on' declaration", bs.Heading))
 	}
-}
-
-// checkVerificationTestability ensures at least one verification item references a test artifact.
-func checkVerificationTestability(r *Result, bs BeadSection) {
-	for _, line := range bs.VerifyLines {
-		lower := strings.ToLower(line)
-		for _, pattern := range testArtifactPatterns {
-			if strings.Contains(lower, strings.ToLower(pattern)) {
-				return
-			}
-		}
-	}
-	r.AddError("bead-verification-testability",
-		fmt.Sprintf("%s: verification steps must reference at least one test artifact (e.g., _test.go, make test, go test, pytest)", bs.Heading))
 }
 
 // pathRefRe matches Go file paths (internal/foo/bar.go), package paths

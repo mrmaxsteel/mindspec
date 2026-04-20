@@ -18,15 +18,16 @@ var execCommand = exec.Command
 
 // BeadInfo represents a work item from the Beads CLI.
 type BeadInfo struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Priority    int    `json:"priority"`
-	IssueType   string `json:"issue_type"`
-	Owner       string `json:"owner"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          string                 `json:"id"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Status      string                 `json:"status"`
+	Priority    int                    `json:"priority"`
+	IssueType   string                 `json:"issue_type"`
+	Owner       string                 `json:"owner"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Preflight checks prerequisites for bead commands:

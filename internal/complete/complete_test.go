@@ -363,6 +363,47 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 }
 
+// TestAdvanceState_InProgressBeadHoldsImplementPhase pins the fix for the
+// premature review-mode bug. If any remaining bead is in_progress (e.g. a
+// parallel agent has it claimed) when another bead completes, advanceState
+// must stay in plan/implement — not flip the spec to review. Earlier code
+// only queried `--status=open` and silently missed in_progress beads.
+func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
+	saveAndRestore(t)
+
+	setupTempRoot(t)
+	stubPhaseEpic(t, "001-test-spec", "epic-123")
+
+	// No ready beads (the in_progress one isn't ready because it's already claimed).
+	runBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return json.Marshal([]bead.BeadInfo{})
+		}
+		return nil, fmt.Errorf("unexpected")
+	}
+
+	// One in_progress bead exists; nothing open or blocked.
+	listJSONFn = func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--status=in_progress" {
+				items := []bead.BeadInfo{
+					{ID: "claimed-bead", Title: "[IMPL 001-test-spec.2] Claimed by peer"},
+				}
+				return json.Marshal(items)
+			}
+		}
+		return []byte("[]"), nil
+	}
+
+	mode, nextBead := advanceState("001-test-spec")
+	if mode != state.ModePlan {
+		t.Errorf("in_progress bead must hold phase: got %q, want %q (not review)", mode, state.ModePlan)
+	}
+	if nextBead != "" {
+		t.Errorf("nextBead should be empty, got %q", nextBead)
+	}
+}
+
 func TestAdvanceState_NoEpic(t *testing.T) {
 	saveAndRestore(t)
 

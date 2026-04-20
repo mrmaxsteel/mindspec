@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"gopkg.in/yaml.v3"
 )
 
 // ResolvedWork holds the result of mode resolution for a claimed bead.
@@ -105,23 +107,61 @@ func stripChunkSuffix(slug string) string {
 	return slug[:dotIdx]
 }
 
-// resolveFeatureMode checks the spec's artifact state to determine if we're in
-// spec mode (draft spec) or plan mode (approved spec with plan needed).
+// resolveFeatureMode determines whether a feature bead belongs to spec mode
+// (draft spec) or plan mode (approved spec). The authoritative source is the
+// epic's `mindspec_phase` metadata in Beads (ADR-0023, Spec 080); if that is
+// unavailable the spec.md YAML frontmatter is parsed as a fallback. Substring
+// matching on raw markdown is avoided — casing variations, status values in
+// prose, or localized frontmatter keys would all break it silently.
 func resolveFeatureMode(root, specID string) string {
 	if specID == "" {
 		return state.ModeSpec
 	}
 
+	// Primary source: epic metadata via beads.
+	if epicID, err := phase.FindEpicBySpecID(specID); err == nil && epicID != "" {
+		if p, derr := phase.DerivePhase(epicID); derr == nil && p != "" {
+			switch p {
+			case state.ModeSpec:
+				return state.ModeSpec
+			case state.ModePlan, state.ModeImplement, state.ModeReview:
+				return state.ModePlan
+			}
+		}
+	}
+
+	// Fallback: parse spec.md YAML frontmatter.
 	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return state.ModeSpec
 	}
-
-	content := string(data)
-	if strings.Contains(content, "Status: APPROVED") || strings.Contains(content, "**Status**: APPROVED") {
+	if specFrontmatterIsApproved(data) {
 		return state.ModePlan
 	}
-
 	return state.ModeSpec
+}
+
+// specFrontmatterIsApproved reports whether the spec.md YAML frontmatter has
+// a `status` field set to "Approved" (case-insensitive). Returns false for
+// malformed or missing frontmatter.
+func specFrontmatterIsApproved(data []byte) bool {
+	lines := strings.Split(string(data), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	var fmLines []string
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		fmLines = append(fmLines, line)
+	}
+	var fm struct {
+		Status string `yaml:"status"`
+	}
+	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(fm.Status), "Approved")
 }
