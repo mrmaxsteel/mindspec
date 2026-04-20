@@ -116,10 +116,26 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 
 	// Step 4: Auto-commit plan approval + bead_ids so implementation
 	// worktrees that branch from spec/<id> contain the approved artifacts.
+	// This is a hard error: leaving the spec worktree dirty here causes the
+	// downstream `mindspec complete` merge to fail (`git merge` refuses to
+	// run with uncommitted changes in the target worktree).
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not auto-commit plan approval: %v", err))
+		return nil, fmt.Errorf("auto-commit plan approval failed: %w\n\nFix the issue in %s and re-run 'mindspec plan approve %s'", err, specWtPath, specID)
+	}
+
+	// Pre-commit hooks (beads, etc.) can modify tracked files as a side
+	// effect of the commit above. A second CommitAll picks up those
+	// residual changes so the spec worktree lands clean.
+	if err := exec.CommitAll(specWtPath, fmt.Sprintf("chore: sync beads state after plan approval for %s", specID)); err != nil {
+		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec plan approve %s'", err, specWtPath, specID)
+	}
+
+	// Final guard: the spec worktree must be clean before beads can be
+	// merged back into it during `mindspec complete`.
+	if err := exec.IsTreeClean(specWtPath); err != nil {
+		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\ncd %s && git status", err, specWtPath)
 	}
 
 	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
