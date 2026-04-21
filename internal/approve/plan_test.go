@@ -978,17 +978,29 @@ None
 
 	// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
 	// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
+	epicJSON := []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`)
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		// Only return the epic on --status=open queries; empty otherwise so
 		// dedup doesn't double-process.
 		for _, a := range args {
 			if a == "--status=open" {
-				return []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`), nil
+				return epicJSON, nil
 			}
 		}
 		return []byte(`[]`), nil
 	})
 	defer restoreList()
+
+	// Validation's checkPlanApprovalGateConsistency calls phase.DerivePhase →
+	// runBDFn("show", epicID, "--json"). Stub it too so the test doesn't
+	// depend on a real bd binary being present in $PATH.
+	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return epicJSON, nil
+		}
+		return []byte(`[]`), nil
+	})
+	defer restoreRunBD()
 
 	// Record ordering across exec.CommitAll and planMergeMetadataFn.
 	var callLog []string
@@ -1000,8 +1012,8 @@ None
 	}
 
 	restoreMerge := SetPlanMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
-		phase, _ := updates["mindspec_phase"].(string)
-		record(fmt.Sprintf("merge-metadata:%s:%s", issueID, phase))
+		newPhase, _ := updates["mindspec_phase"].(string)
+		record(fmt.Sprintf("merge-metadata:%s:%s", issueID, newPhase))
 		return nil
 	})
 	defer restoreMerge()
