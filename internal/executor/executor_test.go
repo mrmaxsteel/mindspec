@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // --- Helpers ---
@@ -35,6 +37,7 @@ func newTestExecutor(t *testing.T) *MindspecExecutor {
 		WorktreeCreateFn:  func(name, branch string) error { return nil },
 		WorktreeRemoveFn:  func(name string) error { return nil },
 		WorktreeListFn:    func() ([]bead.WorktreeListEntry, error) { return nil, nil },
+		ExportJSONLFn:     func(workdir string) error { return nil },
 		LoadConfigFn:      func(root string) (*config.Config, error) { return config.DefaultConfig(), nil },
 		ExecCommandFn:     exec.Command,
 	}
@@ -497,6 +500,193 @@ func TestCommitCount_DelegatesToGitutil(t *testing.T) {
 	}
 	if count != 42 {
 		t.Errorf("count = %d, want 42", count)
+	}
+}
+
+// --- CommitAll / ExportJSONL ordering ---
+
+func TestCommitAll_ExportsBeforeCommit(t *testing.T) {
+	g := newTestExecutor(t)
+
+	var calls []string
+	g.ExportJSONLFn = func(workdir string) error {
+		calls = append(calls, "export:"+workdir)
+		return nil
+	}
+	g.CommitAllFn = func(workdir, message string) error {
+		calls = append(calls, "commit:"+workdir+":"+message)
+		return nil
+	}
+
+	if err := g.CommitAll("/wt", "msg"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want 2 entries", calls)
+	}
+	if calls[0] != "export:/wt" {
+		t.Errorf("calls[0] = %q, want %q", calls[0], "export:/wt")
+	}
+	if calls[1] != "commit:/wt:msg" {
+		t.Errorf("calls[1] = %q, want %q", calls[1], "commit:/wt:msg")
+	}
+}
+
+func TestCommitAll_ExportErrorAbortsCommit(t *testing.T) {
+	g := newTestExecutor(t)
+
+	g.ExportJSONLFn = func(workdir string) error {
+		return fmt.Errorf("dolt unreachable")
+	}
+	committed := false
+	g.CommitAllFn = func(workdir, message string) error {
+		committed = true
+		return nil
+	}
+
+	err := g.CommitAll("/wt", "msg")
+	if err == nil {
+		t.Fatal("expected error when export fails")
+	}
+	if !contains(err.Error(), "dolt unreachable") {
+		t.Errorf("error = %q, want to contain export failure", err.Error())
+	}
+	if committed {
+		t.Error("commit should not run when export fails")
+	}
+}
+
+func TestCommitAll_ExportUsesCommitPath(t *testing.T) {
+	g := newTestExecutor(t)
+
+	var seenWorkdir string
+	g.ExportJSONLFn = func(workdir string) error {
+		seenWorkdir = workdir
+		return nil
+	}
+
+	if err := g.CommitAll("/worktree-path", "msg"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenWorkdir != "/worktree-path" {
+		t.Errorf("export workdir = %q, want %q", seenWorkdir, "/worktree-path")
+	}
+}
+
+func TestCommitAll_ExportFallsBackToRootWhenPathEmpty(t *testing.T) {
+	g := newTestExecutor(t)
+
+	var seenWorkdir string
+	g.ExportJSONLFn = func(workdir string) error {
+		seenWorkdir = workdir
+		return nil
+	}
+
+	if err := g.CommitAll("", "msg"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenWorkdir != g.Root {
+		t.Errorf("export workdir = %q, want root %q", seenWorkdir, g.Root)
+	}
+}
+
+func TestCompleteBead_ExportsBeforeCommit(t *testing.T) {
+	g := newTestExecutor(t)
+
+	var calls []string
+	g.ExportJSONLFn = func(workdir string) error {
+		calls = append(calls, "export")
+		return nil
+	}
+	g.CommitAllFn = func(workdir, message string) error {
+		calls = append(calls, "commit")
+		return nil
+	}
+	g.WorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{{Name: "worktree-b.1", Path: "/wt/b.1", Branch: "bead/b.1"}}, nil
+	}
+	g.ExecCommandFn = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("true") // IsTreeClean succeeds
+	}
+
+	if err := g.CompleteBead("b.1", "spec/077", "finish"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Expect export first, then commit.
+	if len(calls) < 2 || calls[0] != "export" || calls[1] != "commit" {
+		t.Errorf("calls = %v, want [export commit ...]", calls)
+	}
+}
+
+// Integration-style: real git repo, real gitutil.CommitAll, fake bd export.
+// Verifies that the pre-stage export lands in the committed tree (AC: "after
+// approve/complete, `git show --stat HEAD` includes `.beads/issues.jsonl`"
+// and "committed JSONL is byte-identical to a fresh `bd export` at commit time").
+func TestCommitAll_ExportedJSONLLandsInCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, strings.TrimSpace(string(out)))
+		}
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "test")
+	runGit("commit", "--allow-empty", "-m", "root")
+
+	if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	g := newTestExecutor(t)
+	g.Root = dir
+	// Real gitutil.CommitAll via imported package (tests use package-level).
+	g.CommitAllFn = gitutil.CommitAll
+	expectedJSONL := `{"id":"fake-1","title":"fresh from dolt"}` + "\n"
+	exportCalls := 0
+	g.ExportJSONLFn = func(workdir string) error {
+		exportCalls++
+		return os.WriteFile(filepath.Join(workdir, ".beads", "issues.jsonl"), []byte(expectedJSONL), 0o644)
+	}
+
+	if err := g.CommitAll(dir, "chore: commit with export"); err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if exportCalls != 1 {
+		t.Errorf("export calls = %d, want 1", exportCalls)
+	}
+
+	// git show --stat HEAD must list .beads/issues.jsonl.
+	statCmd := exec.Command("git", "-C", dir, "show", "--stat", "--format=", "HEAD")
+	statOut, err := statCmd.Output()
+	if err != nil {
+		t.Fatalf("git show --stat: %v", err)
+	}
+	if !strings.Contains(string(statOut), ".beads/issues.jsonl") {
+		t.Errorf("git show --stat did not include .beads/issues.jsonl:\n%s", string(statOut))
+	}
+
+	// git cat-file blob HEAD:.beads/issues.jsonl must equal the exported bytes.
+	blobCmd := exec.Command("git", "-C", dir, "cat-file", "blob", "HEAD:.beads/issues.jsonl")
+	blobOut, err := blobCmd.Output()
+	if err != nil {
+		t.Fatalf("git cat-file: %v", err)
+	}
+	if string(blobOut) != expectedJSONL {
+		t.Errorf("committed blob = %q, want %q", string(blobOut), expectedJSONL)
 	}
 }
 
