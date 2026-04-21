@@ -1,12 +1,316 @@
 package bead
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// RequiredBeadsConfigKeys lists the mindspec-required keys and their canonical
+// values for .beads/config.yaml, excluding issue-prefix (which is derived from
+// the repo directory name and never overwritten).
+//
+// Exported so downstream checks (e.g. doctor) can reference the same source.
+var RequiredBeadsConfigKeys = []RequiredKey{
+	{Key: "types.custom", Value: "gate"},
+	{Key: "status.custom", Value: "resolved"},
+	{Key: "export.git-add", Value: false},
+}
+
+// RequiredKey is one mindspec-required setting for .beads/config.yaml.
+type RequiredKey struct {
+	Key   string
+	Value any
+}
+
+// ConfigDrift records a required key whose user-authored value disagrees with
+// the mindspec canonical value. It is returned for reporting; the value is
+// left alone unless EnsureBeadsConfig is called with force=true.
+//
+// HaveRaw is a best-effort YAML rendering of the user's current value — for
+// scalars it is the literal string, for sequences/mappings it is a compact
+// rendering from yaml.Marshal (trailing newline stripped).
+type ConfigDrift struct {
+	Key     string
+	Want    any
+	HaveRaw string
+}
+
+// ConfigResult summarises the effect of an EnsureBeadsConfig call.
+type ConfigResult struct {
+	Added          []string
+	AlreadyCorrect []string
+	UserAuthored   []ConfigDrift
+	CreatedFile    bool
+}
+
+// EnsureBeadsConfig idempotently applies the mindspec-required keys to
+// <root>/.beads/config.yaml. Existing keys, values, and comments outside the
+// mindspec-required set are preserved byte-for-byte via yaml.v3 Node editing.
+//
+// Behaviour per key:
+//   - issue-prefix: written only when absent; the value defaults to
+//     filepath.Base(root). An existing issue-prefix is never overwritten and
+//     never reported as drift (the user's project-naming choice is sovereign).
+//   - types.custom / status.custom / export.git-add: if absent, added. If
+//     present with the canonical value, counted in AlreadyCorrect. If present
+//     with a different value, recorded in UserAuthored and left alone unless
+//     force=true, in which case they are replaced and reported in Added.
+//
+// If the file does not exist, it is created with a brief header comment.
+// Writes are atomic (temp file + os.Rename).
+func EnsureBeadsConfig(root string, force bool) (*ConfigResult, error) {
+	beadsDir := filepath.Join(root, ".beads")
+	// bd recommends 0o700 on .beads (contains SQLite/Dolt runtime state).
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir .beads: %w", err)
+	}
+	cfgPath := filepath.Join(beadsDir, "config.yaml")
+
+	data, err := os.ReadFile(cfgPath)
+	created := false
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config: %w", err)
+		}
+		created = true
+	}
+	// Treat an empty existing file the same as a missing one: an empty YAML
+	// document has no root mapping to merge into, and writing a fresh template
+	// is the obviously correct outcome.
+	if !created && len(bytes.TrimSpace(data)) == 0 {
+		created = true
+	}
+
+	res := &ConfigResult{CreatedFile: created}
+	defaultPrefix := filepath.Base(root)
+
+	var out []byte
+	if created {
+		out, err = freshConfig(defaultPrefix, res)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		out, err = mergeConfig(data, defaultPrefix, force, res)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(out, data) {
+			return res, nil
+		}
+	}
+
+	if err := atomicWrite(cfgPath, out); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+const freshHeader = "# .beads/config.yaml — managed by mindspec\n" +
+	"# User-authored keys are preserved; mindspec only manages the keys in\n" +
+	"# RequiredBeadsConfigKeys plus issue-prefix (set once, never overwritten).\n"
+
+// freshConfig builds a new config file with the mindspec-required keys in a
+// deterministic order: issue-prefix first, then RequiredBeadsConfigKeys in
+// declaration order. Built via yaml.Node so map-iteration randomness can't
+// leak into the output.
+func freshConfig(defaultPrefix string, res *ConfigResult) ([]byte, error) {
+	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
+	res.Added = append(res.Added, "issue-prefix")
+	for _, rk := range RequiredBeadsConfigKeys {
+		appendScalarEntry(mapping, rk.Key, rk.Value)
+		res.Added = append(res.Added, rk.Key)
+	}
+	doc := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{mapping}}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return nil, fmt.Errorf("encode fresh config: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("close encoder: %w", err)
+	}
+	return append([]byte(freshHeader), buf.Bytes()...), nil
+}
+
+// mergeConfig applies required keys to an existing config while preserving
+// user-authored keys and comments byte-for-byte.
+func mergeConfig(data []byte, defaultPrefix string, force bool, res *ConfigResult) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	mapping := rootMapping(&doc)
+	if mapping == nil {
+		return nil, fmt.Errorf("config root is not a YAML mapping")
+	}
+
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+		appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
+		res.Added = append(res.Added, "issue-prefix")
+	}
+
+	for _, rk := range RequiredBeadsConfigKeys {
+		applyRequiredKey(mapping, rk, force, res)
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return nil, fmt.Errorf("encode config: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("close encoder: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func applyRequiredKey(mapping *yaml.Node, rk RequiredKey, force bool, res *ConfigResult) {
+	valNode, ok := findMapEntry(mapping, rk.Key)
+	if !ok {
+		appendScalarEntry(mapping, rk.Key, rk.Value)
+		res.Added = append(res.Added, rk.Key)
+		return
+	}
+	if scalarEquals(valNode, rk.Value) {
+		res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
+		return
+	}
+	if !force {
+		res.UserAuthored = append(res.UserAuthored, ConfigDrift{
+			Key:     rk.Key,
+			Want:    rk.Value,
+			HaveRaw: renderNodeValue(valNode),
+		})
+		return
+	}
+	setScalarValue(valNode, rk.Value)
+	res.Added = append(res.Added, rk.Key)
+}
+
+// renderNodeValue returns a best-effort string rendering of a YAML node's
+// value. Scalars return their literal .Value; sequences and mappings are
+// rendered via yaml.Marshal (trailing newline stripped) so callers can see
+// what the user actually wrote even when it's not a scalar.
+func renderNodeValue(n *yaml.Node) string {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value
+	}
+	out, err := yaml.Marshal(n)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\n")
+}
+
+// rootMapping returns the top-level mapping node from a parsed document.
+// A zero-content document (empty file) is promoted to an empty mapping in
+// place so callers can append keys.
+func rootMapping(doc *yaml.Node) *yaml.Node {
+	if doc.Kind != yaml.DocumentNode {
+		return nil
+	}
+	if len(doc.Content) == 0 {
+		doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	return root
+}
+
+// findMapEntry walks a MappingNode's Content (alternating key/value nodes)
+// and returns the value node and whether the key was found.
+func findMapEntry(mapping *yaml.Node, key string) (*yaml.Node, bool) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1], true
+		}
+	}
+	return nil, false
+}
+
+func appendScalarEntry(mapping *yaml.Node, key string, value any) {
+	k := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	v := scalarNodeFor(value)
+	mapping.Content = append(mapping.Content, k, v)
+}
+
+func scalarNodeFor(value any) *yaml.Node {
+	switch v := value.(type) {
+	case string:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v, Style: yaml.DoubleQuotedStyle}
+	case bool:
+		out := "false"
+		if v {
+			out = "true"
+		}
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: out}
+	default:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: fmt.Sprintf("%v", v)}
+	}
+}
+
+func setScalarValue(n *yaml.Node, value any) {
+	replacement := scalarNodeFor(value)
+	n.Kind = replacement.Kind
+	n.Tag = replacement.Tag
+	n.Value = replacement.Value
+	n.Style = replacement.Style
+	n.Content = nil
+	n.Alias = nil
+}
+
+func scalarEquals(n *yaml.Node, want any) bool {
+	if n.Kind != yaml.ScalarNode {
+		return false
+	}
+	switch w := want.(type) {
+	case string:
+		return n.Value == w
+	case bool:
+		if w {
+			return n.Value == "true"
+		}
+		return n.Value == "false"
+	default:
+		return n.Value == fmt.Sprintf("%v", w)
+	}
+}
+
+func atomicWrite(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".config.yaml.*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp: %w", err)
+	}
+	return nil
+}
 
 // builtinStatuses lists the statuses bd recognizes out of the box. Callers
 // that need to iterate every possible bead status combine this with
