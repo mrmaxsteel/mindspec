@@ -176,6 +176,39 @@ func TestParsePlanFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParsePlanFrontmatter_ScalarADRCitations(t *testing.T) {
+	content := "---\nstatus: Draft\nspec_id: \"005\"\nversion: \"1.0\"\nadr_citations:\n  - ADR-0001\n  - ADR-0002\n---\n\n# Plan\n"
+
+	fm, err := parsePlanFrontmatter(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fm.ADRCitations) != 2 {
+		t.Fatalf("expected 2 ADR citations, got %d", len(fm.ADRCitations))
+	}
+	if fm.ADRCitations[0].ID != "ADR-0001" || fm.ADRCitations[1].ID != "ADR-0002" {
+		t.Errorf("unexpected citation IDs: %+v", fm.ADRCitations)
+	}
+}
+
+func TestParsePlanFrontmatter_MixedADRCitations(t *testing.T) {
+	content := "---\nstatus: Draft\nspec_id: \"005\"\nversion: \"1.0\"\nadr_citations:\n  - ADR-0001\n  - id: ADR-0002\n    sections: [\"CLI\"]\n---\n\n# Plan\n"
+
+	fm, err := parsePlanFrontmatter(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fm.ADRCitations) != 2 {
+		t.Fatalf("expected 2 citations, got %d", len(fm.ADRCitations))
+	}
+	if fm.ADRCitations[0].ID != "ADR-0001" || len(fm.ADRCitations[0].Sections) != 0 {
+		t.Errorf("scalar citation not decoded: %+v", fm.ADRCitations[0])
+	}
+	if fm.ADRCitations[1].ID != "ADR-0002" || len(fm.ADRCitations[1].Sections) != 1 {
+		t.Errorf("map citation not decoded: %+v", fm.ADRCitations[1])
+	}
+}
+
 func TestParsePlanFrontmatter_WithComments(t *testing.T) {
 	content := "---\nstatus: Draft\nspec_id: \"005\"\nversion: \"0.1\"\n# approved_at:\n# approved_by:\n# bead_ids: []\n---\n\n# Plan\n"
 
