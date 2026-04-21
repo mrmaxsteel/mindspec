@@ -48,7 +48,7 @@ func RunCodex(root string, check bool) (*Result, error) {
 
 	// 4. Optionally chain bd setup codex
 	if !check {
-		chainBeadsSetupCodex(r)
+		chainBeadsSetupCodex(root, r)
 	}
 
 	return r, nil
@@ -110,14 +110,18 @@ func ensureAgentsMD(root string, check bool, r *Result) error {
 	return nil
 }
 
-// chainBeadsSetupCodex runs bd setup codex if beads is installed.
-func chainBeadsSetupCodex(r *Result) {
+// chainBeadsSetupCodex runs bd setup codex if beads is installed. See the
+// note on chainBeadsSetup — cmd.Dir must be pinned to the caller's root so
+// bd doesn't scaffold integration files into whatever CWD the process
+// happened to inherit (notably, package source dirs under `go test`).
+func chainBeadsSetupCodex(root string, r *Result) {
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
 		return
 	}
 
 	cmd := exec.Command(bdPath, "setup", "codex")
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	r.BeadsRan = true
 	if err != nil {

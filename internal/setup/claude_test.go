@@ -421,6 +421,89 @@ func TestRunClaude_CleansStalePreToolUse(t *testing.T) {
 	}
 }
 
+// installFakeBD writes a shell stub named `bd` into dir that records its
+// working directory and argv to $dir/invocations.log, then returns success.
+// Callers must prepend dir to PATH (via t.Setenv) to shadow the real bd.
+func installFakeBD(t *testing.T, dir string) string {
+	t.Helper()
+	log := filepath.Join(dir, "invocations.log")
+	script := "#!/bin/sh\nprintf 'cwd=%s args=%s\\n' \"$PWD\" \"$*\" >> \"" + log + "\"\n"
+	bdPath := filepath.Join(dir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	return log
+}
+
+func TestChainBeadsSetup_UsesRootAsCWD(t *testing.T) {
+	fakeBin := t.TempDir()
+	log := installFakeBD(t, fakeBin)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := t.TempDir()
+	r := &Result{}
+	chainBeadsSetup(root, r)
+
+	if !r.BeadsRan {
+		t.Fatal("expected BeadsRan=true")
+	}
+	assertFakeBDCWD(t, log, root, "setup claude")
+}
+
+func TestChainBeadsSetupCodex_UsesRootAsCWD(t *testing.T) {
+	fakeBin := t.TempDir()
+	log := installFakeBD(t, fakeBin)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := t.TempDir()
+	r := &Result{}
+	chainBeadsSetupCodex(root, r)
+
+	if !r.BeadsRan {
+		t.Fatal("expected BeadsRan=true")
+	}
+	assertFakeBDCWD(t, log, root, "setup codex")
+}
+
+// assertFakeBDCWD checks that the fake bd was invoked exactly once with CWD
+// equal to root (resolving symlinks on both sides — macOS temp dirs resolve
+// through /private) and an argv matching wantArgs.
+func assertFakeBDCWD(t *testing.T, logPath, root, wantArgs string) {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading invocations log: %v", err)
+	}
+	entry := strings.TrimSpace(string(data))
+	// entry format: "cwd=<path> args=<argv>"
+	const cwdPrefix = "cwd="
+	if !strings.HasPrefix(entry, cwdPrefix) {
+		t.Fatalf("unexpected log format: %q", entry)
+	}
+	rest := entry[len(cwdPrefix):]
+	sp := strings.Index(rest, " args=")
+	if sp < 0 {
+		t.Fatalf("missing args= in log entry: %q", entry)
+	}
+	gotCWD := rest[:sp]
+	gotArgs := rest[sp+len(" args="):]
+
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		resolvedRoot = root
+	}
+	resolvedGot, err := filepath.EvalSymlinks(gotCWD)
+	if err != nil {
+		resolvedGot = gotCWD
+	}
+	if resolvedGot != resolvedRoot {
+		t.Errorf("bd was invoked with wrong CWD.\n  got:  %s\n  want: %s", resolvedGot, resolvedRoot)
+	}
+	if gotArgs != wantArgs {
+		t.Errorf("unexpected argv.\n  got:  %q\n  want: %q", gotArgs, wantArgs)
+	}
+}
+
 func TestRunClaude_AppendExistingClaudeMD(t *testing.T) {
 	t.Parallel()
 
