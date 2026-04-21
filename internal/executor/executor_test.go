@@ -392,6 +392,73 @@ func TestFinalizeEpic_PushesWhenRemote(t *testing.T) {
 	}
 }
 
+func TestFinalizeEpic_ExportsBeforeArtifactCommits(t *testing.T) {
+	g := newTestExecutor(t)
+
+	g.BranchExistsFn = func(name string) bool { return true }
+	g.IsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+		// Report bead branch as not-yet-merged so FinalizeEpic invokes the
+		// per-bead commit path.
+		return false, nil
+	}
+	g.WorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-b.1", Path: "/wt/b.1", Branch: "bead/b.1"},
+		}, nil
+	}
+
+	var calls []string
+	g.ExportJSONLFn = func(workdir string) error {
+		calls = append(calls, "export:"+workdir)
+		return nil
+	}
+	g.CommitAllFn = func(workdir, message string) error {
+		calls = append(calls, "commit:"+workdir)
+		return nil
+	}
+	g.MergeIntoFn = func(targetWorkdir, sourceBranch string) error { return nil }
+
+	// Pre-create the spec worktree path so FinalizeEpic's os.Stat succeeds
+	// and the spec-artifact commit path runs.
+	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-077-test")
+	if err := os.MkdirAll(specWtPath, 0o755); err != nil {
+		t.Fatalf("setup spec worktree dir: %v", err)
+	}
+
+	if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Expect two commit pairs: spec-artifact commit and bead-artifact commit.
+	// Each must be preceded by an export for the same workdir.
+	wantPrefixes := []struct {
+		export string
+		commit string
+	}{
+		{"export:" + specWtPath, "commit:" + specWtPath},
+		{"export:/wt/b.1", "commit:/wt/b.1"},
+	}
+	for _, want := range wantPrefixes {
+		exportIdx := -1
+		commitIdx := -1
+		for i, c := range calls {
+			if c == want.export && exportIdx == -1 {
+				exportIdx = i
+			}
+			if c == want.commit && commitIdx == -1 {
+				commitIdx = i
+			}
+		}
+		if exportIdx == -1 || commitIdx == -1 {
+			t.Errorf("missing %s or %s in calls: %v", want.export, want.commit, calls)
+			continue
+		}
+		if exportIdx >= commitIdx {
+			t.Errorf("export must precede commit for %s: calls=%v", want.commit, calls)
+		}
+	}
+}
+
 func TestFinalizeEpic_BranchNotFound(t *testing.T) {
 	g := newTestExecutor(t)
 	g.BranchExistsFn = func(name string) bool { return false }

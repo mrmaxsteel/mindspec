@@ -426,6 +426,15 @@ func (g *MindspecExecutor) CommitAll(path, msg string) error {
 // byte-identical (deterministic on unchanged Dolt state). Do not "optimize"
 // either away — this one guards against bypassed hooks (--no-verify, test
 // paths) and the hook guards ad-hoc `git commit` outside mindspec.
+//
+// Path semantics: `exportDir` is the workdir of the pending commit (bead
+// worktree, spec worktree, or main). `-o .beads/issues.jsonl` resolves
+// relative to cmd.Dir, so bd writes to that worktree's tracked JSONL — the
+// exact file `git add -A` will stage on this branch. The spec primer phrase
+// "main repo's .beads/" describes the semantic endpoint (main becomes
+// authoritative after PR merge), not the literal export target: each
+// worktree has its own checked-out copy of the tracked file, so refreshing
+// "main's copy" from a bead worktree would leave the staged blob stale.
 func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	exportDir := path
 	if exportDir == "" {
