@@ -65,3 +65,19 @@ status.custom: "resolved"
 # - linear.api-key
 # - github.org
 # - github.repo
+
+# MindSpec project policy: do not let bd auto-stage its JSONL export.
+#
+# bd's default is to `git add <export.path>` after each export, where
+# export.path defaults to `issues.jsonl` (relative to the invoking CWD,
+# not to bd's resolved base dir). In a worktree that doesn't share a live
+# Dolt database with main, CWD at hook-time is the worktree root, so the
+# implicit git-add stages a stray root-level issues.jsonl — a duplicate
+# of the tracked .beads/issues.jsonl that pollutes unrelated commits.
+#
+# mindspec already stages beads state explicitly via executor.CommitAll
+# (which runs `git add -A`) during `approve`, `complete`, and related
+# workflow commands, so bd's convenience auto-add is redundant here.
+# Disabling it makes the staging flow transparent without losing any
+# functionality.
+export.git-add: false

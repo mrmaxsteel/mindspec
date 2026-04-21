@@ -172,11 +172,11 @@ func checkAcceptanceCriteria(r *Result, sections map[string]string) {
 		r.AddError("criteria-count", fmt.Sprintf("expected at least 3 acceptance criteria, found %d", len(criteriaLines)))
 	}
 
-	for _, line := range criteriaLines {
-		if IsVagueCriterion(line) {
-			r.AddWarning("criteria-vague", fmt.Sprintf("possibly vague criterion: %s", strings.TrimSpace(line)))
-		}
-	}
+	// Criterion quality ("is this vague?") is a semantic judgment and belongs
+	// to the AI reviewer at spec-approve time, not a deterministic keyword
+	// allowlist. Enforcing an English phrasebook ("works correctly", "is fast")
+	// in Go code is a ZFC violation and fails silently for any synonym,
+	// translation, or domain-specific term the author didn't anticipate.
 }
 
 // checkLifecycleBinding checks if the spec has a corresponding beads epic.

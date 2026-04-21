@@ -22,8 +22,8 @@ func TestAuditWorkset_StaleDetection(t *testing.T) {
 
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		beads := `[
-			{"id":"old-1","title":"[SPEC test] Old bead","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + oldDate + `"},
-			{"id":"new-1","title":"[IMPL test.1] New bead","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"}
+			{"id":"old-1","title":"Old spec bead","description":"short","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":"` + oldDate + `","metadata":{"spec_id":"007-test","mindspec_phase":"spec"}},
+			{"id":"new-1","title":"New impl bead","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_id":"007-test"}}
 		]`
 		return exec.Command("echo", beads)
 	}
@@ -47,10 +47,14 @@ func TestAuditWorkset_OrphanDetection(t *testing.T) {
 
 	recentDate := time.Now().Format(time.RFC3339)
 
+	// A mindspec bead is identified by its metadata (spec_id / spec_num /
+	// mindspec_phase), not by a title prefix. Beads without that metadata
+	// were created outside the mindspec lifecycle and are reported as orphans.
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		beads := `[
-			{"id":"spec-1","title":"[SPEC 007] test","description":"short","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":"` + recentDate + `"},
-			{"id":"orphan-1","title":"Random bead without convention prefix","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"}
+			{"id":"spec-1","title":"[SPEC 007] test","description":"short","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_num":7,"spec_title":"test","mindspec_phase":"spec"}},
+			{"id":"orphan-1","title":"[SPEC 999] title-only prefix","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"},
+			{"id":"orphan-2","title":"Random external bead","description":"short","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"}
 		]`
 		return exec.Command("echo", beads)
 	}
@@ -60,11 +64,12 @@ func TestAuditWorkset_OrphanDetection(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(report.Orphaned) != 1 {
-		t.Errorf("expected 1 orphaned bead, got %d", len(report.Orphaned))
+	if len(report.Orphaned) != 2 {
+		t.Fatalf("expected 2 orphaned beads (no mindspec metadata), got %d", len(report.Orphaned))
 	}
-	if len(report.Orphaned) > 0 && report.Orphaned[0].ID != "orphan-1" {
-		t.Errorf("expected orphan orphan-1, got %s", report.Orphaned[0].ID)
+	ids := map[string]bool{report.Orphaned[0].ID: true, report.Orphaned[1].ID: true}
+	if !ids["orphan-1"] || !ids["orphan-2"] {
+		t.Errorf("expected orphans orphan-1 and orphan-2, got %v", ids)
 	}
 }
 
@@ -73,11 +78,14 @@ func TestAuditWorkset_OversizedDetection(t *testing.T) {
 	defer func() { execCommand = origExec }()
 
 	recentDate := time.Now().Format(time.RFC3339)
-	longDesc := strings.Repeat("x", 500) // 500 chars > 400 cap for SPEC beads
+	// 850 chars > single 800-char threshold. Phase/type no longer affects
+	// the threshold — we used to size-gate [SPEC ] beads at 400 but that
+	// required classifying beads by title prefix (a ZFC violation).
+	longDesc := strings.Repeat("x", 850)
 
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		beads := `[
-			{"id":"big-spec","title":"[SPEC test] big","description":"` + longDesc + `","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":"` + recentDate + `"}
+			{"id":"big-bead","title":"big","description":"` + longDesc + `","status":"open","priority":2,"issue_type":"feature","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_id":"007-test"}}
 		]`
 		return exec.Command("echo", beads)
 	}
@@ -100,9 +108,9 @@ func TestAuditWorkset_TotalOpenCount(t *testing.T) {
 
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		beads := `[
-			{"id":"a","title":"[SPEC t] A","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"},
-			{"id":"b","title":"[IMPL t.1] B","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"},
-			{"id":"c","title":"[IMPL t.2] C","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `"}
+			{"id":"a","title":"A","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_id":"t"}},
+			{"id":"b","title":"B","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_id":"t"}},
+			{"id":"c","title":"C","description":"","status":"open","priority":2,"issue_type":"task","owner":"","created_at":"","updated_at":"` + recentDate + `","metadata":{"spec_id":"t"}}
 		]`
 		return exec.Command("echo", beads)
 	}

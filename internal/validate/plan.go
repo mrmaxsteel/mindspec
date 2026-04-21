@@ -101,7 +101,7 @@ func ValidatePlan(root, specID string) *Result {
 	}
 
 	for _, bs := range beadSections {
-		checkBeadSection(r, bs, isApproved)
+		checkBeadSection(r, bs)
 	}
 
 	// Spec 076: cross-bead decomposition quality checks
@@ -198,19 +198,6 @@ type BeadSection struct {
 	HasDependsOn       bool
 	DependsOn          string // raw text after "Depends on" marker
 	AcceptanceCriteria string // per-bead acceptance criteria text
-}
-
-// testArtifactPatterns are substrings that indicate a concrete test artifact reference.
-var testArtifactPatterns = []string{
-	"_test.go",
-	".test.ts",
-	".test.js",
-	".spec.ts",
-	"make test",
-	"go test",
-	"pytest",
-	"npm test",
-	"mindspec validate",
 }
 
 // ParseBeadSections finds and parses ## Bead ... sections from plan content.
@@ -372,8 +359,11 @@ func hasSection(content, heading string) bool {
 	return false
 }
 
-// checkBeadSection validates a single bead section.
-func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
+// checkBeadSection validates a single bead section. Note: the previous
+// `isApproved` parameter gated the deleted verification-testability check
+// (removed as a ZFC violation); the remaining checks are structural and
+// apply uniformly regardless of plan status.
+func checkBeadSection(r *Result, bs BeadSection) {
 	if bs.StepsCount < 3 {
 		r.AddError("bead-steps", fmt.Sprintf("%s: expected 3-7 steps, found %d", bs.Heading, bs.StepsCount))
 	} else if bs.StepsCount > 7 {
@@ -384,10 +374,13 @@ func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
 		r.AddError("bead-verification", fmt.Sprintf("%s: missing verification steps", bs.Heading))
 	}
 
-	// Spec 039: check verification testability
-	if bs.HasVerify && bs.VerifyCount > 0 && !isApproved {
-		checkVerificationTestability(r, bs)
-	}
+	// Verification *quality* (is it concrete? is it testable?) is delegated to
+	// the AI reviewer at plan-approve time and to the author via the instruct
+	// template. The validator's job is structural: the section exists with at
+	// least one checkbox item. Hardcoding keyword allowlists ("go test",
+	// "pytest", backtick counts, etc.) is a ZFC violation — it bakes
+	// framework/style assumptions into the deterministic shell and fails
+	// silently for every toolchain the author didn't anticipate.
 
 	// Spec 080: per-bead acceptance criteria is a structural requirement (error, not warning).
 	// Applies regardless of approval status — plans must always have per-bead AC.
@@ -398,20 +391,6 @@ func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
 	if !bs.HasDependsOn {
 		r.AddWarning("bead-depends", fmt.Sprintf("%s: no 'Depends on' declaration", bs.Heading))
 	}
-}
-
-// checkVerificationTestability ensures at least one verification item references a test artifact.
-func checkVerificationTestability(r *Result, bs BeadSection) {
-	for _, line := range bs.VerifyLines {
-		lower := strings.ToLower(line)
-		for _, pattern := range testArtifactPatterns {
-			if strings.Contains(lower, strings.ToLower(pattern)) {
-				return
-			}
-		}
-	}
-	r.AddError("bead-verification-testability",
-		fmt.Sprintf("%s: verification steps must reference at least one test artifact (e.g., _test.go, make test, go test, pytest)", bs.Heading))
 }
 
 // pathRefRe matches Go file paths (internal/foo/bar.go), package paths

@@ -73,28 +73,14 @@ func TestResult_FormatText_WithIssues(t *testing.T) {
 	}
 }
 
-// --- Vague criterion tests ---
-
-func TestIsVagueCriterion(t *testing.T) {
-	tests := []struct {
-		text     string
-		expected bool
-	}{
-		{"The system works correctly under load", true},
-		{"The API is fast enough", true},
-		{"The handler properly handles edge cases", true},
-		{"Functions as expected in all scenarios", true},
-		{"`mindspec validate spec <id>` reports missing/empty required sections", false},
-		{"All sub-commands return non-zero exit code on validation failure", false},
-		{"make test passes with tests covering each validation check", false},
-	}
-	for _, tt := range tests {
-		result := IsVagueCriterion(tt.text)
-		if result != tt.expected {
-			t.Errorf("IsVagueCriterion(%q) = %v, want %v", tt.text, result, tt.expected)
-		}
-	}
-}
+// --- Vague criterion check (removed as ZFC violation) ---
+//
+// The deterministic `criteria-vague` warning was removed: it encoded an
+// English-only keyword blocklist ("works correctly", "is fast", "properly
+// handles", …), which is exactly the kind of keyword-based semantic
+// classification Yegge flags as a Zero Framework Cognition violation.
+// Criterion quality is now judged at spec-approve time by the AI reviewer.
+// TestValidateSpec_VagueCriteriaNotFlagged below pins this behaviour.
 
 // --- Spec validation tests ---
 
@@ -199,7 +185,11 @@ Do something useful.
 	}
 }
 
-func TestValidateSpec_VagueCriteria(t *testing.T) {
+// TestValidateSpec_VagueCriteriaNotFlagged confirms the validator no longer
+// fires a `criteria-vague` warning on English phrases that used to match the
+// deleted keyword list. Reinstating the check would be a regression to a ZFC
+// violation.
+func TestValidateSpec_VagueCriteriaNotFlagged(t *testing.T) {
 	tmp := t.TempDir()
 	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
 	os.MkdirAll(specDir, 0755)
@@ -249,14 +239,10 @@ None — all resolved.
 
 	r := ValidateSpec(tmp, "999-test")
 
-	vagueCount := 0
 	for _, issue := range r.Issues {
 		if issue.Name == "criteria-vague" {
-			vagueCount++
+			t.Errorf("criteria-vague must not be emitted (ZFC): %s", issue.Message)
 		}
-	}
-	if vagueCount != 2 {
-		t.Errorf("expected 2 vague criteria warnings, got %d", vagueCount)
 	}
 }
 
