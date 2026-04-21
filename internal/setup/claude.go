@@ -109,7 +109,7 @@ func RunClaude(root string, check bool) (*Result, error) {
 
 	// 5. Optionally chain bd setup claude
 	if !check {
-		chainBeadsSetup(r)
+		chainBeadsSetup(root, r)
 	}
 
 	return r, nil
@@ -390,14 +390,18 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 	return nil
 }
 
-// chainBeadsSetup runs bd setup claude if beads is installed.
-func chainBeadsSetup(r *Result) {
+// chainBeadsSetup runs bd setup claude if beads is installed. The bd
+// subprocess inherits the caller's CWD unless we pin it — without cmd.Dir,
+// test processes (whose CWD is the package source directory) cause bd to
+// scaffold .claude/settings.json and CLAUDE.md into the repo's source tree.
+func chainBeadsSetup(root string, r *Result) {
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
 		return
 	}
 
 	cmd := exec.Command(bdPath, "setup", "claude")
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	r.BeadsRan = true
 	if err != nil {
