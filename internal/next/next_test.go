@@ -254,9 +254,9 @@ func TestResolveMode_Feature_DraftSpec(t *testing.T) {
 // old raw-markdown "Status: APPROVED" substring check.
 func TestResolveMode_Feature_EpicMetadataPrimary(t *testing.T) {
 	cases := []struct {
-		name       string
-		phase      string
-		wantMode   string
+		name     string
+		phase    string
+		wantMode string
 	}{
 		{"spec-phase → spec", "spec", "spec"},
 		{"plan-phase → plan", "plan", "plan"},

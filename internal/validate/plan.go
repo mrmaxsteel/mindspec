@@ -101,7 +101,7 @@ func ValidatePlan(root, specID string) *Result {
 	}
 
 	for _, bs := range beadSections {
-		checkBeadSection(r, bs, isApproved)
+		checkBeadSection(r, bs)
 	}
 
 	// Spec 076: cross-bead decomposition quality checks
@@ -359,8 +359,11 @@ func hasSection(content, heading string) bool {
 	return false
 }
 
-// checkBeadSection validates a single bead section.
-func checkBeadSection(r *Result, bs BeadSection, isApproved bool) {
+// checkBeadSection validates a single bead section. Note: the previous
+// `isApproved` parameter gated the deleted verification-testability check
+// (removed as a ZFC violation); the remaining checks are structural and
+// apply uniformly regardless of plan status.
+func checkBeadSection(r *Result, bs BeadSection) {
 	if bs.StepsCount < 3 {
 		r.AddError("bead-steps", fmt.Sprintf("%s: expected 3-7 steps, found %d", bs.Heading, bs.StepsCount))
 	} else if bs.StepsCount > 7 {

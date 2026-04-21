@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// builtinStatuses lists the statuses bd recognises out of the box. Callers
+// builtinStatuses lists the statuses bd recognizes out of the box. Callers
 // that need to iterate every possible bead status combine this with
 // CustomStatuses for a complete picture.
 var builtinStatuses = []string{"open", "in_progress", "blocked", "closed"}

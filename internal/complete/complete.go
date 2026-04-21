@@ -247,7 +247,7 @@ func advanceState(root, specID string) (mode, nextBead string) {
 }
 
 // queryAllChildren pulls child beads under an epic across every status bd
-// recognises — built-in (open, in_progress, blocked, closed) plus every
+// recognizes — built-in (open, in_progress, blocked, closed) plus every
 // custom status declared in <root>/.beads/config.yaml. Reading the custom
 // set at runtime means new statuses added later (or different per project)
 // are picked up without touching this code. Mirrors phase.queryChildren

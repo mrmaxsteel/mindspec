@@ -489,7 +489,7 @@ func TestAdvanceState_UndeclaredCustomStatusIsNotIterated(t *testing.T) {
 	stubPhaseEpic(t, "001-test-spec", "epic-123")
 
 	stubChildrenByStatus(map[string][]bead.BeadInfo{
-		"closed":    {{ID: "done-1", Title: "[IMPL 001-test-spec.1] Done"}},
+		"closed":     {{ID: "done-1", Title: "[IMPL 001-test-spec.1] Done"}},
 		"undeclared": {{ID: "mystery", Title: "[???] Undeclared status"}},
 	})
 
