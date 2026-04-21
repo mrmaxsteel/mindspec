@@ -1041,7 +1041,7 @@ None
 
 	mockExec := &recordingExecutor{
 		MockExecutor: &executor.MockExecutor{},
-		onCommit: func(path, msg string) { record("commit-all") },
+		onCommit:     func(path, msg string) { record("commit-all") },
 	}
 
 	result, err := ApprovePlan(tmp, specID, "tester", mockExec)
