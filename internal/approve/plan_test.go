@@ -6,8 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func TestUpdatePlanApproval_UpdatesFrontmatter(t *testing.T) {
@@ -913,4 +917,164 @@ func TestExtractPlanVersion(t *testing.T) {
 			t.Errorf("extractPlanVersion(%q) = %q, want %q", tt.content, got, tt.expected)
 		}
 	}
+}
+
+// TestApprovePlan_CommitsBeforeWritingImplementPhase is a regression test for
+// the ordering bug where ApprovePlan flipped the epic's mindspec_phase to
+// "implement" BEFORE auto-committing plan.md. Because the pre-commit hook
+// (internal/hook/dispatch.go) blocks commits on spec/<id> branches when
+// mindspec_phase is "implement", flipping the phase first caused the plan
+// approval commit itself to be blocked. Callers had to retry with
+// MINDSPEC_ALLOW_MAIN=1 to unstick the approval.
+//
+// Invariant: every exec.CommitAll invocation must complete before the first
+// planMergeMetadataFn call that writes mindspec_phase=implement.
+func TestApprovePlan_CommitsBeforeWritingImplementPhase(t *testing.T) {
+	tmp := t.TempDir()
+	specID := "042-test"
+	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## ADR Fitness
+
+No ADRs touched.
+
+## Testing Strategy
+
+Go unit tests.
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Acceptance Criteria**
+- First bead works
+
+**Depends on**
+None
+`
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n"), 0644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
+	// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		// Only return the epic on --status=open queries; empty otherwise so
+		// dedup doesn't double-process.
+		for _, a := range args {
+			if a == "--status=open" {
+				return []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`), nil
+			}
+		}
+		return []byte(`[]`), nil
+	})
+	defer restoreList()
+
+	// Record ordering across exec.CommitAll and planMergeMetadataFn.
+	var callLog []string
+	var mu sync.Mutex
+	record := func(label string) {
+		mu.Lock()
+		callLog = append(callLog, label)
+		mu.Unlock()
+	}
+
+	restoreMerge := SetPlanMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		phase, _ := updates["mindspec_phase"].(string)
+		record(fmt.Sprintf("merge-metadata:%s:%s", issueID, phase))
+		return nil
+	})
+	defer restoreMerge()
+
+	restoreBD := SetPlanRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			return []byte(`{"id":"bead-1"}`), nil
+		}
+		if len(args) > 0 && args[0] == "dep" {
+			return nil, nil
+		}
+		return []byte(`[]`), nil
+	})
+	defer restoreBD()
+
+	// planListJSONFn — used by handleExistingBeads to query children; none exist.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+	restoreCombined := SetPlanRunBDCombinedForTest(func(args ...string) ([]byte, error) {
+		return nil, nil
+	})
+	defer restoreCombined()
+
+	mockExec := &recordingExecutor{
+		MockExecutor: &executor.MockExecutor{},
+		onCommit: func(path, msg string) { record("commit-all") },
+	}
+
+	result, err := ApprovePlan(tmp, specID, "tester", mockExec)
+	if err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
+	if result == nil {
+		t.Fatal("nil result")
+	}
+
+	// At least two commits and exactly one phase write.
+	var firstPhaseWrite = -1
+	var lastCommit = -1
+	for i, entry := range callLog {
+		if entry == "commit-all" {
+			lastCommit = i
+		}
+		if strings.HasPrefix(entry, "merge-metadata:") && strings.HasSuffix(entry, ":implement") {
+			if firstPhaseWrite < 0 {
+				firstPhaseWrite = i
+			}
+		}
+	}
+	if lastCommit < 0 {
+		t.Fatalf("expected at least one exec.CommitAll call; got calls: %v", callLog)
+	}
+	if firstPhaseWrite < 0 {
+		t.Fatalf("expected a merge-metadata:*:implement call; got calls: %v", callLog)
+	}
+	if firstPhaseWrite <= lastCommit {
+		t.Fatalf("ordering regression: phase=implement metadata write (idx=%d) must come AFTER final commit (idx=%d). Calls: %v",
+			firstPhaseWrite, lastCommit, callLog)
+	}
+}
+
+// recordingExecutor wraps MockExecutor to capture CommitAll call ordering
+// across other mocked package-level funcs.
+type recordingExecutor struct {
+	*executor.MockExecutor
+	onCommit func(path, msg string)
+}
+
+func (r *recordingExecutor) CommitAll(path, msg string) error {
+	if r.onCommit != nil {
+		r.onCommit(path, msg)
+	}
+	return r.MockExecutor.CommitAll(path, msg)
 }

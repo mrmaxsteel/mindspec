@@ -32,6 +32,16 @@ var planRunBDFn = bead.RunBD
 // planListJSONFn wraps bead.ListJSON for testability.
 var planListJSONFn = bead.ListJSON
 
+// planMergeMetadataFn wraps bead.MergeMetadata for testability.
+var planMergeMetadataFn = bead.MergeMetadata
+
+// SetPlanMergeMetadataForTest swaps planMergeMetadataFn for testing and returns a restore function.
+func SetPlanMergeMetadataForTest(fn func(issueID string, updates map[string]interface{}) error) func() {
+	orig := planMergeMetadataFn
+	planMergeMetadataFn = fn
+	return func() { planMergeMetadataFn = orig }
+}
+
 // SetPlanRunBDForTest swaps planRunBDFn for testing and returns a restore function.
 func SetPlanRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
 	orig := planRunBDFn
@@ -106,18 +116,17 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		result.Warnings = append(result.Warnings, "no epic found for spec via beads metadata; skipping bead auto-creation")
 	}
 
-	// Step 3c (Spec 080): Write mindspec_phase: implement to epic metadata.
-	if parentID != "" {
-		if err := bead.MergeMetadata(parentID, map[string]interface{}{"mindspec_phase": "implement"}); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
-		}
-	}
-
 	// Step 4: Auto-commit plan approval + bead_ids so implementation
 	// worktrees that branch from spec/<id> contain the approved artifacts.
 	// This is a hard error: leaving the spec worktree dirty here causes the
 	// downstream `mindspec complete` merge to fail (`git merge` refuses to
 	// run with uncommitted changes in the target worktree).
+	//
+	// Ordering invariant: this must happen BEFORE Step 4b flips the epic's
+	// mindspec_phase to "implement". Once phase=implement is stored, the
+	// pre-commit hook (internal/hook/dispatch.go) blocks further commits on
+	// the spec/<id> branch — including this very commit, which would then
+	// only land via the MINDSPEC_ALLOW_MAIN=1 escape hatch.
 	specWtPath := state.SpecWorktreePath(root, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
@@ -135,6 +144,14 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// merged back into it during `mindspec complete`.
 	if err := exec.IsTreeClean(specWtPath); err != nil {
 		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\ncd %s && git status", err, specWtPath)
+	}
+
+	// Step 4b (Spec 080): Write mindspec_phase: implement to epic metadata.
+	// Must run AFTER Step 4 — see ordering invariant above.
+	if parentID != "" {
+		if err := planMergeMetadataFn(parentID, map[string]interface{}{"mindspec_phase": "implement"}); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
+		}
 	}
 
 	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
