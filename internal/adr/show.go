@@ -11,13 +11,40 @@ import (
 )
 
 // Show reads and returns a single ADR by ID.
+//
+// Lookup first tries an exact filename match ("<id>.md"). If that fails, it
+// falls back to a slug-tolerant match: any file named "<id>-<slug>.md" in the
+// ADR directory, provided it's unambiguous. This lets plans cite a pure ID
+// like `ADR-0001` even when the on-disk file is `ADR-0001-descriptive.md`.
 func Show(root, id string) (*ADR, error) {
-	path := filepath.Join(workspace.ADRDir(root), id+".md")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("%s not found", id)
+	dir := workspace.ADRDir(root)
+	path := filepath.Join(dir, id+".md")
+	if _, err := os.Stat(path); err == nil {
+		a, err := ParseADR(path)
+		if err != nil {
+			return nil, err
+		}
+		return &a, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
 
-	a, err := ParseADR(path)
+	matches, err := filepath.Glob(filepath.Join(dir, id+"-*.md"))
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("%s not found", id)
+	}
+	if len(matches) > 1 {
+		names := make([]string, len(matches))
+		for i, m := range matches {
+			names[i] = filepath.Base(m)
+		}
+		return nil, fmt.Errorf("%s is ambiguous: matches %s", id, strings.Join(names, ", "))
+	}
+
+	a, err := ParseADR(matches[0])
 	if err != nil {
 		return nil, err
 	}

@@ -27,9 +27,26 @@ type PlanFrontmatter struct {
 }
 
 // ADRCitation represents an ADR citation in plan frontmatter.
+// Accepts the mapping form (`- id: ADR-0001, sections: [...]`) and the
+// shorthand scalar form (`- ADR-0001`) for plans that only need IDs.
 type ADRCitation struct {
 	ID       string   `yaml:"id"`
 	Sections []string `yaml:"sections"`
+}
+
+// UnmarshalYAML accepts both scalar (`- ADR-0001`) and mapping (`- id: ADR-0001`) forms.
+func (c *ADRCitation) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		c.ID = strings.TrimSpace(node.Value)
+		return nil
+	}
+	type raw ADRCitation
+	var r raw
+	if err := node.Decode(&r); err != nil {
+		return err
+	}
+	*c = ADRCitation(r)
+	return nil
 }
 
 // ValidatePlan checks the structural quality of a plan.md file.

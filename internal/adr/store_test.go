@@ -98,6 +98,60 @@ func TestFileStore_Get(t *testing.T) {
 	}
 }
 
+// writeADRAt lets tests place an ADR under an arbitrary filename (e.g. a
+// descriptive slug) to exercise the prefix-fallback lookup.
+func writeADRAt(t *testing.T, root, filename, id, title, status string) {
+	t.Helper()
+	adrDir := filepath.Join(root, ".mindspec", "docs", "adr")
+	os.MkdirAll(adrDir, 0o755)
+	content := "# " + id + ": " + title + "\n\n- **Status**: " + status + "\n- **Domain(s)**: core\n- **Supersedes**: n/a\n- **Superseded-by**: n/a\n\n## Decision\nSome decision.\n"
+	os.WriteFile(filepath.Join(adrDir, filename), []byte(content), 0o644)
+}
+
+func TestFileStore_Get_PrefixFallback(t *testing.T) {
+	root := t.TempDir()
+	writeADRAt(t, root, "ADR-0001-fastapi-and-python-for-backend.md", "ADR-0001", "FastAPI backend", "Accepted")
+
+	store := NewFileStore(root)
+	a, err := store.Get("ADR-0001")
+	if err != nil {
+		t.Fatalf("Get with prefix: %v", err)
+	}
+	if a.Title != "FastAPI backend" {
+		t.Errorf("expected title 'FastAPI backend', got %q", a.Title)
+	}
+}
+
+func TestFileStore_Get_PrefixAmbiguous(t *testing.T) {
+	root := t.TempDir()
+	writeADRAt(t, root, "ADR-0001-first.md", "ADR-0001", "First", "Accepted")
+	writeADRAt(t, root, "ADR-0001-second.md", "ADR-0001", "Second", "Accepted")
+
+	store := NewFileStore(root)
+	_, err := store.Get("ADR-0001")
+	if err == nil {
+		t.Fatal("expected ambiguous-match error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("expected ambiguity error, got: %v", err)
+	}
+}
+
+func TestFileStore_Get_ExactBeatsPrefix(t *testing.T) {
+	root := t.TempDir()
+	writeADRAt(t, root, "ADR-0001.md", "ADR-0001", "Exact", "Accepted")
+	writeADRAt(t, root, "ADR-0001-also.md", "ADR-0001", "Slugged", "Accepted")
+
+	store := NewFileStore(root)
+	a, err := store.Get("ADR-0001")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if a.Title != "Exact" {
+		t.Errorf("expected exact match to win, got %q", a.Title)
+	}
+}
+
 func TestFileStore_Search(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "ADR-0001", "Worktree Management", "Accepted", []string{"execution"})
