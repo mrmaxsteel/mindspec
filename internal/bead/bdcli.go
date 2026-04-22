@@ -67,6 +67,27 @@ func RunBDCombined(args ...string) ([]byte, error) {
 	return tracedCombined("run", args)
 }
 
+// Export refreshes <workdir>/.beads/issues.jsonl from current Dolt state.
+// Run before `git add -A` so the committed JSONL matches Dolt at commit time.
+// bd's own pre-commit hook also exports; running here belt-and-braces guards
+// against bypassed hooks (--no-verify, non-hook callers).
+func Export(workdir string) error {
+	start := time.Now()
+	cmd := execCommand("bd", "export", "-o", ".beads/issues.jsonl")
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	trace.Emit(trace.NewEvent("bead.cli").
+		WithDuration(time.Since(start)).
+		WithData(map[string]any{
+			"op": "export",
+			"ok": err == nil,
+		}))
+	if err != nil {
+		return fmt.Errorf("bd export in %s: %s", workdir, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Close closes one or more beads via `bd close`.
 func Close(ids ...string) error {
 	if len(ids) == 0 {

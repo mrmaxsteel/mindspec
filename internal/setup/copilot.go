@@ -42,6 +42,11 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		}
 	}
 
+	// 4. Surface .beads/config.yaml drift. Copilot setup doesn't chain
+	// `bd setup`, so this runs against whatever `.beads/` state the project
+	// already has. Shared helper keeps the three entry points aligned.
+	applyBeadsConfig(root, check, r)
+
 	return r, nil
 }
 

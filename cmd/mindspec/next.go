@@ -89,9 +89,21 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			}
 		}
 
-		// Step 1: Check clean tree
-		if err := exec.IsTreeClean(cwd); err != nil {
-			fmt.Fprintf(os.Stderr, "Cannot claim work: %s\n\n", err)
+		// Step 1: Artifact-aware dirty-tree guard (ADR-0025).
+		// `.beads/issues.jsonl` is a build artifact co-managed by bd; dirt on
+		// that path alone is auto-handled via `bd export`. User-authored dirt
+		// still blocks — the guard's purpose is to protect user code.
+		userDirt, err := next.CheckDirtyTree(root, cwd)
+		if err != nil {
+			return fmt.Errorf("checking working tree: %w", err)
+		}
+		if len(userDirt) > 0 {
+			fmt.Fprintln(os.Stderr, "Cannot claim work: workspace has uncommitted user changes:")
+			for _, p := range userDirt {
+				fmt.Fprintf(os.Stderr, "  %s\n", p)
+			}
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Note: .beads/issues.jsonl is auto-handled (ADR-0025) and does not need stashing.")
 			fmt.Fprintln(os.Stderr, "Recovery steps:")
 			fmt.Fprintln(os.Stderr, "  1. Commit your changes: mindspec complete \"wip\"")
 			fmt.Fprintln(os.Stderr, "  2. Or discard them: git restore .")

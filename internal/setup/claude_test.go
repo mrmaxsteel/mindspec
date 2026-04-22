@@ -541,3 +541,143 @@ func TestRunClaude_AppendExistingClaudeMD(t *testing.T) {
 		t.Error("AGENTS.md reference not appended")
 	}
 }
+
+// TestRunClaude_PatchesBeadsConfig verifies that a project which already ran
+// `bd init` (so .beads/ exists with a user-authored config.yaml) ends up with
+// a mindspec-ready config after `mindspec setup claude`. This is the
+// "brownfield" entry point — users who installed bd first and mindspec second.
+func TestRunClaude_PatchesBeadsConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := "issue-prefix: \"proj-x\"\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := RunClaude(root, false)
+	if err != nil {
+		t.Fatalf("RunClaude: %v", err)
+	}
+	if r.BeadsConfig == nil {
+		t.Fatalf("expected BeadsConfig populated, got nil (err=%v)", r.BeadsConfErr)
+	}
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	for _, k := range []string{"types.custom", "status.custom", "export.git-add"} {
+		if !added[k] {
+			t.Errorf("expected %q in Added, got %v", k, r.BeadsConfig.Added)
+		}
+	}
+
+	// Re-read the config and assert mindspec keys landed while the existing
+	// issue-prefix was preserved.
+	data, err := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	wantFragments := []string{
+		"issue-prefix:",
+		"proj-x",
+		"types.custom:",
+		"status.custom:",
+		"export.git-add:",
+	}
+	for _, f := range wantFragments {
+		if !strings.Contains(got, f) {
+			t.Errorf("config.yaml missing %q; full content:\n%s", f, got)
+		}
+	}
+}
+
+// TestRunClaude_BeadsConfigIdempotent verifies that running setup twice on an
+// already-mindspec-ready .beads/config.yaml is a byte-identical no-op.
+func TestRunClaude_BeadsConfigIdempotent(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ready := `issue-prefix: "proj"
+types.custom: "gate"
+status.custom: "resolved"
+export.git-add: false
+`
+	cfgPath := filepath.Join(beadsDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(ready), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfgPath)
+
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("first RunClaude: %v", err)
+	}
+	r2, err := RunClaude(root, false)
+	if err != nil {
+		t.Fatalf("second RunClaude: %v", err)
+	}
+	if r2.BeadsConfig == nil {
+		t.Fatal("expected BeadsConfig on second run")
+	}
+	if n := len(r2.BeadsConfig.Added); n != 0 {
+		t.Errorf("second run added %d keys: %v", n, r2.BeadsConfig.Added)
+	}
+	if n := len(r2.BeadsConfig.UserAuthored); n != 0 {
+		t.Errorf("second run reported drift: %+v", r2.BeadsConfig.UserAuthored)
+	}
+	after, _ := os.ReadFile(cfgPath)
+	if string(before) != string(after) {
+		t.Errorf("config.yaml changed on idempotent run:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestRunClaude_CheckModeScansBeadsConfigWithoutMutating verifies that check
+// mode returns a read-only scan (so users can preview drift via --check) but
+// does not touch .beads/config.yaml on disk.
+func TestRunClaude_CheckModeScansBeadsConfigWithoutMutating(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := "issue-prefix: \"proj\"\n"
+	cfgPath := filepath.Join(beadsDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := RunClaude(root, true)
+	if err != nil {
+		t.Fatalf("RunClaude(check=true): %v", err)
+	}
+	if r.BeadsConfig == nil {
+		t.Fatal("check mode should scan and return a ConfigResult, got nil")
+	}
+	if !r.BeadsScan {
+		t.Error("BeadsScan should be true in check mode")
+	}
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	for _, k := range []string{"types.custom", "status.custom", "export.git-add"} {
+		if !added[k] {
+			t.Errorf("check-mode scan missing %q in Added, got %v", k, r.BeadsConfig.Added)
+		}
+	}
+	data, _ := os.ReadFile(cfgPath)
+	if string(data) != original {
+		t.Errorf("check mode modified config.yaml:\nwant: %q\ngot:  %q", original, string(data))
+	}
+}

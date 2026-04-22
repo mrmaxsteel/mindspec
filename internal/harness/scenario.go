@@ -49,6 +49,7 @@ func AllScenarios() []Scenario {
 		ScenarioUnmergedBeadGuard(),
 		ScenarioStopAfterComplete(),
 		ScenarioStopDoesNotBlockApproveImpl(),
+		ScenarioBeadsArtifactPassthrough(),
 	}
 }
 
@@ -1797,6 +1798,172 @@ Do not close beads directly with bd commands.`,
 			assertBeadsState(t, sandbox, epicID, map[string]string{
 				beadID: "closed",
 			})
+		},
+	}
+}
+
+// ScenarioBeadsArtifactPassthrough canaries the combined effect of spec 082
+// Bead 1a (artifact-aware dirty-tree guard) and Bead 2 (executor bd export):
+// a pre-session `bd create` has left `.beads/issues.jsonl` dirty, and the
+// agent should run `mindspec next` → implement → `mindspec complete` without
+// stashing, branching for the artifact, or otherwise touching it. The prompt
+// deliberately omits the dirty JSONL so this tests the product behavior, not
+// prompt guidance.
+func ScenarioBeadsArtifactPassthrough() Scenario {
+	var epicID, taskBeadID, driveByID string
+	return Scenario{
+		Name:        "beads_artifact_passthrough",
+		Description: "mindspec next/complete handle a pre-session dirty .beads/issues.jsonl without workarounds",
+		MaxTurns:    35,
+		Model:       "haiku",
+		Setup: func(sandbox *Sandbox) error {
+			specID := "001-hello"
+
+			// Track .beads/issues.jsonl while keeping runtime files ignored, so the
+			// scenario mirrors a real MindSpec repo where the JSONL is a versioned
+			// projection of Dolt state (ADR-0025). Retains the default sandbox
+			// ignores for .harness/, .worktrees/, and ephemeral .mindspec files.
+			sandbox.WriteFile(".gitignore", ".beads/*\n!.beads/issues.jsonl\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n")
+
+			// Spec epic + one open task bead — the ready work the agent must claim.
+			epicID = sandbox.CreateSpecEpic(specID)
+			taskBeadID = sandbox.CreateBead("["+specID+"] Create hello.go", "task", epicID)
+
+			// Deferred sibling: keeps the epic from auto-closing when the task
+			// bead closes (Beads molecule auto-close fires once every child is
+			// closed). Deferred beads stay out of `bd ready`, so they don't
+			// perturb `mindspec next` selection. Without this, `mindspec complete`
+			// can hit "no active specs found" during its post-close state advance.
+			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
+			sandbox.runBDMust("defer", keepaliveID)
+
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Hello Feature
+status: Approved
+---
+# Hello Feature
+Add a hello.go file that prints a greeting.
+`)
+			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+status: Approved
+spec_id: %s
+bead_ids:
+- %s
+---
+# Plan
+## Bead 1: Create hello.go
+Create hello.go with a Hello() function that returns "hi".
+`, specID, taskBeadID))
+
+			// Establish the baseline JSONL so it's tracked by git before setup
+			// completes. Subsequent exports will show as modifications.
+			if _, err := sandbox.runBD("export", "-o", ".beads/issues.jsonl"); err != nil {
+				return fmt.Errorf("bd export baseline: %w", err)
+			}
+			sandbox.Commit("setup: spec + approved plan + baseline JSONL")
+
+			// Plan-phase worktree only — no bead worktree. The agent must run
+			// `mindspec next` to claim the bead and create its worktree, which is
+			// the moment where the dirty-tree guard is exercised.
+			setupWorktrees(sandbox, specID, "", "plan")
+			sandbox.Commit("setup: plan mode")
+
+			// Simulate a drive-by `bd create` from before the session (e.g. the
+			// user filed a quick cleanup issue without committing). Parent-less so
+			// it stays out of the spec's ready list; closed so `bd ready` ignores
+			// it entirely. The ID still lands in the JSONL diff, which is the
+			// canary for Bead 2.
+			driveByID = sandbox.CreateBead("Drive-by: refresh stale dashboard", "task", "")
+			sandbox.runBDMust("close", driveByID)
+			if _, err := sandbox.runBD("export", "-o", ".beads/issues.jsonl"); err != nil {
+				return fmt.Errorf("bd export dirty: %w", err)
+			}
+			// Intentionally not committed. `.beads/issues.jsonl` is now dirty on main.
+
+			// Precondition: the whole scenario is meaningless if the tree isn't
+			// actually dirty on the artifact. Surface setup drift loudly instead
+			// of silently testing nothing.
+			if sandbox.GitStatusClean() {
+				return fmt.Errorf("precondition: expected .beads/issues.jsonl dirty after drive-by export, but tree is clean")
+			}
+
+			return nil
+		},
+		// The prompt deliberately names the lifecycle commands (`mindspec next`,
+		// `mindspec complete`) because the friction under test lives inside
+		// `mindspec next`'s dirty-tree guard, not in the agent's command
+		// discovery. Keeping the task prescriptive isolates the variable this
+		// canary is supposed to measure: did the guard let the claim through
+		// without the agent resorting to `git stash` or a `chore/` branch?
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+
+The spec 001-hello is approved and has one ready bead.
+1. Run mindspec next to claim the ready bead.
+2. Create hello.go with a function Hello() string that returns "hi".
+3. Run mindspec complete to finish the bead.
+
+Do not close beads directly with bd commands.`,
+		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
+			// (a) No git stash — the dirty JSONL should not have prompted one.
+			// No chore/ branch — the agent should not have branched for the artifact.
+			for _, e := range events {
+				if e.Command != "git" {
+					continue
+				}
+				args := eventArgs(e)
+				if containsAll(args, "stash") {
+					t.Errorf("agent ran git stash (artifact should not require stashing): %v", args)
+				}
+				for _, a := range args {
+					if strings.HasPrefix(a, "chore/") {
+						t.Errorf("agent referenced chore/ branch (artifact should not require branching): %v", args)
+						break
+					}
+				}
+			}
+
+			// (b) mindspec next succeeded — the dirty-tree guard allowed the claim
+			// through without retry on the artifact path.
+			assertCommandSucceeded(t, events, "mindspec", "next")
+
+			// The agent carried out the implementation task.
+			helloObserved := sandbox.FileExists("hello.go") || fileExistsInWorktrees(sandbox.Root, "hello.go")
+			if !helloObserved {
+				for _, e := range events {
+					if e.Command != "git" || e.ExitCode != 0 {
+						continue
+					}
+					args := eventArgs(e)
+					if containsAll(args, "add") && containsAll(args, "hello.go") {
+						helloObserved = true
+						break
+					}
+				}
+			}
+			if !helloObserved {
+				t.Error("hello.go was not created")
+			}
+
+			// mindspec complete ran — the commit step is where Bead 2's executor
+			// bd export runs before `git add -A`.
+			assertCommandSucceeded(t, events, "mindspec", "complete")
+			assertBeadsState(t, sandbox, epicID, map[string]string{
+				taskBeadID: "closed",
+			})
+
+			// (c) Post-session `.beads/issues.jsonl` contains the pre-seeded
+			// drive-by issue's ID. This proves Bead 2's executor export ran
+			// during the lifecycle and carried pre-session Dolt state into the
+			// tracked artifact. The stricter check ("the specific `mindspec
+			// complete` commit's diff contains this ID") is deferred until the
+			// sandbox gains per-worktree `.beads/redirect` wiring — the pinned
+			// `bd` shim currently redirects every `bd export` back to sandbox
+			// root, so it never lands inside a bead worktree's commit. See
+			// mindspec-4u93 for the redirect-gap tracking bug.
+			jsonl := sandbox.ReadFile(".beads/issues.jsonl")
+			if !strings.Contains(jsonl, driveByID) {
+				t.Errorf("post-session .beads/issues.jsonl does not contain drive-by issue %q — bd export was not carried through the lifecycle", driveByID)
+			}
 		},
 	}
 }

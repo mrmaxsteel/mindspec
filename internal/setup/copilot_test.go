@@ -263,3 +263,64 @@ func TestRunCopilot_ExistingInstructionsUpdate_StaleBeginEnd(t *testing.T) {
 		t.Error("managed block should contain updated content")
 	}
 }
+
+// TestRunCopilot_PatchesBeadsConfig mirrors TestRunClaude_PatchesBeadsConfig —
+// projects that already ran `bd init` should get a mindspec-ready config after
+// `mindspec setup copilot`. Copilot setup does not chain any bd subcommand,
+// so the patch is the only path by which mindspec-required keys land.
+func TestRunCopilot_PatchesBeadsConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := "issue-prefix: \"cpro\"\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("RunCopilot: %v", err)
+	}
+	if r.BeadsConfig == nil {
+		t.Fatalf("expected BeadsConfig populated, got nil (err=%v)", r.BeadsConfErr)
+	}
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	for _, k := range []string{"types.custom", "status.custom", "export.git-add"} {
+		if !added[k] {
+			t.Errorf("expected %q in Added, got %v", k, r.BeadsConfig.Added)
+		}
+	}
+
+	data, _ := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+	got := string(data)
+	for _, f := range []string{"issue-prefix:", "cpro", "types.custom:", "status.custom:", "export.git-add:"} {
+		if !strings.Contains(got, f) {
+			t.Errorf("config.yaml missing %q; full content:\n%s", f, got)
+		}
+	}
+}
+
+// TestRunCopilot_NoBeadsDir verifies RunCopilot leaves BeadsConfig nil (and
+// produces no error) when the project has no .beads/ directory.
+func TestRunCopilot_NoBeadsDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	r, err := RunCopilot(root, false)
+	if err != nil {
+		t.Fatalf("RunCopilot: %v", err)
+	}
+	if r.BeadsConfig != nil {
+		t.Errorf("expected BeadsConfig=nil without .beads/, got %+v", r.BeadsConfig)
+	}
+	if r.BeadsConfErr != nil {
+		t.Errorf("unexpected BeadsConfErr: %v", r.BeadsConfErr)
+	}
+}

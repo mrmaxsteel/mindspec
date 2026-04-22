@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
 
 const (
@@ -16,10 +18,13 @@ const (
 
 // Result tracks what the init operation created or skipped.
 type Result struct {
-	Created  []string
-	Appended []string
-	Skipped  []string
-	BeadsOK  bool // true if bd/beads found in PATH
+	Created      []string
+	Appended     []string
+	Skipped      []string
+	BeadsOK      bool               // true if bd/beads found in PATH
+	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig (or ScanBeadsConfig in dry-run), nil if .beads/ absent
+	BeadsScan    bool               // true when BeadsConfig came from a read-only scan (dry-run)
+	BeadsConfErr error              // non-nil if the beads-config step failed (non-fatal)
 }
 
 // FormatSummary returns a human-readable summary of the init result.
@@ -65,6 +70,31 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("  MindSpec works without Beads but the full workflow requires it.\n")
 	}
 
+	if r.BeadsConfig != nil {
+		if summary := r.BeadsConfig.FormatSummary(); summary != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			if r.BeadsScan {
+				// Tell the user this is a preview, not a completed action —
+				// otherwise the "+" bullets read like "we added these keys"
+				// when actually nothing was written.
+				sb.WriteString("Beads config (dry-run preview — no writes):\n")
+				// FormatSummary prints its own "Beads config …:" header, so
+				// trim the helper's header line to avoid a duplicate.
+				sb.WriteString(trimFirstLine(summary))
+			} else {
+				sb.WriteString(summary)
+			}
+		}
+	}
+	if r.BeadsConfErr != nil {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "Beads config: %v\n", r.BeadsConfErr)
+	}
+
 	sb.WriteString("\nNext steps:\n")
 	sb.WriteString("  mindspec setup claude    # Configure Claude Code integration\n")
 	sb.WriteString("  mindspec setup copilot   # Configure GitHub Copilot integration\n")
@@ -79,6 +109,27 @@ func Run(root string, dryRun bool) (*Result, error) {
 
 	// Check for Beads CLI
 	r.BeadsOK = checkBeadsCLI()
+
+	// Surface .beads/config.yaml drift. In normal mode we mutate (via
+	// EnsureBeadsConfig); in dry-run we scan (via ScanBeadsConfig) so users
+	// still see what would change without touching disk. Either way, failures
+	// are reported but not fatal so a broken beads config doesn't block the
+	// rest of the init flow.
+	if bead.HasBeadsDir(root) {
+		var cr *bead.ConfigResult
+		var err error
+		if dryRun {
+			cr, err = bead.ScanBeadsConfig(root)
+			r.BeadsScan = true
+		} else {
+			cr, err = bead.EnsureBeadsConfig(root, false)
+		}
+		if err != nil {
+			r.BeadsConfErr = err
+		} else {
+			r.BeadsConfig = cr
+		}
+	}
 
 	for _, item := range manifest() {
 		target := filepath.Join(root, item.path)
@@ -186,6 +237,16 @@ func checkBeadsCLI() bool {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// trimFirstLine drops the first line of s (including its trailing newline).
+// Used to splice our own dry-run header in front of ConfigResult.FormatSummary
+// without a duplicate header line.
+func trimFirstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 func fileExists(path string) bool {

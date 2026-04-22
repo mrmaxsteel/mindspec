@@ -39,6 +39,11 @@ type MindspecExecutor struct {
 	WorktreeRemoveFn func(name string) error
 	WorktreeListFn   func() ([]bead.WorktreeListEntry, error)
 
+	// Pre-stage hook: refresh .beads/issues.jsonl from Dolt before each commit
+	// so the committed JSONL matches Dolt state. Called with the workdir of
+	// the pending commit (bd export writes to <workdir>/.beads/issues.jsonl).
+	ExportJSONLFn func(workdir string) error
+
 	// Config loader (default to config.Load).
 	LoadConfigFn func(root string) (*config.Config, error)
 
@@ -65,6 +70,7 @@ func NewMindspecExecutor(root string) *MindspecExecutor {
 		WorktreeCreateFn:  bead.WorktreeCreate,
 		WorktreeRemoveFn:  bead.WorktreeRemove,
 		WorktreeListFn:    bead.WorktreeList,
+		ExportJSONLFn:     bead.Export,
 		LoadConfigFn:      config.Load,
 		ExecCommandFn:     exec.Command,
 	}
@@ -207,7 +213,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 			commitPath = g.Root
 		}
 		commitMsg := fmt.Sprintf("impl(%s): %s", beadID, msg)
-		if err := g.CommitAllFn(commitPath, commitMsg); err != nil {
+		if err := g.commitWithExport(commitPath, commitMsg); err != nil {
 			return fmt.Errorf("auto-commit failed: %w", err)
 		}
 
@@ -270,7 +276,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 
 	// Auto-commit any remaining spec artifacts.
 	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
-	if err := g.CommitAllFn(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
+	if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
 	}
 
@@ -283,7 +289,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			}
 			// Auto-commit any remaining bead artifacts.
 			if e.Path != "" {
-				_ = g.CommitAllFn(e.Path, "chore: commit remaining bead artifacts")
+				_ = g.commitWithExport(e.Path, "chore: commit remaining bead artifacts")
 			}
 			// Merge bead branch into spec branch if not already an ancestor.
 			if _, statErr := os.Stat(specWtPath); statErr == nil {
@@ -406,7 +412,39 @@ func (g *MindspecExecutor) CommitCount(base, head string) (int, error) {
 }
 
 // CommitAll stages all changes and commits with the given message.
+// Refreshes .beads/issues.jsonl from Dolt before staging so the committed
+// JSONL is byte-identical to Dolt at commit time (ADR-0025, spec 082).
 func (g *MindspecExecutor) CommitAll(path, msg string) error {
+	return g.commitWithExport(path, msg)
+}
+
+// commitWithExport runs the pre-stage beads export, then delegates to the
+// underlying commit. Used by every executor path that ends in `git commit`
+// so every mindspec-driven commit carries current beads state.
+//
+// bd's pre-commit hook also runs `bd export`; the two exports are
+// byte-identical (deterministic on unchanged Dolt state). Do not "optimize"
+// either away — this one guards against bypassed hooks (--no-verify, test
+// paths) and the hook guards ad-hoc `git commit` outside mindspec.
+//
+// Path semantics: `exportDir` is the workdir of the pending commit (bead
+// worktree, spec worktree, or main). `-o .beads/issues.jsonl` resolves
+// relative to cmd.Dir, so bd writes to that worktree's tracked JSONL — the
+// exact file `git add -A` will stage on this branch. The spec primer phrase
+// "main repo's .beads/" describes the semantic endpoint (main becomes
+// authoritative after PR merge), not the literal export target: each
+// worktree has its own checked-out copy of the tracked file, so refreshing
+// "main's copy" from a bead worktree would leave the staged blob stale.
+func (g *MindspecExecutor) commitWithExport(path, msg string) error {
+	exportDir := path
+	if exportDir == "" {
+		exportDir = g.Root
+	}
+	if g.ExportJSONLFn != nil {
+		if err := g.ExportJSONLFn(exportDir); err != nil {
+			return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
+		}
+	}
 	return g.CommitAllFn(path, msg)
 }
 

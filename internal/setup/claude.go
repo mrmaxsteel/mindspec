@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
@@ -20,10 +21,13 @@ const (
 
 // Result tracks what the setup operation created, skipped, or found existing.
 type Result struct {
-	Created  []string
-	Skipped  []string
-	BeadsRan bool   // true if bd setup claude was run
-	BeadsMsg string // output/error from bd setup claude
+	Created      []string
+	Skipped      []string
+	BeadsRan     bool               // true if bd setup <agent> was run
+	BeadsMsg     string             // output/error from bd setup <agent>
+	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig (or ScanBeadsConfig in check mode) after chained bd setup
+	BeadsScan    bool               // true when BeadsConfig came from a read-only scan (check mode)
+	BeadsConfErr error              // non-nil if the beads-config step failed (non-fatal)
 }
 
 // FormatSummary returns a human-readable summary.
@@ -63,7 +67,39 @@ func (r *Result) FormatSummary() string {
 		}
 	}
 
+	if r.BeadsConfig != nil {
+		if summary := r.BeadsConfig.FormatSummary(); summary != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			if r.BeadsScan {
+				// Prefix a dry-run-style header so check mode doesn't read like
+				// mutation. Trim the helper's own header to avoid duplication.
+				sb.WriteString("Beads config (check-mode preview — no writes):\n")
+				sb.WriteString(trimFirstLine(summary))
+			} else {
+				sb.WriteString(summary)
+			}
+		}
+	}
+	if r.BeadsConfErr != nil {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "Beads config: %v\n", r.BeadsConfErr)
+	}
+
 	return sb.String()
+}
+
+// trimFirstLine drops the first line (including its trailing newline). Used
+// when splicing a setup-specific header in front of the shared ConfigResult
+// FormatSummary output.
+func trimFirstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 // RunClaude sets up Claude Code integration at root.
@@ -112,7 +148,35 @@ func RunClaude(root string, check bool) (*Result, error) {
 		chainBeadsSetup(root, r)
 	}
 
+	// 6. Surface .beads/config.yaml drift. Runs after chainBeadsSetup so
+	// projects that hadn't run `bd init` yet get the config created here too
+	// (bd setup scaffolds .beads/ by this point). Check mode scans read-only
+	// so --check still reports pending drift without writing.
+	applyBeadsConfig(root, check, r)
+
 	return r, nil
+}
+
+// applyBeadsConfig runs the config step on r. Shared by RunClaude, RunCodex,
+// and RunCopilot so the four entry points can't drift. Non-fatal: errors are
+// recorded on Result but never returned.
+func applyBeadsConfig(root string, check bool, r *Result) {
+	if !bead.HasBeadsDir(root) {
+		return
+	}
+	var cr *bead.ConfigResult
+	var err error
+	if check {
+		cr, err = bead.ScanBeadsConfig(root)
+		r.BeadsScan = true
+	} else {
+		cr, err = bead.EnsureBeadsConfig(root, false)
+	}
+	if err != nil {
+		r.BeadsConfErr = err
+		return
+	}
+	r.BeadsConfig = cr
 }
 
 // ensureSettings creates or merges .claude/settings.json with MindSpec hooks.

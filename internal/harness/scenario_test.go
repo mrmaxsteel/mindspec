@@ -318,6 +318,28 @@ func TestLLM_StopDoesNotBlockApproveImpl(t *testing.T) {
 	}
 }
 
+// --- Beads artifact scenarios ---
+
+func TestLLM_BeadsArtifactPassthrough(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping LLM test in short mode")
+	}
+	report, _ := runScenario(t, ScenarioBeadsArtifactPassthrough())
+	// Tolerate bd_close_shortcut — Haiku commonly reaches for `bd close`
+	// before discovering `mindspec complete`; the core property under test
+	// is that the agent did not try to stash or branch around the dirty
+	// JSONL artifact. skip_next here is tolerated for the same reason as
+	// ScenarioSingleBead (post-complete overreach).
+	for _, wa := range report.WrongActions {
+		switch wa.Rule {
+		case "bd_close_shortcut", "skip_next":
+			t.Logf("tolerated wrong action: [%s] %s", wa.Rule, wa.Reason)
+		default:
+			t.Errorf("unexpected wrong action: [%s] %s", wa.Rule, wa.Reason)
+		}
+	}
+}
+
 // --- Assertion helper unit tests ---
 
 func TestAssertMergeTopology(t *testing.T) {

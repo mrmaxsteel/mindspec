@@ -912,3 +912,17 @@ Haiku in `claude -p` mode tends to be conversational unless strongly directed. R
 | 2026-03-11 | FAIL | 750 | 30 | 6m50s | Haiku | FormatResult review message changed from `/ms-impl-approve` to `mindspec approve impl <spec-id>`. Agent still used `bd close`, missed guidance. Also failed on wrong actions count. |
 | 2026-03-11 | **PASS** | 3797 | 31 | 6m42s | Haiku | Added "Do not close beads directly with bd commands" to prompt (end-state constraint, same as SingleBead). Relaxed assertion to accept `bd close`. Tolerate skip_next/bd_close_shortcut wrong actions. MaxTurns 25→35. 87.1% fwd ratio. |
 | 2026-03-11 | **PASS** | 4259 | 38 | 8m02s | Haiku | Updated STOP message to include `/clear` hint. Agent completed bead + approve impl correctly. 81.6% fwd ratio (31 fwd / 7 retry). |
+
+### TestLLM_BeadsArtifactPassthrough (NEW — Spec 082)
+
+Canary for spec 082 Beads 1a + 2: `.beads/issues.jsonl` is dirty at session
+start (simulating a pre-session `bd create`); the agent must run `mindspec
+next` → implement → `mindspec complete` without `git stash` or `chore/`
+branching. The prompt deliberately omits the dirty JSONL so this exercises
+the product behavior, not prompt hints.
+
+_No runs recorded yet. First row will be added after the initial harness execution._
+
+| Date | Result | Events | Turns | Time | Model | Change |
+|------|--------|--------|-------|------|-------|--------|
+
