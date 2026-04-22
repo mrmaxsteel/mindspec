@@ -38,6 +38,11 @@ func (r *Report) HasFailures() bool {
 
 // Fix runs FixFunc on all checks that have one and are in Error or Warn
 // status. Fixed checks are updated to Fixed status.
+//
+// Note for check authors: attaching a FixFunc to a Warn-status check opts
+// that check into auto-repair under `mindspec doctor --fix`. Leave FixFunc
+// nil on advisory-only warnings that should stay visible until the user
+// acts on them manually.
 func (r *Report) Fix() {
 	for i := range r.Checks {
 		c := &r.Checks[i]

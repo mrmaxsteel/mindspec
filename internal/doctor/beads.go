@@ -354,8 +354,10 @@ func splitSemver(s string) [3]int {
 
 // readExportAuto parses .beads/config.yaml for the export.auto key.
 // Returns (value, known). `known=false` means the file doesn't exist, can't
-// be parsed, or doesn't declare the key — treat as bd's default (true) in
-// callers where the distinction matters.
+// be parsed, or doesn't declare the key. When the distinction matters,
+// callers should treat `known=false` as "assume bd's default (true)" — we
+// return the zero value (false) rather than a misleading true so a caller
+// that forgets the `known` check doesn't silently flip behaviour.
 func readExportAuto(root string) (bool, bool) {
 	path := filepath.Join(root, ".beads", "config.yaml")
 	data, err := os.ReadFile(path)
@@ -368,7 +370,7 @@ func readExportAuto(root string) (bool, bool) {
 	}
 	raw, ok := cfg["export.auto"]
 	if !ok {
-		return true, false
+		return false, false
 	}
 	switch v := raw.(type) {
 	case bool:
@@ -385,9 +387,16 @@ func readExportAuto(root string) (bool, bool) {
 }
 
 // detectDoltRemote reports whether a Dolt remote is configured for this
-// repo. It tries, in order: `sync.remote` in .beads/config.yaml, then
-// .beads/dolt/.dolt/repo_state.json (which lists remote branches). Returns
-// (known=false, ...) when detection cannot be performed confidently.
+// repo. Fallback order:
+//  1. `sync.remote` in .beads/config.yaml (bd's own remote-sync config)
+//  2. .beads/dolt/.dolt/repo_state.json → `remotes` map (the canonical
+//     location on bd 1.0.2; verified against a live install)
+//  3. .beads/dolt/.dolt/config.json → `remotes` map (legacy / per-repo
+//     global config fallback — some Dolt versions and fresh repos leave
+//     repo_state absent)
+//
+// Returns (known=false, ...) only when none of the three surfaces yielded
+// a parseable answer. The hasRemote return is meaningful only when known.
 func detectDoltRemote(root string) (known bool, hasRemote bool) {
 	cfgPath := filepath.Join(root, ".beads", "config.yaml")
 	if data, err := os.ReadFile(cfgPath); err == nil {
@@ -401,13 +410,29 @@ func detectDoltRemote(root string) (known bool, hasRemote bool) {
 		}
 	}
 
-	repoState := filepath.Join(root, ".beads", "dolt", ".dolt", "repo_state.json")
-	if data, err := os.ReadFile(repoState); err == nil {
+	for _, rel := range []string{
+		filepath.Join(".beads", "dolt", ".dolt", "repo_state.json"),
+		filepath.Join(".beads", "dolt", ".dolt", "config.json"),
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
 		var state struct {
 			Remotes map[string]any `json:"remotes"`
 		}
-		if json.Unmarshal(data, &state) == nil {
+		if err := json.Unmarshal(data, &state); err != nil {
+			continue
+		}
+		// Only treat config.json as authoritative when it declares remotes;
+		// an empty config.json tells us nothing and shouldn't stop the
+		// next fallback. repo_state.json is always authoritative when
+		// parseable — an empty remotes map there means "no remotes."
+		if strings.HasSuffix(rel, "repo_state.json") {
 			return true, len(state.Remotes) > 0
+		}
+		if len(state.Remotes) > 0 {
+			return true, true
 		}
 	}
 

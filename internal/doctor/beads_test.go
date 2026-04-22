@@ -182,6 +182,31 @@ func TestCheckBeadsConfigDrift_FixForceReplacesUserAuthored(t *testing.T) {
 	}
 }
 
+func TestCheckBeadsConfigDrift_MalformedYAML(t *testing.T) {
+	root := beadsRoot(t, false)
+	// Unterminated flow mapping — yaml.v3 refuses to parse.
+	writeFile(t, filepath.Join(root, ".beads", "config.yaml"),
+		"issue-prefix: \"proj\"\ntypes.custom: {oops\n")
+
+	r := &Report{}
+	checkBeadsConfigDrift(r, root, false)
+
+	c := findCheck(r, "Beads config drift")
+	if c == nil {
+		t.Fatal("expected a check for malformed config")
+	}
+	if c.Status != Warn {
+		t.Errorf("status = %d, want Warn", c.Status)
+	}
+	if !strings.Contains(c.Message, "cannot scan") {
+		t.Errorf("message should explain the scan failure; got %q", c.Message)
+	}
+	// No FixFunc is attached — we don't auto-repair a file we can't parse.
+	if c.FixFunc != nil {
+		t.Error("FixFunc must be nil on parse failure (refuse to blindly overwrite user YAML)")
+	}
+}
+
 func TestCheckBeadsConfigDrift_NoBeadsDirSilent(t *testing.T) {
 	root := t.TempDir()
 
@@ -266,6 +291,23 @@ func TestCheckDurabilityRisk_AutoExportOff_WithRemote(t *testing.T) {
 
 	if findCheck(r, "Beads durability") != nil {
 		t.Error("remote configured should suppress warn")
+	}
+}
+
+func TestCheckDurabilityRisk_AutoExportOff_RemoteViaConfigJSON(t *testing.T) {
+	// When repo_state.json is absent but config.json declares remotes,
+	// detectDoltRemote should still recognize the remote.
+	root := beadsRoot(t, false)
+	writeFile(t, filepath.Join(root, ".beads", "config.yaml"),
+		"issue-prefix: \"p\"\nexport.auto: false\n")
+	writeFile(t, filepath.Join(root, ".beads", "dolt", ".dolt", "config.json"),
+		`{"remotes":{"origin":{"url":"https://example.com/foo"}}}`)
+
+	r := &Report{}
+	checkDurabilityRisk(r, root)
+
+	if findCheck(r, "Beads durability") != nil {
+		t.Error("config.json with remotes should suppress the durability warn")
 	}
 }
 
