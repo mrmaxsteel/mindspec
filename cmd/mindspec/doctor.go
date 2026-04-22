@@ -14,9 +14,12 @@ var doctorCmd = &cobra.Command{
 	Short: "Check the health of the current workspace",
 	Long: `Validates project structure, documentation health, and Beads hygiene.
 
-Use --fix to auto-repair fixable issues (e.g. tracked runtime files).`,
+Use --fix to auto-repair fixable issues (e.g. tracked runtime files).
+Use --fix --force to also replace user-authored values for mindspec-required
+beads config keys (not just add missing ones).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fix, _ := cmd.Flags().GetBool("fix")
+		force, _ := cmd.Flags().GetBool("force")
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -30,7 +33,7 @@ Use --fix to auto-repair fixable issues (e.g. tracked runtime files).`,
 
 		fmt.Printf("Workspace Root: %s\n", root)
 
-		report := doctor.Run(root)
+		report := doctor.RunWithOptions(root, doctor.Options{Force: force})
 
 		if fix {
 			report.Fix()
@@ -70,4 +73,5 @@ func statusTag(s doctor.Status) string {
 
 func init() {
 	doctorCmd.Flags().Bool("fix", false, "Auto-repair fixable issues")
+	doctorCmd.Flags().Bool("force", false, "With --fix, also replace user-authored values for mindspec-required beads config keys")
 }

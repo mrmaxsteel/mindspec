@@ -36,12 +36,12 @@ func (r *Report) HasFailures() bool {
 	return false
 }
 
-// Fix runs FixFunc on all checks that have one and are in Error status.
-// Fixed checks are updated to Fixed status.
+// Fix runs FixFunc on all checks that have one and are in Error or Warn
+// status. Fixed checks are updated to Fixed status.
 func (r *Report) Fix() {
 	for i := range r.Checks {
 		c := &r.Checks[i]
-		if c.FixFunc != nil && c.Status == Error {
+		if c.FixFunc != nil && (c.Status == Error || c.Status == Warn) {
 			if err := c.FixFunc(); err != nil {
 				c.Message += fmt.Sprintf(" (fix failed: %v)", err)
 			} else {
@@ -51,11 +51,27 @@ func (r *Report) Fix() {
 	}
 }
 
+// Options tunes doctor's behaviour. Force controls whether `--fix` on the
+// beads config-drift check should also replace user-authored values for
+// mindspec-required keys (as opposed to only adding missing ones).
+type Options struct {
+	Force bool
+}
+
 // Run executes all doctor checks against the given project root.
 func Run(root string) *Report {
+	return RunWithOptions(root, Options{})
+}
+
+// RunWithOptions is Run's full-surface variant.
+func RunWithOptions(root string, opts Options) *Report {
 	r := &Report{}
 	checkDocs(r, root)
 	checkBeads(r, root)
+	checkBeadsConfigDrift(r, root, opts.Force)
+	checkStrayRootJSONL(r, root)
+	checkDurabilityRisk(r, root)
+	checkBdVersionFloor(r, root)
 	checkGit(r, root)
 	checkHooks(r, root)
 	return r

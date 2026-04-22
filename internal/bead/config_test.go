@@ -109,6 +109,55 @@ func readConfig(t *testing.T, root string) string {
 	return string(data)
 }
 
+func TestScanBeadsConfig_NoFileReportsAllAsAdded(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmp, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ScanBeadsConfig(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.CreatedFile {
+		t.Error("expected CreatedFile=true when config.yaml is missing")
+	}
+	// Scan must not write anything.
+	if _, err := os.Stat(filepath.Join(tmp, ".beads", "config.yaml")); !os.IsNotExist(err) {
+		t.Errorf("scan should not write: err=%v", err)
+	}
+	wantAdded := []string{"issue-prefix", "types.custom", "status.custom", "export.git-add"}
+	if !reflect.DeepEqual(sortedCopy(res.Added), sortedCopy(wantAdded)) {
+		t.Errorf("Added = %v, want %v", res.Added, wantAdded)
+	}
+}
+
+func TestScanBeadsConfig_ReportsDriftWithoutWriting(t *testing.T) {
+	tmp := t.TempDir()
+	writeBeadsConfig(t, tmp,
+		"issue-prefix: \"proj\"\n"+
+			"types.custom: \"gate\"\n"+
+			"status.custom: \"resolved\"\n"+
+			"export.git-add: true\n")
+
+	before, err := os.ReadFile(filepath.Join(tmp, ".beads", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ScanBeadsConfig(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UserAuthored) != 1 || res.UserAuthored[0].Key != "export.git-add" {
+		t.Errorf("UserAuthored = %+v, want one entry for export.git-add", res.UserAuthored)
+	}
+	after, _ := os.ReadFile(filepath.Join(tmp, ".beads", "config.yaml"))
+	if !reflect.DeepEqual(before, after) {
+		t.Error("scan must not mutate file")
+	}
+}
+
 func TestEnsureBeadsConfig_FreshFile(t *testing.T) {
 	tmp := t.TempDir()
 	res, err := EnsureBeadsConfig(tmp, false)
