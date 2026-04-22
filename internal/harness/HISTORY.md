@@ -921,7 +921,8 @@ next` → implement → `mindspec complete` without `git stash` or `chore/`
 branching. The prompt deliberately omits the dirty JSONL so this exercises
 the product behavior, not prompt hints.
 
+_No runs recorded yet. First row will be added after the initial harness execution._
+
 | Date | Result | Events | Turns | Time | Model | Change |
 |------|--------|--------|-------|------|-------|--------|
-| 2026-04-22 | PENDING | - | - | - | Haiku | Scenario added (bead mindspec-hzdh.7). Baseline run not yet recorded. |
 
