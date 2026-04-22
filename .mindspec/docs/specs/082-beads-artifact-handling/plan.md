@@ -2,6 +2,7 @@
 adr_citations:
     - id: ADR-0006
     - id: ADR-0023
+    - id: ADR-0025
 approved_at: "2026-04-21T22:31:03Z"
 approved_by: user
 bead_ids:
