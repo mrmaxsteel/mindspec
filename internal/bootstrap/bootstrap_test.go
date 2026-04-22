@@ -334,8 +334,8 @@ func TestRun_NoBeadsDir(t *testing.T) {
 	if r.BeadsConfig != nil {
 		t.Errorf("expected BeadsConfig=nil when no .beads/ dir exists, got %+v", r.BeadsConfig)
 	}
-	if r.BeadsConfErr != "" {
-		t.Errorf("expected no BeadsConfErr, got: %s", r.BeadsConfErr)
+	if r.BeadsConfErr != nil {
+		t.Errorf("expected no BeadsConfErr, got: %v", r.BeadsConfErr)
 	}
 }
 
@@ -361,8 +361,8 @@ func TestRun_PatchesExistingBeadsConfig(t *testing.T) {
 	if r.BeadsConfig == nil {
 		t.Fatalf("expected BeadsConfig to be populated when .beads/ exists")
 	}
-	if r.BeadsConfErr != "" {
-		t.Fatalf("unexpected BeadsConfErr: %s", r.BeadsConfErr)
+	if r.BeadsConfErr != nil {
+		t.Fatalf("unexpected BeadsConfErr: %v", r.BeadsConfErr)
 	}
 
 	// mindspec-required keys should have been added.
@@ -432,10 +432,12 @@ export.git-add: false
 	}
 }
 
-func TestRun_DryRunDoesNotPatchBeadsConfig(t *testing.T) {
+func TestRun_DryRunScansBeadsConfigWithoutMutating(t *testing.T) {
 	root := t.TempDir()
 
-	// .beads/ exists but dry-run must not touch config.yaml.
+	// .beads/ exists with a partial user-authored config. Dry-run must
+	// surface the pending drift via ScanBeadsConfig (so users know the file
+	// needs patching) without touching the file on disk.
 	beadsDir := filepath.Join(root, ".beads")
 	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -451,9 +453,23 @@ func TestRun_DryRunDoesNotPatchBeadsConfig(t *testing.T) {
 		t.Fatalf("Run(dryRun=true) error: %v", err)
 	}
 
-	if r.BeadsConfig != nil {
-		t.Errorf("dry-run should not call EnsureBeadsConfig, got BeadsConfig=%+v", r.BeadsConfig)
+	if r.BeadsConfig == nil {
+		t.Fatal("dry-run should scan and return a ConfigResult, got nil")
 	}
+	if !r.BeadsScan {
+		t.Error("BeadsScan should be true in dry-run mode")
+	}
+	// Scan must report the same pending-adds that EnsureBeadsConfig would.
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	for _, k := range []string{"types.custom", "status.custom", "export.git-add"} {
+		if !added[k] {
+			t.Errorf("dry-run scan missing %q in Added, got %v", k, r.BeadsConfig.Added)
+		}
+	}
+	// File must be byte-identical to what was seeded.
 	data, _ := os.ReadFile(cfgPath)
 	if string(data) != existing {
 		t.Errorf("dry-run modified config.yaml:\nwant: %q\ngot:  %q", existing, string(data))

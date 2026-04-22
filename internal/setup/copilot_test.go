@@ -286,7 +286,7 @@ func TestRunCopilot_PatchesBeadsConfig(t *testing.T) {
 		t.Fatalf("RunCopilot: %v", err)
 	}
 	if r.BeadsConfig == nil {
-		t.Fatalf("expected BeadsConfig populated, got nil (err=%q)", r.BeadsConfErr)
+		t.Fatalf("expected BeadsConfig populated, got nil (err=%v)", r.BeadsConfErr)
 	}
 	added := map[string]bool{}
 	for _, k := range r.BeadsConfig.Added {
@@ -320,7 +320,7 @@ func TestRunCopilot_NoBeadsDir(t *testing.T) {
 	if r.BeadsConfig != nil {
 		t.Errorf("expected BeadsConfig=nil without .beads/, got %+v", r.BeadsConfig)
 	}
-	if r.BeadsConfErr != "" {
-		t.Errorf("unexpected BeadsConfErr: %s", r.BeadsConfErr)
+	if r.BeadsConfErr != nil {
+		t.Errorf("unexpected BeadsConfErr: %v", r.BeadsConfErr)
 	}
 }

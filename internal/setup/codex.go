@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
@@ -52,16 +51,9 @@ func RunCodex(root string, check bool) (*Result, error) {
 		chainBeadsSetupCodex(root, r)
 	}
 
-	// 5. Patch .beads/config.yaml with mindspec-required keys. Same rationale
-	// as RunClaude: runs after chainBeadsSetupCodex so a project that first
-	// gets `.beads/` scaffolded here still ends up with a mindspec-ready config.
-	if !check && beadsDirExists(root) {
-		if cr, err := bead.EnsureBeadsConfig(root, false); err != nil {
-			r.BeadsConfErr = err.Error()
-		} else {
-			r.BeadsConfig = cr
-		}
-	}
+	// 5. Surface .beads/config.yaml drift via the shared helper so RunClaude,
+	// RunCodex, and RunCopilot stay aligned on ordering and semantics.
+	applyBeadsConfig(root, check, r)
 
 	return r, nil
 }

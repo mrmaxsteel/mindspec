@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
 
 // RunCopilot sets up GitHub Copilot integration at root.
@@ -44,16 +42,10 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		}
 	}
 
-	// 4. Patch .beads/config.yaml with mindspec-required keys (no-op if .beads/
-	// doesn't exist). Copilot setup doesn't chain bd setup, so this runs against
-	// whatever `.beads/` state the project already has.
-	if !check && beadsDirExists(root) {
-		if cr, err := bead.EnsureBeadsConfig(root, false); err != nil {
-			r.BeadsConfErr = err.Error()
-		} else {
-			r.BeadsConfig = cr
-		}
-	}
+	// 4. Surface .beads/config.yaml drift. Copilot setup doesn't chain
+	// `bd setup`, so this runs against whatever `.beads/` state the project
+	// already has. Shared helper keeps the three entry points aligned.
+	applyBeadsConfig(root, check, r)
 
 	return r, nil
 }

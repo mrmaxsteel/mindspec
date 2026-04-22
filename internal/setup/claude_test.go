@@ -564,7 +564,7 @@ func TestRunClaude_PatchesBeadsConfig(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 	if r.BeadsConfig == nil {
-		t.Fatalf("expected BeadsConfig populated, got nil (err=%q)", r.BeadsConfErr)
+		t.Fatalf("expected BeadsConfig populated, got nil (err=%v)", r.BeadsConfErr)
 	}
 	added := map[string]bool{}
 	for _, k := range r.BeadsConfig.Added {
@@ -640,9 +640,10 @@ export.git-add: false
 	}
 }
 
-// TestRunClaude_CheckModeSkipsBeadsConfig verifies that check mode does not
-// mutate .beads/config.yaml.
-func TestRunClaude_CheckModeSkipsBeadsConfig(t *testing.T) {
+// TestRunClaude_CheckModeScansBeadsConfigWithoutMutating verifies that check
+// mode returns a read-only scan (so users can preview drift via --check) but
+// does not touch .beads/config.yaml on disk.
+func TestRunClaude_CheckModeScansBeadsConfigWithoutMutating(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -660,8 +661,20 @@ func TestRunClaude_CheckModeSkipsBeadsConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunClaude(check=true): %v", err)
 	}
-	if r.BeadsConfig != nil {
-		t.Errorf("check mode should not populate BeadsConfig, got %+v", r.BeadsConfig)
+	if r.BeadsConfig == nil {
+		t.Fatal("check mode should scan and return a ConfigResult, got nil")
+	}
+	if !r.BeadsScan {
+		t.Error("BeadsScan should be true in check mode")
+	}
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	for _, k := range []string{"types.custom", "status.custom", "export.git-add"} {
+		if !added[k] {
+			t.Errorf("check-mode scan missing %q in Added, got %v", k, r.BeadsConfig.Added)
+		}
 	}
 	data, _ := os.ReadFile(cfgPath)
 	if string(data) != original {

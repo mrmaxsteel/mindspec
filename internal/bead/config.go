@@ -48,6 +48,49 @@ type ConfigResult struct {
 	CreatedFile    bool
 }
 
+// HasBeadsDir reports whether root contains a .beads/ directory. Callers use
+// it to decide whether it's worth invoking EnsureBeadsConfig or ScanBeadsConfig
+// at all — projects that haven't run `bd init` have nothing to patch.
+func HasBeadsDir(root string) bool {
+	info, err := os.Stat(filepath.Join(root, ".beads"))
+	return err == nil && info.IsDir()
+}
+
+// FormatSummary renders a ConfigResult as a short human-readable block for
+// init/setup/doctor output. Returns an empty string when the result carries no
+// news (no additions, no drift, no fresh-file creation) so callers can omit a
+// whole section instead of printing an empty header.
+//
+// The header line is caller-agnostic ("Beads config (.beads/config.yaml):");
+// if a caller wants to disambiguate scan vs. mutate modes it can prepend its
+// own line before calling FormatSummary.
+func (r *ConfigResult) FormatSummary() string {
+	if r == nil {
+		return ""
+	}
+	if len(r.Added) == 0 && len(r.UserAuthored) == 0 && !r.CreatedFile {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Beads config (.beads/config.yaml):\n")
+	if r.CreatedFile {
+		sb.WriteString("  + created with mindspec-required keys\n")
+	}
+	for _, k := range r.Added {
+		sb.WriteString("  + ")
+		sb.WriteString(k)
+		sb.WriteString("\n")
+	}
+	for _, drift := range r.UserAuthored {
+		// %q on both sides so quoting is consistent; Want is typically a
+		// string or bool, %q handles both via fmt's default formatting of
+		// the generic any.
+		fmt.Fprintf(&sb, "  ! %s: user value %q left in place (mindspec wants %q)\n",
+			drift.Key, drift.HaveRaw, fmt.Sprint(drift.Want))
+	}
+	return sb.String()
+}
+
 // ScanBeadsConfig is the read-only variant of EnsureBeadsConfig. It returns
 // the same ConfigResult describing what EnsureBeadsConfig would add, preserve,
 // or flag as drift — without writing to disk. Callers use it to report drift
