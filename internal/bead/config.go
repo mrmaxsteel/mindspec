@@ -48,6 +48,64 @@ type ConfigResult struct {
 	CreatedFile    bool
 }
 
+// ScanBeadsConfig is the read-only variant of EnsureBeadsConfig. It returns
+// the same ConfigResult describing what EnsureBeadsConfig would add, preserve,
+// or flag as drift — without writing to disk. Callers use it to report drift
+// without side effects (e.g. `mindspec doctor` without `--fix`).
+func ScanBeadsConfig(root string) (*ConfigResult, error) {
+	cfgPath := filepath.Join(root, ".beads", "config.yaml")
+
+	data, err := os.ReadFile(cfgPath)
+	created := false
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config: %w", err)
+		}
+		created = true
+	}
+	if !created && len(bytes.TrimSpace(data)) == 0 {
+		created = true
+	}
+
+	res := &ConfigResult{CreatedFile: created}
+	if created {
+		res.Added = append(res.Added, "issue-prefix")
+		for _, rk := range RequiredBeadsConfigKeys {
+			res.Added = append(res.Added, rk.Key)
+		}
+		return res, nil
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	mapping := rootMapping(&doc)
+	if mapping == nil {
+		return nil, fmt.Errorf("config root is not a YAML mapping")
+	}
+
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+		res.Added = append(res.Added, "issue-prefix")
+	}
+	for _, rk := range RequiredBeadsConfigKeys {
+		valNode, ok := findMapEntry(mapping, rk.Key)
+		switch {
+		case !ok:
+			res.Added = append(res.Added, rk.Key)
+		case scalarEquals(valNode, rk.Value):
+			res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
+		default:
+			res.UserAuthored = append(res.UserAuthored, ConfigDrift{
+				Key:     rk.Key,
+				Want:    rk.Value,
+				HaveRaw: renderNodeValue(valNode),
+			})
+		}
+	}
+	return res, nil
+}
+
 // EnsureBeadsConfig idempotently applies the mindspec-required keys to
 // <root>/.beads/config.yaml. Existing keys, values, and comments outside the
 // mindspec-required set are preserved byte-for-byte via yaml.v3 Node editing.
