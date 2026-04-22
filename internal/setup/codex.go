@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
@@ -49,6 +50,17 @@ func RunCodex(root string, check bool) (*Result, error) {
 	// 4. Optionally chain bd setup codex
 	if !check {
 		chainBeadsSetupCodex(root, r)
+	}
+
+	// 5. Patch .beads/config.yaml with mindspec-required keys. Same rationale
+	// as RunClaude: runs after chainBeadsSetupCodex so a project that first
+	// gets `.beads/` scaffolded here still ends up with a mindspec-ready config.
+	if !check && beadsDirExists(root) {
+		if cr, err := bead.EnsureBeadsConfig(root, false); err != nil {
+			r.BeadsConfErr = err.Error()
+		} else {
+			r.BeadsConfig = cr
+		}
 	}
 
 	return r, nil

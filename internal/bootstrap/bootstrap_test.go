@@ -322,6 +322,144 @@ func TestFormatSummary_MentionsCopilotSetup(t *testing.T) {
 	}
 }
 
+func TestRun_NoBeadsDir(t *testing.T) {
+	root := t.TempDir()
+
+	r, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// No .beads/ dir present → EnsureBeadsConfig is skipped.
+	if r.BeadsConfig != nil {
+		t.Errorf("expected BeadsConfig=nil when no .beads/ dir exists, got %+v", r.BeadsConfig)
+	}
+	if r.BeadsConfErr != "" {
+		t.Errorf("expected no BeadsConfErr, got: %s", r.BeadsConfErr)
+	}
+}
+
+func TestRun_PatchesExistingBeadsConfig(t *testing.T) {
+	root := t.TempDir()
+
+	// Simulate a project that ran `bd init` before `mindspec init`: .beads/
+	// exists with a minimal user-authored config.
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := "issue-prefix: \"myproj\"\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if r.BeadsConfig == nil {
+		t.Fatalf("expected BeadsConfig to be populated when .beads/ exists")
+	}
+	if r.BeadsConfErr != "" {
+		t.Fatalf("unexpected BeadsConfErr: %s", r.BeadsConfErr)
+	}
+
+	// mindspec-required keys should have been added.
+	added := map[string]bool{}
+	for _, k := range r.BeadsConfig.Added {
+		added[k] = true
+	}
+	wantKeys := []string{"types.custom", "status.custom", "export.git-add"}
+	for _, k := range wantKeys {
+		if !added[k] {
+			t.Errorf("expected %s in Added, got %v", k, r.BeadsConfig.Added)
+		}
+	}
+
+	// Existing user-authored prefix must be preserved.
+	data, err := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(data), `issue-prefix: "myproj"`) && !contains(string(data), "issue-prefix: myproj") {
+		t.Errorf("user-authored issue-prefix not preserved; got:\n%s", string(data))
+	}
+}
+
+func TestRun_BeadsConfigIdempotent(t *testing.T) {
+	root := t.TempDir()
+
+	// Seed with an already-mindspec-ready config so the first Run picks it up
+	// via EnsureBeadsConfig as AlreadyCorrect.
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ready := `issue-prefix: "proj"
+types.custom: "gate"
+status.custom: "resolved"
+export.git-add: false
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(ready), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before, _ := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+
+	if _, err := Run(root, false); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	r2, err := Run(root, false)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	// Nothing added, nothing drifted — already-correct is the expected state.
+	if r2.BeadsConfig == nil {
+		t.Fatal("expected BeadsConfig on second run")
+	}
+	if len(r2.BeadsConfig.Added) != 0 {
+		t.Errorf("second run added keys: %v (want none)", r2.BeadsConfig.Added)
+	}
+	if len(r2.BeadsConfig.UserAuthored) != 0 {
+		t.Errorf("second run reported drift: %+v", r2.BeadsConfig.UserAuthored)
+	}
+
+	after, _ := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+	if string(before) != string(after) {
+		t.Errorf("config.yaml changed on idempotent run:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestRun_DryRunDoesNotPatchBeadsConfig(t *testing.T) {
+	root := t.TempDir()
+
+	// .beads/ exists but dry-run must not touch config.yaml.
+	beadsDir := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(beadsDir, "config.yaml")
+	existing := "issue-prefix: \"myproj\"\n"
+	if err := os.WriteFile(cfgPath, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Run(root, true)
+	if err != nil {
+		t.Fatalf("Run(dryRun=true) error: %v", err)
+	}
+
+	if r.BeadsConfig != nil {
+		t.Errorf("dry-run should not call EnsureBeadsConfig, got BeadsConfig=%+v", r.BeadsConfig)
+	}
+	data, _ := os.ReadFile(cfgPath)
+	if string(data) != existing {
+		t.Errorf("dry-run modified config.yaml:\nwant: %q\ngot:  %q", existing, string(data))
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && containsHelper(s, substr)
 }
