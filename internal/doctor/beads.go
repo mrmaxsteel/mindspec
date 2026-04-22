@@ -215,7 +215,7 @@ func checkBeadsConfigDrift(r *Report, root string, force bool) {
 }
 
 // checkStrayRootJSONL warns when <root>/issues.jsonl is tracked by git. This
-// is GIT_DIR-pollution leakage from bd v1.0.2's default auto-add behaviour
+// is GIT_DIR-pollution leakage from bd v1.0.2's default auto-add behavior
 // (see .beads/config.yaml header). The canonical location is
 // .beads/issues.jsonl.
 func checkStrayRootJSONL(r *Report, root string) {
@@ -357,7 +357,7 @@ func splitSemver(s string) [3]int {
 // be parsed, or doesn't declare the key. When the distinction matters,
 // callers should treat `known=false` as "assume bd's default (true)" — we
 // return the zero value (false) rather than a misleading true so a caller
-// that forgets the `known` check doesn't silently flip behaviour.
+// that forgets the `known` check doesn't silently flip behavior.
 func readExportAuto(root string) (bool, bool) {
 	path := filepath.Join(root, ".beads", "config.yaml")
 	data, err := os.ReadFile(path)

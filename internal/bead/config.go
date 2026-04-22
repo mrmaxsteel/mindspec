@@ -40,7 +40,7 @@ type ConfigDrift struct {
 	HaveRaw string
 }
 
-// ConfigResult summarises the effect of an EnsureBeadsConfig call.
+// ConfigResult summarizes the effect of an EnsureBeadsConfig call.
 type ConfigResult struct {
 	Added          []string
 	AlreadyCorrect []string
@@ -153,7 +153,7 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 // <root>/.beads/config.yaml. Existing keys, values, and comments outside the
 // mindspec-required set are preserved byte-for-byte via yaml.v3 Node editing.
 //
-// Behaviour per key:
+// Behavior per key:
 //   - issue-prefix: written only when absent; the value defaults to
 //     filepath.Base(root). An existing issue-prefix is never overwritten and
 //     never reported as drift (the user's project-naming choice is sovereign).

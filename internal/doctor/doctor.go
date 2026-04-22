@@ -56,7 +56,7 @@ func (r *Report) Fix() {
 	}
 }
 
-// Options tunes doctor's behaviour. Force controls whether `--fix` on the
+// Options tunes doctor's behavior. Force controls whether `--fix` on the
 // beads config-drift check should also replace user-authored values for
 // mindspec-required keys (as opposed to only adding missing ones).
 type Options struct {
