@@ -28,9 +28,12 @@ var (
 
 func defaultStatusPorcelain(cwd string) (string, error) {
 	cmd := exec.Command("git", "-C", cwd, "status", "--porcelain")
-	out, err := cmd.Output()
+	// CombinedOutput (not Output) so stderr is preserved on failure — a
+	// missing `-C` target or corrupt index otherwise exits with an opaque
+	// *ExitError whose message the caller cannot surface.
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("checking working tree: %w", err)
+		return "", fmt.Errorf("checking working tree: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
 }
