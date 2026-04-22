@@ -205,6 +205,64 @@ func TestWorktreeCreate_ArgsConstruction(t *testing.T) {
 	}
 }
 
+// TestWorktreeCreate_SharesMainDB is a real-bd regression test for the
+// "redirect gap" described in spec 082 bead 4. A worktree created via
+// `bd worktree create` must be able to query the main repo's beads DB from
+// inside the worktree (the whole point of a shared-beads worktree).
+//
+// Current status (bd 1.0.2): skipped — `bd` eagerly spawns a sidecar Dolt
+// server from the worktree's local `.beads/` (tracked `metadata.json` and
+// `config.yaml` trigger the local-path branch ahead of the git common-dir
+// fallback promised by `bd worktree create --help`). The fix surface is
+// upstream bd or a structural change to what mindspec tracks under `.beads/`
+// — both larger than this bead's spike timebox, so the patch is deferred.
+// Removing the skip should be the first commit of the follow-up bead.
+func TestWorktreeCreate_SharesMainDB(t *testing.T) {
+	t.Skip("deferred to follow-up bead mindspec-4u93: bd 1.0.2 sidecar-dolt-server issue")
+
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skipf("bd not on PATH: %v", err)
+	}
+
+	tmp := t.TempDir()
+
+	// Initialize a git repo + bd project at tmp.
+	runCmd := func(dir, name string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %v failed in %s: %v\n%s", name, args, dir, err, out)
+		}
+	}
+	runCmd(tmp, "git", "init")
+	runCmd(tmp, "git", "config", "user.email", "test@example.com")
+	runCmd(tmp, "git", "config", "user.name", "test")
+	runCmd(tmp, "git", "commit", "--allow-empty", "-m", "init")
+	runCmd(tmp, "bd", "init")
+
+	// Create a throwaway issue so the shared DB is non-trivial to observe.
+	runCmd(tmp, "bd", "create", "--title", "probe", "--description", "probe", "--type", "task")
+
+	// Create a worktree branch and worktree. `bd worktree create` takes the
+	// relative worktree path as its first positional arg.
+	runCmd(tmp, "git", "branch", "feature-x")
+	runCmd(tmp, "bd", "worktree", "create", ".worktrees/feature-x", "--branch=feature-x")
+
+	// From INSIDE the worktree, bd list must succeed and see the probe issue.
+	wt := filepath.Join(tmp, ".worktrees", "feature-x")
+	listCmd := exec.Command("bd", "list", "--json")
+	listCmd.Dir = wt
+	out, err := listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bd list from worktree failed (redirect gap reproduced): %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "probe") {
+		t.Errorf("bd list from worktree did not see main-repo issues; got:\n%s", out)
+	}
+}
+
 func TestWorktreeCreate_NoBranch(t *testing.T) {
 	var capturedArgs []string
 	origExec := execCommand

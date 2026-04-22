@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 )
 
@@ -20,10 +21,12 @@ const (
 
 // Result tracks what the setup operation created, skipped, or found existing.
 type Result struct {
-	Created  []string
-	Skipped  []string
-	BeadsRan bool   // true if bd setup claude was run
-	BeadsMsg string // output/error from bd setup claude
+	Created      []string
+	Skipped      []string
+	BeadsRan     bool               // true if bd setup claude was run
+	BeadsMsg     string             // output/error from bd setup claude
+	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig after chained bd setup
+	BeadsConfErr string             // non-empty if EnsureBeadsConfig failed (non-fatal)
 }
 
 // FormatSummary returns a human-readable summary.
@@ -63,6 +66,51 @@ func (r *Result) FormatSummary() string {
 		}
 	}
 
+	if r.BeadsConfig != nil {
+		if summary := formatBeadsConfig(r.BeadsConfig); summary != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(summary)
+		}
+	}
+	if r.BeadsConfErr != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Beads config: ")
+		sb.WriteString(r.BeadsConfErr)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// formatBeadsConfig renders a ConfigResult as a short human-readable block.
+// Mirrors the identical helper in bootstrap.FormatSummary — kept as a local
+// copy here so the setup package stays free of a bootstrap import cycle.
+// Returns empty when the result carries no news (no changes, no drift).
+func formatBeadsConfig(cr *bead.ConfigResult) string {
+	if cr == nil {
+		return ""
+	}
+	if len(cr.Added) == 0 && len(cr.UserAuthored) == 0 && !cr.CreatedFile {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Beads config (.beads/config.yaml):\n")
+	if cr.CreatedFile {
+		sb.WriteString("  + created with mindspec-required keys\n")
+	}
+	for _, k := range cr.Added {
+		sb.WriteString("  + ")
+		sb.WriteString(k)
+		sb.WriteString("\n")
+	}
+	for _, drift := range cr.UserAuthored {
+		fmt.Fprintf(&sb, "  ! %s: user-authored value %q left in place (mindspec wants %v)\n",
+			drift.Key, drift.HaveRaw, drift.Want)
+	}
 	return sb.String()
 }
 
@@ -112,7 +160,23 @@ func RunClaude(root string, check bool) (*Result, error) {
 		chainBeadsSetup(root, r)
 	}
 
+	// 6. Patch .beads/config.yaml with mindspec-required keys. Runs after
+	// chainBeadsSetup so projects that hadn't run `bd init` yet get the config
+	// created here too — bd setup will have scaffolded .beads/ by this point.
+	if !check && beadsDirExists(root) {
+		if cr, err := bead.EnsureBeadsConfig(root, false); err != nil {
+			r.BeadsConfErr = err.Error()
+		} else {
+			r.BeadsConfig = cr
+		}
+	}
+
 	return r, nil
+}
+
+func beadsDirExists(root string) bool {
+	info, err := os.Stat(filepath.Join(root, ".beads"))
+	return err == nil && info.IsDir()
 }
 
 // ensureSettings creates or merges .claude/settings.json with MindSpec hooks.

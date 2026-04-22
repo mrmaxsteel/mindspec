@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
 
 const (
@@ -16,10 +18,12 @@ const (
 
 // Result tracks what the init operation created or skipped.
 type Result struct {
-	Created  []string
-	Appended []string
-	Skipped  []string
-	BeadsOK  bool // true if bd/beads found in PATH
+	Created      []string
+	Appended     []string
+	Skipped      []string
+	BeadsOK      bool               // true if bd/beads found in PATH
+	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig, nil if .beads/ absent
+	BeadsConfErr string             // non-empty if EnsureBeadsConfig failed (non-fatal)
 }
 
 // FormatSummary returns a human-readable summary of the init result.
@@ -65,6 +69,23 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("  MindSpec works without Beads but the full workflow requires it.\n")
 	}
 
+	if r.BeadsConfig != nil {
+		if summary := formatBeadsConfig(r.BeadsConfig); summary != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(summary)
+		}
+	}
+	if r.BeadsConfErr != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Beads config: ")
+		sb.WriteString(r.BeadsConfErr)
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("\nNext steps:\n")
 	sb.WriteString("  mindspec setup claude    # Configure Claude Code integration\n")
 	sb.WriteString("  mindspec setup copilot   # Configure GitHub Copilot integration\n")
@@ -79,6 +100,21 @@ func Run(root string, dryRun bool) (*Result, error) {
 
 	// Check for Beads CLI
 	r.BeadsOK = checkBeadsCLI()
+
+	// Patch .beads/config.yaml with mindspec-required keys when a beads project
+	// exists. This is a no-op for brand-new projects that haven't run `bd init`
+	// yet — we only mindspec-ify an existing beads directory. The result is
+	// surfaced in the summary; failures are reported but not fatal so a broken
+	// beads config doesn't block the rest of the init flow.
+	if !dryRun {
+		if beadsDirExists(root) {
+			if cr, err := bead.EnsureBeadsConfig(root, false); err != nil {
+				r.BeadsConfErr = err.Error()
+			} else {
+				r.BeadsConfig = cr
+			}
+		}
+	}
 
 	for _, item := range manifest() {
 		target := filepath.Join(root, item.path)
@@ -186,6 +222,38 @@ func checkBeadsCLI() bool {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func beadsDirExists(root string) bool {
+	return dirExists(filepath.Join(root, ".beads"))
+}
+
+// formatBeadsConfig renders a ConfigResult as a short human-readable block.
+// Returns an empty string if the result is effectively a silent no-op
+// (no changes and no drift to report), keeping init/setup output uncluttered
+// for the common case.
+func formatBeadsConfig(cr *bead.ConfigResult) string {
+	if cr == nil {
+		return ""
+	}
+	if len(cr.Added) == 0 && len(cr.UserAuthored) == 0 && !cr.CreatedFile {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Beads config (.beads/config.yaml):\n")
+	if cr.CreatedFile {
+		sb.WriteString("  + created with mindspec-required keys\n")
+	}
+	for _, k := range cr.Added {
+		sb.WriteString("  + ")
+		sb.WriteString(k)
+		sb.WriteString("\n")
+	}
+	for _, drift := range cr.UserAuthored {
+		fmt.Fprintf(&sb, "  ! %s: user-authored value %q left in place (mindspec wants %v)\n",
+			drift.Key, drift.HaveRaw, drift.Want)
+	}
+	return sb.String()
 }
 
 func fileExists(path string) bool {
