@@ -40,3 +40,12 @@ Workflow **uses** context packs (from context-system) to provide mode-appropriat
 ## Current State
 
 Mode system is implemented. Beads is the single state store (ADR-0023) — no filesystem state files. Phase is derived from epic/child statuses. All git operations go through the Executor interface (Spec 077).
+
+## JSONL as Artifact
+
+`.beads/issues.jsonl` is a **build artifact**, not user authorship (ADR-0025). It is a deterministic projection of Dolt, rewritten by `bd export` and by bd's pre-commit hook after every mutation. Workflow guards must not treat its diff as user work:
+
+- **`mindspec next`** classifies dirty paths. If the only dirty path is `.beads/issues.jsonl`, the guard runs `bd export` from the main repo root to normalize the diff against stale throttled exports, then re-checks. User-authored dirt still blocks — the guard's purpose is to protect user code, not to enforce hygiene on derived files (`internal/next/guard.go`, citing ADR-0025).
+- **Executor commits** (`approve spec`, `approve plan`, `approve impl`, `complete`) refresh the JSONL via `bd export` before `git add -A`, so every mindspec-driven commit carries current beads state. In projects without a Dolt remote, this makes `git push` the off-machine durability guarantee.
+
+Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.
