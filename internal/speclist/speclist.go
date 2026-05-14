@@ -1,12 +1,11 @@
 package speclist
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -32,7 +31,12 @@ func List(root string) ([]SpecEntry, error) {
 			continue
 		}
 		specID := e.Name()
-		status := readFrontmatterStatus(filepath.Join(specsDir, specID, "spec.md"))
+		status := frontmatter.StatusFromPath(filepath.Join(specsDir, specID, "spec.md"))
+		// Preserve the "unknown" sentinel for CLI display: a blank Status column
+		// looks broken in tables. The parser drops the sentinel; the table keeps it.
+		if status == "" {
+			status = "unknown"
+		}
 		ph := derivePhase(specID)
 
 		specs = append(specs, SpecEntry{
@@ -60,30 +64,4 @@ func derivePhase(specID string) string {
 		return "—"
 	}
 	return ph
-}
-
-// readFrontmatterStatus reads the status field from YAML frontmatter.
-func readFrontmatterStatus(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return "unknown"
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
-			if inFrontmatter {
-				break
-			}
-			inFrontmatter = true
-			continue
-		}
-		if inFrontmatter && strings.HasPrefix(line, "status:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "status:"))
-		}
-	}
-	return "unknown"
 }

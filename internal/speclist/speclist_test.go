@@ -106,43 +106,6 @@ func TestList_EmptySpecsDir(t *testing.T) {
 	}
 }
 
-func TestReadFrontmatterStatus(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{
-			name:    "draft",
-			content: "---\nstatus: Draft\n---\n# Spec",
-			want:    "Draft",
-		},
-		{
-			name:    "approved",
-			content: "---\nstatus: Approved\napproved_at: \"2026-01-01\"\n---\n# Spec",
-			want:    "Approved",
-		},
-		{
-			name:    "no frontmatter",
-			content: "# Spec\nSome content",
-			want:    "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmp := t.TempDir()
-			path := filepath.Join(tmp, "spec.md")
-			os.WriteFile(path, []byte(tt.content), 0644)
-
-			got := readFrontmatterStatus(path)
-			if got != tt.want {
-				t.Errorf("readFrontmatterStatus() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 type specDirOpt struct {
 	id     string
 	status string

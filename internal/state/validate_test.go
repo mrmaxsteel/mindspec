@@ -192,28 +192,3 @@ func TestReadSpecApprovalStatus(t *testing.T) {
 	}
 }
 
-func TestReadPlanFrontmatterStatus(t *testing.T) {
-	tmp := t.TempDir()
-
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{"draft", "---\nstatus: Draft\nspec_id: 004\n---\n# Plan\n", "Draft"},
-		{"approved", "---\nstatus: Approved\napproved_at: 2026-02-12\n---\n# Plan\n", "Approved"},
-		{"no frontmatter", "# Plan\n\nSome content\n", "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(tmp, tt.name+".md")
-			os.WriteFile(path, []byte(tt.content), 0644)
-
-			got := readPlanFrontmatterStatus(path)
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -80,9 +81,12 @@ func BuildContext(root string, mc *state.Focus) *Context {
 		ctx.SpecGoal = readSpecGoal(root, mc.ActiveSpec)
 	}
 
-	// Check plan approval status in plan mode
+	// Check plan approval status in plan mode. Case-insensitive match aligns
+	// with validate.SpecIsApproved (ARCH-6 / mindspec-npd2): status: approved
+	// (lowercase) now counts as approved.
 	if mc.Mode == state.ModePlan && mc.ActiveSpec != "" {
-		ctx.PlanApproved = isPlanApproved(root, mc.ActiveSpec)
+		planPath := filepath.Join(workspace.SpecDir(root, mc.ActiveSpec), "plan.md")
+		ctx.PlanApproved = strings.EqualFold(frontmatter.StatusFromPath(planPath), "Approved")
 	}
 
 	// AvailableSpecs removed — the disk directory listing was noise
@@ -220,32 +224,6 @@ func gatesForMode(mode string) []string {
 	default:
 		return []string{}
 	}
-}
-
-// isPlanApproved checks whether the plan frontmatter has status: Approved.
-func isPlanApproved(root, specID string) bool {
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
-	data, err := os.ReadFile(planPath)
-	if err != nil {
-		return false
-	}
-
-	// Quick scan: find "status:" in YAML frontmatter
-	lines := bytes.Split(data, []byte("\n"))
-	if len(lines) == 0 || string(bytes.TrimSpace(lines[0])) != "---" {
-		return false
-	}
-	for _, line := range lines[1:] {
-		trimmed := bytes.TrimSpace(line)
-		if string(trimmed) == "---" {
-			break
-		}
-		if bytes.HasPrefix(trimmed, []byte("status:")) {
-			val := string(bytes.TrimSpace(bytes.TrimPrefix(trimmed, []byte("status:"))))
-			return val == "Approved" || val == "\"Approved\""
-		}
-	}
-	return false
 }
 
 // readSpecGoal extracts the Goal section from a spec file.
