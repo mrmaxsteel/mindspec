@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -72,20 +71,6 @@ func WriteSessionFile(root string, s *Session) error {
 	data = append(data, '\n')
 
 	return os.WriteFile(workspace.SessionPath(root), data, 0644)
-}
-
-// SpecBranch returns the canonical branch name for a spec.
-func SpecBranch(specID string) string { return "spec/" + specID }
-
-// SpecWorktreePath returns the canonical worktree path for a spec.
-func SpecWorktreePath(root, specID string) string {
-	return filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
-}
-
-// BeadWorktreePath returns the canonical worktree path for a bead
-// nested under its spec's worktree.
-func BeadWorktreePath(specWorktree, beadID string) string {
-	return filepath.Join(specWorktree, ".worktrees", "worktree-"+beadID)
 }
 
 // IsValidMode reports whether mode is a recognized operating mode

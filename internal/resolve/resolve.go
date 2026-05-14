@@ -53,15 +53,11 @@ func ResolveMode(root, specID string) (string, error) {
 	return derivedPhase, nil
 }
 
-// ResolveSpecBranch returns the canonical branch name for a spec.
-func ResolveSpecBranch(specID string) string {
-	return state.SpecBranch(specID)
-}
-
-// ResolveWorktree returns the canonical worktree path for a spec.
-func ResolveWorktree(root, specID string) string {
-	return state.SpecWorktreePath(root, specID)
-}
+// ResolveSpecBranch and ResolveWorktree were thin shims around the
+// state.* path helpers. Both helpers moved to internal/workspace and
+// had no remaining callers in the tree, so the shims were removed
+// (ARCH-7 / mindspec-c8q0). Use workspace.SpecBranch and
+// workspace.SpecWorktreePath directly.
 
 // FormatActiveList produces a human-readable list of active specs.
 func FormatActiveList(specs []SpecStatus) string {

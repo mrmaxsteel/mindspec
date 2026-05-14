@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -90,7 +91,7 @@ func scanSourceMarkdown(root string) ([]string, error) {
 				}
 			}
 			// Skip vendored/dependency repos and worktree clones
-			if name == "beads" || strings.HasPrefix(name, "worktree-") {
+			if name == "beads" || strings.HasPrefix(name, workspace.BeadWorktreePrefix) {
 				return filepath.SkipDir
 			}
 			// Skip nested git repos

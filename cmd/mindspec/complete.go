@@ -7,8 +7,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
-	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +59,11 @@ The bead ID is required as the first argument.`,
 
 		// Auto-chdir to spec worktree or main root before calling Run.
 		if specID != "" {
-			specWtPath := state.SpecWorktreePath(root, specID)
+			cfg, cfgErr := config.Load(root)
+			if cfgErr != nil {
+				cfg = config.DefaultConfig()
+			}
+			specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 			if fi, err := os.Stat(specWtPath); err == nil && fi.IsDir() {
 				os.Chdir(specWtPath)
 			} else {

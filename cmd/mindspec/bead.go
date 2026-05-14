@@ -6,6 +6,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -60,8 +61,8 @@ var beadWorktreeCmd = &cobra.Command{
 		}
 
 		if create {
-			wtName := "worktree-" + beadID
-			branchName := "bead/" + beadID
+			wtName := workspace.BeadWorktreeName(beadID)
+			branchName := workspace.BeadBranch(beadID)
 			if err := bead.WorktreeCreate(wtName, branchName); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
@@ -73,8 +74,8 @@ var beadWorktreeCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(2)
 			}
-			expectedName := "worktree-" + beadID
-			expectedBranch := "bead/" + beadID
+			expectedName := workspace.BeadWorktreeName(beadID)
+			expectedBranch := workspace.BeadBranch(beadID)
 			found := false
 			for _, e := range entries {
 				if e.Name == expectedName || e.Branch == expectedBranch {

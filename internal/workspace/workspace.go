@@ -136,9 +136,15 @@ func LegacyDocsDir(root string) string {
 // Returns the first path that exists on disk. If none exist, returns the
 // canonical path (option 2) so that callers creating new specs write to
 // the right location.
+//
+// SpecDir deliberately scans the default ".worktrees" root rather than
+// honoring cfg.WorktreeRoot — it must locate existing on-disk worktrees,
+// which may have been created with a different config at the time. A
+// follow-up bead may extend this to accept *config.Config and probe both
+// the configured root and the default for portability across configs.
 func SpecDir(root, specID string) string {
-	// 1. Worktree path
-	wtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
+	// 1. Worktree path (scan token uses default worktrees dir name).
+	wtPath := filepath.Join(DefaultWorktreesDir(root), SpecWorktreeName(specID),
 		".mindspec", "docs", "specs", specID)
 	if exists(wtPath) {
 		return wtPath
@@ -203,6 +209,11 @@ const (
 // It returns the kind (main/spec/bead) and any extracted spec or bead ID.
 // Detection is based on the path containing .worktrees/worktree-spec-<id> or
 // .worktrees/worktree-<bead-id>.
+//
+// This function intentionally does NOT honor cfg.WorktreeRoot: it scans
+// path strings that may have been produced with whatever worktree-root
+// name was active when the directory was created. Recognizing the
+// canonical ".worktrees" token keeps detection robust across configs.
 func DetectWorktreeContext(dir string) (kind, specID, beadID string) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -217,13 +228,13 @@ func DetectWorktreeContext(dir string) (kind, specID, beadID string) {
 	for i, part := range parts {
 		if part == ".worktrees" && i+1 < len(parts) {
 			wtDir := parts[i+1]
-			if strings.HasPrefix(wtDir, "worktree-spec-") {
+			if strings.HasPrefix(wtDir, SpecWorktreePrefix) {
 				lastKind = WorktreeSpec
-				lastSpecID = strings.TrimPrefix(wtDir, "worktree-spec-")
+				lastSpecID = strings.TrimPrefix(wtDir, SpecWorktreePrefix)
 				lastBeadID = ""
-			} else if strings.HasPrefix(wtDir, "worktree-") {
+			} else if strings.HasPrefix(wtDir, BeadWorktreePrefix) {
 				lastKind = WorktreeBead
-				lastBeadID = strings.TrimPrefix(wtDir, "worktree-")
+				lastBeadID = strings.TrimPrefix(wtDir, BeadWorktreePrefix)
 			}
 		}
 	}

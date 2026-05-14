@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -209,14 +210,18 @@ func ReadState() *HookState {
 	if ctxErr == nil && ctx != nil {
 		hs.Mode = ctx.Phase
 		hs.ActiveSpec = ctx.SpecID
+		cfg, cfgErr := config.Load(root)
+		if cfgErr != nil {
+			cfg = config.DefaultConfig()
+		}
 		if ctx.BeadID != "" && ctx.SpecID != "" {
-			specWt := state.SpecWorktreePath(root, ctx.SpecID)
-			wt := state.BeadWorktreePath(specWt, ctx.BeadID)
+			specWt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
+			wt := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID)
 			if dirExists(wt) {
 				hs.ActiveWorktree = wt
 			}
 		} else if ctx.SpecID != "" {
-			wt := state.SpecWorktreePath(root, ctx.SpecID)
+			wt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
 			if dirExists(wt) {
 				hs.ActiveWorktree = wt
 			}

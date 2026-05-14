@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
-	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
@@ -102,7 +102,11 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	// Step 3c: Auto-commit approval changes so downstream branches see them.
 	// Hard-fail on commit failure so the spec worktree is guaranteed clean
 	// before plan approval and bead merges.
-	specWtPath := state.SpecWorktreePath(root, specID)
+	cfg, cfgErr := config.Load(root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		return nil, fmt.Errorf("auto-commit spec approval failed: %w\n\nFix the issue in %s and re-run 'mindspec spec approve %s'", err, specWtPath, specID)

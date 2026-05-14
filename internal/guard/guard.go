@@ -8,7 +8,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
-	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // guardState holds the subset of state that guards need.
@@ -38,14 +38,18 @@ func defaultReadGuardState(root string) (*guardState, error) {
 	gs := &guardState{
 		ActiveSpec: ctx.SpecID,
 	}
+	cfg, cfgErr := loadConfigFn(root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
 	// Derive worktree path from context.
 	// Validate existence at each level: prefer bead worktree > spec worktree.
 	// If neither exists on disk (both deleted during crash/cleanup),
 	// leave ActiveWorktree empty so no redirect fires.
 	if ctx.SpecID != "" {
-		specWt := state.SpecWorktreePath(root, ctx.SpecID)
+		specWt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
 		if ctx.BeadID != "" {
-			beadWt := state.BeadWorktreePath(specWt, ctx.BeadID)
+			beadWt := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID)
 			if dirExists(beadWt) {
 				gs.ActiveWorktree = beadWt
 			} else if dirExists(specWt) {
@@ -92,7 +96,7 @@ func CheckCWD(root string) error {
 	// Also allow the spec worktree — lifecycle commands (complete, impl-approve)
 	// need to run there after all beads are done.
 	if gs.ActiveSpec != "" {
-		specWtName := "worktree-spec-" + gs.ActiveSpec
+		specWtName := workspace.SpecWorktreeName(gs.ActiveSpec)
 		specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
 		if strings.HasPrefix(cwdAbs, specWtAbs) {
 			return nil

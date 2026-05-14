@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -168,17 +167,8 @@ func TestFormatActiveList_Multiple(t *testing.T) {
 	}
 }
 
-func TestResolveSpecBranch(t *testing.T) {
-	got := ResolveSpecBranch("053-drop-state-json")
-	if got != "spec/053-drop-state-json" {
-		t.Errorf("ResolveSpecBranch() = %q, want %q", got, "spec/053-drop-state-json")
-	}
-}
-
-func TestResolveWorktree(t *testing.T) {
-	got := ResolveWorktree("/project", "053-drop-state-json")
-	want := filepath.Join("/project", ".worktrees", "worktree-spec-053-drop-state-json")
-	if got != want {
-		t.Errorf("ResolveWorktree() = %q, want %q", got, want)
-	}
-}
+// TestResolveSpecBranch and TestResolveWorktree were removed alongside
+// the ResolveSpecBranch and ResolveWorktree shims (ARCH-7 /
+// mindspec-c8q0). Use workspace.SpecBranch and
+// workspace.SpecWorktreePath directly; the tests for those helpers live
+// in internal/workspace/worktree_test.go.
