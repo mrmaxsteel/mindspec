@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -336,14 +338,10 @@ func flattenAttributes(attrs []otlpKeyValue) map[string]any {
 		if a.Value.StringValue != "" {
 			m[a.Key] = a.Value.StringValue
 		} else if len(a.Value.IntValue) > 0 {
-			// IntValue can be a JSON string ("123") or number (123)
-			var v int64
-			s := string(a.Value.IntValue)
-			// Strip quotes if present
-			if len(s) >= 2 && s[0] == '"' {
-				s = s[1 : len(s)-1]
-			}
-			fmt.Sscanf(s, "%d", &v)
+			// IntValue can be a JSON string ("123") or number (123).
+			// strings.Trim handles both: quoted ("123") -> 123, bare (123) -> 123.
+			s := strings.Trim(string(a.Value.IntValue), "\"")
+			v, _ := strconv.ParseInt(s, 10, 64) // 0 on error, matching prior fmt.Sscanf semantics
 			m[a.Key] = v
 		} else if a.Value.DoubleValue != nil {
 			m[a.Key] = *a.Value.DoubleValue
@@ -354,8 +352,7 @@ func flattenAttributes(attrs []otlpKeyValue) map[string]any {
 
 // parseOTLPTimestamp converts a nanosecond Unix timestamp string to RFC3339Nano.
 func parseOTLPTimestamp(nanos string) string {
-	var n int64
-	fmt.Sscanf(nanos, "%d", &n)
+	n, _ := strconv.ParseInt(strings.Trim(nanos, "\""), 10, 64)
 	if n == 0 {
 		return time.Now().UTC().Format(time.RFC3339Nano)
 	}
