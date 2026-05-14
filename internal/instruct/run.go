@@ -30,6 +30,13 @@ import (
 // Returns an error only on unrecoverable failures (workspace lookup, render
 // errors, ambiguous target with multiple actives). Idle / no-state is NOT
 // an error — it renders the idle template.
+//
+// PERF-1: one phase.Cache per Run invocation is shared across the guard /
+// resolve / phase / instruct / state stack so a warm `mindspec instruct`
+// makes ≤3 bd calls (≤4 with an active bead via state.checkBeadStatus).
+// The cache is allocated before the guard.ActiveWorktreePathWithCache call
+// so that lookup shares its `bd list --type=epic` with the rest of the
+// invocation.
 func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -45,11 +52,14 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 		mainRoot = localRoot
 	}
 
+	// PERF-1: per-invocation cache, shared by every cache-aware helper below.
+	cache := phase.NewCache()
+
 	// Protected branch check FIRST: main/master → always idle.
 	// This must run before guard/worktree checks which query beads (slow dolt cold start).
 	if specFlag == "" {
 		if _, ok := RenderIdleIfProtected(mainRoot); ok {
-			return handleNoState(mainRoot, format, out)
+			return handleNoState(cache, mainRoot, format, out)
 		}
 	}
 
@@ -59,7 +69,7 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 
 	// CWD redirect: if running from main with an active worktree,
 	// emit ONLY the redirect message — no normal guidance.
-	if wtPath := guard.ActiveWorktreePath(mainRoot); wtPath != "" && guard.IsMainCWD(mainRoot) {
+	if wtPath := guard.ActiveWorktreePathWithCache(cache, mainRoot); wtPath != "" && guard.IsMainCWDWithCache(cache, mainRoot) {
 		msg := fmt.Sprintf("# MindSpec — CWD Redirect\n\nYou are in the main worktree. Run:\n\n  cd %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", wtPath)
 		if format == "json" {
 			fmt.Fprintf(out, `{"redirect":true,"worktree_path":%q,"message":"Switch to worktree"}`, wtPath)
@@ -76,17 +86,17 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 
 	// ADR-0023: derive state from beads, not focus files.
 	// First try resolver for spec targeting, then use phase context.
-	specID, resolveErr := resolve.ResolveTarget(mainRoot, specFlag)
+	specID, resolveErr := resolve.ResolveTargetWithCache(cache, mainRoot, specFlag)
 
 	var mc *state.Focus
 	if resolveErr != nil {
 		if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
-			return handleAmbiguous(mainRoot, format, out, ambErr)
+			return handleAmbiguous(cache, mainRoot, format, out, ambErr)
 		}
 		// Try phase context for beads-derived state.
-		pctx, ctxErr := phase.ResolveContext(mainRoot)
+		pctx, ctxErr := phase.ResolveContextWithCache(cache, mainRoot)
 		if ctxErr != nil || pctx == nil || pctx.Phase == "" {
-			return handleNoState(mainRoot, format, out)
+			return handleNoState(cache, mainRoot, format, out)
 		}
 		mc = &state.Focus{
 			Mode:       pctx.Phase,
@@ -94,10 +104,12 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 			ActiveBead: pctx.BeadID,
 		}
 	} else {
-		// Derive mode from beads
-		mode, _ := resolve.ResolveMode(mainRoot, specID)
+		// Derive mode from beads. Single cache-shared path:
+		//   - resolve.ResolveModeWithCache → cache.FindEpicBySpecID + cache.FindEpic
+		//   - phase.ResolveContextFromDirWithCache → reuses cached epic/children
+		mode, _ := resolve.ResolveModeWithCache(cache, mainRoot, specID)
 		// Try to find active bead via phase context
-		pctx, _ := phase.ResolveContextFromDir(mainRoot, localRoot)
+		pctx, _ := phase.ResolveContextFromDirWithCache(cache, mainRoot, localRoot)
 		activeBead := ""
 		if pctx != nil {
 			activeBead = pctx.BeadID
@@ -119,7 +131,7 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 		mc.ActiveWorktree = resolveBeadWorktree(mc.ActiveBead)
 	}
 
-	bctx := BuildContext(mainRoot, mc)
+	bctx := BuildContextWithCache(cache, mainRoot, mc)
 
 	// Add worktree check when an active worktree is set.
 	if mc.ActiveWorktree != "" {
@@ -158,9 +170,9 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 }
 
 // handleNoState provides a graceful fallback when no state exists.
-func handleNoState(root, format string, out io.Writer) error {
+func handleNoState(cache *phase.Cache, root, format string, out io.Writer) error {
 	mc := &state.Focus{Mode: state.ModeIdle}
-	ctx := BuildContext(root, mc)
+	ctx := BuildContextWithCache(cache, root, mc)
 	// No warning needed — the idle template already tells the agent what to do.
 
 	if format == "json" {
@@ -181,9 +193,9 @@ func handleNoState(root, format string, out io.Writer) error {
 }
 
 // handleAmbiguous renders the ambiguous template listing all active specs.
-func handleAmbiguous(root, format string, out io.Writer, ambErr *resolve.ErrAmbiguousTarget) error {
+func handleAmbiguous(cache *phase.Cache, root, format string, out io.Writer, ambErr *resolve.ErrAmbiguousTarget) error {
 	mc := &state.Focus{Mode: "ambiguous"}
-	ctx := BuildContext(root, mc)
+	ctx := BuildContextWithCache(cache, root, mc)
 	for _, s := range ambErr.Active {
 		ctx.ActiveSpecList = append(ctx.ActiveSpecList, SpecInfo{
 			SpecID: s.SpecID,

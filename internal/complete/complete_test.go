@@ -87,38 +87,33 @@ func stubPhaseEpicInMode(t *testing.T, specID, epicID, mode string) {
 			}
 		}
 
-		// Parent queries for DerivePhase child enumeration
+		// Parent queries for DerivePhase child enumeration.
+		// PERF-1: cache.GetChildren now passes
+		//   --status=open,in_progress,closed -n 0
+		// in a single call. The stub returns a single child matching the
+		// requested mode (DerivePhaseFromChildren counts the status).
 		isParentQuery := false
-		var status string
 		for _, a := range args {
 			if a == "--parent" {
 				isParentQuery = true
-			}
-			if strings.HasPrefix(a, "--status=") {
-				status = strings.TrimPrefix(a, "--status=")
+				break
 			}
 		}
 
 		if isParentQuery {
 			switch mode {
 			case state.ModeImplement:
-				if status == "in_progress" {
-					return json.Marshal([]phase.ChildInfo{{
-						ID: "stub-bead", Title: "[" + specID + "] stub", Status: "in_progress",
-					}})
-				}
+				return json.Marshal([]phase.ChildInfo{{
+					ID: "stub-bead", Title: "[" + specID + "] stub", Status: "in_progress",
+				}})
 			case state.ModePlan:
-				if status == "open" {
-					return json.Marshal([]phase.ChildInfo{{
-						ID: "stub-bead", Title: "[" + specID + "] stub", Status: "open",
-					}})
-				}
+				return json.Marshal([]phase.ChildInfo{{
+					ID: "stub-bead", Title: "[" + specID + "] stub", Status: "open",
+				}})
 			case state.ModeReview:
-				if status == "closed" {
-					return json.Marshal([]phase.ChildInfo{{
-						ID: "stub-bead", Title: "[" + specID + "] stub", Status: "closed",
-					}})
-				}
+				return json.Marshal([]phase.ChildInfo{{
+					ID: "stub-bead", Title: "[" + specID + "] stub", Status: "closed",
+				}})
 			}
 		}
 
@@ -285,26 +280,40 @@ func TestRun_NoWorktree(t *testing.T) {
 }
 
 // stubChildrenByStatus installs a listJSONFn that returns children keyed by
-// their --status=<name> filter. Each returned child's Status field is
-// overwritten to match the requested filter so that phase.DerivePhaseFromChildren
-// counts them correctly. Any status not in the map returns [].
+// status. PERF-1: the cache now issues a single `--status=open,in_progress,closed`
+// bd call and filters in-process, so this stub returns the union of all
+// requested-status buckets (each stamped with its bucket's status) in one shot.
+// Any status not in the map contributes no items.
 func stubChildrenByStatus(byStatus map[string][]bead.BeadInfo) {
 	listJSONFn = func(args ...string) ([]byte, error) {
+		statuses := []string{}
 		for _, a := range args {
 			const prefix = "--status="
 			if strings.HasPrefix(a, prefix) {
-				status := strings.TrimPrefix(a, prefix)
-				if items, ok := byStatus[status]; ok {
-					stamped := make([]bead.BeadInfo, len(items))
-					for i := range items {
-						stamped[i] = items[i]
-						stamped[i].Status = status
-					}
-					return json.Marshal(stamped)
+				csv := strings.TrimPrefix(a, prefix)
+				for _, s := range strings.Split(csv, ",") {
+					statuses = append(statuses, strings.TrimSpace(s))
 				}
 			}
 		}
-		return []byte("[]"), nil
+		if len(statuses) == 0 {
+			// Default-open fallback (mirrors `bd list` behaviour) — keeps any
+			// legacy caller that omitted --status working.
+			statuses = []string{"open"}
+		}
+		var out []bead.BeadInfo
+		for _, status := range statuses {
+			items, ok := byStatus[status]
+			if !ok {
+				continue
+			}
+			for i := range items {
+				stamped := items[i]
+				stamped.Status = status
+				out = append(out, stamped)
+			}
+		}
+		return json.Marshal(out)
 	}
 }
 

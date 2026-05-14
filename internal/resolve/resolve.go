@@ -18,9 +18,15 @@ type SpecStatus struct {
 }
 
 // ActiveSpecs discovers all specs with active lifecycles by querying beads for open epics.
-// Returns specs sorted by spec ID for deterministic output.
+// Returns specs sorted by spec ID for deterministic output. Constructs a fresh
+// phase.Cache; hot-path callers should use ActiveSpecsWithCache.
 func ActiveSpecs(root string) ([]SpecStatus, error) {
-	activeSpecs, err := phase.DiscoverActiveSpecs()
+	return ActiveSpecsWithCache(phase.NewCache(), root)
+}
+
+// ActiveSpecsWithCache is the cache-aware variant of ActiveSpecs.
+func ActiveSpecsWithCache(c *phase.Cache, root string) ([]SpecStatus, error) {
+	activeSpecs, err := phase.DiscoverActiveSpecsWithCache(c)
 	if err != nil {
 		return nil, err
 	}
@@ -40,13 +46,19 @@ func ActiveSpecs(root string) ([]SpecStatus, error) {
 }
 
 // ResolveMode returns the current lifecycle phase for a spec by querying beads.
-// Returns ModeIdle if no epic exists for the spec.
+// Returns ModeIdle if no epic exists for the spec. Constructs a fresh phase.Cache;
+// hot-path callers should use ResolveModeWithCache.
 func ResolveMode(root, specID string) (string, error) {
-	epicID, err := phase.FindEpicBySpecID(specID)
+	return ResolveModeWithCache(phase.NewCache(), root, specID)
+}
+
+// ResolveModeWithCache is the cache-aware variant of ResolveMode.
+func ResolveModeWithCache(c *phase.Cache, root, specID string) (string, error) {
+	epicID, err := phase.FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
 		return state.ModeIdle, nil
 	}
-	derivedPhase, err := phase.DerivePhase(epicID)
+	derivedPhase, err := phase.DerivePhaseWithCache(c, epicID)
 	if err != nil {
 		return state.ModeIdle, err
 	}

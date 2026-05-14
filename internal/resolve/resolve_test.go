@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -16,23 +15,13 @@ func stubActiveEpics(t *testing.T, epics []phase.EpicInfo, childrenByEpic map[st
 	for _, e := range epics {
 		epicByID[e.ID] = e
 	}
-	// queryEpics/queryActiveEpics and queryChildren use listJSONFn
+	// PERF-1: Cache.AllEpics / Cache.GetChildren issue a single
+	// `--status=open,in_progress,closed -n 0` bd list call. The stub here
+	// returns all epics in one shot and lets the cache do the in-process
+	// filtering for active vs. all-statuses lookups.
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--type=epic" {
-				// Filter epics by --status arg to match queryActiveEpics behavior
-				for _, s := range args {
-					if strings.HasPrefix(s, "--status=") {
-						status := strings.TrimPrefix(s, "--status=")
-						var filtered []phase.EpicInfo
-						for _, e := range epics {
-							if strings.EqualFold(e.Status, status) {
-								filtered = append(filtered, e)
-							}
-						}
-						return json.Marshal(filtered)
-					}
-				}
 				return json.Marshal(epics)
 			}
 		}

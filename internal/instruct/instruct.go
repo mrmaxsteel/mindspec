@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -55,7 +56,13 @@ type JSONOutput struct {
 }
 
 // BuildContext creates a rendering context from focus state and project root.
+// Constructs a fresh phase.Cache; hot-path callers should use BuildContextWithCache.
 func BuildContext(root string, mc *state.Focus) *Context {
+	return BuildContextWithCache(phase.NewCache(), root, mc)
+}
+
+// BuildContextWithCache is the cache-aware variant of BuildContext.
+func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Context {
 	ctx := &Context{
 		Mode:           mc.Mode,
 		ActiveSpec:     mc.ActiveSpec,

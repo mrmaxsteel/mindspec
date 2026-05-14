@@ -384,10 +384,12 @@ func TestResolveContextFromDir_MainWorktree(t *testing.T) {
 }
 
 func TestFindEpicBySpecID_ClosedEpic(t *testing.T) {
+	// PERF-1: the consolidated single bd list call now requests
+	// --status=open,in_progress,closed in one shot, so the stub branches on
+	// --type=epic and returns the closed epic in the unified list.
 	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
-		// queryEpics uses listJSONFn; only return epic for closed status
 		for _, a := range args {
-			if a == "--status=closed" {
+			if a == "--type=epic" {
 				return []byte(`[{"id":"epic-99","title":"[SPEC 099-done] Done","status":"closed","issue_type":"epic","metadata":{"spec_num":99,"spec_title":"done"}}]`), nil
 			}
 		}
@@ -405,8 +407,12 @@ func TestFindEpicBySpecID_ClosedEpic(t *testing.T) {
 }
 
 func TestFindEpicBySpecID_DeduplicatesAcrossStatuses(t *testing.T) {
+	// PERF-1: per-status dedup is gone (only one bd list call). Test now
+	// asserts the cache memoizes the result across repeated FindEpicBySpecID
+	// calls on the same Cache — listJSON must fire exactly once.
+	calls := 0
 	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
-		// queryEpics uses listJSONFn; return same epic for all status queries
+		calls++
 		for _, a := range args {
 			if a == "--type=epic" {
 				return []byte(`[{"id":"epic-1","title":"[SPEC 001-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
@@ -416,12 +422,18 @@ func TestFindEpicBySpecID_DeduplicatesAcrossStatuses(t *testing.T) {
 	})
 	defer restore()
 
-	epicID, err := FindEpicBySpecID("001-test")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	cache := NewCache()
+	for i := 0; i < 3; i++ {
+		epicID, err := FindEpicBySpecIDWithCache(cache, "001-test")
+		if err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i, err)
+		}
+		if epicID != "epic-1" {
+			t.Errorf("call %d: epicID: got %q, want %q", i, epicID, "epic-1")
+		}
 	}
-	if epicID != "epic-1" {
-		t.Errorf("epicID: got %q, want %q", epicID, "epic-1")
+	if calls != 1 {
+		t.Errorf("listJSON called %d times, want 1 (cache should memoize)", calls)
 	}
 }
 

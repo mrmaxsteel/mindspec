@@ -27,6 +27,11 @@ func (e *ErrAmbiguousTarget) Error() string {
 // (e.g. "077-execution-layer-interface"). If the input already contains a hyphen,
 // it is assumed to be a full spec ID and returned as-is.
 func ResolveSpecPrefix(prefix string) (string, error) {
+	return ResolveSpecPrefixWithCache(phase.NewCache(), prefix)
+}
+
+// ResolveSpecPrefixWithCache is the cache-aware variant of ResolveSpecPrefix.
+func ResolveSpecPrefixWithCache(c *phase.Cache, prefix string) (string, error) {
 	// If it contains a hyphen, treat as full spec ID — pass through.
 	if strings.Contains(prefix, "-") {
 		return prefix, nil
@@ -43,7 +48,7 @@ func ResolveSpecPrefix(prefix string) (string, error) {
 	padded := fmt.Sprintf("%03s", prefix)
 
 	// Query active specs first.
-	activeSpecs, err := phase.DiscoverActiveSpecs()
+	activeSpecs, err := phase.DiscoverActiveSpecsWithCache(c)
 	if err == nil {
 		var matches []string
 		for _, as := range activeSpecs {
@@ -72,10 +77,20 @@ func ResolveSpecPrefix(prefix string) (string, error) {
 //  3. Query active specs; if exactly one, auto-select it.
 //  4. If multiple active specs exist, return ErrAmbiguousTarget.
 //  5. If nothing found, return an error.
+//
+// Constructs a fresh phase.Cache; hot-path callers should use ResolveTargetWithCache.
 func ResolveTarget(root, specFlag string) (string, error) {
+	return ResolveTargetWithCache(phase.NewCache(), root, specFlag)
+}
+
+// ResolveTargetWithCache is the cache-aware variant of ResolveTarget. It shares
+// phase.Cache with subsequent ResolveModeWithCache / ResolveContextWithCache /
+// instruct.BuildContextWithCache calls so a single warm `mindspec instruct` run
+// makes at most 3 bd subprocess calls.
+func ResolveTargetWithCache(c *phase.Cache, root, specFlag string) (string, error) {
 	// Explicit target — resolve prefix if needed.
 	if specFlag != "" {
-		return ResolveSpecPrefix(specFlag)
+		return ResolveSpecPrefixWithCache(c, specFlag)
 	}
 
 	// Worktree-derived context: if CWD is inside a spec/bead worktree,
@@ -84,14 +99,14 @@ func ResolveTarget(root, specFlag string) (string, error) {
 	// internally, which we do below via ActiveSpecs anyway).
 	kind, _, _ := workspace.DetectWorktreeContext(root)
 	if kind != workspace.WorktreeMain {
-		ctx, err := phase.ResolveContextFromDir(root, root)
+		ctx, err := phase.ResolveContextFromDirWithCache(c, root, root)
 		if err == nil && ctx != nil && ctx.SpecID != "" {
 			return ctx.SpecID, nil
 		}
 	}
 
 	// Query active specs (main worktree or worktree context didn't resolve)
-	active, err := ActiveSpecs(root)
+	active, err := ActiveSpecsWithCache(c, root)
 	if err == nil {
 		switch len(active) {
 		case 1:
