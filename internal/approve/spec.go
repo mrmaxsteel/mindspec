@@ -37,6 +37,9 @@ type SpecResult struct {
 
 // ApproveSpec validates and approves a spec, updating lifecycle and setting state.
 func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*SpecResult, error) {
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
+	}
 	result := &SpecResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
@@ -45,11 +48,14 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		return nil, fmt.Errorf("spec validation failed:\n%s", vr.FormatText())
 	}
 
-	specDir := workspace.SpecDir(root, specID)
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(specDir, "spec.md")
-	if err := updateSpecApproval(specPath, approvedBy); err != nil {
+	if err = updateSpecApproval(specPath, approvedBy); err != nil {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
 	}
 

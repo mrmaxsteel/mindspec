@@ -12,15 +12,23 @@ import (
 )
 
 // BenchmarkDir returns the benchmark artifact directory for a spec.
-func BenchmarkDir(repoRoot, specID string) string {
-	return filepath.Join(workspace.SpecDir(repoRoot, specID), "benchmark")
+// Returns an error if specID is not a well-formed spec identifier.
+func BenchmarkDir(repoRoot, specID string) (string, error) {
+	specDir, err := workspace.SpecDir(repoRoot, specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(specDir, "benchmark"), nil
 }
 
 // WriteResults persists all benchmark artifacts to the spec's benchmark directory.
 func WriteResults(cfg *RunConfig, results []*SessionResult, quantReport string,
 	qual *QualitativeResult, traceSummary string, plans, diffs map[string]string) error {
 
-	dir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+	dir, err := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+	if err != nil {
+		return fmt.Errorf("resolving benchmark dir: %w", err)
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating benchmark dir: %w", err)
 	}

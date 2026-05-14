@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/domain"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -25,11 +26,17 @@ var domainAddCmd = &cobra.Command{
 		}
 
 		name := args[0]
+		if err := validate.DomainName(name); err != nil {
+			return err
+		}
 		if err := domain.Add(root, name); err != nil {
 			return err
 		}
 
-		domainPath := workspace.DomainDir(root, name)
+		domainPath, err := workspace.DomainDir(root, name)
+		if err != nil {
+			return err
+		}
 		relPath, err := filepath.Rel(root, domainPath)
 		if err != nil {
 			relPath = domainPath
@@ -64,6 +71,9 @@ var domainShowCmd = &cobra.Command{
 	Short: "Show detailed information about a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validate.DomainName(args[0]); err != nil {
+			return err
+		}
 		root, err := findRoot()
 		if err != nil {
 			return err

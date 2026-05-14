@@ -10,6 +10,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
+// mustSpecDir is a test helper that fails the test on validation error.
+// Centralised here so the SpecDir signature change adds one line per call site
+// (SEC-1, bead mindspec-x1qr).
+func mustSpecDir(t *testing.T, root, specID string) string {
+	t.Helper()
+	p, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("workspace.SpecDir(%q): %v", specID, err)
+	}
+	return p
+}
+
 // newMockExecutor creates a MockExecutor that returns a workspace under testRoot.
 func newMockExecutor(testRoot, specID string) *executor.MockExecutor {
 	wtPath := filepath.Join(testRoot, ".worktrees", "worktree-spec-"+specID)
@@ -54,7 +66,7 @@ func TestRunCreatesSpecFromTemplate(t *testing.T) {
 	}
 
 	// Spec files are written to the worktree, not to root (ADR-0006).
-	specPath := filepath.Join(workspace.SpecDir(result.WorktreePath, "010-my-feature"), "spec.md")
+	specPath := filepath.Join(mustSpecDir(t, result.WorktreePath, "010-my-feature"), "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("spec.md not created: %v", err)
@@ -86,7 +98,7 @@ func TestRunWithExplicitTitle(t *testing.T) {
 	}
 
 	// Spec files are written to the worktree (ADR-0006).
-	specPath := filepath.Join(workspace.SpecDir(result.WorktreePath, "011-custom"), "spec.md")
+	specPath := filepath.Join(mustSpecDir(t, result.WorktreePath, "011-custom"), "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("spec.md not created: %v", err)
@@ -104,7 +116,7 @@ func TestRunErrorsOnExistingDirectory(t *testing.T) {
 	ensureWorktreeDir(t, mock)
 
 	// Pre-create the spec directory in the worktree path (where Run() now checks).
-	specDir := workspace.SpecDir(mock.InitSpecWorkspaceResult.Path, "010-exists")
+	specDir := mustSpecDir(t, mock.InitSpecWorkspaceResult.Path, "010-exists")
 	os.MkdirAll(specDir, 0755)
 
 	_, err := Run(root, "010-exists", "", mock)
@@ -219,7 +231,7 @@ func TestRunNoLifecycleFile(t *testing.T) {
 	}
 
 	// Per ADR-0023: no lifecycle.yaml should be created (eliminated).
-	specDir := workspace.SpecDir(result.WorktreePath, "014-lifecycle-test")
+	specDir := mustSpecDir(t, result.WorktreePath, "014-lifecycle-test")
 	lcPath := filepath.Join(specDir, "lifecycle.yaml")
 	if _, statErr := os.Stat(lcPath); statErr == nil {
 		t.Error("expected no lifecycle.yaml (ADR-0023), but file was created")

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -68,9 +69,21 @@ func Create(root, title string, opts CreateOpts) (string, error) {
 		return "", fmt.Errorf("title must not be empty")
 	}
 
-	// If superseding, verify old ADR exists and optionally copy domains
+	// If superseding, verify old ADR exists and optionally copy domains.
+	//
+	// SEC-1 hot path (bead mindspec-x1qr): opts.Supersedes is user-controlled
+	// and previously flowed straight into filepath.Join, enabling a
+	// "../../../tmp/poisoned" traversal that mutated arbitrary *.md files.
+	// We validate BEFORE any join so the error message is precise and no
+	// path-construction code runs on attacker input.
 	if opts.Supersedes != "" {
-		oldPath := filepath.Join(workspace.ADRDir(root), opts.Supersedes+".md")
+		if err := idvalidate.ADRID(opts.Supersedes); err != nil {
+			return "", fmt.Errorf("invalid --supersedes value: %w", err)
+		}
+		oldPath, err := workspace.ADRFilePath(root, opts.Supersedes)
+		if err != nil {
+			return "", err
+		}
 		if _, err := os.Stat(oldPath); os.IsNotExist(err) {
 			return "", fmt.Errorf("%s not found", opts.Supersedes)
 		}

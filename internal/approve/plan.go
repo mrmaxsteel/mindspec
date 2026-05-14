@@ -67,6 +67,9 @@ type PlanResult struct {
 
 // ApprovePlan validates and approves a plan, creating beads and setting state.
 func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*PlanResult, error) {
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
+	}
 	result := &PlanResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
@@ -76,7 +79,10 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		// approval so we can guide agents that pick the wrong subcommand.
 		// The authoritative phase signal is the epic's mindspec_phase metadata
 		// (ADR-0023); falling back to YAML frontmatter only when no epic exists.
-		specDir := workspace.SpecDir(root, specID)
+		specDir, sdErr := workspace.SpecDir(root, specID)
+		if sdErr != nil {
+			return nil, sdErr
+		}
 		planPath := filepath.Join(specDir, "plan.md")
 		if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
 			if !specIsApproved(specDir, specID) {
@@ -87,7 +93,10 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	}
 
 	// Step 2: Find epic ID via beads metadata query (ADR-0023).
-	specDir := workspace.SpecDir(root, specID)
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return nil, err
+	}
 	var parentID string
 	epicID, epicErr := phase.FindEpicBySpecID(specID)
 	if epicErr == nil {
@@ -96,7 +105,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 
 	// Step 3: Update plan frontmatter
 	planPath := filepath.Join(specDir, "plan.md")
-	if err := updatePlanApproval(planPath, approvedBy); err != nil {
+	if err = updatePlanApproval(planPath, approvedBy); err != nil {
 		return nil, fmt.Errorf("updating plan approval: %w", err)
 	}
 
@@ -608,6 +617,9 @@ func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
 // from an already-approved plan. Use this when plan-approve failed to create
 // beads (e.g., bd was unreachable, CWD issue, etc.).
 func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
+	}
 	result := &PlanResult{SpecID: specID}
 
 	epicID, epicErr := phase.FindEpicBySpecID(specID)
@@ -615,7 +627,10 @@ func CreateBeadsFromPlan(root, specID string) (*PlanResult, error) {
 		return nil, fmt.Errorf("spec %s has no epic in beads; cannot create beads", specID)
 	}
 
-	specDir := workspace.SpecDir(root, specID)
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return nil, err
+	}
 	planPath := filepath.Join(specDir, "plan.md")
 	beadIDs, err := createImplementationBeads(planPath, specID, epicID)
 	if err != nil {

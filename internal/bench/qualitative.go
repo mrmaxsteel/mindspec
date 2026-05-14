@@ -48,9 +48,11 @@ func CollectPlans(cfg *RunConfig, specID string) map[string]string {
 	plans := make(map[string]string)
 
 	// Session C (mindspec): plan under the active docs root.
-	planC := filepath.Join(workspace.SpecDir(filepath.Join(cfg.WorkDir, "wt-c"), specID), "plan.md")
-	if data, err := os.ReadFile(planC); err == nil {
-		plans["c"] = string(data)
+	if specDirC, err := workspace.SpecDir(filepath.Join(cfg.WorkDir, "wt-c"), specID); err == nil {
+		planC := filepath.Join(specDirC, "plan.md")
+		if data, rdErr := os.ReadFile(planC); rdErr == nil {
+			plans["c"] = string(data)
+		}
 	}
 
 	// Sessions A and B: check .claude/plans/ for any plan files

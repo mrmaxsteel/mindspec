@@ -54,7 +54,17 @@ func (c *ADRCitation) UnmarshalYAML(node *yaml.Node) error {
 func ValidatePlan(root, specID string) *Result {
 	r := &Result{SubCommand: "plan", TargetID: specID}
 
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
+	if err := SpecID(specID); err != nil {
+		r.AddError("spec-id", err.Error())
+		return r
+	}
+
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		r.AddError("spec-id", err.Error())
+		return r
+	}
+	planPath := filepath.Join(specDir, "plan.md")
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		r.AddError("plan-file", fmt.Sprintf("cannot read plan: %v", err))

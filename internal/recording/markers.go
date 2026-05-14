@@ -35,12 +35,16 @@ func EmitMarker(root, specID, event string, data map[string]any) error {
 		Data:  data,
 	}
 
+	eventsPath, err := EventsPath(root, specID)
+	if err != nil {
+		return fmt.Errorf("resolving events path: %w", err)
+	}
 	// BufSize == 0 keeps Emit synchronous to the file descriptor; defer Close
 	// closes the FD before this function returns, providing per-call durability.
 	// FileMode 0o600 enforces SEC-7: the writer chmods after OpenFile so that
 	// even if AgentMind's collector created the file first with a looser umask,
 	// the marker write path re-tightens it to 0600.
-	w, err := ndjson.New(EventsPath(root, specID), ndjson.Opts{
+	w, err := ndjson.New(eventsPath, ndjson.Opts{
 		Append:   true,
 		FileMode: 0o600,
 	})

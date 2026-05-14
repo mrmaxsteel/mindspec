@@ -8,6 +8,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/spec"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,9 @@ creates a branch and worktree, sets state to spec mode, and emits guidance.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID := args[0]
+		if err := validate.SpecID(specID); err != nil {
+			return err
+		}
 		title, _ := cmd.Flags().GetString("title")
 
 		root, err := findRoot()
@@ -38,7 +42,11 @@ creates a branch and worktree, sets state to spec mode, and emits guidance.`,
 			return err
 		}
 
-		specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+		specDir, err := workspace.SpecDir(root, specID)
+		if err != nil {
+			return err
+		}
+		specPath := filepath.Join(specDir, "spec.md")
 		relPath, err := filepath.Rel(root, specPath)
 		if err != nil {
 			relPath = specPath
@@ -81,6 +89,9 @@ func init() {
 // approveSpecRunE is shared between `spec approve` and `approve spec`.
 func approveSpecRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
+	if err := validate.SpecID(specID); err != nil {
+		return err
+	}
 	approvedBy, _ := cmd.Flags().GetString("approved-by")
 
 	root, err := findRoot()

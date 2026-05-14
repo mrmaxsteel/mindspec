@@ -30,23 +30,44 @@ type Phase struct {
 }
 
 // RecordingDir returns the recording directory for a spec.
-func RecordingDir(root, specID string) string {
+// Returns an error if specID is not a well-formed spec identifier.
+func RecordingDir(root, specID string) (string, error) {
 	return workspace.RecordingDir(root, specID)
 }
 
 // ManifestPath returns the path to manifest.json for a spec.
-func ManifestPath(root, specID string) string {
-	return filepath.Join(RecordingDir(root, specID), "manifest.json")
+// Returns an error if specID is not a well-formed spec identifier.
+func ManifestPath(root, specID string) (string, error) {
+	dir, err := RecordingDir(root, specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "manifest.json"), nil
 }
 
 // EventsPath returns the path to events.ndjson for a spec.
-func EventsPath(root, specID string) string {
-	return filepath.Join(RecordingDir(root, specID), "events.ndjson")
+// Returns an error if specID is not a well-formed spec identifier.
+func EventsPath(root, specID string) (string, error) {
+	dir, err := RecordingDir(root, specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "events.ndjson"), nil
 }
 
 // HasRecording returns true if a recording directory exists for the spec.
+//
+// On an invalid spec ID this returns false (the safe default — callers
+// treat "no recording" as a non-action). Keeping a bool return keeps
+// the ergonomic call sites (e.g. `if !recording.HasRecording(...) { ... }`)
+// unchanged. Callers that need to distinguish "invalid ID" from "no recording"
+// should call ManifestPath directly.
 func HasRecording(root, specID string) bool {
-	_, err := os.Stat(ManifestPath(root, specID))
+	p, err := ManifestPath(root, specID)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(p)
 	return err == nil
 }
 
@@ -55,7 +76,11 @@ func ReadManifest(root, specID string) (*Manifest, error) {
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(ManifestPath(root, specID))
+	p, err := ManifestPath(root, specID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p)
 	if err != nil {
 		return nil, fmt.Errorf("reading manifest: %w", err)
 	}
@@ -71,7 +96,10 @@ func WriteManifest(root, specID string, m *Manifest) error {
 	if err := validate.SpecID(specID); err != nil {
 		return err
 	}
-	dir := RecordingDir(root, specID)
+	dir, err := RecordingDir(root, specID)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating recording dir: %w", err)
 	}
@@ -80,5 +108,9 @@ func WriteManifest(root, specID string, m *Manifest) error {
 		return fmt.Errorf("marshaling manifest: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(ManifestPath(root, specID), data, 0o600)
+	mp, err := ManifestPath(root, specID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(mp, data, 0o600)
 }

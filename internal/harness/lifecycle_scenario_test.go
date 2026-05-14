@@ -97,6 +97,18 @@ func must(t *testing.T, err error) {
 	}
 }
 
+// mustSpecDir is a test helper that fails the test on validation error.
+// Centralised so the workspace.SpecDir signature change (SEC-1, bead
+// mindspec-x1qr) adds one line per call site, not three.
+func mustSpecDir(t *testing.T, root, specID string) string {
+	t.Helper()
+	p, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("workspace.SpecDir(%q): %v", specID, err)
+	}
+	return p
+}
+
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -246,7 +258,7 @@ Bead 1
 func simulateSpecInit(t *testing.T, root, specID string) {
 	t.Helper()
 
-	specDir := workspace.SpecDir(root, specID)
+	specDir := mustSpecDir(t, root, specID)
 	must(t, os.MkdirAll(specDir, 0o755))
 
 	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "spec.md"), validSpecMD(specID))
@@ -411,7 +423,7 @@ func TestScenario_ResumeAfterCrash(t *testing.T) {
 	simulateSpecInit(t, root, specID)
 
 	// Verify spec artifacts exist (the durable state that survives crashes)
-	specDir := workspace.SpecDir(root, specID)
+	specDir := mustSpecDir(t, root, specID)
 	if _, err := os.Stat(filepath.Join(specDir, "spec.md")); err != nil {
 		t.Fatalf("spec.md should exist after crash: %v", err)
 	}
@@ -441,7 +453,7 @@ func TestScenario_SpecApprovalUpdatesArtifacts(t *testing.T) {
 	}
 
 	// Verify spec.md was updated with approval info
-	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+	specPath := filepath.Join(mustSpecDir(t, root, specID), "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("reading spec.md: %v", err)
@@ -513,7 +525,7 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 	}
 
 	// Verify plan.md was updated with approval
-	planPath := filepath.Join(workspace.SpecDir(root, specID), "plan.md")
+	planPath := filepath.Join(mustSpecDir(t, root, specID), "plan.md")
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("reading plan.md: %v", err)

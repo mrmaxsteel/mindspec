@@ -13,7 +13,10 @@ import (
 // StartCollector launches AgentMind as a detached background process
 // to collect OTLP telemetry and write NDJSON to the spec's recording directory.
 func StartCollector(root, specID string) error {
-	eventsPath := EventsPath(root, specID)
+	eventsPath, err := EventsPath(root, specID)
+	if err != nil {
+		return err
+	}
 
 	pid, err := agentmind.AutoStart(root, agentmind.DefaultOTLPPort, agentmind.DefaultUIPort, eventsPath)
 	if err != nil {

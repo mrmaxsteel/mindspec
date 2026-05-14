@@ -256,13 +256,19 @@ Follow the MindSpec workflow:
 	// Commit if requested
 	if !cfg.SkipCommit {
 		fmt.Fprintln(cfg.Stdout, "Committing results...")
-		benchDir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+		benchDir, bdErr := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+		if bdErr != nil {
+			return fmt.Errorf("resolving benchmark dir: %w", bdErr)
+		}
 		_ = gitutil.Add(cfg.RepoRoot, benchDir)
 		commitMsg := fmt.Sprintf("bench(%s): add e2e benchmark results", cfg.SpecID)
 		_ = gitutil.CommitNoVerify(cfg.RepoRoot, commitMsg)
 	}
 
-	benchDir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+	benchDir, bdErr := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
+	if bdErr != nil {
+		return fmt.Errorf("resolving benchmark dir: %w", bdErr)
+	}
 	fmt.Fprintf(cfg.Stdout, "\nDone. Results in %s/\n", benchDir)
 	fmt.Fprintln(cfg.Stdout, "  report.md        — quantitative + qualitative report")
 	if qual != nil && qual.Improvements != "" {
