@@ -191,4 +191,3 @@ func TestReadSpecApprovalStatus(t *testing.T) {
 		})
 	}
 }
-

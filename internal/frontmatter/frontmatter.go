@@ -42,7 +42,7 @@ func StatusFromPath(path string) string {
 // frontmatter. `ok` is false when the field is missing, the document
 // has no frontmatter, or the value is non-scalar (sequence/mapping).
 // Whitespace around the value is trimmed; quotes (single/double) are
-// honoured by the underlying yaml unmarshaller.
+// honored by the underlying yaml unmarshaller.
 func Field(data []byte, key string) (value string, ok bool) {
 	block, _, found := Parse(data)
 	if !found {
