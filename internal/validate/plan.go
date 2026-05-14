@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -123,7 +124,14 @@ func ValidatePlan(root, specID string) *Result {
 
 	// Spec 076: cross-bead decomposition quality checks
 	if !isApproved {
-		checkDecompositionQuality(r, beadSections)
+		// Load project config for decomposition thresholds. Non-fatal: a
+		// malformed config file should not block plan validation, so we
+		// fall back to baked-in defaults and proceed.
+		cfg, err := config.Load(root)
+		if err != nil {
+			cfg = config.DefaultConfig()
+		}
+		checkDecompositionQuality(r, beadSections, cfg.Decomposition)
 	}
 
 	return r
@@ -439,14 +447,17 @@ func ExtractPathRefs(text string) []string {
 var beadDepRe = regexp.MustCompile(`(?i)bead\s+(\d+)`)
 
 // checkDecompositionQuality computes cross-bead metrics and emits warnings
-// when the plan structure correlates with known degradation patterns.
-func checkDecompositionQuality(r *Result, sections []BeadSection) {
+// when the plan structure correlates with known degradation patterns. All
+// emitted issues are advisory (AddWarning, never AddError) and never gate
+// approval. Thresholds are configurable via `.mindspec/config.yaml` under
+// the top-level `decomposition:` block (see config.Decomposition).
+func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Decomposition) {
 	if len(sections) == 0 {
 		return
 	}
 
 	// 1. Bead count check
-	if len(sections) > 6 {
+	if len(sections) > cfg.MaxBeads {
 		r.AddWarning("decomposition-bead-count",
 			fmt.Sprintf("plan has %d beads — consider whether decomposition is too fine-grained; 3-5 is optimal", len(sections)))
 	}
@@ -488,13 +499,13 @@ func checkDecompositionQuality(r *Result, sections []BeadSection) {
 		}
 
 		rScope := float64(sharedCount) / float64(len(allPaths))
-		if rScope > 0.50 {
+		if rScope > cfg.MaxScopeOverlap {
 			r.AddWarning("decomposition-scope-redundancy",
-				fmt.Sprintf("scope redundancy R=%.2f exceeds threshold 0.50 — high bead overlap, consider merging beads that share most files", rScope))
+				fmt.Sprintf("scope redundancy R=%.2f exceeds threshold %.2f — high bead overlap, consider merging beads that share most files", rScope, cfg.MaxScopeOverlap))
 		}
-		if rScope < 0.15 && len(sections) > 2 {
+		if rScope < cfg.MinScopeOverlap && len(sections) > 2 {
 			r.AddWarning("decomposition-scope-redundancy",
-				fmt.Sprintf("scope redundancy R=%.2f below threshold 0.15 with %d beads — beads may lack shared context", rScope, len(sections)))
+				fmt.Sprintf("scope redundancy R=%.2f below threshold %.2f with %d beads — beads may lack shared context", rScope, cfg.MinScopeOverlap, len(sections)))
 		}
 	}
 
@@ -528,9 +539,9 @@ func checkDecompositionQuality(r *Result, sections []BeadSection) {
 
 	// Compute longest path (chain depth) via BFS/topological order
 	chainDepth := computeChainDepth(adj, len(sections))
-	if chainDepth > 3 {
+	if chainDepth > cfg.MaxChainDepth {
 		r.AddWarning("decomposition-chain-depth",
-			fmt.Sprintf("dependency chain depth %d exceeds threshold 3 — deep serial chain, coordination overhead grows super-linearly", chainDepth))
+			fmt.Sprintf("dependency chain depth %d exceeds threshold %d — deep serial chain, coordination overhead grows super-linearly", chainDepth, cfg.MaxChainDepth))
 	}
 
 	// Parallelism ratio: beads with zero inbound deps / total
@@ -541,9 +552,9 @@ func checkDecompositionQuality(r *Result, sections []BeadSection) {
 		}
 	}
 	parallelism := float64(zeroInbound) / float64(len(sections))
-	if parallelism < 0.25 {
+	if parallelism < cfg.MinParallelism {
 		r.AddWarning("decomposition-parallelism",
-			fmt.Sprintf("parallelism ratio %.2f below threshold 0.25 — most beads are serial, check for false dependencies", parallelism))
+			fmt.Sprintf("parallelism ratio %.2f below threshold %.2f — most beads are serial, check for false dependencies", parallelism, cfg.MinParallelism))
 	}
 }
 

@@ -33,6 +33,60 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Recording.Enabled {
 		t.Error("expected recording.enabled=false by default")
 	}
+	if cfg.Decomposition.MaxBeads != 6 {
+		t.Errorf("expected decomposition.max_beads=6, got %d", cfg.Decomposition.MaxBeads)
+	}
+	if cfg.Decomposition.MaxScopeOverlap != 0.50 {
+		t.Errorf("expected decomposition.max_scope_overlap=0.50, got %v", cfg.Decomposition.MaxScopeOverlap)
+	}
+	if cfg.Decomposition.MinScopeOverlap != 0.15 {
+		t.Errorf("expected decomposition.min_scope_overlap=0.15, got %v", cfg.Decomposition.MinScopeOverlap)
+	}
+	if cfg.Decomposition.MaxChainDepth != 3 {
+		t.Errorf("expected decomposition.max_chain_depth=3, got %d", cfg.Decomposition.MaxChainDepth)
+	}
+	if cfg.Decomposition.MinParallelism != 0.25 {
+		t.Errorf("expected decomposition.min_parallelism=0.25, got %v", cfg.Decomposition.MinParallelism)
+	}
+}
+
+func TestLoadFromFile_Decomposition(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `
+decomposition:
+  max_beads: 12
+  max_chain_depth: 5
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Decomposition.MaxBeads != 12 {
+		t.Errorf("expected max_beads=12, got %d", cfg.Decomposition.MaxBeads)
+	}
+	if cfg.Decomposition.MaxChainDepth != 5 {
+		t.Errorf("expected max_chain_depth=5, got %d", cfg.Decomposition.MaxChainDepth)
+	}
+	// Untouched fields should backfill from defaults.
+	if cfg.Decomposition.MaxScopeOverlap != 0.50 {
+		t.Errorf("expected max_scope_overlap=0.50 (default), got %v", cfg.Decomposition.MaxScopeOverlap)
+	}
+	if cfg.Decomposition.MinScopeOverlap != 0.15 {
+		t.Errorf("expected min_scope_overlap=0.15 (default), got %v", cfg.Decomposition.MinScopeOverlap)
+	}
+	if cfg.Decomposition.MinParallelism != 0.25 {
+		t.Errorf("expected min_parallelism=0.25 (default), got %v", cfg.Decomposition.MinParallelism)
+	}
 }
 
 func TestLoadMissing(t *testing.T) {
