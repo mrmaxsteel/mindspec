@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -74,9 +74,6 @@ approved_by: ""
 - **Notes**: -
 `
 
-// specIDPattern matches NNN-kebab-case where NNN is 3+ digits.
-var specIDPattern = regexp.MustCompile(`^\d{3,}-[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
-
 // Result holds the output of a spec-init operation.
 type Result struct {
 	SpecDir      string // Path to the spec directory
@@ -94,8 +91,8 @@ type Result struct {
 // The exec parameter provides workspace creation and git operations;
 // enforcement content (spec files, hooks, recording) stays here.
 func Run(root, specID, title string, exec executor.Executor) (*Result, error) {
-	if !specIDPattern.MatchString(specID) {
-		return nil, fmt.Errorf("invalid spec ID %q: must match NNN-kebab-case (e.g. 010-my-feature)", specID)
+	if err := validate.SpecID(specID); err != nil {
+		return nil, err
 	}
 
 	if title == "" {
