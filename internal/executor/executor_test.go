@@ -676,4 +676,3 @@ func isAncestorIn(t *testing.T, dir, anc, desc string) bool {
 	cmd := exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", anc, desc)
 	return cmd.Run() == nil
 }
-
