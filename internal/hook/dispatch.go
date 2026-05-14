@@ -101,4 +101,3 @@ func runPreCommit(st *HookState) Result {
 
 	return Result{Action: Pass}
 }
-
