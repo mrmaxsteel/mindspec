@@ -31,7 +31,7 @@ var ErrSymlinkRefused = errors.New("refusing to write through symlink")
 // OpenAppendNoSymlink opens path for append+write, failing if path is a
 // symlink. On Unix the open also uses O_NOFOLLOW as belt-and-suspenders
 // against a TOCTOU race between Lstat and OpenFile. On Windows there is no
-// O_NOFOLLOW; the Lstat pre-check is the only line of defence (NTFS
+// O_NOFOLLOW; the Lstat pre-check is the only line of defense (NTFS
 // reparse-point hardening is out of scope).
 func OpenAppendNoSymlink(path string, perm os.FileMode) (*os.File, error) {
 	if err := refuseIfSymlink(path); err != nil {
