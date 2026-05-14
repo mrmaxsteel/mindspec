@@ -1,4 +1,4 @@
-package lifecycle
+package harness
 
 import (
 	"fmt"
@@ -203,7 +203,7 @@ Unit tests in scenario_test.go validate all transitions via go test.
 
 **Verification**
 
-- [ ] `+"`go test ./internal/lifecycle/`"+` passes
+- [ ] `+"`go test ./internal/harness/`"+` passes
 - [ ] State transitions work correctly
 - [ ] Invalid transitions rejected
 
@@ -226,7 +226,7 @@ None
 
 **Verification**
 
-- [ ] `+"`go test ./internal/lifecycle/`"+` passes
+- [ ] `+"`go test ./internal/harness/`"+` passes
 - [ ] Full lifecycle tested end-to-end
 - [ ] Edge cases covered
 
