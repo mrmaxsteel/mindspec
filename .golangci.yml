@@ -86,7 +86,7 @@ linters:
         linters:
           - unparam
         text: 'findRoot'
-      - path: 'internal/state/validate\.go'
+      - path: 'internal/validate/state\.go'
         linters:
           - unparam
         text: 'validateReviewMode'
