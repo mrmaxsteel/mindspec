@@ -2,9 +2,10 @@ package doctor
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // checkGit runs git-related health checks.
@@ -22,9 +23,7 @@ var runtimeFiles = []string{
 // These are local runtime files (ADR-0015) and should be gitignored.
 func checkRuntimeFilesTracked(r *Report, root string) {
 	for _, file := range runtimeFiles {
-		cmd := exec.Command("git", "ls-files", "--error-unmatch", file)
-		cmd.Dir = root
-		if err := cmd.Run(); err != nil {
+		if err := gitutil.LsFilesErrorUnmatch(root, file); err != nil {
 			// Not tracked — good.
 			r.Checks = append(r.Checks, Check{
 				Name:    file + " git tracking",
@@ -51,16 +50,12 @@ func checkRuntimeFilesTracked(r *Report, root string) {
 // it is listed in .gitignore.
 func untrackRuntimeFile(root, file string) error {
 	// git rm --cached (keeps file on disk)
-	cmd := exec.Command("git", "rm", "--cached", file)
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return &fixError{op: "git rm --cached " + file, detail: strings.TrimSpace(string(out))}
+	if err := gitutil.RmCached(root, file); err != nil {
+		return &fixError{op: "git rm --cached " + file, detail: strings.TrimPrefix(err.Error(), "rm --cached: ")}
 	}
 
 	// Ensure .gitignore has the entry
-	cmd = exec.Command("git", "check-ignore", "-q", file)
-	cmd.Dir = root
-	if err := cmd.Run(); err == nil {
+	if err := gitutil.CheckIgnore(root, file); err == nil {
 		return nil // already gitignored
 	}
 

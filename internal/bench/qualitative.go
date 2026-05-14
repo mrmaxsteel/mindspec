@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -84,20 +85,20 @@ func GenerateDiffs(cfg *RunConfig, benchCommit string) map[string]string {
 	diffs := make(map[string]string)
 	const maxDiffChars = 100000
 
+	excludes := []string{
+		":(exclude).beads",
+		":(exclude).mindspec",
+		":(exclude)docs/specs",
+		":(exclude).mindspec/docs/specs",
+	}
 	for _, label := range []string{"a", "b", "c"} {
 		wtPath := filepath.Join(cfg.WorkDir, "wt-"+label)
-		cmd := exec.Command("git", "-C", wtPath, "diff", benchCommit, "HEAD",
-			"--",
-			":(exclude).beads",
-			":(exclude).mindspec",
-			":(exclude)docs/specs",
-			":(exclude).mindspec/docs/specs")
-		out, err := cmd.Output()
+		out, err := gitutil.DiffPathspec(wtPath, benchCommit, "HEAD", excludes)
 		if err != nil {
 			diffs[label] = "(diff generation failed)"
 			continue
 		}
-		diff := string(out)
+		diff := out
 		if len(diff) > maxDiffChars {
 			diff = diff[:maxDiffChars] + fmt.Sprintf("\n\n[... truncated at %d chars ...]", maxDiffChars)
 		}

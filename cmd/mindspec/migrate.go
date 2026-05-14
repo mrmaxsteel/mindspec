@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -314,10 +315,7 @@ func newMigrateIgnoreChecker(root string) *migrateIgnoreChecker {
 	if _, err := exec.LookPath("git"); err != nil {
 		return c
 	}
-	cmd := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Run(); err != nil {
+	if !gitutil.IsInsideWorkTree(root) {
 		return c
 	}
 	c.enabled = true
@@ -328,8 +326,5 @@ func (c *migrateIgnoreChecker) isIgnored(relPath string) bool {
 	if !c.enabled {
 		return false
 	}
-	cmd := exec.Command("git", "-C", c.root, "check-ignore", "--quiet", "--", relPath)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
+	return gitutil.CheckIgnore(c.root, relPath) == nil
 }
