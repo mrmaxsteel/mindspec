@@ -381,8 +381,14 @@ func hasSection(content, heading string) bool {
 // (removed as a ZFC violation); the remaining checks are structural and
 // apply uniformly regardless of plan status.
 func checkBeadSection(r *Result, bs BeadSection) {
-	if bs.StepsCount < 3 {
-		r.AddError("bead-steps", fmt.Sprintf("%s: expected 3-7 steps, found %d", bs.Heading, bs.StepsCount))
+	// StepsCount == 0 is a newly-added structural floor: a bead section with a
+	// **Steps** heading but zero numbered items is malformed. The lower bound
+	// `< 3` (previously an error) is demoted to a warning to match the existing
+	// `> 7` upper-bound warning — symmetric advisory signal, not a hard gate.
+	if bs.StepsCount == 0 {
+		r.AddError("bead-steps", fmt.Sprintf("%s: missing steps (no numbered items under **Steps**)", bs.Heading))
+	} else if bs.StepsCount < 3 {
+		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", bs.Heading, bs.StepsCount))
 	} else if bs.StepsCount > 7 {
 		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", bs.Heading, bs.StepsCount))
 	}

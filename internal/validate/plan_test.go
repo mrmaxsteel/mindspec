@@ -98,26 +98,76 @@ func TestValidatePlan_NoBeadSections(t *testing.T) {
 }
 
 func TestValidatePlan_BeadMissingSteps(t *testing.T) {
+	// ZFC-4 (mindspec-d78q): StepsCount < 3 is now a WARNING, not an error.
+	// A 1-step bead validates (no failure) but surfaces a bead-steps warning.
 	tmp := t.TempDir()
 	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
 	os.MkdirAll(specDir, 0755)
 
-	plan := "---\nstatus: Draft\nspec_id: \"999-test\"\nversion: \"1.0\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNone.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 999-A: Test\n\n**Scope**: Do something\n\n**Steps**:\n1. Only one step\n\n**Verification**:\n- [ ] `go test` passes\n\n**Depends on**: nothing\n"
+	plan := "---\nstatus: Draft\nspec_id: \"999-test\"\nversion: \"1.0\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNone.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 999-A: Test\n\n**Scope**: Do something\n\n**Acceptance Criteria**:\n- [ ] It works\n\n**Steps**:\n1. Only one step\n\n**Verification**:\n- [ ] `go test` passes\n\n**Depends on**: nothing\n"
 	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
 
 	r := ValidatePlan(tmp, "999-test")
-	if !r.HasFailures() {
-		t.Error("expected failure for bead with < 3 steps")
+	if r.HasFailures() {
+		t.Errorf("expected no failure for 1-step bead (warning only), got failures: %v", r.Issues)
 	}
 
 	found := false
 	for _, issue := range r.Issues {
 		if issue.Name == "bead-steps" {
+			if issue.Severity != SevWarning {
+				t.Errorf("expected bead-steps to be WARNING, got %s", issue.Severity)
+			}
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected bead-steps error")
+		t.Error("expected bead-steps warning for 1-step bead")
+	}
+}
+
+func TestValidatePlan_BeadOneStep_Passes(t *testing.T) {
+	// ZFC-4 (mindspec-d78q): a 1-step bead, otherwise complete (verification,
+	// AC, depends on) must validate without failures.
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0755)
+
+	plan := "---\nstatus: Draft\nspec_id: \"999-test\"\nversion: \"1.0\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNone.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 999-A: Test\n\n**Scope**: Do something\n\n**Acceptance Criteria**:\n- [ ] It works\n\n**Steps**:\n1. Only one step\n\n**Verification**:\n- [ ] `go test` passes\n\n**Depends on**: nothing\n"
+	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
+
+	r := ValidatePlan(tmp, "999-test")
+	if r.HasFailures() {
+		t.Errorf("expected 1-step bead to validate without failures, got: %v", r.Issues)
+	}
+}
+
+func TestValidatePlan_BeadZeroSteps_Errors(t *testing.T) {
+	// ZFC-4 (mindspec-d78q): newly-added structural floor — a **Steps**
+	// heading with zero numbered items is malformed and must error.
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0755)
+
+	plan := "---\nstatus: Draft\nspec_id: \"999-test\"\nversion: \"1.0\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNone.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 999-A: Test\n\n**Scope**: Do something\n\n**Acceptance Criteria**:\n- [ ] It works\n\n**Steps**:\n\n**Verification**:\n- [ ] `go test` passes\n\n**Depends on**: nothing\n"
+	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
+
+	r := ValidatePlan(tmp, "999-test")
+	if !r.HasFailures() {
+		t.Errorf("expected failure for 0-step bead, got: %v", r.Issues)
+	}
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "bead-steps" {
+			if issue.Severity != SevError {
+				t.Errorf("expected bead-steps to be ERROR for 0 steps, got %s", issue.Severity)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected bead-steps error for 0-step bead")
 	}
 }
 
