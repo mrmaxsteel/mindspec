@@ -132,3 +132,87 @@ func TestWorktreePath(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestLoadCaches_SamePointer(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	dir := t.TempDir()
+	a, err := Load(dir)
+	if err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	b, err := Load(dir)
+	if err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+	if a != b {
+		t.Fatalf("expected identical *Config pointer from cache, got %p vs %p", a, b)
+	}
+}
+
+func TestLoadCaches_DiskMutationIgnored(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	dir := t.TempDir()
+	mindspecDir := filepath.Join(dir, ".mindspec")
+	if err := os.MkdirAll(mindspecDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"),
+		[]byte("merge_strategy: rebase\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.MergeStrategy != "rebase" {
+		t.Fatalf("first load: want rebase, got %q", first.MergeStrategy)
+	}
+
+	// Mutate disk; cached Load must NOT pick this up.
+	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"),
+		[]byte("merge_strategy: squash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.MergeStrategy != "rebase" {
+		t.Fatalf("cache busted: want rebase (cached), got %q", second.MergeStrategy)
+	}
+
+	// ResetCache should force a re-read.
+	ResetCache()
+	third, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.MergeStrategy != "squash" {
+		t.Fatalf("after reset: want squash, got %q", third.MergeStrategy)
+	}
+}
+
+func TestLoadCaches_KeyedByAbsolutePath(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	a, err := Load(dirA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Load(dirB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatal("distinct roots should yield distinct cache entries")
+	}
+}
