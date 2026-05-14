@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -101,7 +102,7 @@ func BuildContext(root string, mc *state.Focus) *Context {
 	}
 
 	// Run cross-validation and collect warnings
-	warnings := state.CrossValidate(root, mc)
+	warnings := validate.CrossValidate(root, mc)
 	for _, w := range warnings {
 		ctx.Warnings = append(ctx.Warnings, fmt.Sprintf("[%s] %s", w.Field, w.Message))
 	}

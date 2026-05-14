@@ -1,4 +1,4 @@
-package state
+package validate
 
 import (
 	"bufio"
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -19,24 +20,24 @@ type Warning struct {
 }
 
 // CrossValidate checks focus state against artifact state and returns warnings for any drift.
-func CrossValidate(root string, s *Focus) []Warning {
+func CrossValidate(root string, s *state.Focus) []Warning {
 	var warnings []Warning
 
 	switch s.Mode {
-	case ModeSpec:
+	case state.ModeSpec:
 		warnings = append(warnings, validateSpecMode(root, s)...)
-	case ModePlan:
+	case state.ModePlan:
 		warnings = append(warnings, validatePlanMode(root, s)...)
-	case ModeImplement:
+	case state.ModeImplement:
 		warnings = append(warnings, validateImplementMode(root, s)...)
-	case ModeReview:
+	case state.ModeReview:
 		warnings = append(warnings, validateReviewMode(root, s)...)
 	}
 
 	return warnings
 }
 
-func validateSpecMode(root string, s *Focus) []Warning {
+func validateSpecMode(root string, s *state.Focus) []Warning {
 	var warnings []Warning
 
 	if s.ActiveSpec == "" {
@@ -78,7 +79,7 @@ func validateSpecMode(root string, s *Focus) []Warning {
 	return warnings
 }
 
-func validatePlanMode(root string, s *Focus) []Warning {
+func validatePlanMode(root string, s *state.Focus) []Warning {
 	var warnings []Warning
 
 	if s.ActiveSpec == "" {
@@ -108,7 +109,7 @@ func validatePlanMode(root string, s *Focus) []Warning {
 	return warnings
 }
 
-func validateImplementMode(root string, s *Focus) []Warning {
+func validateImplementMode(root string, s *state.Focus) []Warning {
 	var warnings []Warning
 
 	if s.ActiveSpec == "" {
@@ -146,7 +147,7 @@ func validateImplementMode(root string, s *Focus) []Warning {
 	return warnings
 }
 
-func validateReviewMode(root string, s *Focus) []Warning {
+func validateReviewMode(root string, s *state.Focus) []Warning {
 	var warnings []Warning
 
 	if s.ActiveSpec == "" {
