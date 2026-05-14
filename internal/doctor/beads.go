@@ -139,8 +139,10 @@ func isRuntimeArtifact(filename string) bool {
 	return false
 }
 
-// bdVersionFloor is the minimum supported bd version. Earlier versions lack
-// worktree-redirect fixes that mindspec relies on (v1.0.2 bundles the fixes).
+// bdVersionFloor is the minimum supported bd version. v1.0.2 ships the
+// worktree-redirect fixes mindspec relies on, and is also the floor below
+// which `bd list --json` may emit non-JSON (which bead.ListJSON now rejects
+// rather than fall back to scraping). Keep bead.minBdVersionMsg in sync.
 const bdVersionFloor = "1.0.2"
 
 // checkBeadsConfigDrift reports missing or drifted mindspec-required keys in

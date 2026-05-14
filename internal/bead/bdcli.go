@@ -157,9 +157,14 @@ func WorktreeRemove(name string) error {
 	return nil
 }
 
+// minBdVersionMsg is the bd version mentioned in ListJSON's non-JSON error.
+// Keep in sync with doctor.bdVersionFloor — bead must not import doctor (cycle).
+const minBdVersionMsg = "1.0.2"
+
 // ListJSON runs `bd list <args> --json` and returns valid JSON bytes (a JSON array).
-// Works around bd versions where --json is ignored by falling back to
-// parsing IDs from human-readable output and fetching each with `bd show --json`.
+// Requires `bd` >= 1.0.2 (the floor enforced by `mindspec doctor`). When `bd`
+// emits non-JSON output (older versions where --json was ignored), this returns
+// a structured error directing the user to upgrade — no human-output scraping.
 func ListJSON(args ...string) ([]byte, error) {
 	fullArgs := append(append([]string{"list"}, args...), "--json")
 	out, err := tracedOutput("list", fullArgs)
@@ -179,51 +184,8 @@ func ListJSON(args ...string) ([]byte, error) {
 		return []byte(trimmed), nil
 	}
 
-	// Fallback: parse IDs from human-readable output, fetch each with bd show --json.
-	// Handles both flat format ("○ id ● P2 ...") and tree format ("├── ✓ id ● P2 ...").
-	var ids []string
-	for _, line := range strings.Split(trimmed, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "Total:") || strings.HasPrefix(line, "Status:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		for _, f := range fields {
-			// Skip tree-drawing characters (├──, └──, │)
-			if strings.ContainsAny(f, "├└│─") {
-				continue
-			}
-			// Skip flag-like strings
-			if strings.HasPrefix(f, "--") {
-				continue
-			}
-			// First field containing "-" is the issue ID
-			if strings.Contains(f, "-") {
-				ids = append(ids, f)
-				break
-			}
-		}
-	}
-
-	if len(ids) == 0 {
-		return []byte("[]"), nil
-	}
-
-	// Fetch each issue with bd show --json (which works correctly)
-	var results []json.RawMessage
-	for _, id := range ids {
-		showOut, showErr := tracedOutput("show-fallback", []string{"show", id, "--json"})
-		if showErr != nil {
-			continue
-		}
-		// bd show returns a JSON array with one element: [{"id": ...}]
-		var items []json.RawMessage
-		if json.Unmarshal(showOut, &items) == nil {
-			results = append(results, items...)
-		}
-	}
-
-	return json.Marshal(results)
+	return nil, fmt.Errorf("bd list --json returned non-JSON output (your bd may be older than the supported floor %s). "+
+		"Run `mindspec doctor` and upgrade with `brew upgrade beads`.", minBdVersionMsg)
 }
 
 // MergeMetadata reads an issue's existing metadata, merges in the given key-value
