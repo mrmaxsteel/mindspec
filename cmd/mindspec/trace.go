@@ -40,6 +40,11 @@ var traceSummaryCmd = &cobra.Command{
 		var eventCount int
 
 		scanner := bufio.NewScanner(f)
+		// Increase buffer for large NDJSON lines (e.g. tool results with large
+		// payloads). Mirrors internal/viz/replay.go. Without this, the default
+		// 64 KiB token limit causes oversized events to be silently dropped or
+		// to abort the scan, omitting later events from the summary.
+		scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 		for scanner.Scan() {
 			var e trace.Event
 			if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
