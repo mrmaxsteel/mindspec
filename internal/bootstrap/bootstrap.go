@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
 const (
@@ -160,7 +161,7 @@ func Run(root string, dryRun bool) (*Result, error) {
 						r.Appended = append(r.Appended, item.path)
 						if !dryRun {
 							block := "\n" + mindspecMarkerBegin + "\n" + item.appendBlock + mindspecMarkerEnd + "\n"
-							f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0644)
+							f, err := safeio.OpenAppendNoSymlink(target, 0644)
 							if err != nil {
 								return nil, fmt.Errorf("appending to %s: %w", item.path, err)
 							}
@@ -189,7 +190,7 @@ func Run(root string, dryRun bool) (*Result, error) {
 				if item.contentFunc != nil {
 					content = item.contentFunc()
 				}
-				if err := os.WriteFile(target, []byte(content), 0644); err != nil {
+				if err := safeio.WriteFileNoSymlink(target, []byte(content), 0644); err != nil {
 					return nil, fmt.Errorf("writing %s: %w", item.path, err)
 				}
 			}
