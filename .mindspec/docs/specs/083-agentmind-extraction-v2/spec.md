@@ -74,16 +74,39 @@ boundary is only symbolic.
    subpackage.
 2. agentmind never imports `github.com/mrmaxsteel/mindspec/*`. Verified by
    `go list -m -json all` in agentmind — any mindspec dep fails CI.
-3. Inter-process communication between mindspec and agentmind is OTLP/HTTP on
-   port 4318 only (ADR-0011). No file-watch, no shared memory, no env-var
-   side-channels for data.
-4. **Graceful degradation, runtime-verified.** When the `agentmind` binary is
-   absent from PATH and the configured `--bin` location, every mindspec command
-   that previously auto-started agentmind must succeed with exit code 0 and a
-   single stderr line:
+3. Inter-process communication between mindspec and agentmind has exactly two
+   normative channels:
+   - **Inbound to agentmind** (telemetry from the workload under test):
+     OTLP/HTTP on port 4318 only (ADR-0011). No file-watch, no shared memory,
+     no env-var side-channels for data.
+   - **Outbound from agentmind to mindspec consumers** (collected events
+     stream): **stdout pipe with line-delimited JSON** (one
+     `wire.CollectedEvent` per line, UTF-8, terminated by `\n`). The
+     agentmind-side `--output <file>` flag remains a separate facility for
+     writing to a file when invoked directly; mindspec consumers never depend
+     on file-tailing semantics. The canonical reader is
+     `client.ReadEvents(io.Reader) <-chan wire.CollectedEvent`.
+4. **Graceful degradation, runtime-verified — per command class.** When the
+   `agentmind` binary is absent from PATH and the configured `--bin` location,
+   commands fall into three classes with distinct contracts. In every class,
+   detection uses the typed sentinel `errors.Is(err, client.ErrBinaryNotFound)`
+   (exported from `agentmind/client`); substring matching on error text is
+   prohibited. When a warn line is emitted, it is exactly one line per process
+   and reads
    `WARN: agentmind binary not found; telemetry export will drop silently`.
-   Specifically: `mindspec record start`, `mindspec bench run`, and
-   `mindspec spec-init` must all complete with exit code 0 in this state.
+   Centralized emission inside `agentmind/client` via a process-level
+   `sync.Once` is the mechanism that guarantees "exactly one line" across
+   multiple `AutoStart` callers in the same process.
+   - **Telemetry-as-output** (`mindspec record start`): MUST exit non-zero
+     with a clear error message when the binary is absent. Telemetry IS the
+     deliverable; a silent empty-recording is a correctness violation, not
+     graceful degradation.
+   - **Interactive** (`mindspec viz`, `mindspec agentmind serve`,
+     `mindspec agentmind replay`): MUST exit non-zero when the binary is
+     absent. A user-invoked UI command that exits 0 with no UI is a UX bug.
+   - **Batch / side-effect** (`mindspec bench run`,
+     `mindspec agentmind setup`): MAY exit 0 with the warn line; telemetry
+     was a side-effect, not the deliverable.
 5. CLI surface unchanged on the user side. `mindspec record`, `mindspec bench`,
    and `mindspec viz` (alias `mindspec agentmind`) behave identically as
    observed from the user perspective. `mindspec agentmind serve` and
@@ -122,7 +145,7 @@ boundary is only symbolic.
 | (new) | `cmd/agentmind/main.go` | ~150 | Standalone binary with `serve`, `replay`, `setup` subcommands. Mirrors current `mindspec agentmind` cobra tree. |
 | (new) | `cmd/agentmind/serve.go` | ~60 | `serve` subcommand handler — calls `viz.RunLiveOpts`. |
 | (new) | `cmd/agentmind/replay.go` | ~80 | `replay` subcommand handler. |
-| (new) | `client/client.go` | ~40 | Thin client API: `AutoStart`, `IsRunning`, `DefaultOTLPPort`, `DefaultUIPort`. Imports only stdlib and `agentmind/wire`. |
+| (new) | `client/client.go` | ~60 | Thin client API: `AutoStart`, `IsRunning`, `DefaultOTLPPort`, `DefaultUIPort`, `ReadEvents(io.Reader) <-chan wire.CollectedEvent`, and the typed sentinel `ErrBinaryNotFound`. Imports only stdlib and `agentmind/wire`. |
 
 **Stays in `mindspec/`:**
 
@@ -133,7 +156,7 @@ boundary is only symbolic.
 | `internal/recording/collector.go` | Replaces direct OTLP parsing with: spawn agentmind via `client.AutoStart`, read its NDJSON output. |
 | `cmd/mindspec/viz.go` | Thin shell. `mindspec agentmind serve` re-execs `agentmind serve` with the same flags. If agentmind binary is missing, prints the graceful-degradation warning and exits 0. |
 | `cmd/mindspec/record.go`, `cmd/mindspec/bench.go` | Unchanged for end users. Internally call the new boundary. |
-| `internal/agentmind/*` | **Deleted** after the migration. Spec failure if the directory still exists at the end of any extraction commit beyond Phase 1. |
+| `internal/agentmind/*` | **Deleted in Phase 5.** Spec failure if the directory still exists from the Phase 5 deletion commit onward. |
 
 **Becomes shared between both repos:**
 
@@ -153,6 +176,15 @@ boundary is only symbolic.
   `internal/bench/runner.go` to call `agentmind/client.AutoStart`.
 - The graceful-degradation wrapper around every `client.AutoStart` caller.
 - ADR-0026 (new): records the extraction, deferred decisions, rollback.
+- **Install path commitment (Phase 6):** the agentmind binary is delivered
+  via **documented manual download with checksum verification**. The
+  agentmind GitHub release publishes prebuilt binaries for darwin-arm64,
+  darwin-amd64, linux-amd64, windows-amd64 alongside a `SHA256SUMS` file
+  (and detached signature if available). Mindspec documentation (README +
+  Phase 6 release notes) provides the exact `curl`/`sha256sum` invocation
+  to fetch the binary and verify its checksum, and instructs users to
+  place it at `<mindspec-root>/bin/agentmind` (or any directory on PATH).
+  This is the supported install path for v1.0.0.
 
 ### Out of Scope
 
@@ -180,6 +212,15 @@ boundary is only symbolic.
   a future ADR.
 - No version-skew runtime handling (`client.Probe()` semantics). Future ADR.
 
+### Deferred to follow-up spec
+
+- **`mindspec install agentmind` subcommand.** A first-party installer that
+  downloads, checksum-verifies, and places the agentmind binary in
+  `<mindspec-root>/bin/` is cross-cutting (download client, checksum
+  verification, platform detection, possibly signature verification) and is
+  explicitly deferred to its own follow-up spec. For v1.0.0, the install
+  path is documented manual download (see Scope above).
+
 ## Acceptance Criteria
 
 - [ ] `find internal/agentmind` returns no results in the mindspec tree.
@@ -191,13 +232,27 @@ boundary is only symbolic.
 - [ ] mindspec `go build ./cmd/mindspec` and `go test -short ./...` pass on
       every commit produced by the migration.
 - [ ] With `agentmind` binary absent from PATH, `AGENTMIND_BIN` unset, and no
-      `./bin/agentmind`: `mindspec record start --spec test`,
-      `mindspec bench run <fixture>`, and `mindspec spec-init` each exit 0
-      with stderr containing exactly one line
-      `WARN: agentmind binary not found; telemetry export will drop silently`.
-- [ ] With `agentmind` binary present, `mindspec bench run` produces NDJSON
-      output byte-for-byte equal to the pre-migration output for the same
-      fixture (compared via `diff`).
+      `./bin/agentmind`, commands behave per their class (Hard Constraint #4):
+  - `mindspec record start --spec test` exits non-zero with a clear error
+    message (telemetry-as-output class).
+  - `mindspec viz`, `mindspec agentmind serve`, `mindspec agentmind replay`
+    each exit non-zero (interactive class).
+  - `mindspec bench run <fixture>` and `mindspec agentmind setup` each exit
+    0 with stderr containing exactly one line
+    `WARN: agentmind binary not found; telemetry export will drop silently`
+    (batch class).
+- [ ] NDJSON parity with the pre-migration output is phase-scoped:
+  - **Phase 2 (alias state, no subprocess yet):** byte-for-byte equality
+    against a saved fixture produced under a frozen-clock test harness with
+    the canonical encoding defined in `wire/event.go` — JSON object keys
+    sorted lexicographically, floats formatted with a fixed precision rule
+    (`strconv.FormatFloat(v, 'f', -1, 64)`), and timestamps emitted as
+    UTC RFC3339Nano. Comparison via `diff`.
+  - **Phase 4+ (subprocess state):** semantic equivalence under documented
+    normalization. The normalization step (sort events by event time, redact
+    PID/host fields, redact wall-clock timestamps to a canonical placeholder)
+    is published as a tool/library inside `agentmind/wire` and named in the
+    acceptance harness. The normalized streams must diff clean.
 - [ ] `mindspec agentmind serve --help` and `mindspec agentmind replay --help`
       print the same usage text as before the extraction.
 - [ ] mindspec binary size shrinks; the before/after sizes are recorded in
@@ -216,23 +271,36 @@ extractions in the v1 panel; runtime checks are not.
   `test -x ./agentmind/bin/agentmind && ./agentmind/bin/agentmind --version | grep -q "^agentmind"`.
 - **Test B — no-mindspec-dep check (precondition):**
   `cd ./agentmind && go list -m -json all | jq -r '.Path' | grep -q '^github.com/mrmaxsteel/mindspec'` returns no match.
-- **Test C — graceful-degradation check (the one no v1 candidate passed):**
+- **Test C — per-class degradation check (the one no v1 candidate passed):**
   Strip `agentmind` from PATH, `unset AGENTMIND_BIN`, `rm -f ./bin/agentmind`.
-  Run `./bin/mindspec record start --spec test 2>stderr.log`. Assert
-  `grep -q "agentmind binary not found; telemetry export will drop silently" stderr.log`
-  and `rc == 0`. Repeat for `mindspec bench run` and `mindspec spec-init`.
+  Then, per command class (Hard Constraint #4):
+  - **Telemetry-as-output:** `./bin/mindspec record start --spec test 2>stderr.log`
+    must exit non-zero with a clear error message on stderr.
+  - **Interactive:** `./bin/mindspec viz`, `./bin/mindspec agentmind serve`,
+    `./bin/mindspec agentmind replay` each must exit non-zero.
+  - **Batch / side-effect:** `./bin/mindspec bench run <fixture> 2>stderr.log`
+    and `./bin/mindspec agentmind setup 2>stderr.log` must each exit 0 with
+    `grep -q "agentmind binary not found; telemetry export will drop silently" stderr.log`
+    matching exactly one line.
 - **Test D — end-to-end live capture:**
   `./agentmind/bin/agentmind serve --otlp-port 4318 --ui-port 0 --output /tmp/em.ndjson &`,
   POST a synthetic OTLP log payload, then assert `/tmp/em.ndjson` is non-empty
   and contains `"name":"claude_code.api_request"`.
 - **Test E — no-circular-discovery check:**
-  `grep -rn '"mindspec"' ./agentmind/client/ ./agentmind/cmd/ ./agentmind/internal/ | grep -vE 'README|comment|//'`
-  returns no match.
+  `grep -rn 'exec\.Command.*"mindspec"\|LookPath.*"mindspec"\|StartProcess.*"mindspec"' ./agentmind/client/ ./agentmind/cmd/ ./agentmind/internal/`
+  returns no match. An AST-based check that enumerates `exec.Command`,
+  `exec.LookPath`, and `os.StartProcess` argument literals is an acceptable
+  alternative.
 - **Test F — import-boundary check:**
   `cd ./mindspec && go list -deps ./cmd/mindspec | grep mrmaxsteel/agentmind | sort -u | grep -vE '^github.com/mrmaxsteel/agentmind/(client|wire)$'`
   returns no match.
+- **Test G — Phase 0 prerequisite gate (the agentmind v0.0.1 tag exists):**
+  `git ls-remote --tags https://github.com/mrmaxsteel/agentmind | grep -q 'refs/tags/v0.0.1$'`
+  returns success. The v0.0.1 tag SHA MUST be recorded in this spec before
+  Phase 1 may begin (placeholder until that recording happens:
+  `agentmind v0.0.1 SHA: <TBD — record before Phase 1>`).
 
-Passing Tests A–F is the definition of "the extraction is done."
+Passing Tests A–G is the definition of "the extraction is done."
 
 ## Migration phases (mindspec side)
 
@@ -248,6 +316,21 @@ aborts the migration.
   plus round-trip tests for every event shape currently emitted (log events,
   metric events, the seven attribute key sets in the codex fallback). Tag
   `v0.1.0`. No mindspec changes yet.
+
+  **Phase 1 precondition (method-set inventory).** Go does not permit
+  declaring methods on type aliases of types defined in another package, so
+  Phase 2's `type CollectedEvent = wire.CollectedEvent` alias strategy
+  requires that `bench.CollectedEvent`, `otlpValue`, and `otlpKeyValue`
+  have no methods at the time of aliasing. Before Phase 1 may complete:
+  enumerate every method currently declared on `bench.CollectedEvent`,
+  `otlpValue`, and `otlpKeyValue` (via grep or AST walk on
+  `internal/bench/` for `func (… *?CollectedEvent)`, `func (… *?otlpValue)`,
+  `func (… *?otlpKeyValue)`) and move them into `wire/event.go` as part of
+  Phase 1's public surface. If the panel/agent verifies "no methods today"
+  via grep, record that finding as the precondition outcome in the
+  extraction commit message and the alias strategy is unblocked. If
+  methods are found and cannot be moved cleanly, fall back to full type
+  duplication during Phase 2 (and delete the bench-side copies in Phase 5).
 - **Phase 2**: agentmind absorbs the OTLP collector
   (`internal/otlp/collector.go` + tests). In mindspec, change
   `internal/bench/collector.go` to re-export via type aliases
@@ -261,17 +344,26 @@ aborts the migration.
   Still no consumer change in mindspec — the new binary exists in parallel.
 - **Phase 4**: agentmind adds `client/client.go` exporting `AutoStart`,
   `IsRunning`, `WaitForPort`, `Probe`, `DefaultOTLPPort=4318`,
-  `DefaultUIPort=8420`. `findBinary` looks up `agentmind` (never `mindspec`)
-  in this exact order: `$AGENTMIND_BIN` → `<mindspec-root>/bin/agentmind` →
-  `agentmind` on PATH. Returns an error matching the literal text
-  `"agentmind binary not found"` when none resolves. Tag `v0.3.0`.
+  `DefaultUIPort=8420`, `ReadEvents(io.Reader) <-chan wire.CollectedEvent`,
+  and the typed sentinel `ErrBinaryNotFound`. `findBinary` looks up
+  `agentmind` (never `mindspec`) in this exact order: `$AGENTMIND_BIN` →
+  `<mindspec-root>/bin/agentmind` → `agentmind` on PATH. When none resolves,
+  it returns an error that satisfies `errors.Is(err, client.ErrBinaryNotFound)`
+  (wrapping with `fmt.Errorf("…: %w", client.ErrBinaryNotFound)` is
+  permitted). Substring matching on error text is prohibited. The warn-line
+  emission is centralized inside `agentmind/client` and guarded by a
+  process-level `sync.Once` so that no matter how many `AutoStart` callers
+  exist in the same process, exactly one warn line is emitted. Tag `v0.3.0`.
   In mindspec: change every consumer of `internal/agentmind.AutoStart` to
   `agentmind/client.AutoStart` (files: `internal/recording/collector.go`,
-  `internal/bench/runner.go`). Wrap each call site with the
-  graceful-degradation contract: errors matching `"agentmind binary not found"`
-  print the warn line and return nil, not the error. Update
+  `internal/bench/runner.go`). Each call site detects the absent-binary
+  condition with `errors.Is(err, client.ErrBinaryNotFound)` and applies the
+  per-class policy from Hard Constraint #4 (telemetry-as-output: propagate
+  the error and exit non-zero; interactive: propagate; batch: swallow and
+  return nil after the centralized warn line fires). Update
   `cmd/mindspec/viz.go`'s `agentmindServeCmd` and `agentmindReplayCmd` to
-  re-exec via `client.RunStandalone(args)`.
+  re-exec via `client.RunStandalone(args)`; on `ErrBinaryNotFound` they
+  exit non-zero per the interactive class.
 - **Phase 5**: Delete `mindspec/internal/agentmind/` entirely. Delete the
   OTLP-parsing code from `mindspec/internal/bench/collector.go`, keeping only
   the type aliases until no caller uses them, then drop the file. Delete
@@ -280,10 +372,15 @@ aborts the migration.
   in the commit message.
 - **Phase 6**: Cut `agentmind v1.0.0` after the Phase 3 integration test has
   been green for 7 days of nightly runs. mindspec drops the local `replace`
-  directive and pins `agentmind v1.0.0`. agentmind GitHub release publishes
-  prebuilt binaries for darwin-arm64, darwin-amd64, linux-amd64,
-  windows-amd64. A `mindspec install agentmind` subcommand (or a documented
-  manual download) places them in `<mindspec-root>/bin/`.
+  directive and pins `agentmind v1.0.0`. The agentmind GitHub release
+  publishes prebuilt binaries for darwin-arm64, darwin-amd64, linux-amd64,
+  windows-amd64 alongside a `SHA256SUMS` file. The supported install path
+  for v1.0.0 is **documented manual download with checksum verification**:
+  mindspec README and release notes give users the exact `curl` and
+  `sha256sum` (or `shasum -a 256`) invocation, and instruct them to place
+  the verified binary at `<mindspec-root>/bin/agentmind` or any directory
+  on PATH. The first-party `mindspec install agentmind` subcommand is
+  deferred to a follow-up spec (see Non-Goals → Deferred to follow-up spec).
 
 ## Lessons baked in from sessions 4 and 5
 
@@ -306,9 +403,6 @@ aborts the migration.
 
 ## Open Questions
 
-- [ ] Should the in-repo `mindspec install agentmind` subcommand (Phase 6) be
-      part of this spec, or split into its own follow-up spec? It is small
-      but cross-cutting (download, checksum, platform detection).
 - [ ] During Phase 2, the local `replace` directive points at `../agentmind`.
       Is that path acceptable in CI, or do we need a sibling-checkout helper?
 - [ ] Does mindspec need a smoke test that runs against a real `agentmind`
@@ -324,8 +418,9 @@ aborts the migration.
 - Phase 4 mindspec edits (consumer swap + graceful-degradation wrapper +
   cobra re-exec): one day.
 - Phase 5 mindspec deletions and binary-size measurement: half a day.
-- Phase 6 mindspec edits (drop replace, pin tag, optional install
-  subcommand): half a day plus a one-week soak.
+- Phase 6 mindspec edits (drop replace, pin tag, document manual install
+  with checksum verification in README/release notes): half a day plus a
+  one-week soak. (No install subcommand — deferred.)
 
 Total mindspec-side: roughly 2.5–3 engineer-days, on top of the agentmind-side
 work tracked in the agentmind repo. The v1 panel saw zero candidates that did
