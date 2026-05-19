@@ -122,19 +122,22 @@ func runSessionStartHook(inp *hook.Input) error {
 		return nil
 	}
 
-	// Slow path: spawn instruct subprocess with a timeout for non-protected branches.
+	// Slow path: call instruct in-process with a timeout for non-protected branches.
+	// The context is plumbed into instruct.Run so cancellation is honored at step
+	// boundaries (avoids leaking goroutines past the hook's 12s budget).
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "instruct")
-	cmd.Dir = root
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			fmt.Fprintln(os.Stderr, "warning: mindspec instruct timed out (bd/dolt may be slow — try `bd dolt start`)")
-		} else {
+	done := make(chan error, 1)
+	go func() { done <- instruct.Run(ctx, root, "", "", os.Stdout) }()
+	select {
+	case err := <-done:
+		if err != nil && ctx.Err() != context.DeadlineExceeded {
 			fmt.Fprintln(os.Stderr, "mindspec instruct unavailable — run make build")
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, "warning: mindspec instruct timed out (bd/dolt may be slow — try `bd dolt start`; run make build if stale)")
 		}
+	case <-ctx.Done():
+		fmt.Fprintln(os.Stderr, "warning: mindspec instruct timed out (bd/dolt may be slow — try `bd dolt start`; run make build if stale)")
 	}
 	return nil
 }
