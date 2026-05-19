@@ -1,7 +1,14 @@
 package bench
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -283,3 +290,210 @@ func TestExtractMetricEventsWithResourceAttrs(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+// freePort grabs a free TCP port on 127.0.0.1.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return port
+}
+
+// TestCollectorRunEndToEnd exercises the full bench writer wiring: it starts
+// Run, posts a synthetic OTLP log payload to /v1/logs, cancels Run, and asserts
+// the output file contains a well-formed NDJSON line. This covers writeEvents,
+// the atomic counter, and the Run open/close lifecycle that collector_test.go
+// historically did not exercise.
+func TestCollectorRunEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "events.ndjson")
+	port := freePort(t)
+	c := NewCollector(port, outPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- c.Run(ctx)
+	}()
+
+	// Wait for the server to be reachable (Run prints "Collecting on...").
+	endpoint := "http://127.0.0.1:" + itoa(port)
+	if err := waitForServer(endpoint+"/v1/logs", 2*time.Second); err != nil {
+		cancel()
+		t.Fatalf("server never came up: %v", err)
+	}
+
+	body := []byte(`{
+		"resourceLogs": [{
+			"scopeLogs": [{
+				"logRecords": [{
+					"timeUnixNano": "1707840000000000000",
+					"body": {"stringValue": "claude_code.api_request"},
+					"attributes": [
+						{"key": "model", "value": {"stringValue": "test-model"}},
+						{"key": "input_tokens", "value": {"intValue": "100"}}
+					]
+				}]
+			}]
+		}]
+	}`)
+
+	resp, err := http.Post(endpoint+"/v1/logs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		cancel()
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		cancel()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Cancel and wait for Run to return (which closes the writer + flushes).
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run returned: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after ctx cancel")
+	}
+
+	// Verify counter was incremented exactly once.
+	if got := c.count.Load(); got != 1 {
+		t.Errorf("count = %d, want 1", got)
+	}
+
+	// Read output and verify one well-formed NDJSON line.
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		t.Fatal("output file is empty")
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1: %q", len(lines), trimmed)
+	}
+
+	var ev CollectedEvent
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+		t.Fatalf("output line not valid JSON: %v", err)
+	}
+	if ev.Event != "claude_code.api_request" {
+		t.Errorf("Event = %q, want claude_code.api_request", ev.Event)
+	}
+	if v, ok := ev.Data["model"].(string); !ok || v != "test-model" {
+		t.Errorf("Data[model] = %v, want test-model", ev.Data["model"])
+	}
+}
+
+// TestCollectorRunAppendMode verifies that NewCollectorAppend preserves
+// pre-existing content rather than truncating it.
+func TestCollectorRunAppendMode(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "events.ndjson")
+
+	// Seed with an existing line.
+	preexisting := `{"ts":"2026-01-01T00:00:00Z","event":"pre.existing"}` + "\n"
+	if err := os.WriteFile(outPath, []byte(preexisting), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	port := freePort(t)
+	c := NewCollectorAppend(port, outPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- c.Run(ctx)
+	}()
+
+	endpoint := "http://127.0.0.1:" + itoa(port)
+	if err := waitForServer(endpoint+"/v1/logs", 2*time.Second); err != nil {
+		cancel()
+		t.Fatalf("server never came up: %v", err)
+	}
+
+	body := []byte(`{
+		"resourceLogs": [{
+			"scopeLogs": [{
+				"logRecords": [{
+					"timeUnixNano": "1707840000000000000",
+					"body": {"stringValue": "claude_code.api_request"},
+					"attributes": []
+				}]
+			}]
+		}]
+	}`)
+	resp, err := http.Post(endpoint+"/v1/logs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		cancel()
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run returned: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after ctx cancel")
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "pre.existing") {
+		t.Error("append mode dropped pre-existing content")
+	}
+	if !strings.Contains(string(data), "claude_code.api_request") {
+		t.Error("append mode did not write new event")
+	}
+}
+
+// itoa is a tiny helper to avoid pulling in strconv just for this.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [16]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+// waitForServer polls the endpoint until it accepts a connection or deadline hits.
+func waitForServer(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// A POST with empty body returns 400, but the server is up if it answers.
+		resp, err := http.Post(url, "application/json", bytes.NewReader([]byte("{}")))
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return context.DeadlineExceeded
+}

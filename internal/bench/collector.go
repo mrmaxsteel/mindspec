@@ -10,22 +10,35 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/ndjson"
 )
 
-const maxCollectorBodySize = 4 << 20 // 4 MB
+const (
+	maxCollectorBodySize = 4 << 20 // 4 MB
+	// collectorBufSize is the bufio buffer size for the NDJSON writer.
+	// Sized for high-throughput OTLP receivers.
+	collectorBufSize = 64 << 10 // 64 KiB
+	// collectorFlushInterval caps the durability-loss window on hard crash
+	// (up to one buffer's worth, or this interval, of events may be lost).
+	collectorFlushInterval = 500 * time.Millisecond
+)
 
 // Collector is a lightweight OTLP/HTTP JSON receiver that extracts
 // Claude Code telemetry events and writes them as NDJSON.
+//
+// On hard crash, up to collectorBufSize bytes or collectorFlushInterval
+// of events may be lost (telemetry is best-effort and replayable). On graceful
+// shutdown, Run's deferred Close on the writer flushes the buffer.
 type Collector struct {
 	port       int
 	output     string
 	appendMode bool
-	mu         sync.Mutex
-	w          io.WriteCloser
+	w          *ndjson.Writer
 	server     *http.Server
-	count      int
+	count      atomic.Int64
 }
 
 // NewCollector creates a collector that listens on the given port
@@ -42,17 +55,15 @@ func NewCollectorAppend(port int, output string) *Collector {
 
 // Run starts the HTTP server and blocks until ctx is cancelled.
 func (c *Collector) Run(ctx context.Context) error {
-	var f *os.File
-	var err error
-	if c.appendMode {
-		f, err = os.OpenFile(c.output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	} else {
-		f, err = os.Create(c.output)
-	}
+	w, err := ndjson.New(c.output, ndjson.Opts{
+		Append:        c.appendMode,
+		BufSize:       collectorBufSize,
+		FlushInterval: collectorFlushInterval,
+	})
 	if err != nil {
 		return fmt.Errorf("opening output file: %w", err)
 	}
-	c.w = f
+	c.w = w
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/logs", c.handleLogs)
@@ -88,9 +99,7 @@ func (c *Collector) Run(ctx context.Context) error {
 	defer cancel()
 	c.server.Shutdown(shutCtx) //nolint:errcheck
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "\nCollected %d events → %s\n", c.count, c.output)
+	fmt.Fprintf(os.Stderr, "\nCollected %d events → %s\n", c.count.Load(), c.output)
 	return c.w.Close()
 }
 
@@ -152,18 +161,11 @@ func (c *Collector) writeEvents(events []CollectedEvent) {
 	if len(events) == 0 {
 		return
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	for _, e := range events {
-		data, err := json.Marshal(e)
-		if err != nil {
+		if err := c.w.Emit(e); err != nil {
 			continue
 		}
-		data = append(data, '\n')
-		c.w.Write(data) //nolint:errcheck
-		c.count++
+		c.count.Add(1)
 	}
 }
 
