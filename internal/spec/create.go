@@ -10,9 +10,69 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/hooks"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
-	"github.com/mrmaxsteel/mindspec/internal/templates"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+const specTemplate = `---
+status: Draft
+approved_at: ""
+approved_by: ""
+---
+# Spec <ID>: <Title>
+
+## Goal
+
+<Brief description of what this spec achieves and the target user outcome>
+
+## Background
+
+<Context, motivation, and any relevant prior decisions>
+
+## Impacted Domains
+
+- <domain-1>: <how it is impacted>
+
+## ADR Touchpoints
+
+- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+
+## Requirements
+
+1. <Requirement 1>
+2. <Requirement 2>
+
+## Scope
+
+### In Scope
+- <File or component 1>
+
+### Out of Scope
+- <Explicitly excluded items>
+
+## Non-Goals
+
+- <What this spec intentionally does not address>
+
+## Acceptance Criteria
+
+- [ ] <Specific, measurable criterion 1>
+- [ ] <Specific, measurable criterion 2>
+
+## Validation Proofs
+
+- <command 1>: <Expected outcome>
+
+## Open Questions
+
+- [ ] <Question that must be resolved before planning>
+
+## Approval
+
+- **Status**: DRAFT
+- **Approved By**: -
+- **Approval Date**: -
+- **Notes**: -
+`
 
 // specIDPattern matches NNN-kebab-case where NNN is 3+ digits.
 var specIDPattern = regexp.MustCompile(`^\d{3,}-[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -64,7 +124,7 @@ func Run(root, specID, title string, exec executor.Executor) (*Result, error) {
 	result.SpecDir = specDir
 
 	// Fill placeholders and write spec.md.
-	content := strings.Replace(templates.Spec(), "<ID>", specID, 1)
+	content := strings.Replace(specTemplate, "<ID>", specID, 1)
 	content = strings.Replace(content, "<Title>", title, 1)
 
 	if err := os.MkdirAll(specDir, 0755); err != nil {
