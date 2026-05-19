@@ -72,7 +72,7 @@ func WriteManifest(root, specID string, m *Manifest) error {
 		return err
 	}
 	dir := RecordingDir(root, specID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating recording dir: %w", err)
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
@@ -80,5 +80,5 @@ func WriteManifest(root, specID string, m *Manifest) error {
 		return fmt.Errorf("marshaling manifest: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(ManifestPath(root, specID), data, 0644)
+	return os.WriteFile(ManifestPath(root, specID), data, 0o600)
 }

@@ -35,11 +35,19 @@ func EmitMarker(root, specID, event string, data map[string]any) error {
 	}
 	line = append(line, '\n')
 
-	f, err := os.OpenFile(EventsPath(root, specID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(EventsPath(root, specID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening events file: %w", err)
 	}
 	defer f.Close()
+
+	// Belt-and-suspenders: AgentMind's collector may have created this file
+	// first with a looser mode. O_CREATE only sets mode on creation, so chmod
+	// via the open fd to guarantee 0600 regardless of who created it. On
+	// Windows this is largely a no-op, same as OpenFile's perm bits.
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod events file: %w", err)
+	}
 
 	_, err = f.Write(line)
 	return err

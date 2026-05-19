@@ -411,6 +411,85 @@ func TestPathHelpers(t *testing.T) {
 	}
 }
 
+func TestRecordingFileModes(t *testing.T) {
+	root := t.TempDir()
+	enableRecording(t, root)
+	specID := "001-mode-test"
+
+	if err := os.MkdirAll(RecordingDir(root, specID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{SpecID: specID, Status: "recording"}
+	if err := WriteManifest(root, specID, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := EmitMarker(root, specID, "lifecycle.start", nil); err != nil {
+		t.Fatalf("EmitMarker: %v", err)
+	}
+
+	cases := []struct {
+		path string
+		want os.FileMode
+	}{
+		{ManifestPath(root, specID), 0o600},
+		{EventsPath(root, specID), 0o600},
+	}
+	for _, tc := range cases {
+		info, err := os.Stat(tc.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", tc.path, err)
+		}
+		if got := info.Mode().Perm(); got != tc.want {
+			t.Errorf("%s mode = %#o, want %#o", tc.path, got, tc.want)
+		}
+	}
+
+	dirInfo, err := os.Stat(RecordingDir(root, specID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Allow umask to remove bits but reject any group/other bits.
+	if dirInfo.Mode().Perm()&0o077 != 0 {
+		t.Errorf("recording dir mode = %#o, expected no group/other bits",
+			dirInfo.Mode().Perm())
+	}
+}
+
+// TestRecordingFileModesAgentMindFirst simulates the case where AgentMind's
+// collector creates events.ndjson first with a looser mode (0644). The
+// belt-and-suspenders chmod in EmitMarker must tighten the existing file.
+func TestRecordingFileModesAgentMindFirst(t *testing.T) {
+	root := t.TempDir()
+	enableRecording(t, root)
+	specID := "001-agentmind-first"
+
+	if err := os.MkdirAll(RecordingDir(root, specID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{SpecID: specID, Status: "recording"}
+	if err := WriteManifest(root, specID, m); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create events.ndjson with loose mode to simulate AgentMind creating
+	// it first.
+	if err := os.WriteFile(EventsPath(root, specID), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EmitMarker(root, specID, "lifecycle.start", nil); err != nil {
+		t.Fatalf("EmitMarker: %v", err)
+	}
+
+	info, err := os.Stat(EventsPath(root, specID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("post-emit events mode = %#o, want 0600 (chmod must tighten existing file)", got)
+	}
+}
+
 func TestHealthCheckNoRecording(t *testing.T) {
 	root := t.TempDir()
 
