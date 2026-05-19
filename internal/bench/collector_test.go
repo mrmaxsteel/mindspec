@@ -3,6 +3,7 @@ package bench
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestExtractLogEvents(t *testing.T) {
@@ -122,6 +123,62 @@ func TestFlattenAttributes(t *testing.T) {
 	}
 	if m["dbl"] != 3.14 {
 		t.Errorf("dbl = %v, want 3.14", m["dbl"])
+	}
+}
+
+func TestFlattenAttributesIntValueVariants(t *testing.T) {
+	attrs := []otlpKeyValue{
+		{Key: "bare", Value: otlpValue{IntValue: json.RawMessage(`123`)}},
+		{Key: "neg", Value: otlpValue{IntValue: json.RawMessage(`"-7"`)}},
+		{Key: "bad", Value: otlpValue{IntValue: json.RawMessage(`"abc"`)}},
+		{Key: "empty", Value: otlpValue{IntValue: json.RawMessage(`""`)}},
+		{Key: "big", Value: otlpValue{IntValue: json.RawMessage(`"9223372036854775807"`)}},
+	}
+
+	m := flattenAttributes(attrs)
+
+	if m["bare"] != int64(123) {
+		t.Errorf("bare = %v (type %T), want int64(123)", m["bare"], m["bare"])
+	}
+	if m["neg"] != int64(-7) {
+		t.Errorf("neg = %v, want -7", m["neg"])
+	}
+	// Legacy zero-on-parse-error semantics: malformed input yields int64(0)
+	// with the key still present, matching the previous fmt.Sscanf behavior.
+	if v, ok := m["bad"]; !ok || v != int64(0) {
+		t.Errorf("bad = %v (ok=%v), want int64(0) present", v, ok)
+	}
+	if v, ok := m["empty"]; !ok || v != int64(0) {
+		t.Errorf("empty = %v (ok=%v), want int64(0) present", v, ok)
+	}
+	if m["big"] != int64(9223372036854775807) {
+		t.Errorf("big = %v, want 9223372036854775807", m["big"])
+	}
+}
+
+func TestParseOTLPTimestamp(t *testing.T) {
+	const wantFixed = "2024-02-13T16:00:00Z"
+
+	// Quoted nanos (OTLP/JSON wire format).
+	if got := parseOTLPTimestamp(`"1707840000000000000"`); got != wantFixed {
+		t.Errorf("quoted: got %q, want %q", got, wantFixed)
+	}
+	// Bare nanos (already-unquoted upstream).
+	if got := parseOTLPTimestamp(`1707840000000000000`); got != wantFixed {
+		t.Errorf("bare: got %q, want %q", got, wantFixed)
+	}
+	// Empty input: zero triggers fallback to time.Now(); must still parse as RFC3339Nano.
+	if got := parseOTLPTimestamp(""); got == "" {
+		t.Errorf("empty: got empty string, want RFC3339Nano fallback")
+	} else if _, err := time.Parse(time.RFC3339Nano, got); err != nil {
+		t.Errorf("empty: got %q, not parseable as RFC3339Nano: %v", got, err)
+	}
+	// Garbage input: ParseInt returns (0, err); zero triggers fallback to time.Now()
+	// (legacy fmt.Sscanf behavior preserved).
+	if got := parseOTLPTimestamp(`"not-a-number"`); got == "" {
+		t.Errorf("garbage: got empty string, want RFC3339Nano fallback")
+	} else if _, err := time.Parse(time.RFC3339Nano, got); err != nil {
+		t.Errorf("garbage: got %q, not parseable as RFC3339Nano: %v", got, err)
 	}
 }
 
