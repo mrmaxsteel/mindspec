@@ -92,9 +92,15 @@ func slugify(s string) string {
 }
 
 // DerivePhase determines the lifecycle phase from an epic's status and children statuses.
-// Implements the phase derivation table from ADR-0023 §3.
+// Implements the phase derivation table from ADR-0023 §3. Constructs a fresh cache;
+// hot-path callers should use DerivePhaseWithCache to share bd queries.
 func DerivePhase(epicID string) (string, error) {
-	return DerivePhaseWithStatus(epicID, "")
+	return DerivePhaseWithCache(NewCache(), epicID)
+}
+
+// DerivePhaseWithCache is the cache-aware variant of DerivePhase.
+func DerivePhaseWithCache(c *Cache, epicID string) (string, error) {
+	return DerivePhaseWithStatusWithCache(c, epicID, "")
 }
 
 // DerivePhaseWithStatus determines the lifecycle phase, using a pre-fetched epic status
@@ -104,10 +110,18 @@ func DerivePhase(epicID string) (string, error) {
 // that is returned directly. Child-based derivation runs as a consistency check; if it
 // disagrees, a warning is emitted to stderr but the stored phase is trusted.
 func DerivePhaseWithStatus(epicID, epicStatus string) (string, error) {
+	return DerivePhaseWithStatusWithCache(NewCache(), epicID, epicStatus)
+}
+
+// DerivePhaseWithStatusWithCache is the cache-aware variant of DerivePhaseWithStatus.
+// All four bd-touching helpers (readStoredPhase, queryEpicStatus, hasDoneMarker,
+// queryChildren) now route through the cache, so a warm path that already has
+// the epic loaded incurs zero extra bd calls.
+func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string, error) {
 	// Spec 080: check metadata-stored phase first (O(1)).
-	if storedPhase := readStoredPhase(epicID); storedPhase != "" {
+	if storedPhase := readStoredPhaseWithCache(c, epicID); storedPhase != "" {
 		// Run child-based derivation as consistency check.
-		childPhase := deriveFromChildrenOrStatus(epicID, epicStatus)
+		childPhase := deriveFromChildrenOrStatusWithCache(c, epicID, epicStatus)
 		if childPhase != "" && childPhase != storedPhase {
 			fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\n",
 				epicID, storedPhase, childPhase)
@@ -117,34 +131,27 @@ func DerivePhaseWithStatus(epicID, epicStatus string) (string, error) {
 
 	// Fallback for pre-080 epics: derive from children/status (backward compat).
 	if epicStatus == "" {
-		epicStatus = queryEpicStatus(epicID)
+		epicStatus = queryEpicStatusWithCache(c, epicID)
 	}
 	if strings.EqualFold(epicStatus, "closed") {
-		if hasDoneMarker(epicID) {
+		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone, nil
 		}
-		children := queryChildren(epicID)
+		children, _ := c.GetChildren(epicID)
 		return DerivePhaseFromChildren(children), nil
 	}
-	children := queryChildren(epicID)
+	children, _ := c.GetChildren(epicID)
 	return DerivePhaseFromChildren(children), nil
 }
 
-// readStoredPhase reads the mindspec_phase metadata field from an epic.
+// readStoredPhaseWithCache reads the mindspec_phase metadata field from an epic.
 // Returns "" if the field is missing, empty, or not a valid mode.
-func readStoredPhase(epicID string) string {
-	out, err := runBDFn("show", epicID, "--json")
-	if err != nil {
+func readStoredPhaseWithCache(c *Cache, epicID string) string {
+	epic, err := c.FindEpic(epicID)
+	if err != nil || epic == nil || epic.Metadata == nil {
 		return ""
 	}
-	var items []EpicInfo
-	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
-		return ""
-	}
-	if items[0].Metadata == nil {
-		return ""
-	}
-	raw, ok := items[0].Metadata["mindspec_phase"]
+	raw, ok := epic.Metadata["mindspec_phase"]
 	if !ok {
 		return ""
 	}
@@ -155,20 +162,20 @@ func readStoredPhase(epicID string) string {
 	return phase
 }
 
-// deriveFromChildrenOrStatus runs child-based phase derivation for consistency checking.
+// deriveFromChildrenOrStatusWithCache runs child-based phase derivation for consistency checking.
 // Returns the derived phase, or "" if derivation fails.
-func deriveFromChildrenOrStatus(epicID, epicStatus string) string {
+func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) string {
 	if epicStatus == "" {
-		epicStatus = queryEpicStatus(epicID)
+		epicStatus = queryEpicStatusWithCache(c, epicID)
 	}
 	if strings.EqualFold(epicStatus, "closed") {
-		if hasDoneMarker(epicID) {
+		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone
 		}
-		children := queryChildren(epicID)
+		children, _ := c.GetChildren(epicID)
 		return DerivePhaseFromChildren(children)
 	}
-	children := queryChildren(epicID)
+	children, _ := c.GetChildren(epicID)
 	return DerivePhaseFromChildren(children)
 }
 
@@ -215,11 +222,16 @@ func DerivePhaseFromChildren(children []ChildInfo) string {
 }
 
 // DiscoverActiveSpecs queries beads for open/in_progress epics and derives phase for each.
-// Only queries non-closed statuses to minimize bd calls and avoid dolt server contention
-// (closed epics with mindspec_phase: done are not active; legacy closed epics without the
-// marker are an edge case that callers like FindEpicBySpecID handle separately).
+// Constructs a fresh cache; hot-path callers should use DiscoverActiveSpecsWithCache
+// to share the underlying `bd list --type=epic` call with other parts of the same invocation.
 func DiscoverActiveSpecs() ([]ActiveSpec, error) {
-	epics, err := queryActiveEpics()
+	return DiscoverActiveSpecsWithCache(NewCache())
+}
+
+// DiscoverActiveSpecsWithCache is the cache-aware variant of DiscoverActiveSpecs.
+// Filters AllEpics down to open + in_progress in-process (no additional bd call).
+func DiscoverActiveSpecsWithCache(c *Cache) ([]ActiveSpec, error) {
+	epics, err := c.ActiveEpics()
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +261,7 @@ func DiscoverActiveSpecs() ([]ActiveSpec, error) {
 		}
 
 		// Fallback for pre-080 epics: derive from children.
-		children := queryChildren(epic.ID)
+		children, _ := c.GetChildren(epic.ID)
 
 		phase := DerivePhaseFromChildren(children)
 		if phase == state.ModeDone {
@@ -277,8 +289,22 @@ func ResolveContext(root string) (*Context, error) {
 	return ResolveContextFromDir(root, cwd)
 }
 
+// ResolveContextWithCache is the cache-aware variant of ResolveContext.
+func ResolveContextWithCache(c *Cache, root string) (*Context, error) {
+	cwd, err := filepath.Abs(".")
+	if err != nil {
+		cwd = "."
+	}
+	return ResolveContextFromDirWithCache(c, root, cwd)
+}
+
 // ResolveContextFromDir resolves context from a specific directory.
 func ResolveContextFromDir(root, dir string) (*Context, error) {
+	return ResolveContextFromDirWithCache(NewCache(), root, dir)
+}
+
+// ResolveContextFromDirWithCache is the cache-aware variant of ResolveContextFromDir.
+func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error) {
 	kind, specID, beadID := workspace.DetectWorktreeContext(dir)
 
 	ctx := &Context{
@@ -288,12 +314,12 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 	switch kind {
 	case workspace.WorktreeBead:
 		ctx.BeadID = beadID
-		epicID, derivedSpecID, err := FindEpicForBead(beadID)
+		epicID, derivedSpecID, err := FindEpicForBeadWithCache(c, beadID)
 		if err == nil && derivedSpecID != "" {
 			ctx.SpecID = derivedSpecID
 			ctx.EpicID = epicID
 		}
-		phase, err := derivePhaseForSpec(ctx.EpicID)
+		phase, err := derivePhaseForSpecWithCache(c, ctx.EpicID)
 		if err == nil {
 			ctx.Phase = phase
 		} else {
@@ -302,10 +328,10 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 
 	case workspace.WorktreeSpec:
 		ctx.SpecID = specID
-		epicID, err := FindEpicBySpecID(specID)
+		epicID, err := FindEpicBySpecIDWithCache(c, specID)
 		if err == nil && epicID != "" {
 			ctx.EpicID = epicID
-			phase, err := DerivePhase(epicID)
+			phase, err := DerivePhaseWithCache(c, epicID)
 			if err == nil {
 				ctx.Phase = phase
 			}
@@ -315,13 +341,13 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 		}
 		// Check for active bead
 		if ctx.EpicID != "" {
-			if activeBead := FindActiveBeadForEpic(ctx.EpicID); activeBead != "" {
+			if activeBead := FindActiveBeadForEpicWithCache(c, ctx.EpicID); activeBead != "" {
 				ctx.BeadID = activeBead
 			}
 		}
 
 	case workspace.WorktreeMain:
-		specs, err := DiscoverActiveSpecs()
+		specs, err := DiscoverActiveSpecsWithCache(c)
 		if err == nil && len(specs) == 1 {
 			ctx.SpecID = specs[0].SpecID
 			ctx.EpicID = specs[0].EpicID
@@ -341,7 +367,7 @@ func CheckSpecNumberCollision(specNum int) error {
 	// Pull latest from Dolt
 	_, _ = runBDFn("dolt", "pull")
 
-	epics, err := queryEpics()
+	epics, err := fetchAllEpics()
 	if err != nil {
 		return fmt.Errorf("querying epics: %w", err)
 	}
@@ -357,54 +383,46 @@ func CheckSpecNumberCollision(specNum int) error {
 }
 
 // FindEpicBySpecID finds the epic ID for a given spec ID by querying metadata.
+// Constructs a fresh cache; hot-path callers should use FindEpicBySpecIDWithCache.
 func FindEpicBySpecID(specID string) (string, error) {
-	epics, err := queryEpics()
-	if err != nil {
-		return "", err
-	}
+	return FindEpicBySpecIDWithCache(NewCache(), specID)
+}
 
-	for _, epic := range epics {
-		num, title := ExtractSpecMetadata(epic)
-		if num > 0 && title != "" {
-			if SpecIDFromMetadata(num, title) == specID {
-				return epic.ID, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("no epic found for spec %s", specID)
+// FindEpicBySpecIDWithCache is the cache-aware variant of FindEpicBySpecID.
+func FindEpicBySpecIDWithCache(c *Cache, specID string) (string, error) {
+	return c.FindEpicBySpecID(specID)
 }
 
 // --- Internal helpers ---
 
-// hasDoneMarker checks if an epic has been explicitly finalized.
+// hasDoneMarkerWithCache checks if an epic has been explicitly finalized.
 // Checks both mindspec_phase: done (Spec 080) and legacy mindspec_done: true
-// for backward compatibility.
-func hasDoneMarker(epicID string) bool {
-	out, err := runBDFn("show", epicID, "--json")
-	if err != nil {
-		return false
-	}
-	var items []EpicInfo
-	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
-		return false
-	}
-	if items[0].Metadata == nil {
+// for backward compatibility. Routes through c.FindEpic so the same bd show
+// call is shared with readStoredPhase / queryEpicStatus in a warm path.
+func hasDoneMarkerWithCache(c *Cache, epicID string) bool {
+	epic, err := c.FindEpic(epicID)
+	if err != nil || epic == nil || epic.Metadata == nil {
 		return false
 	}
 	// Spec 080: check mindspec_phase: done
-	if phase, ok := items[0].Metadata["mindspec_phase"]; ok {
+	if phase, ok := epic.Metadata["mindspec_phase"]; ok {
 		if s, ok := phase.(string); ok && s == state.ModeDone {
 			return true
 		}
 	}
 	// Legacy: check mindspec_done: true
-	done, ok := items[0].Metadata["mindspec_done"]
+	done, ok := epic.Metadata["mindspec_done"]
 	if !ok {
 		return false
 	}
 	b, ok := done.(bool)
 	return ok && b
+}
+
+// hasDoneMarker is the cache-free wrapper retained for backward compatibility
+// and the existing test suite (which invokes it directly via SetRunBDForTest stubs).
+func hasDoneMarker(epicID string) bool {
+	return hasDoneMarkerWithCache(nil, epicID)
 }
 
 // extractPhaseFromMetadata reads mindspec_phase from an already-loaded epic's metadata.
@@ -424,83 +442,10 @@ func extractPhaseFromMetadata(epic EpicInfo) string {
 	return phase
 }
 
-// queryActiveEpics returns only open and in_progress epics (2 bd calls).
-// Used by DiscoverActiveSpecs where closed epics are not needed.
-func queryActiveEpics() ([]EpicInfo, error) {
-	var allEpics []EpicInfo
-	seen := map[string]bool{}
-	var lastErr error
-	for _, status := range []string{"open", "in_progress"} {
-		out, err := listJSONFn("--type=epic", "--status="+status)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		var epics []EpicInfo
-		if err := json.Unmarshal(out, &epics); err != nil {
-			lastErr = err
-			continue
-		}
-		for _, e := range epics {
-			if !seen[e.ID] {
-				seen[e.ID] = true
-				allEpics = append(allEpics, e)
-			}
-		}
-	}
-	if len(allEpics) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("bd list --type=epic failed: %w", lastErr)
-	}
-	return allEpics, nil
-}
-
-func queryEpics() ([]EpicInfo, error) {
-	// Query all statuses: bd list --type=epic defaults to open only,
-	// but phase derivation needs closed epics too (e.g. impl approve, FindEpicBySpecID).
-	var allEpics []EpicInfo
-	seen := map[string]bool{}
-	var lastErr error
-	for _, status := range []string{"open", "in_progress", "closed"} {
-		out, err := listJSONFn("--type=epic", "--status="+status)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		var epics []EpicInfo
-		if err := json.Unmarshal(out, &epics); err != nil {
-			lastErr = err
-			continue
-		}
-		for _, e := range epics {
-			if !seen[e.ID] {
-				seen[e.ID] = true
-				allEpics = append(allEpics, e)
-			}
-		}
-	}
-	if len(allEpics) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("bd list --type=epic failed: %w", lastErr)
-	}
-	return allEpics, nil
-}
-
-func queryChildren(epicID string) []ChildInfo {
-	// Query all statuses: bd list --parent defaults to open only,
-	// but phase derivation needs closed beads too.
-	var allChildren []ChildInfo
-	for _, status := range []string{"open", "in_progress", "closed"} {
-		out, err := listJSONFn("--parent", epicID, "--status="+status)
-		if err != nil {
-			continue
-		}
-		var children []ChildInfo
-		if err := json.Unmarshal(out, &children); err != nil {
-			continue
-		}
-		allChildren = append(allChildren, children...)
-	}
-	return allChildren
-}
+// (Per-status fan-out helpers queryActiveEpics / queryEpics / queryChildren
+// were collapsed into Cache.AllEpics / Cache.ActiveEpics / Cache.GetChildren,
+// backed by single `bd list … --status=open,in_progress,closed -n 0` calls.
+// See internal/phase/cache.go.)
 
 // ExtractSpecMetadata gets spec_num and spec_title from epic metadata or title.
 func ExtractSpecMetadata(epic EpicInfo) (int, string) {
@@ -556,7 +501,17 @@ func ParseSpecFromTitle(title string) (int, string) {
 
 // FindEpicForBead looks up the parent epic for a bead and returns the epic ID
 // and derived spec ID. Used by complete to resolve the spec from just a bead ID.
+// Constructs a fresh cache; hot-path callers should use FindEpicForBeadWithCache.
 func FindEpicForBead(beadID string) (epicID, specID string, err error) {
+	return FindEpicForBeadWithCache(NewCache(), beadID)
+}
+
+// FindEpicForBeadWithCache is the cache-aware variant of FindEpicForBead.
+// The `bd show <beadID>` call is not memoized in Cache (bead IDs are not
+// tracked); the resolved parent epic, however, is fetched via cache.FindEpic
+// so a subsequent bd show on the same epic ID is a no-op. The fallback
+// epic-list path uses cache.AllEpics so it shares with the wider invocation.
+func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, err error) {
 	out, err := runBDFn("show", beadID, "--json")
 	if err != nil {
 		return "", "", fmt.Errorf("bd show %s failed: %w", beadID, err)
@@ -579,14 +534,11 @@ func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 	// Try to find the parent epic via dependencies
 	for _, dep := range items[0].Dependencies {
 		if strings.EqualFold(dep.IssueType, "epic") {
-			epicOut, epicErr := runBDFn("show", dep.ID, "--json")
-			if epicErr == nil {
-				var epicItems []EpicInfo
-				if json.Unmarshal(epicOut, &epicItems) == nil && len(epicItems) > 0 {
-					num, title := ExtractSpecMetadata(epicItems[0])
-					if num > 0 && title != "" {
-						return dep.ID, SpecIDFromMetadata(num, title), nil
-					}
+			epic, epicErr := c.FindEpic(dep.ID)
+			if epicErr == nil && epic != nil {
+				num, title := ExtractSpecMetadata(*epic)
+				if num > 0 && title != "" {
+					return dep.ID, SpecIDFromMetadata(num, title), nil
 				}
 			}
 		}
@@ -600,7 +552,7 @@ func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 			numStr := title[idx+1 : idx+endIdx]
 			var num int
 			if _, scanErr := fmt.Sscanf(numStr, "%d", &num); scanErr == nil {
-				epics, listErr := queryEpics()
+				epics, listErr := c.AllEpics()
 				if listErr == nil {
 					for _, epic := range epics {
 						epicNum, epicTitle := ExtractSpecMetadata(epic)
@@ -618,24 +570,31 @@ func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 
 // FindActiveBeadForEpic returns the ID of an in_progress bead under the given epic, or "".
 // Returns "" if zero or multiple beads are in_progress (ambiguous — caller should
-// fall back to the spec worktree).
+// fall back to the spec worktree). Constructs a fresh cache; hot-path callers
+// should use FindActiveBeadForEpicWithCache.
 func FindActiveBeadForEpic(epicID string) string {
-	out, err := listJSONFn("--parent", epicID, "--status=in_progress")
+	return FindActiveBeadForEpicWithCache(NewCache(), epicID)
+}
+
+// FindActiveBeadForEpicWithCache is the cache-aware variant of FindActiveBeadForEpic.
+// Routes through cache.GetChildren (single all-status `bd list --parent` call) and
+// filters to in_progress in-process, so it shares its bd call with DerivePhase.
+func FindActiveBeadForEpicWithCache(c *Cache, epicID string) string {
+	kids, err := c.GetChildren(epicID)
 	if err != nil {
 		return ""
 	}
 
-	var items []ChildInfo
-	if err := json.Unmarshal(out, &items); err != nil {
-		return ""
-	}
-
-	// Filter out epics (only want beads).
+	// Filter out epics and non-in_progress entries.
 	var beads []ChildInfo
-	for _, item := range items {
-		if !strings.EqualFold(item.IssueType, "epic") {
-			beads = append(beads, item)
+	for _, item := range kids {
+		if strings.EqualFold(item.IssueType, "epic") {
+			continue
 		}
+		if !strings.EqualFold(strings.TrimSpace(item.Status), "in_progress") {
+			continue
+		}
+		beads = append(beads, item)
 	}
 
 	// Only return a bead when exactly one is in_progress.
@@ -646,22 +605,18 @@ func FindActiveBeadForEpic(epicID string) string {
 	return ""
 }
 
-// queryEpicStatus fetches the status of a single epic by ID.
-func queryEpicStatus(epicID string) string {
-	out, err := runBDFn("show", epicID, "--json")
-	if err != nil {
+// queryEpicStatusWithCache fetches the status of a single epic by ID via the cache.
+func queryEpicStatusWithCache(c *Cache, epicID string) string {
+	epic, err := c.FindEpic(epicID)
+	if err != nil || epic == nil {
 		return ""
 	}
-	var items []EpicInfo
-	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
-		return ""
-	}
-	return items[0].Status
+	return epic.Status
 }
 
-func derivePhaseForSpec(epicID string) (string, error) {
+func derivePhaseForSpecWithCache(c *Cache, epicID string) (string, error) {
 	if epicID == "" {
 		return state.ModeSpec, nil
 	}
-	return DerivePhase(epicID)
+	return DerivePhaseWithCache(c, epicID)
 }

@@ -2,12 +2,13 @@ package validate
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -213,17 +214,29 @@ func readSpecApprovalStatus(specPath string) string {
 	return "unknown"
 }
 
-// checkBeadStatus shells out to bd show to check bead status. Returns warning message or empty string.
+// checkBeadStatus calls `bd show <bead> --json` via bead.RunBD (shared tracing)
+// to check bead status. Returns warning message or empty string.
+//
+// PERF-1: routed through bead.RunBD instead of a direct exec.Command so the call
+// shares trace instrumentation with the rest of the CLI and could be memoized
+// in a future Cache extension. On JSON parse failure we fall back to the same
+// "Could not verify bead" warning as before.
 func checkBeadStatus(beadID string) string {
-	cmd := exec.Command("bd", "show", beadID)
-	output, err := cmd.Output()
+	output, err := bead.RunBD("show", beadID, "--json")
 	if err != nil {
 		// bd not available or bead not found — non-fatal
 		return fmt.Sprintf("Could not verify bead %s via bd: %v", beadID, err)
 	}
 
-	out := string(output)
-	if strings.Contains(out, "status: closed") || strings.Contains(out, "Status: closed") {
+	var items []struct {
+		Status string `json:"status"`
+	}
+	if jerr := json.Unmarshal(output, &items); jerr != nil || len(items) == 0 {
+		// JSON parse failure — same fallback as the previous grep-based check.
+		return fmt.Sprintf("Could not verify bead %s via bd: %v", beadID, jerr)
+	}
+
+	if strings.EqualFold(strings.TrimSpace(items[0].Status), "closed") {
 		return fmt.Sprintf("Bead %s appears to be closed, but state says implement mode", beadID)
 	}
 

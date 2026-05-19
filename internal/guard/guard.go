@@ -25,7 +25,11 @@ var (
 )
 
 func defaultReadGuardState(root string) (*guardState, error) {
-	ctx, err := phase.ResolveContext(root)
+	return defaultReadGuardStateWithCache(nil, root)
+}
+
+func defaultReadGuardStateWithCache(c *phase.Cache, root string) (*guardState, error) {
+	ctx, err := phase.ResolveContextWithCache(c, root)
 	if err != nil || ctx == nil {
 		return &guardState{}, nil
 	}
@@ -33,7 +37,7 @@ func defaultReadGuardState(root string) (*guardState, error) {
 	// Query for an active bead so the redirect points to the bead
 	// worktree (not just the spec worktree).
 	if ctx.BeadID == "" && ctx.EpicID != "" {
-		ctx.BeadID = phase.FindActiveBeadForEpic(ctx.EpicID)
+		ctx.BeadID = phase.FindActiveBeadForEpicWithCache(c, ctx.EpicID)
 	}
 	gs := &guardState{
 		ActiveSpec: ctx.SpecID,
@@ -66,6 +70,15 @@ func defaultReadGuardState(root string) (*guardState, error) {
 // Returns an error if CWD is the main worktree when a worktree is active.
 // Returns nil if no worktree is active, guards are disabled, or CWD is correct.
 func CheckCWD(root string) error {
+	return checkCWDWithCache(nil, root)
+}
+
+// CheckCWDWithCache is the cache-aware variant of CheckCWD.
+func CheckCWDWithCache(c *phase.Cache, root string) error {
+	return checkCWDWithCache(c, root)
+}
+
+func checkCWDWithCache(c *phase.Cache, root string) error {
 	cfg, err := loadConfigFn(root)
 	if err != nil {
 		cfg = config.DefaultConfig()
@@ -74,7 +87,12 @@ func CheckCWD(root string) error {
 		return nil
 	}
 
-	gs, err := readGuardStateFn(root)
+	var gs *guardState
+	if c != nil {
+		gs, err = defaultReadGuardStateWithCache(c, root)
+	} else {
+		gs, err = readGuardStateFn(root)
+	}
 	if err != nil || gs.ActiveWorktree == "" {
 		return nil
 	}
@@ -117,9 +135,28 @@ func IsMainCWD(root string) bool {
 	return CheckCWD(root) != nil
 }
 
+// IsMainCWDWithCache is the cache-aware variant of IsMainCWD.
+func IsMainCWDWithCache(c *phase.Cache, root string) bool {
+	return CheckCWDWithCache(c, root) != nil
+}
+
 // ActiveWorktreePath returns the active worktree path from beads context, or empty string.
+// Constructs a fresh cache; cache-aware callers should use ActiveWorktreePathWithCache.
 func ActiveWorktreePath(root string) string {
 	gs, err := readGuardStateFn(root)
+	if err != nil {
+		return ""
+	}
+	return gs.ActiveWorktree
+}
+
+// ActiveWorktreePathWithCache is the cache-aware variant of ActiveWorktreePath.
+// PERF-1: lets cmd/mindspec/instruct.go share its phase.Cache with the
+// guard.ActiveWorktreePath call that precedes spec resolution, so the warm
+// path stays within the ≤3 bd-call budget instead of paying an extra
+// uncached `bd list --type=epic`.
+func ActiveWorktreePathWithCache(c *phase.Cache, root string) string {
+	gs, err := defaultReadGuardStateWithCache(c, root)
 	if err != nil {
 		return ""
 	}

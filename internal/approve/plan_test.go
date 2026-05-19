@@ -979,11 +979,11 @@ None
 	// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
 	// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
 	epicJSON := []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`)
+	// PERF-1: cache.AllEpics issues a single `--type=epic --status=open,in_progress,closed`
+	// call; stub returns the epic whenever a --type=epic query is seen.
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
-		// Only return the epic on --status=open queries; empty otherwise so
-		// dedup doesn't double-process.
 		for _, a := range args {
-			if a == "--status=open" {
+			if a == "--type=epic" {
 				return epicJSON, nil
 			}
 		}
