@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Scenario defines a behavioral test scenario for an agent session.
@@ -2024,7 +2025,9 @@ func setupWorktrees(sandbox *Sandbox, specID, beadID, phase string) worktreePath
 // --- Helpers ---
 
 func fileExistsInWorktrees(root, fileName string) bool {
-	worktreeRoot := filepath.Join(root, ".worktrees")
+	// No *config.Config is available in this test helper; the sandbox
+	// hard-codes ".worktrees" for fixture setup, so use the default.
+	worktreeRoot := workspace.DefaultWorktreesDir(root)
 	found := false
 	_ = filepath.WalkDir(worktreeRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil || d.IsDir() {

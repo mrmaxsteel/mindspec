@@ -89,7 +89,7 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			Mode:       mode,
 			ActiveSpec: specID,
 			ActiveBead: activeBead,
-			SpecBranch: state.SpecBranch(specID),
+			SpecBranch: workspace.SpecBranch(specID),
 		}
 
 		data, err := json.MarshalIndent(out, "", "  ")

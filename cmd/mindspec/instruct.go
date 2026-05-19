@@ -197,8 +197,8 @@ func resolveBeadWorktree(beadID string) string {
 	if err != nil {
 		return ""
 	}
-	wtName := "worktree-" + beadID
-	branchName := "bead/" + beadID
+	wtName := workspace.BeadWorktreeName(beadID)
+	branchName := workspace.BeadBranch(beadID)
 	for _, e := range entries {
 		if e.Name == wtName || e.Branch == branchName {
 			return e.Path

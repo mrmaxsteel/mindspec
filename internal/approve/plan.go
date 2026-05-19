@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -127,7 +128,11 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// pre-commit hook (internal/hook/dispatch.go) blocks further commits on
 	// the spec/<id> branch — including this very commit, which would then
 	// only land via the MINDSPEC_ALLOW_MAIN=1 escape hatch.
-	specWtPath := state.SpecWorktreePath(root, specID)
+	cfg, cfgErr := config.Load(root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		return nil, fmt.Errorf("auto-commit plan approval failed: %w\n\nFix the issue in %s and re-run 'mindspec plan approve %s'", err, specWtPath, specID)

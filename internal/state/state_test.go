@@ -71,39 +71,10 @@ func TestSessionFile_OmitsEmptyFields(t *testing.T) {
 }
 
 // --- Convention function tests ---
-
-func TestSpecBranch(t *testing.T) {
-	tests := []struct {
-		specID string
-		want   string
-	}{
-		{"053-drop-state-json", "spec/053-drop-state-json"},
-		{"001-skeleton", "spec/001-skeleton"},
-	}
-	for _, tt := range tests {
-		got := SpecBranch(tt.specID)
-		if got != tt.want {
-			t.Errorf("SpecBranch(%q) = %q, want %q", tt.specID, got, tt.want)
-		}
-	}
-}
-
-func TestSpecWorktreePath(t *testing.T) {
-	got := SpecWorktreePath("/project", "053-foo")
-	want := filepath.Join("/project", ".worktrees", "worktree-spec-053-foo")
-	if got != want {
-		t.Errorf("SpecWorktreePath = %q, want %q", got, want)
-	}
-}
-
-func TestBeadWorktreePath(t *testing.T) {
-	specWT := filepath.Join("/project", ".worktrees", "worktree-spec-053-foo")
-	got := BeadWorktreePath(specWT, "mindspec-mol-07lst")
-	want := filepath.Join(specWT, ".worktrees", "worktree-mindspec-mol-07lst")
-	if got != want {
-		t.Errorf("BeadWorktreePath = %q, want %q", got, want)
-	}
-}
+//
+// TestSpecBranch, TestSpecWorktreePath, and TestBeadWorktreePath were
+// relocated to internal/workspace/worktree_test.go along with the
+// helpers themselves (ARCH-7 / mindspec-c8q0).
 
 func TestIsValidMode(t *testing.T) {
 	for _, m := range ValidModes {

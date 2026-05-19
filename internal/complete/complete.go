@@ -3,10 +3,10 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -82,14 +82,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 	}
 
 	// Derive spec branch from conventions
-	specBranch := state.SpecBranch(specID)
+	specBranch := workspace.SpecBranch(specID)
 
 	// 2. Find worktree matching bead (needed for commit/clean-tree paths)
 	var wtPath string
 	entries, err := worktreeListFn()
 	if err == nil {
-		expectedName := "worktree-" + beadID
-		expectedBranch := "bead/" + beadID
+		expectedName := workspace.BeadWorktreeName(beadID)
+		expectedBranch := workspace.BeadBranch(beadID)
 		for _, e := range entries {
 			if e.Name == expectedName || e.Branch == expectedBranch {
 				wtPath = e.Path
@@ -138,10 +138,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 		_ = recording.EmitBeadMarker(root, specID, "complete", beadID)
 	}
 
+	cfg, cfgErr := config.Load(root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
 	result := &Result{
 		BeadID:       beadID,
 		BeadClosed:   true,
-		SpecWorktree: filepath.Join(root, ".worktrees", "worktree-spec-"+specID),
+		SpecWorktree: workspace.SpecWorktreePath(root, cfg, specID),
 	}
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).

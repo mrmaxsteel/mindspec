@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // MindspecExecutor implements Executor using local git operations and beads
@@ -84,8 +85,8 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 		return WorkspaceInfo{}, fmt.Errorf("loading config: %w", err)
 	}
 
-	specBranch := "spec/" + specID
-	wtName := "worktree-spec-" + specID
+	specBranch := workspace.SpecBranch(specID)
+	wtName := workspace.SpecWorktreeName(specID)
 	wtPath := cfg.WorktreePath(g.Root, wtName)
 
 	// Ensure .worktrees/ directory exists and is gitignored.
@@ -127,16 +128,16 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 		cfg = config.DefaultConfig()
 	}
 
-	branchName := "bead/" + beadID
+	branchName := workspace.BeadBranch(beadID)
 	baseBranch := "HEAD"
 	if specID != "" {
-		baseBranch = "spec/" + specID
+		baseBranch = workspace.SpecBranch(specID)
 	}
 
 	// Check for existing worktree.
 	entries, err := g.WorktreeListFn()
 	if err == nil {
-		wtName := "worktree-" + beadID
+		wtName := workspace.BeadWorktreeName(beadID)
 		for _, e := range entries {
 			if e.Name == wtName || e.Branch == branchName {
 				return WorkspaceInfo{Path: e.Path, Branch: branchName}, nil
@@ -163,7 +164,7 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	}
 
 	// Create worktree under the anchor root.
-	wtName := "worktree-" + beadID
+	wtName := workspace.BeadWorktreeName(beadID)
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
 	if err := withWorkingDir(anchorRoot, func() error {
 		return g.WorktreeCreateFn(relWtPath, branchName)
@@ -189,8 +190,8 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 // CompleteBead closes out a bead: commits, merges into spec, removes worktree,
 // deletes branch. Mirrors the logic in internal/complete/complete.go.
 func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
-	beadBranch := "bead/" + beadID
-	wtName := "worktree-" + beadID
+	beadBranch := workspace.BeadBranch(beadID)
+	wtName := workspace.BeadWorktreeName(beadID)
 
 	// Find bead worktree.
 	var wtPath string
@@ -228,8 +229,12 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 
 	// Merge bead branch into spec branch via spec worktree.
 	// Derive spec worktree path from specBranch (spec/<specID>).
-	specID := strings.TrimPrefix(specBranch, "spec/")
-	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
+	specID := strings.TrimPrefix(specBranch, workspace.SpecBranchPrefix)
+	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if _, err := os.Stat(specWtPath); err == nil {
 		if err := g.MergeIntoFn(specWtPath, beadBranch); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", beadBranch, specBranch, err)
@@ -275,7 +280,11 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	}
 
 	// Auto-commit any remaining spec artifacts.
-	specWtPath := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
+	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
 	}
@@ -284,7 +293,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	// This handles beads that were closed via `bd close` without `mindspec complete`.
 	if entries, listErr := g.WorktreeListFn(); listErr == nil {
 		for _, e := range entries {
-			if !strings.HasPrefix(e.Branch, "bead/") {
+			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 				continue
 			}
 			// Auto-commit any remaining bead artifacts.
@@ -328,7 +337,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		// Clean up lingering bead worktrees/branches.
 		if entries, listErr := g.WorktreeListFn(); listErr == nil {
 			for _, e := range entries {
-				if strings.HasPrefix(e.Branch, "bead/") {
+				if strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 					_ = g.WorktreeRemoveFn(e.Name)
 					_ = g.DeleteBranchFn(e.Branch)
 				}
@@ -336,7 +345,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		}
 
 		// Remove spec worktree.
-		specWtName := "worktree-spec-" + specID
+		specWtName := workspace.SpecWorktreeName(specID)
 		if err := g.WorktreeRemoveFn(specWtName); err != nil {
 			if !isAlreadyRemovedErr(err) {
 				return fmt.Errorf("removing spec worktree: %w", err)
@@ -368,8 +377,8 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 // Cleanup removes stale workspaces and branches for a spec.
 // Mirrors the logic in internal/cleanup/cleanup.go.
 func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
-	specBranch := "spec/" + specID
-	specWtName := "worktree-spec-" + specID
+	specBranch := workspace.SpecBranch(specID)
+	specWtName := workspace.SpecWorktreeName(specID)
 
 	// Remove worktree (best-effort).
 	if err := g.WorktreeRemoveFn(specWtName); err != nil {
@@ -454,7 +463,11 @@ func (g *MindspecExecutor) resolveAnchorRoot(specID string) string {
 	if specID == "" {
 		return g.Root
 	}
-	specWt := filepath.Join(g.Root, ".worktrees", "worktree-spec-"+specID)
+	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWt := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if fi, err := os.Stat(specWt); err == nil && fi.IsDir() {
 		return specWt
 	}

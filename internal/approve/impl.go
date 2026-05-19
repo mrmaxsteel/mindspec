@@ -77,7 +77,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 
 	// Derive spec branch from convention.
-	specBranch := state.SpecBranch(specID)
+	specBranch := workspace.SpecBranch(specID)
 
 	// Enforcement: verify all plan beads are closed.
 	specDir := workspace.SpecDir(root, specID)

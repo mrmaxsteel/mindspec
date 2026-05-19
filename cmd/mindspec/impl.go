@@ -3,9 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +42,11 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 	// Auto-cd into the spec worktree so phase resolution finds the correct
 	// context. Without this, running from main fails because DiscoverActiveSpecs
 	// doesn't find closed epics (review mode).
-	specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+	cfg, cfgErr := config.Load(root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	if info, err := os.Stat(specWtPath); err == nil && info.IsDir() {
 		_ = os.Chdir(specWtPath)
 	}
