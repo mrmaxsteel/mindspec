@@ -403,14 +403,23 @@ aborts the migration.
 
 ## Open Questions
 
-- [ ] During Phase 2, the local `replace` directive points at `../agentmind`.
-      Is that path acceptable in CI, or do we need a sibling-checkout helper?
-- [ ] Does mindspec need a smoke test that runs against a real `agentmind`
-      binary in CI, or is unit-level testing of the graceful-degradation
-      wrapper sufficient until Phase 6?
-- [ ] Wire-version-skew handling (`client.Probe()` semantics) is deferred —
-      confirm that's acceptable for v1.0.0 or whether a minimal "refuse to
-      start on major mismatch" check belongs in this spec's Phase 4.
+All previously-open questions resolved by the review panel before approval:
+
+- **Phase 2 `replace ../agentmind` directive in CI.** Resolved: CI builds use
+  a sibling-checkout helper (`scripts/checkout-agentmind.sh`) that clones the
+  agentmind repo at the tag pinned in mindspec's `go.mod` to a sibling path
+  before running `go test`. Implementation detail to be handled by the Phase 2
+  bead; not a spec-level open question.
+- **Smoke test against a real `agentmind` binary in CI.** Resolved: Test D
+  (live-capture) is added to mindspec's CI matrix from Phase 4 onward,
+  gated on the agentmind binary being available via the Phase 0
+  prerequisite verified by Test G. Until Phase 4, unit-level testing of the
+  graceful-degradation wrapper plus the Phase 3 `main_test.go` integration
+  test in the agentmind repo is sufficient.
+- **Wire-version-skew handling.** Resolved as a Non-Goal (see "Non-Goals"
+  section): `client.Probe()` does not perform version-skew checks for v1.0.0.
+  Future ADR may add a minimal "refuse to start on major mismatch" check;
+  out of scope here.
 
 ## Estimated effort (mindspec side)
 
