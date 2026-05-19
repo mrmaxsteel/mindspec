@@ -7,12 +7,32 @@
     "OTEL_METRICS_EXPORTER": "otlp"
   },
   "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
           {
             "command": "mindspec hook session-start",
             "statusMessage": "Loading mode guidance...",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
             "type": "command"
           }
         ],

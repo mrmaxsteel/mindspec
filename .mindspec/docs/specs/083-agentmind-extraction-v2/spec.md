@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-05-19T23:32:32Z"
+approved_by: user
+status: Approved
 ---
 # Spec 083-agentmind-extraction-v2: AgentMind Extraction (v2)
 
@@ -438,7 +438,7 @@ gap this spec is sized against.
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-05-19
+- **Notes**: Approved via mindspec approve spec
