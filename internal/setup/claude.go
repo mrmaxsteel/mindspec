@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
+	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
 const (
@@ -236,7 +237,7 @@ func ensureSettings(root string, check bool, r *Result) error {
 			if err != nil {
 				return fmt.Errorf("marshaling %s: %w", relPath, err)
 			}
-			if err := os.WriteFile(absPath, append(out, '\n'), 0o644); err != nil {
+			if err := safeio.WriteFileNoSymlink(absPath, append(out, '\n'), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
 			}
 		}
@@ -253,7 +254,7 @@ func ensureSettings(root string, check bool, r *Result) error {
 			if err != nil {
 				return fmt.Errorf("marshaling %s: %w", relPath, err)
 			}
-			if err := os.WriteFile(absPath, append(out, '\n'), 0o644); err != nil {
+			if err := safeio.WriteFileNoSymlink(absPath, append(out, '\n'), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
 			}
 		}
@@ -417,7 +418,7 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 			}
 			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
 			if !check {
-				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+				if err := safeio.WriteFileNoSymlink(absPath, []byte(updated), 0o644); err != nil {
 					return fmt.Errorf("writing %s: %w", relPath, err)
 				}
 			}
@@ -428,7 +429,7 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
 			if !check {
 				block := "\n" + mindspecMarkerBegin + "\n" + claudeMDAppendBlock + mindspecMarkerEnd + "\n"
-				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
+				f, err := safeio.OpenAppendNoSymlink(absPath, 0o644)
 				if err != nil {
 					return fmt.Errorf("opening %s: %w", relPath, err)
 				}
@@ -445,7 +446,7 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 	} else {
 		r.Created = append(r.Created, relPath)
 		if !check {
-			if err := os.WriteFile(absPath, []byte(claudeMDFull), 0o644); err != nil {
+			if err := safeio.WriteFileNoSymlink(absPath, []byte(claudeMDFull), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
 			}
 		}

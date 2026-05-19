@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
 // RunCopilot sets up GitHub Copilot integration at root.
@@ -69,7 +71,7 @@ func ensureCopilotInstructions(root string, check bool, r *Result) error {
 			}
 			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
 			if !check {
-				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+				if err := safeio.WriteFileNoSymlink(absPath, []byte(updated), 0o644); err != nil {
 					return fmt.Errorf("writing %s: %w", relPath, err)
 				}
 			}
@@ -80,7 +82,7 @@ func ensureCopilotInstructions(root string, check bool, r *Result) error {
 			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
 			if !check {
 				block := "\n" + mindspecMarkerBegin + "\n" + copilotInstructionsAppendBlock + mindspecMarkerEnd + "\n"
-				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
+				f, err := safeio.OpenAppendNoSymlink(absPath, 0o644)
 				if err != nil {
 					return fmt.Errorf("opening %s: %w", relPath, err)
 				}
@@ -100,7 +102,7 @@ func ensureCopilotInstructions(root string, check bool, r *Result) error {
 			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 				return fmt.Errorf("creating dir for %s: %w", relPath, err)
 			}
-			if err := os.WriteFile(absPath, []byte(copilotInstructionsFull), 0o644); err != nil {
+			if err := safeio.WriteFileNoSymlink(absPath, []byte(copilotInstructionsFull), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
 			}
 		}
