@@ -366,6 +366,77 @@ func TestWorktreeList_ArgsConstruction(t *testing.T) {
 	}
 }
 
+// --- ListJSON tests ---
+
+func TestListJSON_ValidJSONPassthrough(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", `[{"id":"mindspec-abc","title":"x"}]`)
+	}
+	out, err := ListJSON("--status", "ready")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !strings.Contains(string(out), "mindspec-abc") {
+		t.Fatalf("got %s", out)
+	}
+}
+
+func TestListJSON_EmptyResults(t *testing.T) {
+	cases := []string{"", "[]", "No issues found."}
+	for _, c := range cases {
+		c := c
+		t.Run(c, func(t *testing.T) {
+			origExec := execCommand
+			defer func() { execCommand = origExec }()
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				return exec.Command("echo", c)
+			}
+			out, err := ListJSON()
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if strings.TrimSpace(string(out)) != "[]" {
+				t.Errorf("want [], got %q", out)
+			}
+		})
+	}
+}
+
+func TestListJSON_NonJSONFailsLoudly(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		// Simulate an old bd printing a human-readable table.
+		return exec.Command("echo", "○ mindspec-abc ● P2 ready  Some title")
+	}
+	_, err := ListJSON()
+	if err == nil {
+		t.Fatal("expected error for non-JSON output")
+	}
+	if !strings.Contains(err.Error(), "mindspec doctor") {
+		t.Errorf("error should point at doctor: %v", err)
+	}
+	if !strings.Contains(err.Error(), "brew upgrade beads") &&
+		!strings.Contains(err.Error(), "upgrade") {
+		t.Errorf("error should suggest upgrade: %v", err)
+	}
+}
+
+func TestListJSON_ExecErrorPropagates(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		// `false` exits 1 with no output.
+		return exec.Command("false")
+	}
+	_, err := ListJSON()
+	if err == nil {
+		t.Fatal("expected error from failed bd invocation")
+	}
+}
+
 // --- WorktreeRemove tests ---
 
 func TestWorktreeRemove_ArgsConstruction(t *testing.T) {
