@@ -154,6 +154,9 @@ func TestRunRejectsInvalidSpecID(t *testing.T) {
 		{"001-a", false},
 		{"0001-long-number", false},
 		{"999-three-part-slug", false},
+		// Valid under canonical pattern (validate.SpecID): slug may start with digit
+		{"010-1bad", false},
+		{"999-3d-engine", false},
 
 		// Invalid: no numeric prefix
 		{"my-feature", true},
@@ -166,8 +169,6 @@ func TestRunRejectsInvalidSpecID(t *testing.T) {
 		{"010-My-Feature", true},
 		// Invalid: spaces
 		{"010-my feature", true},
-		// Invalid: slug starts with digit
-		{"010-1bad", true},
 		// Invalid: trailing hyphen
 		{"010-bad-", true},
 		// Invalid: double hyphen
