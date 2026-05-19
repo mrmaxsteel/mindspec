@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/viz"
@@ -49,6 +51,27 @@ var agentmindServeCmd = &cobra.Command{
 			<-sigCh
 			cancel()
 		}()
+
+		// Write the AgentMind identity lockfile so other mindspec processes
+		// can verify the listener on otlpPort is us, not a hostile/foreign
+		// process on the same port. See internal/agentmind/lockfile.go for
+		// the contract. The writer lives here on the mindspec side rather
+		// than inside internal/viz/ so the viz package can be extracted
+		// without entangling identity state.
+		tok, err := agentmind.NewToken()
+		if err != nil {
+			return fmt.Errorf("generating agentmind token: %w", err)
+		}
+		if err := agentmind.WriteLockfile(agentmind.Lockfile{
+			PID:       os.Getpid(),
+			OTLPPort:  otlpPort,
+			UIPort:    uiPort,
+			Token:     tok,
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			return fmt.Errorf("writing agentmind lockfile: %w", err)
+		}
+		defer func() { _ = agentmind.RemoveLockfile() }()
 
 		return viz.RunLiveOpts(ctx, viz.LiveOpts{
 			OTLPPort:   otlpPort,
