@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -112,14 +113,13 @@ func RunSessionWithRetries(ctx context.Context, cfg *RunConfig, def *SessionDef,
 // commitWorktreeChanges commits any changes made during the session.
 func commitWorktreeChanges(wtPath, label string) {
 	// Check if there are changes
-	cmd := exec.Command("git", "-C", wtPath, "status", "--porcelain")
-	out, err := cmd.Output()
+	out, err := gitutil.Status(wtPath)
 	if err != nil || len(out) == 0 {
 		return
 	}
 
-	exec.Command("git", "-C", wtPath, "add", "-A").Run()                                                      //nolint:errcheck
-	exec.Command("git", "-C", wtPath, "commit", "-m", "bench: Session "+label+" output", "--no-verify").Run() //nolint:errcheck
+	_ = gitutil.Add(wtPath, "-A")
+	_ = gitutil.CommitNoVerify(wtPath, "bench: Session "+label+" output")
 }
 
 // waitForPort waits until the given port is accepting TCP connections.
@@ -233,18 +233,16 @@ func countEventsByLabel(path, label string) int {
 
 // getCurrentCommit returns the HEAD commit SHA of a worktree.
 func getCurrentCommit(wtPath string) string {
-	cmd := exec.Command("git", "-C", wtPath, "rev-parse", "HEAD")
-	out, err := cmd.Output()
+	sha, err := gitutil.RevParseHEAD(wtPath)
 	if err != nil {
 		return ""
 	}
-	return trimNewline(string(out))
+	return sha
 }
 
 // hasCodeChanges checks if implementation source files were created since baseCommit.
 func hasCodeChanges(wtPath, baseCommit string) bool {
-	cmd := exec.Command("git", "-C", wtPath, "diff", "--name-only", baseCommit+"..HEAD")
-	out, err := cmd.Output()
+	lines, err := gitutil.DiffNameOnly(wtPath, baseCommit, "HEAD")
 	if err != nil {
 		return false
 	}
@@ -252,11 +250,7 @@ func hasCodeChanges(wtPath, baseCommit string) bool {
 	codeExts := regexp.MustCompile(`\.(go|js|ts|html|css|jsx|tsx)$`)
 	excludeDirs := []string{"docs/", ".claude/", ".mindspec/", ".beads/"}
 
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	for _, line := range lines {
 		if !codeExts.MatchString(line) {
 			continue
 		}

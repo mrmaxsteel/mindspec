@@ -2,10 +2,10 @@ package next
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // artifactPaths is the list of paths mindspec treats as co-managed build
@@ -27,15 +27,14 @@ var (
 )
 
 func defaultStatusPorcelain(cwd string) (string, error) {
-	cmd := exec.Command("git", "-C", cwd, "status", "--porcelain")
-	// CombinedOutput (not Output) so stderr is preserved on failure — a
-	// missing `-C` target or corrupt index otherwise exits with an opaque
-	// *ExitError whose message the caller cannot surface.
-	out, err := cmd.CombinedOutput()
+	// Use StatusWithStderr (CombinedOutput-based) so stderr is preserved on
+	// failure — a missing `-C` target or corrupt index otherwise exits with
+	// an opaque *ExitError whose message the caller cannot surface.
+	out, err := gitutil.StatusWithStderr(cwd)
 	if err != nil {
-		return "", fmt.Errorf("checking working tree: %w: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("checking working tree: %w", err)
 	}
-	return string(out), nil
+	return out, nil
 }
 
 // classifyDirty partitions a list of repo-relative dirty paths into co-managed

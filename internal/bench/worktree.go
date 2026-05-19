@@ -4,39 +4,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // CreateWorktree creates a git worktree at wtPath from the given commit,
 // then checks out a new branch with the given name.
 func CreateWorktree(repoRoot, branch, wtPath, commit string) error {
-	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", wtPath, commit)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add: %w\n%s", err, out)
+	if err := gitutil.WorktreeAddDetach(repoRoot, wtPath, commit); err != nil {
+		return fmt.Errorf("git worktree add: %w", err)
 	}
-
-	cmd = exec.Command("git", "-C", wtPath, "checkout", "-b", branch)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git checkout -b: %w\n%s", err, out)
+	if err := gitutil.CheckoutNewBranch(wtPath, branch); err != nil {
+		return fmt.Errorf("git checkout -b: %w", err)
 	}
 	return nil
 }
 
 // CheckoutWorktree creates a git worktree at wtPath from an existing branch.
 func CheckoutWorktree(repoRoot, branch, wtPath string) error {
-	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", wtPath, branch)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add (existing branch): %w\n%s", err, out)
+	if err := gitutil.WorktreeAdd(repoRoot, wtPath, branch); err != nil {
+		return fmt.Errorf("git worktree add (existing branch): %w", err)
 	}
 	return nil
 }
 
 // RemoveWorktree force-removes a git worktree and prunes.
 func RemoveWorktree(repoRoot, wtPath string) error {
-	cmd := exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", wtPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree remove: %w\n%s", err, out)
+	if err := gitutil.WorktreeRemoveForce(repoRoot, wtPath); err != nil {
+		return fmt.Errorf("git worktree remove: %w", err)
 	}
 	return nil
 }

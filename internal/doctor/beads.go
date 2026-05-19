@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,9 +76,7 @@ func checkBeads(r *Report, root string) {
 }
 
 func checkTrackedRuntime(r *Report, root string) {
-	cmd := exec.Command("git", "ls-files", ".beads/")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := gitutil.LsFiles(root, ".beads/")
 	if err != nil {
 		// git not available or not a git repo — skip with warning
 		r.Checks = append(r.Checks, Check{
@@ -88,7 +87,7 @@ func checkTrackedRuntime(r *Report, root string) {
 		return
 	}
 
-	tracked := strings.TrimSpace(string(out))
+	tracked := strings.TrimSpace(out)
 	if tracked == "" {
 		r.Checks = append(r.Checks, Check{
 			Name:    "Beads runtime artifacts",
@@ -225,13 +224,11 @@ func checkStrayRootJSONL(r *Report, root string) {
 		return
 	}
 
-	cmd := exec.Command("git", "ls-files", "--full-name", "--", "issues.jsonl")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := gitutil.LsFilesFullName(root, "issues.jsonl")
 	if err != nil {
 		return
 	}
-	if strings.TrimSpace(string(out)) == "" {
+	if strings.TrimSpace(out) == "" {
 		return
 	}
 

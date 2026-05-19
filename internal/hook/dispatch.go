@@ -3,10 +3,10 @@ package hook
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -61,7 +61,7 @@ func runPreCommit(st *HookState) Result {
 	}
 
 	// Get current branch
-	branch := getCurrentBranch()
+	branch, _ := gitutil.CurrentBranch()
 	if branch == "" {
 		return Result{Action: Pass}
 	}
@@ -100,14 +100,4 @@ func runPreCommit(st *HookState) Result {
 	}
 
 	return Result{Action: Pass}
-}
-
-// getCurrentBranch returns the current git branch name.
-func getCurrentBranch() string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }

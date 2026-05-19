@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // RunConfig holds the configuration for a full benchmark run.
@@ -46,18 +47,18 @@ func Run(cfg *RunConfig) error {
 
 	// Resolve repo root and commit
 	if cfg.RepoRoot == "" {
-		out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+		top, err := gitutil.RevParseShowToplevel()
 		if err != nil {
 			return fmt.Errorf("finding repo root: %w", err)
 		}
-		cfg.RepoRoot = trimNewline(string(out))
+		cfg.RepoRoot = top
 	}
 	if cfg.BenchCommit == "" {
-		out, err := exec.Command("git", "-C", cfg.RepoRoot, "rev-parse", "HEAD").Output()
+		sha, err := gitutil.RevParseHEAD(cfg.RepoRoot)
 		if err != nil {
 			return fmt.Errorf("finding HEAD commit: %w", err)
 		}
-		cfg.BenchCommit = trimNewline(string(out))
+		cfg.BenchCommit = sha
 	}
 
 	if cfg.WorkDir == "" {
@@ -256,11 +257,9 @@ Follow the MindSpec workflow:
 	if !cfg.SkipCommit {
 		fmt.Fprintln(cfg.Stdout, "Committing results...")
 		benchDir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
-		cmd := exec.Command("git", "-C", cfg.RepoRoot, "add", benchDir)
-		cmd.Run() //nolint:errcheck
+		_ = gitutil.Add(cfg.RepoRoot, benchDir)
 		commitMsg := fmt.Sprintf("bench(%s): add e2e benchmark results", cfg.SpecID)
-		cmd = exec.Command("git", "-C", cfg.RepoRoot, "commit", "-m", commitMsg, "--no-verify")
-		cmd.Run() //nolint:errcheck
+		_ = gitutil.CommitNoVerify(cfg.RepoRoot, commitMsg)
 	}
 
 	benchDir := BenchmarkDir(cfg.RepoRoot, cfg.SpecID)
@@ -290,12 +289,10 @@ func checkPrerequisites(cfg *RunConfig) error {
 	}
 
 	// Check clean git tree
-	cmd := exec.Command("git", "-C", cfg.RepoRoot, "diff", "--quiet")
-	if err := cmd.Run(); err != nil {
+	if err := gitutil.DiffQuiet(cfg.RepoRoot); err != nil {
 		errors = append(errors, "git working tree is not clean — commit or stash changes")
 	} else {
-		cmd = exec.Command("git", "-C", cfg.RepoRoot, "diff", "--cached", "--quiet")
-		if err := cmd.Run(); err != nil {
+		if err := gitutil.DiffCachedQuiet(cfg.RepoRoot); err != nil {
 			errors = append(errors, "git index has staged changes — commit or stash")
 		}
 	}
@@ -320,7 +317,7 @@ func cleanupWorktrees(cfg *RunConfig, sessions []*SessionDef) {
 			RemoveWorktree(cfg.RepoRoot, wtPath) //nolint:errcheck
 		}
 	}
-	exec.Command("git", "-C", cfg.RepoRoot, "worktree", "prune").Run() //nolint:errcheck
+	_ = gitutil.WorktreePrune(cfg.RepoRoot)
 }
 
 func trimNewline(s string) string {

@@ -2,8 +2,9 @@ package validate
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // ValidateDocs checks for doc-sync compliance by comparing changed source files
@@ -45,16 +46,9 @@ func ValidateDocs(root, diffRef string) *Result {
 
 // getChangedFiles runs git diff --name-only and returns the list of changed files.
 func getChangedFiles(ref string) ([]string, error) {
-	out, err := exec.Command("git", "diff", "--name-only", ref).Output()
+	files, err := gitutil.DiffNameOnlyRef("", ref)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s: %w", ref, err)
-	}
-
-	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			files = append(files, line)
-		}
 	}
 	return files, nil
 }
