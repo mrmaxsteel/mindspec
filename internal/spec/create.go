@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
-	"github.com/mrmaxsteel/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/githooks"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -143,7 +143,7 @@ func Run(root, specID, title string, exec executor.Executor) (*Result, error) {
 	// Note: No focus file written per ADR-0023 (beads is single state authority).
 
 	// Install git hooks (best-effort, ensures Layer 1 enforcement).
-	if err := hooks.InstallAll(root); err != nil {
+	if err := githooks.InstallAll(root); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not install git hooks: %v\n", err)
 	}
 

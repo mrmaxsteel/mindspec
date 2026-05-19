@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/hooks"
+	"github.com/mrmaxsteel/mindspec/internal/githooks"
 )
 
 // RunCodex sets up OpenAI Codex CLI integration at root.
@@ -41,7 +41,7 @@ func RunCodex(root string, check bool) (*Result, error) {
 
 	// 3. Install/upgrade git hooks (pre-commit, post-checkout)
 	if !check {
-		if err := hooks.InstallAll(root); err != nil {
+		if err := githooks.InstallAll(root); err != nil {
 			return nil, fmt.Errorf("installing git hooks: %w", err)
 		}
 	}
