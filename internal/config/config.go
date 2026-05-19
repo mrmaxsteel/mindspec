@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,9 +67,59 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Load reads .mindspec/config.yaml under root.
+// cachedConfig holds a memoized Load result (config and/or error) for a given root.
+type cachedConfig struct {
+	cfg *Config
+	err error
+}
+
+var (
+	configCacheMu sync.Mutex
+	configCache   = map[string]cachedConfig{}
+)
+
+// Load reads .mindspec/config.yaml under root and returns the parsed Config.
+// Results are cached per absolute root path for the lifetime of the process so
+// repeated calls within a single CLI invocation do not re-read or re-parse the
+// file. Callers must not mutate the returned *Config — it is shared across all
+// callers under the same root. Use ResetCache to invalidate (tests, future
+// daemon use).
+//
 // Returns DefaultConfig if the file does not exist.
 func Load(root string) (*Config, error) {
+	key, absErr := filepath.Abs(root)
+	if absErr != nil {
+		// Fall back to uncached load if Abs fails — we cannot safely key the cache.
+		return loadUncached(root)
+	}
+
+	configCacheMu.Lock()
+	if entry, ok := configCache[key]; ok {
+		configCacheMu.Unlock()
+		return entry.cfg, entry.err
+	}
+	configCacheMu.Unlock()
+
+	cfg, loadErr := loadUncached(root)
+
+	configCacheMu.Lock()
+	configCache[key] = cachedConfig{cfg: cfg, err: loadErr}
+	configCacheMu.Unlock()
+
+	return cfg, loadErr
+}
+
+// ResetCache clears the per-process Load cache. Intended for tests that mutate
+// .mindspec/config.yaml between Load calls and for any future long-running
+// daemon that needs to pick up on-disk edits.
+func ResetCache() {
+	configCacheMu.Lock()
+	defer configCacheMu.Unlock()
+	configCache = map[string]cachedConfig{}
+}
+
+// loadUncached is the actual reader/parser. Not cached; prefer Load.
+func loadUncached(root string) (*Config, error) {
 	path := filepath.Join(root, ".mindspec", "config.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
