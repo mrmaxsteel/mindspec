@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -127,10 +128,10 @@ func validateImplementMode(root string, s *Focus) []Warning {
 
 	// Check plan is approved via frontmatter
 	planPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "plan.md")
-	if planStatus := readPlanFrontmatterStatus(planPath); planStatus != "Approved" {
+	if planStatus := frontmatter.StatusFromPath(planPath); !strings.EqualFold(planStatus, "Approved") {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
-			Message: fmt.Sprintf("State says implement mode but plan.md has status %q (expected Approved)", planStatus),
+			Message: fmt.Sprintf("State says implement mode but plan.md is not in Approved status (got %q; expected Approved)", planStatus),
 		})
 	}
 
@@ -182,32 +183,6 @@ func readSpecApprovalStatus(specPath string) string {
 			if len(parts) == 2 {
 				return strings.TrimSpace(parts[1])
 			}
-		}
-	}
-	return "unknown"
-}
-
-// readPlanFrontmatterStatus extracts the status field from plan.md YAML frontmatter.
-func readPlanFrontmatterStatus(planPath string) string {
-	f, err := os.Open(planPath)
-	if err != nil {
-		return "unknown"
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
-			if inFrontmatter {
-				break // end of frontmatter
-			}
-			inFrontmatter = true
-			continue
-		}
-		if inFrontmatter && strings.HasPrefix(line, "status:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "status:"))
 		}
 	}
 	return "unknown"

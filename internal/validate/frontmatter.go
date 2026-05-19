@@ -1,12 +1,11 @@
 package validate
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
-	"gopkg.in/yaml.v3"
 )
 
 // SpecStatus returns the status field from the YAML frontmatter of a spec.md
@@ -18,6 +17,8 @@ import (
 // the contract (YAML frontmatter) rather than substring-matching raw markdown
 // prose, which was the original ZFC violation in next/mode.go and
 // approve/plan.go.
+//
+// Delegates to internal/frontmatter (ARCH-6 / mindspec-npd2).
 func SpecStatus(root, specID string) string {
 	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
 	return specStatusFromPath(specPath)
@@ -31,34 +32,15 @@ func SpecStatusAt(specDir string) string {
 }
 
 func specStatusFromPath(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return SpecStatusFromBytes(data)
+	return frontmatter.StatusFromPath(path)
 }
 
 // SpecStatusFromBytes parses the YAML frontmatter of already-loaded spec.md
 // bytes and returns the status field. Empty string on any parse failure.
+//
+// Delegates to internal/frontmatter (ARCH-6 / mindspec-npd2).
 func SpecStatusFromBytes(data []byte) string {
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return ""
-	}
-	var fmLines []string
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		fmLines = append(fmLines, line)
-	}
-	var fm struct {
-		Status string `yaml:"status"`
-	}
-	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(fm.Status)
+	return frontmatter.Status(data)
 }
 
 // SpecIsApproved reports whether a spec.md's YAML frontmatter has status
