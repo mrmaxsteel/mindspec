@@ -3,7 +3,6 @@ package executor
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,74 +12,55 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
+// WorktreeOps abstracts the bead worktree CLI surface so tests can run
+// orchestration logic without requiring `bd` on PATH. The default
+// implementation shells out to `bd worktree` via the bead package.
+//
+// This is the only DI seam on MindspecExecutor. Git, config, and exec are
+// called directly (see ARCH-11): they are either trivially testable against a
+// real temp git repo, or — in the case of `bead.Export` — covered by an
+// integration-style test gated on `bd` being on PATH.
+type WorktreeOps interface {
+	Create(name, branch string) error
+	Remove(name string) error
+	List() ([]bead.WorktreeListEntry, error)
+}
+
+// defaultWorktreeOps is the production implementation; it delegates to the
+// `bd worktree` CLI via the bead package.
+type defaultWorktreeOps struct{}
+
+func (defaultWorktreeOps) Create(name, branch string) error { return bead.WorktreeCreate(name, branch) }
+func (defaultWorktreeOps) Remove(name string) error         { return bead.WorktreeRemove(name) }
+func (defaultWorktreeOps) List() ([]bead.WorktreeListEntry, error) {
+	return bead.WorktreeList()
+}
+
 // MindspecExecutor implements Executor using local git operations and beads
 // worktree CLI. It preserves all current behavior: worktree-first creation,
 // --no-ff merges, .gitignore management.
-//
-// Function fields are exposed for testability via injection.
 type MindspecExecutor struct {
 	Root string // Main repo root (absolute path)
 
-	// Git operations (default to gitutil package functions).
-	CreateBranchFn    func(name, from string) error
-	BranchExistsFn    func(name string) bool
-	DeleteBranchFn    func(name string) error
-	MergeBranchFn     func(workdir, source, target string) error
-	MergeIntoFn       func(targetWorkdir, sourceBranch string) error
-	CommitAllFn       func(workdir, message string) error
-	DiffStatFn        func(workdir, base, head string) (string, error)
-	CommitCountFn     func(workdir, base, head string) (int, error)
-	IsAncestorFn      func(workdir, ancestor, descendant string) (bool, error)
-	HasRemoteFn       func() bool
-	PushBranchFn      func(branch string) error
-	EnsureGitignoreFn func(root, entry string) error
-
-	// Worktree operations (default to bead package functions).
-	WorktreeCreateFn func(name, branch string) error
-	WorktreeRemoveFn func(name string) error
-	WorktreeListFn   func() ([]bead.WorktreeListEntry, error)
-
-	// Pre-stage hook: refresh .beads/issues.jsonl from Dolt before each commit
-	// so the committed JSONL matches Dolt state. Called with the workdir of
-	// the pending commit (bd export writes to <workdir>/.beads/issues.jsonl).
-	ExportJSONLFn func(workdir string) error
-
-	// Config loader (default to config.Load).
-	LoadConfigFn func(root string) (*config.Config, error)
-
-	// Command execution (for git status checks).
-	ExecCommandFn func(name string, arg ...string) *exec.Cmd
+	// WorktreeOps is the worktree CLI surface. Defaults to the bead package's
+	// `bd worktree` wrappers; tests may inject a fake to avoid requiring `bd`
+	// on PATH.
+	WorktreeOps WorktreeOps
 }
 
-// NewMindspecExecutor creates a MindspecExecutor with default function bindings.
+// NewMindspecExecutor creates a MindspecExecutor wired to the production
+// git/bead/config helpers.
 func NewMindspecExecutor(root string) *MindspecExecutor {
 	return &MindspecExecutor{
-		Root:              root,
-		CreateBranchFn:    gitutil.CreateBranch,
-		BranchExistsFn:    gitutil.BranchExists,
-		DeleteBranchFn:    gitutil.DeleteBranch,
-		MergeBranchFn:     gitutil.MergeBranch,
-		MergeIntoFn:       gitutil.MergeInto,
-		CommitAllFn:       gitutil.CommitAll,
-		DiffStatFn:        gitutil.DiffStat,
-		CommitCountFn:     gitutil.CommitCount,
-		IsAncestorFn:      gitutil.IsAncestor,
-		HasRemoteFn:       gitutil.HasRemote,
-		PushBranchFn:      gitutil.PushBranch,
-		EnsureGitignoreFn: gitutil.EnsureGitignoreEntry,
-		WorktreeCreateFn:  bead.WorktreeCreate,
-		WorktreeRemoveFn:  bead.WorktreeRemove,
-		WorktreeListFn:    bead.WorktreeList,
-		ExportJSONLFn:     bead.Export,
-		LoadConfigFn:      config.Load,
-		ExecCommandFn:     exec.Command,
+		Root:        root,
+		WorktreeOps: defaultWorktreeOps{},
 	}
 }
 
 // InitSpecWorkspace creates a workspace for spec authoring.
 // Mirrors the logic in internal/spec/create.go (Phase 1).
 func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {
-	cfg, err := g.LoadConfigFn(g.Root)
+	cfg, err := config.Load(g.Root)
 	if err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("loading config: %w", err)
 	}
@@ -93,20 +73,20 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 	if err := os.MkdirAll(filepath.Join(g.Root, cfg.WorktreeRoot), 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
-	if err := g.EnsureGitignoreFn(g.Root, cfg.WorktreeRoot); err != nil {
+	if err := gitutil.EnsureGitignoreEntry(g.Root, cfg.WorktreeRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
 	}
 
 	// Create spec branch from HEAD if it doesn't exist.
-	if !g.BranchExistsFn(specBranch) {
-		if err := g.CreateBranchFn(specBranch, "HEAD"); err != nil {
+	if !gitutil.BranchExists(specBranch) {
+		if err := gitutil.CreateBranch(specBranch, "HEAD"); err != nil {
 			return WorkspaceInfo{}, fmt.Errorf("creating branch %s: %w", specBranch, err)
 		}
 	}
 
 	// Create worktree via beads CLI.
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
-	if err := g.WorktreeCreateFn(relWtPath, specBranch); err != nil {
+	if err := g.WorktreeOps.Create(relWtPath, specBranch); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating worktree: %w", err)
 	}
 
@@ -123,7 +103,7 @@ func (g *MindspecExecutor) HandoffEpic(epicID, specID string, beadIDs []string) 
 // DispatchBead creates a workspace for a bead implementation.
 // Mirrors the logic in internal/next/beads.go EnsureWorktree().
 func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, error) {
-	cfg, err := g.LoadConfigFn(g.Root)
+	cfg, err := config.Load(g.Root)
 	if err != nil {
 		cfg = config.DefaultConfig()
 	}
@@ -135,7 +115,7 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	}
 
 	// Check for existing worktree.
-	entries, err := g.WorktreeListFn()
+	entries, err := g.WorktreeOps.List()
 	if err == nil {
 		wtName := workspace.BeadWorktreeName(beadID)
 		for _, e := range entries {
@@ -149,8 +129,8 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	anchorRoot := g.resolveAnchorRoot(specID)
 
 	// Create bead branch from spec branch (or HEAD).
-	if !g.BranchExistsFn(branchName) {
-		if err := g.CreateBranchFn(branchName, baseBranch); err != nil {
+	if !gitutil.BranchExists(branchName) {
+		if err := gitutil.CreateBranch(branchName, baseBranch); err != nil {
 			return WorkspaceInfo{}, fmt.Errorf("creating branch %s from %s: %w", branchName, baseBranch, err)
 		}
 	}
@@ -159,7 +139,7 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	if err := os.MkdirAll(filepath.Join(anchorRoot, cfg.WorktreeRoot), 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
-	if err := g.EnsureGitignoreFn(anchorRoot, cfg.WorktreeRoot); err != nil {
+	if err := gitutil.EnsureGitignoreEntry(anchorRoot, cfg.WorktreeRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
 	}
 
@@ -167,7 +147,7 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	wtName := workspace.BeadWorktreeName(beadID)
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
 	if err := withWorkingDir(anchorRoot, func() error {
-		return g.WorktreeCreateFn(relWtPath, branchName)
+		return g.WorktreeOps.Create(relWtPath, branchName)
 	}); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating worktree: %w", err)
 	}
@@ -175,7 +155,7 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	wtPath := cfg.WorktreePath(anchorRoot, wtName)
 
 	// Read back from worktree list to confirm actual path.
-	if entries, err := g.WorktreeListFn(); err == nil {
+	if entries, err := g.WorktreeOps.List(); err == nil {
 		for _, e := range entries {
 			if e.Name == wtName || strings.HasSuffix(e.Path, wtName) {
 				wtPath = e.Path
@@ -195,7 +175,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 
 	// Find bead worktree.
 	var wtPath string
-	if entries, err := g.WorktreeListFn(); err == nil {
+	if entries, err := g.WorktreeOps.List(); err == nil {
 		for _, e := range entries {
 			if e.Name == wtName || e.Branch == beadBranch {
 				wtName = e.Name
@@ -230,21 +210,21 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	// Merge bead branch into spec branch via spec worktree.
 	// Derive spec worktree path from specBranch (spec/<specID>).
 	specID := strings.TrimPrefix(specBranch, workspace.SpecBranchPrefix)
-	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
 	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if _, err := os.Stat(specWtPath); err == nil {
-		if err := g.MergeIntoFn(specWtPath, beadBranch); err != nil {
+		if err := gitutil.MergeInto(specWtPath, beadBranch); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", beadBranch, specBranch, err)
 		}
 	}
 
 	// Safety check: verify bead branch is merged into spec branch before cleanup.
 	// This prevents data loss if the merge above failed silently.
-	if g.BranchExistsFn(beadBranch) {
-		isAnc, ancErr := g.IsAncestorFn(g.Root, beadBranch, specBranch)
+	if gitutil.BranchExists(beadBranch) {
+		isAnc, ancErr := gitutil.IsAncestor(g.Root, beadBranch, specBranch)
 		if ancErr != nil || !isAnc {
 			return fmt.Errorf("bead branch %s is NOT merged into %s — aborting cleanup to prevent data loss", beadBranch, specBranch)
 		}
@@ -254,11 +234,11 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	// worktree being removed). Matches the pattern in FinalizeEpic().
 	if err := withWorkingDir(g.Root, func() error {
 		if wtName != "" {
-			if err := g.WorktreeRemoveFn(wtName); err != nil {
+			if err := g.WorktreeOps.Remove(wtName); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", wtName, err)
 			}
 		}
-		if err := g.DeleteBranchFn(beadBranch); err != nil {
+		if err := gitutil.DeleteBranch(beadBranch); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
 		}
 		return nil
@@ -275,12 +255,12 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
 	result := FinalizeResult{}
 
-	if !g.BranchExistsFn(specBranch) {
+	if !gitutil.BranchExists(specBranch) {
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
 	}
 
 	// Auto-commit any remaining spec artifacts.
-	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
@@ -291,7 +271,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 
 	// Auto-merge unmerged bead branches into spec branch before cleanup.
 	// This handles beads that were closed via `bd close` without `mindspec complete`.
-	if entries, listErr := g.WorktreeListFn(); listErr == nil {
+	if entries, listErr := g.WorktreeOps.List(); listErr == nil {
 		for _, e := range entries {
 			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 				continue
@@ -302,9 +282,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			}
 			// Merge bead branch into spec branch if not already an ancestor.
 			if _, statErr := os.Stat(specWtPath); statErr == nil {
-				isAnc, ancErr := g.IsAncestorFn(g.Root, e.Branch, specBranch)
+				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 				if ancErr == nil && !isAnc {
-					if mergeErr := g.MergeIntoFn(specWtPath, e.Branch); mergeErr != nil {
+					if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
 						fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", e.Branch, specBranch, mergeErr)
 					} else {
 						fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
@@ -315,17 +295,17 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	}
 
 	// Gather stats (after bead merges so counts are accurate).
-	if count, err := g.CommitCountFn(g.Root, "main", specBranch); err == nil {
+	if count, err := gitutil.CommitCount(g.Root, "main", specBranch); err == nil {
 		result.CommitCount = count
 	}
-	if stat, err := g.DiffStatFn(g.Root, "main", specBranch); err == nil {
+	if stat, err := gitutil.DiffStat(g.Root, "main", specBranch); err == nil {
 		result.DiffStat = stat
 	}
 
 	// Push to remote if available.
-	if g.HasRemoteFn() {
+	if gitutil.HasRemote() {
 		result.MergeStrategy = "pr"
-		if err := g.PushBranchFn(specBranch); err != nil {
+		if err := gitutil.PushBranch(specBranch); err != nil {
 			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
 		}
 	} else {
@@ -335,18 +315,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
 		// Clean up lingering bead worktrees/branches.
-		if entries, listErr := g.WorktreeListFn(); listErr == nil {
+		if entries, listErr := g.WorktreeOps.List(); listErr == nil {
 			for _, e := range entries {
 				if strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
-					_ = g.WorktreeRemoveFn(e.Name)
-					_ = g.DeleteBranchFn(e.Branch)
+					_ = g.WorktreeOps.Remove(e.Name)
+					_ = gitutil.DeleteBranch(e.Branch)
 				}
 			}
 		}
 
 		// Remove spec worktree.
 		specWtName := workspace.SpecWorktreeName(specID)
-		if err := g.WorktreeRemoveFn(specWtName); err != nil {
+		if err := g.WorktreeOps.Remove(specWtName); err != nil {
 			if !isAlreadyRemovedErr(err) {
 				return fmt.Errorf("removing spec worktree: %w", err)
 			}
@@ -354,13 +334,13 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 
 		// Direct merge for local (no-remote) workflows.
 		if result.MergeStrategy == "direct" {
-			if err := g.MergeBranchFn(g.Root, specBranch, "main"); err != nil {
+			if err := gitutil.MergeBranch(g.Root, specBranch, "main"); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not merge %s into main: %v\n", specBranch, err)
 			}
 		}
 
 		// Delete spec branch.
-		if err := g.DeleteBranchFn(specBranch); err != nil {
+		if err := gitutil.DeleteBranch(specBranch); err != nil {
 			if !isAlreadyRemovedErr(err) {
 				return fmt.Errorf("deleting spec branch: %w", err)
 			}
@@ -381,15 +361,15 @@ func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
 	specWtName := workspace.SpecWorktreeName(specID)
 
 	// Remove worktree (best-effort).
-	if err := g.WorktreeRemoveFn(specWtName); err != nil {
+	if err := g.WorktreeOps.Remove(specWtName); err != nil {
 		if !isAlreadyRemovedErr(err) {
 			fmt.Fprintf(os.Stderr, "warning: could not remove worktree: %v\n", err)
 		}
 	}
 
 	// Delete branch (best-effort).
-	if g.BranchExistsFn(specBranch) {
-		if err := g.DeleteBranchFn(specBranch); err != nil {
+	if gitutil.BranchExists(specBranch) {
+		if err := gitutil.DeleteBranch(specBranch); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not delete branch: %v\n", err)
 		}
 	}
@@ -399,25 +379,24 @@ func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
 
 // IsTreeClean returns nil if the workspace at path has no uncommitted changes.
 func (g *MindspecExecutor) IsTreeClean(path string) error {
-	cmd := g.ExecCommandFn("git", "-C", path, "status", "--porcelain")
-	out, err := cmd.Output()
+	out, err := gitutil.Status(path)
 	if err != nil {
 		return fmt.Errorf("checking worktree status: %w", err)
 	}
-	if strings.TrimSpace(string(out)) != "" {
-		return fmt.Errorf("workspace has uncommitted changes:\n%s", strings.TrimSpace(string(out)))
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("workspace has uncommitted changes:\n%s", strings.TrimSpace(out))
 	}
 	return nil
 }
 
 // DiffStat returns a short diffstat summary between two refs.
 func (g *MindspecExecutor) DiffStat(base, head string) (string, error) {
-	return g.DiffStatFn(g.Root, base, head)
+	return gitutil.DiffStat(g.Root, base, head)
 }
 
 // CommitCount returns the number of commits between base and head.
 func (g *MindspecExecutor) CommitCount(base, head string) (int, error) {
-	return g.CommitCountFn(g.Root, base, head)
+	return gitutil.CommitCount(g.Root, base, head)
 }
 
 // CommitAll stages all changes and commits with the given message.
@@ -449,12 +428,10 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if exportDir == "" {
 		exportDir = g.Root
 	}
-	if g.ExportJSONLFn != nil {
-		if err := g.ExportJSONLFn(exportDir); err != nil {
-			return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
-		}
+	if err := bead.Export(exportDir); err != nil {
+		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
 	}
-	return g.CommitAllFn(path, msg)
+	return gitutil.CommitAll(path, msg)
 }
 
 // resolveAnchorRoot returns the spec worktree path if it exists, otherwise
@@ -463,7 +440,7 @@ func (g *MindspecExecutor) resolveAnchorRoot(specID string) string {
 	if specID == "" {
 		return g.Root
 	}
-	cfg, cfgErr := g.LoadConfigFn(g.Root)
+	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
