@@ -296,9 +296,11 @@ func autoApprove(label, wtPath, specID string) {
 
 	case "plan":
 		// Approve the plan: update frontmatter, advance to implement mode
-		planPath := filepath.Join(workspace.SpecDir(wtPath, specID), "plan.md")
-		if _, err := os.Stat(planPath); err == nil {
-			updateFrontmatterApproval(planPath)
+		if specDir, sdErr := workspace.SpecDir(wtPath, specID); sdErr == nil {
+			planPath := filepath.Join(specDir, "plan.md")
+			if _, err := os.Stat(planPath); err == nil {
+				updateFrontmatterApproval(planPath)
+			}
 		}
 		writeFocus(wtPath, "implement", specID, "bench-impl")
 	}
@@ -408,8 +410,12 @@ func writeFocus(wtPath, mode, specID, beadID string) {
 // findSpecFile locates the spec.md for a given spec ID in the worktree.
 func findSpecFile(wtPath, specID string) string {
 	// Try the standard location first
-	p := filepath.Join(workspace.SpecDir(wtPath, specID), "spec.md")
-	if _, err := os.Stat(p); err == nil {
+	specDir, err := workspace.SpecDir(wtPath, specID)
+	if err != nil {
+		return ""
+	}
+	p := filepath.Join(specDir, "spec.md")
+	if _, statErr := os.Stat(p); statErr == nil {
 		return p
 	}
 	// Try without the full slug (e.g., "022" instead of "022-agentmind-viz-mvp")
@@ -433,7 +439,11 @@ func findSpecFile(wtPath, specID string) string {
 func findSpecRelPath(wtPath, specID string) string {
 	abs := findSpecFile(wtPath, specID)
 	if abs == "" {
-		rel, err := filepath.Rel(wtPath, filepath.Join(workspace.SpecDir(wtPath, specID), "spec.md"))
+		specDir, err := workspace.SpecDir(wtPath, specID)
+		if err != nil {
+			return fmt.Sprintf(".mindspec/docs/specs/%s/spec.md", specID)
+		}
+		rel, err := filepath.Rel(wtPath, filepath.Join(specDir, "spec.md"))
 		if err != nil {
 			return fmt.Sprintf(".mindspec/docs/specs/%s/spec.md", specID)
 		}

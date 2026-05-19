@@ -3,33 +3,38 @@ package validate
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
-// specIDPattern matches valid spec IDs: 3+ digits, hyphen, then kebab-case slug.
-var specIDPattern = regexp.MustCompile(`^[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*$`)
-
 // SpecID validates that id is a well-formed spec identifier (e.g. "033-security-hardening").
-// Returns an error if the ID is empty, contains path separators, or doesn't match the expected format.
+// Thin re-export of idvalidate.SpecID; kept here for API stability of the
+// existing `validate.SpecID` call sites.
 func SpecID(id string) error {
-	if id == "" {
-		return fmt.Errorf("invalid spec ID: empty")
-	}
-	if id == "." || id == ".." {
-		return fmt.Errorf("invalid spec ID %q: must match NNN-slug format", id)
-	}
-	if strings.ContainsAny(id, "/\\") {
-		return fmt.Errorf("invalid spec ID %q: contains path separator", id)
-	}
-	if !specIDPattern.MatchString(id) {
-		return fmt.Errorf("invalid spec ID %q: must match NNN-slug format", id)
-	}
-	return nil
+	return idvalidate.SpecID(id)
+}
+
+// ADRID re-exports idvalidate.ADRID for convenience at validate package call sites.
+func ADRID(id string) error {
+	return idvalidate.ADRID(id)
+}
+
+// BeadID re-exports idvalidate.BeadID for convenience at validate package call sites.
+func BeadID(id string) error {
+	return idvalidate.BeadID(id)
+}
+
+// DomainName re-exports idvalidate.DomainName for convenience at validate package call sites.
+func DomainName(name string) error {
+	return idvalidate.DomainName(name)
 }
 
 // SafePath checks that resolved is contained under root after symlink resolution.
 // Both paths are resolved to their real (symlink-free) absolute forms before comparison.
+//
+// This is filesystem-aware (unlike the pure-string validators in idvalidate)
+// so it stays in package validate.
 func SafePath(root, resolved string) error {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {

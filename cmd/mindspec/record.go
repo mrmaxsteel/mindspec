@@ -67,7 +67,11 @@ var recordStatusCmd = &cobra.Command{
 		}
 
 		// Count events
-		eventCount := countLines(recording.EventsPath(root, specID))
+		eventsPath, err := recording.EventsPath(root, specID)
+		if err != nil {
+			return err
+		}
+		eventCount := countLines(eventsPath)
 
 		// Current phase
 		currentPhase := "unknown"

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
 // ErrNoRoot is returned when no project root marker is found.
@@ -142,25 +144,33 @@ func LegacyDocsDir(root string) string {
 // which may have been created with a different config at the time. A
 // follow-up bead may extend this to accept *config.Config and probe both
 // the configured root and the default for portability across configs.
-func SpecDir(root, specID string) string {
+//
+// Returns an error if specID is not a well-formed spec identifier. This
+// turns a previously silent vulnerability (user-controlled IDs reaching
+// filepath.Join) into a compile-time obligation for every caller. See
+// SEC-1 (bead mindspec-x1qr).
+func SpecDir(root, specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", err
+	}
 	// 1. Worktree path (scan token uses default worktrees dir name).
 	wtPath := filepath.Join(DefaultWorktreesDir(root), SpecWorktreeName(specID),
 		".mindspec", "docs", "specs", specID)
 	if exists(wtPath) {
-		return wtPath
+		return wtPath, nil
 	}
 	// 2. Canonical path
 	canonical := filepath.Join(CanonicalDocsDir(root), "specs", specID)
 	if exists(canonical) {
-		return canonical
+		return canonical, nil
 	}
 	// 3. Legacy path
 	legacy := filepath.Join(LegacyDocsDir(root), "specs", specID)
 	if exists(legacy) {
-		return legacy
+		return legacy, nil
 	}
 	// Default: canonical (for new spec creation)
-	return canonical
+	return canonical, nil
 }
 
 // ContextMapPath returns the path to docs/context-map.md under root.
@@ -169,18 +179,41 @@ func ContextMapPath(root string) string {
 }
 
 // ADRDir returns the path to docs/adr/ under root.
+//
+// This takes no user input so its signature is unchanged. However, every
+// site that joins ADRDir with a user-supplied ADR ID (e.g.
+// `filepath.Join(workspace.ADRDir(root), id+".md")`) must validate the id
+// first. Use ADRFilePath, which bundles validation + path construction.
 func ADRDir(root string) string {
 	return filepath.Join(DocsDir(root), "adr")
 }
 
+// ADRFilePath returns the on-disk path for a single ADR file by ID.
+// Returns an error if adrID is not a well-formed ADR identifier.
+func ADRFilePath(root, adrID string) (string, error) {
+	if err := idvalidate.ADRID(adrID); err != nil {
+		return "", err
+	}
+	return filepath.Join(ADRDir(root), adrID+".md"), nil
+}
+
 // DomainDir returns the path to a specific domain's doc directory under root.
-func DomainDir(root, domain string) string {
-	return filepath.Join(DocsDir(root), "domains", domain)
+// Returns an error if domain is not a well-formed domain name.
+func DomainDir(root, domain string) (string, error) {
+	if err := idvalidate.DomainName(domain); err != nil {
+		return "", err
+	}
+	return filepath.Join(DocsDir(root), "domains", domain), nil
 }
 
 // RecordingDir returns the path to a spec's recording directory.
-func RecordingDir(root, specID string) string {
-	return filepath.Join(SpecDir(root, specID), "recording")
+// Returns an error if specID is not a well-formed spec identifier.
+func RecordingDir(root, specID string) (string, error) {
+	specDir, err := SpecDir(root, specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(specDir, "recording"), nil
 }
 
 // MindspecDir returns the path to the .mindspec directory under root.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +32,15 @@ var adrCreateCmd = &cobra.Command{
 
 		domain, _ := cmd.Flags().GetString("domain")
 		supersedes, _ := cmd.Flags().GetString("supersedes")
+
+		// SEC-1 (mindspec-x1qr): validate --supersedes at the CLI boundary
+		// BEFORE it reaches filepath.Join in internal/adr/create.go. Defense
+		// in depth — internal/adr/create.go also validates.
+		if supersedes != "" {
+			if err := validate.ADRID(supersedes); err != nil {
+				return fmt.Errorf("invalid --supersedes value: %w", err)
+			}
+		}
 
 		var domains []string
 		if domain != "" {
@@ -102,6 +112,10 @@ var adrShowCmd = &cobra.Command{
 	Short: "Show a single ADR summary",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// SEC-1: validate at CLI boundary before reaching filepath.Glob.
+		if err := validate.ADRID(args[0]); err != nil {
+			return err
+		}
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err

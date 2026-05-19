@@ -22,8 +22,12 @@ type DomainDoc struct {
 
 // ReadDomainDocs reads the 4 standard doc files from a domain directory.
 // Missing files result in empty strings, not errors.
+// Returns an error if domain is not a well-formed domain name.
 func ReadDomainDocs(root, domain string) (*DomainDoc, error) {
-	dir := workspace.DomainDir(root, domain)
+	dir, err := workspace.DomainDir(root, domain)
+	if err != nil {
+		return nil, err
+	}
 	doc := &DomainDoc{Domain: domain}
 
 	overviewPath := filepath.Join(dir, "overview.md")

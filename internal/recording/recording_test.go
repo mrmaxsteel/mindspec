@@ -10,6 +10,36 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
+// mustRecordingDir is a test helper that fails the test on validation error.
+func mustRecordingDir(t *testing.T, root, specID string) string {
+	t.Helper()
+	p, err := RecordingDir(root, specID)
+	if err != nil {
+		t.Fatalf("RecordingDir(%q): %v", specID, err)
+	}
+	return p
+}
+
+// mustEventsPath is a test helper that fails the test on validation error.
+func mustEventsPath(t *testing.T, root, specID string) string {
+	t.Helper()
+	p, err := EventsPath(root, specID)
+	if err != nil {
+		t.Fatalf("EventsPath(%q): %v", specID, err)
+	}
+	return p
+}
+
+// mustManifestPath is a test helper that fails the test on validation error.
+func mustManifestPath(t *testing.T, root, specID string) string {
+	t.Helper()
+	p, err := ManifestPath(root, specID)
+	if err != nil {
+		t.Fatalf("ManifestPath(%q): %v", specID, err)
+	}
+	return p
+}
+
 // enableRecording writes a config that enables recording in the temp root.
 func enableRecording(t *testing.T, root string) {
 	t.Helper()
@@ -74,7 +104,7 @@ func TestHasRecording(t *testing.T) {
 	}
 
 	// Create manifest
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -93,7 +123,7 @@ func TestEmitMarker(t *testing.T) {
 	specID := "001-test-spec"
 
 	// Create recording dir and manifest
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -108,7 +138,7 @@ func TestEmitMarker(t *testing.T) {
 	}
 
 	// Read events file
-	data, err := os.ReadFile(EventsPath(root, specID))
+	data, err := os.ReadFile(mustEventsPath(t, root, specID))
 	if err != nil {
 		t.Fatalf("reading events: %v", err)
 	}
@@ -152,7 +182,7 @@ func TestEmitPhaseMarker(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-test-spec"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -164,7 +194,7 @@ func TestEmitPhaseMarker(t *testing.T) {
 		t.Fatalf("EmitPhaseMarker: %v", err)
 	}
 
-	data, err := os.ReadFile(EventsPath(root, specID))
+	data, err := os.ReadFile(mustEventsPath(t, root, specID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +220,7 @@ func TestEmitBeadMarker(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-test-spec"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -202,7 +232,7 @@ func TestEmitBeadMarker(t *testing.T) {
 		t.Fatalf("EmitBeadMarker: %v", err)
 	}
 
-	data, err := os.ReadFile(EventsPath(root, specID))
+	data, err := os.ReadFile(mustEventsPath(t, root, specID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +349,7 @@ func TestUpdatePhase(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-test-spec"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -359,7 +389,7 @@ func TestAddBeadToPhase(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-test-spec"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0755); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,17 +425,26 @@ func TestPathHelpers(t *testing.T) {
 	root := "/project"
 	specID := "027-spec-recording"
 
-	recDir := RecordingDir(root, specID)
+	recDir, err := RecordingDir(root, specID)
+	if err != nil {
+		t.Fatalf("RecordingDir: %v", err)
+	}
 	if recDir != "/project/.mindspec/docs/specs/027-spec-recording/recording" {
 		t.Errorf("RecordingDir = %q", recDir)
 	}
 
-	manifest := ManifestPath(root, specID)
+	manifest, err := ManifestPath(root, specID)
+	if err != nil {
+		t.Fatalf("ManifestPath: %v", err)
+	}
 	if manifest != "/project/.mindspec/docs/specs/027-spec-recording/recording/manifest.json" {
 		t.Errorf("ManifestPath = %q", manifest)
 	}
 
-	events := EventsPath(root, specID)
+	events, err := EventsPath(root, specID)
+	if err != nil {
+		t.Fatalf("EventsPath: %v", err)
+	}
 	if events != "/project/.mindspec/docs/specs/027-spec-recording/recording/events.ndjson" {
 		t.Errorf("EventsPath = %q", events)
 	}
@@ -416,7 +455,7 @@ func TestRecordingFileModes(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-mode-test"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0o700); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -431,8 +470,8 @@ func TestRecordingFileModes(t *testing.T) {
 		path string
 		want os.FileMode
 	}{
-		{ManifestPath(root, specID), 0o600},
-		{EventsPath(root, specID), 0o600},
+		{mustManifestPath(t, root, specID), 0o600},
+		{mustEventsPath(t, root, specID), 0o600},
 	}
 	for _, tc := range cases {
 		info, err := os.Stat(tc.path)
@@ -444,7 +483,7 @@ func TestRecordingFileModes(t *testing.T) {
 		}
 	}
 
-	dirInfo, err := os.Stat(RecordingDir(root, specID))
+	dirInfo, err := os.Stat(mustRecordingDir(t, root, specID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +502,7 @@ func TestRecordingFileModesAgentMindFirst(t *testing.T) {
 	enableRecording(t, root)
 	specID := "001-agentmind-first"
 
-	if err := os.MkdirAll(RecordingDir(root, specID), 0o700); err != nil {
+	if err := os.MkdirAll(mustRecordingDir(t, root, specID), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manifest{SpecID: specID, Status: "recording"}
@@ -473,7 +512,7 @@ func TestRecordingFileModesAgentMindFirst(t *testing.T) {
 
 	// Pre-create events.ndjson with loose mode to simulate AgentMind creating
 	// it first.
-	if err := os.WriteFile(EventsPath(root, specID), nil, 0o644); err != nil {
+	if err := os.WriteFile(mustEventsPath(t, root, specID), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -481,7 +520,7 @@ func TestRecordingFileModesAgentMindFirst(t *testing.T) {
 		t.Fatalf("EmitMarker: %v", err)
 	}
 
-	info, err := os.Stat(EventsPath(root, specID))
+	info, err := os.Stat(mustEventsPath(t, root, specID))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,22 +5,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-
 // Add scaffolds a new domain directory with 4 template files and appends
 // a bounded context entry to the context map.
+//
+// The previously local `nameRe` regex was promoted into idvalidate.DomainName
+// (re-exported as validate.DomainName) so the validator is shared across all
+// CLI entrypoints (SEC-1, bead mindspec-x1qr). Do not reintroduce a local
+// regex check here — duplication invites drift.
 func Add(root, name string) error {
-	if !nameRe.MatchString(name) {
-		return fmt.Errorf("invalid domain name %q: must match [a-z][a-z0-9-]*", name)
+	domainDir, err := workspace.DomainDir(root, name)
+	if err != nil {
+		return err
 	}
-
-	domainDir := workspace.DomainDir(root, name)
+	// Defense in depth: DomainDir already validates, but call again explicitly
+	// so future refactors that bypass DomainDir still get validation.
+	if err := validate.DomainName(name); err != nil {
+		return err
+	}
 	if _, err := os.Stat(domainDir); err == nil {
 		return fmt.Errorf("domain %q already exists", name)
 	}

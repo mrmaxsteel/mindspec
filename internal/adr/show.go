@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -16,9 +17,20 @@ import (
 // falls back to a slug-tolerant match: any file named "<id>-<slug>.md" in the
 // ADR directory, provided it's unambiguous. This lets plans cite a pure ID
 // like `ADR-0001` even when the on-disk file is `ADR-0001-descriptive.md`.
+//
+// SEC-1 (bead mindspec-x1qr): id is validated BEFORE filepath.Glob. The
+// glob below appends `id+"-*.md"` — without validation, an id containing
+// `*`, `?`, `[`, `]` would inject a glob pattern; an id with `/` or `..`
+// would escape the ADR directory.
 func Show(root, id string) (*ADR, error) {
+	if err := idvalidate.ADRID(id); err != nil {
+		return nil, err
+	}
+	path, err := workspace.ADRFilePath(root, id)
+	if err != nil {
+		return nil, err
+	}
 	dir := workspace.ADRDir(root)
-	path := filepath.Join(dir, id+".md")
 	if _, err := os.Stat(path); err == nil {
 		a, err := ParseADR(path)
 		if err != nil {

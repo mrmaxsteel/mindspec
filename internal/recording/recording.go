@@ -23,7 +23,10 @@ func StartRecording(root, specID string) error {
 	if !IsEnabled(root) {
 		return nil
 	}
-	dir := RecordingDir(root, specID)
+	dir, err := RecordingDir(root, specID)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating recording dir: %w", err)
 	}

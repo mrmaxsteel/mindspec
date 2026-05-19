@@ -25,7 +25,19 @@ var requiredSpecSections = []string{
 func ValidateSpec(root, specID string) *Result {
 	r := &Result{SubCommand: "spec", TargetID: specID}
 
-	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+	// Defense in depth: workspace.SpecDir will also validate, but failing fast
+	// here gives a clearer error message tagged with the spec subcommand.
+	if err := SpecID(specID); err != nil {
+		r.AddError("spec-id", err.Error())
+		return r
+	}
+
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		r.AddError("spec-id", err.Error())
+		return r
+	}
+	specPath := filepath.Join(specDir, "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		r.AddError("spec-file", fmt.Sprintf("cannot read spec: %v", err))
@@ -187,7 +199,10 @@ func checkLifecycleBinding(r *Result, root, specID string) {
 	}
 
 	// Detect stale lifecycle.yaml files from pre-ADR-0023 repos.
-	specDir := workspace.SpecDir(root, specID)
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return
+	}
 	lcPath := filepath.Join(specDir, "lifecycle.yaml")
 	if _, statErr := os.Stat(lcPath); statErr == nil {
 		r.AddWarning("stale-lifecycle", "stale lifecycle.yaml detected; lifecycle state is now derived from beads")

@@ -29,8 +29,11 @@ type DomainInfo struct {
 
 // Show returns detailed information about a single domain.
 func Show(root, name string) (*DomainInfo, error) {
-	domainDir := workspace.DomainDir(root, name)
-	if _, err := os.Stat(domainDir); os.IsNotExist(err) {
+	domainDir, err := workspace.DomainDir(root, name)
+	if err != nil {
+		return nil, err
+	}
+	if _, statErr := os.Stat(domainDir); os.IsNotExist(statErr) {
 		return nil, fmt.Errorf("domain %q does not exist", name)
 	}
 

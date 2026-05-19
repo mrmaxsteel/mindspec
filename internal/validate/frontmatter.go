@@ -20,7 +20,11 @@ import (
 //
 // Delegates to internal/frontmatter (ARCH-6 / mindspec-npd2).
 func SpecStatus(root, specID string) string {
-	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return ""
+	}
+	specPath := filepath.Join(specDir, "spec.md")
 	return specStatusFromPath(specPath)
 }
 

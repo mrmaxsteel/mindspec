@@ -295,7 +295,10 @@ func TestCheckPortFree(t *testing.T) {
 }
 
 func TestBenchmarkDir(t *testing.T) {
-	dir := BenchmarkDir("/repo", "021-bench-go-command")
+	dir, err := BenchmarkDir("/repo", "021-bench-go-command")
+	if err != nil {
+		t.Fatalf("BenchmarkDir: %v", err)
+	}
 	expected := filepath.Join("/repo", ".mindspec", "docs", "specs", "021-bench-go-command", "benchmark")
 	if dir != expected {
 		t.Errorf("BenchmarkDir = %q, want %q", dir, expected)
@@ -357,7 +360,7 @@ func TestWriteResults(t *testing.T) {
 	os.WriteFile(filepath.Join(workDir, "output-c.txt"), []byte("output c"), 0644)
 
 	cfg := &RunConfig{
-		SpecID:      "test-spec",
+		SpecID:      "999-test-spec",
 		BenchCommit: "abc123",
 		Timeout:     30 * time.Minute,
 		Prompt:      "test",
@@ -386,7 +389,10 @@ func TestWriteResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	benchDir := BenchmarkDir(dir, "test-spec")
+	benchDir, err := BenchmarkDir(dir, "999-test-spec")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Check report.md exists
 	if _, err := os.Stat(filepath.Join(benchDir, "report.md")); os.IsNotExist(err) {
@@ -473,8 +479,8 @@ func TestCollectPlans(t *testing.T) {
 	workDir := t.TempDir()
 
 	// Session C plan
-	os.MkdirAll(filepath.Join(workDir, "wt-c", "docs", "specs", "test-spec"), 0755)
-	os.WriteFile(filepath.Join(workDir, "wt-c", "docs", "specs", "test-spec", "plan.md"), []byte("# Plan C"), 0644)
+	os.MkdirAll(filepath.Join(workDir, "wt-c", "docs", "specs", "999-test-spec"), 0755)
+	os.WriteFile(filepath.Join(workDir, "wt-c", "docs", "specs", "999-test-spec", "plan.md"), []byte("# Plan C"), 0644)
 
 	// Session A plan (Claude plans dir)
 	os.MkdirAll(filepath.Join(workDir, "wt-a", ".claude", "plans"), 0755)
@@ -484,7 +490,7 @@ func TestCollectPlans(t *testing.T) {
 	os.MkdirAll(filepath.Join(workDir, "wt-b"), 0755)
 
 	cfg := &RunConfig{WorkDir: workDir}
-	plans := CollectPlans(cfg, "test-spec")
+	plans := CollectPlans(cfg, "999-test-spec")
 
 	if plans["c"] != "# Plan C" {
 		t.Errorf("plan c = %q, want '# Plan C'", plans["c"])
@@ -545,11 +551,11 @@ func TestFormatTableNEmptySessions(t *testing.T) {
 
 func TestBuildRetryPrompt(t *testing.T) {
 	// Sessions A/B: escalating prompts
-	p1 := buildRetryPrompt("a", "/tmp", "test-spec", 1)
+	p1 := buildRetryPrompt("a", "/tmp", "999-test-spec", 1)
 	if !strings.Contains(p1, "approved") {
 		t.Error("first retry for A should mention approval")
 	}
-	p2 := buildRetryPrompt("b", "/tmp", "test-spec", 2)
+	p2 := buildRetryPrompt("b", "/tmp", "999-test-spec", 2)
 	if !strings.Contains(p2, "required") {
 		t.Error("second retry for B should escalate")
 	}
@@ -560,16 +566,16 @@ func TestBuildRetryPrompt(t *testing.T) {
 
 	// Plan mode → should mention plan creation
 	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
-		[]byte(`{"mode":"plan","activeSpec":"test-spec"}`), 0644)
-	p := buildRetryPrompt("c", wtDir, "test-spec", 1)
+		[]byte(`{"mode":"plan","activeSpec":"999-test-spec"}`), 0644)
+	p := buildRetryPrompt("c", wtDir, "999-test-spec", 1)
 	if !strings.Contains(p, "plan") {
 		t.Error("plan mode retry should mention plan")
 	}
 
 	// Implement mode → should mention implementation
 	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
-		[]byte(`{"mode":"implement","activeSpec":"test-spec"}`), 0644)
-	p = buildRetryPrompt("c", wtDir, "test-spec", 1)
+		[]byte(`{"mode":"implement","activeSpec":"999-test-spec"}`), 0644)
+	p = buildRetryPrompt("c", wtDir, "999-test-spec", 1)
 	if !strings.Contains(p, "Implement") {
 		t.Error("implement mode retry should mention implementation")
 	}
@@ -578,18 +584,18 @@ func TestBuildRetryPrompt(t *testing.T) {
 func TestAutoApproveSessionC(t *testing.T) {
 	wtDir := t.TempDir()
 	os.MkdirAll(filepath.Join(wtDir, ".mindspec"), 0755)
-	os.MkdirAll(filepath.Join(wtDir, "docs", "specs", "test-spec"), 0755)
+	os.MkdirAll(filepath.Join(wtDir, "docs", "specs", "999-test-spec"), 0755)
 
 	// Write initial focus: spec mode
 	os.WriteFile(filepath.Join(wtDir, ".mindspec", "focus"),
-		[]byte(`{"mode":"spec","activeSpec":"test-spec"}`), 0644)
+		[]byte(`{"mode":"spec","activeSpec":"999-test-spec"}`), 0644)
 
 	// Write a spec with frontmatter
-	os.WriteFile(filepath.Join(wtDir, "docs", "specs", "test-spec", "spec.md"),
+	os.WriteFile(filepath.Join(wtDir, "docs", "specs", "999-test-spec", "spec.md"),
 		[]byte("---\nstatus: Draft\napproved_at: \"\"\napproved_by: \"\"\n---\n# Spec\n"), 0644)
 
 	// Auto-approve should advance spec → plan
-	autoApprove("c", wtDir, "test-spec")
+	autoApprove("c", wtDir, "999-test-spec")
 
 	// Check focus advanced to plan
 	data, _ := os.ReadFile(filepath.Join(wtDir, ".mindspec", "focus"))
@@ -598,16 +604,16 @@ func TestAutoApproveSessionC(t *testing.T) {
 	}
 
 	// Check spec frontmatter was updated
-	specData, _ := os.ReadFile(filepath.Join(wtDir, "docs", "specs", "test-spec", "spec.md"))
+	specData, _ := os.ReadFile(filepath.Join(wtDir, "docs", "specs", "999-test-spec", "spec.md"))
 	if !strings.Contains(string(specData), "Approved") {
 		t.Error("spec status should be Approved")
 	}
 
 	// Now write a plan and auto-approve plan → implement
-	os.WriteFile(filepath.Join(wtDir, "docs", "specs", "test-spec", "plan.md"),
+	os.WriteFile(filepath.Join(wtDir, "docs", "specs", "999-test-spec", "plan.md"),
 		[]byte("---\nstatus: Draft\napproved_at: \"\"\napproved_by: \"\"\n---\n# Plan\n"), 0644)
 
-	autoApprove("c", wtDir, "test-spec")
+	autoApprove("c", wtDir, "999-test-spec")
 
 	data, _ = os.ReadFile(filepath.Join(wtDir, ".mindspec", "focus"))
 	if !strings.Contains(string(data), `"implement"`) {
@@ -617,8 +623,8 @@ func TestAutoApproveSessionC(t *testing.T) {
 
 func TestAutoApproveNoopForAB(t *testing.T) {
 	// autoApprove should be a no-op for sessions A and B
-	autoApprove("a", "/nonexistent", "test-spec") // should not panic
-	autoApprove("b", "/nonexistent", "test-spec") // should not panic
+	autoApprove("a", "/nonexistent", "999-test-spec") // should not panic
+	autoApprove("b", "/nonexistent", "999-test-spec") // should not panic
 }
 
 // Verify N-way backward compat: 2 sessions via bench report still works

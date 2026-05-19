@@ -86,8 +86,10 @@ func BuildContext(root string, mc *state.Focus) *Context {
 	// with validate.SpecIsApproved (ARCH-6 / mindspec-npd2): status: approved
 	// (lowercase) now counts as approved.
 	if mc.Mode == state.ModePlan && mc.ActiveSpec != "" {
-		planPath := filepath.Join(workspace.SpecDir(root, mc.ActiveSpec), "plan.md")
-		ctx.PlanApproved = strings.EqualFold(frontmatter.StatusFromPath(planPath), "Approved")
+		if specDir, err := workspace.SpecDir(root, mc.ActiveSpec); err == nil {
+			planPath := filepath.Join(specDir, "plan.md")
+			ctx.PlanApproved = strings.EqualFold(frontmatter.StatusFromPath(planPath), "Approved")
+		}
 	}
 
 	// AvailableSpecs removed — the disk directory listing was noise
@@ -229,7 +231,11 @@ func gatesForMode(mode string) []string {
 
 // readSpecGoal extracts the Goal section from a spec file.
 func readSpecGoal(root, specID string) string {
-	specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return ""
+	}
+	specPath := filepath.Join(specDir, "spec.md")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return ""

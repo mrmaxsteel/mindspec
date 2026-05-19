@@ -80,7 +80,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	specBranch := workspace.SpecBranch(specID)
 
 	// Enforcement: verify all plan beads are closed.
-	specDir := workspace.SpecDir(root, specID)
+	specDir, sdErr := workspace.SpecDir(root, specID)
+	if sdErr != nil {
+		return nil, sdErr
+	}
 	planPath := filepath.Join(specDir, "plan.md")
 	beadIDs, planErr := readPlanBeadIDs(planPath)
 	if planErr == nil {

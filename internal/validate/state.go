@@ -48,8 +48,16 @@ func validateSpecMode(root string, s *state.Focus) []Warning {
 		return warnings
 	}
 
-	specPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "spec.md")
-	if _, err := os.Stat(specPath); os.IsNotExist(err) {
+	specDir, err := workspace.SpecDir(root, s.ActiveSpec)
+	if err != nil {
+		warnings = append(warnings, Warning{
+			Field:   "activeSpec",
+			Message: fmt.Sprintf("Invalid activeSpec ID: %v", err),
+		})
+		return warnings
+	}
+	specPath := filepath.Join(specDir, "spec.md")
+	if _, statErr := os.Stat(specPath); os.IsNotExist(statErr) {
 		warnings = append(warnings, Warning{
 			Field:   "activeSpec",
 			Message: fmt.Sprintf("Spec file not found: %s", specPath),
@@ -68,7 +76,7 @@ func validateSpecMode(root string, s *state.Focus) []Warning {
 	// Check if plan.md exists (drift: molecule says spec mode but agent already started planning).
 	// This means the spec-approve gate was skipped — the agent jumped to plan writing
 	// without running `mindspec approve spec`.
-	planPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "plan.md")
+	planPath := filepath.Join(specDir, "plan.md")
 	if _, err := os.Stat(planPath); err == nil {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
@@ -90,7 +98,15 @@ func validatePlanMode(root string, s *state.Focus) []Warning {
 		return warnings
 	}
 
-	specPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "spec.md")
+	specDir, err := workspace.SpecDir(root, s.ActiveSpec)
+	if err != nil {
+		warnings = append(warnings, Warning{
+			Field:   "activeSpec",
+			Message: fmt.Sprintf("Invalid activeSpec ID: %v", err),
+		})
+		return warnings
+	}
+	specPath := filepath.Join(specDir, "spec.md")
 	if status := readSpecApprovalStatus(specPath); status != "APPROVED" {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
@@ -98,7 +114,7 @@ func validatePlanMode(root string, s *state.Focus) []Warning {
 		})
 	}
 
-	planPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "plan.md")
+	planPath := filepath.Join(specDir, "plan.md")
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		warnings = append(warnings, Warning{
 			Field:   "activeSpec",
@@ -128,7 +144,15 @@ func validateImplementMode(root string, s *state.Focus) []Warning {
 	}
 
 	// Check plan is approved via frontmatter
-	planPath := filepath.Join(workspace.SpecDir(root, s.ActiveSpec), "plan.md")
+	specDir, err := workspace.SpecDir(root, s.ActiveSpec)
+	if err != nil {
+		warnings = append(warnings, Warning{
+			Field:   "activeSpec",
+			Message: fmt.Sprintf("Invalid activeSpec ID: %v", err),
+		})
+		return warnings
+	}
+	planPath := filepath.Join(specDir, "plan.md")
 	if planStatus := frontmatter.StatusFromPath(planPath); !strings.EqualFold(planStatus, "Approved") {
 		warnings = append(warnings, Warning{
 			Field:   "mode",

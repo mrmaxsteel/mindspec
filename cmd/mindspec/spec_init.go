@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/spec"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,9 @@ var specInitCmd = &cobra.Command{
 	Args:   cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID := args[0]
+		if err := validate.SpecID(specID); err != nil {
+			return err
+		}
 		title, _ := cmd.Flags().GetString("title")
 
 		root, err := findRoot()
@@ -31,7 +35,11 @@ var specInitCmd = &cobra.Command{
 			return err
 		}
 
-		specPath := filepath.Join(workspace.SpecDir(root, specID), "spec.md")
+		specDir, err := workspace.SpecDir(root, specID)
+		if err != nil {
+			return err
+		}
+		specPath := filepath.Join(specDir, "spec.md")
 		relPath, err := filepath.Rel(root, specPath)
 		if err != nil {
 			relPath = specPath

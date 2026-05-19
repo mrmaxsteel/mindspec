@@ -114,8 +114,11 @@ func Run(root, specID, title string, exec executor.Executor) (*Result, error) {
 	// --- Phase 2: Write spec files into the workspace (not main) ---
 
 	// Check for existing spec dir in the workspace.
-	specDir := workspace.SpecDir(ws.Path, specID)
-	if _, err := os.Stat(specDir); err == nil {
+	specDir, err := workspace.SpecDir(ws.Path, specID)
+	if err != nil {
+		return nil, err
+	}
+	if _, statErr := os.Stat(specDir); statErr == nil {
 		return nil, fmt.Errorf("spec directory already exists: %s", specDir)
 	}
 	result.SpecDir = specDir

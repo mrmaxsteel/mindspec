@@ -195,7 +195,10 @@ func TestSpecDir_UsesDocsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := SpecDir(root, "001-test")
+	got, err := SpecDir(root, "001-test")
+	if err != nil {
+		t.Fatalf("SpecDir unexpected error: %v", err)
+	}
 	want := filepath.Join(canonical, "specs", "001-test")
 	if got != want {
 		t.Errorf("SpecDir canonical: got %q, want %q", got, want)
@@ -237,7 +240,10 @@ func TestDomainDir_UsesDocsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := DomainDir(root, "core")
+	got, err := DomainDir(root, "core")
+	if err != nil {
+		t.Fatalf("DomainDir unexpected error: %v", err)
+	}
 	want := filepath.Join(canonical, "domains", "core")
 	if got != want {
 		t.Errorf("DomainDir canonical: got %q, want %q", got, want)
@@ -251,7 +257,10 @@ func TestRecordingDir_UsesSpecDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := RecordingDir(root, "001-test")
+	got, err := RecordingDir(root, "001-test")
+	if err != nil {
+		t.Fatalf("RecordingDir unexpected error: %v", err)
+	}
 	want := filepath.Join(canonical, "specs", "001-test", "recording")
 	if got != want {
 		t.Errorf("RecordingDir canonical: got %q, want %q", got, want)
@@ -272,7 +281,10 @@ func TestSpecDir_WorktreeAware_WorktreeFirst(t *testing.T) {
 		}
 	}
 
-	got := SpecDir(root, specID)
+	got, err := SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("SpecDir unexpected error: %v", err)
+	}
 	if got != wtSpec {
 		t.Errorf("SpecDir worktree-first: got %q, want %q", got, wtSpec)
 	}
@@ -291,7 +303,10 @@ func TestSpecDir_WorktreeAware_CanonicalFallback(t *testing.T) {
 		}
 	}
 
-	got := SpecDir(root, specID)
+	got, err := SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("SpecDir unexpected error: %v", err)
+	}
 	if got != canonical {
 		t.Errorf("SpecDir canonical fallback: got %q, want %q", got, canonical)
 	}
@@ -307,7 +322,10 @@ func TestSpecDir_WorktreeAware_LegacyFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := SpecDir(root, specID)
+	got, err := SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("SpecDir unexpected error: %v", err)
+	}
 	if got != legacy {
 		t.Errorf("SpecDir legacy fallback: got %q, want %q", got, legacy)
 	}
@@ -320,7 +338,10 @@ func TestSpecDir_WorktreeAware_DefaultsToCanonical(t *testing.T) {
 	specID := "044-launch-website"
 	want := filepath.Join(root, ".mindspec", "docs", "specs", specID)
 
-	got := SpecDir(root, specID)
+	got, err := SpecDir(root, specID)
+	if err != nil {
+		t.Fatalf("SpecDir unexpected error: %v", err)
+	}
 	if got != want {
 		t.Errorf("SpecDir default canonical: got %q, want %q", got, want)
 	}
@@ -336,7 +357,10 @@ func TestRecordingDir_WorktreeAware(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := RecordingDir(root, specID)
+	got, err := RecordingDir(root, specID)
+	if err != nil {
+		t.Fatalf("RecordingDir unexpected error: %v", err)
+	}
 	want := filepath.Join(wtSpec, "recording")
 	if got != want {
 		t.Errorf("RecordingDir worktree: got %q, want %q", got, want)

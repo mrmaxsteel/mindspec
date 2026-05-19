@@ -104,12 +104,18 @@ var agentmindReplayCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("finding project root: %w", err)
 			}
-			filePath = recording.EventsPath(root, specID)
-			if _, err := os.Stat(filePath); err != nil {
+			filePath, err = recording.EventsPath(root, specID)
+			if err != nil {
+				return err
+			}
+			if _, statErr := os.Stat(filePath); statErr != nil {
 				// Also try resolving via workspace
-				specDir := workspace.SpecDir(root, specID)
+				specDir, sdErr := workspace.SpecDir(root, specID)
+				if sdErr != nil {
+					return sdErr
+				}
 				filePath = filepath.Join(specDir, "recording", "events.ndjson")
-				if _, err := os.Stat(filePath); err != nil {
+				if _, statErr := os.Stat(filePath); statErr != nil {
 					return fmt.Errorf("no recording found for spec %s", specID)
 				}
 			}
