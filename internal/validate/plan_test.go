@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 func TestValidatePlan_WellFormed(t *testing.T) {
@@ -919,7 +921,7 @@ func TestDecompositionQuality_HighBeadCount(t *testing.T) {
 			DependsOn:    "None",
 		}
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -955,7 +957,7 @@ func TestDecompositionQuality_HighScopeRedundancy(t *testing.T) {
 			DependsOn:    "None",
 		},
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -991,7 +993,7 @@ func TestDecompositionQuality_LowScopeRedundancy(t *testing.T) {
 			DependsOn:    "None",
 		},
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1013,7 +1015,7 @@ func TestDecompositionQuality_DeepChain(t *testing.T) {
 		{Heading: "Bead 3: C", HasDependsOn: true, DependsOn: "Bead 2"},
 		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 3"},
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1038,7 +1040,7 @@ func TestDecompositionQuality_LowParallelism(t *testing.T) {
 		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 2"},
 		{Heading: "Bead 5: E", HasDependsOn: true, DependsOn: "Bead 3"},
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1074,7 +1076,7 @@ func TestDecompositionQuality_NoWarnings(t *testing.T) {
 			DependsOn:    "Bead 1",
 		},
 	}
-	checkDecompositionQuality(r, sections)
+	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
 
 	decompositionChecks := []string{
 		"decomposition-bead-count",
@@ -1089,4 +1091,57 @@ func TestDecompositionQuality_NoWarnings(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestDecompositionQuality_ConfigOverride confirms the thresholds are honored
+// from config: raising MaxBeads silences a warning that defaults would fire,
+// and lowering MaxChainDepth fires a warning that defaults would silence.
+func TestDecompositionQuality_ConfigOverride(t *testing.T) {
+	t.Run("raise_max_beads_silences_warning", func(t *testing.T) {
+		r := &Result{}
+		sections := make([]BeadSection, 7)
+		for i := range sections {
+			sections[i] = BeadSection{
+				Heading:      fmt.Sprintf("Bead %d: Task", i+1),
+				StepsCount:   3,
+				HasDependsOn: true,
+				DependsOn:    "None",
+			}
+		}
+		cfg := config.DefaultConfig().Decomposition
+		cfg.MaxBeads = 100
+		checkDecompositionQuality(r, sections, cfg)
+
+		for _, issue := range r.Issues {
+			if issue.Name == "decomposition-bead-count" {
+				t.Errorf("did not expect decomposition-bead-count warning with MaxBeads=100, got: %s", issue.Message)
+			}
+		}
+	})
+
+	t.Run("lower_max_chain_depth_triggers_warning", func(t *testing.T) {
+		r := &Result{}
+		// Chain depth 2: Bead 1 → Bead 2. Defaults (MaxChainDepth=3) would
+		// not warn; lowering to 1 should.
+		sections := []BeadSection{
+			{Heading: "Bead 1: A", HasDependsOn: true, DependsOn: "None"},
+			{Heading: "Bead 2: B", HasDependsOn: true, DependsOn: "Bead 1"},
+		}
+		cfg := config.DefaultConfig().Decomposition
+		cfg.MaxChainDepth = 1
+		checkDecompositionQuality(r, sections, cfg)
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name == "decomposition-chain-depth" {
+				found = true
+				if !strings.Contains(issue.Message, "threshold 1") {
+					t.Errorf("expected threshold 1 in message, got: %s", issue.Message)
+				}
+			}
+		}
+		if !found {
+			t.Error("expected decomposition-chain-depth warning with MaxChainDepth=1")
+		}
+	})
 }
