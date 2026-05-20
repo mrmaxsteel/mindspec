@@ -73,7 +73,7 @@ func TestOwnershipRejectsExcludedTrees(t *testing.T) {
 	}
 }
 
-func TestResolveOwnerFallback(t *testing.T) {
+func TestOwnershipFallback(t *testing.T) {
 	root := t.TempDir()
 	// Domain dir exists on disk (we create it) but no OWNERSHIP.yaml
 	// is present. loadOwnership must return the fallback
