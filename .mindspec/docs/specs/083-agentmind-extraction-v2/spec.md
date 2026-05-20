@@ -296,9 +296,21 @@ extractions in the v1 panel; runtime checks are not.
   returns no match.
 - **Test G — Phase 0 prerequisite gate (the agentmind v0.0.1 tag exists):**
   `git ls-remote --tags https://github.com/mrmaxsteel/agentmind | grep -q 'refs/tags/v0.0.1$'`
-  returns success. The v0.0.1 tag SHA MUST be recorded in this spec before
-  Phase 1 may begin (placeholder until that recording happens:
-  `agentmind v0.0.1 SHA: <TBD — record before Phase 1>`).
+  returns success. The check is wrapped in
+  `scripts/verify-agentmind-tag.sh` (also reachable via
+  `make verify-agentmind-tag`), which exits 0 and prints the SHA on
+  success, exits 2 when the tag is absent, and exits 3 when the repo
+  itself is unreachable. The v0.0.1 tag SHA MUST be recorded in this
+  spec before Phase 1 may begin. **Current state (Bead 1
+  implementation):** `agentmind v0.0.1` has not yet been published
+  upstream — at the time of Bead 1, the gate exits 2 with a clear
+  "tag not found" message. This is the expected state during the
+  parallel mindspec-side migration; the gate flips green when the
+  agentmind side scaffolds and tags `v0.0.1`. The script supports
+  `--record` mode (`scripts/verify-agentmind-tag.sh v0.0.1 --record`),
+  which, once the tag is published, replaces the placeholder below
+  with the captured SHA in this file. Placeholder until that happens:
+  `agentmind v0.0.1 SHA: <TBD — record before Phase 1; populated by scripts/verify-agentmind-tag.sh --record>`.
 
 Passing Tests A–G is the definition of "the extraction is done."
 
