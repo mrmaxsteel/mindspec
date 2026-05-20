@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mrmaxsteel/agentmind/wire"
 	"github.com/mrmaxsteel/mindspec/internal/ndjson"
 )
 
@@ -170,12 +171,15 @@ func (c *Collector) writeEvents(events []CollectedEvent) {
 }
 
 // CollectedEvent is the normalized NDJSON schema for collected telemetry.
-type CollectedEvent struct {
-	TS       string         `json:"ts"`
-	Event    string         `json:"event"`
-	Data     map[string]any `json:"data,omitempty"`
-	Resource map[string]any `json:"resource,omitempty"`
-}
+//
+// Spec 083 Bead 2 (Phase 2 alias state): re-exported as a type alias of
+// wire.CollectedEvent so future beads can swap the OTLP-parsing
+// implementation without breaking callers. The Bead 2 method-set
+// precondition (spec lines 339-346) was verified by grep — zero methods
+// declared on CollectedEvent/otlpValue/otlpKeyValue at the time of
+// aliasing — so Branch A (alias) applies; Branch B (full duplication)
+// was not needed.
+type CollectedEvent = wire.CollectedEvent
 
 // extractLogEvents parses an OTLP ExportLogsServiceRequest JSON body
 // and extracts claude_code.api_request events.
@@ -319,19 +323,15 @@ func extractMetricEvents(body []byte) []CollectedEvent {
 	return events
 }
 
-// otlpValue represents an OTLP AnyValue.
-// IntValue uses json.RawMessage because OTLP sends it as either a string or number.
-type otlpValue struct {
-	StringValue string          `json:"stringValue"`
-	IntValue    json.RawMessage `json:"intValue"`
-	DoubleValue *float64        `json:"doubleValue"`
-}
+// otlpValue is the package-private alias of wire.OTLPValue (Bead 2 Phase
+// 2 alias state). The unexported alias keeps the bench-internal call
+// sites unchanged while routing the actual type through the wire
+// package.
+type otlpValue = wire.OTLPValue
 
-// otlpKeyValue represents an OTLP KeyValue.
-type otlpKeyValue struct {
-	Key   string    `json:"key"`
-	Value otlpValue `json:"value"`
-}
+// otlpKeyValue is the package-private alias of wire.OTLPKeyValue (Bead 2
+// Phase 2 alias state).
+type otlpKeyValue = wire.OTLPKeyValue
 
 // flattenAttributes converts OTLP attributes to a flat map.
 func flattenAttributes(attrs []otlpKeyValue) map[string]any {
