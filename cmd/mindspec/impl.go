@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -27,6 +28,7 @@ This is the final human gate in the spec lifecycle.`,
 }
 
 func init() {
+	implApproveCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
 	implCmd.AddCommand(implApproveCmd)
 }
 
@@ -51,8 +53,16 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		_ = os.Chdir(specWtPath)
 	}
 
+	// Spec 086 Bead 3: --allow-doc-skew override flag (shared between
+	// `mindspec impl approve` and `mindspec approve impl`). Explicit
+	// empty reason rejected per spec Req 12.
+	allowDocSkew, _ := cmd.Flags().GetString("allow-doc-skew")
+	if cmd.Flags().Changed("allow-doc-skew") && strings.TrimSpace(allowDocSkew) == "" {
+		return fmt.Errorf("--allow-doc-skew requires a non-empty reason")
+	}
+
 	exec := newExecutor(root)
-	result, err := approve.ApproveImpl(root, specID, exec)
+	result, err := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{AllowDocSkew: allowDocSkew})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

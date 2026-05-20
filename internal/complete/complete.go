@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -13,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -26,7 +28,23 @@ var (
 	findLocalRootFn   = defaultFindLocalRoot
 	fetchBeadByIDFn   = next.FetchBeadByID
 	findEpicForBeadFn = phase.FindEpicForBead
+	mergeMetadataFn   = bead.MergeMetadata
+	gitUserEmailFn    = bead.GitUserEmail
 )
+
+// CompleteOpts holds options for bead completion.
+//
+// Spec 086 Bead 3: `AllowDocSkew` activates the doc-sync override gate.
+// Empty string means "no override". A non-empty string is interpreted
+// as the human-readable reason; it is recorded as
+// `mindspec_doc_skew_reason` (alongside `_by` and `_at`) on the bead's
+// metadata AFTER the terminal mutation (`exec.CompleteBead`) returns
+// nil — symmetric with ApproveImpl's post-FinalizeEpic write
+// discipline. If CompleteBead fails, the metadata is not written —
+// the failure itself is the audit trail.
+type CompleteOpts struct {
+	AllowDocSkew string
+}
 
 // Result summarizes what mindspec complete did.
 type Result struct {
@@ -48,7 +66,8 @@ func defaultFindLocalRoot() (string, error) {
 // beadID is required — it must always be provided by the caller.
 // exec is the Executor used for all git/workspace operations.
 // specIDHint is optional and typically comes from --spec for disambiguation.
-func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*Result, error) {
+// opts carries lifecycle options including the doc-sync skew override.
+func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (*Result, error) {
 	// Determine local root for per-worktree context resolution.
 	localRoot := root
 	if lr, err := findLocalRootFn(); err == nil {
@@ -122,6 +141,35 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 		return nil, fmt.Errorf("%w\nhint: use `mindspec complete %s \"describe what you did\"` to auto-commit", err, beadID)
 	}
 
+	// 3.5. Spec 086 (F2) doc-sync enforcement gate. Computes the
+	// merge-base of HEAD against the spec branch so the gate sees
+	// exactly the bead's commits, then runs the doc-sync lane. The
+	// `--allow-doc-skew "<reason>"` override allows the gate to pass
+	// without doc updates; the reason is recorded on bead metadata
+	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
+	// (see step 5.5 below). ADR divergence is a forward-compatible
+	// stub (spec 087) — it is called for AST-anchoring +
+	// future-proofing, but currently emits no failures.
+	base, mbErr := exec.MergeBase(specBranch, "HEAD")
+	if mbErr != nil {
+		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
+	}
+	docResult := validate.ValidateDocs(root, base, exec)
+	if docResult.HasFailures() {
+		if opts.AllowDocSkew == "" {
+			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
+		}
+		// Override path: fall through. Metadata is written AFTER the
+		// terminal mutation succeeds (panel CONSENSUS revision 4).
+	}
+	adrResult := validate.CheckADRDivergence(root, base, exec)
+	if adrResult.HasFailures() {
+		// ADR divergence is NOT covered by `--allow-doc-skew` per panel
+		// CONSENSUS revision 6. The stub never sets failures today, but
+		// the gate is wired so spec 087 inherits the boundary contract.
+		return nil, fmt.Errorf("adr-divergence: %s", joinResultErrorMessages(adrResult))
+	}
+
 	// 4. Close bead (idempotent: tolerate already-closed beads)
 	if err := closeBeadFn(beadID); err != nil {
 		// Check if the bead is already closed — if so, warn and continue cleanup.
@@ -150,10 +198,30 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor) (*R
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
 	// Pass empty msg since we already handled commit+clean-tree above.
-	if err := exec.CompleteBead(beadID, specBranch, ""); err != nil {
-		fmt.Printf("Warning: bead cleanup: %v\n", err)
+	completeErr := exec.CompleteBead(beadID, specBranch, "")
+	if completeErr != nil {
+		fmt.Printf("Warning: bead cleanup: %v\n", completeErr)
 	} else {
 		result.WorktreeRemoved = true
+	}
+
+	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
+	// terminal bead→spec merge (`exec.CompleteBead`) returns nil. This
+	// mirrors ApproveImpl's post-FinalizeEpic discipline — the override
+	// metadata write must be symmetric with the terminal mutation, not
+	// just the prior `closeBeadFn` step. If CompleteBead failed we skip
+	// the write; the failure itself is the audit trail (panel CONSENSUS
+	// revision 4). Best-effort: a metadata write failure surfaces as a
+	// warning print but does not fail the lifecycle.
+	if opts.AllowDocSkew != "" && completeErr == nil {
+		meta := buildSkewMetadata(opts.AllowDocSkew,
+			"mindspec_doc_skew_reason",
+			"mindspec_doc_skew_at",
+			"mindspec_doc_skew_by",
+		)
+		if err := mergeMetadataFn(beadID, meta); err != nil {
+			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", beadID, err)
+		}
 	}
 
 	// 6. Advance state
@@ -248,6 +316,31 @@ func advanceState(root, specID string) (mode, nextBead string) {
 	}
 
 	return derivedPhase, ""
+}
+
+// buildSkewMetadata returns a metadata map with the override reason,
+// an RFC3339-UTC timestamp, and a best-effort actor identity, keyed by
+// the caller-provided field names. Spec 086 Bead 3.
+func buildSkewMetadata(reason, reasonKey, atKey, byKey string) map[string]interface{} {
+	return map[string]interface{}{
+		reasonKey: reason,
+		atKey:     time.Now().UTC().Format(time.RFC3339),
+		byKey:     gitUserEmailFn(),
+	}
+}
+
+// joinResultErrorMessages flattens SevError-severity Issues from a
+// *validate.Result into a single string suitable for fmt.Errorf
+// wrapping. Spec 086 Bead 3.
+func joinResultErrorMessages(r *validate.Result) string {
+	msgs := make([]string, 0, len(r.Issues))
+	for _, i := range r.Issues {
+		if i.Severity != validate.SevError {
+			continue
+		}
+		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // queryAllChildren pulls child beads under an epic across every status bd

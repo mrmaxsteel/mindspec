@@ -38,6 +38,7 @@ var approveImplCmd = &cobra.Command{
 func init() {
 	approveSpecCmd.Flags().String("approved-by", "user", "Identity of the approver")
 	approvePlanCmd.Flags().String("approved-by", "user", "Identity of the approver")
+	approveImplCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
 	approveCmd.AddCommand(approveSpecCmd)
 	approveCmd.AddCommand(approvePlanCmd)
 	approveCmd.AddCommand(approveImplCmd)
