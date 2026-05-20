@@ -4,6 +4,10 @@
 // Enforcement packages (validate, approve, bead/gate, state) call Executor
 // methods; they never perform git or workspace operations directly.
 // This package must NOT import any enforcement package.
+//
+// Executor is the **git/process I/O boundary** for the enforcement packages
+// (internal/{validate,approve,complete,state,phase}). `bd` access is OUT OF
+// SCOPE for this boundary and lives behind internal/bead.
 package executor
 
 // Executor abstracts workspace lifecycle operations. Implementations include
@@ -56,6 +60,20 @@ type Executor interface {
 	// CommitAll stages all changes in the workspace at path and commits
 	// with the given message. No-op if the tree is clean.
 	CommitAll(path, msg string) error
+
+	// ChangedFiles returns the list of paths changed between two git refs.
+	// Passing base == "" means working tree vs head, matching
+	// gitutil.DiffNameOnlyRef("", ref) semantics. With both refs set it is
+	// equivalent to `git diff --name-only <base>..<head>`.
+	ChangedFiles(base, head string) ([]string, error)
+
+	// FileAtRef returns the content of path at git ref (wraps
+	// `git show <ref>:<path>`). Empty ref is undefined.
+	FileAtRef(ref, path string) ([]byte, error)
+
+	// MergeBase returns the merge-base SHA of refs a and b (wraps
+	// `git merge-base <a> <b>`).
+	MergeBase(a, b string) (string, error)
 }
 
 // WorkspaceInfo describes a created workspace.

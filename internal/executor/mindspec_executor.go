@@ -3,6 +3,7 @@ package executor
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -404,6 +405,52 @@ func (g *MindspecExecutor) CommitCount(base, head string) (int, error) {
 // JSONL is byte-identical to Dolt at commit time (ADR-0025, spec 082).
 func (g *MindspecExecutor) CommitAll(path, msg string) error {
 	return g.commitWithExport(path, msg)
+}
+
+// ChangedFiles returns the list of paths changed between two git refs.
+// When base == "", delegates to gitutil.DiffNameOnlyRef("", head) to preserve
+// the exact semantics (working tree vs head) the docsync.go call site relies
+// on. When both refs are set, shells out to `git diff --name-only base..head`
+// directly and parses the newline-separated output inline (the executor must
+// not import enforcement packages to reuse a parser).
+func (g *MindspecExecutor) ChangedFiles(base, head string) ([]string, error) {
+	if base == "" {
+		return gitutil.DiffNameOnlyRef("", head)
+	}
+	cmd := exec.Command("git", "-C", g.Root, "diff", "--name-only", base+".."+head)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --name-only %s..%s: %w", base, head, err)
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+// FileAtRef returns the byte contents of path at git ref. Wraps
+// `git show <ref>:<path>`.
+func (g *MindspecExecutor) FileAtRef(ref, path string) ([]byte, error) {
+	cmd := exec.Command("git", "-C", g.Root, "show", ref+":"+path)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s: %w", ref, path, err)
+	}
+	return out, nil
+}
+
+// MergeBase returns the merge-base SHA of refs a and b. Wraps
+// `git merge-base <a> <b>`.
+func (g *MindspecExecutor) MergeBase(a, b string) (string, error) {
+	cmd := exec.Command("git", "-C", g.Root, "merge-base", a, b)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git merge-base %s %s: %w", a, b, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // commitWithExport runs the pre-stage beads export, then delegates to the

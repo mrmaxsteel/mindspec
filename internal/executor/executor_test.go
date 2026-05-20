@@ -593,6 +593,9 @@ func TestMockExecutor_RecordsCalls(t *testing.T) {
 		InitSpecWorkspaceResult: WorkspaceInfo{Path: "/ws", Branch: "spec/001"},
 		DispatchBeadResult:      WorkspaceInfo{Path: "/bead", Branch: "bead/x.1"},
 		FinalizeEpicResult:      FinalizeResult{MergeStrategy: "direct", CommitCount: 3},
+		ChangedFilesResult:      []string{"a.txt", "b.txt"},
+		FileAtRefResult:         []byte("file contents"),
+		MergeBaseResult:         "abc123",
 	}
 
 	info, _ := m.InitSpecWorkspace("001-test")
@@ -618,6 +621,19 @@ func TestMockExecutor_RecordsCalls(t *testing.T) {
 	_, _ = m.CommitCount("main", "spec/001")
 	_ = m.CommitAll("/path", "msg")
 
+	files, _ := m.ChangedFiles("main", "feature")
+	if len(files) != 2 || files[0] != "a.txt" {
+		t.Errorf("ChangedFiles = %v, want [a.txt b.txt]", files)
+	}
+	content, _ := m.FileAtRef("HEAD", "a.txt")
+	if string(content) != "file contents" {
+		t.Errorf("FileAtRef = %q, want %q", string(content), "file contents")
+	}
+	mb, _ := m.MergeBase("main", "feature")
+	if mb != "abc123" {
+		t.Errorf("MergeBase = %q, want %q", mb, "abc123")
+	}
+
 	if calls := m.CallsTo("InitSpecWorkspace"); len(calls) != 1 {
 		t.Errorf("InitSpecWorkspace calls = %d, want 1", len(calls))
 	}
@@ -636,8 +652,150 @@ func TestMockExecutor_RecordsCalls(t *testing.T) {
 	if calls := m.CallsTo("Cleanup"); len(calls) != 1 {
 		t.Errorf("Cleanup calls = %d, want 1", len(calls))
 	}
-	if total := len(m.Calls); total != 10 {
-		t.Errorf("total calls = %d, want 10", total)
+	if calls := m.CallsTo("ChangedFiles"); len(calls) != 1 {
+		t.Errorf("ChangedFiles calls = %d, want 1", len(calls))
+	}
+	if calls := m.CallsTo("FileAtRef"); len(calls) != 1 {
+		t.Errorf("FileAtRef calls = %d, want 1", len(calls))
+	}
+	if calls := m.CallsTo("MergeBase"); len(calls) != 1 {
+		t.Errorf("MergeBase calls = %d, want 1", len(calls))
+	}
+	if total := len(m.Calls); total != 13 {
+		t.Errorf("total calls = %d, want 13", total)
+	}
+}
+
+// --- ChangedFiles / FileAtRef / MergeBase (production impl) ---
+
+func TestChangedFiles_TwoRefs(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	runGitIn(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "add alpha/beta")
+
+	files, err := g.ChangedFiles("main", "feature")
+	if err != nil {
+		t.Fatalf("ChangedFiles: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %v, want 2 entries", files)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f] = true
+	}
+	if !seen["alpha.txt"] || !seen["beta.txt"] {
+		t.Errorf("files = %v, want both alpha.txt and beta.txt", files)
+	}
+}
+
+func TestChangedFiles_EmptyBase_WorkingTreeVsHead(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// Make a committed change on a side branch.
+	runGitIn(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "in-feature.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "feature commit")
+	// Back to main: the working tree differs from "feature" by the feature commit.
+	runGitIn(t, dir, "checkout", "main")
+
+	files, err := g.ChangedFiles("", "feature")
+	if err != nil {
+		t.Fatalf("ChangedFiles: %v", err)
+	}
+	// The working tree (main) lacks in-feature.txt; diff against feature lists it.
+	found := false
+	for _, f := range files {
+		if f == "in-feature.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("files = %v, want to include in-feature.txt", files)
+	}
+}
+
+func TestFileAtRef_ReturnsBlobBytes(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	want := []byte("hello from ref\n")
+	if err := os.WriteFile(filepath.Join(dir, "greet.txt"), want, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "add greet")
+
+	got, err := g.FileAtRef("HEAD", "greet.txt")
+	if err != nil {
+		t.Fatalf("FileAtRef: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("FileAtRef = %q, want %q", string(got), string(want))
+	}
+}
+
+func TestFileAtRef_MissingPath_Errors(t *testing.T) {
+	g, _, _ := newRepoExecutor(t)
+
+	if _, err := g.FileAtRef("HEAD", "does-not-exist.txt"); err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestMergeBase_ReturnsCommonAncestor(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// main has the root commit. Branch off and add a commit on each side.
+	mainRoot := refHash(t, dir, "main")
+
+	runGitIn(t, dir, "checkout", "-b", "left")
+	if err := os.WriteFile(filepath.Join(dir, "l.txt"), []byte("l"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "left commit")
+
+	runGitIn(t, dir, "checkout", "main")
+	runGitIn(t, dir, "checkout", "-b", "right")
+	if err := os.WriteFile(filepath.Join(dir, "r.txt"), []byte("r"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "right commit")
+
+	got, err := g.MergeBase("left", "right")
+	if err != nil {
+		t.Fatalf("MergeBase: %v", err)
+	}
+	if got != mainRoot {
+		t.Errorf("MergeBase = %q, want root %q", got, mainRoot)
+	}
+}
+
+func TestMergeBase_TrimsWhitespace(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	got, err := g.MergeBase("HEAD", "HEAD")
+	if err != nil {
+		t.Fatalf("MergeBase: %v", err)
+	}
+	if strings.TrimSpace(got) != got {
+		t.Errorf("MergeBase returned untrimmed output: %q", got)
+	}
+	if got != refHash(t, dir, "HEAD") {
+		t.Errorf("MergeBase(HEAD,HEAD) = %q, want HEAD %q", got, refHash(t, dir, "HEAD"))
 	}
 }
 

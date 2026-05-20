@@ -24,6 +24,12 @@ type MockExecutor struct {
 	CommitCountResult       int
 	CommitCountErr          error
 	CommitAllErr            error
+	ChangedFilesResult      []string
+	ChangedFilesErr         error
+	FileAtRefResult         []byte
+	FileAtRefErr            error
+	MergeBaseResult         string
+	MergeBaseErr            error
 }
 
 // MockCall records a single method invocation.
@@ -99,6 +105,21 @@ func (m *MockExecutor) CommitCount(base, head string) (int, error) {
 func (m *MockExecutor) CommitAll(path, msg string) error {
 	m.record("CommitAll", path, msg)
 	return m.CommitAllErr
+}
+
+func (m *MockExecutor) ChangedFiles(base, head string) ([]string, error) {
+	m.record("ChangedFiles", base, head)
+	return m.ChangedFilesResult, m.ChangedFilesErr
+}
+
+func (m *MockExecutor) FileAtRef(ref, path string) ([]byte, error) {
+	m.record("FileAtRef", ref, path)
+	return m.FileAtRefResult, m.FileAtRefErr
+}
+
+func (m *MockExecutor) MergeBase(a, b string) (string, error) {
+	m.record("MergeBase", a, b)
+	return m.MergeBaseResult, m.MergeBaseErr
 }
 
 // Compile-time interface check.
