@@ -35,7 +35,12 @@ jobs:
       # granted by `id-token: write` above provides the identity.
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
         with:
-          cosign-release: "v2.4.1"
+          # v2.6.3 is the minimum cosign version that can parse the
+          # sigstore-bundle format goreleaser-action v7.x ships its own
+          # download with. v2.4.x fails self-verification on action startup
+          # ("bundle does not contain cert for verification"); panel-final
+          # blocker on PR #112 surfaced this on the introducing PR's dryrun.
+          cosign-release: "v2.6.3"
 
       # Install syft so GoReleaser's `sboms:` block can invoke `syft scan`
       # for every archive and the checksums file (SPDX-JSON output).

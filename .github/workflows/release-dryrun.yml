@@ -72,7 +72,12 @@ jobs:
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
         with:
-          cosign-release: "v2.4.1"
+          # Pinned to v2.6.3 in lockstep with release.yml — anything older
+          # fails goreleaser-action v7.x's startup self-verify with
+          # "bundle does not contain cert for verification". See PR #112
+          # panel-final blocker for the surfacing of this on the
+          # introducing dryrun run.
+          cosign-release: "v2.6.3"
 
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
