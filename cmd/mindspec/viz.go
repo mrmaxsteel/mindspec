@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/agentmind/client"
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/viz"
@@ -66,31 +65,31 @@ var agentmindServeCmd = &cobra.Command{
 		}
 
 		// Write the AgentMind identity lockfile per the contract in
-		// internal/agentmind/lockfile.go. The standalone agentmind
+		// internal/recording/lockfile.go. The standalone agentmind
 		// binary does not yet own this write (see spec 083 — the
 		// contract docstring notes "When AgentMind is extracted into
 		// its own binary, this file...MUST be copied/re-exported"),
 		// so the mindspec wrapper continues to own it until the
-		// sibling binary takes over. Consumers of `internal/agentmind`
-		// (record health, record stop, OTLP-port identity checks via
-		// IsRunning/PortInUseByForeign/Token) depend on this file
-		// being present and PID-alive while serve runs. Writing it
-		// here keeps the pre-Bead-4 identity protocol intact.
-		token, tokErr := agentmind.NewToken()
+		// sibling binary takes over.
+		//
+		// Spec 083 Bead 5: the lockfile helpers moved from the deleted
+		// `internal/agentmind/` package to `internal/recording/`
+		// (mindspec owns the contract; the agentmind binary honors it).
+		token, tokErr := recording.NewToken()
 		if tokErr != nil {
 			return fmt.Errorf("generating agentmind token: %w", tokErr)
 		}
-		lf := agentmind.Lockfile{
+		lf := recording.Lockfile{
 			PID:       os.Getpid(),
 			OTLPPort:  otlpPort,
 			UIPort:    uiPort,
 			Token:     token,
 			StartedAt: time.Now().UTC(),
 		}
-		if err := agentmind.WriteLockfile(lf); err != nil {
+		if err := recording.WriteLockfile(lf); err != nil {
 			return fmt.Errorf("writing agentmind lockfile: %w", err)
 		}
-		defer func() { _ = agentmind.RemoveLockfile() }()
+		defer func() { _ = recording.RemoveLockfile() }()
 
 		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
