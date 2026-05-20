@@ -39,13 +39,45 @@ Research on scaling agent systems ([arXiv:2512.08296](https://arxiv.org/abs/2512
 - **Validation gates** — `mindspec validate` catches structural issues in specs, plans, and docs before they reach approval
 - **Proof runner** — executes validation proof commands from specs and records timestamped pass/fail evidence
 
-**Observability (AgentMind)**
-- **3D activity visualization** — agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
-- **Token and cost tracking** — input/output tokens, cache reads, cache creation, and estimated USD cost broken down per model
-- **Tool and MCP analytics** — every tool call and MCP server interaction counted and categorized with frequency histograms
-- **Session recording and replay** — capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
-- **A/B/C benchmarking** — compare agentic workflows side-by-side with automated delta reporting and qualitative analysis
-- **Multi-agent identity** — distinct visualization nodes for each agent and sub-agent with parent-child hierarchy
+**Observability (OTEL-config only — spec 084)**
+- **`mindspec otel setup` writes one config and that's it.** Point
+  `mindspec otel setup --endpoint <url>` at any OTLP/HTTP receiver
+  (AgentMind, Honeycomb, Tempo, Jaeger, opentelemetry-collector-contrib,
+  …) and your workload's telemetry lands there. mindspec itself
+  never spawns, restarts, or probes a collector — that's not its
+  job.
+- **`mindspec otel status`** is a read-only diagnostic: shows the
+  configured endpoint, protocol, header keys (values redacted), and
+  which workload-config files (Claude Code settings, Codex config)
+  carry the stanza.
+- **No OTLP receiver in mindspec.** As of spec 084
+  ([ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md)),
+  mindspec does not run an OTLP receiver, does not parse OTLP, does
+  not read NDJSON, and does not depend on any specific
+  collector binary. If you want the AgentMind viz / replay / bench
+  UI, install the standalone `agentmind` binary from
+  [github.com/mrmaxsteel/agentmind](https://github.com/mrmaxsteel/agentmind/releases)
+  and point your endpoint at it.
+
+### Migration from `mindspec agentmind serve|replay|viz` (spec 084)
+
+Spec 084 removed mindspec's embedded observability surface. The
+following commands no longer exist; each prints a one-shot
+deprecation message and exits with code 2:
+
+| Removed command | Replacement |
+|---|---|
+| `mindspec agentmind serve` | `agentmind serve` (standalone binary; install from https://github.com/mrmaxsteel/agentmind/releases) |
+| `mindspec agentmind replay` | `agentmind replay` (standalone binary) |
+| `mindspec viz` | `agentmind serve` (standalone binary; the top-level `viz` alias is gone) |
+| `mindspec agentmind setup` | `mindspec otel setup` (renamed; no backwards-compat alias) |
+| `mindspec bench …` | No mindspec-side replacement. See [BENCH-MOVED.md](BENCH-MOVED.md) for the git-history rescue procedure; bench is destined for its own repo. |
+
+The deprecation messages live for exactly one mindspec release after
+spec 084 and are then deleted. See
+[ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md) and
+[ADR-0028](.mindspec/docs/adr/ADR-0028-bench-rescue-procedure.md) for
+the architectural rationale.
 
 **Project Setup & Integration**
 - **One-command bootstrap** — `mindspec init` scaffolds the full project structure; additive and safe for existing repos
@@ -177,8 +209,9 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 | **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/user/guides/claude-code.md) |
 | **Full workflow with Codex** | [Codex guide](.mindspec/docs/user/guides/codex.md) |
 | **Full workflow with Copilot** | [Copilot guide](.mindspec/docs/user/guides/copilot.md) |
-| **Visualize & benchmark agent activity** | [AgentMind guide](.mindspec/docs/user/guides/agentmind.md) |
-| **Installing the AgentMind binary** | [AgentMind install](.mindspec/docs/installation/agentmind.md) |
+| **Point mindspec at any OTLP/HTTP collector** | `mindspec otel setup --endpoint <url>` (see ADR-0027) |
+| **Visualize & benchmark agent activity (downstream of mindspec)** | [AgentMind guide](.mindspec/docs/user/guides/agentmind.md) |
+| **Installing the AgentMind binary (downstream tool)** | [AgentMind install](.mindspec/docs/installation/agentmind.md) |
 | **Workflow state machine (allowed/disallowed transitions)** | [WORKFLOW-STATE-MACHINE.md](.mindspec/docs/core/WORKFLOW-STATE-MACHINE.md) |
 | **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
 

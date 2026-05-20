@@ -88,7 +88,6 @@ func findLocalRoot() (string, error) {
 func init() {
 	rootCmd.PersistentFlags().String("trace", "", "Write trace events to file (use - for stderr)")
 
-	rootCmd.AddCommand(benchCmd)
 	rootCmd.AddCommand(adrCmd)
 	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(approveCmd) // hidden backward-compat alias
@@ -110,6 +109,13 @@ func init() {
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(validateCmd)
-	rootCmd.AddCommand(agentmindCmd)
+	rootCmd.AddCommand(otelCmd)
 	rootCmd.AddCommand(recordCmd)
+
+	// Spec 084 Bead 3: register one-shot deprecation stubs for removed
+	// top-level commands (HC #7). Each stub is hidden and exits 2 with
+	// exactly one stderr line. See cmd/mindspec/deprecated_commands.go.
+	rootCmd.AddCommand(agentmindDeprecatedCmd)
+	rootCmd.AddCommand(vizDeprecatedCmd)
+	rootCmd.AddCommand(benchDeprecatedCmd)
 }

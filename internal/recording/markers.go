@@ -4,9 +4,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/bench"
 	"github.com/mrmaxsteel/mindspec/internal/ndjson"
 )
+
+// MarkerEvent is the on-disk NDJSON shape of a lifecycle marker.
+//
+// Spec 084 Bead 3: this type replaces the previous
+// `bench.CollectedEvent` (a type alias of
+// `github.com/mrmaxsteel/agentmind/wire.CollectedEvent`). After the
+// bench/agentmind subsystems were deleted from mindspec, the recording
+// package owns its own NDJSON schema — it is the only writer left and
+// the on-disk JSON shape (`ts`, `event`, `data`) is unchanged so
+// downstream consumers (replay tools, agentmind, etc.) keep parsing the
+// same fields. The `resource` field that the OTLP-side wire type
+// carried is unused by markers and intentionally omitted here.
+type MarkerEvent struct {
+	TS    string         `json:"ts"`
+	Event string         `json:"event"`
+	Data  map[string]any `json:"data,omitempty"`
+}
 
 // EmitMarker appends a lifecycle marker event to events.ndjson.
 //
@@ -29,7 +45,7 @@ func EmitMarker(root, specID, event string, data map[string]any) error {
 	}
 	data["spec_id"] = specID
 
-	e := bench.CollectedEvent{
+	e := MarkerEvent{
 		TS:    time.Now().UTC().Format(time.RFC3339Nano),
 		Event: event,
 		Data:  data,
@@ -41,9 +57,9 @@ func EmitMarker(root, specID, event string, data map[string]any) error {
 	}
 	// BufSize == 0 keeps Emit synchronous to the file descriptor; defer Close
 	// closes the FD before this function returns, providing per-call durability.
-	// FileMode 0o600 enforces SEC-7: the writer chmods after OpenFile so that
-	// even if AgentMind's collector created the file first with a looser umask,
-	// the marker write path re-tightens it to 0600.
+	// FileMode 0o600 enforces SEC-7: the writer chmods after OpenFile so the
+	// file is created (or re-tightened) at 0o600 even if a previous writer
+	// left it looser.
 	w, err := ndjson.New(eventsPath, ndjson.Opts{
 		Append:   true,
 		FileMode: 0o600,
