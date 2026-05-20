@@ -46,3 +46,59 @@ release:
   github:
     owner: mrmaxsteel
     name: mindspec
+
+# Cosign keyless signing — spec 090 Bead 2 / ADR-0029.
+# Two entries: one signs each release archive, one signs `checksums.txt`.
+# `${artifact}` is the GoReleaser-substituted artifact filename. The
+# explicit `--bundle=${artifact}.cosign.bundle` flag is load-bearing —
+# the verification path consumes the `.cosign.bundle` companion file.
+signs:
+  - id: archives
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: archive
+  - id: checksums
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: checksum
+
+# Syft SBOM generation — SPDX-JSON per archive and per checksums file.
+# Two entries mirroring the `signs:` shape; each produces
+# `${artifact}.spdx.json`.
+sboms:
+  - id: archives
+    cmd: syft
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
+    documents:
+      - "${artifact}.spdx.json"
+    artifacts: archive
+  - id: checksums
+    cmd: syft
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
+    documents:
+      - "${artifact}.spdx.json"
+    artifacts: checksum
