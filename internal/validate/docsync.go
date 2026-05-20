@@ -144,13 +144,21 @@ func checkCmdChanges(r *Result, source, docs []string) {
 
 	hasRelevantDoc := false
 	for _, f := range docs {
+		// Existing operator-docs accept set (preserved):
 		if f == "CLAUDE.md" || strings.Contains(f, "CONVENTIONS.md") {
+			hasRelevantDoc = true
+			break
+		}
+		// Spec-086 additive operator-docs accept set (Requirement 10):
+		// any user-facing doc or the core USAGE manual also satisfies the lane.
+		if strings.HasPrefix(f, ".mindspec/docs/user/") ||
+			f == ".mindspec/docs/core/USAGE.md" {
 			hasRelevantDoc = true
 			break
 		}
 	}
 
 	if !hasRelevantDoc {
-		r.AddWarning("cmd-docs", "cmd/ files changed but neither CLAUDE.md nor CONVENTIONS.md updated")
+		r.AddWarning("cmd-docs", "cmd/ changes without operator-docs update (one of CLAUDE.md, CONVENTIONS.md, .mindspec/docs/user/**, .mindspec/docs/core/USAGE.md)")
 	}
 }

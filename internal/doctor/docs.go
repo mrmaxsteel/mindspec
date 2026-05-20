@@ -79,6 +79,22 @@ func checkDomains(r *Report, root, docsRel string) {
 				})
 			}
 		}
+
+		// OWNERSHIP.yaml check (spec-086 Bead 4).
+		// Warn (not Missing) per spec Requirement 15: existing repos must
+		// not start failing `mindspec doctor` on day one when the manifest
+		// is absent — doc-sync falls back to internal/<domain>/** mapping.
+		ownerPath := filepath.Join(domainDir, "OWNERSHIP.yaml")
+		ownerName := filepath.ToSlash(filepath.Join(docsRel, "domains", domain, "OWNERSHIP.yaml"))
+		if fileExists(ownerPath) {
+			r.Checks = append(r.Checks, Check{Name: ownerName, Status: OK})
+		} else {
+			r.Checks = append(r.Checks, Check{
+				Name:    ownerName,
+				Status:  Warn,
+				Message: fmt.Sprintf("missing OWNERSHIP.yaml; doc-sync falls back to internal/%s/**", domain),
+			})
+		}
 	}
 }
 

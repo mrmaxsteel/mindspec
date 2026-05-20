@@ -150,3 +150,64 @@ func TestCheckCmdChanges_NoCmdFiles(t *testing.T) {
 		t.Error("expected no issues when no cmd files changed")
 	}
 }
+
+// TestOperatorDocsAdditiveAcceptSet verifies the operator-docs lane accepts
+// the spec-086 additive set (.mindspec/docs/user/** and
+// .mindspec/docs/core/USAGE.md) in addition to the existing accept set
+// (CLAUDE.md, CONVENTIONS.md). Severity stays at warning per Req 7.
+func TestOperatorDocsAdditiveAcceptSet(t *testing.T) {
+	cases := []struct {
+		name        string
+		source      []string
+		docs        []string
+		wantWarning bool
+	}{
+		{
+			name:        "CLAUDE.md satisfies lane (existing, preserved)",
+			source:      []string{"cmd/mindspec/validate.go"},
+			docs:        []string{"CLAUDE.md"},
+			wantWarning: false,
+		},
+		{
+			name:        "CONVENTIONS.md satisfies lane (existing, preserved)",
+			source:      []string{"cmd/mindspec/validate.go"},
+			docs:        []string{"docs/CONVENTIONS.md"},
+			wantWarning: false,
+		},
+		{
+			name:        ".mindspec/docs/user/** satisfies lane (additive)",
+			source:      []string{"cmd/mindspec/validate.go"},
+			docs:        []string{".mindspec/docs/user/getting-started.md"},
+			wantWarning: false,
+		},
+		{
+			name:        ".mindspec/docs/core/USAGE.md satisfies lane (additive)",
+			source:      []string{"cmd/mindspec/validate.go"},
+			docs:        []string{".mindspec/docs/core/USAGE.md"},
+			wantWarning: false,
+		},
+		{
+			name:        "no operator-doc touch warns",
+			source:      []string{"cmd/mindspec/validate.go"},
+			docs:        []string{"docs/domains/workflow/overview.md"},
+			wantWarning: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Result{SubCommand: "docs"}
+			checkCmdChanges(r, tc.source, tc.docs)
+
+			found := false
+			for _, issue := range r.Issues {
+				if issue.Name == "cmd-docs" {
+					found = true
+				}
+			}
+			if found != tc.wantWarning {
+				t.Errorf("warning present = %v, want %v (issues=%+v)", found, tc.wantWarning, r.Issues)
+			}
+		})
+	}
+}
