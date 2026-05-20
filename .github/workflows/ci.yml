@@ -136,3 +136,54 @@ jobs:
             echo "::error::go.mod or go.sum is not tidy. Run 'go mod tidy' and commit."
             exit 1
           fi
+
+  # Spec 083 Bead 4 — Test D (live capture) gate. End-to-end:
+  # build the in-repo cmd/agentmind-fake (stand-in for the real
+  # binary until agentmind v0.2.0+ ships), set $AGENTMIND_BIN,
+  # invoke `make test-live-capture` (which runs the
+  # `livecapture`-tagged Go test that spawns the binary, POSTs a
+  # synthetic OTLP payload, and asserts NDJSON event capture).
+  #
+  # Gated on Test G via `make verify-agentmind-tag`: when the
+  # agentmind v0.0.1 tag is absent upstream, the verify step exits
+  # non-zero with a clear deferral message and we skip the live-
+  # capture job rather than fail. Once upstream publishes the tag
+  # and a real binary becomes available, set
+  # AGENTMIND_REAL_BINARY=1 to upgrade the assertion to the
+  # spec-canonical `claude_code.api_request` event check.
+  live-capture:
+    name: Live capture (Test D)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
+
+      - name: Test G — verify agentmind v0.0.1 tag (gate)
+        id: testg
+        run: |
+          set +e
+          ./scripts/verify-agentmind-tag.sh
+          rc=$?
+          echo "verify-agentmind-tag exit=$rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # Exit 0/2/3 are all acceptable to the job — 0 lets us run,
+          # 2/3 cause the live-capture step to skip with a notice.
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
+            echo "::error::verify-agentmind-tag.sh failed unexpectedly (rc=$rc)"
+            exit "$rc"
+          fi
+
+      - name: Run live-capture gate (Test D)
+        if: steps.testg.outputs.rc == '0'
+        run: make test-live-capture
+
+      - name: Skip live-capture (Test G deferred)
+        if: steps.testg.outputs.rc != '0'
+        run: |
+          echo "::notice::Test G (agentmind v0.0.1 tag) is deferred (rc=${{ steps.testg.outputs.rc }}); skipping live-capture per spec 083 Bead 4 step 5 (defensive gating)."
