@@ -34,12 +34,20 @@ resolution, replacing implicit `internal/<domain>/**` heuristics.
 
 Three sub-decisions:
 
-1. **Warnings → Errors at the named call sites.** `AddWarning` at
-   `internal/validate/docsync.go:37`, `:127`, and `:154` become `AddError`.
-   `complete.Run` and `ApproveImpl` exit non-zero on doc-sync errors.
-   Rejected alternatives: warn-only (preserves the status quo and lets
-   drift compound); feature-flag rollout (defers the decision without
-   forcing a resolution).
+1. **Warnings → Errors at the doc-sync call sites; operator-docs lane
+   stays advisory.** `AddWarning` at `internal/validate/docsync.go:37`
+   and `:127` become `AddError`. `AddWarning` at `:154` (the operator-docs
+   lane — `cmd/` changes without `CLAUDE.md`/`CONVENTIONS.md`/
+   `.mindspec/docs/user/` touches) deliberately REMAINS `AddWarning`,
+   per spec 086 Requirement 7: the operator-docs lane is intentionally
+   advisory so cross-cutting `cmd/` edits don't require operator-doc
+   churn on every commit. `complete.Run` and `ApproveImpl` exit non-zero
+   on doc-sync errors only — operator-docs warnings continue to surface
+   as advisories. Rejected alternatives: warn-only across all three sites
+   (preserves the status quo and lets drift compound); promote all three
+   sites uniformly (contradicts the operator-docs lane policy and would
+   block routine `cmd/` refactors); feature-flag rollout (defers the
+   decision without forcing a resolution).
 
 2. **Per-domain `OWNERSHIP.yaml`, co-located.**
    `.mindspec/docs/domains/<domain>/OWNERSHIP.yaml` with schema
