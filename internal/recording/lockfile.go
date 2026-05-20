@@ -23,6 +23,13 @@
 // `cmd/mindspec/viz.go` still writes the file during the pre-1.0
 // transition (the contract docstring notes "When AgentMind is extracted
 // into its own binary, this file...MUST be copied/re-exported").
+//
+// ReadLockfile was dropped during the move: no in-mindspec caller reads
+// the file anymore, and the previously-used `record health` /
+// port-collision diagnostics now defer to the standalone agentmind
+// binary (which owns liveness verification per ADR-0011 / ADR-0026).
+// If a future caller needs to read the lockfile, restore ReadLockfile
+// alongside a smoke test that decodes the WriteLockfile output.
 package recording
 
 import (

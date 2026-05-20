@@ -29,8 +29,8 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export MINDSPEC_TRACE=/tmp/mindspec-bench-a-trace.jsonl
 
-# In a separate terminal, start the collector:
-#   mindspec bench collect --port 4318 --output /tmp/bench-session-a.jsonl
+# AgentMind serves as the unified collector — start it if not running:
+#   mindspec agentmind serve --output /tmp/bench-session-a.jsonl
 
 # ─── Session B (Baseline) ──────────────────────────────────
 export CLAUDE_CODE_ENABLE_TELEMETRY=1

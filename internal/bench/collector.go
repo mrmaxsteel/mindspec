@@ -8,12 +8,13 @@
 // over OTLP/HTTP:4318 — see `github.com/mrmaxsteel/agentmind/cmd/agentmind`
 // and `github.com/mrmaxsteel/agentmind/internal/otlp`).
 //
-// What remains here is the Phase-2 alias re-export — `CollectedEvent`,
-// `otlpValue`, `otlpKeyValue` — kept because in-mindspec callers
-// (`internal/recording/markers.go`, the parity tests) still reference
-// the bench-side name. These are type aliases of
-// `github.com/mrmaxsteel/agentmind/wire`, so the wire package is the
-// single source of truth.
+// What remains here is the Phase-2 alias re-export — `CollectedEvent` —
+// kept because in-mindspec callers (`internal/recording/markers.go`,
+// the parity tests) still reference the bench-side name. It is a type
+// alias of `github.com/mrmaxsteel/agentmind/wire`, so the wire package
+// is the single source of truth. The unexported `otlpValue` /
+// `otlpKeyValue` aliases were dropped in the Bead 5 review round because
+// no in-mindspec caller referenced them after the parser deletion.
 package bench
 
 import "github.com/mrmaxsteel/agentmind/wire"
@@ -26,11 +27,3 @@ import "github.com/mrmaxsteel/agentmind/wire"
 // parser; the alias remains to spare in-mindspec callers a churn-only
 // rename.
 type CollectedEvent = wire.CollectedEvent
-
-// otlpValue is the package-private alias of wire.OTLPValue. Retained
-// alongside CollectedEvent for symmetry with the wire package; not
-// referenced after the OTLP parser was removed but cheap to keep.
-type otlpValue = wire.OTLPValue //nolint:unused
-
-// otlpKeyValue is the package-private alias of wire.OTLPKeyValue.
-type otlpKeyValue = wire.OTLPKeyValue //nolint:unused
