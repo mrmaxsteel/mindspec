@@ -82,6 +82,16 @@ signs:
 # Two entries mirroring the `signs:` shape; each produces
 # `${artifact}.spdx.json`.
 sboms:
+  # GoReleaser v2.15's `sboms.artifacts` enum accepts only
+  # archive / binary / source / package / any (NOT `checksum`).
+  # The checksums.txt file is still signed by the `signs:` block
+  # below; SBOM coverage applies to archives only, which is the
+  # ecosystem norm (an SBOM of a checksum manifest carries no
+  # additional content beyond the manifest itself).
+  # Surfaced by PR #112 panel-final via dryrun-on-introducing-PR:
+  # GoReleaser exits 1 with
+  #   "invalid list of artifacts to catalog: checksum"
+  # when the second entry below was present.
   - id: archives
     cmd: syft
     args:
@@ -92,13 +102,3 @@ sboms:
     documents:
       - "${artifact}.spdx.json"
     artifacts: archive
-  - id: checksums
-    cmd: syft
-    args:
-      - "scan"
-      - "${artifact}"
-      - "-o"
-      - "spdx-json=${document}"
-    documents:
-      - "${artifact}.spdx.json"
-    artifacts: checksum

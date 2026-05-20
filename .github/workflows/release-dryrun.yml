@@ -90,19 +90,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Block A — Manual sign + SBOM (spec 090 Bead 3 step 2 / panel
-      # revision 3). `goreleaser --snapshot` skips `signs:` by default
-      # (and historically `sboms:` too), so cosign and syft are invoked
-      # directly here. `--tlog-upload=false` is mandatory (panel revision
-      # 3, R5:C5) so PR-context Fulcio certs do not pollute the public
-      # Rekor transparency log.
-      - name: Manual cosign sign-blob + syft SBOM (snapshot side-cars)
+      # revision 3). `goreleaser --snapshot` skips `signs:` by default,
+      # so cosign and syft are invoked directly here. `--tlog-upload=false`
+      # is mandatory (panel revision 3, R5:C5) so PR-context Fulcio certs
+      # do not pollute the public Rekor transparency log.
+      #
+      # Symmetry with .goreleaser.yml: cosign signs archives AND
+      # checksums.txt; syft scans archives only. The `sboms.artifacts`
+      # enum in GoReleaser v2.15 does not accept `checksum`, and an SBOM
+      # of a checksum manifest carries no additional content beyond the
+      # manifest itself. Surfaced by PR #112 panel-final dryrun.
+      - name: Manual cosign sign-blob (archives + checksums.txt)
         env:
           COSIGN_YES: "true"
         run: |
           set -euo pipefail
           shopt -s nullglob
-          artifacts=( dist/mindspec_*.tar.gz dist/mindspec_*.zip dist/checksums.txt )
-          for artifact in "${artifacts[@]}"; do
+          sign_targets=( dist/mindspec_*.tar.gz dist/mindspec_*.zip dist/checksums.txt )
+          for artifact in "${sign_targets[@]}"; do
             [ -f "$artifact" ] || continue
             cosign sign-blob \
               --yes \
@@ -111,17 +116,29 @@ jobs:
               --output-signature="${artifact}.sig" \
               --output-certificate="${artifact}.pem" \
               "$artifact"
+          done
+
+      - name: Manual syft SBOM (archives only)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sbom_targets=( dist/mindspec_*.tar.gz dist/mindspec_*.zip )
+          for artifact in "${sbom_targets[@]}"; do
+            [ -f "$artifact" ] || continue
             syft scan "$artifact" -o spdx-json="${artifact}.spdx.json"
           done
 
       # Block B — Structural assertion (spec 090 Bead 3 step 2, covers
-      # spec Requirement #4 a–c). Extended beyond the spec's example loop
-      # to include `dist/checksums.txt` per spec Requirement #3.
+      # spec Requirement #4 a–c).
+      #
+      # Assertion shape mirrors the per-artifact-class division above:
+      #   - archives (.tar.gz / .zip) must have .sig + .cosign.bundle + .spdx.json
+      #   - checksums.txt must have .sig + .cosign.bundle only (no .spdx.json)
       - name: Assert side-car presence + SPDX validity
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=( dist/mindspec_*.tar.gz dist/mindspec_*.zip dist/checksums.txt )
+          archives=( dist/mindspec_*.tar.gz dist/mindspec_*.zip )
           if [ ${#archives[@]} -eq 0 ]; then
             echo "no archives found in dist/ — goreleaser snapshot produced nothing"
             exit 1
@@ -134,4 +151,9 @@ jobs:
             jq -e '.spdxVersion' "${archive}.spdx.json" >/dev/null \
               || { echo "invalid SPDX in ${archive}.spdx.json"; exit 1; }
           done
-          echo "release-dryrun: $(printf '%s\n' "${archives[@]}" | wc -l) artifacts verified"
+          checksums="dist/checksums.txt"
+          if [ -f "$checksums" ]; then
+            [ -s "${checksums}.sig" ]           || { echo "missing ${checksums}.sig"; exit 1; }
+            [ -s "${checksums}.cosign.bundle" ] || { echo "missing ${checksums}.cosign.bundle"; exit 1; }
+          fi
+          echo "release-dryrun: ${#archives[@]} archives + checksums.txt verified"
