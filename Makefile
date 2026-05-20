@@ -2,7 +2,7 @@ BINARY  := mindspec
 BINDIR  := ./bin
 PKG     := ./cmd/mindspec
 
-.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind
+.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind verify-sibling
 
 build:
 	go build -o $(BINDIR)/$(BINARY) $(PKG)
@@ -31,6 +31,14 @@ verify-agentmind-tag:
 # 3 (upstream unreachable).
 checkout-agentmind:
 	./scripts/checkout-agentmind.sh
+
+# Spec 083 Bead 3a — panel bead-3a-v1 REV-6 sibling cross-check.
+# Confirms the agentmind sibling resolves, compiles, and passes its
+# own `go test -short ./...` gate. Without this, reviewers seeing only
+# mindspec's diff cannot independently verify ErrBinaryNotFound /
+# EmitWarnOnce / findBinary in the out-of-tree sibling.
+verify-sibling:
+	./scripts/verify-sibling.sh
 
 clean:
 	rm -rf $(BINDIR)

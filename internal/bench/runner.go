@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/agentmind/client"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
@@ -37,7 +37,7 @@ type RunConfig struct {
 }
 
 // agentMindPort is the OTLP port used for bench collection via AgentMind.
-const agentMindPort = agentmind.DefaultOTLPPort
+const agentMindPort = client.DefaultOTLPPort
 
 // Run executes the full benchmark pipeline.
 func Run(cfg *RunConfig) error {
@@ -129,18 +129,17 @@ func Run(cfg *RunConfig) error {
 	wtC := filepath.Join(cfg.WorkDir, "wt-c")
 	prepareSessionC(wtC, cfg.SpecID)
 
-	// Start AgentMind as OTLP collector for all sessions
+	// Start AgentMind as OTLP collector for all sessions.
+	//
+	// Spec 083 Hard Constraint #4 (batch class): if the agentmind binary
+	// is absent, emit the centralized warn line via client.EmitWarnOnce
+	// and proceed with exit 0. The bench run continues without telemetry
+	// collection — for the bench command, telemetry is a side-effect, not
+	// the deliverable.
 	benchEventsPath := filepath.Join(cfg.WorkDir, "bench-events.jsonl")
-	agentMindPID, err := agentmind.AutoStart(cfg.RepoRoot, agentMindPort, agentmind.DefaultUIPort, benchEventsPath)
-	if err != nil {
-		return fmt.Errorf("starting AgentMind collector: %w", err)
+	if _, err := startBenchCollector(cfg.RepoRoot, cfg.WorkDir, benchEventsPath, cfg.Stdout, os.Stderr); err != nil {
+		return err
 	}
-	if agentMindPID > 0 {
-		fmt.Fprintf(cfg.Stdout, "AgentMind started (PID %d) → %s\n", agentMindPID, benchEventsPath)
-	} else {
-		fmt.Fprintf(cfg.Stdout, "AgentMind already running on :%d\n", agentMindPort)
-	}
-	fmt.Fprintf(cfg.Stdout, "Watch live at http://localhost:%d\n", agentmind.DefaultUIPort)
 
 	// Build per-session prompts
 	// Sessions A & B: generic feature prompt (no MindSpec workflow)

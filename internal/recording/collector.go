@@ -7,20 +7,42 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/agentmind/client"
 )
 
 // StartCollector launches AgentMind as a detached background process
 // to collect OTLP telemetry and write NDJSON to the spec's recording directory.
+//
+// Spec 083 Bead 3a: rewired to call `client.AutoStart` (from the
+// extracted agentmind module). Per Hard Constraint #4
+// (telemetry-as-output class), an absent binary is a hard error here:
+// the recording IS the deliverable. The error wraps
+// `client.ErrBinaryNotFound` so upstream commands (e.g.
+// `mindspec record start`) can detect the condition via
+// `errors.Is(err, client.ErrBinaryNotFound)` and exit non-zero with
+// the canonical warn line.
 func StartCollector(root, specID string) error {
 	eventsPath, err := EventsPath(root, specID)
 	if err != nil {
 		return err
 	}
 
-	pid, err := agentmind.AutoStart(root, agentmind.DefaultOTLPPort, agentmind.DefaultUIPort, eventsPath)
+	handle, err := client.AutoStart(root, client.DefaultOTLPPort, client.DefaultUIPort, eventsPath)
 	if err != nil {
+		// Telemetry-as-output class: every AutoStart failure (including
+		// the typed client.ErrBinaryNotFound sentinel) is propagated to
+		// the command-level handler. The %w wrapping preserves
+		// errors.Is(err, client.ErrBinaryNotFound) detection upstream so
+		// the handler can call client.EmitWarnOnce alongside the non-zero
+		// exit. No branching needed here — both arms previously returned
+		// the same wrapped error, which was structurally dead code (panel
+		// bead-3a-v1, REV-3).
 		return fmt.Errorf("starting AgentMind collector: %w", err)
+	}
+
+	pid := 0
+	if handle != nil {
+		pid = handle.PID
 	}
 
 	// Update manifest with PID, port, and process name for later verification
@@ -29,7 +51,7 @@ func StartCollector(root, specID string) error {
 		return fmt.Errorf("reading manifest for PID update: %w", err)
 	}
 	m.CollectorPID = pid
-	m.CollectorPort = agentmind.DefaultOTLPPort
+	m.CollectorPort = client.DefaultOTLPPort
 	m.Status = "recording"
 
 	// Record the expected process name for PID verification on stop
