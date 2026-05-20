@@ -9,29 +9,18 @@ on:
 permissions:
   contents: read
 
-# Spec 083 Bead 2: every job that compiles Go must first run
-# `scripts/checkout-agentmind.sh` (via `make checkout-agentmind`) so the
-# `replace github.com/mrmaxsteel/agentmind => ../agentmind` directive
-# resolves to a real sibling and `go build` succeeds. The script also
-# writes a gitignored go.work file pinning the sibling via an absolute
-# path so worktree depth does not affect resolution.
+# Spec 084 (mindspec-otel-only) simplified CI:
 #
-# Spec 083 Phase 6 deferral (PR #110 final-panel revision 1): until
-# the agentmind repository is published upstream, `make checkout-agentmind`
-# exits 3 (upstream unreachable) and downstream Go steps cannot run.
-# Every job that depends on the sibling captures the script's exit code
-# and converts rc==2 (tag not yet published) or rc==3 (upstream
-# unreachable) into a documented skip-with-warning rather than a hard
-# fail. This is NOT a silent bypass of HC#6 — the warning is visible in
-# the CI summary and tied to the spec's Phase 6 deferral. Once upstream
-# ships, the script returns rc==0 and the jobs run as written.
+# All spec-083 sibling-materialization steps (`make checkout-agentmind`,
+# `verify-agentmind-tag.sh`, `test-e-continuity.sh`, `live-capture`)
+# were removed when spec 084 dropped the `github.com/mrmaxsteel/agentmind`
+# Go-module dependency from `go.mod`. mindspec no longer requires the
+# sibling repo to build, test, lint, vet, or tidy.
 #
-# MINDSPEC_REQUIRE_SIBLING is intentionally NOT set at the workflow
-# level: only the specgate test that asserts sibling-presence-required
-# semantics should opt in, and only on a job where the sibling has been
-# successfully materialized (rc==0). Defaulting it on at the workflow
-# level forces every job into "require sibling" mode even when the
-# Phase 6 deferral is in effect.
+# The permanent CI gate against re-introduction of the dep is the
+# specgate test at `internal/specgate/verify_no_agentmind_dep_test.go`,
+# which runs in the regular `go test -short ./...` invocation below.
+# See ADR-0027 for the architectural rationale.
 
 jobs:
   test:
@@ -47,33 +36,11 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
       - name: Run tests
-        if: steps.sibling.outputs.rc == '0'
-        env:
-          MINDSPEC_REQUIRE_SIBLING: "1"
         run: go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Skip tests (upstream agentmind deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::Go tests skipped: upstream agentmind not yet published (rc=${{ steps.sibling.outputs.rc }}). This is the documented spec-083 Phase 6 deferral state. HC#6 (every commit build+test green) is honoured pre-upstream by skip-with-warning; once agentmind ships the script returns rc=0 and this job runs normally."
-
       - name: Upload coverage
-        if: matrix.go-version == '1.22' && steps.sibling.outputs.rc == '0'
+        if: matrix.go-version == '1.22'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
@@ -89,37 +56,13 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
       - name: Build binary
-        if: steps.sibling.outputs.rc == '0'
-        env:
-          MINDSPEC_REQUIRE_SIBLING: "1"
         run: make build
 
       - name: Verify binary runs
-        if: steps.sibling.outputs.rc == '0'
         run: ./bin/mindspec --help
 
-      - name: Skip build (upstream agentmind deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::Build skipped: upstream agentmind not yet published (rc=${{ steps.sibling.outputs.rc }}). This is the documented spec-083 Phase 6 deferral state. HC#6 (every commit build+test green) is honoured pre-upstream by skip-with-warning; once agentmind ships the script returns rc=0 and this job runs normally."
-
       - name: Upload binary
-        if: steps.sibling.outputs.rc == '0'
         uses: actions/upload-artifact@v4
         with:
           name: mindspec-linux-amd64
@@ -135,30 +78,10 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
       - name: golangci-lint
-        if: steps.sibling.outputs.rc == '0'
         uses: golangci/golangci-lint-action@v7
         with:
           version: "v2.1"
-
-      - name: Skip lint (upstream agentmind deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::Lint skipped: upstream agentmind not yet published (rc=${{ steps.sibling.outputs.rc }}). This is the documented spec-083 Phase 6 deferral state. golangci-lint needs a buildable module graph; once upstream ships, this job runs normally."
 
   vet:
     name: Vet & Formatting
@@ -170,26 +93,10 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
       - name: go vet
-        if: steps.sibling.outputs.rc == '0'
         run: go vet ./...
 
       - name: Check formatting
-        if: steps.sibling.outputs.rc == '0'
         run: |
           unformatted=$(gofmt -l . | grep -v '^beads/' || true)
           if [ -n "$unformatted" ]; then
@@ -197,11 +104,6 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
-
-      - name: Skip vet/fmt (upstream agentmind deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::go vet skipped: upstream agentmind not yet published (rc=${{ steps.sibling.outputs.rc }}). gofmt is also gated because we want a single consistent skip surface during the Phase 6 deferral window. Once upstream ships, this job runs normally."
 
   tidy:
     name: Module Tidy
@@ -213,141 +115,10 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
       - name: Check go.mod is tidy
-        if: steps.sibling.outputs.rc == '0'
         run: |
           go mod tidy
           if ! git diff --exit-code go.mod go.sum; then
             echo "::error::go.mod or go.sum is not tidy. Run 'go mod tidy' and commit."
             exit 1
           fi
-
-      - name: Skip tidy check (upstream agentmind deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::go mod tidy check skipped: upstream agentmind not yet published (rc=${{ steps.sibling.outputs.rc }}). go mod tidy needs to resolve the replace target; once upstream ships, this job runs normally."
-
-  # Spec 083 Bead 4 — Test D (live capture) gate. End-to-end:
-  # build the in-repo cmd/agentmind-fake (stand-in for the real
-  # binary until agentmind v0.2.0+ ships), set $AGENTMIND_BIN,
-  # invoke `make test-live-capture` (which runs the
-  # `livecapture`-tagged Go test that spawns the binary, POSTs a
-  # synthetic OTLP payload, and asserts NDJSON event capture).
-  #
-  # Gated on Test G via `make verify-agentmind-tag`: when the
-  # agentmind v0.0.1 tag is absent upstream, the verify step exits
-  # non-zero with a clear deferral message and we skip the live-
-  # capture job rather than fail. Once upstream publishes the tag
-  # and a real binary becomes available, set
-  # AGENTMIND_REAL_BINARY=1 to upgrade the assertion to the
-  # spec-canonical `claude_code.api_request` event check.
-  live-capture:
-    name: Live capture (Test D)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
-      - name: Materialize agentmind sibling
-        id: sibling
-        run: |
-          set +e
-          make checkout-agentmind
-          rc=$?
-          echo "checkout-agentmind exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::make checkout-agentmind failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-          exit 0
-
-      - name: Test G — verify agentmind v0.0.1 tag (gate)
-        id: testg
-        if: steps.sibling.outputs.rc == '0'
-        run: |
-          set +e
-          ./scripts/verify-agentmind-tag.sh
-          rc=$?
-          echo "verify-agentmind-tag exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          # Exit 0/2/3 are all acceptable to the job — 0 lets us run,
-          # 2/3 cause the live-capture step to skip with a notice.
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::verify-agentmind-tag.sh failed unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-
-      - name: Run live-capture gate (Test D)
-        if: steps.sibling.outputs.rc == '0' && steps.testg.outputs.rc == '0'
-        run: make test-live-capture
-
-      - name: Skip live-capture (sibling deferred)
-        if: steps.sibling.outputs.rc != '0'
-        run: |
-          echo "::warning::Live-capture skipped: upstream agentmind not yet published (sibling rc=${{ steps.sibling.outputs.rc }}). This is the spec-083 Phase 6 deferral state."
-
-      - name: Skip live-capture (Test G deferred)
-        if: steps.sibling.outputs.rc == '0' && steps.testg.outputs.rc != '0'
-        run: |
-          echo "::warning::Test G (agentmind v0.0.1 tag) is deferred (rc=${{ steps.testg.outputs.rc }}); skipping live-capture per spec 083 Bead 4 step 5 (defensive gating). This is non-blocking but should be visible in CI summary so a long-running deferral does not silently hide a broken upstream tag."
-
-  # Spec 083 Bead 6 — Test E cross-repo continuity gate. After Bead 5
-  # deleted `internal/agentmind/`, Test E (no-circular-discovery) no
-  # longer has an in-tree target. This job re-runs the spec-canonical
-  # grep against a shallow clone of github.com/mrmaxsteel/agentmind at
-  # the version pinned by `pin-agentmind-release.sh` (default v1.0.0).
-  #
-  # Exit-code contract from scripts/test-e-continuity.sh:
-  #   0 — clone + grep both green (Test E passes).
-  #   1 — circular-discovery match in agentmind tree (hard fail).
-  #   2 — upstream tag absent (deferral; today's expected state until
-  #       agentmind v1.0.0 ships). CI converts this to a skip-with-
-  #       warning, matching the Test G / live-capture pattern.
-  #   3 — upstream unreachable (skip-with-warning, same rationale).
-  test-e-continuity:
-    name: Test E cross-repo (no-circular-discovery)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Test E against pinned agentmind tag
-        id: teste
-        run: |
-          set +e
-          ./scripts/test-e-continuity.sh
-          rc=$?
-          echo "test-e-continuity exit=$rc"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          # 0 passes; 1 is a hard fail (circular discovery); 2/3 are
-          # deferrals that produce a warning but do not fail CI.
-          if [ "$rc" -eq 1 ]; then
-            echo "::error::Test E failed: circular-discovery references found in agentmind tree"
-            exit 1
-          fi
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
-            echo "::error::test-e-continuity.sh exited unexpectedly (rc=$rc)"
-            exit "$rc"
-          fi
-
-      - name: Note deferral
-        if: steps.teste.outputs.rc != '0'
-        run: |
-          echo "::warning::Test E cross-repo gate is deferred (rc=${{ steps.teste.outputs.rc }}). This is the expected state until agentmind v1.0.0 ships upstream. Once `pin-agentmind-release.sh v1.0.0` has been run and the tag exists, this job will return rc=0 (Test E green by clone-and-grep)."
