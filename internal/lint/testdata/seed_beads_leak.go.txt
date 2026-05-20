@@ -1,0 +1,17 @@
+package validate
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func CheckBeadExists(id string) (bool, error) {
+	err := exec.Command("bd", "show", id, "--json").Run()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return false, nil
+		}
+		return false, fmt.Errorf("running bd show: %w", err)
+	}
+	return true, nil
+}

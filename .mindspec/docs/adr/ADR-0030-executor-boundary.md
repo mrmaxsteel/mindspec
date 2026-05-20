@@ -12,8 +12,11 @@
 
 ## Status
 
-Stub created during spec 085-executor-boundary drafting. Finalized in
-spec 085 Bead N alongside the AST boundary lint.
+Finalized in spec 085 Bead 4 alongside the AST boundary lint at
+`internal/lint/boundary_test.go`. The two historical leak sites —
+`internal/validate/docsync.go`'s `getChangedFiles` and
+`internal/validate/beads.go`'s `CheckBeadExists` — were rewired in
+Beads 2 and 3 respectively.
 
 ## Context
 
