@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-05-20T07:27:34Z"
+approved_by: user
+status: Approved
 ---
 # Spec 084-mindspec-otel-only: Reduce MindSpec to a Pure Spec/Plan/Lifecycle Tool
 
@@ -872,13 +872,7 @@ gates, not the calendar.
 
 ## Approval
 
-- **Status**: Draft (synthesized winner — C10 spine + C01 rigor +
-  C05 permanence + C02 ordering + C03 migration table + C09
-  one-shot deprecation message)
-- **Stance**: SYNTHESIS — smallest set of changes that makes the
-  user's one-sentence vision literally true, with the strongest
-  validation discipline the panel could assemble, and a permanent
-  CI gate that prevents regression for the lifetime of the repo.
-- **Approved By**: Panel consensus (5/6 C10 majority; R2 dissent
-  on bench-disposition only — see CONSENSUS.md)
-- **Approval Date**: 2026-05-19
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-05-20
+- **Notes**: Approved via mindspec approve spec
