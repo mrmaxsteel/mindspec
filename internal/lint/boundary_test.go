@@ -59,11 +59,11 @@ var bannedExecLiterals = map[string]bool{
 // walker. Pinned by file + line + nearest enclosing func so the
 // diagnostic is actionable.
 type finding struct {
-	File    string
-	Line    int
+	File     string
+	Line     int
 	FuncName string
-	Kind    string // "import" or "call"
-	Detail  string
+	Kind     string // "import" or "call"
+	Detail   string
 }
 
 func (f finding) String() string {
