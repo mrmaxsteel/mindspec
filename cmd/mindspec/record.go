@@ -29,8 +29,11 @@ package main
 // The status/stop/health subcommands are unchanged in shape from the
 // pre-spec-084 implementation; their CollectorPID / CollectorPort
 // references are vestigial and slated for cleanup in Bead 3 (which
-// also deletes internal/recording/collector.go). Keeping them here in
-// Bead 2 keeps the diff minimal: Bead 2's scope is "record start only".
+// also deletes internal/recording/collector.go). All three are marked
+// Hidden:true so they no longer appear in `mindspec record --help`,
+// and their bodies are guarded to skip the dangling collector fields
+// the new writeRecordingSkeleton no longer populates. See the
+// TODO(bead-3) markers below.
 
 import (
 	"bufio"
@@ -54,9 +57,17 @@ var recordCmd = &cobra.Command{
 	Short: "Manage per-spec telemetry recording",
 }
 
+// recordStatusCmd is hidden in Bead 2 (CONSENSUS revision #3): it
+// still references CollectorPID/CollectorPort manifest fields that
+// the new writeRecordingSkeleton no longer populates, so showing it
+// to users would be misleading. Bead 3 will delete the command (and
+// internal/recording/collector.go) outright.
+//
+// TODO(bead-3): delete this command along with internal/recording/collector.go.
 var recordStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show recording status for the active spec",
+	Use:    "status",
+	Short:  "Show recording status for the active spec",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := findLocalRoot()
 		if err != nil {
@@ -71,6 +82,14 @@ var recordStatusCmd = &cobra.Command{
 				return fmt.Errorf("no active spec — use --spec to specify one")
 			}
 			specID = ctx.SpecID
+		}
+
+		// CONSENSUS revision #5: restore the IsEnabled gate that was
+		// inadvertently dropped in the Bead 2 diff. Bead 2's scope is
+		// "record start only"; status semantics must not change here.
+		if !recording.IsEnabled(root) {
+			fmt.Println("Recording disabled (set recording.enabled: true in .mindspec/config.yaml to enable)")
+			return nil
 		}
 
 		if !recording.HasRecording(root, specID) {
@@ -109,6 +128,10 @@ var recordStatusCmd = &cobra.Command{
 		if elapsed != "" {
 			fmt.Printf("Elapsed: %s\n", elapsed)
 		}
+		// TODO(bead-3): the Collector: line is omitted defensively
+		// because writeRecordingSkeleton no longer populates
+		// m.CollectorPID / m.CollectorPort. Bead 3 deletes this whole
+		// command.
 		return nil
 	},
 }
@@ -131,10 +154,24 @@ var recordStatusCmd = &cobra.Command{
 //   - execs the workload, inheriting stdin/stdout/stderr verbatim;
 //   - exits with the workload's exit code.
 //
+// Env precedence (CONSENSUS revision #2): if the caller already
+// exports an OTEL_* env var before invoking `mindspec record start`,
+// the caller's value WINS — mindspec's rendered config only fills in
+// keys that are absent from the parent environment. This matches
+// POSIX expectation: an explicit `export OTEL_EXPORTER_OTLP_ENDPOINT=…`
+// in the shell trumps `mindspec otel setup`'s on-disk config.
+//
+// Error contract (CONSENSUS revision #1): a malformed
+// .claude/settings.local.json or a config that fails Validate()
+// causes record start to exit non-zero with a real `Error: …`
+// diagnostic on stderr. Silent degradation is reserved for the "no
+// config exists at all" case; "config exists but is broken" is a
+// configuration bug and must be surfaced.
+//
 // If no OTEL endpoint is configured on disk, the workload is still
 // launched — the workload's own OTEL SDK will silently drop events
 // (per spec line 535: "no graceful-degradation contract"). mindspec
-// emits exactly zero stderr telemetry warnings either way.
+// emits exactly zero stderr telemetry warnings on the no-config path.
 var recordStartCmd = &cobra.Command{
 	Use:   "start [-- workload-cmd...]",
 	Short: "Launch a workload with OTEL env vars set, recording the lifecycle on disk",
@@ -147,6 +184,10 @@ workload (Claude Code, Codex, bash, ...) emits OTLP telemetry to the
 endpoint the user configured via 'mindspec otel setup'. mindspec
 itself never speaks OTLP, never opens a TCP listener, and never reads
 the workload's telemetry back.
+
+Env precedence: caller-exported OTEL_* env vars win over mindspec's
+rendered on-disk config. mindspec only injects OTEL keys that are
+absent from the parent environment.
 
 The exit code is the workload's exit code, propagated verbatim.
 
@@ -173,7 +214,8 @@ a usage error.`,
 		// Workload-exit errors propagate the exit code verbatim with
 		// empty stderr (spec Test F line 651). Every other error is
 		// a real mindspec error and gets printed before returning.
-		if _, ok := err.(*workloadExitError); ok {
+		var wee *workloadExitError
+		if errors.As(err, &wee) {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -215,10 +257,13 @@ func runRecordStart(cmd *cobra.Command, args []string) error {
 
 	// 2) Build the workload env: parent env + OTEL keys rendered
 	// from whatever the user configured via `mindspec otel setup`.
-	// If no endpoint is configured on disk, the parent env is
-	// passed through unmodified (no OTEL keys synthesized from
-	// thin air — silent drop is the workload's OTEL SDK contract).
-	workloadEnv := buildWorkloadEnv(root)
+	// A malformed on-disk config returns a real error here
+	// (CONSENSUS revision #1); a missing-config-entirely degrades
+	// silently to parent env (workload's own OTEL SDK contract).
+	workloadEnv, err := otel.BuildWorkloadEnv(root, os.Environ())
+	if err != nil {
+		return err
+	}
 
 	// 3) Exec the workload, inherit stdio, propagate exit code.
 	bin := workloadArgs[0]
@@ -279,106 +324,6 @@ func writeRecordingSkeleton(root, specID string) error {
 	return nil
 }
 
-// buildWorkloadEnv returns the env slice to pass to the workload. The
-// parent process env is the baseline; any OTEL endpoint configured on
-// disk (.claude/settings.local.json or ~/.codex/config.toml) is
-// rendered via internal/otel and overlaid on top.
-//
-// The function never returns an error — a missing config file, a
-// parse failure, or a partial config all degrade to "pass parent env
-// through unchanged". mindspec must not emit stderr about telemetry
-// (spec Test F line 651).
-func buildWorkloadEnv(root string) []string {
-	parent := os.Environ()
-	cfg, ok := loadConfiguredOtel(root)
-	if !ok {
-		return parent
-	}
-	if err := cfg.Validate(); err != nil {
-		// Bad config on disk — silently fall back to parent env. The
-		// workload's own OTEL SDK will read whatever OTEL_* vars the
-		// parent process has set (if any) and behave accordingly.
-		return parent
-	}
-	otelEnv := otelEnvKeyValues(cfg)
-	return mergeEnv(parent, otelEnv)
-}
-
-// loadConfiguredOtel returns the OTEL config the user previously
-// wrote via `mindspec otel setup`, preferring the Claude target over
-// Codex (Claude is the project-local default; Codex is user-global).
-// Returns (Config{}, false) when nothing is configured.
-func loadConfiguredOtel(root string) (otel.Config, bool) {
-	status, _ := otel.ReadCurrent(root)
-	if status.ClaudePresent {
-		return status.Claude, true
-	}
-	if status.CodexPresent {
-		return status.Codex, true
-	}
-	return otel.Config{}, false
-}
-
-// otelEnvKeyValues renders the OTEL Config as a flat KEY=VALUE map
-// using the same key set RenderClaudeSettingsLocal emits. Returns a
-// map so mergeEnv can overlay it on the parent process env without
-// shell-quoting roundtrips.
-func otelEnvKeyValues(c otel.Config) map[string]string {
-	c = c.Normalize()
-	out := map[string]string{
-		"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-		"OTEL_METRICS_EXPORTER":        "otlp",
-		"OTEL_LOGS_EXPORTER":           "otlp",
-		"OTEL_EXPORTER_OTLP_PROTOCOL":  c.Protocol,
-		"OTEL_EXPORTER_OTLP_ENDPOINT":  c.Endpoint,
-		"OTEL_SERVICE_NAME":            c.ServiceName,
-	}
-	if hdr := c.FormatHeaders(); hdr != "" {
-		out["OTEL_EXPORTER_OTLP_HEADERS"] = hdr
-	}
-	return out
-}
-
-// mergeEnv overlays the overrides map onto the parent env slice,
-// preserving non-overridden keys and replacing overridden ones in
-// place (rather than appending) so the result has no duplicates.
-func mergeEnv(parent []string, overrides map[string]string) []string {
-	if len(overrides) == 0 {
-		return parent
-	}
-	seen := make(map[string]bool, len(overrides))
-	out := make([]string, 0, len(parent)+len(overrides))
-	for _, kv := range parent {
-		eq := indexEq(kv)
-		if eq < 0 {
-			out = append(out, kv)
-			continue
-		}
-		key := kv[:eq]
-		if v, ok := overrides[key]; ok {
-			out = append(out, key+"="+v)
-			seen[key] = true
-			continue
-		}
-		out = append(out, kv)
-	}
-	for k, v := range overrides {
-		if !seen[k] {
-			out = append(out, k+"="+v)
-		}
-	}
-	return out
-}
-
-func indexEq(s string) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '=' {
-			return i
-		}
-	}
-	return -1
-}
-
 // exitCodedError wraps a workload exit code so main.go can propagate
 // it verbatim via otelExitCode (defined in otel.go).
 type workloadExitError struct{ code int }
@@ -389,6 +334,11 @@ func (e *workloadExitError) Error() string {
 
 func exitCodedError(code int) error { return &workloadExitError{code: code} }
 
+// recordStopCmd is hidden in Bead 2 (CONSENSUS revision #3): it
+// references the collector lifecycle that mindspec no longer runs.
+// Bead 3 deletes it.
+//
+// TODO(bead-3): delete this command along with internal/recording/collector.go.
 var recordStopCmd = &cobra.Command{
 	Use:    "stop",
 	Short:  "Stop recording for the active spec",
@@ -416,6 +366,12 @@ var recordStopCmd = &cobra.Command{
 	},
 }
 
+// recordHealthCmd is hidden in Bead 2 (CONSENSUS revision #3): the
+// SessionStart hook no longer needs to revive a collector mindspec
+// doesn't run. Bead 3 deletes both the command and the supporting
+// internal/recording health-check code.
+//
+// TODO(bead-3): delete this command along with internal/recording/collector.go.
 var recordHealthCmd = &cobra.Command{
 	Use:    "health",
 	Short:  "Check and restart dead collector (for SessionStart hook)",

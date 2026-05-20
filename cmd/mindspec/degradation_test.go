@@ -473,6 +473,10 @@ func buildMindspecBinary(t *testing.T) string {
 //   - PATH set to an empty temp dir (no agentmind binary discoverable)
 //   - HOME pointed at a fresh temp dir (so lockfile/config probes can't
 //     accidentally pick up a real agentmind running on the host)
+//   - All OTEL_* / CLAUDE_CODE_ENABLE_TELEMETRY env vars removed (spec
+//     084 Bead 2 panel CONSENSUS revision #2 introduced caller-env-wins
+//     precedence; without stripping OTEL_* the developer's host shell
+//     vars leak into hermetic record-start tests).
 //
 // Other env vars (HOME-derived ones, GOCACHE, etc.) are preserved.
 func strippedEnv(t *testing.T) []string {
@@ -491,6 +495,15 @@ func strippedEnv(t *testing.T) []string {
 			continue
 		}
 		if strings.HasPrefix(kv, "HOME=") {
+			continue
+		}
+		// Drop OTEL_* and CLAUDE_CODE_ENABLE_TELEMETRY so the
+		// developer's host shell doesn't leak telemetry settings
+		// into a hermetic record-start subprocess.
+		if strings.HasPrefix(kv, "OTEL_") {
+			continue
+		}
+		if strings.HasPrefix(kv, "CLAUDE_CODE_ENABLE_TELEMETRY=") {
 			continue
 		}
 		out = append(out, kv)

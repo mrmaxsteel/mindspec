@@ -16,6 +16,7 @@ package main
 // verify equivalence before legacy removal in Bead 3.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -272,13 +273,20 @@ func otelExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	switch e := err.(type) {
-	case *codedError:
-		return e.code
-	case *usageError:
+	// CONSENSUS revision (related to #1): use errors.As so the
+	// switch is robust against future fmt.Errorf("...: %w") wraps
+	// inserted between RunE and the otelExitCode call site.
+	var wee *workloadExitError
+	if errors.As(err, &wee) {
+		return wee.code
+	}
+	var ce *codedError
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
 		return 2
-	case *workloadExitError:
-		return e.code
 	}
 	return 1
 }
