@@ -34,6 +34,15 @@ type StartResult struct {
 	// PID is the OS process ID of the spawned agentmind subprocess
 	// (zero when Reused or Degraded).
 	PID int
+	// Consumer is the live NDJSON event-stream consumer attached to
+	// the subprocess stdout pipe via `client.ReadEvents`. Non-nil
+	// only when Started is true (Reused has no inherited stdout pipe;
+	// Degraded has no subprocess at all). Spec 083 Bead 3b's
+	// read-side rewire — the consumer forwards each
+	// `wire.CollectedEvent` decoded from
+	// `Handle.Stdout` to the same on-disk NDJSON file the bench
+	// runner aggregations expect.
+	Consumer *StreamConsumer
 }
 
 // RunStartCollectorForTest is the test-only entry point that lets
@@ -97,6 +106,18 @@ func startBenchCollector(repoRoot, workDir, eventsPath string, stdout, stderrWri
 				// on stderr and continue.
 				fmt.Fprintf(stderrWriter, "warning: could not persist agentmind PID to %s: %v\n", pidFile, writeErr)
 			}
+			// Bead 3b: wire the subprocess stdout pipe through
+			// client.ReadEvents into the on-disk NDJSON file the
+			// post-run aggregations consume. The io.Reader fed to
+			// client.ReadEvents is handle.Stdout (subprocess stdout
+			// pipe) — NEVER an os.Open on eventsPath (Hard Constraint
+			// #3: outbound channel is stdout-pipe NDJSON, NOT
+			// file-tail).
+			consumer, consumeErr := ConsumeHandleToFile(handle, eventsPath)
+			if consumeErr != nil {
+				return StartResult{}, fmt.Errorf("starting bench event-stream consumer: %w", consumeErr)
+			}
+			res.Consumer = consumer
 			fmt.Fprintf(stdout, "AgentMind started (PID %d) → %s\n", handle.PID, eventsPath)
 		} else {
 			res.Reused = true
