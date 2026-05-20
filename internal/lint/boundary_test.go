@@ -278,8 +278,17 @@ func walkFile(fset *token.FileSet, file *ast.File, path string) []finding {
 	return out
 }
 
-// isAllowlisted reports whether the file's file-doc comment carries
-// the boundary-allowlisted marker on any of its lines.
+// isAllowlisted checks whether the file is exempted from the boundary
+// gates via a leading `// boundary-allowlisted: <reason>` marker.
+//
+// Per panel reconciliation on bead c9e8.4 (R3:C4, R6:C1): the spec
+// narrative (spec.md §Requirements 11) describes the marker as being
+// "after the package clause", but Go's canonical convention attaches
+// file-level documentation comments to the package clause via the
+// `ast.File.Doc` field, which holds the comment group IMMEDIATELY
+// ABOVE `package <name>`. We honor the Go convention here; the spec
+// wording is imprecise but the intent (file-level doc comment) is
+// satisfied. A future spec amendment can normalize the wording.
 func isAllowlisted(file *ast.File) bool {
 	if file.Doc == nil {
 		return false

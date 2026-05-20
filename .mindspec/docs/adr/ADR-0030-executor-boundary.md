@@ -75,6 +75,24 @@ Three sub-decisions:
   boundary.
 - (−) The lint adds ~50ms to `go test -short ./...`.
 
+## Procedure: Adding a new enforcement package
+
+To extend the boundary gate to a new package (e.g., `internal/foo`):
+
+1. **Update the lint test:** add the package path to the
+   `enforcementPkgs` slice in `internal/lint/boundary_test.go`.
+2. **Verify clean state:** confirm the package's non-test `*.go` files
+   do not import `"os/exec"` or `"github.com/mrmaxsteel/mindspec/internal/gitutil"`.
+   If any do, either rewire them through `internal/executor` / `internal/bead`
+   (preferred) or add a `// boundary-allowlisted: <reason and reviewer-id>`
+   marker to the file's leading doc comment (escape hatch — opt-in per
+   ADR-0030).
+3. **Declare the boundary:** add a package doc comment declaring the
+   import bans and naming the boundary destinations (mirror the comment
+   already on `internal/validate`).
+4. **Re-run the lint:** `go test ./internal/lint/...` must pass; the
+   new package is now under the gate.
+
 ## Rollback
 
 Revert spec 085 PR's merge commit in a single git command
