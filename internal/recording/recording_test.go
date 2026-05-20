@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mrmaxsteel/mindspec/internal/bench"
 )
 
 // mustRecordingDir is a test helper that fails the test on validation error.
@@ -148,7 +146,7 @@ func TestEmitMarker(t *testing.T) {
 		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
 
-	var e bench.CollectedEvent
+	var e MarkerEvent
 	if err := json.Unmarshal([]byte(lines[0]), &e); err != nil {
 		t.Fatalf("parsing NDJSON: %v", err)
 	}
@@ -199,7 +197,7 @@ func TestEmitPhaseMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var e bench.CollectedEvent
+	var e MarkerEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &e); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +235,7 @@ func TestEmitBeadMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var e bench.CollectedEvent
+	var e MarkerEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &e); err != nil {
 		t.Fatal(err)
 	}
@@ -529,14 +527,7 @@ func TestRecordingFileModesAgentMindFirst(t *testing.T) {
 	}
 }
 
-func TestHealthCheckNoRecording(t *testing.T) {
-	root := t.TempDir()
-
-	status, err := HealthCheck(root, "nonexistent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status != HealthNoRecording {
-		t.Errorf("expected HealthNoRecording, got %d", status)
-	}
-}
+// TestHealthCheckNoRecording was deleted with internal/recording/health.go
+// in spec 084 Bead 3. mindspec no longer manages a collector subprocess,
+// so the HealthCheck / RestartIfDead / HealthStatus surface is gone.
+// Recording presence on disk is still observable via HasRecording.

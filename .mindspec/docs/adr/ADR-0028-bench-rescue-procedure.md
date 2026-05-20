@@ -1,7 +1,7 @@
 # ADR-0028: Bench Rescue Procedure via Annotated Tag
 
 - **Date**: 2026-05-20
-- **Status**: Proposed
+- **Status**: Accepted
 - **Domain(s)**: extraction, recovery, bench
 - **Deciders**: Max
 - **Supersedes**: n/a
@@ -12,9 +12,9 @@
 
 ## Status
 
-Proposed (drafted at plan-approval time for spec 084-mindspec-otel-only;
-finalized in Bead 3 alongside the actual tag push and BENCH-MOVED.md
-addition).
+Accepted. Finalized in spec 084 Bead 3 alongside the actual tag creation
+(`pre-spec-084-bench-delete`, annotated, pushed to origin) and the
+addition of `BENCH-MOVED.md` at the repo root.
 
 ## Context
 
