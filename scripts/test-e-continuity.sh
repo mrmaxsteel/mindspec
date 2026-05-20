@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# test-e-continuity.sh — Spec 083 Bead 6 step 4 Test E cross-repo gate.
+#
+# Spec Test E (no-circular-discovery) used to grep the in-tree
+# `internal/agentmind/` directory; after Bead 5's deletion that target
+# no longer exists inside mindspec. This script preserves the test by
+# performing a shallow clone of the agentmind repo at the tag pinned
+# in mindspec's `go.mod` and running the spec-canonical grep against
+# the agentmind tree.
+#
+# Spec reference:
+#   .mindspec/docs/specs/083-agentmind-extraction-v2/spec.md
+#   - Test E (lines 289-293):
+#       grep -rEn 'exec\.Command.*"mindspec"|LookPath.*"mindspec"|StartProcess.*"mindspec"' \
+#           ./agentmind/client/ ./agentmind/cmd/ ./agentmind/internal/
+#     returns no match.
+#   .mindspec/docs/specs/083-agentmind-extraction-v2/plan.md
+#   - Bead 6 step 4 (Test E continuity post-Bead-5 deletion).
+#
+# The agentmind side's own CI is the primary owner of Test E
+# enforcement; this script is the mindspec-side mirror that runs in
+# mindspec CI from Phase 6 onward.
+#
+# Until upstream publishes `v1.0.0`, the requested tag cannot be
+# resolved and the script exits 2 with a clear deferral message. CI
+# treats exit 2 as "skip the job with a warning"; only exit 0 (zero
+# matches) is a hard pass, exit 1 (matches found, circular discovery
+# detected) is a hard fail.
+#
+# Usage:
+#   scripts/test-e-continuity.sh                # read tag from go.mod
+#                                               # (falls back to v1.0.0 if
+#                                               #  go.mod has no pin yet)
+#   scripts/test-e-continuity.sh v1.2.0         # override tag explicitly
+#   scripts/test-e-continuity.sh --use-sibling  # use ../agentmind if present
+#                                               # (local-dev / pre-release mode)
+#
+# The default tag is read from `go.mod` (the version pinned next to
+# `require github.com/mrmaxsteel/agentmind`) so this gate cannot drift
+# from the version mindspec actually depends on. If go.mod still carries
+# the zero pseudo-version (`v0.0.0-...`) the script falls back to v1.0.0
+# (which today triggers the deferral path; see exit 2 below).
+#
+# Exit codes:
+#   0  — clone succeeded, grep returned no matches. Test E green.
+#   1  — clone succeeded, grep found matches. Circular discovery in
+#        the agentmind tree; bug.
+#   2  — upstream reachable but the tag is absent. Deferral mode;
+#        upstream agentmind has not shipped this tag yet.
+#   3  — upstream unreachable OR clone failed mid-flight (transient
+#        network, ref-format mismatch). Also returned when
+#        --use-sibling was specified but no usable sibling exists.
+#   4  — invocation error (bad args, missing tools, freshly-cloned
+#        tree contained no client/cmd/internal subdirs).
+
+set -euo pipefail
+
+export GIT_TERMINAL_PROMPT=0
+
+REPO_URL="${AGENTMIND_REPO_URL:-https://github.com/mrmaxsteel/agentmind}"
+
+usage() {
+    cat <<'EOF'
+test-e-continuity.sh — Spec 083 Bead 6 Test E cross-repo gate.
+
+Performs a shallow clone of github.com/mrmaxsteel/agentmind at the
+requested tag and runs the spec-canonical Test E grep against the
+checkout. Exits 0 on zero matches (green), 1 on matches found
+(failure), 2 on tag-not-found (deferral), 3 on upstream unreachable
+or clone failure, 4 on invocation error.
+
+Usage:
+  scripts/test-e-continuity.sh [TAG] [--use-sibling]
+
+  TAG            Tag to clone. Default: read from go.mod's pinned
+                 require line; v1.0.0 if go.mod still has the zero
+                 pseudo-version.
+  --use-sibling  If a usable ../agentmind sibling repo exists, grep
+                 against it instead of cloning. Intended for local
+                 development against an in-progress agentmind branch.
+                 If the sibling is missing, emits a loud warning and
+                 falls back to the upstream-clone path.
+EOF
+}
+
+USE_SIBLING=0
+TAG=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --use-sibling)
+            USE_SIBLING=1
+            ;;
+        --*)
+            echo "test-e-continuity.sh: unknown flag '$arg'" >&2
+            usage >&2
+            exit 4
+            ;;
+        *)
+            if [ -z "$TAG" ]; then
+                TAG="$arg"
+            else
+                echo "test-e-continuity.sh: unexpected positional argument '$arg'" >&2
+                exit 4
+            fi
+            ;;
+    esac
+done
+
+SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT_EARLY="$(cd "$SCRIPT_DIR_EARLY/.." && pwd)"
+
+# If the caller did not pass an explicit tag, read it from go.mod.
+# This keeps the gate honest after future agentmind bumps: CI invokes
+# the script with no args and the tag follows whatever go.mod pins.
+# Fall back to v1.0.0 if go.mod still carries the zero pseudo-version
+# (today: replace-overridden, no real pin yet) so the deferral exit
+# path still fires correctly.
+if [ -z "$TAG" ] && [ -f "$REPO_ROOT_EARLY/go.mod" ]; then
+    # Match the require line in either form (standalone or grouped),
+    # tolerate trailing `// indirect` etc., extract the version token.
+    GOMOD_TAG="$(awk '
+        /^[[:space:]]*require[[:space:]]+github\.com\/mrmaxsteel\/agentmind[[:space:]]+v/ ||
+        /^[[:space:]]+github\.com\/mrmaxsteel\/agentmind[[:space:]]+v/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^v[0-9]/) { print $i; exit }
+            }
+        }
+    ' "$REPO_ROOT_EARLY/go.mod")"
+    case "$GOMOD_TAG" in
+        v0.0.0-*) ;;  # zero pseudo-version; ignore, fall back to default
+        v[0-9]*)  TAG="$GOMOD_TAG" ;;
+    esac
+fi
+
+TAG="${TAG:-v1.0.0}"
+
+if ! command -v git >/dev/null 2>&1; then
+    echo "test-e-continuity.sh: git not found on PATH" >&2
+    exit 4
+fi
+if ! command -v grep >/dev/null 2>&1; then
+    echo "test-e-continuity.sh: grep not found on PATH" >&2
+    exit 4
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# run_grep runs the spec-canonical Test E grep against the supplied
+# directory. The directory must contain `client/`, `cmd/`, and/or
+# `internal/` subtrees (missing subtrees are skipped within an
+# otherwise-populated tree). Returns 0 on zero matches, 1 on matches
+# found, 4 on an empty tree when $strict is set (used after the clone
+# path to refuse a vacuous-green false-pass).
+run_grep() {
+    local root="$1"
+    local strict="${2:-0}"
+    local subdirs=()
+    for sub in client cmd internal; do
+        if [ -d "$root/$sub" ]; then
+            subdirs+=("$root/$sub")
+        fi
+    done
+    if [ "${#subdirs[@]}" -eq 0 ]; then
+        if [ "$strict" -eq 1 ]; then
+            echo "test-e-continuity.sh: FATAL — no client/, cmd/, or internal/ subdirs found under $root" >&2
+            echo "  A successful clone is expected to produce at least one. Treating as" >&2
+            echo "  invocation error rather than vacuous-green pass." >&2
+            return 4
+        fi
+        echo "test-e-continuity.sh: no client/, cmd/, or internal/ subdirs found under $root" >&2
+        # Non-strict: treat as "nothing to grep" — Test E is vacuously green.
+        return 0
+    fi
+
+    # The -E flag is mandatory; without it the `|` alternation is
+    # interpreted literally and the gate silently false-negatives
+    # (spec plan Bead 4 step 4 emphasizes this exact failure mode).
+    local matches
+    matches="$(grep -rEn \
+        'exec\.Command.*"mindspec"|LookPath.*"mindspec"|StartProcess.*"mindspec"' \
+        "${subdirs[@]}" 2>/dev/null || true)"
+
+    if [ -n "$matches" ]; then
+        echo "test-e-continuity.sh: Test E FAILED — circular-discovery references found:" >&2
+        printf '%s\n' "$matches" >&2
+        return 1
+    fi
+    echo "test-e-continuity.sh: Test E PASSED — zero circular-discovery references in $root" >&2
+    return 0
+}
+
+# Sibling-mode shortcut.
+if [ "$USE_SIBLING" -eq 1 ]; then
+    SIBLING="$REPO_ROOT/../agentmind"
+    if [ -d "$SIBLING" ] && [ -f "$SIBLING/go.mod" ] && \
+       grep -q '^module github\.com/mrmaxsteel/agentmind$' "$SIBLING/go.mod"; then
+        echo "test-e-continuity.sh: using sibling checkout at $SIBLING (not the pinned tag)" >&2
+        run_grep "$SIBLING"
+        exit $?
+    fi
+    # Loud warning so operators reading CI logs notice the silent
+    # fall-through to the upstream-clone path. A subsequent exit-2
+    # deferral is otherwise easy to misattribute to "tag not published"
+    # rather than "my sibling was missing/invalid".
+    echo "" >&2
+    echo "==================================================================" >&2
+    echo "WARN: test-e-continuity.sh: --use-sibling requested but no usable" >&2
+    echo "WARN: agentmind sibling found at $SIBLING." >&2
+    echo "WARN: Falling back to the upstream-clone path. If you intended to" >&2
+    echo "WARN: test against an in-progress sibling branch, fix the sibling" >&2
+    echo "WARN: location (or unset --use-sibling)." >&2
+    echo "==================================================================" >&2
+    echo "" >&2
+fi
+
+# Probe upstream for the tag.
+ERR_FILE="$(mktemp -t test-e-continuity.err.XXXXXX)"
+CLONE_DIR=""
+cleanup() {
+    rm -f "$ERR_FILE"
+    if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
+        rm -rf "$CLONE_DIR"
+    fi
+}
+trap cleanup EXIT
+
+if ! LS_REMOTE_OUT="$(git ls-remote --tags "$REPO_URL" 2>"$ERR_FILE")"; then
+    echo "test-e-continuity.sh: upstream unreachable: $REPO_URL" >&2
+    if [ -s "$ERR_FILE" ]; then
+        sed 's/^/  /' "$ERR_FILE" >&2
+    fi
+    exit 3
+fi
+
+SHA="$(printf '%s\n' "$LS_REMOTE_OUT" | awk -v tag="refs/tags/$TAG" '$2 == tag { print $1; exit }')"
+if [ -z "$SHA" ]; then
+    echo "test-e-continuity.sh: tag $TAG NOT found at $REPO_URL" >&2
+    echo "" >&2
+    echo "  This is the expected outcome until upstream publishes" >&2
+    echo "  $TAG. Spec 083 Bead 6 step 4 commits to running this" >&2
+    echo "  gate against the pinned tag once it exists; CI treats" >&2
+    echo "  exit 2 as a skip-with-warning, not a hard failure." >&2
+    exit 2
+fi
+
+CLONE_DIR="$(mktemp -d -t test-e-continuity.clone.XXXXXX)"
+echo "test-e-continuity.sh: shallow-cloning $REPO_URL@$TAG (sha $SHA) -> $CLONE_DIR" >&2
+
+# Explicit clone-success check. Without this, a clone failure
+# (permission, transient network, partial fetch, ref-format mismatch)
+# would leave CLONE_DIR empty; the subsequent run_grep would then hit
+# the "no client/cmd/internal subdirs" branch and silently return 0
+# (a false-pass for Test E). Capture stderr so we can surface it on
+# failure rather than throwing it away.
+CLONE_ERR="$(mktemp -t test-e-continuity.clone-err.XXXXXX)"
+if ! git clone --depth 1 --branch "$TAG" "$REPO_URL" "$CLONE_DIR" \
+        >/dev/null 2>"$CLONE_ERR"; then
+    echo "test-e-continuity.sh: shallow clone of $REPO_URL@$TAG FAILED" >&2
+    if [ -s "$CLONE_ERR" ]; then
+        sed 's/^/  /' "$CLONE_ERR" >&2
+    fi
+    rm -f "$CLONE_ERR"
+    exit 3
+fi
+rm -f "$CLONE_ERR"
+
+# Invoke run_grep in strict mode: a successful clone is expected to
+# produce at least one of client/, cmd/, internal/. If the cloned tree
+# has none of them, refuse to return 0 (would be a vacuous-green
+# false-pass) and exit 4 as invocation error.
+run_grep "$CLONE_DIR" 1

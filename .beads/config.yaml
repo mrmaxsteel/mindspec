@@ -81,3 +81,5 @@ status.custom: "resolved"
 # Disabling it makes the staging flow transparent without losing any
 # functionality.
 export.git-add: false
+
+sync.remote: "git+https://github.com/mrmaxsteel/mindspec.git"

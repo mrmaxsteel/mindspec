@@ -41,7 +41,7 @@ This prints environment variable blocks for both sessions. You can also configur
 In a separate terminal:
 
 ```bash
-mindspec bench collect --port 4318 --output /tmp/bench-session-a.jsonl
+mindspec agentmind serve --output /tmp/bench-session-a.jsonl
 ```
 
 ### Configure telemetry
@@ -124,7 +124,7 @@ These deletions are uncommitted and will be discarded when you return to a branc
 In a separate terminal:
 
 ```bash
-mindspec bench collect --port 4318 --output /tmp/bench-session-b.jsonl
+mindspec agentmind serve --output /tmp/bench-session-b.jsonl
 ```
 
 ### Configure telemetry

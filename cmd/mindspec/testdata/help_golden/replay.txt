@@ -1,0 +1,14 @@
+Replay a recorded NDJSON session file
+
+Usage:
+  mindspec agentmind replay [file.jsonl] [flags]
+
+Flags:
+  -h, --help           help for replay
+      --phase string   Filter replay to a specific phase (e.g., plan, implement)
+      --spec string    Spec ID to replay (resolves via active docs root to specs/<id>/recording/events.ndjson)
+      --speed float    Replay speed multiplier (1, 5, 10, or 0 for max) (default 1)
+      --ui-port int    Port for web UI (default 8420)
+
+Global Flags:
+      --trace string   Write trace events to file (use - for stderr)

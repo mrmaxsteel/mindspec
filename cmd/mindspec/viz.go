@@ -1,19 +1,18 @@
 package main
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/agentmind/client"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/viz"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +30,17 @@ Subcommands:
   setup         Configure agent telemetry export to AgentMind`,
 }
 
+// agentmindServeCmd is a thin cobra re-exec wrapper around the
+// standalone `agentmind` binary (spec 083 Phase 4b, Bead 4). It
+// reconstructs the equivalent `agentmind serve …` argv from the
+// flags cobra parsed for us and execs the binary via
+// `client.RunStandalone`.
+//
+// Per spec 083 Hard Constraint #4 (interactive class): on
+// `errors.Is(err, client.ErrBinaryNotFound)` we MUST exit non-zero.
+// The canonical warn line is emitted exactly once per process via
+// `client.EmitWarnOnce` to keep parity with the batch class and to
+// give users one consistent diagnostic.
 var agentmindServeCmd = &cobra.Command{
 	Use:     "serve",
 	Aliases: []string{"live"},
@@ -42,46 +52,55 @@ var agentmindServeCmd = &cobra.Command{
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 		output, _ := cmd.Flags().GetString("output")
 		bind, _ := cmd.Flags().GetString("bind")
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		// Write the AgentMind identity lockfile so other mindspec processes
-		// can verify the listener on otlpPort is us, not a hostile/foreign
-		// process on the same port. See internal/agentmind/lockfile.go for
-		// the contract. The writer lives here on the mindspec side rather
-		// than inside internal/viz/ so the viz package can be extracted
-		// without entangling identity state.
-		tok, err := agentmind.NewToken()
-		if err != nil {
-			return fmt.Errorf("generating agentmind token: %w", err)
+		runArgs := []string{
+			"serve",
+			"--otlp-port", strconv.Itoa(otlpPort),
+			"--ui-port", strconv.Itoa(uiPort),
+			"--bind", bind,
 		}
-		if err := agentmind.WriteLockfile(agentmind.Lockfile{
+		if strings.TrimSpace(output) != "" {
+			runArgs = append(runArgs, "--output", output)
+		}
+
+		// Write the AgentMind identity lockfile per the contract in
+		// internal/recording/lockfile.go. The standalone agentmind
+		// binary does not yet own this write (see spec 083 — the
+		// contract docstring notes "When AgentMind is extracted into
+		// its own binary, this file...MUST be copied/re-exported"),
+		// so the mindspec wrapper continues to own it until the
+		// sibling binary takes over.
+		//
+		// Spec 083 Bead 5: the lockfile helpers moved from the deleted
+		// `internal/agentmind/` package to `internal/recording/`
+		// (mindspec owns the contract; the agentmind binary honors it).
+		token, tokErr := recording.NewToken()
+		if tokErr != nil {
+			return fmt.Errorf("generating agentmind token: %w", tokErr)
+		}
+		lf := recording.Lockfile{
 			PID:       os.Getpid(),
 			OTLPPort:  otlpPort,
 			UIPort:    uiPort,
-			Token:     tok,
+			Token:     token,
 			StartedAt: time.Now().UTC(),
-		}); err != nil {
+		}
+		if err := recording.WriteLockfile(lf); err != nil {
 			return fmt.Errorf("writing agentmind lockfile: %w", err)
 		}
-		defer func() { _ = agentmind.RemoveLockfile() }()
+		defer func() { _ = recording.RemoveLockfile() }()
 
-		return viz.RunLiveOpts(ctx, viz.LiveOpts{
-			OTLPPort:   otlpPort,
-			UIPort:     uiPort,
-			OutputPath: output,
-			BindAddr:   bind,
-		})
+		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
 }
 
+// agentmindReplayCmd resolves the recording file path on the
+// mindspec side (so the spec-id → file-path lookup keeps using
+// mindspec's workspace layout) and execs the standalone agentmind
+// binary with the resolved file as the positional argument.
+//
+// Per spec 083 Hard Constraint #4 (interactive class): exits
+// non-zero when the binary is absent.
 var agentmindReplayCmd = &cobra.Command{
 	Use:   "replay [file.jsonl]",
 	Short: "Replay a recorded NDJSON session file",
@@ -92,7 +111,9 @@ var agentmindReplayCmd = &cobra.Command{
 		speed, _ := cmd.Flags().GetFloat64("speed")
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 
-		// Resolve file path
+		// Resolve file path — stays in mindspec because it depends
+		// on mindspec's workspace/spec layout (per spec 083 Scope:
+		// "Recording-directory ownership stays in mindspec").
 		var filePath string
 		if len(args) > 0 {
 			filePath = args[0]
@@ -109,7 +130,6 @@ var agentmindReplayCmd = &cobra.Command{
 				return err
 			}
 			if _, statErr := os.Stat(filePath); statErr != nil {
-				// Also try resolving via workspace
 				specDir, sdErr := workspace.SpecDir(root, specID)
 				if sdErr != nil {
 					return sdErr
@@ -127,18 +147,48 @@ var agentmindReplayCmd = &cobra.Command{
 			speed = 0
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		runArgs := []string{
+			"replay",
+			filePath,
+			"--speed", strconv.FormatFloat(speed, 'f', -1, 64),
+			"--ui-port", strconv.Itoa(uiPort),
+		}
+		if strings.TrimSpace(phase) != "" {
+			runArgs = append(runArgs, "--phase", phase)
+		}
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		return viz.RunReplay(ctx, filePath, speed, uiPort, phase)
+		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
+}
+
+// runStandaloneWithInteractiveDegradation invokes
+// client.RunStandalone(runArgs) and applies the interactive-class
+// graceful-degradation contract from spec 083 Hard Constraint #4:
+//
+//   - On `errors.Is(err, client.ErrBinaryNotFound)`: emit the
+//     canonical warn line via `client.EmitWarnOnce`, suppress
+//     cobra's usage printout, and return an error that produces a
+//     non-zero exit code. A user-invoked UI command that exits 0
+//     with no UI is a UX bug per the spec.
+//   - On `*exec.ExitError`: propagate so the subprocess's non-zero
+//     exit reaches the user, suppress cobra usage (the failure is
+//     in the child, not in our CLI parsing).
+//   - On any other error: return as-is (cobra surfaces it with its
+//     default "Error:" prefix).
+func runStandaloneWithInteractiveDegradation(cmd *cobra.Command, runArgs []string) error {
+	err := client.RunStandalone(runArgs)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, client.ErrBinaryNotFound) {
+		client.EmitWarnOnce(os.Stderr)
+		cmd.SilenceUsage = true
+		return fmt.Errorf("interactive command requires the agentmind binary; install it or set $AGENTMIND_BIN: %w", err)
+	}
+	if _, isExit := err.(*exec.ExitError); isExit {
+		cmd.SilenceUsage = true
+	}
+	return err
 }
 
 var agentmindSetupCmd = &cobra.Command{
@@ -146,6 +196,20 @@ var agentmindSetupCmd = &cobra.Command{
 	Short: "Configure agent telemetry export for AgentMind",
 }
 
+// agentmindSetupCodexCmd configures Codex OTEL export to AgentMind by
+// editing ~/.codex/config.toml — that path stays in mindspec because it
+// composes with mindspec's recording layout (spec 083 Scope: "agentmind
+// setup stays in mindspec for this spec because it knows mindspec's
+// .claude/ layout"; the same reasoning applies to ~/.codex/config.toml).
+//
+// Spec 083 Bead 5: the `--session` path (Codex JSONL → NDJSON
+// conversion) moved to the standalone agentmind binary alongside the
+// rest of internal/viz/. When `--session` is set, this command
+// re-execs `agentmind setup codex --session …` via
+// `client.RunStandalone` and applies the interactive-class
+// degradation contract (Hard Constraint #4): exits non-zero if the
+// binary is absent. The conversion produces user-visible NDJSON the
+// caller asked for, so a silent no-op would be a correctness bug.
 var agentmindSetupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Configure Codex OTEL export, or convert a Codex session JSONL fallback",
@@ -156,23 +220,11 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 
 		if strings.TrimSpace(sessionPath) != "" {
-			if strings.TrimSpace(outputPath) == "" {
-				outputPath = defaultCodexImportOutputPath(sessionPath)
+			runArgs := []string{"setup", "codex", "--session", sessionPath}
+			if strings.TrimSpace(outputPath) != "" {
+				runArgs = append(runArgs, "--output", outputPath)
 			}
-
-			stats, err := viz.ConvertCodexSessionFile(sessionPath, outputPath)
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintf(os.Stderr, "Converted Codex session %s -> %s\n", sessionPath, outputPath)
-			fmt.Fprintf(os.Stderr, "events=%d tool_calls=%d tool_results=%d api_requests=%d\n",
-				stats.Events, stats.ToolCalls, stats.ToolResults, stats.APIRequests)
-			if skipped := stats.SkippedMalformed + stats.SkippedUnknown + stats.SkippedIgnored; skipped > 0 {
-				fmt.Fprintf(os.Stderr, "skipped malformed=%d unknown=%d ignored=%d\n",
-					stats.SkippedMalformed, stats.SkippedUnknown, stats.SkippedIgnored)
-			}
-			return nil
+			return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 		}
 
 		if configPath == "" {
@@ -205,17 +257,6 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		fmt.Printf("Codex OTEL export already configured for AgentMind in %s\n", result.ConfigPath)
 		return nil
 	},
-}
-
-func defaultCodexImportOutputPath(inputPath string) string {
-	dir := filepath.Dir(inputPath)
-	base := filepath.Base(inputPath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	if name == "" {
-		name = "codex-session"
-	}
-	return filepath.Join(dir, name+"-agentmind.ndjson")
 }
 
 func init() {

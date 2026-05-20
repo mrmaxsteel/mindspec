@@ -1,11 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bench"
@@ -32,8 +29,8 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export MINDSPEC_TRACE=/tmp/mindspec-bench-a-trace.jsonl
 
-# In a separate terminal, start the collector:
-#   mindspec bench collect --port 4318 --output /tmp/bench-session-a.jsonl
+# AgentMind serves as the unified collector — start it if not running:
+#   mindspec agentmind serve --output /tmp/bench-session-a.jsonl
 
 # ─── Session B (Baseline) ──────────────────────────────────
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
@@ -52,33 +49,12 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 	},
 }
 
-var benchCollectCmd = &cobra.Command{
-	Use:   "collect",
-	Short: "Start an OTLP/HTTP collector to capture Claude Code telemetry",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "Deprecated: use 'mindspec agentmind serve --output <path>' instead")
-		port, _ := cmd.Flags().GetInt("port")
-		output, _ := cmd.Flags().GetString("output")
-
-		if output == "" {
-			return fmt.Errorf("--output is required")
-		}
-
-		c := bench.NewCollector(port, output)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		return c.Run(ctx)
-	},
-}
+// benchCollectCmd was deleted by spec 083 Bead 5 alongside the OTLP
+// parser it depended on (`internal/bench.NewCollector`). The
+// `mindspec bench collect` subcommand was a deprecated alias that
+// already told users to run `mindspec agentmind serve --output <path>`
+// (which re-execs the standalone agentmind binary). agentmind owns the
+// OTLP receiver now per ADR-0011.
 
 var benchReportCmd = &cobra.Command{
 	Use:   "report <session.jsonl> [session.jsonl...]",
@@ -206,9 +182,6 @@ func splitLabels(s string) []string {
 }
 
 func init() {
-	benchCollectCmd.Flags().Int("port", 4318, "Port to listen on")
-	benchCollectCmd.Flags().String("output", "", "Output NDJSON file path")
-
 	benchReportCmd.Flags().String("labels", "", "Comma-separated labels for sessions (e.g., no-docs,baseline,mindspec)")
 	benchReportCmd.Flags().String("format", "table", "Output format: table or json")
 
@@ -226,7 +199,6 @@ func init() {
 	benchRunCmd.Flags().Int("max-retries", 3, "Max auto-approve retry attempts per session")
 
 	benchCmd.AddCommand(benchSetupCmd)
-	benchCmd.AddCommand(benchCollectCmd)
 	benchCmd.AddCommand(benchReportCmd)
 	benchCmd.AddCommand(benchRunCmd)
 }

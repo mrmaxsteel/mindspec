@@ -41,9 +41,11 @@ var traceSummaryCmd = &cobra.Command{
 
 		scanner := bufio.NewScanner(f)
 		// Increase buffer for large NDJSON lines (e.g. tool results with large
-		// payloads). Mirrors internal/viz/replay.go. Without this, the default
-		// 64 KiB token limit causes oversized events to be silently dropped or
-		// to abort the scan, omitting later events from the summary.
+		// payloads). Without this, the default 64 KiB token limit causes
+		// oversized events to be silently dropped or to abort the scan,
+		// omitting later events from the summary. (The equivalent sizing in
+		// the agentmind replay path lives in the sibling repo at
+		// github.com/mrmaxsteel/agentmind/internal/viz/replay.go.)
 		scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 		for scanner.Scan() {
 			var e trace.Event
