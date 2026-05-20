@@ -1,0 +1,18 @@
+Start an OTLP/HTTP receiver and web UI server. Configure Claude Code with:
+  export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:<otlp-port>
+
+Usage:
+  mindspec agentmind serve [flags]
+
+Aliases:
+  serve, live
+
+Flags:
+      --bind string     Address to bind to (use 0.0.0.0 for all interfaces) (default "127.0.0.1")
+  -h, --help            help for serve
+      --otlp-port int   Port for OTLP/HTTP receiver (default 4318)
+      --output string   Write events to NDJSON file (append mode)
+      --ui-port int     Port for web UI (default 8420)
+
+Global Flags:
+      --trace string   Write trace events to file (use - for stderr)

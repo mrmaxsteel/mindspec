@@ -165,6 +165,104 @@ func TestDegradation_PerClass(t *testing.T) {
 			t.Fatalf("agentmind setup must not emit warn line (satisfied-by-design); got stderr=%q", stderr.String())
 		}
 	})
+
+	// Spec 083 Bead 4 — interactive class: `mindspec viz`,
+	// `mindspec agentmind serve`, and `mindspec agentmind replay`
+	// MUST exit non-zero when the agentmind binary is absent. A
+	// user-invoked UI command that exits 0 with no UI is a UX bug
+	// per spec 083 Hard Constraint #4.
+	//
+	// We also assert that the canonical warn line appears exactly
+	// once on stderr in each case so the user gets a consistent
+	// diagnostic even though the failure exit is also non-zero.
+	t.Run("interactive_agentmind_serve_exits_nonzero", func(t *testing.T) {
+		t.Parallel()
+		workspace := mkWorkspace(t, false)
+
+		// Use ui-port 0 / otlp-port 0 so even if the re-exec code
+		// path were to fall back to in-process (it must not), it
+		// would not collide with any real port.
+		cmd := exec.Command(bin, "agentmind", "serve",
+			"--otlp-port", "0", "--ui-port", "0")
+		cmd.Dir = workspace
+		cmd.Env = strippedEnv(t)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+
+		assertInteractiveAbsentBinary(t, "agentmind serve", err, stdout.String(), stderr.String(), warnLine)
+	})
+
+	t.Run("interactive_agentmind_replay_exits_nonzero", func(t *testing.T) {
+		t.Parallel()
+		workspace := mkWorkspace(t, false)
+
+		// Provide an empty file argument so cobra's positional-arg
+		// validation passes and we reach the RunE body that calls
+		// RunStandalone. The point of this test is the absent-binary
+		// path, not the file-resolution path.
+		fakeFile := filepath.Join(workspace, "recording.ndjson")
+		if err := os.WriteFile(fakeFile, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write fake recording: %v", err)
+		}
+
+		cmd := exec.Command(bin, "agentmind", "replay", fakeFile,
+			"--ui-port", "0")
+		cmd.Dir = workspace
+		cmd.Env = strippedEnv(t)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+
+		assertInteractiveAbsentBinary(t, "agentmind replay", err, stdout.String(), stderr.String(), warnLine)
+	})
+
+	t.Run("interactive_viz_alias_exits_nonzero", func(t *testing.T) {
+		t.Parallel()
+		workspace := mkWorkspace(t, false)
+
+		// `mindspec viz` is the spec-mandated alias for
+		// `mindspec agentmind`. Invoking it with the `serve`
+		// subcommand exercises the same RunE wired by Bead 4.
+		cmd := exec.Command(bin, "viz", "serve",
+			"--otlp-port", "0", "--ui-port", "0")
+		cmd.Dir = workspace
+		cmd.Env = strippedEnv(t)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+
+		assertInteractiveAbsentBinary(t, "viz serve", err, stdout.String(), stderr.String(), warnLine)
+	})
+}
+
+// assertInteractiveAbsentBinary applies the interactive-class
+// contract from spec 083 Hard Constraint #4 to a finished subprocess:
+//
+//   - The command MUST have exited non-zero.
+//   - Stderr MUST contain exactly one occurrence of the canonical
+//     warn line (the centralized sync.Once guard guarantees this
+//     across all callers within the same process).
+func assertInteractiveAbsentBinary(t *testing.T, label string, err error, stdoutStr, stderrStr, warnLine string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected non-zero exit with binary absent; got nil error\nstdout=%q\nstderr=%q",
+			label, stdoutStr, stderrStr)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("%s: expected *exec.ExitError; got %T: %v\nstderr=%q", label, err, err, stderrStr)
+	}
+	if exitErr.ExitCode() == 0 {
+		t.Fatalf("%s: expected non-zero exit code; got 0\nstderr=%q", label, stderrStr)
+	}
+	if got := strings.Count(stderrStr, warnLine); got != 1 {
+		t.Fatalf("%s: expected exactly one canonical warn line on stderr; got %d\nstderr=%q",
+			label, got, stderrStr)
+	}
 }
 
 // TestDegradation_TypedSentinelDetection is a repo-wide grep guardrail

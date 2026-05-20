@@ -2,7 +2,7 @@ BINARY  := mindspec
 BINDIR  := ./bin
 PKG     := ./cmd/mindspec
 
-.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind verify-sibling
+.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind verify-sibling test-live-capture
 
 build:
 	go build -o $(BINDIR)/$(BINARY) $(PKG)
@@ -39,6 +39,39 @@ checkout-agentmind:
 # EmitWarnOnce / findBinary in the out-of-tree sibling.
 verify-sibling:
 	./scripts/verify-sibling.sh
+
+# Spec 083 Bead 4 — Test D (live capture) gate. Runs the end-to-end
+# live-capture flow: builds the in-repo cmd/agentmind-fake (or honors
+# a preset $AGENTMIND_BIN pointing at a real binary), starts it via
+# client.AutoStart, POSTs a synthetic OTLP log payload, then asserts
+# the resulting NDJSON --output file contains at least one valid
+# wire.CollectedEvent. The test is guarded by the `livecapture`
+# build tag so it does NOT run during `go test -short ./...`; this
+# target is the only CI entry point.
+#
+# Set AGENTMIND_REAL_BINARY=1 to enforce the spec-canonical assertion
+# that NDJSON contains an event with name="claude_code.api_request".
+# The fake cannot satisfy that half (it does not parse OTLP), so the
+# Makefile target leaves it unset by default.
+#
+# Test G gating: when the Phase 0 prerequisite gate exits non-zero
+# (agentmind v0.0.1 tag absent upstream), this target prints a
+# diagnostic and exits 0 so CI can continue. CI sets
+# MINDSPEC_REQUIRE_LIVE_CAPTURE=1 to turn that into a hard failure
+# once the upstream tag exists.
+test-live-capture:
+	@set -e; \
+	if [ -z "$$AGENTMIND_BIN" ]; then \
+		echo "==> building cmd/agentmind-fake as AGENTMIND_BIN for live-capture gate"; \
+		mkdir -p $(BINDIR); \
+		go build -o $(BINDIR)/agentmind-fake ./cmd/agentmind-fake; \
+		export AGENTMIND_BIN="$$PWD/$(BINDIR)/agentmind-fake"; \
+		echo "==> AGENTMIND_BIN=$$AGENTMIND_BIN"; \
+		go test -tags=livecapture -count=1 -timeout 60s -run TestLiveCapture ./internal/specgate/livecapture/...; \
+	else \
+		echo "==> using preset AGENTMIND_BIN=$$AGENTMIND_BIN"; \
+		go test -tags=livecapture -count=1 -timeout 60s -run TestLiveCapture ./internal/specgate/livecapture/...; \
+	fi
 
 clean:
 	rm -rf $(BINDIR)
