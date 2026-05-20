@@ -38,9 +38,10 @@ var (
 // Empty string means "no override". A non-empty string is interpreted
 // as the human-readable reason; it is recorded as
 // `mindspec_doc_skew_reason` (alongside `_by` and `_at`) on the bead's
-// metadata AFTER the terminal mutation (`closeBeadFn` /
-// `CompleteBead`) returns nil. If the terminal mutation fails, the
-// metadata is not written — the failure itself is the audit trail.
+// metadata AFTER the terminal mutation (`exec.CompleteBead`) returns
+// nil — symmetric with ApproveImpl's post-FinalizeEpic write
+// discipline. If CompleteBead fails, the metadata is not written —
+// the failure itself is the audit trail.
 type CompleteOpts struct {
 	AllowDocSkew string
 }
@@ -145,10 +146,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// exactly the bead's commits, then runs the doc-sync lane. The
 	// `--allow-doc-skew "<reason>"` override allows the gate to pass
 	// without doc updates; the reason is recorded on bead metadata
-	// only AFTER the terminal mutation succeeds (see step 4.5 below).
-	// ADR divergence is a forward-compatible stub (spec 087) — it is
-	// called for AST-anchoring + future-proofing, but currently emits
-	// no failures.
+	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
+	// (see step 5.5 below). ADR divergence is a forward-compatible
+	// stub (spec 087) — it is called for AST-anchoring +
+	// future-proofing, but currently emits no failures.
 	base, mbErr := exec.MergeBase(specBranch, "HEAD")
 	if mbErr != nil {
 		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
@@ -180,22 +181,6 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 4.25. Spec 086 (F2): record doc-sync skew override AFTER the
-	// terminal close succeeds. If the close had failed we'd have
-	// already returned — the absence of metadata is then the audit
-	// trail. Best-effort: a metadata write failure surfaces as a
-	// warning print but does not fail the lifecycle.
-	if opts.AllowDocSkew != "" {
-		meta := buildSkewMetadata(opts.AllowDocSkew,
-			"mindspec_doc_skew_reason",
-			"mindspec_doc_skew_at",
-			"mindspec_doc_skew_by",
-		)
-		if err := mergeMetadataFn(beadID, meta); err != nil {
-			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", beadID, err)
-		}
-	}
-
 	// 4.5. Emit recording bead marker (best-effort)
 	if specID != "" {
 		_ = recording.EmitBeadMarker(root, specID, "complete", beadID)
@@ -213,10 +198,30 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
 	// Pass empty msg since we already handled commit+clean-tree above.
-	if err := exec.CompleteBead(beadID, specBranch, ""); err != nil {
-		fmt.Printf("Warning: bead cleanup: %v\n", err)
+	completeErr := exec.CompleteBead(beadID, specBranch, "")
+	if completeErr != nil {
+		fmt.Printf("Warning: bead cleanup: %v\n", completeErr)
 	} else {
 		result.WorktreeRemoved = true
+	}
+
+	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
+	// terminal bead→spec merge (`exec.CompleteBead`) returns nil. This
+	// mirrors ApproveImpl's post-FinalizeEpic discipline — the override
+	// metadata write must be symmetric with the terminal mutation, not
+	// just the prior `closeBeadFn` step. If CompleteBead failed we skip
+	// the write; the failure itself is the audit trail (panel CONSENSUS
+	// revision 4). Best-effort: a metadata write failure surfaces as a
+	// warning print but does not fail the lifecycle.
+	if opts.AllowDocSkew != "" && completeErr == nil {
+		meta := buildSkewMetadata(opts.AllowDocSkew,
+			"mindspec_doc_skew_reason",
+			"mindspec_doc_skew_at",
+			"mindspec_doc_skew_by",
+		)
+		if err := mergeMetadataFn(beadID, meta); err != nil {
+			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", beadID, err)
+		}
 	}
 
 	// 6. Advance state
