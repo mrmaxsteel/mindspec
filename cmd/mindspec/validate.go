@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -65,7 +66,8 @@ var validateDocsCmd = &cobra.Command{
 			return err
 		}
 
-		result := validate.ValidateDocs(root, diffRef)
+		exec := executor.NewMindspecExecutor(root)
+		result := validate.ValidateDocs(root, diffRef, exec)
 		return outputResult(result, format)
 	},
 }

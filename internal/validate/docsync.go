@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
 // ValidateDocs checks for doc-sync compliance by comparing changed source files
 // against documentation updates in the same diff.
-func ValidateDocs(root, diffRef string) *Result {
+func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 	r := &Result{SubCommand: "docs"}
 
 	if diffRef == "" {
 		diffRef = "HEAD~1"
 	}
 
-	changed, err := getChangedFiles(diffRef)
+	changed, err := getChangedFiles(exec, diffRef)
 	if err != nil {
 		r.AddError("git-diff", fmt.Sprintf("cannot get changed files: %v", err))
 		return r
@@ -44,11 +44,12 @@ func ValidateDocs(root, diffRef string) *Result {
 	return r
 }
 
-// getChangedFiles runs git diff --name-only and returns the list of changed files.
-func getChangedFiles(ref string) ([]string, error) {
-	files, err := gitutil.DiffNameOnlyRef("", ref)
+// getChangedFiles returns the list of changed files between the working tree
+// and ref, routing through the Executor boundary instead of shelling out.
+func getChangedFiles(exec executor.Executor, ref string) ([]string, error) {
+	files, err := exec.ChangedFiles("", ref)
 	if err != nil {
-		return nil, fmt.Errorf("git diff --name-only %s: %w", ref, err)
+		return nil, fmt.Errorf("changed files for %s: %w", ref, err)
 	}
 	return files, nil
 }
