@@ -1,0 +1,8 @@
+paths:
+  - internal/complete/**
+  - internal/approve/**
+  - internal/next/**
+  - internal/resolve/**
+  - internal/instruct/**
+  - internal/validate/**
+  - internal/doctor/**

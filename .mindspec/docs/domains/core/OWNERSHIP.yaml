@@ -1,0 +1,7 @@
+paths:
+  - internal/state/**
+  - internal/config/**
+  - internal/workspace/**
+  - internal/spec/**
+  - internal/phase/**
+  - internal/recording/**

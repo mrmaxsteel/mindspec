@@ -1,0 +1,5 @@
+paths:
+  - internal/executor/**
+  - internal/bead/**
+  - internal/gitutil/**
+  - internal/safeio/**
