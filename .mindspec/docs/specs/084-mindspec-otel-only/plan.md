@@ -4,8 +4,15 @@ adr_citations:
     - id: ADR-0026
     - id: ADR-0027
     - id: ADR-0028
+approved_at: "2026-05-20T07:50:46Z"
+approved_by: user
+bead_ids:
+    - mindspec-buh3.1
+    - mindspec-buh3.2
+    - mindspec-buh3.3
+    - mindspec-buh3.4
 spec_id: 084-mindspec-otel-only
-status: Draft
+status: Approved
 version: "1"
 ---
 # Plan: 084-mindspec-otel-only
