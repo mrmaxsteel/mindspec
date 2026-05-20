@@ -19,10 +19,7 @@ import (
 // neutral.
 func CheckADRDivergence(root, diffRef string, exec executor.Executor) *Result {
 	_ = root
+	_ = diffRef
 	_ = exec
-	return &Result{
-		SubCommand: "adr-divergence",
-		TargetID:   diffRef,
-		Issues:     nil,
-	}
+	return &Result{SubCommand: "adr-divergence"}
 }

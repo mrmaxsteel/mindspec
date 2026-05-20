@@ -2,14 +2,18 @@ package validate
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
-// ClassifiedChanges groups a diff's changed files by category so doc-sync
+// classifiedChanges groups a diff's changed files by category so doc-sync
 // lanes can reason about source, doc, and the raw full list together.
-type ClassifiedChanges struct {
+// Package-private: no external consumers (spec-086 panel CONSENSUS Minor 8).
+type classifiedChanges struct {
 	All    []string
 	Source []string
 	Docs   []string
@@ -35,7 +39,7 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 	}
 
 	sourceChanges, docChanges := classifyChanges(changed)
-	changes := ClassifiedChanges{All: changed, Source: sourceChanges, Docs: docChanges}
+	changes := classifiedChanges{All: changed, Source: sourceChanges, Docs: docChanges}
 
 	// Spec-artifact sync runs BEFORE the source-empty early-return so a
 	// spec.md-only diff (which classifies as docs-only) still gates on
@@ -52,7 +56,7 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 	}
 
 	// Check specific mapping heuristics
-	checkInternalPackages(r, sourceChanges, docChanges)
+	checkInternalPackages(r, root, sourceChanges, docChanges)
 	checkCmdChanges(r, sourceChanges, docChanges)
 
 	return r
@@ -107,38 +111,158 @@ func isSourceFile(path string) bool {
 		!strings.HasSuffix(path, "_test.go")
 }
 
-// checkInternalPackages warns if internal/ packages changed without domain doc updates.
-func checkInternalPackages(r *Result, source, docs []string) {
-	// Collect unique package directories from source changes
-	pkgs := make(map[string]bool)
-	for _, f := range source {
-		if strings.HasPrefix(f, "internal/") {
-			parts := strings.SplitN(f, "/", 3)
-			if len(parts) >= 2 {
-				pkgs[parts[1]] = true
-			}
+// listDomainDirs returns the lexicographically-sorted list of domain
+// directory names under .mindspec/docs/domains/ in the given root.
+// Returns an empty slice (no error) when the domains directory is
+// missing — callers fall back to the legacy "internal/<domain>/**"
+// heuristic via attributeDomain's per-domain loadOwnership fallback.
+func listDomainDirs(root string) ([]string, error) {
+	dir := filepath.Join(root, ".mindspec", "docs", "domains")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading domains dir %s: %w", dir, err)
+	}
+	domains := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			domains = append(domains, e.Name())
 		}
 	}
+	sort.Strings(domains)
+	return domains, nil
+}
 
-	if len(pkgs) == 0 {
+// checkInternalPackages errors when internal/ packages changed without
+// the corresponding domain docs being updated in the same diff.
+// Attribution uses the Bead-1 ownership machinery (loadOwnership +
+// attributeDomain): each changed source path is resolved to its
+// owning domain via .mindspec/docs/domains/<domain>/OWNERSHIP.yaml,
+// or via the "internal/<domain>/**" fallback when the manifest is
+// absent. The error message NAMES the manifest file that decided
+// ownership (or "<fallback: internal/<domain>/**>") so the operator
+// knows which OWNERSHIP.yaml to edit.
+func checkInternalPackages(r *Result, root string, source, docs []string) {
+	domains, err := listDomainDirs(root)
+	if err != nil {
+		r.AddError("internal-docs", fmt.Sprintf("cannot enumerate domain dirs: %v", err))
 		return
 	}
 
-	// Check if any domain docs files were changed
-	hasDomainDocs := false
-	for _, f := range docs {
-		if strings.HasPrefix(f, "docs/domains/") || strings.HasPrefix(f, ".mindspec/docs/domains/") {
-			hasDomainDocs = true
-			break
+	// Group source files by attributed domain, retaining the
+	// manifest/fallback marker that decided ownership.
+	type attribution struct {
+		manifest string // o.ManifestPath, or "" → use fallback marker
+		files    []string
+	}
+	byDomain := map[string]*attribution{}
+
+	// Legacy fallback when there are no domain manifests at all:
+	// preserve the pre-Bead-1 internal/<pkg>/ heuristic so we still
+	// surface drift on bare checkouts.
+	if len(domains) == 0 {
+		pkgs := map[string][]string{}
+		for _, f := range source {
+			if !strings.HasPrefix(f, "internal/") {
+				continue
+			}
+			parts := strings.SplitN(f, "/", 3)
+			if len(parts) < 2 {
+				continue
+			}
+			pkgs[parts[1]] = append(pkgs[parts[1]], f)
 		}
+		if len(pkgs) == 0 {
+			return
+		}
+		hasDomainDocs := false
+		for _, f := range docs {
+			if strings.HasPrefix(f, "docs/domains/") || strings.HasPrefix(f, ".mindspec/docs/domains/") {
+				hasDomainDocs = true
+				break
+			}
+		}
+		if hasDomainDocs {
+			return
+		}
+		names := make([]string, 0, len(pkgs))
+		for p := range pkgs {
+			names = append(names, p)
+		}
+		sort.Strings(names)
+		for _, p := range names {
+			r.AddError("internal-docs", fmt.Sprintf(
+				"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by <fallback: internal/%s/**>",
+				p, strings.Join(pkgs[p], ", "),
+				filepath.Join(".mindspec", "docs", "domains", p),
+				p,
+			))
+		}
+		return
 	}
 
-	if !hasDomainDocs && len(pkgs) > 0 {
-		names := make([]string, 0, len(pkgs))
-		for pkg := range pkgs {
-			names = append(names, pkg)
+	for _, f := range source {
+		// Only consider files that could plausibly be owned by a
+		// domain. attributeDomain returns "" when nothing matches —
+		// in that case the file is silently skipped (it is not the
+		// internal-docs lane's job to police unmapped trees).
+		domain, o, derr := attributeDomain(root, f, domains)
+		if derr != nil {
+			r.AddError("internal-docs", fmt.Sprintf("attributing %s: %v", f, derr))
+			continue
 		}
-		r.AddError("internal-docs", fmt.Sprintf("internal packages changed (%s) but no domain docs files updated", strings.Join(names, ", ")))
+		if domain == "" {
+			continue
+		}
+		manifest := ""
+		if o != nil {
+			manifest = o.ManifestPath
+		}
+		a, ok := byDomain[domain]
+		if !ok {
+			a = &attribution{manifest: manifest}
+			byDomain[domain] = a
+		}
+		a.files = append(a.files, f)
+	}
+
+	if len(byDomain) == 0 {
+		return
+	}
+
+	// Walk domains in sorted order for deterministic emit.
+	domainNames := make([]string, 0, len(byDomain))
+	for d := range byDomain {
+		domainNames = append(domainNames, d)
+	}
+	sort.Strings(domainNames)
+
+	for _, domain := range domainNames {
+		a := byDomain[domain]
+		hasDomainDocs := false
+		mindspecPrefix := ".mindspec/docs/domains/" + domain + "/"
+		legacyPrefix := "docs/domains/" + domain + "/"
+		for _, f := range docs {
+			if strings.HasPrefix(f, mindspecPrefix) || strings.HasPrefix(f, legacyPrefix) {
+				hasDomainDocs = true
+				break
+			}
+		}
+		if hasDomainDocs {
+			continue
+		}
+		marker := a.manifest
+		if marker == "" {
+			marker = fmt.Sprintf("<fallback: internal/%s/**>", domain)
+		}
+		r.AddError("internal-docs", fmt.Sprintf(
+			"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by %s",
+			domain, strings.Join(a.files, ", "),
+			filepath.Join(".mindspec", "docs", "domains", domain),
+			marker,
+		))
 	}
 }
 
@@ -178,13 +302,21 @@ func checkCmdChanges(r *Result, source, docs []string) {
 }
 
 // validateSpecArtifactSync enforces that any modification to a
-// .mindspec/docs/specs/<id>/spec.md file is accompanied in the same diff by
-// at least one supporting artifact: the sibling plan.md, any other file
-// under .mindspec/docs/specs/<id>/, or any ADR file under
-// .mindspec/docs/adr/**.md. A spec.md change made in isolation is rejected
-// with the "spec-doc-sync" lane error so the doctrine that "a spec change
-// is never atomic" is enforced by the gate.
-func validateSpecArtifactSync(r *Result, changes ClassifiedChanges) {
+// .mindspec/docs/specs/<id>/spec.md file is accompanied in the same
+// diff by at least one supporting artifact: the sibling plan.md, any
+// other file under .mindspec/docs/specs/<id>/, or any ADR file under
+// .mindspec/docs/adr/**.md. A spec.md change made in isolation is
+// rejected with the "spec-artifact-sync" lane error so the doctrine
+// that "a spec change is never atomic" is enforced by the gate.
+//
+// NOTE on ADR-sibling matching (panel CONSENSUS Minor 9): any
+// modification under .mindspec/docs/adr/**.md currently satisfies the
+// sibling requirement. This is deliberately loose — spec edits in
+// practice routinely add or cite ADRs as the load-bearing artifact,
+// and the gate's purpose here is to prevent zero-companion spec.md
+// commits, not to police ADR-citation graphs. A stricter "cited ADR"
+// check is deferred to spec 087's ADR-divergence lane.
+func validateSpecArtifactSync(r *Result, changes classifiedChanges) {
 	// Collect spec IDs whose spec.md was touched in this diff.
 	touched := make(map[string]bool)
 	for _, f := range changes.All {
@@ -196,7 +328,15 @@ func validateSpecArtifactSync(r *Result, changes ClassifiedChanges) {
 		return
 	}
 
+	// Sort touched spec IDs for deterministic emit order (panel
+	// CONSENSUS Major 6).
+	ids := make([]string, 0, len(touched))
 	for id := range touched {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
 		prefix := ".mindspec/docs/specs/" + id + "/"
 		specMD := prefix + "spec.md"
 		hasCompanion := false
@@ -214,7 +354,10 @@ func validateSpecArtifactSync(r *Result, changes ClassifiedChanges) {
 			}
 		}
 		if !hasCompanion {
-			r.AddError("spec-doc-sync", "spec.md change requires plan.md, ADR, or sibling artifact update in same diff")
+			r.AddError("spec-artifact-sync", fmt.Sprintf(
+				"spec %s/spec.md change requires plan.md, ADR (.mindspec/docs/adr/**.md), or sibling artifact (.mindspec/docs/specs/%s/**) update in same diff",
+				id, id,
+			))
 		}
 	}
 }
