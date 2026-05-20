@@ -306,10 +306,21 @@ extractions in the v1 panel; runtime checks are not.
   upstream — at the time of Bead 1, the gate exits 2 with a clear
   "tag not found" message. This is the expected state during the
   parallel mindspec-side migration; the gate flips green when the
-  agentmind side scaffolds and tags `v0.0.1`. The script supports
-  `--record` mode (`scripts/verify-agentmind-tag.sh v0.0.1 --record`),
-  which, once the tag is published, replaces the placeholder below
-  with the captured SHA in this file. Placeholder until that happens:
+  agentmind side scaffolds and tags `v0.0.1`.
+
+  **Deferral mechanism (closes the `<TBD>` placeholder below).**
+  The placeholder is resolved by a single command, run after upstream
+  publishes `v0.0.1`: `scripts/verify-agentmind-tag.sh v0.0.1 --record`.
+  The script verifies the tag exists, captures its SHA, and rewrites
+  the placeholder line below to embed the SHA. The Go test
+  `internal/specgate.TestVerifyAgentmindTagAgainstUpstream` then
+  enforces SHA-equality between what the gate reports and what is
+  recorded here on every CI run; setting
+  `MINDSPEC_REQUIRE_GATE_PASS=1` in CI converts that observation into
+  a hard failure when the gate reports anything other than exit 0
+  matching the recorded SHA. No Phase 1 bead may merge until that
+  one-command resolution has run and the placeholder is closed.
+  Placeholder until that happens:
   `agentmind v0.0.1 SHA: <TBD — record before Phase 1; populated by scripts/verify-agentmind-tag.sh --record>`.
 
 Passing Tests A–G is the definition of "the extraction is done."
