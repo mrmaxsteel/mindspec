@@ -92,7 +92,6 @@ jobs:
       # Rekor transparency log.
       - name: Manual cosign sign-blob + syft SBOM (snapshot side-cars)
         env:
-          COSIGN_EXPERIMENTAL: "1"
           COSIGN_YES: "true"
         run: |
           set -euo pipefail
