@@ -111,5 +111,6 @@ func init() {
 	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(agentmindCmd)
+	rootCmd.AddCommand(otelCmd)
 	rootCmd.AddCommand(recordCmd)
 }
