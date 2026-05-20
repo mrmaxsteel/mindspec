@@ -82,8 +82,8 @@ func TestIsSecretHeader(t *testing.T) {
 func TestRedacted(t *testing.T) {
 	c := Config{
 		Headers: map[string]string{
-			"x-api-key":    "sk-prod-12345",
-			"x-trace-id":   "abc123",
+			"x-api-key":     "sk-prod-12345",
+			"x-trace-id":    "abc123",
 			"authorization": "Bearer xyz",
 		},
 	}

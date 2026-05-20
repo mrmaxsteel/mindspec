@@ -393,8 +393,8 @@ func receiverIdentifier(x ast.Expr) string {
 //
 // The allow-listed files are:
 //
-//  - internal/specgate/verify_no_agentmind_dep_test.go (this file)
-//  - cmd/mindspec/deprecated_commands.go
+//   - internal/specgate/verify_no_agentmind_dep_test.go (this file)
+//   - cmd/mindspec/deprecated_commands.go
 //
 // Closes the spec-line-548 "string-literal-only" gate.
 func TestAllowListedFilesAreStringLiteralOnly(t *testing.T) {

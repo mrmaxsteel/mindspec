@@ -11,7 +11,7 @@
 // http.Client.Do. Pure file rendering only. Bead 4 lands an AST-checked
 // specgate test (TestNoOtelNetCalls) that enforces this perpetually.
 //
-// TOML merge strategy
+// # TOML merge strategy
 //
 // The plan (line ~160) permits either a BurntSushi/toml round-trip OR a
 // regex-based key-replacement strategy. Per Bead 1's hard constraint
@@ -412,7 +412,7 @@ func collapseBlankRuns(s string) string {
 // before the first export. The trailing newline is included.
 //
 // Values are POSIX-shell single-quoted (each ' inside the value is
-// escaped as '\''). This is the only escape form that round-trips
+// escaped as '\”). This is the only escape form that round-trips
 // safely without shell interpretation.
 func RenderEnvExports(c Config) string {
 	// Caller is expected to call Validate first; if Endpoint is empty
@@ -451,7 +451,7 @@ func RenderEnvExports(c Config) string {
 }
 
 // shellQuote returns a POSIX-shell single-quoted form of s. Embedded
-// single quotes are escaped as '\''. The result is always wrapped in
+// single quotes are escaped as '\”. The result is always wrapped in
 // single quotes even for "safe" values; consistency aids the
 // idempotency test.
 func shellQuote(s string) string {

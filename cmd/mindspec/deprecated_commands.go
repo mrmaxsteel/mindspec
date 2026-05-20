@@ -80,12 +80,12 @@ func stubDeprecated(use, line string) *cobra.Command {
 // Per-command stderr lines per spec 084 plan Bead 3 step 6 (which
 // pins them verbatim from spec lines 411-417).
 const (
-	depBenchMsg          = "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0028 for rationale)"
-	depAgentmindServeMsg = "agentmind serve moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind serve' (see ADR-0027)"
+	depBenchMsg           = "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0028 for rationale)"
+	depAgentmindServeMsg  = "agentmind serve moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind serve' (see ADR-0027)"
 	depAgentmindReplayMsg = "agentmind replay moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind replay' (see ADR-0027)"
-	depVizMsg            = "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz' (see ADR-0027)"
-	depAgentmindSetupMsg = "agentmind setup renamed: use 'mindspec otel setup' (see ADR-0027 for rationale)"
-	depAgentmindGenMsg   = "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)"
+	depVizMsg             = "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz' (see ADR-0027)"
+	depAgentmindSetupMsg  = "agentmind setup renamed: use 'mindspec otel setup' (see ADR-0027 for rationale)"
+	depAgentmindGenMsg    = "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)"
 )
 
 // agentmindDeprecatedCmd is the parent stub. Direct invocation of
