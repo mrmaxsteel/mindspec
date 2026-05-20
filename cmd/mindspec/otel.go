@@ -265,7 +265,9 @@ func exitErr(code int, err error) error {
 
 // ExitCode returns the exit code for an error, used by main.go. Returns
 // 0 if err is nil, the wrapped code for *codedError, 2 for
-// *usageError, and 1 for any other error (cobra default).
+// *usageError, the workload's exit code for *workloadExitError
+// (spec 084 Bead 2 — `mindspec record start` propagates the workload
+// exit code verbatim), and 1 for any other error (cobra default).
 func otelExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -275,6 +277,8 @@ func otelExitCode(err error) int {
 		return e.code
 	case *usageError:
 		return 2
+	case *workloadExitError:
+		return e.code
 	}
 	return 1
 }

@@ -44,11 +44,18 @@ func TestDegradation_PerClass(t *testing.T) {
 
 	const warnLine = "WARN: agentmind binary not found; telemetry export will drop silently"
 
-	t.Run("telemetry_as_output_record_start_exits_nonzero", func(t *testing.T) {
+	t.Run("record_start_propagates_workload_exit_code", func(t *testing.T) {
+		// Spec 084 Bead 2: `mindspec record start` is now a pure
+		// OTEL-config + workload-launcher. The old "absent agentmind
+		// binary -> non-zero exit + warn line" contract is gone (the
+		// command no longer spawns any collector). The new contract
+		// (spec Test F) is: the workload's exit code is propagated
+		// verbatim and mindspec stderr stays clean.
 		t.Parallel()
 		workspace := mkWorkspace(t, true)
 
-		cmd := exec.Command(bin, "record", "start", "--spec", "999-test-bead3a")
+		cmd := exec.Command(bin, "record", "start", "--spec", "999-test-bead3a",
+			"--", "/bin/bash", "-c", "echo workload-ran; exit 42")
 		cmd.Dir = workspace
 		cmd.Env = strippedEnv(t)
 		var stdout, stderr bytes.Buffer
@@ -56,19 +63,73 @@ func TestDegradation_PerClass(t *testing.T) {
 		cmd.Stderr = &stderr
 		err := cmd.Run()
 
-		if err == nil {
-			t.Fatalf("expected non-zero exit for telemetry-as-output with binary absent; got nil\nstdout=%q\nstderr=%q", stdout.String(), stderr.String())
-		}
 		exitErr, ok := err.(*exec.ExitError)
 		if !ok {
-			t.Fatalf("expected ExitError; got %T: %v", err, err)
+			t.Fatalf("expected *exec.ExitError; got %T: %v\nstdout=%q\nstderr=%q",
+				err, err, stdout.String(), stderr.String())
 		}
-		if exitErr.ExitCode() == 0 {
-			t.Fatalf("expected non-zero exit code; got 0")
+		if got := exitErr.ExitCode(); got != 42 {
+			t.Fatalf("expected workload exit code 42 to propagate; got %d\nstdout=%q\nstderr=%q",
+				got, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "workload-ran") {
+			t.Fatalf("expected workload stdout to be inherited; got stdout=%q", stdout.String())
+		}
+		// Spec Test F: stderr must not mention OTEL or telemetry or
+		// agentmind on a normal workload exit.
+		stderrStr := stderr.String()
+		for _, banned := range []string{"OTEL", "agentmind", "telemetry"} {
+			if strings.Contains(stderrStr, banned) {
+				t.Errorf("stderr should not mention %q on workload exit; got stderr=%q",
+					banned, stderrStr)
+			}
+		}
+		// And it must not emit the old absent-binary warn line.
+		if strings.Contains(stderrStr, warnLine) {
+			t.Errorf("record start must no longer emit the absent-binary warn line (spec 084 removes the agentmind dependency from record start); got stderr=%q",
+				stderrStr)
+		}
+	})
+
+	t.Run("record_start_injects_otel_env_into_workload", func(t *testing.T) {
+		// Spec 084 Bead 2 acceptance: after `mindspec otel setup
+		// --endpoint <url>` writes .claude/settings.local.json, a
+		// subsequent `mindspec record start --spec <id> -- <workload>`
+		// MUST exec the workload with OTEL_EXPORTER_OTLP_ENDPOINT set
+		// in its environment (rendered from the on-disk config).
+		t.Parallel()
+		workspace := mkWorkspace(t, true)
+
+		// Pre-seed .claude/settings.local.json via `mindspec otel setup`
+		// to keep the test orthogonal to the rendering implementation.
+		setup := exec.Command(bin, "otel", "setup",
+			"--endpoint", "http://collector.example:4318",
+			"--protocol", "http/protobuf")
+		setup.Dir = workspace
+		setup.Env = strippedEnv(t)
+		var setupStderr bytes.Buffer
+		setup.Stderr = &setupStderr
+		if err := setup.Run(); err != nil {
+			t.Fatalf("otel setup failed: %v\nstderr=%q", err, setupStderr.String())
 		}
 
-		if got := strings.Count(stderr.String(), warnLine); got != 1 {
-			t.Fatalf("expected exactly one warn line in stderr; got %d\nstderr=%q", got, stderr.String())
+		// Workload echoes its OTEL endpoint env var; assert it equals
+		// what we wrote via `otel setup`.
+		cmd := exec.Command(bin, "record", "start", "--spec", "999-test-bead3a",
+			"--", "/bin/bash", "-c", "echo OTEL_EXPORTER_OTLP_ENDPOINT=$OTEL_EXPORTER_OTLP_ENDPOINT")
+		cmd.Dir = workspace
+		cmd.Env = strippedEnv(t)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("record start failed: %v\nstdout=%q\nstderr=%q",
+				err, stdout.String(), stderr.String())
+		}
+		want := "OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.example:4318"
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("workload did not receive OTEL endpoint env; want substring %q, got stdout=%q",
+				want, stdout.String())
 		}
 	})
 
