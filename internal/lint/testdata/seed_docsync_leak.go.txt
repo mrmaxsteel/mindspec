@@ -1,0 +1,15 @@
+package validate
+
+import (
+	"fmt"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+)
+
+func getChangedFiles(ref string) ([]string, error) {
+	files, err := gitutil.DiffNameOnlyRef("", ref)
+	if err != nil {
+		return nil, fmt.Errorf("git diff --name-only %s: %w", ref, err)
+	}
+	return files, nil
+}
