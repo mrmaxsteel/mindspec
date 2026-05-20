@@ -60,10 +60,11 @@ boundary is only symbolic.
 
 - [ADR-0011](../../adr/ADR-0011.md): One-way `mindspec → agentmind` dependency
   over OTLP/HTTP:4318. This spec is the physical realization of that ADR.
-- ADR-0026 (new, to be authored as part of this work): "AgentMind extracted to
-  standalone repo." Records the move, the deferred decisions (UI-port
-  discovery, version-skew handling, setup ownership), and the rollback
-  procedure (`git revert <merge-sha>` in mindspec + drop the `require` line).
+- [ADR-0026](../../adr/ADR-0026-agentmind-extracted-to-standalone-repo.md):
+  "AgentMind extracted to standalone repo." Records the move, the deferred
+  decisions (UI-port discovery, version-skew handling, setup ownership), and
+  the rollback procedure (`git revert <merge-sha>` in mindspec + drop the
+  `require` line).
 
 ## Requirements
 
