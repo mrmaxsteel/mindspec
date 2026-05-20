@@ -17,20 +17,15 @@ jobs:
     name: GoReleaser
     runs-on: ubuntu-latest
     steps:
-      # ACTION_SHA_PIN_TODO: spec 090 Bead 2 requires every `uses:` to be
-      # pinned to a 40-char commit SHA. The orchestrator does not currently
-      # have GitHub access to verify SHAs at implementation time; the
-      # major-version tags below are placeholders. A follow-up fixup commit
-      # must replace each `@vN` with the verified release SHA and append a
-      # trailing `# vX.Y.Z` annotation. Spec verification grep
-      # `grep -hE '^\s*-?\s*uses:' .github/workflows/release*.yml |
-      #  grep -vE '@[0-9a-f]{40}\b'` is expected to FLAG these lines until
-      # the fixup lands; this is recorded in the bead commit message.
-      - uses: actions/checkout@v4  # ACTION_SHA_PIN_TODO: pin to v4.x SHA
+      # Every `uses:` is pinned to a 40-char commit SHA per spec 090 Bead 2
+      # (ADR-0029) so a compromised upstream action cannot silently change
+      # signing behavior. The trailing `# vX.Y.Z` annotation names the
+      # release the SHA corresponds to.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5  # ACTION_SHA_PIN_TODO: pin to v5.x SHA
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: "1.22"
 
@@ -38,16 +33,16 @@ jobs:
       # sign-blob` for every archive and the checksums file. Keyless mode
       # is selected implicitly by the absence of `--key`; the OIDC token
       # granted by `id-token: write` above provides the identity.
-      - uses: sigstore/cosign-installer@v3  # ACTION_SHA_PIN_TODO: pin to v3.7.0 SHA
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
         with:
           cosign-release: "v2.4.1"
 
       # Install syft so GoReleaser's `sboms:` block can invoke `syft scan`
       # for every archive and the checksums file (SPDX-JSON output).
-      - uses: anchore/sbom-action/download-syft@v0  # ACTION_SHA_PIN_TODO: pin to v0.17.x SHA
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6  # ACTION_SHA_PIN_TODO: pin to v6.x SHA
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
         with:
           version: "~> v2"
           args: release --clean
