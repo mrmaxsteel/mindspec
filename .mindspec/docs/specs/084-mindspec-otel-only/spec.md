@@ -122,10 +122,13 @@ matrix in §Validation Proofs.
   wrangling.
 - **`internal/bench/` (whole directory)**: **Deleted from mindspec.**
   Not extracted to a new repository inside this spec. A one-paragraph
-  `BENCH-MOVED.md` rescue note at the repo root points to the commit
-  SHA immediately prior to deletion so anyone can
-  `git checkout <sha> -- internal/bench/` and lift the code into its
-  own repo whenever they want.
+  `BENCH-MOVED.md` rescue note at the repo root points to the
+  annotated tag `pre-spec-084-bench-delete` (per HC #11 default
+  option (b)) so anyone can run
+  `git checkout pre-spec-084-bench-delete -- internal/bench/` and
+  lift the code into its own repo whenever they want — and the
+  rescue handle is reachable from `main` even if the spec-084 PR is
+  squash-merged.
 - **`internal/agentmind/` (if any remnant survived 083)**: **Deleted.**
   Belt-and-suspenders; spec 083 should have removed this, but the
   grep proof in §Acceptance Criteria catches anything missed.
@@ -179,7 +182,32 @@ matrix in §Validation Proofs.
 1. **Zero agentmind in the Go dep graph.** `go list -deps ./... |
    grep -c 'mrmaxsteel/agentmind'` outputs exactly `0`. `go.mod` and
    `go.sum` contain no `mrmaxsteel/agentmind` entries.
-2. **Zero agentmind in source.** `grep -rn 'agentmind\|wire\.CollectedEvent\|client\.AutoStart\|client\.ReadEvents\|client\.RunStandalone' cmd/ internal/` returns zero matches.
+2. **Zero agentmind in source — with two deliberate, allow-listed
+   exceptions.** The grep is:
+
+   ```
+   grep -rn 'agentmind\|wire\.CollectedEvent\|client\.AutoStart\|client\.ReadEvents\|client\.RunStandalone' cmd/ internal/ \
+     --exclude='*_specgate*.go' \
+     --exclude='*verify_no_agentmind*.go' \
+     --exclude='deprecated_commands*.go'
+   ```
+
+   Two — and only two — files in the post-spec tree may legitimately
+   contain the literal substring `agentmind`:
+
+   - `internal/specgate/verify_no_agentmind_dep_test.go` — by design
+     enumerates the forbidden string so it can assert its absence
+     in the dep graph and AST.
+   - `cmd/mindspec/deprecated_commands.go` — emits the per-command
+     migration table's deprecation messages, which by design name
+     `agentmind` and link to the standalone repo URL.
+
+   The grep excludes precisely those two file-name patterns so the
+   acceptance criterion is self-consistent. The specgate test itself
+   (Test H) AST-walks both files and verifies that the only
+   occurrences of `agentmind` are inside string literals (not
+   imports, not `exec.Command` first arguments) — so the two
+   allow-listed files are still gated against real reintroduction.
 3. **mindspec has no concept of agentmind's presence or absence.** Built
    with the `agentmind` binary completely absent from `$PATH` and from
    any `bin/` directory mindspec might once have looked in, mindspec
@@ -193,13 +221,85 @@ matrix in §Validation Proofs.
    OTEL exporter points at the user-configured endpoint. No mindspec
    process ever reads OTLP, NDJSON, or any other telemetry format.
    **mindspec opens no TCP listener of its own** (verified at runtime
-   under lsof/dtruss — see Test E).
+   via portable Go listener-enumeration on Linux `/proc/<pid>/net/tcp`
+   and Darwin `lsof -F pn` — see Test E for the platform-specific
+   implementation and the explicit CI coverage matrix).
 5. **`mindspec otel setup` is the sole observability surface.** It
    accepts `--endpoint <url>`, optional `--protocol grpc|http/protobuf`,
    optional `--headers k=v,k=v`, optional `--codex`. It writes to
    `.claude/settings.local.json` and, with `--codex`,
    `~/.codex/config.toml`. It never starts, stops, restarts, queries,
    or probes any collector.
+
+   **Explicit `--codex` contract:**
+   - Target file: `~/.codex/config.toml` (override with
+     `--codex-config <path>`). If the parent directory is absent,
+     `mindspec otel setup --codex` creates it with mode `0700`.
+   - **Merge semantics:** the target TOML is parsed; only the
+     `[otel.exporter]` table (or whatever the canonical Codex
+     stanza name is at implementation time — pinned in the
+     `internal/otel/config.go` rendering layer) is replaced.
+     Sibling top-level keys and other tables are preserved
+     byte-for-byte. If the existing file fails to parse as TOML,
+     exit code 1 is returned with `error: cannot merge into
+     malformed TOML at <path>; back up the file and re-run` on
+     stderr; the file is not modified.
+   - **Secret hygiene for `--headers`:** values containing
+     substrings matching `(?i)bearer|token|key|secret|password`
+     are written to the target file's `[otel.exporter.headers]`
+     table verbatim (the target file is the canonical store) but
+     **redacted to `***` in any `mindspec otel status` output and
+     in stderr error messages**. Users who wish to keep secrets
+     out of `~/.codex/config.toml` may pass them via the
+     `OTEL_EXPORTER_OTLP_HEADERS` env var at workload-launch time
+     instead; `mindspec otel setup` documents this in `--help`.
+   - **Idempotency:** re-running `mindspec otel setup
+     --endpoint <same> --codex` against an unchanged
+     `~/.codex/config.toml` produces a sha256-identical output
+     file. This is asserted by the Acceptance Criteria sha256-
+     idempotency bullet.
+   - **Exit code matrix for `mindspec otel setup`:**
+     - `0` — config written (or already up-to-date and re-write
+       was idempotent).
+     - `1` — pre-existing target TOML/JSON failed to parse;
+       no modification performed.
+     - `2` — invocation error (missing `--endpoint`, unknown
+       `--protocol` value, etc.).
+     - **No other exit codes**; `mindspec otel setup` never
+       returns a network-error exit because it performs no
+       network I/O.
+
+   **Explicit `mindspec otel status` contract (read-only diagnostic):**
+   - Reads (only): the current working directory's
+     `.claude/settings.local.json` and the user's
+     `~/.codex/config.toml` (and any path passed via
+     `--codex-config`).
+   - Writes (only): stdout (the report) and stderr (errors).
+     `mindspec otel status` **performs zero network I/O** — this
+     is asserted by Test H's AST check (no `net.Dial`, `http.Get`,
+     `http.Post`, `http.Client.Do`, or `url.Parse`-followed-by-
+     `Dial` call sites under `cmd/mindspec/otel.go` or
+     `internal/otel/`). This closes the "doctor-by-another-name"
+     hole: status is mechanically prevented from acquiring probe
+     behavior.
+   - Output (stable golden file under
+     `cmd/mindspec/testdata/otel-status-golden.txt`): a short
+     human-readable report listing:
+     - configured OTLP endpoint (URL, scheme, host, port);
+     - configured protocol;
+     - configured headers (keys only, values redacted to `***`
+       per the secret-hygiene rule above);
+     - target files: which of `.claude/settings.local.json` and
+       `~/.codex/config.toml` exist; for each, whether the OTEL
+       stanza is present and matches the canonical mindspec
+       rendering.
+   - **Exit code matrix for `mindspec otel status`:**
+     - `0` — config present and parseable in at least one target
+       file; report printed.
+     - `1` — no OTEL config found in any target file.
+     - `2` — at least one target file exists but fails to parse;
+       report indicates which.
+     - **No other exit codes.**
 6. **`mindspec --help` is observability-name-free.** None of
    `agentmind`, `bench`, `serve`, `replay`, `viz` appear in
    `mindspec --help` output. `mindspec --help` fits on one screen.
@@ -233,10 +333,71 @@ matrix in §Validation Proofs.
     less than 30% fails the merge. The delta is recorded in the merge
     commit message. This is C01's anti-symbolic-extraction defense:
     if real code is hiding behind renames, the binary won't shrink.
-11. **Rescue-note discipline.** The deletion commits (bench, viz cobra
-    subtree, recording collector) each cite, in their commit message,
-    the parent SHA and the file paths deleted, so `git show <sha>:<path>`
-    is a one-command resurrection for any downstream consumer.
+
+    **Pinned baseline (the numeric anchor for the gate):** measured
+    on `darwin-arm64` from `main` HEAD immediately prior to spec-084
+    work, `go build ./cmd/mindspec` produces a binary of
+    **10,734,354 bytes (~10.24 MiB)**. The merge-time check computes
+    `1 - (post_bytes / 10734354)` and fails if the result is less
+    than `0.30` (post-spec-084 binary must be **≤ 7,514,047 bytes**).
+    The number is pinned here so the gate is falsifiable at review
+    time, not negotiable post-hoc. If a legitimate Go runtime change
+    moves the baseline (e.g., a toolchain bump) before this spec
+    lands, re-measure on the *same* commit that introduces the
+    toolchain bump and update this number in a revision-bead PR
+    before approving spec 084.
+
+    **Calibration of the 30% floor.** The deleted code closure is:
+    `internal/bench/` (~3,500 LOC), `cmd/mindspec/viz.go` (~220 LOC),
+    `cmd/mindspec/bench*.go` (~200 LOC),
+    `internal/recording/collector.go` (~250 LOC), plus the entire
+    `github.com/mrmaxsteel/agentmind/{client,wire}` Go module and
+    its transitive closure (websocket dep `nhooyr.io/websocket`, the
+    `internal/viz/web/*` embed.FS UI assets that the agentmind
+    binary now carries instead of mindspec). Expected shrinkage on
+    this surface is 35–45%; **30% is the conservative merge floor**.
+    A measured shrinkage between 30% and 35% is acceptable but
+    flagged in review as suggesting incomplete dead-code elimination.
+    A measured shrinkage below 30% indicates real code is still
+    hiding behind renames and is a hard merge-block per HC #10.
+11. **Rescue-note discipline — survives squash-merge.** The deletion
+    commits (bench, viz cobra subtree, recording collector) each cite,
+    in their commit message, the file paths deleted. Because this PR
+    is permitted to land via squash-merge (see §Migration commits),
+    parent-SHA citations in PR-fork commits do **not** survive into
+    `main`'s history and would silently break six-month-old rescue
+    procedures. To prevent that, this spec requires one of the
+    following three SHA-preservation mechanisms; the implementer
+    picks **option (b)** as the default unless they explicitly
+    document choosing another:
+
+    - **(a) Require a true merge commit (no squash).** The PR is
+      merged with `git merge --no-ff`; the seven intermediate
+      commits remain in `main`'s history and their parent SHAs
+      survive verbatim. `BENCH-MOVED.md` cites the pre-bench-delete
+      commit SHA from that history.
+
+    - **(b) Annotated tag at the pre-delete state (default).** Before
+      the bench-delete commit lands, the implementer pushes an
+      annotated tag `pre-spec-084-bench-delete` pointing at the
+      parent SHA. `BENCH-MOVED.md` cites the tag, not a raw SHA:
+      `git show pre-spec-084-bench-delete:internal/bench/runner.go`.
+      Tags are pushed to `origin` from the integration branch BEFORE
+      the squash-merge so they exist in shared history independent
+      of PR-fork lifecycle. This is the default because it survives
+      both squash and merge-commit, and is the minimum-friction
+      addition to the existing flow.
+
+    - **(c) Inline-rescue note carrying the full directory.**
+      `BENCH-MOVED.md` includes a `git format-patch` invocation
+      against the squash-merge commit's parent that reconstructs
+      `internal/bench/` from `main`'s reachable history. Verbose;
+      acceptable only if the implementer rejects both (a) and (b).
+
+    The deletion commit messages still cite their parent SHAs as
+    review aids, but the **canonical rescue handle is the
+    `pre-spec-084-bench-delete` annotated tag** unless (a) or (c)
+    is chosen and documented in `BENCH-MOVED.md`.
 
 ### Per-command migration table (per C03)
 
@@ -247,13 +408,37 @@ the one-shot deprecation messages in Hard Constraint #7.
 
 | Removed command | Replacement | Deprecation message |
 |---|---|---|
-| `mindspec record start --…` (old shape) | `mindspec record start --spec <id> -- <workload-cmd>` (simplified to pure config + launch; old subprocess-management flags rejected with non-zero exit) | n/a — `record start` survives, reshaped per BRIEF task #4 |
+| `mindspec record start --…` (old shape) | `mindspec record start --spec <id> -- <workload-cmd>` (simplified to pure config + launch; see flag enumeration below) | n/a — `record start` survives, reshaped per BRIEF task #4 |
 | `mindspec bench`, `mindspec bench run`, `mindspec bench *` | No replacement in mindspec. See `BENCH-MOVED.md` for the git-history rescue procedure; future bench-repo author lifts code from cited SHA. | `command moved: 'mindspec bench' has moved out of mindspec; see BENCH-MOVED.md (or ADR-0028) for rescue procedure` |
 | `mindspec agentmind serve` | `agentmind serve` (standalone binary; install from https://github.com/mrmaxsteel/agentmind/releases) | `command moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)` |
 | `mindspec agentmind replay` | `agentmind replay` (standalone binary) | `command moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)` |
 | `mindspec viz` (top-level alias) | `agentmind serve` (standalone binary) | `command moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)` |
 | `mindspec agentmind setup` | `mindspec otel setup` (renamed; no backwards-compat alias) | `command renamed: use 'mindspec otel setup' (see ADR-0027 for rationale)` |
 | `mindspec agentmind` (any other subcommand) | n/a — entire cobra subtree removed | `command moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)` |
+
+### `record start` flag-shape enumeration (per C03)
+
+The spec must be the source of truth for which `record start` flags
+survive and which are rejected. An audit of `cmd/mindspec/record.go`
+on `main` at the time of this spec (parent commit
+`1eb9782 sec: validate spec/ADR/bead/domain IDs at all CLI entrypoints`)
+shows `recordStartCmd` exposes exactly **one** flag:
+
+| Flag | On main today | Post-spec-084 disposition |
+|---|---|---|
+| `--spec <id>` | yes (required) | **Preserved** — still required; identifies the spec the recording belongs to. |
+
+No other flags exist on `record start` in the current codebase, so
+no subprocess-management flag deprecation enumeration is required
+beyond this single-row table. **If, during implementation, any
+hidden flag is discovered in `record.go` that this audit missed**
+(e.g., a hidden bench-coupling flag inherited from a refactor), the
+implementer MUST update this table in the spec by amendment-bead
+BEFORE the bench-delete commit lands, and the flag MUST either
+survive (with documented rationale) or emit exit code 2 with a
+stderr line `flag removed: --<name>; see ADR-0027 §record-start` —
+no silent acceptance. This closes the R1:C7 / R5:C5 latent-surface
+hole: the spec is the binding enumeration.
 
 ### Surface to remove — exact file inventory
 
@@ -289,7 +474,7 @@ the one-shot deprecation messages in Hard Constraint #7.
 | `internal/specgate/verify_no_agentmind_dep_test.go` | ~100 | Permanent CI gate: dep-graph + AST `exec.Command` literal check (per C05). |
 | `docs/adr/ADR-0027-mindspec-otel-config-only.md` | — | The "mindspec is OTEL-config only" ADR. |
 | `docs/adr/ADR-0028-bench-removed-from-mindspec.md` | — | The "bench is gone, here is the rescue procedure" ADR. |
-| `BENCH-MOVED.md` (repo root) | ~30 | Pointer to the pre-deletion SHA and the rescue command, so a stranger finds it. |
+| `BENCH-MOVED.md` (repo root) | ~30 | Pointer to the `pre-spec-084-bench-delete` annotated tag and the `git checkout <tag> -- internal/bench/` rescue command. Tag is pushed to `origin` before the spec-084 PR merges so the rescue handle survives squash-merge. |
 
 ## Scope
 
@@ -355,8 +540,12 @@ the one-shot deprecation messages in Hard Constraint #7.
 - [ ] `grep -rn "github.com/mrmaxsteel/agentmind" .` returns no
       matches in the mindspec tree (excluding allow-listed paths:
       `.mindspec/docs/specs/083-*`, ADR-0026/0027/0028 prose, CHANGELOG).
-- [ ] `grep -rn "agentmind\|wire\.CollectedEvent\|client\.AutoStart\|client\.ReadEvents\|client\.RunStandalone" cmd/ internal/`
-      returns zero matches.
+- [ ] `grep -rn 'agentmind\|wire\.CollectedEvent\|client\.AutoStart\|client\.ReadEvents\|client\.RunStandalone' cmd/ internal/ --exclude='*_specgate*.go' --exclude='*verify_no_agentmind*.go' --exclude='deprecated_commands*.go'`
+      returns zero matches. (The two allow-listed files —
+      `internal/specgate/verify_no_agentmind_dep_test.go` and
+      `cmd/mindspec/deprecated_commands.go` — are by-design exceptions
+      per Hard Constraint #2; Test H further gates them to
+      string-literal-only contexts.)
 - [ ] `find internal/bench -type f` returns no results.
 - [ ] `find internal/agentmind -type f` returns no results.
 - [ ] `find internal/recording -name 'collector*'` returns no results.
@@ -394,7 +583,7 @@ the one-shot deprecation messages in Hard Constraint #7.
 - [ ] ADR-0027 and ADR-0028 are committed and cross-referenced from
       this spec.
 
-## Validation Proofs (Tests A–I per C01, with C02/C05 additions)
+## Validation Proofs (Tests A–J per C01, with C02/C05 additions; K as safety belt)
 
 These are runtime + static checks that gate the merge. Static greps
 caught spec-083 candidates who left dead code in place; runtime checks
@@ -421,12 +610,38 @@ or runs once at merge time.** Static-only signals are insufficient.
   code 2 and exactly one stderr line matching the documented
   per-command migration table pattern. AST-checked via a Go test in
   `cmd/mindspec/deprecated_commands_test.go`.
-- **Test E — record opens no listener (lsof/dtruss runtime, per C01):**
-  Spawn `mindspec record start --spec test -- bash -c 'sleep 2'` and,
-  from a sibling test process, run `lsof -p <mindspec-pid>` (or the
-  Darwin equivalent `dtruss -t bind -p <pid>`) for the duration of
-  the workload. Assert mindspec opens **zero TCP listening sockets**
-  of its own. Workload env contains `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- **Test E — record opens no listener (portable Go runtime check,
+  per C01):**
+  Replaces the original lsof/dtruss design (platform-fragile;
+  dtruss requires SIP-disabled hosts on modern Darwin and lsof
+  flag semantics diverge between BSD and Linux).
+  Implemented as a portable Go test in
+  `internal/recording/no_listener_test.go` that:
+  1. Spawns `mindspec record start --spec test -- bash -c 'sleep 2'`
+     with the workload env containing `OTEL_EXPORTER_OTLP_ENDPOINT`.
+  2. Enumerates mindspec's open TCP sockets via the platform-
+     appropriate kernel interface:
+     - **Linux**: parses `/proc/<mindspec-pid>/net/tcp` and
+       `/proc/<mindspec-pid>/net/tcp6` and filters for state `0A`
+       (LISTEN); no external tool required.
+     - **Darwin**: invokes `lsof -p <mindspec-pid> -iTCP -sTCP:LISTEN
+       -n -P -F pn` (the `-F` formatted output is stable across
+       lsof versions and does not require dtruss / ptrace
+       privileges); skipped with `t.Skip("lsof not present")` if
+       lsof is absent.
+     - **Other OSes**: `t.Skip("no portable listener-enumeration
+       implementation on $GOOS")`.
+  3. Asserts mindspec opens **zero TCP listening sockets** of its
+     own across the workload's lifetime (sampled every 100ms until
+     workload exit).
+
+  **CI coverage matrix is explicit:** Test E runs on both
+  `ubuntu-latest` and `macos-latest` GitHub-hosted runners; both
+  must report zero listeners for the merge gate to clear. A skip
+  on either runner is a CI failure (the test uses `t.Errorf` on
+  unexpected skip, not `t.Skip`, when `GOOS` is `linux` or
+  `darwin`). No SIP-disabled / root / ptrace privileges are
+  required; Test E will not silently no-op.
 - **Test F — record start exit-code propagation + clean stderr (the
   user's literal vision):**
   Start a fresh tmp repo. `export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:65535`
@@ -453,23 +668,47 @@ or runs once at merge time.** Static-only signals are insufficient.
   pre-merge baseline recorded in the spec. **Fail the merge if
   shrinkage is less than 30%.** Delta recorded in the final commit
   message.
-- **Test J — point-at-a-real-collector check (smoke, optional in CI):**
+- **Test J — point-at-a-real-collector check (MANDATORY,
+  end-to-end proof of the user vision):**
   Start `otel/opentelemetry-collector-contrib` locally with the
-  `loggingexporter`.
+  `loggingexporter` (pulled from the official OTel image; pinned
+  by digest in `.github/workflows/spec-084-test-j.yml`).
   `mindspec otel setup --endpoint http://127.0.0.1:4318`. Run a
-  workload via `mindspec record start … -- <claude-code-like
-  script that emits one OTLP log>`. Assert the collector's stdout
-  contains the emitted log line. **No mindspec process touches OTLP
-  at any point in this test path** — this is the end-to-end proof of
-  "and that's it."
-- **Test K — bench-rescue procedure:**
-  In a clean checkout, `git show <pre-delete-SHA>:internal/bench/runner.go
-  | head -n 20` returns the old file. Documents that deletion did
-  not lose history.
+  workload via `mindspec record start --spec test -- <fixture
+  script under internal/otel/testdata/emit-one-otlp-log.sh that
+  emits one OTLP log via curl>`. Assert the collector's stdout
+  contains the emitted log line. **No mindspec process touches
+  OTLP at any point in this test path** — this is the literal
+  proof of the user's one-sentence vision ("point mindspec at an
+  OTEL collector and that's it") and the test the spec exists to
+  satisfy. Promoted from optional to **mandatory** per panel
+  consensus: the v1-spec-084 design treats the end-to-end check
+  as the load-bearing acceptance proof, not aspirational
+  documentation.
 
-Passing Tests A–I (plus J as smoke and K as safety belt) is the
-definition of "mindspec is OTEL-config only and the boundary is
-architecturally enforced."
+  **CI cadence:** Test J runs in `.github/workflows/spec-084-test-j.yml`
+  on every PR that touches `cmd/mindspec/`, `internal/otel/`,
+  `internal/recording/`, or `go.mod`. If per-PR docker-pull cost is
+  prohibitive in practice (measured after first ten runs), the
+  cadence may be relaxed to "nightly + on PRs touching the above
+  paths" by spec-amendment bead, but it MUST run at least nightly
+  on `main` and a failure MUST block the next release. It is never
+  silently optional.
+- **Test K — bench-rescue procedure (squash-merge resilient):**
+  In a clean checkout of `main` after the spec-084 PR merges,
+  `git show pre-spec-084-bench-delete:internal/bench/runner.go |
+  head -n 20` returns the old file (assuming HC #11 default
+  option (b) — annotated tag). The tag must be reachable from
+  `origin` and not be a PR-fork-only ref. If option (a)
+  (merge-commit) was chosen instead, the test uses the cited
+  SHA from `BENCH-MOVED.md` directly. The test fails if neither
+  the tag nor a `main`-reachable SHA can resurrect the file —
+  the very failure mode this revision exists to prevent.
+
+Passing Tests A–J (with K as safety belt) is the definition of
+"mindspec is OTEL-config only and the boundary is architecturally
+enforced." Test J is the load-bearing literal-vision proof and is
+mandatory; K is the rescue-procedure safety belt.
 
 ## Migration commits (single PR, bench-first per C02)
 
@@ -481,14 +720,23 @@ that subsequent commits must touch by ~60%, because bench is the
 dominant remaining consumer of `client.AutoStart` /
 `client.ReadEvents` / `wire.CollectedEvent`.
 
-- **Commit 1 — Add `internal/otel/`, `cmd/mindspec/otel.go`, and the
-  permanent specgate test.** New surfaces land first. Existing
-  `mindspec agentmind setup` stays in place for two commits so users
-  can verify equivalence by diffing the output of the old vs. new
-  command on the same flags. `internal/specgate/verify_no_agentmind_dep_test.go`
-  is added but initially skipped with a build tag until Commit 6
-  clears the dep graph. Tests A–C and Tests H draft are wired but
-  the dep-graph assertion is gated.
+- **Commit 1 — Add `internal/otel/`, `cmd/mindspec/otel.go`.**
+  New surfaces land first. Existing `mindspec agentmind setup`
+  stays in place for two commits so users can verify equivalence
+  by diffing the output of the old vs. new command on the same
+  flags. **The specgate test
+  (`internal/specgate/verify_no_agentmind_dep_test.go`) is NOT
+  landed in this commit.** Per panel consensus revision #9, the
+  build-tag silencing pattern is rejected: a "permanent gate" that
+  is off for five of seven commits is the spec-083 failure mode
+  this spec exists to prevent. Tests A–C and Test H's draft AST
+  scaffolding may be wired into ordinary test files in Commit 1
+  (they assert what is true at that commit: `agentmind` IS still
+  in the source and dep graph), but the specgate test itself —
+  whose contract is "agentmind is never in the graph" — is
+  introduced only in Commit 6 below, alongside the actual dep
+  removal, so its first appearance in the repo is its permanent
+  enforced form.
 - **Commit 2 — Delete `internal/bench/` and `cmd/mindspec/bench*.go`.**
   `BENCH-MOVED.md` lands in the same commit at the repo root. Commit
   message cites the parent SHA explicitly for the rescue procedure.
@@ -511,12 +759,15 @@ dominant remaining consumer of `client.AutoStart` /
   exit-2 stubs.** Registers hidden cobra commands for `agentmind`,
   `viz`, `bench`, `serve`, `replay` emitting the per-command migration
   table messages from Hard Constraint #7. Test D becomes green.
-- **Commit 6 — Drop the `agentmind` Go module dep.**
-  `go.mod` and `go.sum` edits, `go mod tidy`. Remove the build-tag
-  skip on `internal/specgate/verify_no_agentmind_dep_test.go`; the
-  specgate test now runs unconditionally on every CI invocation
-  going forward. Binary-size delta recorded in the commit message.
-  Tests A, B, H all green.
+- **Commit 6 — Drop the `agentmind` Go module dep and land the
+  permanent specgate test.**
+  `go.mod` and `go.sum` edits, `go mod tidy`. **Add
+  `internal/specgate/verify_no_agentmind_dep_test.go` in this
+  commit** (its first appearance in the repo) so the test's
+  initial state is its permanent enforced state: no build tags,
+  no skips, runs unconditionally in `go test -short ./...` from
+  this commit forward. Binary-size delta recorded in the commit
+  message. Tests A, B, H all green.
 - **Commit 7 — ADRs, README, CHANGELOG.**
   ADR-0027, ADR-0028, ADR-0011 prose postscript, README "Telemetry"
   section rewrite with the per-command migration table embedded.
