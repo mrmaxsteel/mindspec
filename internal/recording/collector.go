@@ -1,7 +1,6 @@
 package recording
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,13 +29,14 @@ func StartCollector(root, specID string) error {
 
 	handle, err := client.AutoStart(root, client.DefaultOTLPPort, client.DefaultUIPort, eventsPath)
 	if err != nil {
-		if errors.Is(err, client.ErrBinaryNotFound) {
-			// Telemetry-as-output class: propagate. The wrapping with %w
-			// preserves errors.Is detection upstream. No warn line emitted
-			// here — the command-level handler decides whether to call
-			// client.EmitWarnOnce alongside the non-zero exit.
-			return fmt.Errorf("starting AgentMind collector: %w", err)
-		}
+		// Telemetry-as-output class: every AutoStart failure (including
+		// the typed client.ErrBinaryNotFound sentinel) is propagated to
+		// the command-level handler. The %w wrapping preserves
+		// errors.Is(err, client.ErrBinaryNotFound) detection upstream so
+		// the handler can call client.EmitWarnOnce alongside the non-zero
+		// exit. No branching needed here — both arms previously returned
+		// the same wrapped error, which was structurally dead code (panel
+		// bead-3a-v1, REV-3).
 		return fmt.Errorf("starting AgentMind collector: %w", err)
 	}
 

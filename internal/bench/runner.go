@@ -2,7 +2,6 @@ package bench
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -138,22 +137,8 @@ func Run(cfg *RunConfig) error {
 	// collection — for the bench command, telemetry is a side-effect, not
 	// the deliverable.
 	benchEventsPath := filepath.Join(cfg.WorkDir, "bench-events.jsonl")
-	handle, err := client.AutoStart(cfg.RepoRoot, agentMindPort, client.DefaultUIPort, benchEventsPath)
-	switch {
-	case err == nil:
-		if handle != nil && handle.PID > 0 {
-			fmt.Fprintf(cfg.Stdout, "AgentMind started (PID %d) → %s\n", handle.PID, benchEventsPath)
-		} else {
-			fmt.Fprintf(cfg.Stdout, "AgentMind already running on :%d\n", agentMindPort)
-		}
-		fmt.Fprintf(cfg.Stdout, "Watch live at http://localhost:%d\n", client.DefaultUIPort)
-	case errors.Is(err, client.ErrBinaryNotFound):
-		// Batch class: degrade gracefully. EmitWarnOnce is the sync.Once
-		// guarded helper that guarantees exactly one warn line per
-		// process even if multiple consumers also call it.
-		client.EmitWarnOnce(os.Stderr)
-	default:
-		return fmt.Errorf("starting AgentMind collector: %w", err)
+	if _, err := startBenchCollector(cfg.RepoRoot, cfg.WorkDir, benchEventsPath, cfg.Stdout, os.Stderr); err != nil {
+		return err
 	}
 
 	// Build per-session prompts
