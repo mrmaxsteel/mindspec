@@ -159,6 +159,6 @@ func checkCmdChanges(r *Result, source, docs []string) {
 	}
 
 	if !hasRelevantDoc {
-		r.AddWarning("cmd-docs", "cmd/ files changed but neither CLAUDE.md nor CONVENTIONS.md updated")
+		r.AddWarning("cmd-docs", "cmd/ changes without operator-docs update (one of CLAUDE.md, CONVENTIONS.md, .mindspec/docs/user/**, .mindspec/docs/core/USAGE.md)")
 	}
 }

@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// TestDoctorOWNERSHIPYamlMissing verifies that checkDomains warns when a
+// TestDoctorWarnsOnMissingOwnership verifies that checkDomains warns when a
 // domain directory lacks OWNERSHIP.yaml and reports OK when present
 // (spec-086 Bead 4).
-func TestDoctorOWNERSHIPYamlMissing(t *testing.T) {
+func TestDoctorWarnsOnMissingOwnership(t *testing.T) {
 	t.Run("missing manifest emits Warn", func(t *testing.T) {
 		root := t.TempDir()
 		domainDir := filepath.Join(root, "docs", "domains", "foo")
