@@ -1,0 +1,4 @@
+{"data":{"cache_read_tokens":0,"input_tokens":1024,"latency_ms":1234,"model":"claude-opus-4-7","output_tokens":256,"success":"true"},"event":"claude_code.api_request","resource":{"host.name":"frozen-clock-fixture","service.name":"claude-code","service.version":"1.0.0"},"ts":"2026-01-01T00:00:00.000000001Z"}
+{"data":{"metric":"claude_code.token.usage","model":"claude-opus-4-7","type":"input","value":1024},"event":"claude_code.token.usage","resource":{"service.name":"claude-code"},"ts":"2026-01-01T00:00:01.123456789Z"}
+{"data":{"currency":"USD","metric":"claude_code.cost.usage","model":"claude-opus-4-7","value":0.0123456},"event":"claude_code.cost.usage","resource":{"service.name":"claude-code"},"ts":"2026-01-01T00:00:02.999999999Z"}
+{"event":"claude_code.session.start","ts":"2026-01-01T00:00:03Z"}
