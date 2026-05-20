@@ -1,7 +1,7 @@
 # ADR-0027: MindSpec is OTEL-Only
 
 - **Date**: 2026-05-20
-- **Status**: Proposed
+- **Status**: Accepted
 - **Domain(s)**: observability, telemetry, recording, extraction
 - **Deciders**: Max
 - **Supersedes**: n/a
