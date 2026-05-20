@@ -464,3 +464,66 @@ func TestWorktreeRemove_ArgsConstruction(t *testing.T) {
 		}
 	}
 }
+
+// --- BeadExists tests ---
+//
+// Covers the three branches that justify this helper's existence:
+//   (1) success -> (true, nil)
+//   (2) bd ran, non-zero exit (bead missing) -> (false, nil) — the
+//       *exec.ExitError type-switch that keeps os/exec out of callers.
+//   (3) bd unavailable / other invocation failure -> (false, err).
+
+func TestBeadExists_Found(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", `[{"id":"mindspec-abc"}]`)
+	}
+
+	exists, err := BeadExists("mindspec-abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !exists {
+		t.Error("expected exists=true for successful bd show")
+	}
+}
+
+func TestBeadExists_NotFound(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	// `false` exits non-zero with no output: bd-ran-but-bead-missing.
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
+	}
+
+	exists, err := BeadExists("mindspec-missing")
+	if err != nil {
+		t.Fatalf("expected nil err for *exec.ExitError, got: %v", err)
+	}
+	if exists {
+		t.Error("expected exists=false when bd exits non-zero")
+	}
+}
+
+func TestBeadExists_BdUnavailable(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	// Non-existent binary: cmd.Output() returns a non-ExitError
+	// (an *exec.Error / *fs.PathError). That branch must surface
+	// the error to the caller so warnings (not errors) are emitted.
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/nonexistent/path/to/bd-binary")
+	}
+
+	exists, err := BeadExists("mindspec-anything")
+	if err == nil {
+		t.Fatal("expected error when bd binary is unavailable")
+	}
+	if exists {
+		t.Error("expected exists=false on bd invocation failure")
+	}
+}

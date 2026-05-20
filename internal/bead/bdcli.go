@@ -1,7 +1,14 @@
+// Package bead is the bd boundary for enforcement packages
+// (internal/{validate,approve,complete,state,phase}). Direct
+// exec.Command("bd", ...) calls from any of those packages are
+// prohibited and must route through this package. Helpers here own
+// the os/exec type-switches and JSON parsing so callers stay free of
+// process-I/O concerns. See ADR-0030.
 package bead
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,6 +66,25 @@ func Preflight(root string) error {
 // This is the primary interface for composing with bd per ADR-0012.
 func RunBD(args ...string) ([]byte, error) {
 	return tracedOutput("run", args)
+}
+
+// BeadExists reports whether bead id is present in Beads. Returns
+// (true, nil) if `bd show <id> --json` succeeds; (false, nil) if bd
+// ran but reported the bead as missing (non-zero exit captured as
+// *exec.ExitError); (false, err) only if bd itself is unavailable
+// or some other non-exit error occurred. The os/exec type-switch is
+// performed inside this package so enforcement-package callers
+// (e.g. internal/validate) never import os/exec.
+func BeadExists(id string) (bool, error) {
+	_, err := RunBD("show", id, "--json")
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
 }
 
 // RunBDCombined executes a bd command and returns combined stdout+stderr.

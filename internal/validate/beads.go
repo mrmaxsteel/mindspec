@@ -1,20 +1,25 @@
+// Package validate runs workflow validation checks.
+//
+// This package may not import os/exec or internal/gitutil. Process I/O
+// routes through internal/executor; bd I/O routes through internal/bead.
 package validate
 
 import (
 	"fmt"
-	"os/exec"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
 
-// CheckBeadExists verifies a bead ID exists in Beads by running `bd show <id> --json`.
+// CheckBeadExists verifies a bead ID exists in Beads by routing through
+// internal/bead (the bd boundary; see ADR-0030). The (bool, error)
+// contract is: (true, nil) if found; (false, nil) if bd reported the
+// bead missing; (false, err) only if bd itself is unavailable.
 func CheckBeadExists(id string) (bool, error) {
-	err := exec.Command("bd", "show", id, "--json").Run()
+	exists, err := bead.BeadExists(id)
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return false, nil // command ran but bead not found
-		}
-		return false, fmt.Errorf("running bd show: %w", err) // bd not available
+		return false, fmt.Errorf("running bd show: %w", err)
 	}
-	return true, nil
+	return exists, nil
 }
 
 // checkBeadIDs verifies each bead ID in the plan frontmatter exists.
