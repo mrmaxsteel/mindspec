@@ -56,6 +56,24 @@ func TestDeprecatedCommands_ExitCodeAndMessage(t *testing.T) {
 			argv:     []string{"viz"},
 			wantLine: "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz' (see ADR-0027)",
 		},
+		// Pin the parent-Run dispatch contract for `mindspec agentmind`
+		// (bare) and `mindspec agentmind <unknown-sub>`. cobra dispatches
+		// to the parent's Run when no leaf matches; DisableFlagParsing on
+		// the parent means the unknown-sub becomes a positional arg that
+		// the parent's Run ignores. If a future cobra upgrade changes
+		// parent-Run-fallback semantics, these two cases catch the
+		// regression before the deprecation message degrades to
+		// "Error: unknown command ..." + exit 1.
+		{
+			name:     "agentmind-bare",
+			argv:     []string{"agentmind"},
+			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)",
+		},
+		{
+			name:     "agentmind-unknown-sub",
+			argv:     []string{"agentmind", "nosuchcmd"},
+			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)",
+		},
 	}
 
 	for _, tc := range cases {

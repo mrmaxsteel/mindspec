@@ -12,9 +12,34 @@ package main
 // (closing Hard Constraint #6) but still run if a user types the old
 // name out of muscle memory.
 //
-// This file is the only place under cmd/ or internal/ (outside the
-// permanent specgate test introduced in Bead 4) permitted to contain
-// the literal substring `agentmind`, per Hard Constraint #2.
+// This file is the canonical place under cmd/ or internal/ permitted
+// to contain the literal substring `agentmind` outside the permanent
+// specgate test introduced in Bead 4, per Hard Constraint #2.
+//
+// Documented carve-outs (residual `agentmind` substring hits Bead 4's
+// AST scan must accept):
+//
+//  1. The `AGENTMIND_BIN` env-var name in `cmd/mindspec/testhelpers_test.go`
+//     (env-var scrubbing for test hermeticity — not an `agentmind`
+//     binary invocation, just stripping any inherited value).
+//  2. The `agentmind` literal in banned-token lists in
+//     `cmd/mindspec/help_golden_test.go` and `cmd/mindspec/record_test.go`
+//     (the banlist *is* the assertion; the literal is load-bearing).
+//  3. Explanatory comments in `internal/recording/markers.go`,
+//     `cmd/mindspec/record.go`, `cmd/mindspec/trace.go`,
+//     `cmd/mindspec/otel.go` that reference the historical
+//     bench/agentmind subsystems or the sibling agentmind repo
+//     (`github.com/mrmaxsteel/agentmind`).
+//  4. The `agentmindDeprecatedCmd` Go identifier (here and in
+//     `cmd/mindspec/root.go`) — this is an internal-package
+//     identifier, not an import path / exec.Command first arg /
+//     string literal. Bead 4's AST scan should match only
+//     imports, exec.Command first args, and non-test string
+//     literals per spec lines 207-209.
+//  5. The `001-agentmind-first` test-fixture spec ID in
+//     `internal/recording/recording_test.go` (historical fixture
+//     name; renaming would churn the test corpus for no semantic
+//     gain).
 //
 // Lifecycle: per spec line 314-318, the deprecation stubs live for
 // exactly one mindspec release after spec 084 ships. A single-bead
@@ -57,7 +82,7 @@ func stubDeprecated(use, line string) *cobra.Command {
 const (
 	depBenchMsg          = "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0028 for rationale)"
 	depAgentmindServeMsg = "agentmind serve moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind serve' (see ADR-0027)"
-	depAgentmindReplyMsg = "agentmind replay moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind replay' (see ADR-0027)"
+	depAgentmindReplayMsg = "agentmind replay moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind replay' (see ADR-0027)"
 	depVizMsg            = "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz' (see ADR-0027)"
 	depAgentmindSetupMsg = "agentmind setup renamed: use 'mindspec otel setup' (see ADR-0027 for rationale)"
 	depAgentmindGenMsg   = "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)"
@@ -82,7 +107,7 @@ var agentmindDeprecatedCmd = func() *cobra.Command {
 		},
 	}
 	c.AddCommand(stubDeprecated("serve", depAgentmindServeMsg))
-	c.AddCommand(stubDeprecated("replay", depAgentmindReplyMsg))
+	c.AddCommand(stubDeprecated("replay", depAgentmindReplayMsg))
 	c.AddCommand(stubDeprecated("setup", depAgentmindSetupMsg))
 	return c
 }()

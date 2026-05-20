@@ -13,9 +13,10 @@ See [ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md)
 ## Rescue procedure
 
 The pre-deletion state of `internal/bench/` is preserved at the
-annotated tag **`pre-spec-084-bench-delete`**. The tag is pushed to
-`origin` so the rescue handle survives squash-merge of the spec 084 PR
-(per HC #11 default option (b)).
+annotated tag **`pre-spec-084-bench-delete`**. The tag is created
+locally in the spec 084 PR branch; the push to `origin` happens as
+part of the merge step (per HC #11 default option (b)), so the rescue
+handle survives squash-merge of the spec 084 PR.
 
 To lift `internal/bench/` into a new repository, or to inspect the
 code from history:
@@ -33,7 +34,7 @@ git show pre-spec-084-bench-delete:internal/bench/runner.go
 git diff pre-spec-084-bench-delete..HEAD -- internal/bench/
 ```
 
-The `cmd/mindspec/bench*.go` cobra command files are recoverable from
+The `cmd/mindspec/bench.go` cobra command file is recoverable from
 the same tag (`git checkout pre-spec-084-bench-delete -- cmd/mindspec/bench.go`).
 The `cmd/agentmind-fake/` test fixture is likewise preserved at the
 tag.

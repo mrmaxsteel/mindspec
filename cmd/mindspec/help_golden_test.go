@@ -60,29 +60,57 @@ func TestOtelHelpListsExactlySetupAndStatus(t *testing.T) {
 	}
 	out := stdout.String()
 
-	// The "Available Commands:" section lists subcommands one per
-	// line. We scan all visible subcommand names by matching the
-	// indented "  <name>" pattern. cobra's default help renders e.g.
-	//   "  setup       …"
+	// Extract subcommand names from the "Available Commands:" section
+	// only. cobra also emits indented lines for Usage (e.g.
+	// "  mindspec otel [command]") and the cmd's Long description that
+	// would otherwise false-match an "indented two-space + word"
+	// regex. Slice between "Available Commands:" and the next
+	// non-indented section header (Flags:, Global Flags:, etc).
+	availIdx := strings.Index(out, "Available Commands:")
+	if availIdx < 0 {
+		t.Fatalf("mindspec otel --help: no 'Available Commands:' section\n--- output ---\n%s\n--- end ---", out)
+	}
+	availSection := out[availIdx:]
+	// Stop at the first blank line OR the next "Flags:" / "Global
+	// Flags:" header, whichever comes first.
+	if endIdx := strings.Index(availSection, "\n\n"); endIdx > 0 {
+		availSection = availSection[:endIdx]
+	}
 	subRe := regexp.MustCompile(`(?m)^  ([a-z][a-z0-9-]*)\s`)
-	matches := subRe.FindAllStringSubmatch(out, -1)
+	matches := subRe.FindAllStringSubmatch(availSection, -1)
 	seen := map[string]bool{}
 	for _, m := range matches {
 		seen[m[1]] = true
 	}
 
-	// Filter to the two subcommands we expect (cobra also reports
-	// "completion" and "help" as built-ins; those are acceptable —
-	// only the user-defined surface matters).
-	wantPresent := []string{"setup", "status"}
-	for _, name := range wantPresent {
-		if !seen[name] {
+	// Filter to user-defined subcommands. cobra also reports
+	// "completion" and "help" as built-ins; drop those before
+	// enforcing exact set-equality so a future user-defined third
+	// subcommand (e.g. `mindspec otel export`) fails the test.
+	builtins := map[string]bool{"completion": true, "help": true}
+	userDefined := map[string]bool{}
+	for name := range seen {
+		if !builtins[name] {
+			userDefined[name] = true
+		}
+	}
+
+	wantSet := map[string]bool{"setup": true, "status": true}
+	for name := range wantSet {
+		if !userDefined[name] {
 			t.Errorf("mindspec otel --help missing subcommand %q\n--- output ---\n%s\n--- end ---", name, out)
+		}
+	}
+	for name := range userDefined {
+		if !wantSet[name] {
+			t.Errorf("mindspec otel --help has unexpected user-defined subcommand %q (expected exactly setup+status)\n--- output ---\n%s\n--- end ---", name, out)
 		}
 	}
 
 	// Hard-reject any agentmind/bench/replay/serve/viz that might have
-	// leaked into the otel subtree.
+	// leaked into the otel subtree. (Redundant with the set-equality
+	// check above, but explicit so the failure message names the
+	// banned token.)
 	bannedHere := []string{"agentmind", "bench", "replay", "serve", "viz"}
 	for _, b := range bannedHere {
 		if seen[b] {
@@ -93,8 +121,10 @@ func TestOtelHelpListsExactlySetupAndStatus(t *testing.T) {
 
 // containsToken returns true if s contains tok as a word-ish token
 // (surrounded by non-alphanumeric / start-or-end). Without this guard
-// "service" would falsely match "serve".
+// "service" would falsely match "serve". Both inputs are lowercased
+// before matching so a mixed-case token like "AgentMind" is found in
+// any-case input.
 func containsToken(s, tok string) bool {
-	re := regexp.MustCompile(`(?i)(^|[^a-z0-9_])` + regexp.QuoteMeta(tok) + `($|[^a-z0-9_])`)
+	re := regexp.MustCompile(`(^|[^a-z0-9_])` + regexp.QuoteMeta(strings.ToLower(tok)) + `($|[^a-z0-9_])`)
 	return re.MatchString(strings.ToLower(s))
 }
