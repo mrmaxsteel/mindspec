@@ -1,8 +1,12 @@
 package main
 
-// cmd/mindspec/record.go — spec 084 (mindspec-otel-only) Bead 2 rewire.
+// cmd/mindspec/record.go — spec 084 (mindspec-otel-only) Bead 3.
 //
-// `mindspec record start` is now a pure OTEL-config + workload-launcher:
+// `mindspec record start` is a pure OTEL-config + workload-launcher.
+// Bead 2 reshaped it from the old subprocess-managing form; Bead 3
+// deletes the residual `record status`, `record stop`, and
+// `record health` subcommands (which all targeted the now-removed
+// internal/recording collector lifecycle).
 //
 //  1. Reads the user-configured OTEL endpoint from
 //     .claude/settings.local.json and/or ~/.codex/config.toml via the
@@ -18,25 +22,12 @@ package main
 //     inheriting stdin/stdout/stderr verbatim.
 //  5. Exits with the workload's exit code.
 //
-// What this file used to do — spawn the agentmind subprocess via
-// client.AutoStart, manage its PID, and tail its NDJSON output — is
-// deliberately removed (spec 084 Hard Constraint #4: "mindspec record
-// start is pure config + launch"). The OTLP receiver lives in the
+// mindspec never opens a TCP listener, never reads OTLP, never
+// spawns a collector subprocess. The OTLP receiver lives in the
 // standalone agentmind binary or any other OTLP/HTTP collector the
-// user chooses to point the endpoint at; mindspec is no longer aware
-// of it.
-//
-// The status/stop/health subcommands are unchanged in shape from the
-// pre-spec-084 implementation; their CollectorPID / CollectorPort
-// references are vestigial and slated for cleanup in Bead 3 (which
-// also deletes internal/recording/collector.go). All three are marked
-// Hidden:true so they no longer appear in `mindspec record --help`,
-// and their bodies are guarded to skip the dangling collector fields
-// the new writeRecordingSkeleton no longer populates. See the
-// TODO(bead-3) markers below.
+// user chooses to point the endpoint at.
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -45,9 +36,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/otel"
-	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
-	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -55,85 +44,6 @@ import (
 var recordCmd = &cobra.Command{
 	Use:   "record",
 	Short: "Manage per-spec telemetry recording",
-}
-
-// recordStatusCmd is hidden in Bead 2 (CONSENSUS revision #3): it
-// still references CollectorPID/CollectorPort manifest fields that
-// the new writeRecordingSkeleton no longer populates, so showing it
-// to users would be misleading. Bead 3 will delete the command (and
-// internal/recording/collector.go) outright.
-//
-// TODO(bead-3): delete this command along with internal/recording/collector.go.
-var recordStatusCmd = &cobra.Command{
-	Use:    "status",
-	Short:  "Show recording status for the active spec",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := findLocalRoot()
-		if err != nil {
-			return err
-		}
-
-		specID, _ := cmd.Flags().GetString("spec")
-		if specID == "" {
-			// ADR-0023: derive active spec from beads, not focus file.
-			ctx, ctxErr := phase.ResolveContextFromDir(root, root)
-			if ctxErr != nil || ctx == nil || ctx.SpecID == "" {
-				return fmt.Errorf("no active spec — use --spec to specify one")
-			}
-			specID = ctx.SpecID
-		}
-
-		// CONSENSUS revision #5: restore the IsEnabled gate that was
-		// inadvertently dropped in the Bead 2 diff. Bead 2's scope is
-		// "record start only"; status semantics must not change here.
-		if !recording.IsEnabled(root) {
-			fmt.Println("Recording disabled (set recording.enabled: true in .mindspec/config.yaml to enable)")
-			return nil
-		}
-
-		if !recording.HasRecording(root, specID) {
-			fmt.Printf("No recording found for spec %s\n", specID)
-			return nil
-		}
-
-		m, err := recording.ReadManifest(root, specID)
-		if err != nil {
-			return err
-		}
-
-		// Count events
-		eventsPath, err := recording.EventsPath(root, specID)
-		if err != nil {
-			return err
-		}
-		eventCount := countLines(eventsPath)
-
-		// Current phase
-		currentPhase := "unknown"
-		if len(m.Phases) > 0 {
-			currentPhase = m.Phases[len(m.Phases)-1].Phase
-		}
-
-		// Elapsed time
-		var elapsed string
-		if t, err := time.Parse(time.RFC3339, m.StartedAt); err == nil {
-			elapsed = time.Since(t).Truncate(time.Second).String()
-		}
-
-		fmt.Printf("Spec:    %s\n", m.SpecID)
-		fmt.Printf("Status:  %s\n", m.Status)
-		fmt.Printf("Events:  %d\n", eventCount)
-		fmt.Printf("Phase:   %s\n", currentPhase)
-		if elapsed != "" {
-			fmt.Printf("Elapsed: %s\n", elapsed)
-		}
-		// TODO(bead-3): the Collector: line is omitted defensively
-		// because writeRecordingSkeleton no longer populates
-		// m.CollectorPID / m.CollectorPort. Bead 3 deletes this whole
-		// command.
-		return nil
-	},
 }
 
 // recordStartCmd is the spec-084 reshaped `mindspec record start`:
@@ -154,19 +64,18 @@ var recordStatusCmd = &cobra.Command{
 //   - execs the workload, inheriting stdin/stdout/stderr verbatim;
 //   - exits with the workload's exit code.
 //
-// Env precedence (CONSENSUS revision #2): if the caller already
-// exports an OTEL_* env var before invoking `mindspec record start`,
-// the caller's value WINS — mindspec's rendered config only fills in
-// keys that are absent from the parent environment. This matches
-// POSIX expectation: an explicit `export OTEL_EXPORTER_OTLP_ENDPOINT=…`
-// in the shell trumps `mindspec otel setup`'s on-disk config.
+// Env precedence: if the caller already exports an OTEL_* env var
+// before invoking `mindspec record start`, the caller's value WINS —
+// mindspec's rendered config only fills in keys that are absent from
+// the parent environment. This matches POSIX expectation: an explicit
+// `export OTEL_EXPORTER_OTLP_ENDPOINT=…` in the shell trumps
+// `mindspec otel setup`'s on-disk config.
 //
-// Error contract (CONSENSUS revision #1): a malformed
-// .claude/settings.local.json or a config that fails Validate()
-// causes record start to exit non-zero with a real `Error: …`
-// diagnostic on stderr. Silent degradation is reserved for the "no
-// config exists at all" case; "config exists but is broken" is a
-// configuration bug and must be surfaced.
+// Error contract: a malformed .claude/settings.local.json or a config
+// that fails Validate() causes record start to exit non-zero with a
+// real `Error: …` diagnostic on stderr. Silent degradation is reserved
+// for the "no config exists at all" case; "config exists but is
+// broken" is a configuration bug and must be surfaced.
 //
 // If no OTEL endpoint is configured on disk, the workload is still
 // launched — the workload's own OTEL SDK will silently drop events
@@ -257,9 +166,9 @@ func runRecordStart(cmd *cobra.Command, args []string) error {
 
 	// 2) Build the workload env: parent env + OTEL keys rendered
 	// from whatever the user configured via `mindspec otel setup`.
-	// A malformed on-disk config returns a real error here
-	// (CONSENSUS revision #1); a missing-config-entirely degrades
-	// silently to parent env (workload's own OTEL SDK contract).
+	// A malformed on-disk config returns a real error here; a missing-
+	// config-entirely degrades silently to parent env (workload's own
+	// OTEL SDK contract).
 	workloadEnv, err := otel.BuildWorkloadEnv(root, os.Environ())
 	if err != nil {
 		return err
@@ -334,86 +243,7 @@ func (e *workloadExitError) Error() string {
 
 func exitCodedError(code int) error { return &workloadExitError{code: code} }
 
-// recordStopCmd is hidden in Bead 2 (CONSENSUS revision #3): it
-// references the collector lifecycle that mindspec no longer runs.
-// Bead 3 deletes it.
-//
-// TODO(bead-3): delete this command along with internal/recording/collector.go.
-var recordStopCmd = &cobra.Command{
-	Use:    "stop",
-	Short:  "Stop recording for the active spec",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := findLocalRoot()
-		if err != nil {
-			return err
-		}
-
-		specID, _ := cmd.Flags().GetString("spec")
-		if specID == "" {
-			ctx, ctxErr := phase.ResolveContextFromDir(root, root)
-			if ctxErr != nil || ctx == nil || ctx.SpecID == "" {
-				return fmt.Errorf("no active spec — use --spec to specify one")
-			}
-			specID = ctx.SpecID
-		}
-
-		if err := recording.StopRecording(root, specID); err != nil {
-			return err
-		}
-		fmt.Printf("Recording stopped for spec %s\n", specID)
-		return nil
-	},
-}
-
-// recordHealthCmd is hidden in Bead 2 (CONSENSUS revision #3): the
-// SessionStart hook no longer needs to revive a collector mindspec
-// doesn't run. Bead 3 deletes both the command and the supporting
-// internal/recording health-check code.
-//
-// TODO(bead-3): delete this command along with internal/recording/collector.go.
-var recordHealthCmd = &cobra.Command{
-	Use:    "health",
-	Short:  "Check and restart dead collector (for SessionStart hook)",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := findLocalRoot()
-		if err != nil {
-			return nil // silent exit if no project root
-		}
-
-		// ADR-0023: derive active spec from beads, not focus file.
-		ctx, ctxErr := phase.ResolveContextFromDir(root, root)
-		if ctxErr != nil || ctx == nil || ctx.SpecID == "" || ctx.Phase == state.ModeIdle {
-			return nil // no active spec
-		}
-
-		return recording.RestartIfDead(root, ctx.SpecID)
-	},
-}
-
 func init() {
 	recordStartCmd.Flags().String("spec", "", "Spec ID to record (required)")
-	recordStatusCmd.Flags().String("spec", "", "Spec ID (defaults to active spec)")
-	recordStopCmd.Flags().String("spec", "", "Spec ID (defaults to active spec)")
-
 	recordCmd.AddCommand(recordStartCmd)
-	recordCmd.AddCommand(recordStatusCmd)
-	recordCmd.AddCommand(recordStopCmd)
-	recordCmd.AddCommand(recordHealthCmd)
-}
-
-func countLines(path string) int {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		count++
-	}
-	return count
 }
