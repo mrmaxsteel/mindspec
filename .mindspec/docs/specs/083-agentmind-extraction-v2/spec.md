@@ -405,6 +405,59 @@ aborts the migration.
   on PATH. The first-party `mindspec install agentmind` subcommand is
   deferred to a follow-up spec (see Non-Goals → Deferred to follow-up spec).
 
+  **Phase 6 deferred state — current snapshot (post-Bead-6
+  implementation).** At the time Bead 6 implements, AgentMind v1.0.0
+  has not yet been published upstream, so the actual go.mod edit
+  (`drop replace + pin v1.0.0`) cannot run. Bead 6's deliverables are
+  therefore the *armed-but-dormant* mechanisms that flip on the day
+  upstream ships:
+
+  1. **Install docs**: `.mindspec/docs/installation/agentmind.md`
+     captures the URL pattern under
+     `github.com/mrmaxsteel/agentmind/releases/download/`, the
+     four-platform archive naming, the `SHA256SUMS` artifact, and the
+     exact `curl` + `sha256sum`/`shasum -a 256` invocations. The page
+     carries an explicit "v1.0.0 not yet published" status banner so
+     readers know it documents the release plan, not an installable
+     binary.
+  2. **Pin script**: `scripts/pin-agentmind-release.sh` (also
+     `make pin-agentmind-release`) is the one-command tool that
+     performs the go.mod edit. The script's upstream-tag gate
+     guarantees it cannot accidentally drop the `replace` directive
+     against a non-existent upstream: it exits 2 with a clear
+     "tag NOT found" deferral message until `v1.0.0` exists.
+     `--dry-run` and `--skip-upstream-check` cover review and
+     offline-mirror scenarios.
+  3. **CI continuity**:
+     - `scripts/test-e-continuity.sh` + the `test-e-continuity`
+       workflow job preserve Test E (no-circular-discovery) by
+       shallow-cloning agentmind at the pinned tag and re-running the
+       spec-canonical grep. Today the job runs and reports a
+       skip-with-warning (rc=2: tag not yet published); the day
+       upstream ships, the same job becomes a hard gate (rc=0 on
+       green, rc=1 on circular-discovery hit).
+     - The existing `live-capture` workflow job uses
+       `cmd/agentmind-fake` as a stand-in for the release binary
+       (`AGENTMIND_REAL_BINARY=0`). Phase 6 will flip the job to
+       download the released binary via the manual-install URL +
+       SHA256SUMS verification documented in `agentmind.md`.
+  4. **Soak gate**: `.mindspec/docs/installation/agentmind-soak-gate.md`
+     records the "not yet armed" status. The spec line above mentions
+     "7 days of nightly runs" — plan Bead 6 step 5 converts that into
+     a verifiable, date-stamped check on a CI artifact
+     (`agentmind-phase3-soak-history.txt`). Today the artifact does
+     not exist; the doc enumerates the three unmet prerequisites
+     (no upstream binary, no nightly download, pin-script exits 2)
+     and the arming sequence.
+
+  Once upstream publishes `v1.0.0`, executing Phase 6 is a single
+  command sequence: `make pin-agentmind-release` (verifies tag, edits
+  go.mod, runs `go mod tidy && go build && go test -short`), update
+  the `live-capture` job to download the released binary, accumulate
+  seven nightly green entries (or take the documented one-shot
+  alternative), then merge the resulting PR. No further design work
+  is needed; the wiring is in place.
+
 ## Lessons baked in from sessions 4 and 5
 
 - **Don't trust diff-stat as a quality signal.** The v1 bench's "winning" arm

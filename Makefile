@@ -2,7 +2,7 @@ BINARY  := mindspec
 BINDIR  := ./bin
 PKG     := ./cmd/mindspec
 
-.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind verify-sibling test-live-capture
+.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind verify-sibling test-live-capture pin-agentmind-release
 
 build:
 	go build -o $(BINDIR)/$(BINARY) $(PKG)
@@ -72,6 +72,20 @@ test-live-capture:
 		echo "==> using preset AGENTMIND_BIN=$$AGENTMIND_BIN"; \
 		go test -tags=livecapture -count=1 -timeout 60s -run TestLiveCapture ./internal/specgate/livecapture/...; \
 	fi
+
+# Spec 083 Bead 6 — Phase 6 release-pin helper. Drops the local
+# `replace github.com/mrmaxsteel/agentmind => ../agentmind` directive
+# from go.mod and pins `require github.com/mrmaxsteel/agentmind` to the
+# released tag (default v1.0.0). Verifies the tag is reachable upstream
+# unless --skip-upstream-check is passed. Until agentmind v1.0.0 ships,
+# this target exits 2 with a clear deferral message.
+#
+# Usage:
+#   make pin-agentmind-release                 # default: v1.0.0
+#   make pin-agentmind-release ARGS="v1.0.0 --dry-run"
+#   make pin-agentmind-release ARGS="v1.0.0 --skip-upstream-check"
+pin-agentmind-release:
+	./scripts/pin-agentmind-release.sh $(ARGS)
 
 clean:
 	rm -rf $(BINDIR)

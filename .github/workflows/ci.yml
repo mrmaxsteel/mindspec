@@ -187,3 +187,46 @@ jobs:
         if: steps.testg.outputs.rc != '0'
         run: |
           echo "::warning::Test G (agentmind v0.0.1 tag) is deferred (rc=${{ steps.testg.outputs.rc }}); skipping live-capture per spec 083 Bead 4 step 5 (defensive gating). This is non-blocking but should be visible in CI summary so a long-running deferral does not silently hide a broken upstream tag."
+
+  # Spec 083 Bead 6 — Test E cross-repo continuity gate. After Bead 5
+  # deleted `internal/agentmind/`, Test E (no-circular-discovery) no
+  # longer has an in-tree target. This job re-runs the spec-canonical
+  # grep against a shallow clone of github.com/mrmaxsteel/agentmind at
+  # the version pinned by `pin-agentmind-release.sh` (default v1.0.0).
+  #
+  # Exit-code contract from scripts/test-e-continuity.sh:
+  #   0 — clone + grep both green (Test E passes).
+  #   1 — circular-discovery match in agentmind tree (hard fail).
+  #   2 — upstream tag absent (deferral; today's expected state until
+  #       agentmind v1.0.0 ships). CI converts this to a skip-with-
+  #       warning, matching the Test G / live-capture pattern.
+  #   3 — upstream unreachable (skip-with-warning, same rationale).
+  test-e-continuity:
+    name: Test E cross-repo (no-circular-discovery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Test E against pinned agentmind tag
+        id: teste
+        run: |
+          set +e
+          ./scripts/test-e-continuity.sh
+          rc=$?
+          echo "test-e-continuity exit=$rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # 0 passes; 1 is a hard fail (circular discovery); 2/3 are
+          # deferrals that produce a warning but do not fail CI.
+          if [ "$rc" -eq 1 ]; then
+            echo "::error::Test E failed: circular-discovery references found in agentmind tree"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "$rc" -ne 3 ]; then
+            echo "::error::test-e-continuity.sh exited unexpectedly (rc=$rc)"
+            exit "$rc"
+          fi
+
+      - name: Note deferral
+        if: steps.teste.outputs.rc != '0'
+        run: |
+          echo "::warning::Test E cross-repo gate is deferred (rc=${{ steps.teste.outputs.rc }}). This is the expected state until agentmind v1.0.0 ships upstream. Once `pin-agentmind-release.sh v1.0.0` has been run and the tag exists, this job will return rc=0 (Test E green by clone-and-grep)."
