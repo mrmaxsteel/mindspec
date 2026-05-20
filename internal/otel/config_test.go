@@ -301,6 +301,91 @@ service_name = "old"
 	}
 }
 
+// TestRenderCodexConfigToml_PreservesValueWithOpenBracket verifies
+// the fix for the consensus revision #1: the old codexOtelRegex used
+// `[^\[]*` to delimit the [otel] block and would TRUNCATE at any `[`
+// inside a string value (or any sibling [otel.subtable] header). The
+// line-based replacement now consumes lines until the next top-level
+// table header.
+func TestRenderCodexConfigToml_PreservesValueWithOpenBracket(t *testing.T) {
+	// A sibling top-level table whose value contains a literal '['.
+	existing := `[profile]
+description = "[experimental] my profile"
+nested_array = ["a", "b"]
+
+[otel]
+exporter = { "otlp-http" = { endpoint = "http://OLD:4318", protocol = "http/json" } }
+trace_exporter = "none"
+log_user_prompt = false
+service_name = "old"
+
+[server]
+port = 4318
+`
+	c := Config{Endpoint: "http://NEW:4318", ServiceName: "new"}
+	got, err := RenderCodexConfigToml(c, existing)
+	if err != nil {
+		t.Fatalf("RenderCodexConfigToml: %v", err)
+	}
+	// The [profile] table and its tricky value must survive.
+	if !strings.Contains(got, `description = "[experimental] my profile"`) {
+		t.Errorf("sibling value containing '[' was truncated:\n%s", got)
+	}
+	if !strings.Contains(got, `nested_array = ["a", "b"]`) {
+		t.Errorf("sibling array containing '[' was truncated:\n%s", got)
+	}
+	// The [server] table after [otel] must survive.
+	if !strings.Contains(got, `[server]`) {
+		t.Errorf("sibling [server] table after [otel] was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, `port = 4318`) {
+		t.Errorf("sibling server.port was dropped:\n%s", got)
+	}
+	// OTEL block must be replaced.
+	if strings.Contains(got, "OLD") {
+		t.Errorf("old [otel] block not replaced:\n%s", got)
+	}
+	if !strings.Contains(got, `endpoint = "http://NEW:4318"`) {
+		t.Errorf("new endpoint missing:\n%s", got)
+	}
+}
+
+// TestRenderCodexConfigToml_StripsOtelSubtables verifies that any
+// [otel.<sub>] subtables (e.g. legacy [otel.exporter]) are removed
+// even when followed by a non-otel sibling. The line-based parser
+// must treat all `otel.*` headers as part of the otel zone.
+func TestRenderCodexConfigToml_StripsOtelSubtables(t *testing.T) {
+	existing := `[otel]
+old_key = "leftover"
+
+[otel.exporter]
+endpoint = "http://OLD:4318"
+
+[otel.headers]
+"x-old" = "stale"
+
+[profile]
+name = "default"
+`
+	c := Config{Endpoint: "http://NEW:4318"}
+	got, err := RenderCodexConfigToml(c, existing)
+	if err != nil {
+		t.Fatalf("RenderCodexConfigToml: %v", err)
+	}
+	if strings.Contains(got, "OLD") || strings.Contains(got, "stale") || strings.Contains(got, "leftover") {
+		t.Errorf("legacy otel-namespace content not removed:\n%s", got)
+	}
+	if !strings.Contains(got, `[profile]`) {
+		t.Errorf("sibling [profile] table dropped:\n%s", got)
+	}
+	if !strings.Contains(got, `name = "default"`) {
+		t.Errorf("sibling profile.name dropped:\n%s", got)
+	}
+	if !strings.Contains(got, `endpoint = "http://NEW:4318"`) {
+		t.Errorf("new endpoint missing:\n%s", got)
+	}
+}
+
 func TestRenderEnvExports(t *testing.T) {
 	c := Config{
 		Endpoint:    "http://collector:4318",

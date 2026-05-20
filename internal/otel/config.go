@@ -274,16 +274,53 @@ func MergeClaudeSettingsLocal(existing map[string]any, c Config) (map[string]any
 	return out, nil
 }
 
-// codexExporterRegex matches the entire [otel.exporter] table (and any
-// content up to but not including the next top-level section header).
-// Used by RenderCodexConfigToml as the regex-replacement strategy
-// documented in the package doc.
-var codexExporterRegex = regexp.MustCompile(`(?ms)^\[otel\.exporter\][^\[]*`)
+// tomlSectionHeaderRegex matches a TOML table header on its own line,
+// captured as `[table.name]`. Used by the line-based [otel]-block
+// replacement strategy in RenderCodexConfigToml.
+//
+// Replaces the old fragile codexOtelRegex / codexExporterRegex pair,
+// which used `[^\[]*` to delimit the [otel] block and therefore
+// truncated at any value containing a literal `[` (e.g.
+// `description = "[experimental]"`) and leaked sibling [otel.foo]
+// subtables into the replacement zone.
+var tomlSectionHeaderRegex = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
 
-// codexOtelRegex matches the [otel] table similarly. We rewrite the
-// whole [otel] block so non-exporter keys (trace_exporter,
-// log_user_prompt) are also re-synced.
-var codexOtelRegex = regexp.MustCompile(`(?ms)^\[otel\]\n(?:[^\[]*\n)?`)
+// replaceOtelBlock removes any existing [otel] table and any
+// [otel.<subtable>] tables from `existing` and returns (cleaned,
+// hadOtel). The cleaned string preserves all other top-level tables
+// byte-for-byte (except for blank-line collapsing handled later).
+//
+// A table is considered "otel-namespace" iff its header is `[otel]`
+// or matches `[otel.*]`. The parser walks line by line and treats a
+// header `[name]` as ending the otel zone iff `name` is not in the
+// otel namespace. Lines inside string values that happen to contain
+// `[` no longer truncate the block (the prior regex did).
+func replaceOtelBlock(existing string) (string, bool) {
+	lines := strings.Split(existing, "\n")
+	out := make([]string, 0, len(lines))
+	inOtelZone := false
+	hadOtel := false
+	for _, line := range lines {
+		if m := tomlSectionHeaderRegex.FindStringSubmatch(line); m != nil {
+			name := strings.TrimSpace(m[1])
+			isOtelNs := name == "otel" || strings.HasPrefix(name, "otel.")
+			if isOtelNs {
+				inOtelZone = true
+				hadOtel = true
+				continue
+			}
+			// A non-otel top-level header ends the otel zone.
+			inOtelZone = false
+			out = append(out, line)
+			continue
+		}
+		if inOtelZone {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), hadOtel
+}
 
 // RenderCodexConfigToml renders an OTEL Config into a Codex
 // ~/.codex/config.toml string, merging into existingToml if non-empty.
@@ -340,23 +377,25 @@ func RenderCodexConfigToml(c Config, existingToml string) (string, error) {
 		return otelBlock, nil
 	}
 
-	// Strip any legacy [otel.exporter] subtable (older mindspec
-	// versions wrote one). We always emit the inline exporter form.
-	stripped := codexExporterRegex.ReplaceAllString(existingToml, "")
-
-	// Replace [otel] block if present; otherwise append.
-	if codexOtelRegex.MatchString(stripped) {
-		stripped = codexOtelRegex.ReplaceAllString(stripped, otelBlock)
-	} else {
-		stripped = strings.TrimRight(stripped, "\n") + "\n\n" + otelBlock
+	// Line-based [otel]-block replacement. Strips the [otel] table and
+	// any [otel.<sub>] subtable (e.g. legacy [otel.exporter]) without
+	// truncating on `[` characters inside string values, then appends
+	// the canonical block. This is the documented "more robust
+	// line-based parser" from spec 084.
+	stripped, _ := replaceOtelBlock(existingToml)
+	stripped = strings.TrimRight(stripped, "\n")
+	canonical := strings.TrimRight(otelBlock, "\n")
+	if stripped == "" {
+		return canonical + "\n", nil
 	}
+	out := stripped + "\n\n" + canonical
 
 	// Collapse any triple+ newlines created by stripping into double.
-	stripped = collapseBlankRuns(stripped)
-	if !strings.HasSuffix(stripped, "\n") {
-		stripped += "\n"
+	out = collapseBlankRuns(out)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
 	}
-	return stripped, nil
+	return out, nil
 }
 
 var blankRunRegex = regexp.MustCompile(`\n{3,}`)
@@ -376,14 +415,11 @@ func collapseBlankRuns(s string) string {
 // escaped as '\''). This is the only escape form that round-trips
 // safely without shell interpretation.
 func RenderEnvExports(c Config) string {
-	// Render-time validation: returning an empty string on bad config
-	// would silently break callers. Instead, the caller is expected
-	// to call Validate first; this function panics only on programmer
-	// error (an unset endpoint that slipped past Validate).
+	// Caller is expected to call Validate first; if Endpoint is empty
+	// here that's a programmer error. We still render to keep the
+	// function pure (no panics on invalid input) — the CLI layer
+	// performs the user-facing validation.
 	c = c.Normalize()
-	if c.Endpoint == "" {
-		return ""
-	}
 
 	pairs := map[string]string{
 		"CLAUDE_CODE_ENABLE_TELEMETRY": "1",

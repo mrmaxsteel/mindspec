@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // CurrentStatus aggregates what mindspec can observe about the
@@ -121,26 +122,30 @@ func readClaudeConfig(path string) (Config, bool, string) {
 }
 
 // codexEndpointRegex extracts the endpoint URL from the inline-exporter
-// form mindspec emits: `exporter = { "otlp-http" = { endpoint = "...", ... } }`
+// form mindspec emits: `exporter = { "otlp-http" = { endpoint = "...", ... } }`.
+// Used AFTER scoping to the [otel]-namespace lines.
 var codexEndpointRegex = regexp.MustCompile(`endpoint\s*=\s*"([^"]+)"`)
 
 // codexProtocolRegex extracts the protocol value from the same line.
 var codexProtocolRegex = regexp.MustCompile(`protocol\s*=\s*"([^"]+)"`)
 
 // codexServiceNameRegex extracts service_name from the [otel] table.
-var codexServiceNameRegex = regexp.MustCompile(`(?m)^service_name\s*=\s*"([^"]+)"`)
+var codexServiceNameRegex = regexp.MustCompile(`(?m)^\s*service_name\s*=\s*"([^"]+)"`)
 
-// codexHeaderPairRegex extracts each "k" = "v" pair from a headers
-// inline table such as `headers = { "k1" = "v1", "k2" = "v2" }`.
+// codexHeadersBlockRegex / codexHeaderPairRegex extract each
+// "k" = "v" pair from a headers inline table such as
+// `headers = { "k1" = "v1", "k2" = "v2" }`.
 var codexHeadersBlockRegex = regexp.MustCompile(`headers\s*=\s*\{([^}]*)\}`)
 var codexHeaderPairRegex = regexp.MustCompile(`"([^"]+)"\s*=\s*"([^"]*)"`)
 
 // readCodexConfig extracts an OTEL Config from a Codex TOML file.
-// Uses regex (not BurntSushi/toml — not available in go.mod per Bead 1
-// constraint) and only recognizes the inline-exporter form mindspec
-// emits. A user-supplied Codex config with a different exporter shape
-// will report no endpoint, which is the correct behavior: status
-// reports the mindspec-managed surface only.
+// Uses a line-based scoping pass to restrict the value-extraction
+// regexes to the [otel] table (and any [otel.*] subtables) — sibling
+// top-level tables that happen to contain an `endpoint = "..."` key
+// no longer leak into the status reader. A user-supplied Codex config
+// with a different exporter shape will report no endpoint, which is
+// the correct behavior: status reports the mindspec-managed surface
+// only.
 func readCodexConfig(path string) (Config, bool, string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -149,20 +154,23 @@ func readCodexConfig(path string) (Config, bool, string) {
 		}
 		return Config{}, false, fmt.Sprintf("read %s: %v", path, err)
 	}
-	content := string(raw)
+	otelScope := extractOtelScope(string(raw))
+	if otelScope == "" {
+		return Config{}, false, ""
+	}
 
-	endpointMatch := codexEndpointRegex.FindStringSubmatch(content)
+	endpointMatch := codexEndpointRegex.FindStringSubmatch(otelScope)
 	if len(endpointMatch) < 2 {
 		return Config{}, false, ""
 	}
 	cfg := Config{Endpoint: endpointMatch[1]}
-	if m := codexProtocolRegex.FindStringSubmatch(content); len(m) >= 2 {
+	if m := codexProtocolRegex.FindStringSubmatch(otelScope); len(m) >= 2 {
 		cfg.Protocol = m[1]
 	}
-	if m := codexServiceNameRegex.FindStringSubmatch(content); len(m) >= 2 {
+	if m := codexServiceNameRegex.FindStringSubmatch(otelScope); len(m) >= 2 {
 		cfg.ServiceName = m[1]
 	}
-	if hm := codexHeadersBlockRegex.FindStringSubmatch(content); len(hm) >= 2 {
+	if hm := codexHeadersBlockRegex.FindStringSubmatch(otelScope); len(hm) >= 2 {
 		headers := map[string]string{}
 		for _, pair := range codexHeaderPairRegex.FindAllStringSubmatch(hm[1], -1) {
 			if len(pair) >= 3 {
@@ -174,4 +182,33 @@ func readCodexConfig(path string) (Config, bool, string) {
 		}
 	}
 	return cfg, true, ""
+}
+
+// extractOtelScope returns the substring of `content` consisting only
+// of the [otel] table and any [otel.<sub>] subtable bodies, joined
+// with newlines. Returns "" when no otel-namespace table is present.
+// Uses the same line-based parser strategy as replaceOtelBlock in
+// config.go.
+func extractOtelScope(content string) string {
+	lines := strings.Split(content, "\n")
+	var out []string
+	inOtelZone := false
+	for _, line := range lines {
+		if m := tomlSectionHeaderRegex.FindStringSubmatch(line); m != nil {
+			name := strings.TrimSpace(m[1])
+			if name == "otel" || strings.HasPrefix(name, "otel.") {
+				inOtelZone = true
+				continue
+			}
+			inOtelZone = false
+			continue
+		}
+		if inOtelZone {
+			out = append(out, line)
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, "\n")
 }
