@@ -16,6 +16,7 @@ package main
 // verify equivalence before legacy removal in Bead 3.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -265,15 +266,26 @@ func exitErr(code int, err error) error {
 
 // ExitCode returns the exit code for an error, used by main.go. Returns
 // 0 if err is nil, the wrapped code for *codedError, 2 for
-// *usageError, and 1 for any other error (cobra default).
+// *usageError, the workload's exit code for *workloadExitError
+// (spec 084 Bead 2 — `mindspec record start` propagates the workload
+// exit code verbatim), and 1 for any other error (cobra default).
 func otelExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	switch e := err.(type) {
-	case *codedError:
-		return e.code
-	case *usageError:
+	// CONSENSUS revision (related to #1): use errors.As so the
+	// switch is robust against future fmt.Errorf("...: %w") wraps
+	// inserted between RunE and the otelExitCode call site.
+	var wee *workloadExitError
+	if errors.As(err, &wee) {
+		return wee.code
+	}
+	var ce *codedError
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
 		return 2
 	}
 	return 1
