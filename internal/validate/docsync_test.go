@@ -151,6 +151,106 @@ func TestCheckCmdChanges_NoCmdFiles(t *testing.T) {
 	}
 }
 
+// TestValidateSpecArtifactSync covers the spec-doc-sync lane: a spec.md
+// change must be accompanied in the same diff by plan.md, an ADR, or any
+// sibling artifact under the same spec directory.
+func TestValidateSpecArtifactSync(t *testing.T) {
+	cases := []struct {
+		name      string
+		all       []string
+		wantError bool
+	}{
+		{
+			name:      "spec.md only -> error",
+			all:       []string{".mindspec/docs/specs/086-doc-sync/spec.md"},
+			wantError: true,
+		},
+		{
+			name: "spec.md + plan.md -> no error",
+			all: []string{
+				".mindspec/docs/specs/086-doc-sync/spec.md",
+				".mindspec/docs/specs/086-doc-sync/plan.md",
+			},
+			wantError: false,
+		},
+		{
+			name: "spec.md + sibling notes.md -> no error",
+			all: []string{
+				".mindspec/docs/specs/086-doc-sync/spec.md",
+				".mindspec/docs/specs/086-doc-sync/notes.md",
+			},
+			wantError: false,
+		},
+		{
+			name: "spec.md + ADR .md -> no error",
+			all: []string{
+				".mindspec/docs/specs/086-doc-sync/spec.md",
+				".mindspec/docs/adr/ADR-0031-doc-sync-gate.md",
+			},
+			wantError: false,
+		},
+		{
+			name:      "no spec.md change -> no error",
+			all:       []string{"internal/validate/spec.go", "docs/core/MODES.md"},
+			wantError: false,
+		},
+		{
+			name: "spec.md + unrelated source file (no companion) -> error",
+			all: []string{
+				".mindspec/docs/specs/086-doc-sync/spec.md",
+				"internal/validate/docsync.go",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Result{SubCommand: "docs"}
+			changes := ClassifiedChanges{All: tc.all}
+			validateSpecArtifactSync(r, changes)
+
+			found := false
+			for _, issue := range r.Issues {
+				if issue.Name == "spec-doc-sync" {
+					if issue.Severity != SevError {
+						t.Errorf("spec-doc-sync severity = %v, want %v", issue.Severity, SevError)
+					}
+					found = true
+				}
+			}
+			if found != tc.wantError {
+				t.Errorf("spec-doc-sync error present = %v, want %v (issues=%+v)", found, tc.wantError, r.Issues)
+			}
+		})
+	}
+}
+
+// TestPromotedLaneSeverities pins the spec-086 Req 7 contract: the
+// doc-sync and internal-docs lanes are ERRORS, while the operator-docs
+// (cmd-docs) lane stays a WARNING.
+func TestPromotedLaneSeverities(t *testing.T) {
+	// doc-sync (line ~37 in docsync.go): source changed, no docs.
+	// We can't easily synthesize a *Result via ValidateDocs without an
+	// executor, so we exercise the helpers + struct directly to confirm
+	// severity selection.
+	r := &Result{SubCommand: "docs"}
+	checkInternalPackages(r, []string{"internal/validate/spec.go"}, nil)
+	for _, issue := range r.Issues {
+		if issue.Name == "internal-docs" && issue.Severity != SevError {
+			t.Errorf("internal-docs severity = %v, want %v", issue.Severity, SevError)
+		}
+	}
+
+	r2 := &Result{SubCommand: "docs"}
+	checkCmdChanges(r2, []string{"cmd/mindspec/validate.go"}, []string{"docs/domains/workflow/overview.md"})
+	for _, issue := range r2.Issues {
+		if issue.Name == "cmd-docs" && issue.Severity != SevWarning {
+			t.Errorf("cmd-docs severity = %v, want %v (Req 7 contract)", issue.Severity, SevWarning)
+		}
+	}
+}
+
 // TestOperatorDocsAdditiveAcceptSet verifies the operator-docs lane accepts
 // the spec-086 additive set (.mindspec/docs/user/** and
 // .mindspec/docs/core/USAGE.md) in addition to the existing accept set

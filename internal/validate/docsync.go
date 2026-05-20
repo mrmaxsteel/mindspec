@@ -7,6 +7,14 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
+// ClassifiedChanges groups a diff's changed files by category so doc-sync
+// lanes can reason about source, doc, and the raw full list together.
+type ClassifiedChanges struct {
+	All    []string
+	Source []string
+	Docs   []string
+}
+
 // ValidateDocs checks for doc-sync compliance by comparing changed source files
 // against documentation updates in the same diff.
 func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
@@ -27,14 +35,20 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 	}
 
 	sourceChanges, docChanges := classifyChanges(changed)
+	changes := ClassifiedChanges{All: changed, Source: sourceChanges, Docs: docChanges}
+
+	// Spec-artifact sync runs BEFORE the source-empty early-return so a
+	// spec.md-only diff (which classifies as docs-only) still gates on
+	// having a plan.md / ADR / sibling artifact in the same diff.
+	validateSpecArtifactSync(r, changes)
 
 	if len(sourceChanges) == 0 {
-		return r // only doc changes, all good
+		return r // only doc changes, spec-artifact lane already ran
 	}
 
 	// Check if any doc files were also changed
 	if len(docChanges) == 0 {
-		r.AddWarning("doc-sync", "source files changed but no documentation files updated")
+		r.AddError("doc-sync", "source files changed but no documentation files updated")
 	}
 
 	// Check specific mapping heuristics
@@ -124,7 +138,7 @@ func checkInternalPackages(r *Result, source, docs []string) {
 		for pkg := range pkgs {
 			names = append(names, pkg)
 		}
-		r.AddWarning("internal-docs", fmt.Sprintf("internal packages changed (%s) but no domain docs files updated", strings.Join(names, ", ")))
+		r.AddError("internal-docs", fmt.Sprintf("internal packages changed (%s) but no domain docs files updated", strings.Join(names, ", ")))
 	}
 }
 
@@ -161,4 +175,63 @@ func checkCmdChanges(r *Result, source, docs []string) {
 	if !hasRelevantDoc {
 		r.AddWarning("cmd-docs", "cmd/ changes without operator-docs update (one of CLAUDE.md, CONVENTIONS.md, .mindspec/docs/user/**, .mindspec/docs/core/USAGE.md)")
 	}
+}
+
+// validateSpecArtifactSync enforces that any modification to a
+// .mindspec/docs/specs/<id>/spec.md file is accompanied in the same diff by
+// at least one supporting artifact: the sibling plan.md, any other file
+// under .mindspec/docs/specs/<id>/, or any ADR file under
+// .mindspec/docs/adr/**.md. A spec.md change made in isolation is rejected
+// with the "spec-doc-sync" lane error so the doctrine that "a spec change
+// is never atomic" is enforced by the gate.
+func validateSpecArtifactSync(r *Result, changes ClassifiedChanges) {
+	// Collect spec IDs whose spec.md was touched in this diff.
+	touched := make(map[string]bool)
+	for _, f := range changes.All {
+		if id := specMDID(f); id != "" {
+			touched[id] = true
+		}
+	}
+	if len(touched) == 0 {
+		return
+	}
+
+	for id := range touched {
+		prefix := ".mindspec/docs/specs/" + id + "/"
+		specMD := prefix + "spec.md"
+		hasCompanion := false
+		for _, f := range changes.All {
+			if f == specMD {
+				continue
+			}
+			if strings.HasPrefix(f, prefix) {
+				hasCompanion = true
+				break
+			}
+			if strings.HasPrefix(f, ".mindspec/docs/adr/") && strings.HasSuffix(f, ".md") {
+				hasCompanion = true
+				break
+			}
+		}
+		if !hasCompanion {
+			r.AddError("spec-doc-sync", "spec.md change requires plan.md, ADR, or sibling artifact update in same diff")
+		}
+	}
+}
+
+// specMDID returns the spec ID iff path is .mindspec/docs/specs/<id>/spec.md.
+// Returns "" otherwise.
+func specMDID(path string) string {
+	const prefix = ".mindspec/docs/specs/"
+	const suffix = "/spec.md"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	rest = strings.TrimSuffix(rest, suffix)
+	// Reject nested paths — must be exactly one segment.
+	if rest == "" || strings.Contains(rest, "/") {
+		return ""
+	}
+	return rest
 }
