@@ -1,6 +1,7 @@
 package specgate
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,10 +38,20 @@ func TestCheckoutAgentmindSiblingPresent(t *testing.T) {
 		t.Fatalf("abs path: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(absSibling, "go.mod")); err != nil {
-		t.Skipf("sibling agentmind module not present at %s — skipping "+
-			"local-sibling test (this is expected during the parallel "+
-			"mindspec-side migration when run outside the Bead 2 worktree)",
-			absSibling)
+		// Panel-mandated CI semantics: when MINDSPEC_REQUIRE_SIBLING=1
+		// is set in the environment (the mode CI runs under), a
+		// missing sibling is a hard failure rather than a silent skip.
+		// Default behavior remains skip for local-dev ergonomics so
+		// devs can `go test ./...` from a fresh clone without first
+		// running `make checkout-agentmind`.
+		msg := fmt.Sprintf("sibling agentmind module not present at %s "+
+			"(run `make checkout-agentmind` to materialize it)", absSibling)
+		if os.Getenv("MINDSPEC_REQUIRE_SIBLING") == "1" {
+			t.Fatalf("MINDSPEC_REQUIRE_SIBLING=1 but %s", msg)
+		}
+		t.Skipf("%s — skipping local-sibling test (this is expected "+
+			"during the parallel mindspec-side migration when run "+
+			"outside the Bead 2 worktree)", msg)
 	}
 
 	// Force an unreachable upstream URL so the test never depends on

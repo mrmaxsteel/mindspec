@@ -9,6 +9,18 @@ on:
 permissions:
   contents: read
 
+# Spec 083 Bead 2: every job that compiles Go must first run
+# `scripts/checkout-agentmind.sh` (via `make checkout-agentmind`) so the
+# `replace github.com/mrmaxsteel/agentmind => ../agentmind` directive
+# resolves to a real sibling and `go build` succeeds. The script also
+# writes a gitignored go.work file pinning the sibling via an absolute
+# path so worktree depth does not affect resolution. CI sets
+# MINDSPEC_REQUIRE_SIBLING=1 so the companion specgate test fails
+# rather than skips when the sibling is missing.
+
+env:
+  MINDSPEC_REQUIRE_SIBLING: "1"
+
 jobs:
   test:
     name: Test (Go ${{ matrix.go-version }})
@@ -22,6 +34,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
 
       - name: Run tests
         run: go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -42,6 +57,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
 
       - name: Build binary
         run: make build
@@ -65,6 +83,9 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -79,6 +100,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
 
       - name: go vet
         run: go vet ./...
@@ -101,6 +125,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+
+      - name: Materialize agentmind sibling
+        run: make checkout-agentmind
 
       - name: Check go.mod is tidy
         run: |
