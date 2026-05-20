@@ -127,22 +127,61 @@ later v0.3.0 tag in Bead 4.
    placeholder with the actual SHA captured in step 1. Single commit.
 
 **Verification**
-- [ ] `git ls-remote` output for the v0.0.1 tag is captured in the commit message.
-- [ ] Test B and Test G pass against the v0.0.1 tag.
+- [x] `git ls-remote` output for the v0.0.1 tag is captured in the commit
+      message (or, when upstream returns empty output, the empty-result
+      evidence is recorded). At Bead 1 implementation time the upstream
+      repo `github.com/mrmaxsteel/agentmind` returns an empty tag list
+      with exit 0 — recorded in the Bead 1 fixup commit body.
+- [ ] Test B and Test G pass against the v0.0.1 tag. **Deferred** until
+      upstream publishes `v0.0.1`; the deferral is closed automatically
+      when `scripts/verify-agentmind-tag.sh v0.0.1` exits 0 in CI.
 - [ ] Test A either passes (if v0.0.1 produces a binary) or is documented
       as deferred to the binary-publishing tag (if v0.0.1 is scaffold-only).
-- [ ] `spec.md` no longer contains the `<TBD>` placeholder.
+      **Deferred** to the first agentmind tag that publishes
+      `cmd/agentmind/main.go` (target: `v0.2.0` or `v0.3.0` per spec
+      Phase 3/4); deferral is auditable in the Bead 1 fixup commit body.
+- [ ] `spec.md` no longer contains the `<TBD>` placeholder. **Deferred**:
+      the placeholder is closed by re-running
+      `scripts/verify-agentmind-tag.sh v0.0.1 --record` once upstream
+      publishes the tag. The record-on-republish mechanism owns AC closure.
 
 **Acceptance Criteria**
+
+The original four ACs are restated below, each annotated with the
+deferral status that the panel review accepted. The bead is considered
+"done as far as Phase 0 mindspec-side can be" — the script, Makefile
+target, `internal/specgate` smoke tests, and spec amendment are
+shipped; the remaining bullets are blocked on the upstream `agentmind`
+repository scaffolding and tagging `v0.0.1`, which is outside this
+codebase. Closure of the deferred ACs is mechanically gated by the
+`--record` workflow and the strict-mode CI switch
+`MINDSPEC_REQUIRE_GATE_PASS=1`.
+
 - [ ] Spec Test G (agentmind v0.0.1 tag exists) passes and the SHA is
-      recorded in `spec.md`.
+      recorded in `spec.md`. **Deferred** until upstream publishes
+      `v0.0.1`. Closure mechanism: rerun
+      `scripts/verify-agentmind-tag.sh v0.0.1 --record`; the script
+      replaces the `<TBD>` placeholder with the captured SHA, and
+      `TestVerifyAgentmindTagAgainstUpstream` (with
+      `MINDSPEC_REQUIRE_GATE_PASS=1`) then enforces SHA-equality
+      between the gate's report and the recorded value on every CI run.
 - [ ] Spec Test B (no mindspec dep in agentmind) passes against the v0.0.1
-      tag.
+      tag. **Deferred** until upstream publishes `v0.0.1`. Closure
+      mechanism: a follow-up bead (or re-opened Bead 1 fixup) clones the
+      tag, runs `go list -m -json all | jq … | grep mindspec`, and
+      records the empty result in the spec's AC matrix.
 - [ ] Spec Test A (standalone-binary exists) either passes against v0.0.1
       or is explicitly deferred (with the deferral target tag recorded) per
-      the scaffold-only Phase 0 contract.
+      the scaffold-only Phase 0 contract. **Deferred** to the first
+      agentmind tag that publishes `cmd/agentmind/main.go`; target tag
+      is `v0.2.0` or `v0.3.0` per spec Phase 3/4. The scaffold-only
+      Phase 0 outcome is accepted here as the bead's resolution of
+      this AC.
 - [ ] Spec AC "agentmind v0.0.1 SHA recorded before Phase 1" is satisfied;
-      no `<TBD>` placeholder remains.
+      no `<TBD>` placeholder remains. **Deferred**: identical mechanism
+      as the first bullet — the `--record` invocation that closes
+      Test G also removes the `<TBD>` placeholder. Phase 1 work cannot
+      merge until this AC closes.
 
 **Depends on**
 None (but blocks Beads 2–7).
