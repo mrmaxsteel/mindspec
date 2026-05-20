@@ -796,4 +796,3 @@ func callMapHasKey(expr ast.Expr, key string) bool {
 	}
 	return false
 }
-
