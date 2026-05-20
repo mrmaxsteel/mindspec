@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
@@ -1145,3 +1146,185 @@ func TestDecompositionQuality_ConfigOverride(t *testing.T) {
 		}
 	})
 }
+
+// --- Spec 087 Bead 1: ADR semantic gates ---
+
+// writeTestADRWithDomains writes an ADR with a custom Domain(s) value.
+// Used by Spec 087 tests where the cite-relevant / coverage checks
+// depend on the cited ADR's declared domains.
+func writeTestADRWithDomains(t *testing.T, root, id, status, domains, supersededBy string) {
+	t.Helper()
+	adrDir := filepath.Join(root, "docs", "adr")
+	os.MkdirAll(adrDir, 0o755)
+
+	supBy := "n/a"
+	if supersededBy != "" {
+		supBy = supersededBy
+	}
+	content := "# " + id + ": Test\n\n- **Status**: " + status + "\n- **Domain(s)**: " + domains + "\n- **Supersedes**: n/a\n- **Superseded-by**: " + supBy + "\n\n## Decision\nSome decision.\n"
+	os.WriteFile(filepath.Join(adrDir, id+".md"), []byte(content), 0o644)
+}
+
+// writeTestSpec writes a minimal spec.md with the given impacted-domains.
+// Spec 087 plan-time checks consult spec.md via contextpack.ParseSpec to
+// resolve the impacted-domains set.
+func writeTestSpec(t *testing.T, root string, impactedDomains []string) {
+	t.Helper()
+	specDir := filepath.Join(root, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0o755)
+
+	var b strings.Builder
+	b.WriteString("# Spec 999-test\n\n## Goal\n\nTest spec.\n\n## Impacted Domains\n\n")
+	for _, d := range impactedDomains {
+		b.WriteString("- " + d + ": touched by tests\n")
+	}
+	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(b.String()), 0o644)
+}
+
+func TestPlanRejectsIrrelevantADRCitation(t *testing.T) {
+	// Spec impacted=[payments], ADR Domains=[search]. The intersection
+	// is empty, so the cite-relevant check must surface adr-cite-irrelevant.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "search", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-irrelevant" && issue.Severity == SevError {
+			found = true
+			if !strings.Contains(issue.Message, "ADR-0001") {
+				t.Errorf("expected message to mention ADR-0001, got: %s", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "payments") {
+				t.Errorf("expected message to mention impacted domain payments, got: %s", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-cite-irrelevant error, got issues: %v", r.Issues)
+	}
+}
+
+func TestPlanRejectsUncoveredDomain(t *testing.T) {
+	// Spec impacted=[payments], cited ADR covers [search] — payments
+	// has no covering Accepted ADR, must error with the create-domain hint.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "search", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" && issue.Severity == SevError {
+			found = true
+			if !strings.Contains(issue.Message, "payments") {
+				t.Errorf("expected message to mention payments, got: %s", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "mindspec adr create --domain payments") {
+				t.Errorf("expected message to include actionable hint `mindspec adr create --domain payments`, got: %s", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-coverage-missing error, got issues: %v", r.Issues)
+	}
+}
+
+func TestSupersededADRDoesNotSatisfyCoverage(t *testing.T) {
+	// ADR-0001 (Superseded by ADR-0002) is cited, but ADR-0002 is NOT
+	// cited — coverage must NOT be satisfied. ADR-0002 itself exists
+	// and is Accepted+covering, but the lack of citation breaks the
+	// transitive coverage rule per IsDomainCovered.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Superseded", "payments", "ADR-0002")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Accepted", "payments", "")
+	// Only cite ADR-0001 (the superseded one).
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" && strings.Contains(issue.Message, "payments") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-coverage-missing error when only the superseded ADR is cited, got: %v", r.Issues)
+	}
+}
+
+func TestIsDomainCovered_SupersededWithCitedHeadIsCovered(t *testing.T) {
+	// Companion to TestSupersededADRDoesNotSatisfyCoverage: when BOTH
+	// the superseded ADR and the Accepted chain head are cited,
+	// IsDomainCovered returns true. This pins the transitive coverage
+	// rule for Bead 2's divergence consumer.
+	tmp := t.TempDir()
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Superseded", "payments", "ADR-0002")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Accepted", "payments", "")
+
+	store := adr.NewFileStore(tmp)
+	citations := []ADRCitation{{ID: "ADR-0001"}, {ID: "ADR-0002"}}
+	if !IsDomainCovered(store, citations, "payments") {
+		t.Error("expected payments to be covered when superseded ADR and chain head are both cited")
+	}
+
+	// Conversely, citing only the superseded ADR must NOT satisfy.
+	citations = []ADRCitation{{ID: "ADR-0001"}}
+	if IsDomainCovered(store, citations, "payments") {
+		t.Error("expected payments NOT to be covered when only the superseded ADR is cited")
+	}
+}
+
+func TestSupersedeChainCycleDetected(t *testing.T) {
+	// ADR-A.SupersededBy = ADR-B, ADR-B.SupersededBy = ADR-A. The walker
+	// must terminate and surface an adr-supersede-cycle error.
+	tmp := t.TempDir()
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Superseded", "core", "ADR-0002")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Superseded", "core", "ADR-0001")
+
+	store := adr.NewFileStore(tmp)
+	_, err := walkSupersededChain(store, "ADR-0001")
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+	if !strings.Contains(err.Error(), "adr-supersede-cycle") {
+		t.Errorf("expected error to mention adr-supersede-cycle, got: %v", err)
+	}
+}
+
+func TestSupersedeChainTooLong(t *testing.T) {
+	// Chain of 12 ADRs (11 SupersededBy hops) — exceeds the 10-hop cap
+	// and must surface adr-supersede-chain-too-long. The walker visits
+	// at most maxLen+1 nodes before giving up.
+	tmp := t.TempDir()
+	const total = 12
+	for i := 1; i <= total; i++ {
+		id := fmt.Sprintf("ADR-%04d", i)
+		next := ""
+		status := "Superseded"
+		if i < total {
+			next = fmt.Sprintf("ADR-%04d", i+1)
+		} else {
+			// terminal link is Accepted with no successor
+			status = "Accepted"
+		}
+		writeTestADRWithDomains(t, tmp, id, status, "core", next)
+	}
+
+	store := adr.NewFileStore(tmp)
+	_, err := walkSupersededChain(store, "ADR-0001")
+	if err == nil {
+		t.Fatal("expected too-long error, got nil")
+	}
+	if !strings.Contains(err.Error(), "adr-supersede-chain-too-long") {
+		t.Errorf("expected error to mention adr-supersede-chain-too-long, got: %v", err)
+	}
+}
+

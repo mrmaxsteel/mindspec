@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -99,7 +100,16 @@ func ValidatePlan(root, specID string) *Result {
 		}
 	} else {
 		store := adr.NewFileStore(root)
-		checkADRCitations(r, store, fm.ADRCitations)
+		// Spec 087 Bead 1: the new cite-relevant + coverage gates are
+		// additive; per the Spec 039 backwards-compatibility pattern they
+		// are suppressed for already-approved plans so historical plans
+		// don't re-fail under the new check.
+		var impacted []string
+		if !isApproved {
+			impacted, _ = loadImpactedDomains(specDir)
+		}
+		checkADRCitations(r, store, fm.ADRCitations, impacted)
+		checkADRCoverage(r, store, fm.ADRCitations, impacted)
 	}
 
 	// Check ADR Fitness section (Spec 039: promoted to error)
@@ -363,7 +373,15 @@ func ParseBeadSections(content string) []BeadSection {
 }
 
 // checkADRCitations validates that each cited ADR exists and has appropriate status.
-func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation) {
+//
+// Spec 087 Bead 1: additionally checks that each cited ADR's declared
+// domains intersect the spec's impacted-domains list. When the
+// intersection is empty (and impactedDomains is known), the citation is
+// architecturally irrelevant — emits "adr-cite-irrelevant". The check is
+// suppressed when impactedDomains is empty (e.g. spec.md has no
+// `## Impacted Domains` section yet) so the existing behaviour is
+// preserved verbatim for plans that pre-date the semantic gate.
+func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impactedDomains []string) {
 	for _, cite := range citations {
 		a, err := store.Get(cite.ID)
 		if err != nil {
@@ -381,7 +399,180 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation) {
 		if strings.EqualFold(a.Status, "Proposed") {
 			r.AddWarning("adr-cite-proposed", fmt.Sprintf("cited ADR %s has status Proposed — consider accepting it first", cite.ID))
 		}
+
+		// Spec 087 Bead 1: cite-relevant check. Only run when we have a
+		// concrete impacted-domains list to compare against — without one,
+		// "relevance" is undefined and the check would false-positive every
+		// pre-087 plan.
+		if len(impactedDomains) > 0 {
+			overlap := intersectFold(a.Domains, impactedDomains)
+			if len(overlap) == 0 {
+				r.AddError("adr-cite-irrelevant", fmt.Sprintf("cited ADR %s declares domains %v which do not intersect spec impacted domains %v", cite.ID, a.Domains, impactedDomains))
+			}
+		}
 	}
+}
+
+// checkADRCoverage ensures every spec impacted-domain is covered by at
+// least one cited Accepted ADR. Coverage is the predicate "there exists a
+// cited ADR `a` such that a.Status == Accepted AND a.Domains contains
+// domain (case-folded)". A cited Superseded ADR satisfies coverage only
+// when the chain head (resolved by walkSupersededChain) is ALSO cited and
+// itself Accepted+covering — see IsDomainCovered for the canonical
+// predicate (revision 5 single source of truth).
+//
+// Suppressed when impactedDomains is empty: a spec without a declared
+// impacted-domains list cannot be coverage-checked.
+func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impactedDomains []string) {
+	if len(impactedDomains) == 0 {
+		return
+	}
+	for _, d := range impactedDomains {
+		if !IsDomainCovered(store, citations, d) {
+			r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
+		}
+	}
+}
+
+// IsDomainCovered is the canonical predicate "domain X is covered by an
+// Accepted cited ADR, transitively through one supersede-chain hop".
+// Exported as the single source of truth for both plan-time (Bead 1) and
+// bead-time divergence (Bead 2) coverage decisions — divergence.go MUST
+// call this helper rather than duplicate the Accepted+intersect logic.
+//
+// Coverage rules:
+//   - A cited ADR with Status Accepted whose Domains contain `domain`
+//     (case-folded) → covered.
+//   - A cited ADR with Status Superseded → covered ONLY IF the supersede
+//     chain head is also cited AND itself Accepted AND its Domains
+//     contain `domain`.
+//   - Proposed (including placeholders pre-created by the supersede flow)
+//     does NOT satisfy coverage (revision 11).
+//
+// Walker failures (cycle, too-long chain) cause the Superseded path to
+// be treated as not-covering; the diagnostic for those structural
+// failures is surfaced separately by walkSupersededChain callers when
+// they care.
+func IsDomainCovered(store adr.Store, citations []ADRCitation, domain string) bool {
+	// Build a set of cited ADR IDs for O(1) "is this ADR cited" checks
+	// during the Superseded-chain resolution.
+	citedSet := make(map[string]struct{}, len(citations))
+	for _, c := range citations {
+		citedSet[strings.TrimSpace(c.ID)] = struct{}{}
+	}
+
+	wantDomain := strings.ToLower(strings.TrimSpace(domain))
+	for _, c := range citations {
+		a, err := store.Get(c.ID)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(a.Status, "Accepted") {
+			if domainSliceContains(a.Domains, wantDomain) {
+				return true
+			}
+			continue
+		}
+		if strings.EqualFold(a.Status, "Superseded") {
+			headID, err := walkSupersededChain(store, a.ID)
+			if err != nil {
+				continue
+			}
+			if _, ok := citedSet[headID]; !ok {
+				continue
+			}
+			head, err := store.Get(headID)
+			if err != nil {
+				continue
+			}
+			if strings.EqualFold(head.Status, "Accepted") && domainSliceContains(head.Domains, wantDomain) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// walkSupersededChain follows the `SupersededBy` pointer from startID
+// until it reaches a terminal ADR (one with no SupersededBy). Returns
+// the head ID. Detects cycles via a visited set and caps the chain at
+// 10 hops; both surface as errors so callers can attribute the
+// structural failure.
+func walkSupersededChain(store adr.Store, startID string) (string, error) {
+	const maxLen = 10
+	visited := make(map[string]struct{})
+	current := startID
+	for hops := 0; hops <= maxLen; hops++ {
+		if _, seen := visited[current]; seen {
+			return "", fmt.Errorf("adr-supersede-cycle: chain re-visits %s starting from %s", current, startID)
+		}
+		visited[current] = struct{}{}
+		a, err := store.Get(current)
+		if err != nil {
+			return "", fmt.Errorf("adr-supersede-chain-broken: cannot resolve %s: %w", current, err)
+		}
+		next := strings.TrimSpace(a.SupersededBy)
+		if next == "" {
+			return current, nil
+		}
+		current = next
+	}
+	return "", fmt.Errorf("adr-supersede-chain-too-long: chain from %s exceeds %d hops", startID, maxLen)
+}
+
+// loadImpactedDomains reads spec.md from specDir and returns the parsed
+// impacted-domains list. The contextpack parser already lowercases and
+// trims, so the returned slice is normalisation-ready for intersectFold.
+func loadImpactedDomains(specDir string) ([]string, error) {
+	meta, err := contextpack.ParseSpec(specDir)
+	if err != nil {
+		return nil, err
+	}
+	return meta.Domains, nil
+}
+
+// intersectFold returns the case-folded, trim-whitespace exact set
+// intersection of a and b. Build a map over normalised a then probe b
+// for O(n+m). This is the canonical domain-overlap algorithm per Spec
+// 087 Requirement 16.
+func intersectFold(a, b []string) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, x := range a {
+		set[strings.ToLower(strings.TrimSpace(x))] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(b))
+	var out []string
+	for _, y := range b {
+		norm := strings.ToLower(strings.TrimSpace(y))
+		if norm == "" {
+			continue
+		}
+		if _, ok := set[norm]; !ok {
+			continue
+		}
+		if _, dup := seen[norm]; dup {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	return out
+}
+
+// domainSliceContains is a tiny case-folded membership test on a list of
+// already-normalised domain strings. Used by IsDomainCovered; factored
+// out to keep that function readable.
+func domainSliceContains(domains []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, d := range domains {
+		if strings.ToLower(strings.TrimSpace(d)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // hasSection checks whether a given ## heading exists in the content.
