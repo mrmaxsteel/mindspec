@@ -13,7 +13,6 @@ import (
 	"github.com/mrmaxsteel/agentmind/client"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/viz"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -197,6 +196,20 @@ var agentmindSetupCmd = &cobra.Command{
 	Short: "Configure agent telemetry export for AgentMind",
 }
 
+// agentmindSetupCodexCmd configures Codex OTEL export to AgentMind by
+// editing ~/.codex/config.toml — that path stays in mindspec because it
+// composes with mindspec's recording layout (spec 083 Scope: "agentmind
+// setup stays in mindspec for this spec because it knows mindspec's
+// .claude/ layout"; the same reasoning applies to ~/.codex/config.toml).
+//
+// Spec 083 Bead 5: the `--session` path (Codex JSONL → NDJSON
+// conversion) moved to the standalone agentmind binary alongside the
+// rest of internal/viz/. When `--session` is set, this command
+// re-execs `agentmind setup codex --session …` via
+// `client.RunStandalone` and applies the interactive-class
+// degradation contract (Hard Constraint #4): exits non-zero if the
+// binary is absent. The conversion produces user-visible NDJSON the
+// caller asked for, so a silent no-op would be a correctness bug.
 var agentmindSetupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Configure Codex OTEL export, or convert a Codex session JSONL fallback",
@@ -207,23 +220,11 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 
 		if strings.TrimSpace(sessionPath) != "" {
-			if strings.TrimSpace(outputPath) == "" {
-				outputPath = defaultCodexImportOutputPath(sessionPath)
+			runArgs := []string{"setup", "codex", "--session", sessionPath}
+			if strings.TrimSpace(outputPath) != "" {
+				runArgs = append(runArgs, "--output", outputPath)
 			}
-
-			stats, err := viz.ConvertCodexSessionFile(sessionPath, outputPath)
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintf(os.Stderr, "Converted Codex session %s -> %s\n", sessionPath, outputPath)
-			fmt.Fprintf(os.Stderr, "events=%d tool_calls=%d tool_results=%d api_requests=%d\n",
-				stats.Events, stats.ToolCalls, stats.ToolResults, stats.APIRequests)
-			if skipped := stats.SkippedMalformed + stats.SkippedUnknown + stats.SkippedIgnored; skipped > 0 {
-				fmt.Fprintf(os.Stderr, "skipped malformed=%d unknown=%d ignored=%d\n",
-					stats.SkippedMalformed, stats.SkippedUnknown, stats.SkippedIgnored)
-			}
-			return nil
+			return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 		}
 
 		if configPath == "" {
@@ -256,17 +257,6 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		fmt.Printf("Codex OTEL export already configured for AgentMind in %s\n", result.ConfigPath)
 		return nil
 	},
-}
-
-func defaultCodexImportOutputPath(inputPath string) string {
-	dir := filepath.Dir(inputPath)
-	base := filepath.Base(inputPath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	if name == "" {
-		name = "codex-session"
-	}
-	return filepath.Join(dir, name+"-agentmind.ndjson")
 }
 
 func init() {
