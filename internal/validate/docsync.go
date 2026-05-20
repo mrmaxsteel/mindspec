@@ -144,7 +144,15 @@ func checkCmdChanges(r *Result, source, docs []string) {
 
 	hasRelevantDoc := false
 	for _, f := range docs {
+		// Existing operator-docs accept set (preserved):
 		if f == "CLAUDE.md" || strings.Contains(f, "CONVENTIONS.md") {
+			hasRelevantDoc = true
+			break
+		}
+		// Spec-086 additive operator-docs accept set (Requirement 10):
+		// any user-facing doc or the core USAGE manual also satisfies the lane.
+		if strings.HasPrefix(f, ".mindspec/docs/user/") ||
+			f == ".mindspec/docs/core/USAGE.md" {
 			hasRelevantDoc = true
 			break
 		}
