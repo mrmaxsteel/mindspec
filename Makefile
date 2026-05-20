@@ -2,7 +2,7 @@ BINARY  := mindspec
 BINDIR  := ./bin
 PKG     := ./cmd/mindspec
 
-.PHONY: build install test bench-llm clean verify-agentmind-tag
+.PHONY: build install test bench-llm clean verify-agentmind-tag checkout-agentmind
 
 build:
 	go build -o $(BINDIR)/$(BINARY) $(PKG)
@@ -22,6 +22,15 @@ bench-llm:
 # but the tag is absent; exits 3 when the repo itself is unreachable.
 verify-agentmind-tag:
 	./scripts/verify-agentmind-tag.sh
+
+# Spec 083 Bead 2 — sibling-checkout helper. Ensures the agentmind sibling
+# repo exists at ../agentmind so the go.mod `replace` directive resolves,
+# and writes a gitignored go.work file at the module root pinning the
+# sibling via an absolute path (so worktree depth does not affect
+# resolution). Exits 0 (sibling present), 2 (tag absent upstream),
+# 3 (upstream unreachable).
+checkout-agentmind:
+	./scripts/checkout-agentmind.sh
 
 clean:
 	rm -rf $(BINDIR)
