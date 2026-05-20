@@ -1,16 +1,15 @@
 package main
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
+	"github.com/mrmaxsteel/agentmind/client"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/viz"
@@ -31,6 +30,17 @@ Subcommands:
   setup         Configure agent telemetry export to AgentMind`,
 }
 
+// agentmindServeCmd is a thin cobra re-exec wrapper around the
+// standalone `agentmind` binary (spec 083 Phase 4b, Bead 4). It
+// reconstructs the equivalent `agentmind serve …` argv from the
+// flags cobra parsed for us and execs the binary via
+// `client.RunStandalone`.
+//
+// Per spec 083 Hard Constraint #4 (interactive class): on
+// `errors.Is(err, client.ErrBinaryNotFound)` we MUST exit non-zero.
+// The canonical warn line is emitted exactly once per process via
+// `client.EmitWarnOnce` to keep parity with the batch class and to
+// give users one consistent diagnostic.
 var agentmindServeCmd = &cobra.Command{
 	Use:     "serve",
 	Aliases: []string{"live"},
@@ -42,46 +52,28 @@ var agentmindServeCmd = &cobra.Command{
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 		output, _ := cmd.Flags().GetString("output")
 		bind, _ := cmd.Flags().GetString("bind")
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		// Write the AgentMind identity lockfile so other mindspec processes
-		// can verify the listener on otlpPort is us, not a hostile/foreign
-		// process on the same port. See internal/agentmind/lockfile.go for
-		// the contract. The writer lives here on the mindspec side rather
-		// than inside internal/viz/ so the viz package can be extracted
-		// without entangling identity state.
-		tok, err := agentmind.NewToken()
-		if err != nil {
-			return fmt.Errorf("generating agentmind token: %w", err)
+		runArgs := []string{
+			"serve",
+			"--otlp-port", strconv.Itoa(otlpPort),
+			"--ui-port", strconv.Itoa(uiPort),
+			"--bind", bind,
 		}
-		if err := agentmind.WriteLockfile(agentmind.Lockfile{
-			PID:       os.Getpid(),
-			OTLPPort:  otlpPort,
-			UIPort:    uiPort,
-			Token:     tok,
-			StartedAt: time.Now().UTC(),
-		}); err != nil {
-			return fmt.Errorf("writing agentmind lockfile: %w", err)
+		if strings.TrimSpace(output) != "" {
+			runArgs = append(runArgs, "--output", output)
 		}
-		defer func() { _ = agentmind.RemoveLockfile() }()
 
-		return viz.RunLiveOpts(ctx, viz.LiveOpts{
-			OTLPPort:   otlpPort,
-			UIPort:     uiPort,
-			OutputPath: output,
-			BindAddr:   bind,
-		})
+		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
 }
 
+// agentmindReplayCmd resolves the recording file path on the
+// mindspec side (so the spec-id → file-path lookup keeps using
+// mindspec's workspace layout) and execs the standalone agentmind
+// binary with the resolved file as the positional argument.
+//
+// Per spec 083 Hard Constraint #4 (interactive class): exits
+// non-zero when the binary is absent.
 var agentmindReplayCmd = &cobra.Command{
 	Use:   "replay [file.jsonl]",
 	Short: "Replay a recorded NDJSON session file",
@@ -92,7 +84,9 @@ var agentmindReplayCmd = &cobra.Command{
 		speed, _ := cmd.Flags().GetFloat64("speed")
 		uiPort, _ := cmd.Flags().GetInt("ui-port")
 
-		// Resolve file path
+		// Resolve file path — stays in mindspec because it depends
+		// on mindspec's workspace/spec layout (per spec 083 Scope:
+		// "Recording-directory ownership stays in mindspec").
 		var filePath string
 		if len(args) > 0 {
 			filePath = args[0]
@@ -109,7 +103,6 @@ var agentmindReplayCmd = &cobra.Command{
 				return err
 			}
 			if _, statErr := os.Stat(filePath); statErr != nil {
-				// Also try resolving via workspace
 				specDir, sdErr := workspace.SpecDir(root, specID)
 				if sdErr != nil {
 					return sdErr
@@ -127,18 +120,48 @@ var agentmindReplayCmd = &cobra.Command{
 			speed = 0
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		runArgs := []string{
+			"replay",
+			filePath,
+			"--speed", strconv.FormatFloat(speed, 'f', -1, 64),
+			"--ui-port", strconv.Itoa(uiPort),
+		}
+		if strings.TrimSpace(phase) != "" {
+			runArgs = append(runArgs, "--phase", phase)
+		}
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		return viz.RunReplay(ctx, filePath, speed, uiPort, phase)
+		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
+}
+
+// runStandaloneWithInteractiveDegradation invokes
+// client.RunStandalone(runArgs) and applies the interactive-class
+// graceful-degradation contract from spec 083 Hard Constraint #4:
+//
+//   - On `errors.Is(err, client.ErrBinaryNotFound)`: emit the
+//     canonical warn line via `client.EmitWarnOnce`, suppress
+//     cobra's usage printout, and return an error that produces a
+//     non-zero exit code. A user-invoked UI command that exits 0
+//     with no UI is a UX bug per the spec.
+//   - On `*exec.ExitError`: propagate so the subprocess's non-zero
+//     exit reaches the user, suppress cobra usage (the failure is
+//     in the child, not in our CLI parsing).
+//   - On any other error: return as-is (cobra surfaces it with its
+//     default "Error:" prefix).
+func runStandaloneWithInteractiveDegradation(cmd *cobra.Command, runArgs []string) error {
+	err := client.RunStandalone(runArgs)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, client.ErrBinaryNotFound) {
+		client.EmitWarnOnce(os.Stderr)
+		cmd.SilenceUsage = true
+		return fmt.Errorf("interactive command requires the agentmind binary; install it or set $AGENTMIND_BIN: %w", err)
+	}
+	if _, isExit := err.(*exec.ExitError); isExit {
+		cmd.SilenceUsage = true
+	}
+	return err
 }
 
 var agentmindSetupCmd = &cobra.Command{
