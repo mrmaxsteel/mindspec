@@ -71,8 +71,17 @@ The bead ID is required as the first argument.`,
 			}
 		}
 
+		// Spec 086 Bead 3: --allow-doc-skew override flag.
+		// An explicit empty reason (`--allow-doc-skew=""`) is rejected
+		// at the CLI boundary per spec Req 12 — the override must
+		// always carry a recordable reason.
+		allowDocSkew, _ := cmd.Flags().GetString("allow-doc-skew")
+		if cmd.Flags().Changed("allow-doc-skew") && strings.TrimSpace(allowDocSkew) == "" {
+			return fmt.Errorf("--allow-doc-skew requires a non-empty reason")
+		}
+
 		exec := newExecutor(root)
-		result, err := complete.Run(root, beadID, specID, commitMsg, exec)
+		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{AllowDocSkew: allowDocSkew})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -91,4 +100,5 @@ The bead ID is required as the first argument.`,
 
 func init() {
 	completeCmd.Flags().String("spec", "", "Target spec ID when multiple specs are active")
+	completeCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on bead metadata)")
 }

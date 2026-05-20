@@ -3,6 +3,9 @@ package approve
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -340,9 +343,13 @@ func saveAndRestore(t *testing.T) {
 	t.Helper()
 	origRunBD := implRunBDFn
 	origRunBDCombined := implRunBDCombinedFn
+	origMergeMeta := implMergeMetadataFn
+	origGitEmail := implGitUserEmailFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
+		implMergeMetadataFn = origMergeMeta
+		implGitUserEmailFn = origGitEmail
 	})
 
 	// Stub phase package for review mode by default
@@ -354,6 +361,10 @@ func saveAndRestore(t *testing.T) {
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+	// Spec 086 Bead 3: keep override metadata + git-identity reads
+	// inert by default. Tests that observe the write swap these in.
+	implMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
+	implGitUserEmailFn = func() string { return "test@example.invalid" }
 }
 
 func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
@@ -493,4 +504,295 @@ func TestApproveImpl_MockExecutorNoBD(t *testing.T) {
 	if result.CommitCount != 3 {
 		t.Errorf("CommitCount: got %d, want 3", result.CommitCount)
 	}
+}
+
+// --- Spec 086 Bead 3: doc-sync gate + override + call-order tests ---
+
+// TestApproveImplBlocksOnSpecDocSkew exercises the doc-sync gate from
+// the spec-branch perspective: a diff that modifies spec.md alone
+// (no plan/ADR/sibling) trips spec-artifact-sync and ApproveImpl must
+// return an error when no override is supplied.
+func TestApproveImplBlocksOnSpecDocSkew(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// spec.md-only change → spec-artifact-sync emits SevError.
+		ChangedFilesResult: []string{".mindspec/docs/specs/010-test/spec.md"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected doc-sync gate to reject spec.md-only diff")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should mention doc-sync: %v", err)
+	}
+	// FinalizeEpic MUST NOT have been called — the gate runs first.
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must not be called when gate fails: got %d calls", len(calls))
+	}
+}
+
+// TestApproveImplOverrideRecordsToEpic: same gated diff, but the
+// AllowDocSkew override allows the approval to complete AND the
+// override metadata is recorded on the spec EPIC after FinalizeEpic.
+func TestApproveImplOverrideRecordsToEpic(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	var metaEpicID string
+	var metaWrites []map[string]interface{}
+	implMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaEpicID = id
+		metaWrites = append(metaWrites, updates)
+		return nil
+	}
+	implGitUserEmailFn = func() string { return "approver@example.invalid" }
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		ChangedFilesResult: []string{".mindspec/docs/specs/010-test/spec.md"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{AllowDocSkew: "spec doc PR in flight"})
+	if err != nil {
+		t.Fatalf("override should allow approval, got: %v", err)
+	}
+
+	if metaEpicID != "epic-parent" {
+		t.Errorf("override metadata should target epic-parent, got %q", metaEpicID)
+	}
+	found := false
+	for _, m := range metaWrites {
+		if reason, ok := m["mindspec_impl_skew_reason"].(string); ok && reason == "spec doc PR in flight" {
+			if by, _ := m["mindspec_impl_skew_by"].(string); by != "approver@example.invalid" {
+				t.Errorf("mindspec_impl_skew_by: got %q, want approver@example.invalid", by)
+			}
+			if at, _ := m["mindspec_impl_skew_at"].(string); at == "" {
+				t.Error("mindspec_impl_skew_at should not be empty")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected mindspec_impl_skew_reason write; got %v", metaWrites)
+	}
+
+	// FinalizeEpic must have been called before the metadata write.
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 1 {
+		t.Errorf("expected 1 FinalizeEpic call, got %d", len(calls))
+	}
+}
+
+// TestApproveImplCallOrder parses internal/approve/impl.go and asserts
+// the SEVEN anchored call expressions inside ApproveImpl appear in
+// strict source order. Per panel CONSENSUS revision 9 the contract is:
+//
+//  1. readBeadStatus            (bead-status loop)
+//  2. validate.ValidateDocs     (doc-sync gate)
+//  3. validate.CheckADRDivergence (ADR-divergence gate)
+//  4. implRunBDCombinedFn("close", ...)  (EPIC CLOSE)
+//  5. bead.MergeMetadata with "mindspec_phase" literal (phase write)
+//  6. exec.CommitCount          (pre-flight)
+//  7. exec.FinalizeEpic         (terminal mutation)
+//
+// Additionally the override metadata write (implMergeMetadataFn with
+// "mindspec_impl_skew_reason") must appear AFTER FinalizeEpic per
+// panel CONSENSUS revision 4 (write-order rule).
+func TestApproveImplCallOrder(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "impl.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse impl.go: %v", err)
+	}
+
+	type anchor struct {
+		label string
+		match func(call *ast.CallExpr) bool
+		pos   token.Pos
+	}
+
+	anchors := []*anchor{
+		{label: "readBeadStatus", match: func(c *ast.CallExpr) bool {
+			id, ok := c.Fun.(*ast.Ident)
+			return ok && id.Name == "readBeadStatus"
+		}},
+		{label: "validate.ValidateDocs", match: func(c *ast.CallExpr) bool {
+			return isSelectorCall(c.Fun, "validate", "ValidateDocs")
+		}},
+		{label: "validate.CheckADRDivergence", match: func(c *ast.CallExpr) bool {
+			return isSelectorCall(c.Fun, "validate", "CheckADRDivergence")
+		}},
+		{label: "implRunBDCombinedFn(\"close\")", match: func(c *ast.CallExpr) bool {
+			id, ok := c.Fun.(*ast.Ident)
+			if !ok || id.Name != "implRunBDCombinedFn" || len(c.Args) == 0 {
+				return false
+			}
+			return firstArgStringLit(c) == "close"
+		}},
+		{label: "bead.MergeMetadata(mindspec_phase)", match: func(c *ast.CallExpr) bool {
+			if !isSelectorCall(c.Fun, "bead", "MergeMetadata") || len(c.Args) < 2 {
+				return false
+			}
+			return callMapHasKey(c.Args[1], "mindspec_phase")
+		}},
+		{label: "exec.CommitCount", match: func(c *ast.CallExpr) bool {
+			return isSelectorCall(c.Fun, "exec", "CommitCount")
+		}},
+		{label: "exec.FinalizeEpic", match: func(c *ast.CallExpr) bool {
+			return isSelectorCall(c.Fun, "exec", "FinalizeEpic")
+		}},
+	}
+
+	// Override-skew metadata write — asserted to be AFTER FinalizeEpic.
+	var overridePos token.Pos
+	var finalizePos token.Pos
+
+	// Find the ApproveImpl FuncDecl and walk its body.
+	var fn *ast.FuncDecl
+	for _, d := range file.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fd.Name.Name == "ApproveImpl" {
+			fn = fd
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("ApproveImpl FuncDecl not found")
+	}
+
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		for _, a := range anchors {
+			if a.pos == 0 && a.match(call) {
+				a.pos = call.Pos()
+			}
+		}
+		if isSelectorCall(call.Fun, "exec", "FinalizeEpic") && finalizePos == 0 {
+			finalizePos = call.Pos()
+		}
+		// Override metadata: any call to implMergeMetadataFn inside
+		// ApproveImpl is the override-skew write (there is only one).
+		// The reason-key literal lives inside the buildImplSkewMetadata
+		// helper, which is statically resolvable but not via a single
+		// CallExpr walk — keeping the anchor on the function-var name
+		// pins the source-position contract.
+		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "implMergeMetadataFn" {
+			overridePos = call.Pos()
+		}
+		return true
+	})
+
+	for _, a := range anchors {
+		if a.pos == 0 {
+			t.Errorf("anchor %s not found in ApproveImpl body", a.label)
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+
+	// Strict source-position ordering.
+	for i := 1; i < len(anchors); i++ {
+		if !(anchors[i-1].pos < anchors[i].pos) {
+			t.Errorf("call order violation: %s (pos %d) must precede %s (pos %d)",
+				anchors[i-1].label, anchors[i-1].pos, anchors[i].label, anchors[i].pos)
+		}
+	}
+
+	// Override metadata write must be AFTER FinalizeEpic.
+	if overridePos == 0 {
+		t.Error("override metadata write (implMergeMetadataFn call inside ApproveImpl) not found")
+	} else if !(finalizePos < overridePos) {
+		t.Errorf("override metadata write (pos %d) must appear AFTER FinalizeEpic (pos %d)", overridePos, finalizePos)
+	}
+
+	// Cross-check: the helper that supplies the metadata must carry
+	// the "mindspec_impl_skew_reason" key literal so the override
+	// write is recording the right field. This pins the impl-side
+	// contract that the bead description enumerates.
+	src, err := os.ReadFile("impl.go")
+	if err != nil {
+		t.Fatalf("read impl.go: %v", err)
+	}
+	if !strings.Contains(string(src), "\"mindspec_impl_skew_reason\"") {
+		t.Error("impl.go must contain the literal \"mindspec_impl_skew_reason\" (the override metadata key)")
+	}
+}
+
+// --- AST helpers (kept in this file; not exported) ---
+
+func isSelectorCall(expr ast.Expr, recv, sel string) bool {
+	se, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := se.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return id.Name == recv && se.Sel.Name == sel
+}
+
+func firstArgStringLit(c *ast.CallExpr) string {
+	if len(c.Args) == 0 {
+		return ""
+	}
+	lit, ok := c.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return ""
+	}
+	// trim surrounding quotes
+	s := lit.Value
+	if len(s) >= 2 {
+		s = s[1 : len(s)-1]
+	}
+	return s
+}
+
+// callMapHasKey returns true when expr is a composite literal of type
+// map[string]interface{}{...} that contains the given string key
+// literal among its elements.
+func callMapHasKey(expr ast.Expr, key string) bool {
+	cl, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	for _, e := range cl.Elts {
+		kv, ok := e.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		lit, ok := kv.Key.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			continue
+		}
+		raw := lit.Value
+		if len(raw) >= 2 {
+			raw = raw[1 : len(raw)-1]
+		}
+		if raw == key {
+			return true
+		}
+	}
+	return false
 }
