@@ -1,4 +1,4 @@
-// Package agentmind — lockfile contract.
+// Package recording — lockfile contract.
 //
 // CONTRACT (owned by mindspec, honored by the AgentMind binary):
 //
@@ -16,10 +16,21 @@
 // On clean shutdown, AgentMind SHOULD remove the file. mindspec tolerates
 // stale files: a lockfile whose PID is no longer alive is treated as absent.
 //
-// When AgentMind is extracted into its own binary, this file (or an
-// equivalent) MUST be copied/re-exported and the extracted binary MUST
-// implement the write side. mindspec is the verifier.
-package agentmind
+// Spec 083 Phase 5 (Bead 5): this code was moved out of the deleted
+// `internal/agentmind/` package and into `internal/recording/` because
+// mindspec owns the lockfile contract — the standalone agentmind binary is
+// the writer per the contract above, but the wrapper at
+// `cmd/mindspec/viz.go` still writes the file during the pre-1.0
+// transition (the contract docstring notes "When AgentMind is extracted
+// into its own binary, this file...MUST be copied/re-exported").
+//
+// ReadLockfile was dropped during the move: no in-mindspec caller reads
+// the file anymore, and the previously-used `record health` /
+// port-collision diagnostics now defer to the standalone agentmind
+// binary (which owns liveness verification per ADR-0011 / ADR-0026).
+// If a future caller needs to read the lockfile, restore ReadLockfile
+// alongside a smoke test that decodes the WriteLockfile output.
+package recording
 
 import (
 	"crypto/rand"
@@ -27,7 +38,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -120,50 +130,13 @@ func WriteLockfile(lf Lockfile) error {
 	return nil
 }
 
-// ReadLockfile reads the lockfile from disk. If the file does not exist it
-// returns (nil, nil). If the file exists but is group/world-readable it is
-// rejected (the writer must have ensured 0600).
-func ReadLockfile() (*Lockfile, error) {
-	path, err := LockfilePath()
-	if err != nil {
-		return nil, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("stat %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("%s is a directory, expected file", path)
-	}
-	// Enforce 0600 on platforms with real Unix perms. On Windows os.Stat
-	// reports synthesized perms; we don't reject there.
-	if isStrictPermsPlatform() {
-		if info.Mode().Perm()&0o077 != 0 {
-			return nil, fmt.Errorf("lockfile %s has overly permissive mode %o", path, info.Mode().Perm())
-		}
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var lf Lockfile
-	if err := json.Unmarshal(raw, &lf); err != nil {
-		return nil, fmt.Errorf("parsing lockfile: %w", err)
-	}
-	return &lf, nil
-}
-
 // RemoveLockfile deletes the lockfile, ignoring not-exist errors.
 func RemoveLockfile() error {
 	path, err := LockfilePath()
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil

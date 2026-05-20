@@ -71,9 +71,11 @@ remains live at its own repo but is no longer consumed by mindspec.
 
 ## Consequences
 
-- **Positive:** clean import boundary; mindspec binary shrinks; the
-  one-way dep from ADR-0011 is physically enforced by the module
-  boundary; agentmind ships its own releases on its own cadence.
+- **Positive:** clean import boundary; mindspec binary shrinks
+  measurably (Phase 5 measurement: 14,323,266 → 10,750,866 bytes,
+  -3,572,400 bytes = -24.94% on darwin-arm64); the one-way dep from
+  ADR-0011 is physically enforced by the module boundary; agentmind
+  ships its own releases on its own cadence.
 - **Negative:** users must install the `agentmind` binary out-of-band
   (until a follow-up installer ships); version-skew between mindspec and
   agentmind is now a real concern; CI must clone the sibling repo for
@@ -83,10 +85,49 @@ remains live at its own repo but is no longer consumed by mindspec.
   shallow-clone step mirrors the agentmind-side gate from mindspec's
   side.
 
+## As-shipped surface (Phase 5)
+
+After Bead 5 (`mindspec-6oxg.6`) merged:
+
+- `mindspec/internal/agentmind/` — **deleted entirely** (8 files).
+  Lockfile contract relocated to `internal/recording/lockfile.go`
+  (mindspec owns the lockfile; the standalone agentmind binary
+  honors it). AutoStart / IsRunning / Token / Probe / findBinary
+  are now owned by `github.com/mrmaxsteel/agentmind/client`.
+- `mindspec/internal/viz/` — **deleted entirely** (web/{app.js,
+  index.html, style.css} + server.go + hub.go + graph.go +
+  normalize.go + live.go + replay.go + codex_fallback.go + run.go
+  + tests). AgentMind owns the viz code now.
+- `mindspec/internal/bench/collector.go` — **OTLP parser deleted**.
+  The Collector type, handleLogs/handleMetrics HTTP handlers,
+  extractLogEvents/extractMetricEvents parsers, and helpers
+  (flattenAttributes, parseOTLPTimestamp) are gone. The file is
+  reduced to type-alias re-exports of `wire.CollectedEvent`,
+  `wire.OTLPValue`, `wire.OTLPKeyValue` for the surviving
+  in-mindspec callers.
+- `mindspec bench collect` and `mindspec record collect` subcommands
+  — **removed**. They were deprecated aliases that already told
+  users to use `mindspec agentmind serve --output <path>`.
+- `cmd/mindspec/viz.go` `agentmind setup codex --session` path
+  rewired to re-exec `agentmind setup codex --session …` via
+  `client.RunStandalone` (interactive-class degradation: exits
+  non-zero if binary absent).
+
+Acceptance criteria green after this bead:
+
+- `find internal/agentmind`  → no results.
+- `find internal/viz`        → no results.
+- `grep -rn 'http.HandleFunc.*"/v1/logs"' --include="*.go" .` →
+  no results.
+- Test E (no-circular-discovery, against the agentmind sibling):
+  no matches.
+- Test F (import-boundary): mindspec's only agentmind deps are
+  `client` and `wire`.
+
 ## Notes
 
-This ADR is drafted alongside the Phase 5 deletion bead so its text
-mirrors what shipped, and finalized in the Phase 6 release bead. The
-plan's `adr_citations` frontmatter lists ADR-0026 from plan-approval
-time onward; the ADR's `Status` flips from Draft to Accepted only after
-the deletion has merged.
+This ADR was drafted in Bead 5 alongside the Phase 5 deletion so its
+text mirrors what shipped, and is finalized in Bead 7 once Bead 6
+(release) merges. The plan's `adr_citations` frontmatter lists ADR-0026
+from plan-approval time onward; the ADR's `Status` is Accepted now that
+the deletion has shipped.

@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/agentmind/client"
-	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/viz"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -66,31 +64,31 @@ var agentmindServeCmd = &cobra.Command{
 		}
 
 		// Write the AgentMind identity lockfile per the contract in
-		// internal/agentmind/lockfile.go. The standalone agentmind
+		// internal/recording/lockfile.go. The standalone agentmind
 		// binary does not yet own this write (see spec 083 — the
 		// contract docstring notes "When AgentMind is extracted into
 		// its own binary, this file...MUST be copied/re-exported"),
 		// so the mindspec wrapper continues to own it until the
-		// sibling binary takes over. Consumers of `internal/agentmind`
-		// (record health, record stop, OTLP-port identity checks via
-		// IsRunning/PortInUseByForeign/Token) depend on this file
-		// being present and PID-alive while serve runs. Writing it
-		// here keeps the pre-Bead-4 identity protocol intact.
-		token, tokErr := agentmind.NewToken()
+		// sibling binary takes over.
+		//
+		// Spec 083 Bead 5: the lockfile helpers moved from the deleted
+		// `internal/agentmind/` package to `internal/recording/`
+		// (mindspec owns the contract; the agentmind binary honors it).
+		token, tokErr := recording.NewToken()
 		if tokErr != nil {
 			return fmt.Errorf("generating agentmind token: %w", tokErr)
 		}
-		lf := agentmind.Lockfile{
+		lf := recording.Lockfile{
 			PID:       os.Getpid(),
 			OTLPPort:  otlpPort,
 			UIPort:    uiPort,
 			Token:     token,
 			StartedAt: time.Now().UTC(),
 		}
-		if err := agentmind.WriteLockfile(lf); err != nil {
+		if err := recording.WriteLockfile(lf); err != nil {
 			return fmt.Errorf("writing agentmind lockfile: %w", err)
 		}
-		defer func() { _ = agentmind.RemoveLockfile() }()
+		defer func() { _ = recording.RemoveLockfile() }()
 
 		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},
@@ -198,6 +196,20 @@ var agentmindSetupCmd = &cobra.Command{
 	Short: "Configure agent telemetry export for AgentMind",
 }
 
+// agentmindSetupCodexCmd configures Codex OTEL export to AgentMind by
+// editing ~/.codex/config.toml — that path stays in mindspec because it
+// composes with mindspec's recording layout (spec 083 Scope: "agentmind
+// setup stays in mindspec for this spec because it knows mindspec's
+// .claude/ layout"; the same reasoning applies to ~/.codex/config.toml).
+//
+// Spec 083 Bead 5: the `--session` path (Codex JSONL → NDJSON
+// conversion) moved to the standalone agentmind binary alongside the
+// rest of internal/viz/. When `--session` is set, this command
+// re-execs `agentmind setup codex --session …` via
+// `client.RunStandalone` and applies the interactive-class
+// degradation contract (Hard Constraint #4): exits non-zero if the
+// binary is absent. The conversion produces user-visible NDJSON the
+// caller asked for, so a silent no-op would be a correctness bug.
 var agentmindSetupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Configure Codex OTEL export, or convert a Codex session JSONL fallback",
@@ -208,23 +220,11 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 
 		if strings.TrimSpace(sessionPath) != "" {
-			if strings.TrimSpace(outputPath) == "" {
-				outputPath = defaultCodexImportOutputPath(sessionPath)
+			runArgs := []string{"setup", "codex", "--session", sessionPath}
+			if strings.TrimSpace(outputPath) != "" {
+				runArgs = append(runArgs, "--output", outputPath)
 			}
-
-			stats, err := viz.ConvertCodexSessionFile(sessionPath, outputPath)
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintf(os.Stderr, "Converted Codex session %s -> %s\n", sessionPath, outputPath)
-			fmt.Fprintf(os.Stderr, "events=%d tool_calls=%d tool_results=%d api_requests=%d\n",
-				stats.Events, stats.ToolCalls, stats.ToolResults, stats.APIRequests)
-			if skipped := stats.SkippedMalformed + stats.SkippedUnknown + stats.SkippedIgnored; skipped > 0 {
-				fmt.Fprintf(os.Stderr, "skipped malformed=%d unknown=%d ignored=%d\n",
-					stats.SkippedMalformed, stats.SkippedUnknown, stats.SkippedIgnored)
-			}
-			return nil
+			return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 		}
 
 		if configPath == "" {
@@ -257,17 +257,6 @@ var agentmindSetupCodexCmd = &cobra.Command{
 		fmt.Printf("Codex OTEL export already configured for AgentMind in %s\n", result.ConfigPath)
 		return nil
 	},
-}
-
-func defaultCodexImportOutputPath(inputPath string) string {
-	dir := filepath.Dir(inputPath)
-	base := filepath.Base(inputPath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	if name == "" {
-		name = "codex-session"
-	}
-	return filepath.Join(dir, name+"-agentmind.ndjson")
 }
 
 func init() {

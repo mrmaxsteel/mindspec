@@ -2,16 +2,12 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/mrmaxsteel/agentmind/client"
-	"github.com/mrmaxsteel/mindspec/internal/bench"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -202,46 +198,23 @@ var recordHealthCmd = &cobra.Command{
 	},
 }
 
-var recordCollectCmd = &cobra.Command{
-	Use:    "collect",
-	Short:  "Run OTLP collector (internal — used by recording subsystem)",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "Deprecated: use 'mindspec agentmind serve --output <path>' instead")
-		port, _ := cmd.Flags().GetInt("port")
-		output, _ := cmd.Flags().GetString("output")
-
-		if output == "" {
-			return fmt.Errorf("--output is required")
-		}
-
-		collector := bench.NewCollectorAppend(port, output)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			cancel()
-		}()
-
-		return collector.Run(ctx)
-	},
-}
+// recordCollectCmd was deleted by spec 083 Bead 5 alongside the OTLP
+// parser it depended on (`internal/bench.NewCollectorAppend`). The
+// `mindspec record collect` subcommand was already a deprecated alias
+// that printed "use 'mindspec agentmind serve --output <path>' instead".
+// agentmind owns the OTLP receiver now (ADR-0011); users who relied on
+// the hidden subcommand should use `mindspec agentmind serve` (which
+// re-execs the standalone agentmind binary).
 
 func init() {
 	recordStartCmd.Flags().String("spec", "", "Spec ID to start recording for (required)")
 	recordStatusCmd.Flags().String("spec", "", "Spec ID (defaults to active spec)")
 	recordStopCmd.Flags().String("spec", "", "Spec ID (defaults to active spec)")
-	recordCollectCmd.Flags().Int("port", 4318, "Port for OTLP/HTTP receiver")
-	recordCollectCmd.Flags().String("output", "", "Output NDJSON file path")
 
 	recordCmd.AddCommand(recordStartCmd)
 	recordCmd.AddCommand(recordStatusCmd)
 	recordCmd.AddCommand(recordStopCmd)
 	recordCmd.AddCommand(recordHealthCmd)
-	recordCmd.AddCommand(recordCollectCmd)
 }
 
 func countLines(path string) int {
