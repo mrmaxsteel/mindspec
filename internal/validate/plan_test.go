@@ -25,7 +25,20 @@ func TestValidatePlan_WellFormed(t *testing.T) {
 	// The plan is well-formed structurally — should not have structural errors
 	// Note: 005-next is an approved plan, so new Spec 039 checks are skipped
 	// Note: 005-next is a pre-080 plan without per-bead AC (grandfathered)
-	allowedErrors := map[string]bool{"bead-id-missing": true, "bead-acceptance-criteria": true}
+	// Note: 005-next is a pre-087 plan whose Superseded ADR-0005 chain
+	// head (ADR-0015) is not cited, so the new semantic-coverage gate
+	// (Rev 4 fixup removed the Approved-plan skip) surfaces
+	// `adr-coverage-missing` for the `core` domain. Grandfathered for the
+	// same reason as `bead-acceptance-criteria` — the test asserts the
+	// validator's structural shape, not domain-graph completeness on
+	// pre-existing plans.
+	allowedErrors := map[string]bool{
+		"bead-id-missing":           true,
+		"bead-acceptance-criteria":  true,
+		"adr-coverage-missing":      true,
+		"adr-cite-irrelevant":       true,
+		"adr-supersede-chain-broken": true,
+	}
 	for _, issue := range r.Issues {
 		if issue.Severity == SevError && !allowedErrors[issue.Name] {
 			t.Errorf("unexpected structural error: [%s] %s: %s", issue.Severity, issue.Name, issue.Message)
@@ -1296,6 +1309,103 @@ func TestSupersedeChainCycleDetected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "adr-supersede-cycle") {
 		t.Errorf("expected error to mention adr-supersede-cycle, got: %v", err)
+	}
+}
+
+// --- Spec 087 Bead 1 (Rev 1 fixup): walker errors surface through ValidatePlan ---
+
+// TestPlanReportsSupersedeChainCycle exercises the integration: when a
+// plan cites a Superseded ADR whose chain CYCLES, ValidatePlan must
+// surface the `adr-supersede-cycle` error on the Result (not just
+// `adr-coverage-missing`). Pins Rev 1 of the bead-zy4u.1 fixup.
+func TestPlanReportsSupersedeChainCycle(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	// A → B → A: cycle.
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Superseded", "payments", "ADR-0002")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Superseded", "payments", "ADR-0001")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	foundCycle := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-supersede-cycle" && issue.Severity == SevError {
+			foundCycle = true
+			if !strings.Contains(issue.Message, "ADR-0001") && !strings.Contains(issue.Message, "ADR-0002") {
+				t.Errorf("expected cycle message to mention an ADR in the chain, got: %s", issue.Message)
+			}
+		}
+	}
+	if !foundCycle {
+		t.Errorf("expected adr-supersede-cycle error on Result, got issues: %v", r.Issues)
+	}
+}
+
+// TestPlanReportsSupersedeChainTooLong is the length-cap companion: a
+// 12-hop chain triggers `adr-supersede-chain-too-long` and that error
+// must surface through ValidatePlan, not be swallowed by the
+// IsDomainCovered predicate. Pins Rev 1 of the bead-zy4u.1 fixup.
+func TestPlanReportsSupersedeChainTooLong(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+
+	const total = 12
+	for i := 1; i <= total; i++ {
+		id := fmt.Sprintf("ADR-%04d", i)
+		next := ""
+		status := "Superseded"
+		if i < total {
+			next = fmt.Sprintf("ADR-%04d", i+1)
+		} else {
+			status = "Accepted"
+		}
+		writeTestADRWithDomains(t, tmp, id, status, "payments", next)
+	}
+	// Cite only the chain start.
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	foundTooLong := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-supersede-chain-too-long" && issue.Severity == SevError {
+			foundTooLong = true
+		}
+	}
+	if !foundTooLong {
+		t.Errorf("expected adr-supersede-chain-too-long error on Result, got issues: %v", r.Issues)
+	}
+}
+
+// --- Spec 087 Bead 1 (Rev 2 fixup): coverage runs on empty citations ---
+
+// TestPlanCoverageRunsOnEmptyCitations: a plan with non-empty impacted
+// domains but ZERO ADR citations must emit `adr-coverage-missing` for
+// every impacted domain. Previously the gate sat inside the
+// `len(citations) != 0` branch and silently passed.
+func TestPlanCoverageRunsOnEmptyCitations(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments", "search"})
+	// Empty citations, ADR Fitness present so the citations check itself only warns.
+	makePlanWithCitations(t, tmp, "", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	gotPayments := false
+	gotSearch := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			if strings.Contains(issue.Message, "payments") {
+				gotPayments = true
+			}
+			if strings.Contains(issue.Message, "search") {
+				gotSearch = true
+			}
+		}
+	}
+	if !gotPayments || !gotSearch {
+		t.Errorf("expected adr-coverage-missing for both payments and search; got payments=%v search=%v, issues=%v", gotPayments, gotSearch, r.Issues)
 	}
 }
 

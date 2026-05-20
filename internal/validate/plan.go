@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,15 +85,34 @@ func ValidatePlan(root, specID string) *Result {
 	// Check required frontmatter fields
 	checkFrontmatterFields(r, fm)
 
-	// Backwards compatibility: skip new quality gates for already-approved plans
+	// Backwards compatibility: the historic Spec 039 quality gates
+	// (ADR Fitness, Testing Strategy, Provenance) skip for
+	// already-approved plans. The new Spec 087 semantic gates (Rev 4
+	// fixup) do NOT skip — Spec 087 contains no Approved-plan
+	// carve-out and silently bypassing them would let historic plans
+	// citing irrelevant or insufficient ADRs pass forever.
 	isApproved := strings.EqualFold(fm.Status, "Approved")
 
 	hasADRFitness := hasSection(content, "## ADR Fitness")
 
+	// Spec 087 Bead 1 (Rev 3 fixup): load impacted-domains and surface
+	// PARSE errors (file present but malformed) as
+	// `impacted-domains-load`. A missing spec.md is intentionally NOT
+	// promoted here — that's a `mindspec validate spec` concern, and
+	// many internal/validate plan-only test fixtures omit spec.md by
+	// design. The empty-domains case (file present but no `##
+	// Impacted Domains` bullets) returns nil error + empty slice;
+	// downstream the new 087 checks no-op on empty domains, which the
+	// spec-author surfaces via `mindspec validate spec`.
+	impacted, impErr := loadImpactedDomains(specDir)
+	if impErr != nil && !os.IsNotExist(errors.Unwrap(impErr)) {
+		r.AddError("impacted-domains-load", impErr.Error())
+	}
+
 	// Check ADR citations + fitness (Spec 039)
 	if len(fm.ADRCitations) == 0 {
 		if isApproved {
-			// skip for approved plans
+			// skip Spec 039 carve-out for approved plans
 		} else if hasADRFitness {
 			r.AddWarning("adr-citations", "no ADR citations in frontmatter (ADR Fitness section explains why)")
 		} else {
@@ -100,15 +120,17 @@ func ValidatePlan(root, specID string) *Result {
 		}
 	} else {
 		store := adr.NewFileStore(root)
-		// Spec 087 Bead 1: the new cite-relevant + coverage gates are
-		// additive; per the Spec 039 backwards-compatibility pattern they
-		// are suppressed for already-approved plans so historical plans
-		// don't re-fail under the new check.
-		var impacted []string
-		if !isApproved {
-			impacted, _ = loadImpactedDomains(specDir)
-		}
 		checkADRCitations(r, store, fm.ADRCitations, impacted)
+	}
+
+	// Spec 087 Bead 1 (Rev 2 fixup): coverage check runs even when
+	// citations are empty, so a plan with non-empty impacted-domains
+	// and NO citations emits an `adr-coverage-missing` error for every
+	// impacted domain — the canonical "you need to cite an ADR" hint
+	// the user expects, not silence. The check itself short-circuits
+	// on empty impactedDomains (no domains, nothing to cover).
+	if len(impacted) > 0 {
+		store := adr.NewFileStore(root)
 		checkADRCoverage(r, store, fm.ADRCitations, impacted)
 	}
 
@@ -389,26 +411,29 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 			continue
 		}
 
-		if strings.EqualFold(a.Status, "Superseded") {
+		// Spec 087 Bead 1 (Rev 8 fixup): compute relevance FIRST so we
+		// can suppress duplicate Superseded/Proposed warnings on the
+		// same citation — when an ADR is both Superseded AND irrelevant,
+		// the irrelevance error is the higher-priority signal and the
+		// status warning is noise on the same root cause.
+		irrelevant := false
+		if len(impactedDomains) > 0 {
+			overlap := intersectFold(a.Domains, impactedDomains)
+			if len(overlap) == 0 {
+				r.AddError("adr-cite-irrelevant", fmt.Sprintf("cited ADR %s declares domains %v which do not intersect spec impacted domains %v", cite.ID, a.Domains, impactedDomains))
+				irrelevant = true
+			}
+		}
+
+		if !irrelevant && strings.EqualFold(a.Status, "Superseded") {
 			msg := fmt.Sprintf("cited ADR %s is Superseded", cite.ID)
 			if a.SupersededBy != "" {
 				msg += fmt.Sprintf(" (see %s)", a.SupersededBy)
 			}
 			r.AddWarning("adr-cite-superseded", msg)
 		}
-		if strings.EqualFold(a.Status, "Proposed") {
+		if !irrelevant && strings.EqualFold(a.Status, "Proposed") {
 			r.AddWarning("adr-cite-proposed", fmt.Sprintf("cited ADR %s has status Proposed — consider accepting it first", cite.ID))
-		}
-
-		// Spec 087 Bead 1: cite-relevant check. Only run when we have a
-		// concrete impacted-domains list to compare against — without one,
-		// "relevance" is undefined and the check would false-positive every
-		// pre-087 plan.
-		if len(impactedDomains) > 0 {
-			overlap := intersectFold(a.Domains, impactedDomains)
-			if len(overlap) == 0 {
-				r.AddError("adr-cite-irrelevant", fmt.Sprintf("cited ADR %s declares domains %v which do not intersect spec impacted domains %v", cite.ID, a.Domains, impactedDomains))
-			}
 		}
 	}
 }
@@ -428,7 +453,12 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 		return
 	}
 	for _, d := range impactedDomains {
-		if !IsDomainCovered(store, citations, d) {
+		// Spec 087 Bead 1 (Rev 1 fixup): use the Ctx variant so walker
+		// errors (cycle, too-long chain) surface on the Result instead
+		// of being swallowed silently. The Result is deduped by
+		// {Name,Message} via AddError so repeat walks of the same
+		// broken chain across multiple domains don't spam diagnostics.
+		if !IsDomainCoveredCtx(r, store, citations, d) {
 			r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
 		}
 	}
@@ -450,16 +480,51 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 //     does NOT satisfy coverage (revision 11).
 //
 // Walker failures (cycle, too-long chain) cause the Superseded path to
-// be treated as not-covering; the diagnostic for those structural
-// failures is surfaced separately by walkSupersededChain callers when
-// they care.
+// be treated as not-covering. This wrapper SWALLOWS walker errors —
+// callers that need diagnostic propagation (e.g. plan-time
+// checkADRCoverage) must use IsDomainCoveredCtx instead. The wrapper
+// is retained for Bead 2 / divergence consumers that only need the
+// bool predicate.
 func IsDomainCovered(store adr.Store, citations []ADRCitation, domain string) bool {
+	return isDomainCoveredImpl(nil, store, citations, domain)
+}
+
+// IsDomainCoveredCtx is the diagnostic-emitting variant of
+// IsDomainCovered: walker errors (adr-supersede-cycle,
+// adr-supersede-chain-too-long, adr-supersede-chain-broken) are emitted
+// via r.AddError before the function returns false. This is the
+// variant plan-time checkADRCoverage uses so structural ADR-graph
+// failures surface to the user rather than being silently treated as
+// "not covered".
+//
+// Spec 087 Bead 1 (Rev 1 fixup): added to address the unanimous
+// reviewer concern that walker errors were swallowed in the original
+// IsDomainCovered implementation, hiding cycle / too-long failures
+// behind the generic adr-coverage-missing error.
+func IsDomainCoveredCtx(r *Result, store adr.Store, citations []ADRCitation, domain string) bool {
+	return isDomainCoveredImpl(r, store, citations, domain)
+}
+
+// isDomainCoveredImpl is the shared body. When r is non-nil, walker
+// errors are emitted via r.AddError; a per-call dedup map prevents the
+// same broken chain from spamming the Result when multiple impacted
+// domains all probe the same Superseded ADR.
+func isDomainCoveredImpl(r *Result, store adr.Store, citations []ADRCitation, domain string) bool {
 	// Build a set of cited ADR IDs for O(1) "is this ADR cited" checks
-	// during the Superseded-chain resolution.
+	// during the Superseded-chain resolution. Spec 087 Bead 1 (Rev 5
+	// fixup): normalise to upper-case — ADR IDs are ASCII and the
+	// canonical form is `ADR-NNNN`, but plans / stores may carry mixed
+	// case (e.g. `adr-0030` in a hand-edited frontmatter). Without this
+	// the chain-head lookup misses on legitimate citations.
 	citedSet := make(map[string]struct{}, len(citations))
 	for _, c := range citations {
-		citedSet[strings.TrimSpace(c.ID)] = struct{}{}
+		citedSet[strings.ToUpper(strings.TrimSpace(c.ID))] = struct{}{}
 	}
+
+	// emittedWalkerErr tracks {chainStartID} → emitted so a broken
+	// chain is reported once per ValidatePlan call rather than once
+	// per impacted domain.
+	emittedWalkerErr := map[string]struct{}{}
 
 	wantDomain := strings.ToLower(strings.TrimSpace(domain))
 	for _, c := range citations {
@@ -474,11 +539,31 @@ func IsDomainCovered(store adr.Store, citations []ADRCitation, domain string) bo
 			continue
 		}
 		if strings.EqualFold(a.Status, "Superseded") {
-			headID, err := walkSupersededChain(store, a.ID)
-			if err != nil {
+			headID, walkErr := walkSupersededChain(store, a.ID)
+			if walkErr != nil {
+				if r != nil {
+					key := strings.ToUpper(strings.TrimSpace(a.ID))
+					if _, dup := emittedWalkerErr[key]; !dup {
+						emittedWalkerErr[key] = struct{}{}
+						// Surface the structural error under a Name
+						// that matches the walkSupersededChain error
+						// prefix (adr-supersede-cycle /
+						// adr-supersede-chain-too-long /
+						// adr-supersede-chain-broken). Parse the
+						// prefix from the error text since the walker
+						// embeds it as `name: detail`.
+						msg := walkErr.Error()
+						name := "adr-supersede-chain-broken"
+						if idx := strings.Index(msg, ":"); idx > 0 {
+							name = strings.TrimSpace(msg[:idx])
+						}
+						r.AddError(name, msg)
+					}
+				}
 				continue
 			}
-			if _, ok := citedSet[headID]; !ok {
+			headKey := strings.ToUpper(strings.TrimSpace(headID))
+			if _, ok := citedSet[headKey]; !ok {
 				continue
 			}
 			head, err := store.Get(headID)
