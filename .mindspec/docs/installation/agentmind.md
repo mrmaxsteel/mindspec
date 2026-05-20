@@ -66,10 +66,15 @@ curl -fL -o SHA256SUMS "${BASE}/SHA256SUMS"
 
 # 2. Verify the archive checksum.
 #    Linux: use `sha256sum`. macOS: use `shasum -a 256`.
+#    Note: POSIX sha256sum emits two characters between the hash and
+#    the filename — a space then either ' ' (text mode) or '*' (binary
+#    mode). The grep pattern below accepts either form, and escapes
+#    the literal `.` characters in the filename so the pattern matches
+#    only the exact archive name (not e.g. `agentmind-v1Xtar.gz`).
 if command -v sha256sum >/dev/null 2>&1; then
-    grep " agentmind-${VERSION}-${PLATFORM}.tar.gz$" SHA256SUMS | sha256sum -c -
+    grep -E "[ *]agentmind-${VERSION}-${PLATFORM}\.tar\.gz$" SHA256SUMS | sha256sum -c -
 else
-    grep " agentmind-${VERSION}-${PLATFORM}.tar.gz$" SHA256SUMS | shasum -a 256 -c -
+    grep -E "[ *]agentmind-${VERSION}-${PLATFORM}\.tar\.gz$" SHA256SUMS | shasum -a 256 -c -
 fi
 
 # 3. Extract and install.

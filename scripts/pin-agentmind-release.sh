@@ -25,13 +25,20 @@
 #   scripts/pin-agentmind-release.sh v1.0.0 --skip-upstream-check
 #     # do not require the tag to be reachable upstream (advanced; for
 #     # offline / mirror scenarios only)
+#   scripts/pin-agentmind-release.sh v1.0.0 --self-test
+#     # dry-run the edit against a temporary copy of the real go.mod,
+#     # assert that exactly the replace directive is dropped and the
+#     # require line is bumped to $VERSION, then exit. Does NOT touch
+#     # the real go.mod. Intended for CI to exercise the editor against
+#     # the live go.mod shape BEFORE the day Phase 6 fires for real.
 #
 # Exit codes:
 #   0  — go.mod pinned at $VERSION and `go build` + `go test -short` pass
-#        (or --dry-run printed the planned diff).
-#   2  — upstream reachable but the requested tag is absent. Expected
-#        today: v1.0.0 not yet published; the pin step is deferred until
-#        the agentmind side ships v1.0.0. Re-run after the tag exists.
+#        (or --dry-run / --self-test completed successfully).
+#   2  — upstream reachable but the requested tag is absent OR upstream
+#        proxy cannot resolve the module at the tag. Expected today:
+#        v1.0.0 not yet published; the pin step is deferred until the
+#        agentmind side ships v1.0.0. Re-run after the tag exists.
 #   3  — upstream unreachable. Use --skip-upstream-check to proceed
 #        anyway (e.g. behind a corporate mirror).
 #   4  — invocation error (bad args, not run from repo root, missing
@@ -40,7 +47,7 @@
 #        verification failed. The script leaves go.mod in the edited
 #        state so the operator can inspect and decide. Use --no-verify
 #        to skip if the build is known to be broken for unrelated
-#        reasons.
+#        reasons. Recover with: git checkout go.mod
 #
 # Spec reference:
 #   .mindspec/docs/specs/083-agentmind-extraction-v2/spec.md
@@ -59,6 +66,7 @@ VERSION=""
 DRY_RUN=0
 NO_VERIFY=0
 SKIP_UPSTREAM=0
+SELF_TEST=0
 
 usage() {
     cat <<'EOF'
@@ -69,19 +77,22 @@ Drops the local `replace` directive from go.mod and pins
 
 Usage:
   scripts/pin-agentmind-release.sh [VERSION] [--dry-run] [--no-verify]
-                                   [--skip-upstream-check]
+                                   [--skip-upstream-check] [--self-test]
 
   VERSION                Tag to pin (default: v1.0.0).
   --dry-run              Show the planned go.mod diff without writing.
   --no-verify            Skip `go build` + `go test -short` after the edit.
   --skip-upstream-check  Do not require the tag to be reachable upstream.
+  --self-test            Dry-run the edit against a temp copy of the real
+                         go.mod and assert the diff shape is correct.
 
 Exit codes:
-  0  go.mod pinned and verification passed (or dry-run completed).
+  0  go.mod pinned and verification passed (or dry-run / self-test completed).
   2  upstream reachable, tag absent (deferral: re-run after agentmind ships).
   3  upstream unreachable (use --skip-upstream-check to override).
   4  invocation error.
-  5  go.mod edit succeeded but verification failed; edit left in place.
+  5  go.mod edit succeeded but verification failed; edit left in place
+     (recover with: git checkout go.mod).
 EOF
 }
 
@@ -99,6 +110,9 @@ for arg in "$@"; do
             ;;
         --skip-upstream-check)
             SKIP_UPSTREAM=1
+            ;;
+        --self-test)
+            SELF_TEST=1
             ;;
         --*)
             echo "pin-agentmind-release.sh: unknown flag '$arg'" >&2
@@ -148,15 +162,22 @@ fi
 # Single cleanup hook used throughout. Variables are cleared as files
 # get consumed so the trap stays a no-op for the consumed paths.
 TMP_GOMOD=""
+TMP_GOMOD_DIR=""
 ERR_FILE=""
 cleanup() {
-    [ -n "$TMP_GOMOD" ] && rm -f "$TMP_GOMOD"
+    [ -n "$TMP_GOMOD_DIR" ] && [ -d "$TMP_GOMOD_DIR" ] && rm -rf "$TMP_GOMOD_DIR"
     [ -n "$ERR_FILE" ]  && rm -f "$ERR_FILE"
     return 0
 }
 trap cleanup EXIT
 
 # 1. Upstream-tag reachability gate.
+#    Two layers: (a) git ls-remote confirms the tag exists in the upstream
+#    repo; (b) `go mod download` confirms the module is fetchable via Go's
+#    module proxy (GOPROXY), which is what the require-line resolution will
+#    actually use after the pin. A clean git tag with no proxy entry would
+#    fail at `go mod tidy` later — catch that here so the deferral mode is
+#    proxy-aware, not just repo-aware.
 if [ "$SKIP_UPSTREAM" -eq 0 ]; then
     ERR_FILE="$(mktemp -t pin-agentmind-release.err.XXXXXX)"
 
@@ -182,93 +203,101 @@ if [ "$SKIP_UPSTREAM" -eq 0 ]; then
         exit 2
     fi
     echo "pin-agentmind-release.sh: upstream tag $VERSION resolves to $SHA" >&2
+
+    # GOPROXY verification: confirm the module is actually fetchable
+    # through Go's proxy at the requested tag. This rules out "git tag
+    # exists but proxy index has not yet picked it up" and also prevents
+    # a local sibling/module cache from silently satisfying the later
+    # verify chain when verification is supposed to exercise the
+    # released artifact. Probe with a clean GOPROXY in a scratch
+    # GOMODCACHE so on-disk caches cannot short-circuit the lookup.
+    PROXY_GOMODCACHE="$(mktemp -d -t pin-agentmind-release.gomodcache.XXXXXX)"
+    if ! GOPROXY="https://proxy.golang.org,direct" GOFLAGS=-mod=mod \
+            GOMODCACHE="$PROXY_GOMODCACHE" \
+            go mod download -x "github.com/mrmaxsteel/agentmind@$VERSION" \
+            >"$ERR_FILE" 2>&1; then
+        echo "pin-agentmind-release.sh: tag $VERSION exists in git but the Go module proxy could not resolve github.com/mrmaxsteel/agentmind@$VERSION" >&2
+        if [ -s "$ERR_FILE" ]; then
+            sed 's/^/  /' "$ERR_FILE" >&2
+        fi
+        echo "" >&2
+        echo "  The proxy may not have indexed the release yet (typical" >&2
+        echo "  lag is a few minutes). Re-run after the proxy catches up," >&2
+        echo "  or override with --skip-upstream-check if proxying through" >&2
+        echo "  a mirror." >&2
+        rm -rf "$PROXY_GOMODCACHE"
+        exit 2
+    fi
+    rm -rf "$PROXY_GOMODCACHE"
+    echo "pin-agentmind-release.sh: module proxy resolves github.com/mrmaxsteel/agentmind@$VERSION" >&2
 fi
 
-# 2. Compute the new go.mod content. We rewrite the require line and
-#    drop any `replace github.com/mrmaxsteel/agentmind => ...` directive
-#    (and its leading comment block, if it's the spec-prescribed one).
-TMP_GOMOD="$(mktemp -t pin-agentmind-release.gomod.XXXXXX)"
+# 2. Compute the new go.mod content using `go mod edit` against a
+#    temp copy of go.mod. Using the native tool (rather than a
+#    hand-rolled awk state machine) handles all the formatting edge
+#    cases natively: `// indirect` trailing comments on require lines,
+#    multi-line `replace ( ... )` blocks, preceding comment blocks,
+#    standalone vs grouped require directives.
+# `go mod edit -modfile` requires the file path to end in `.mod`, so we
+# create a temp directory and place the working copy inside it.
+TMP_GOMOD_DIR="$(mktemp -d -t pin-agentmind-release.gomod.XXXXXX)"
+TMP_GOMOD="$TMP_GOMOD_DIR/go.mod"
+cp "$GOMOD" "$TMP_GOMOD"
 
-# Use awk to do the edit deterministically. State machine:
-#   - When we see `require github.com/mrmaxsteel/agentmind <ver>`,
-#     replace `<ver>` with $VERSION.
-#   - When we see a comment block immediately preceding a
-#     `replace github.com/mrmaxsteel/agentmind => ...` line, drop the
-#     whole block plus the replace line plus one trailing blank line.
-#   - Otherwise, pass through.
-awk -v ver="$VERSION" '
-    BEGIN { buffer = ""; in_replace_block = 0 }
+# Drop any local replace targeting agentmind (single-line or grouped form).
+# `go mod edit -dropreplace` is a no-op when no matching replace exists,
+# which keeps the edit idempotent.
+if ! go mod edit -modfile="$TMP_GOMOD" \
+        -dropreplace=github.com/mrmaxsteel/agentmind; then
+    echo "pin-agentmind-release.sh: internal error — go mod edit -dropreplace failed" >&2
+    exit 5
+fi
 
-    # Match the require line in either form:
-    #   require github.com/mrmaxsteel/agentmind v1.2.3
-    #   <TAB>github.com/mrmaxsteel/agentmind v1.2.3   (inside require block)
-    # In both cases rewrite the trailing version to $ver.
-    /^[[:space:]]*require[[:space:]]+github\.com\/mrmaxsteel\/agentmind[[:space:]]+v/ ||
-    /^[[:space:]]+github\.com\/mrmaxsteel\/agentmind[[:space:]]+v/ {
-        sub(/[[:space:]]+v[0-9][^[:space:]]*[[:space:]]*$/, " " ver)
-        print
-        next
-    }
-
-    # Match the replace directive itself. If we have buffered comment
-    # lines, drop them; otherwise just skip the line. Also consume the
-    # immediately-following blank line if present.
-    /^replace[[:space:]]+github\.com\/mrmaxsteel\/agentmind[[:space:]]+=>/ {
-        buffer = ""
-        in_replace_block = 1
-        next
-    }
-
-    # When we just dropped the replace, also drop the immediately-
-    # following blank line so the file stays tidy.
-    in_replace_block == 1 {
-        if ($0 == "") {
-            in_replace_block = 0
-            next
-        }
-        # Non-blank: flush whatever was buffered (likely empty) and
-        # process this line normally.
-        in_replace_block = 0
-    }
-
-    # Buffer comment lines. They will either be flushed (when the next
-    # line is not the replace directive) or dropped (when it is).
-    /^\/\// {
-        if (buffer == "") {
-            buffer = $0
-        } else {
-            buffer = buffer "\n" $0
-        }
-        next
-    }
-
-    # Any non-comment, non-replace line: flush the buffer and pass
-    # the current line through.
-    {
-        if (buffer != "") {
-            print buffer
-            buffer = ""
-        }
-        print
-    }
-
-    END {
-        if (buffer != "") {
-            print buffer
-        }
-    }
-' "$GOMOD" > "$TMP_GOMOD"
+# Pin the require line to $VERSION. `-require` adds-or-rewrites the
+# entry, so this works whether the current go.mod has the zero
+# pseudo-version, a real version, or no require at all.
+if ! go mod edit -modfile="$TMP_GOMOD" \
+        -require="github.com/mrmaxsteel/agentmind@$VERSION"; then
+    echo "pin-agentmind-release.sh: internal error — go mod edit -require failed" >&2
+    exit 5
+fi
 
 # Sanity: confirm the produced file no longer contains the replace
 # directive and the require line carries the desired version.
-if grep -qE '^replace[[:space:]]+github\.com/mrmaxsteel/agentmind[[:space:]]+=>' "$TMP_GOMOD"; then
+if grep -qE '^[[:space:]]*replace[[:space:]]+github\.com/mrmaxsteel/agentmind[[:space:]]+=>' "$TMP_GOMOD"; then
     echo "pin-agentmind-release.sh: internal error — replace directive still present after edit" >&2
     exit 5
 fi
-if ! grep -qE "^([[:space:]]*require[[:space:]]+)?[[:space:]]*github\.com/mrmaxsteel/agentmind[[:space:]]+$VERSION([[:space:]]|$)" "$TMP_GOMOD"; then
+if ! grep -qE "(^|[[:space:]])github\.com/mrmaxsteel/agentmind[[:space:]]+$VERSION([[:space:]]|$)" "$TMP_GOMOD"; then
     echo "pin-agentmind-release.sh: internal error — require line did not pick up $VERSION" >&2
     diff -u "$GOMOD" "$TMP_GOMOD" >&2 || true
     exit 5
+fi
+
+# Self-test mode: assert the diff is exactly "replace dropped, require
+# bumped" and nothing else. Intended for CI to run against the live
+# go.mod long before Phase 6 actually fires.
+if [ "$SELF_TEST" -eq 1 ]; then
+    echo "=== SELF-TEST: editor diff against real go.mod ==="
+    DIFF_OUT="$(diff -u "$GOMOD" "$TMP_GOMOD" || true)"
+    printf '%s\n' "$DIFF_OUT"
+
+    # Required signals: at least one `-replace github.com/mrmaxsteel/agentmind`
+    # line (replace dropped) and at least one `+...github.com/mrmaxsteel/agentmind $VERSION`
+    # line (require bumped). If either is missing the editor did not do
+    # what its contract claims.
+    if ! printf '%s\n' "$DIFF_OUT" \
+            | grep -qE '^-[[:space:]]*replace[[:space:]]+github\.com/mrmaxsteel/agentmind[[:space:]]+=>'; then
+        echo "pin-agentmind-release.sh: SELF-TEST FAILED — diff does not drop the replace directive" >&2
+        exit 5
+    fi
+    if ! printf '%s\n' "$DIFF_OUT" \
+            | grep -qE "^\+.*github\.com/mrmaxsteel/agentmind[[:space:]]+$VERSION"; then
+        echo "pin-agentmind-release.sh: SELF-TEST FAILED — diff does not bump require to $VERSION" >&2
+        exit 5
+    fi
+    echo "pin-agentmind-release.sh: SELF-TEST PASSED — editor produces correct diff against real go.mod" >&2
+    exit 0
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -278,7 +307,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 mv "$TMP_GOMOD" "$GOMOD"
-# mv consumed the temp file; clear the variable so cleanup is a no-op.
+# mv consumed the temp file; clear the variable so cleanup tears
+# down only the now-empty directory.
 TMP_GOMOD=""
 echo "pin-agentmind-release.sh: go.mod pinned to agentmind $VERSION" >&2
 
