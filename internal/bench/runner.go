@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mrmaxsteel/agentmind/client"
@@ -136,10 +137,30 @@ func Run(cfg *RunConfig) error {
 	// and proceed with exit 0. The bench run continues without telemetry
 	// collection — for the bench command, telemetry is a side-effect, not
 	// the deliverable.
+	//
+	// Spec 083 Bead 3b (read-side rewire): startBenchCollector now
+	// returns a StreamConsumer attached to the subprocess's stdout pipe
+	// (via Handle.Stdout → client.ReadEvents) when a new agentmind was
+	// spawned. The consumer forwards each wire.CollectedEvent to the
+	// bench-events.jsonl file, preserving the on-disk format the post-
+	// run aggregations rely on. Hard Constraint #3: the io.Reader
+	// passed to client.ReadEvents is the subprocess stdout pipe, NEVER
+	// an os.Open on benchEventsPath.
 	benchEventsPath := filepath.Join(cfg.WorkDir, "bench-events.jsonl")
-	if _, err := startBenchCollector(cfg.RepoRoot, cfg.WorkDir, benchEventsPath, cfg.Stdout, os.Stderr); err != nil {
+	startRes, err := startBenchCollector(cfg.RepoRoot, cfg.WorkDir, benchEventsPath, cfg.Stdout, os.Stderr)
+	if err != nil {
 		return err
 	}
+	// Best-effort safety net: if Run returns before the explicit
+	// shutdown block (e.g., an early error from session execution),
+	// still flush the consumer's buffer so partial events land. The
+	// explicit shutdown below (before aggregations) handles the
+	// happy path with a real Done-wait.
+	defer func() {
+		if startRes.Consumer != nil {
+			_ = startRes.Consumer.Flush()
+		}
+	}()
 
 	// Build per-session prompts
 	// Sessions A & B: generic feature prompt (no MindSpec workflow)
@@ -205,8 +226,37 @@ Follow the MindSpec workflow:
 		}
 	}
 
-	// Brief pause to ensure all events are flushed to disk
-	time.Sleep(2 * time.Second)
+	// Panel bead-3b-v1 REV-1: deterministically drain the
+	// stdout-pipe consumer before reading the on-disk NDJSON file
+	// for aggregations. Previously this was a `time.Sleep(2s)`
+	// kludge plus a deferred `Consumer.Flush()`, neither of which
+	// guarantees the consumer goroutine has finished decoding the
+	// last events from the subprocess stdout pipe.
+	//
+	// Sequence:
+	//   1. Signal the agentmind subprocess to terminate (SIGTERM via
+	//      PID from StartResult.PID; the subprocess closes its
+	//      stdout, which EOFs `client.ReadEvents`, which closes its
+	//      channel, which exits the consumer goroutine).
+	//   2. Wait on `Consumer.Done()` — the consumer's documented
+	//      post-flush happens-after edge (REV-2 makes Done land
+	//      strictly after `w.Close()` in eventstream.go). A 10s
+	//      bound catches a wedged subprocess without hanging the
+	//      bench.
+	//   3. Aggregations below now read a quiesced file.
+	if startRes.Started && startRes.PID > 0 {
+		if proc, perr := os.FindProcess(startRes.PID); perr == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+		}
+	}
+	if startRes.Consumer != nil {
+		select {
+		case <-startRes.Consumer.Done():
+		case <-time.After(10 * time.Second):
+			fmt.Fprintln(cfg.Stdout, "warning: bench event-stream consumer did not drain within 10s; aggregations may be partial")
+			_ = startRes.Consumer.Flush()
+		}
+	}
 
 	// Generate N-way quantitative report from single shared JSONL file
 	fmt.Fprintln(cfg.Stdout, "\nGenerating quantitative report...")

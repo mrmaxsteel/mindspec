@@ -39,6 +39,15 @@ type SessionResult struct {
 	SessionIDs []string // unique session.id UUIDs from OTLP events for this label
 }
 
+// Spec 083 Bead 3b panel REV-5: `ConsumeSessionStream` was previously
+// exported here as a session-side consumer helper, but no production
+// code invoked it — the static-residue test
+// (`TestReadEventsConsumerSourceIsStdoutPipe`) was matching the
+// function's own declaration, a tautology. The production path is
+// runner → `startBenchCollector` → `ConsumeHandleToFile`, which is the
+// only consumer this package needs. If a per-session consumer becomes
+// necessary in a future bead, add it then with a real caller.
+
 // RunSessionWithRetries executes a benchmark session with retry-based auto-approve.
 // After each attempt, it checks whether implementation code was produced. If not,
 // it auto-approves any pending workflow gates (spec/plan for session C) and retries
