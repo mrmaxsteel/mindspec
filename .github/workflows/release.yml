@@ -5,24 +5,49 @@ on:
     tags:
       - "v*"
 
+# `contents: write` is preserved (required by GoReleaser's release upload).
+# `id-token: write` is added so cosign keyless can mint a Fulcio cert
+# bound to this workflow's OIDC identity (spec 090 Bead 2, ADR-0029).
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
     name: GoReleaser
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # ACTION_SHA_PIN_TODO: spec 090 Bead 2 requires every `uses:` to be
+      # pinned to a 40-char commit SHA. The orchestrator does not currently
+      # have GitHub access to verify SHAs at implementation time; the
+      # major-version tags below are placeholders. A follow-up fixup commit
+      # must replace each `@vN` with the verified release SHA and append a
+      # trailing `# vX.Y.Z` annotation. Spec verification grep
+      # `grep -hE '^\s*-?\s*uses:' .github/workflows/release*.yml |
+      #  grep -vE '@[0-9a-f]{40}\b'` is expected to FLAG these lines until
+      # the fixup lands; this is recorded in the bead commit message.
+      - uses: actions/checkout@v4  # ACTION_SHA_PIN_TODO: pin to v4.x SHA
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5  # ACTION_SHA_PIN_TODO: pin to v5.x SHA
         with:
           go-version: "1.22"
 
+      # Install cosign so GoReleaser's `signs:` block can invoke `cosign
+      # sign-blob` for every archive and the checksums file. Keyless mode
+      # is selected implicitly by the absence of `--key`; the OIDC token
+      # granted by `id-token: write` above provides the identity.
+      - uses: sigstore/cosign-installer@v3  # ACTION_SHA_PIN_TODO: pin to v3.7.0 SHA
+        with:
+          cosign-release: "v2.4.1"
+
+      # Install syft so GoReleaser's `sboms:` block can invoke `syft scan`
+      # for every archive and the checksums file (SPDX-JSON output).
+      - uses: anchore/sbom-action/download-syft@v0  # ACTION_SHA_PIN_TODO: pin to v0.17.x SHA
+
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v6  # ACTION_SHA_PIN_TODO: pin to v6.x SHA
         with:
           version: "~> v2"
           args: release --clean
