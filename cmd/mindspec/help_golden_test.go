@@ -12,11 +12,28 @@ import (
 // unchanged on the user side") for the three interactive AgentMind
 // commands rewired into cobra re-exec wrappers in Bead 4. Each
 // golden file at `testdata/help_golden/{serve,replay,viz}.txt`
-// captures the exact `--help` output recorded BEFORE the Bead 4
-// rewire. This test diffs the live `--help` output against the
-// golden; any drift fails the test and forces the author to either
-// (a) revert the surface change or (b) consciously regenerate the
-// golden in the same commit and explain why in the commit message.
+// captures the exact `--help` output. The golden contents were
+// verified byte-equal against the pre-Bead-2 mindspec binary built
+// from commit 0b0bf38 ("Merge bead/mindspec-6oxg.1: Phase 0 gate
+// (Test G)" — the last commit on spec/083-agentmind-extraction-v2
+// before Bead 2's first commit 55c3d4e), AND byte-equal against the
+// current post-rewire binary. This three-way equality (golden ==
+// pre-Bead-2 binary == post-rewire binary) is the actual evidence
+// for HC#5; the test only re-verifies the post-rewire side on every
+// `go test ./...` run.
+//
+// To re-verify the pre-Bead-2 side out-of-band:
+//
+//	git worktree add --detach /tmp/ms-pre-bead2 0b0bf38
+//	cd /tmp/ms-pre-bead2 && go build -o /tmp/ms-pre ./cmd/mindspec
+//	/tmp/ms-pre agentmind serve  --help | diff - cmd/mindspec/testdata/help_golden/serve.txt
+//	/tmp/ms-pre agentmind replay --help | diff - cmd/mindspec/testdata/help_golden/replay.txt
+//	/tmp/ms-pre viz             --help | diff - cmd/mindspec/testdata/help_golden/viz.txt
+//
+// This test diffs the live `--help` output against the golden; any
+// drift fails the test and forces the author to either (a) revert
+// the surface change or (b) consciously regenerate the golden in
+// the same commit and explain why in the commit message.
 //
 // The mindspec binary is built into a temp dir per t.TempDir(), so
 // the test is hermetic against a stale `./bin/mindspec` on disk.

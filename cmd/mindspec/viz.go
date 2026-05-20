@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/agentmind/client"
+	"github.com/mrmaxsteel/mindspec/internal/agentmind"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/viz"
@@ -62,6 +64,33 @@ var agentmindServeCmd = &cobra.Command{
 		if strings.TrimSpace(output) != "" {
 			runArgs = append(runArgs, "--output", output)
 		}
+
+		// Write the AgentMind identity lockfile per the contract in
+		// internal/agentmind/lockfile.go. The standalone agentmind
+		// binary does not yet own this write (see spec 083 — the
+		// contract docstring notes "When AgentMind is extracted into
+		// its own binary, this file...MUST be copied/re-exported"),
+		// so the mindspec wrapper continues to own it until the
+		// sibling binary takes over. Consumers of `internal/agentmind`
+		// (record health, record stop, OTLP-port identity checks via
+		// IsRunning/PortInUseByForeign/Token) depend on this file
+		// being present and PID-alive while serve runs. Writing it
+		// here keeps the pre-Bead-4 identity protocol intact.
+		token, tokErr := agentmind.NewToken()
+		if tokErr != nil {
+			return fmt.Errorf("generating agentmind token: %w", tokErr)
+		}
+		lf := agentmind.Lockfile{
+			PID:       os.Getpid(),
+			OTLPPort:  otlpPort,
+			UIPort:    uiPort,
+			Token:     token,
+			StartedAt: time.Now().UTC(),
+		}
+		if err := agentmind.WriteLockfile(lf); err != nil {
+			return fmt.Errorf("writing agentmind lockfile: %w", err)
+		}
+		defer func() { _ = agentmind.RemoveLockfile() }()
 
 		return runStandaloneWithInteractiveDegradation(cmd, runArgs)
 	},

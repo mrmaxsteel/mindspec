@@ -154,9 +154,14 @@ func TestLiveCapture(t *testing.T) {
 				outputPath, lines)
 		}
 	} else {
-		// Fake-binary smoke assertion: the binary produced something
-		// resembling NDJSON. The fake emits events with `event` field
-		// "fake.event.N"; assert any of them.
+		// Fake-binary strict assertion (spec 083 Bead 4 panel
+		// revision): the default path MUST verify that the in-repo
+		// cmd/agentmind-fake produced its expected `fake.event.N`
+		// records. A binary that emits an empty `{}` JSON object
+		// would previously have passed this gate silently; the
+		// hard-fail below closes that hole. Real-binary mode
+		// (AGENTMIND_REAL_BINARY=1) keeps the
+		// `claude_code.api_request` check above.
 		anyFake := false
 		for _, e := range parsed {
 			if strings.HasPrefix(e.Event, "fake.event.") {
@@ -165,8 +170,8 @@ func TestLiveCapture(t *testing.T) {
 			}
 		}
 		if !anyFake {
-			t.Logf("warning: no fake.event.N records found; binary at %s may not be cmd/agentmind-fake. Continuing — got %d records.",
-				binPath, len(parsed))
+			t.Fatalf("no fake.event.N records found in %s — binary at %s did not emit cmd/agentmind-fake's expected event shape (got %d records). If you intentionally pointed AGENTMIND_BIN at a different binary, set AGENTMIND_REAL_BINARY=1 to switch to the real-binary assertion.",
+				outputPath, binPath, len(parsed))
 		}
 	}
 

@@ -186,4 +186,4 @@ jobs:
       - name: Skip live-capture (Test G deferred)
         if: steps.testg.outputs.rc != '0'
         run: |
-          echo "::notice::Test G (agentmind v0.0.1 tag) is deferred (rc=${{ steps.testg.outputs.rc }}); skipping live-capture per spec 083 Bead 4 step 5 (defensive gating)."
+          echo "::warning::Test G (agentmind v0.0.1 tag) is deferred (rc=${{ steps.testg.outputs.rc }}); skipping live-capture per spec 083 Bead 4 step 5 (defensive gating). This is non-blocking but should be visible in CI summary so a long-running deferral does not silently hide a broken upstream tag."
