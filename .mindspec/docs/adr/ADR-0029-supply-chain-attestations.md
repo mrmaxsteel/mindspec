@@ -1,7 +1,7 @@
 # ADR-0029: Supply Chain Attestations via Cosign Keyless + Syft SBOM
 
 - **Date**: 2026-05-20
-- **Status**: Accepted
+- **Status**: Accepted (Finalized in spec 090 Bead 1)
 - **Domain(s)**: security, release, ci
 - **Deciders**: Max
 - **Supersedes**: n/a
@@ -12,8 +12,12 @@
 
 ## Status
 
-Stub created during spec 090-production-hygiene drafting. Finalized in
-Bead N of spec 090 alongside the cosign + syft workflow integration.
+Finalized in spec 090 Bead 1 alongside the SECURITY.md drop; the
+cosign + syft workflow integration ships in Bead 2 and the
+`release-dryrun` verification gate ships in Bead 3. The ADR documents
+the **planned** as-implemented design; Beads 2 and 3 implement it
+mechanically against the YAML stanzas inlined in the Decision section
+below.
 
 ## Context
 
@@ -30,8 +34,9 @@ Plan item F6 in the converged transformation plan
 landing cosign keyless signing and a syft SBOM on the existing release
 workflow, with a `release-dryrun` CI job verifying both on every PR that
 touches release infrastructure. This ADR records the substantive
-choices that flow from "make releases attestable" so the Bead-N
-implementation is a mechanical translation of an already-decided design.
+choices that flow from "make releases attestable" so the Bead 2 and
+Bead 3 implementations are mechanical translations of an
+already-decided design.
 
 ## Decision
 
@@ -40,6 +45,42 @@ implementation is a mechanical translation of an already-decided design.
 Releases are signed with **cosign keyless** using the GitHub Actions OIDC
 token as the identity. No key material is stored in the repo or in CI
 secrets; rotation is therefore a non-concern.
+
+The Bead 2 `.goreleaser.yml` `signs:` stanza takes the following
+as-planned shape, with two entries so both archives and the
+`checksums.txt` line file are signed:
+
+```yaml
+signs:
+  - id: archives
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: archive
+  - id: checksums
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: checksum
+```
+
+The explicit `--bundle=${artifact}.cosign.bundle` flag is load-bearing:
+the verification path in Bead 3 (and post-tag) consumes the
+`.cosign.bundle` companion file, so its filename is pinned here.
 
 **Rejected alternatives:**
 - *Key-based cosign* — rejected for the key-management burden (secret
@@ -51,6 +92,34 @@ secrets; rotation is therefore a non-concern.
 
 SBOMs are emitted as **SPDX-JSON** by **syft**, invoked through
 GoReleaser's native `sboms:` directive rather than as a separate CI step.
+
+The Bead 2 `.goreleaser.yml` `sboms:` stanza takes the following
+as-planned shape — again with two entries so both archives and
+`checksums.txt` receive an SBOM:
+
+```yaml
+sboms:
+  - id: archives
+    cmd: syft
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
+    documents:
+      - "${artifact}.spdx.json"
+    artifacts: archive
+  - id: checksums
+    cmd: syft
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
+    documents:
+      - "${artifact}.spdx.json"
+    artifacts: checksum
+```
 
 **Rejected alternatives:**
 - *CycloneDX* — rejected for narrower tooling support today; SPDX-JSON is
@@ -104,5 +173,10 @@ side-cars.
   archive, which contains the binary, not the bench JSONL pipeline.
 - Forward reference: spec
   [`090-production-hygiene`](../specs/090-production-hygiene/spec.md) —
-  the implementing spec; Bead N of that spec finalizes this ADR
-  alongside the workflow integration.
+  the implementing spec. **Bead 1** of that spec ships the
+  `SECURITY.md` drop and finalizes this ADR. **Bead 2** lands the
+  `.github/workflows/release.yml` permissions expansion and the paired
+  `.goreleaser.yml` `signs:` / `sboms:` stanzas inlined in the Decision
+  section. **Bead 3** lands the `.github/workflows/release-dryrun.yml`
+  same-repo PR gate that asserts cosign + syft artifact presence and
+  SBOM validity on every PR that touches release infrastructure.
