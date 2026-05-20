@@ -1,7 +1,7 @@
 # ADR-0029: Supply Chain Attestations via Cosign Keyless + Syft SBOM
 
 - **Date**: 2026-05-20
-- **Status**: Accepted
+- **Status**: Accepted (Finalized in spec 090 Bead 1)
 - **Domain(s)**: security, release, ci
 - **Deciders**: Max
 - **Supersedes**: n/a
@@ -54,24 +54,28 @@ as-planned shape, with two entries so both archives and the
 signs:
   - id: archives
     cmd: cosign
-    artifacts: archive
-    signature: ${artifact}.sig
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
     args:
-      - sign-blob
-      - --yes
-      - --output-signature=${artifact}.sig
-      - --bundle=${artifact}.cosign.bundle
-      - ${artifact}
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: archive
   - id: checksums
     cmd: cosign
-    artifacts: checksum
-    signature: ${artifact}.sig
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
     args:
-      - sign-blob
-      - --yes
-      - --output-signature=${artifact}.sig
-      - --bundle=${artifact}.cosign.bundle
-      - ${artifact}
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${artifact}.cosign.bundle"
+      - "--output-signature=${artifact}.sig"
+      - "--output-certificate=${artifact}.pem"
+      - "${artifact}"
+    artifacts: checksum
 ```
 
 The explicit `--bundle=${artifact}.cosign.bundle` flag is load-bearing:
@@ -97,22 +101,24 @@ as-planned shape — again with two entries so both archives and
 sboms:
   - id: archives
     cmd: syft
-    artifacts: archive
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
     documents:
       - "${artifact}.spdx.json"
-    args:
-      - $artifact
-      - --output
-      - spdx-json=${document}
+    artifacts: archive
   - id: checksums
     cmd: syft
-    artifacts: checksum
+    args:
+      - "scan"
+      - "${artifact}"
+      - "-o"
+      - "spdx-json=${document}"
     documents:
       - "${artifact}.spdx.json"
-    args:
-      - $artifact
-      - --output
-      - spdx-json=${document}
+    artifacts: checksum
 ```
 
 **Rejected alternatives:**

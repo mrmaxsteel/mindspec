@@ -34,7 +34,7 @@ the support policy is intentionally narrow:
 | ------------------ | ------------------ | ------------------------------------------------------ |
 | Latest tagged `v*` | Yes                | Security fixes land on `main` and ship in a new tag.   |
 | Older tagged `v*`  | Best-effort        | No backports; please upgrade to the latest tag.        |
-| `main` (untagged)  | Yes (rolling)      | Security fixes are merged here first.                  |
+| `main` (untagged)  | Best-effort        | No LTS commitment; security fixes land on `main` as a normal commit. |
 
 There is no LTS line and no semantic-versioning guarantee before `1.0`.
 A supported-versions matrix with explicit minor-version rows will be
