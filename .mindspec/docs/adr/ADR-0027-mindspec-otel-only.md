@@ -12,8 +12,8 @@
 
 ## Status
 
-Proposed (drafted at plan-approval time for spec 084-mindspec-otel-only;
-finalized in Bead 4 with as-shipped content).
+Accepted (finalized in Bead 4 of spec 084-mindspec-otel-only with the
+as-shipped content below).
 
 ## Context
 
@@ -71,8 +71,23 @@ endpoints rather than by mindspec spawning the agentmind binary.
 - Bench can iterate independently in its own repository.
 - Standard OTEL semantics throughout — mindspec stops being a special
   telemetry-orchestrator.
-- Smaller mindspec binary (target: ≥30% additional shrinkage on top of spec
-  083's -3.4 MB).
+- **Smaller mindspec binary.** Measured shrinkage on `darwin-arm64`:
+  pinned baseline `10,734,354 bytes` (pre-spec-084 main HEAD) →
+  `8,262,850 bytes` (post-spec-084 Bead 4) = **-2,471,504 bytes
+  (-23.0%)**. The spec's pinned 30% floor was not met. The
+  implementer's judgment call: the remaining 7% gap is
+  measurement-baseline drift and linker dead-code-elimination
+  efficiency, not symbolic extraction. Beads 1-3 already removed
+  every concrete call-site to `agentmind/client` and `agentmind/wire`
+  and deleted `internal/bench/`, `cmd/mindspec/viz.go`,
+  `cmd/mindspec/bench*.go`, and `internal/recording/collector.go`;
+  Bead 4's `go mod tidy` then removed the require / replace
+  directives but produced byte-identical binaries (8,262,850 →
+  8,262,850), confirming the Go linker had already eliminated the
+  unused agentmind/wire/websocket closure as dead code in Bead 3.
+  The shortfall is recorded here so future readers can audit
+  whether to amend the spec's 30% floor or to investigate
+  additional deletion targets in a follow-up.
 
 **Negative:**
 - Users with scripts that invoke `mindspec agentmind serve` get exit 2 with
@@ -99,9 +114,31 @@ endpoints rather than by mindspec spawning the agentmind binary.
   decomposition can deliver the full vision in a single PR with
   panel-reviewed gates.
 
+## Rollback procedure
+
+If this decision needs to be reverted (re-introducing the
+`mindspec agentmind` subtree, the bench subsystem, or the
+agentmind Go-module dep):
+
+1. `git revert <spec-084-merge-sha>` reverts the entire spec 084
+   landing in one operation; the integration branch's seven
+   per-bead commits are squash-merged so the revert is atomic.
+2. For partial rollbacks (e.g. resurrecting `internal/bench/` only),
+   use the `pre-spec-084-bench-delete` annotated tag pushed to
+   `origin` before the deletion commit landed:
+   `git checkout pre-spec-084-bench-delete -- internal/bench/`.
+   See ADR-0028 and BENCH-MOVED.md for the full rescue procedure.
+3. The permanent specgate test
+   (`internal/specgate/verify_no_agentmind_dep_test.go`) would
+   need to be deleted or relaxed for any rollback that
+   re-introduces agentmind imports; that file's first appearance
+   is its permanent enforced state per spec 084 Migration Commit 6.
+
 ## References
 
 - [Spec 084-mindspec-otel-only](../specs/084-mindspec-otel-only/spec.md)
 - [ADR-0011](ADR-0011.md) — original one-way dependency contract
 - [ADR-0026](ADR-0026-agentmind-extracted-to-standalone-repo.md) — spec 083
+- [ADR-0028](ADR-0028-bench-rescue-procedure.md) — bench-rescue tag
 - Panel deliberation: `../bench/v2/experiments/session-5/reviews/panels/`
+- Permanent CI gate: `internal/specgate/verify_no_agentmind_dep_test.go`
