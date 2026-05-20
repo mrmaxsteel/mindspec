@@ -25,6 +25,8 @@ func saveAndRestore(t *testing.T) {
 	origResolveTarget := resolveTargetFn
 	origFindLocalRoot := findLocalRootFn
 	origFetchBeadByID := fetchBeadByIDFn
+	origMergeMeta := mergeMetadataFn
+	origGitEmail := gitUserEmailFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -34,6 +36,8 @@ func saveAndRestore(t *testing.T) {
 		resolveTargetFn = origResolveTarget
 		findLocalRootFn = origFindLocalRoot
 		fetchBeadByIDFn = origFetchBeadByID
+		mergeMetadataFn = origMergeMeta
+		gitUserEmailFn = origGitEmail
 	})
 
 	// Default stubs
@@ -41,6 +45,10 @@ func saveAndRestore(t *testing.T) {
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
 	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{}, fmt.Errorf("not found") }
 	listJSONFn = func(args ...string) ([]byte, error) { return []byte("[]"), nil }
+	// Spec 086 Bead 3: keep metadata + git-identity reads inert by
+	// default so the existing tests don't shell out to bd or git.
+	mergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
+	gitUserEmailFn = func() string { return "test@example.invalid" }
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
@@ -171,7 +179,7 @@ func TestRun_HappyPath(t *testing.T) {
 		return nil, fmt.Errorf("unexpected args: %v", args)
 	}
 
-	result, err := Run(root, "bead-1", "", "", mock)
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,7 +232,7 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 		}, nil
 	}
 
-	_, err := Run(root, "bead-1", "", "", mock)
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err == nil {
 		t.Fatal("expected error for dirty worktree")
 	}
@@ -244,7 +252,7 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 
-	_, err := Run(root, "bead-1", "", "", mock)
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
 	}
@@ -270,7 +278,7 @@ func TestRun_NoWorktree(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
 
-	result, err := Run(root, "bead-1", "", "", mock)
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -560,7 +568,7 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	result, err := Run(root, "bead-1", "", "", mock)
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -593,7 +601,7 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	result, err := Run(root, "bead-1", "", "", mock)
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -659,7 +667,7 @@ func TestRun_CloseFailsNonIdempotent(t *testing.T) {
 		return next.BeadInfo{ID: "bead-1", Status: "open"}, nil
 	}
 
-	_, err := Run(root, "bead-1", "", "", mock)
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err == nil {
 		t.Fatal("expected error when close fails and bead is not closed")
 	}
@@ -680,7 +688,7 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	_, err := Run(root, "bead-1", "", "add feature X", mock)
+	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -706,7 +714,7 @@ func TestRun_ImplOnlyGuardRejectsPlanPhase(t *testing.T) {
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 
-	_, err := Run(root, "bead-1", "", "", mock)
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err == nil {
 		t.Fatal("expected error from impl-only guard")
 	}
@@ -730,7 +738,7 @@ func TestRun_ImplOnlyGuardAllowsReview(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	result, err := Run(root, "bead-1", "", "", mock)
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("expected success in review phase, got: %v", err)
 	}
@@ -754,11 +762,142 @@ func TestRun_DirtyTreeHintIncludesBeadID(t *testing.T) {
 		}, nil
 	}
 
-	_, err := Run(root, "my-bead", "", "", mock)
+	_, err := Run(root, "my-bead", "", "", mock, CompleteOpts{})
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
 	}
 	if !strings.Contains(err.Error(), "mindspec complete my-bead") {
 		t.Errorf("hint should include bead ID, got: %v", err)
+	}
+}
+
+// --- Spec 086 Bead 3: doc-sync gate + override metadata tests ---
+
+// TestCompleteBlocksOnDocSkew: a bead whose diff touches an
+// internal/ Go source file with no doc updates should be rejected
+// by the doc-sync gate when no override is requested.
+func TestCompleteBlocksOnDocSkew(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// Source-only diff (internal/<domain>/foo.go) with no doc updates.
+	// ValidateDocs runs both the legacy fallback (no domains dir) AND
+	// the cmd-docs / source-vs-doc check, raising at least one
+	// SevError under "doc-sync".
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected doc-sync gate to reject source-only diff")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should mention doc-sync: %v", err)
+	}
+	// Verify MergeBase was called for the gate
+	if calls := mock.CallsTo("MergeBase"); len(calls) == 0 {
+		t.Error("expected MergeBase call from doc-sync gate")
+	}
+}
+
+// TestCompleteAllowsOverride: same source-only diff, but with the
+// AllowDocSkew opts set, should succeed AND record the override
+// metadata on the bead AFTER closeBeadFn returns.
+func TestCompleteAllowsOverride(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	// Recorder for the override metadata write.
+	var metaCalls []map[string]interface{}
+	var metaBeadID string
+	mergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaBeadID = id
+		metaCalls = append(metaCalls, updates)
+		return nil
+	}
+	gitUserEmailFn = func() string { return "override-user@example.invalid" }
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "doc PR in flight"})
+	if err != nil {
+		t.Fatalf("expected override to allow completion, got: %v", err)
+	}
+
+	if metaBeadID != "bead-1" {
+		t.Errorf("override metadata should target bead-1, got %q", metaBeadID)
+	}
+	// Two metadata writes are expected: the override skew write
+	// (this bead 3 feature) and the spec 080 mindspec_phase sync.
+	// We assert the override one is present.
+	foundOverride := false
+	for _, m := range metaCalls {
+		if reason, ok := m["mindspec_doc_skew_reason"].(string); ok && reason == "doc PR in flight" {
+			if by, _ := m["mindspec_doc_skew_by"].(string); by != "override-user@example.invalid" {
+				t.Errorf("mindspec_doc_skew_by: got %q, want override-user@example.invalid", by)
+			}
+			if at, _ := m["mindspec_doc_skew_at"].(string); at == "" {
+				t.Error("mindspec_doc_skew_at should not be empty")
+			}
+			foundOverride = true
+			break
+		}
+	}
+	if !foundOverride {
+		t.Errorf("expected an override metadata write with mindspec_doc_skew_reason; got %v", metaCalls)
+	}
+}
+
+// TestSkewMetadataWrittenAfterSuccess: if the terminal mutation
+// (closeBeadFn) returns an error AND the bead is not already-closed,
+// the override metadata must NOT be written. The failure itself is
+// the audit trail (panel CONSENSUS revision 4).
+func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	// closeBeadFn fails with a non-idempotent error.
+	closeBeadFn = func(ids ...string) error { return fmt.Errorf("bd close failed: simulated") }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "open"}, nil
+	}
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	// Track every metadata call.
+	var metaCalls []map[string]interface{}
+	mergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaCalls = append(metaCalls, updates)
+		return nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "doc PR in flight"})
+	if err == nil {
+		t.Fatal("expected closeBeadFn failure to propagate")
+	}
+	// The metadata write block runs AFTER closeBeadFn returns nil.
+	// Since close failed, no override metadata may have been written.
+	for _, m := range metaCalls {
+		if _, ok := m["mindspec_doc_skew_reason"]; ok {
+			t.Errorf("override metadata written despite close failure: %v", m)
+		}
 	}
 }
