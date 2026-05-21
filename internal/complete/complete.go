@@ -162,11 +162,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// Override path: fall through. Metadata is written AFTER the
 		// terminal mutation succeeds (panel CONSENSUS revision 4).
 	}
-	adrResult := validate.CheckADRDivergence(root, base, exec)
+	specDir, sdErr := workspace.SpecDir(root, specID)
+	if sdErr != nil {
+		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
+	}
+	adrResult, _ := validate.CheckADRDivergence(root, base, exec, specDir, beadID)
 	if adrResult.HasFailures() {
 		// ADR divergence is NOT covered by `--allow-doc-skew` per panel
-		// CONSENSUS revision 6. The stub never sets failures today, but
-		// the gate is wired so spec 087 inherits the boundary contract.
+		// CONSENSUS revision 6. Spec 087 Bead 2 fills the body — failures
+		// now block bead completion until citations are updated or the
+		// supersede flow (Bead 3) is invoked.
 		return nil, fmt.Errorf("adr-divergence: %s", joinResultErrorMessages(adrResult))
 	}
 

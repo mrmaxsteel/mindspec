@@ -135,7 +135,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// (spec 087 will fill the body). The `--allow-doc-skew` override
 	// is intentionally NOT honored here per panel CONSENSUS rev 6;
 	// the placeholder always emits no failures today.
-	adrResult := validate.CheckADRDivergence(root, base, exec)
+	adrResult, _ := validate.CheckADRDivergence(root, base, exec, specDir, "")
 	if adrResult.HasFailures() {
 		return nil, fmt.Errorf("adr-divergence: %s", joinResultErrorMessages(adrResult))
 	}
