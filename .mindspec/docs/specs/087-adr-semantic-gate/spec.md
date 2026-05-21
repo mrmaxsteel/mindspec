@@ -77,10 +77,10 @@ spec implements that block verbatim; it does not redesign.
 
 ## Impacted Domains
 
-- `context-system`
-- `core`
-- `execution`
-- `workflow`
+- context-system
+- core
+- execution
+- workflow
 
 ### Affected packages (per domain)
 

@@ -67,6 +67,18 @@ func ParseSpec(specDir string) (*SpecMeta, error) {
 				if idx := strings.Index(bullet, ":"); idx >= 0 {
 					domain = strings.TrimSpace(bullet[:idx])
 				}
+				// Spec 087 Bead 1 fixup (revision 6): strip markdown
+				// emphasis (`**foo**`) and inline code fences
+				// (`` `foo` ``) that authors commonly wrap around
+				// domain identifiers — both are presentation noise,
+				// not part of the identifier. Real-world specs ship
+				// both shapes (005-next: `- **workflow**: …`; 087:
+				// `` - `core` ``) and the validator's case-folded
+				// set-intersection must compare canonical names.
+				domain = strings.TrimSpace(domain)
+				domain = strings.TrimPrefix(domain, "**")
+				domain = strings.TrimSuffix(domain, "**")
+				domain = strings.Trim(domain, "`")
 				domain = strings.ToLower(strings.TrimSpace(domain))
 				if domain != "" {
 					meta.Domains = append(meta.Domains, domain)
