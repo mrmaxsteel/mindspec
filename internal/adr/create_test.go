@@ -130,6 +130,91 @@ func TestCreate_SupersedesNotFound(t *testing.T) {
 	}
 }
 
+// TestCreateWithIDUsesSuppliedID asserts the Spec 087 Bead 3
+// placeholder-creation helper writes to the user-supplied ID verbatim
+// (revision 1: deterministic falsifiability for TestSupersedeUnblocks).
+func TestCreateWithIDUsesSuppliedID(t *testing.T) {
+	root := setupCreateEnv(t)
+
+	path, err := CreateWithID(root, "ADR-0099", "Placeholder for ADR-0099", CreateOpts{
+		Domains: []string{"core"},
+	})
+	if err != nil {
+		t.Fatalf("CreateWithID: %v", err)
+	}
+
+	wantSuffix := filepath.Join("docs", "adr", "ADR-0099.md")
+	if !strings.HasSuffix(path, wantSuffix) {
+		t.Errorf("path = %q, want suffix %q", path, wantSuffix)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "# ADR-0099: Placeholder for ADR-0099") {
+		t.Errorf("expected title heading with supplied ID, got:\n%s", content)
+	}
+	if !strings.Contains(content, "**Status**: Proposed") {
+		t.Error("expected Status: Proposed in placeholder")
+	}
+	if !strings.Contains(content, "**Domain(s)**: core") {
+		t.Errorf("expected Domain(s) to include seeded domain, got:\n%s", content)
+	}
+}
+
+// TestCreateWithIDRejectsExisting asserts the collision path: invoking
+// CreateWithID against an already-existing ADR id (exact filename match)
+// returns an error containing the substring "already exists" and writes
+// no file.
+func TestCreateWithIDRejectsExisting(t *testing.T) {
+	root := setupCreateEnv(t)
+
+	// First call succeeds.
+	if _, err := CreateWithID(root, "ADR-0099", "First", CreateOpts{}); err != nil {
+		t.Fatalf("first CreateWithID: %v", err)
+	}
+
+	// Second call against the same ID must fail.
+	_, err := CreateWithID(root, "ADR-0099", "Second", CreateOpts{})
+	if err == nil {
+		t.Fatal("expected error for existing ADR ID")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error must contain 'already exists', got: %v", err)
+	}
+
+	// The on-disk file must still be the "First" content — collision
+	// must not overwrite.
+	data, _ := os.ReadFile(filepath.Join(root, "docs", "adr", "ADR-0099.md"))
+	if !strings.Contains(string(data), "First") {
+		t.Errorf("collision must not overwrite original; got:\n%s", string(data))
+	}
+}
+
+// TestCreateWithIDRejectsExistingSlug asserts collision detection also
+// catches the slugged-filename shape (e.g. ADR-0099-foo.md) when the
+// caller passes the bare "ADR-0099" id.
+func TestCreateWithIDRejectsExistingSlug(t *testing.T) {
+	root := setupCreateEnv(t)
+
+	// Seed a slugged file.
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-0099-existing-slug.md"), []byte("# existing\n"), 0o644); err != nil {
+		t.Fatalf("seed slug file: %v", err)
+	}
+
+	_, err := CreateWithID(root, "ADR-0099", "Placeholder", CreateOpts{})
+	if err == nil {
+		t.Fatal("expected error for existing slugged ADR ID")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error must contain 'already exists', got: %v", err)
+	}
+}
+
 func TestCreate_SupersedesWithExplicitDomains(t *testing.T) {
 	root := setupCreateEnv(t)
 

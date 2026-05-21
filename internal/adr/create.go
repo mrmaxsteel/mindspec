@@ -134,3 +134,79 @@ func Create(root, title string, opts CreateOpts) (string, error) {
 
 	return outPath, nil
 }
+
+// CreateWithID generates a new ADR file at a caller-supplied ID
+// (e.g. "ADR-0099") instead of auto-allocating via NextID. Used by the
+// Spec 087 Bead 3 supersede flow which pre-creates a placeholder ADR
+// with Status: Proposed so the divergence-gate skip path is
+// deterministic (revision 1 of the panel-revised plan: the file MUST
+// exist on disk at the user-supplied ID verbatim).
+//
+// Contract:
+//   - id MUST already have passed idvalidate.ADRID at the call site
+//     (the CLI layer enforces this before reaching here).
+//   - If a file at workspace.ADRFilePath(root, id) — or any
+//     `<id>-<slug>.md` collision — already exists, returns an error
+//     whose message contains the substring "already exists" and writes
+//     nothing.
+//   - Reuses the existing template-fill logic from Create but
+//     SUBSTITUTES the user-supplied id verbatim. Status is Proposed,
+//     Domains seed from opts.Domains.
+//   - The Supersedes/Superseded-by chain update from Create does NOT
+//     apply: CreateWithID is for placeholder creation, which has no
+//     "old" ADR to update.
+func CreateWithID(root, id, title string, opts CreateOpts) (string, error) {
+	if strings.TrimSpace(title) == "" {
+		return "", fmt.Errorf("title must not be empty")
+	}
+
+	// Validate the ID defensively in case the caller forgot.
+	if err := idvalidate.ADRID(id); err != nil {
+		return "", fmt.Errorf("invalid ADR ID: %w", err)
+	}
+
+	outPath, err := workspace.ADRFilePath(root, id)
+	if err != nil {
+		return "", err
+	}
+
+	// Collision check: exact path AND slug variants. Mirrors adr.Show's
+	// lookup discipline so we don't create ADR-0099.md when an
+	// ADR-0099-<slug>.md already exists.
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		return "", fmt.Errorf("ADR %s already exists at %s", id, outPath)
+	} else if !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+	slugMatches, globErr := filepath.Glob(filepath.Join(workspace.ADRDir(root), id+"-*.md"))
+	if globErr != nil {
+		return "", globErr
+	}
+	if len(slugMatches) > 0 {
+		return "", fmt.Errorf("ADR %s already exists at %s", id, slugMatches[0])
+	}
+
+	// Strip the "ADR-" prefix to obtain the bare ID for the template
+	// header substitution (the NextID-driven path uses just digits).
+	bareID := strings.TrimPrefix(id, "ADR-")
+
+	content := adrTemplate
+	content = strings.ReplaceAll(content, "NNNN", bareID)
+	content = strings.ReplaceAll(content, "<Title>", title)
+	content = strings.ReplaceAll(content, "<YYYY-MM-DD>", time.Now().Format("2006-01-02"))
+
+	if len(opts.Domains) > 0 {
+		content = strings.Replace(content, "<comma-separated list>", strings.Join(opts.Domains, ", "), 1)
+	}
+
+	adrDir := workspace.ADRDir(root)
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating ADR directory: %w", err)
+	}
+
+	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("writing ADR file: %w", err)
+	}
+
+	return outPath, nil
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,8 @@ This is the final human gate in the spec lifecycle.`,
 
 func init() {
 	implApproveCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
+	implApproveCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on spec epic metadata)")
+	implApproveCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on spec epic metadata)")
 	implCmd.AddCommand(implApproveCmd)
 }
 
@@ -61,8 +64,30 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--allow-doc-skew requires a non-empty reason")
 	}
 
+	// Spec 087 Bead 3: --override-adr / --supersede-adr override
+	// flags (shared with `mindspec approve impl`). Same discipline
+	// as --allow-doc-skew. Mutually exclusive — distinct audit
+	// namespaces per spec.md Requirement 13.
+	overrideADR, _ := cmd.Flags().GetString("override-adr")
+	if cmd.Flags().Changed("override-adr") && strings.TrimSpace(overrideADR) == "" {
+		return fmt.Errorf("--override-adr requires a non-empty reason")
+	}
+	supersedeADR, _ := cmd.Flags().GetString("supersede-adr")
+	if cmd.Flags().Changed("supersede-adr") {
+		if err := idvalidate.ADRID(supersedeADR); err != nil {
+			return fmt.Errorf("--supersede-adr: %w", err)
+		}
+	}
+	if cmd.Flags().Changed("override-adr") && cmd.Flags().Changed("supersede-adr") {
+		return fmt.Errorf("--override-adr and --supersede-adr are mutually exclusive")
+	}
+
 	exec := newExecutor(root)
-	result, err := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{AllowDocSkew: allowDocSkew})
+	result, err := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{
+		AllowDocSkew: allowDocSkew,
+		OverrideADR:  overrideADR,
+		SupersedeADR: supersedeADR,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

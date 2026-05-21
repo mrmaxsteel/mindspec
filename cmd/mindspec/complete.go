@@ -8,6 +8,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -80,8 +81,30 @@ The bead ID is required as the first argument.`,
 			return fmt.Errorf("--allow-doc-skew requires a non-empty reason")
 		}
 
+		// Spec 087 Bead 3: --override-adr / --supersede-adr override
+		// flags. Same empty-reason discipline as --allow-doc-skew.
+		// The two flags are mutually exclusive — they target the
+		// same gate but record DISTINCT audit namespaces.
+		overrideADR, _ := cmd.Flags().GetString("override-adr")
+		if cmd.Flags().Changed("override-adr") && strings.TrimSpace(overrideADR) == "" {
+			return fmt.Errorf("--override-adr requires a non-empty reason")
+		}
+		supersedeADR, _ := cmd.Flags().GetString("supersede-adr")
+		if cmd.Flags().Changed("supersede-adr") {
+			if err := idvalidate.ADRID(supersedeADR); err != nil {
+				return fmt.Errorf("--supersede-adr: %w", err)
+			}
+		}
+		if cmd.Flags().Changed("override-adr") && cmd.Flags().Changed("supersede-adr") {
+			return fmt.Errorf("--override-adr and --supersede-adr are mutually exclusive")
+		}
+
 		exec := newExecutor(root)
-		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{AllowDocSkew: allowDocSkew})
+		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{
+			AllowDocSkew: allowDocSkew,
+			OverrideADR:  overrideADR,
+			SupersedeADR: supersedeADR,
+		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -101,4 +124,6 @@ The bead ID is required as the first argument.`,
 func init() {
 	completeCmd.Flags().String("spec", "", "Target spec ID when multiple specs are active")
 	completeCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on bead metadata)")
+	completeCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on bead metadata)")
+	completeCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on bead metadata)")
 }

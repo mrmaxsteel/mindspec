@@ -25,7 +25,7 @@ func saveAndRestore(t *testing.T) {
 	origResolveTarget := resolveTargetFn
 	origFindLocalRoot := findLocalRootFn
 	origFetchBeadByID := fetchBeadByIDFn
-	origMergeMeta := mergeMetadataFn
+	origMergeMeta := completeMergeMetadataFn
 	origGitEmail := gitUserEmailFn
 
 	t.Cleanup(func() {
@@ -36,7 +36,7 @@ func saveAndRestore(t *testing.T) {
 		resolveTargetFn = origResolveTarget
 		findLocalRootFn = origFindLocalRoot
 		fetchBeadByIDFn = origFetchBeadByID
-		mergeMetadataFn = origMergeMeta
+		completeMergeMetadataFn = origMergeMeta
 		gitUserEmailFn = origGitEmail
 	})
 
@@ -47,7 +47,7 @@ func saveAndRestore(t *testing.T) {
 	listJSONFn = func(args ...string) ([]byte, error) { return []byte("[]"), nil }
 	// Spec 086 Bead 3: keep metadata + git-identity reads inert by
 	// default so the existing tests don't shell out to bd or git.
-	mergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
 	gitUserEmailFn = func() string { return "test@example.invalid" }
 }
 
@@ -825,7 +825,7 @@ func TestCompleteAllowsOverride(t *testing.T) {
 	// Recorder for the override metadata write.
 	var metaCalls []map[string]interface{}
 	var metaBeadID string
-	mergeMetadataFn = func(id string, updates map[string]interface{}) error {
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
 		metaBeadID = id
 		metaCalls = append(metaCalls, updates)
 		return nil
@@ -861,6 +861,308 @@ func TestCompleteAllowsOverride(t *testing.T) {
 	}
 }
 
+// --- Spec 087 Bead 3: ADR-divergence override/supersede tests ---
+
+// writeADRDivergenceFixture builds a fixture under root that trips
+// the ADR-divergence gate: a spec.md declaring "core" as an impacted
+// domain, a plan.md citing only an execution-domain ADR, and that
+// Accepted ADR on disk. Returns the spec ID.
+func writeADRDivergenceFixture(t *testing.T, root, specID string) {
+	t.Helper()
+
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	specMD := "# Spec " + specID + "\n\n## Impacted Domains\n\n- core\n"
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specMD), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	planMD := "---\nspec_id: " + specID + "\nstatus: Approved\nbead_ids:\n  - bead-1\nadr_citations:\n  - id: ADR-9001\n---\n\n# Plan\n"
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planMD), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+
+	adrDir := filepath.Join(root, ".mindspec", "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("mkdir adr dir: %v", err)
+	}
+	adrMD := "# ADR-9001: Exec-only test\n\n" +
+		"- **Date**: 2026-01-01\n" +
+		"- **Status**: Accepted\n" +
+		"- **Domain(s)**: execution\n" +
+		"- **Deciders**: test\n" +
+		"- **Supersedes**: n/a\n" +
+		"- **Superseded-by**: n/a\n\n" +
+		"## Decision\nTest fixture.\n"
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-9001.md"), []byte(adrMD), 0o644); err != nil {
+		t.Fatalf("write ADR-9001.md: %v", err)
+	}
+}
+
+// TestOverrideUnblocks: a complete.Run that would be rejected by the
+// ADR-divergence gate (uncovered "core" domain touch) succeeds when
+// --override-adr "<reason>" is set, AND the
+// `mindspec_adr_override_*` metadata is written on the bead AFTER
+// CompleteBead returns nil.
+func TestOverrideUnblocks(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "087-test")
+	stubPhaseEpic(t, "087-test", "epic-087")
+	resolveTargetFn = func(r, flag string) (string, error) { return "087-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// Source touch that ValidateDivergence will attribute to "core"
+	// via the fallback `internal/core/**` (no OWNERSHIP.yaml present).
+	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+
+	// Recorder for metadata writes.
+	var metaCalls []map[string]interface{}
+	var metaBeadIDs []string
+	metaSeenBeforeCompleteBead := false
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if len(mock.CallsTo("CompleteBead")) == 0 {
+			metaSeenBeforeCompleteBead = true
+		}
+		metaBeadIDs = append(metaBeadIDs, id)
+		metaCalls = append(metaCalls, updates)
+		return nil
+	}
+	gitUserEmailFn = func() string { return "override-user@example.invalid" }
+
+	// Sanity check: WITHOUT the override flag, the gate must reject.
+	{
+		probeMock := newMockExec()
+		probeMock.MergeBaseResult = "merge-base-sha"
+		probeMock.ChangedFilesResult = []string{"internal/core/foo.go"}
+		_, err := Run(root, "bead-1", "", "", probeMock, CompleteOpts{AllowDocSkew: "test setup"})
+		if err == nil || !strings.Contains(err.Error(), "adr-divergence") {
+			t.Fatalf("baseline: expected adr-divergence error without override, got: %v", err)
+		}
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
+		AllowDocSkew: "test setup",
+		OverrideADR:  "wip — core ADR coming in followup",
+	})
+	if err != nil {
+		t.Fatalf("override should allow completion, got: %v", err)
+	}
+
+	// Verify the override metadata was written to the right bead.
+	foundOverride := false
+	for i, m := range metaCalls {
+		reason, ok := m["mindspec_adr_override_reason"].(string)
+		if !ok {
+			continue
+		}
+		if reason != "wip — core ADR coming in followup" {
+			t.Errorf("override reason: got %q, want verbatim flag value", reason)
+		}
+		if metaBeadIDs[i] != "bead-1" {
+			t.Errorf("override metadata target: got %q, want bead-1", metaBeadIDs[i])
+		}
+		if by, _ := m["mindspec_adr_override_by"].(string); by != "override-user@example.invalid" {
+			t.Errorf("mindspec_adr_override_by: got %q", by)
+		}
+		if at, _ := m["mindspec_adr_override_at"].(string); at == "" {
+			t.Error("mindspec_adr_override_at must not be empty")
+		}
+		foundOverride = true
+		break
+	}
+	if !foundOverride {
+		t.Fatalf("expected an mindspec_adr_override_reason write; got %v", metaCalls)
+	}
+
+	// Strict ordering: the metadata-write seam was NEVER invoked
+	// before CompleteBead during this Run (panel CONSENSUS revision 4
+	// carried forward to spec 087 Bead 3 — the seam check above
+	// records every entry-time observation of whether CompleteBead
+	// had been called).
+	if metaSeenBeforeCompleteBead {
+		t.Error("override metadata write occurred before CompleteBead — panel CONSENSUS rev 4 violation")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 1 {
+		t.Errorf("expected 1 CompleteBead call, got %d", len(calls))
+	}
+}
+
+// TestSupersedeUnblocks: same fixture as TestOverrideUnblocks but with
+// --supersede-adr ADR-0099. Asserts (1) the placeholder ADR file
+// exists on disk at the user-supplied ID verbatim, (2) the run
+// succeeds, (3) the four mindspec_adr_supersede_* keys are written
+// on the bead AFTER CompleteBead.
+func TestSupersedeUnblocks(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "087-test")
+	stubPhaseEpic(t, "087-test", "epic-087")
+	resolveTargetFn = func(r, flag string) (string, error) { return "087-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+
+	var metaCalls []map[string]interface{}
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaCalls = append(metaCalls, updates)
+		return nil
+	}
+	gitUserEmailFn = func() string { return "supersede-user@example.invalid" }
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
+		AllowDocSkew: "test setup",
+		SupersedeADR: "ADR-0099",
+	})
+	if err != nil {
+		t.Fatalf("supersede should allow completion, got: %v", err)
+	}
+
+	// The placeholder ADR file MUST exist on disk at the verbatim ID.
+	adrPath := filepath.Join(root, ".mindspec", "docs", "adr", "ADR-0099.md")
+	data, readErr := os.ReadFile(adrPath)
+	if readErr != nil {
+		t.Fatalf("expected placeholder ADR at %s: %v", adrPath, readErr)
+	}
+	body := string(data)
+	if !strings.Contains(body, "**Status**: Proposed") {
+		t.Errorf("placeholder ADR must carry Status: Proposed, got:\n%s", body)
+	}
+	if !strings.Contains(body, "**Domain(s)**: core") {
+		t.Errorf("placeholder ADR must seed Domain(s) from the uncovered finding (core), got:\n%s", body)
+	}
+
+	// All four mindspec_adr_supersede_* keys must be written.
+	foundSupersede := false
+	for _, m := range metaCalls {
+		id, ok := m["mindspec_adr_supersede_id"].(string)
+		if !ok {
+			continue
+		}
+		if id != "ADR-0099" {
+			t.Errorf("mindspec_adr_supersede_id: got %q, want ADR-0099", id)
+		}
+		reason, _ := m["mindspec_adr_supersede_reason"].(string)
+		if !strings.Contains(reason, "ADR-0099") {
+			t.Errorf("mindspec_adr_supersede_reason must reference the new ID, got %q", reason)
+		}
+		if at, _ := m["mindspec_adr_supersede_at"].(string); at == "" {
+			t.Error("mindspec_adr_supersede_at must not be empty")
+		}
+		if by, _ := m["mindspec_adr_supersede_by"].(string); by != "supersede-user@example.invalid" {
+			t.Errorf("mindspec_adr_supersede_by: got %q", by)
+		}
+		foundSupersede = true
+		break
+	}
+	if !foundSupersede {
+		t.Fatalf("expected mindspec_adr_supersede_id write; got %v", metaCalls)
+	}
+}
+
+// TestSupersedeRejectsExistingID: --supersede-adr against an already
+// existing ADR id returns an error containing "already exists" and
+// MUST NOT mutate the existing ADR file nor write any metadata.
+func TestSupersedeRejectsExistingID(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "087-test")
+	stubPhaseEpic(t, "087-test", "epic-087")
+	resolveTargetFn = func(r, flag string) (string, error) { return "087-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	// Pre-seed ADR-9001 collision (it already exists from the fixture).
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+
+	originalBody, _ := os.ReadFile(filepath.Join(root, ".mindspec", "docs", "adr", "ADR-9001.md"))
+
+	var metaCalls []map[string]interface{}
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaCalls = append(metaCalls, updates)
+		return nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
+		AllowDocSkew: "test setup",
+		SupersedeADR: "ADR-9001",
+	})
+	if err == nil {
+		t.Fatal("expected error when --supersede-adr collides with existing ADR")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should contain 'already exists', got: %v", err)
+	}
+
+	// Existing ADR must not be mutated.
+	afterBody, _ := os.ReadFile(filepath.Join(root, ".mindspec", "docs", "adr", "ADR-9001.md"))
+	if string(afterBody) != string(originalBody) {
+		t.Error("existing ADR was mutated by failed --supersede-adr call")
+	}
+
+	// No supersede metadata may have been written (the failure aborts
+	// before terminal mutation).
+	for _, m := range metaCalls {
+		if _, ok := m["mindspec_adr_supersede_id"]; ok {
+			t.Errorf("no supersede metadata may be written on collision; got %v", m)
+		}
+	}
+}
+
+// TestOverrideMetadataGoesThroughSeam: the override write MUST flow
+// through completeMergeMetadataFn (NOT a direct bead.MergeMetadata
+// call). Per spec.md Requirement 12 + the panel revision 8 rename,
+// the seam is the only audit-write path.
+func TestOverrideMetadataGoesThroughSeam(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "087-test")
+	stubPhaseEpic(t, "087-test", "epic-087")
+	resolveTargetFn = func(r, flag string) (string, error) { return "087-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+
+	seamCalls := 0
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if _, ok := updates["mindspec_adr_override_reason"]; ok {
+			seamCalls++
+		}
+		return nil
+	}
+
+	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
+		AllowDocSkew: "test setup",
+		OverrideADR:  "captured via seam",
+	}); err != nil {
+		t.Fatalf("override should allow completion, got: %v", err)
+	}
+
+	if seamCalls != 1 {
+		t.Errorf("expected exactly one seam call carrying mindspec_adr_override_reason; got %d", seamCalls)
+	}
+}
+
 // TestSkewMetadataWrittenAfterSuccess: if the terminal mutation
 // (closeBeadFn) returns an error AND the bead is not already-closed,
 // the override metadata must NOT be written. The failure itself is
@@ -884,7 +1186,7 @@ func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
 
 	// Track every metadata call.
 	var metaCalls []map[string]interface{}
-	mergeMetadataFn = func(id string, updates map[string]interface{}) error {
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
 		metaCalls = append(metaCalls, updates)
 		return nil
 	}
