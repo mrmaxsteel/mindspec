@@ -12,8 +12,10 @@
 
 ## Status
 
-Stub created during spec 089-ceremony-collapse drafting. Finalized in
-spec 089 Bead 3 alongside the auto-migrator implementation.
+Finalized in spec 089 Bead 3 alongside `phase.EnsureMigrated` (Bead 2),
+`mindspec doctor --dry-run-migration` (this bead), and
+`internal/lint/scaffold_test.go::TestNoMoleculeScaffoldingSymbols`
+(Bead 1).
 
 ## Context
 
