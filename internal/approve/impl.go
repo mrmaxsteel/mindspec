@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -24,6 +25,10 @@ var (
 	implRunBDFn         = bead.RunBD
 	implMergeMetadataFn = bead.MergeMetadata
 	implGitUserEmailFn  = bead.GitUserEmail
+	// implCreateWithIDFn is the Spec 087 Bead 3 seam for the
+	// placeholder-ADR creation step in the supersede flow on the
+	// backstop (`approve impl`) path.
+	implCreateWithIDFn = adr.CreateWithID
 )
 
 // ImplOpts holds options for implementation approval.
@@ -36,6 +41,26 @@ var (
 // written — the failure itself is the audit trail.
 type ImplOpts struct {
 	AllowDocSkew string
+
+	// OverrideADR is the human-readable reason for bypassing the
+	// ADR-divergence backstop gate. Empty string means "no override".
+	// A non-empty string causes the gate to be SKIPPED. After
+	// `exec.FinalizeEpic` returns nil the reason is recorded on the
+	// spec EPIC's metadata under the `mindspec_adr_override_*`
+	// namespace.
+	// Spec 087 Bead 3.
+	OverrideADR string
+
+	// SupersedeADR is the user-supplied ADR ID (e.g. "ADR-0099") for
+	// the supersede backstop flow. Empty string means "no supersede".
+	// When set, a placeholder ADR is pre-created on disk (Status:
+	// Proposed, Domain(s) seeded from the first uncovered
+	// DivergenceFinding) BEFORE the gate-skip decision; the gate is
+	// then SKIPPED, and the four `mindspec_adr_supersede_*` keys are
+	// written to the EPIC's metadata AFTER FinalizeEpic returns nil.
+	// Mutually exclusive with OverrideADR at the CLI layer.
+	// Spec 087 Bead 3.
+	SupersedeADR string
 }
 
 // ImplResult holds the result of implementation approval.
@@ -131,13 +156,36 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		// FinalizeEpic per panel CONSENSUS revision 4.
 	}
 
-	// Enforcement gate (3/3): Spec 086 (F2) ADR-divergence stub
-	// (spec 087 will fill the body). The `--allow-doc-skew` override
-	// is intentionally NOT honored here per panel CONSENSUS rev 6;
-	// the placeholder always emits no failures today.
-	adrResult, _ := validate.CheckADRDivergence(root, base, exec, specDir, "")
-	if adrResult.HasFailures() {
-		return nil, fmt.Errorf("adr-divergence: %s", joinResultErrorMessages(adrResult))
+	// Enforcement gate (3/3): Spec 087 Bead 2 fills the body; this
+	// backstop runs across the full spec branch. The
+	// `--override-adr` and `--supersede-adr` flags (Spec 087 Bead 3)
+	// bypass the gate; `--allow-doc-skew` does NOT (panel CONSENSUS
+	// rev 6). The findings slice seeds the supersede placeholder's
+	// Domains field structurally (revision 2 — no string parsing).
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "")
+
+	// Pre-create the placeholder ADR FIRST when --supersede-adr is
+	// requested so the new file exists on disk even if a downstream
+	// step fails.
+	var supersedeNewID string
+	if o.SupersedeADR != "" {
+		var seedDomains []string
+		for _, f := range adrFindings {
+			if f.Kind == "uncovered" && f.Domain != "" {
+				seedDomains = []string{f.Domain}
+				break
+			}
+		}
+		title := "Placeholder for " + o.SupersedeADR
+		if _, err := implCreateWithIDFn(root, o.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
+			return nil, fmt.Errorf("--supersede-adr: %w", err)
+		}
+		supersedeNewID = o.SupersedeADR
+	}
+
+	if o.OverrideADR == "" && o.SupersedeADR == "" && adrResult.HasFailures() {
+		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
+			joinResultErrorMessages(adrResult))
 	}
 
 	// MUTATION (1/3): close epic and mark as explicitly done.
@@ -181,6 +229,35 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		meta := buildImplSkewMetadata(o.AllowDocSkew)
 		if err := implMergeMetadataFn(epicID, meta); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record impl-skew override metadata on %s: %v", epicID, err))
+		}
+	}
+
+	// Spec 087 Bead 3: ADR-divergence override / supersede metadata
+	// writes on the EPIC, mirroring the doc-skew discipline above.
+	// Distinct namespace per spec.md Requirement 13.
+	if o.OverrideADR != "" && epicID != "" {
+		meta := map[string]interface{}{
+			"mindspec_adr_override_reason": o.OverrideADR,
+			"mindspec_adr_override_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_adr_override_by":     implGitUserEmailFn(),
+		}
+		if err := implMergeMetadataFn(epicID, meta); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record adr-override metadata on %s: %v", epicID, err))
+		}
+	}
+	if o.SupersedeADR != "" && epicID != "" {
+		reason := o.OverrideADR
+		if reason == "" {
+			reason = "superseded by " + supersedeNewID
+		}
+		meta := map[string]interface{}{
+			"mindspec_adr_supersede_id":     supersedeNewID,
+			"mindspec_adr_supersede_reason": reason,
+			"mindspec_adr_supersede_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_adr_supersede_by":     implGitUserEmailFn(),
+		}
+		if err := implMergeMetadataFn(epicID, meta); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record adr-supersede metadata on %s: %v", epicID, err))
 		}
 	}
 

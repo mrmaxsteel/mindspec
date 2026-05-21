@@ -739,6 +739,95 @@ func TestApproveImplCallOrder(t *testing.T) {
 	}
 }
 
+// --- Spec 087 Bead 3: ADR-divergence override/supersede mirror tests ---
+
+// writeADRDivergenceFixtureImpl builds an approve-side fixture that
+// trips ADR-divergence on the spec branch — a spec.md declaring
+// "core" as an impacted domain, a plan.md citing only an
+// execution-domain ADR, and that ADR on disk.
+func writeADRDivergenceFixtureImpl(t *testing.T, root, specID string) {
+	t.Helper()
+
+	specDir := filepath.Join(root, "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"),
+		[]byte("# Spec "+specID+"\n\n## Impacted Domains\n\n- core\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	planMD := "---\nspec_id: " + specID + "\nstatus: Approved\nbead_ids:\n  - bead-1\nadr_citations:\n  - id: ADR-9001\n---\n\n# Plan\n"
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planMD), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("mkdir adr dir: %v", err)
+	}
+	adrMD := "# ADR-9001: Exec-only test\n\n" +
+		"- **Date**: 2026-01-01\n" +
+		"- **Status**: Accepted\n" +
+		"- **Domain(s)**: execution\n" +
+		"- **Deciders**: test\n" +
+		"- **Supersedes**: n/a\n" +
+		"- **Superseded-by**: n/a\n\n" +
+		"## Decision\nTest fixture.\n"
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-9001.md"), []byte(adrMD), 0o644); err != nil {
+		t.Fatalf("write ADR-9001.md: %v", err)
+	}
+}
+
+// TestApproveImplOverrideMetadataGoesThroughSeam mirrors the complete
+// package's TestOverrideMetadataGoesThroughSeam: the override write
+// on the spec EPIC MUST flow through implMergeMetadataFn (the spec
+// 087 Bead 3 seam) and the write must happen AFTER FinalizeEpic
+// returns nil (spec 086 panel CONSENSUS revision 4 discipline).
+func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
+	tmp := t.TempDir()
+	writeADRDivergenceFixtureImpl(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+
+	saveAndRestore(t)
+
+	seamCalls := 0
+	seenBeforeFinalize := false
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// Source touch attributed to "core" via the fallback path.
+		ChangedFilesResult: []string{"internal/core/foo.go"},
+	}
+	implMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if _, ok := updates["mindspec_adr_override_reason"]; ok {
+			seamCalls++
+			if len(mock.CallsTo("FinalizeEpic")) == 0 {
+				seenBeforeFinalize = true
+			}
+		}
+		return nil
+	}
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]string{{"status": "closed"}})
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+
+	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{
+		AllowDocSkew: "test setup",
+		OverrideADR:  "wip — core ADR coming in followup",
+	})
+	if err != nil {
+		t.Fatalf("override should allow approval, got: %v", err)
+	}
+	if seamCalls != 1 {
+		t.Errorf("expected exactly one seam call with mindspec_adr_override_reason; got %d", seamCalls)
+	}
+	if seenBeforeFinalize {
+		t.Error("override metadata write occurred before FinalizeEpic — panel CONSENSUS rev 4 violation")
+	}
+}
+
 // --- AST helpers (kept in this file; not exported) ---
 
 func isSelectorCall(expr ast.Expr, recv, sel string) bool {
