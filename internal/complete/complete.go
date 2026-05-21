@@ -34,7 +34,7 @@ var (
 	// adrCreateWithIDFn is the package-level seam for the placeholder-
 	// ADR creation step in the --supersede-adr flow. Tests swap this
 	// to avoid writing real ADR files when only asserting flow
-	// behaviour, though the default is the real implementation since
+	// behavior, though the default is the real implementation since
 	// TestSupersedeUnblocks asserts on-disk presence.
 	adrCreateWithIDFn = adr.CreateWithID
 )

@@ -13,7 +13,7 @@ import (
 // the package-internal ValidateDivergence helper that does the actual
 // work.
 //
-// Behaviour:
+// Behavior:
 //   - When `specDir` is empty the function cannot load citations or
 //     impacted-domains; it returns a *Result with a single
 //     `adr-divergence-load` error and nil findings.

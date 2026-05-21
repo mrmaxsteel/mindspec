@@ -33,10 +33,10 @@ func TestValidatePlan_WellFormed(t *testing.T) {
 	// validator's structural shape, not domain-graph completeness on
 	// pre-existing plans.
 	allowedErrors := map[string]bool{
-		"bead-id-missing":           true,
-		"bead-acceptance-criteria":  true,
-		"adr-coverage-missing":      true,
-		"adr-cite-irrelevant":       true,
+		"bead-id-missing":            true,
+		"bead-acceptance-criteria":   true,
+		"adr-coverage-missing":       true,
+		"adr-cite-irrelevant":        true,
 		"adr-supersede-chain-broken": true,
 	}
 	for _, issue := range r.Issues {
@@ -1437,4 +1437,3 @@ func TestSupersedeChainTooLong(t *testing.T) {
 		t.Errorf("expected error to mention adr-supersede-chain-too-long, got: %v", err)
 	}
 }
-

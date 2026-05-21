@@ -401,7 +401,7 @@ func ParseBeadSections(content string) []BeadSection {
 // intersection is empty (and impactedDomains is known), the citation is
 // architecturally irrelevant — emits "adr-cite-irrelevant". The check is
 // suppressed when impactedDomains is empty (e.g. spec.md has no
-// `## Impacted Domains` section yet) so the existing behaviour is
+// `## Impacted Domains` section yet) so the existing behavior is
 // preserved verbatim for plans that pre-date the semantic gate.
 func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impactedDomains []string) {
 	for _, cite := range citations {
