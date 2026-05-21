@@ -126,6 +126,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, fmt.Errorf("resolving active spec: %w", err)
 	}
 
+	// 1.25. Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on
+	// first lifecycle command. Must precede the phase-dependent guard
+	// below (and the eventual phase.DerivePhaseFromChildren call in
+	// advanceState) so legacy epics get their mindspec_phase metadata
+	// before any phase read. No-op when already migrated or no epic.
+	if _, err := phase.EnsureMigrated(specID); err != nil {
+		return nil, err
+	}
+
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
 	epicID, epicErr := phase.FindEpicBySpecID(specID)
 	if epicErr == nil && epicID != "" {
