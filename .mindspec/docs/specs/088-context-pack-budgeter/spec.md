@@ -80,7 +80,7 @@ NOT depend on the precise rune-ratio constant.
 
 - context-system
 
-### Affected packages (per domain)
+## Affected packages (per domain)
 
 - **`internal/contextpack/`** (domain: `context-system`) — the
   centerpiece. A NEW sibling file `budgeter.go` is added to export
