@@ -81,6 +81,13 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 	writeSpecDir(t, tmp, "010-test")
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
+	// Spec 089: stub phase.EnsureMigrated's bd-shelling seam so the
+	// migration write doesn't fail before the mode check runs.
+	restorePhaseMerge := phase.SetMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		return nil
+	})
+	t.Cleanup(restorePhaseMerge)
+
 	// Stub phase to return implement mode (not review)
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		for _, a := range args {
@@ -351,6 +358,15 @@ func saveAndRestore(t *testing.T) {
 		implMergeMetadataFn = origMergeMeta
 		implGitUserEmailFn = origGitEmail
 	})
+
+	// Spec 089: phase.EnsureMigrated (wired into approve-impl) shells to
+	// `bd` via bead.MergeMetadata when the epic lacks mindspec_phase. CI
+	// has no `bd` on PATH, so stub the seam to a no-op for the duration
+	// of the test.
+	restorePhaseMerge := phase.SetMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		return nil
+	})
+	t.Cleanup(restorePhaseMerge)
 
 	// Stub phase package for review mode by default
 	stubPhaseForReview(t)

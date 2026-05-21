@@ -16,10 +16,14 @@ var doctorCmd = &cobra.Command{
 
 Use --fix to auto-repair fixable issues (e.g. tracked runtime files).
 Use --fix --force to also replace user-authored values for mindspec-required
-beads config keys (not just add missing ones).`,
+beads config keys (not just add missing ones).
+Use --dry-run-migration to report which specs would migrate on their next
+lifecycle command (per ADR-0034) without writing any state. Exits 0 even
+when legacy specs are surfaced.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fix, _ := cmd.Flags().GetBool("fix")
 		force, _ := cmd.Flags().GetBool("force")
+		dryRun, _ := cmd.Flags().GetBool("dry-run-migration")
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -33,7 +37,7 @@ beads config keys (not just add missing ones).`,
 
 		fmt.Printf("Workspace Root: %s\n", root)
 
-		report := doctor.RunWithOptions(root, doctor.Options{Force: force})
+		report := doctor.RunWithOptions(root, doctor.Options{Force: force, DryRunMigration: dryRun})
 
 		if fix {
 			report.Fix()
@@ -74,4 +78,5 @@ func statusTag(s doctor.Status) string {
 func init() {
 	doctorCmd.Flags().Bool("fix", false, "Auto-repair fixable issues")
 	doctorCmd.Flags().Bool("force", false, "With --fix, also replace user-authored values for mindspec-required beads config keys")
+	doctorCmd.Flags().Bool("dry-run-migration", false, "Report which specs would migrate on their next lifecycle command without writing any state")
 }

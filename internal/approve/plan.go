@@ -70,6 +70,13 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
+	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
+	// lifecycle command. No-op if the epic already has mindspec_phase, or
+	// when no epic exists yet (pre-approve-spec). Migration errors fail
+	// the command (spec 089 Requirement 9).
+	if _, err := phase.EnsureMigrated(specID); err != nil {
+		return nil, err
+	}
 	result := &PlanResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
