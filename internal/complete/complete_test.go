@@ -40,6 +40,15 @@ func saveAndRestore(t *testing.T) {
 		gitUserEmailFn = origGitEmail
 	})
 
+	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
+	// `bd` via bead.MergeMetadata when the epic lacks mindspec_phase.
+	// CI has no `bd` on PATH, so stub the seam to a no-op for the
+	// duration of the test.
+	restorePhaseMerge := phase.SetMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		return nil
+	})
+	t.Cleanup(restorePhaseMerge)
+
 	// Default stubs
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
