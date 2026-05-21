@@ -31,6 +31,11 @@ type beadShowEntry struct {
 // RenderBeadContext fetches bead data via `bd show <beadID> --json` and renders
 // a markdown context document. This replaces the old BuildBeadPrimer/RenderBeadPrimer
 // flow — all context is pre-populated in the bead at plan approval time (Spec 074).
+//
+// Deprecated: New callers should use BuildBead (internal/contextpack/budgeter.go)
+// which honors a token budget, emits the spec 088 six-tier layout, and appends a
+// SHA-256 Provenance block. RenderBeadContext is preserved for byte-identical
+// output when `mindspec context bead <id>` is invoked without `--max-tokens`.
 func RenderBeadContext(beadID string) (string, error) {
 	out, err := beadShowFn("show", beadID, "--json")
 	if err != nil {
