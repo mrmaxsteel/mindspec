@@ -59,8 +59,16 @@ func (r *Report) Fix() {
 // Options tunes doctor's behavior. Force controls whether `--fix` on the
 // beads config-drift check should also replace user-authored values for
 // mindspec-required keys (as opposed to only adding missing ones).
+//
+// DryRunMigration, when true, makes doctor skip its repair checks and
+// run only the checkDryRunMigration reporter, which walks all specs and
+// reports which would migrate on their next lifecycle command. Writes
+// nothing. See ADR-0034 and spec 089 Requirement 11 (the dry-run path
+// is reporting-only and exits 0 regardless of how many legacy specs
+// are surfaced).
 type Options struct {
-	Force bool
+	Force           bool
+	DryRunMigration bool
 }
 
 // Run executes all doctor checks against the given project root.
@@ -71,6 +79,10 @@ func Run(root string) *Report {
 // RunWithOptions is Run's full-surface variant.
 func RunWithOptions(root string, opts Options) *Report {
 	r := &Report{}
+	if opts.DryRunMigration {
+		checkDryRunMigration(r, root)
+		return r
+	}
 	checkDocs(r, root)
 	checkBeads(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)

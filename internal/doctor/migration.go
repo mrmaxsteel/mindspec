@@ -5,7 +5,106 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// excludedSpecPathPrefixes lists path prefixes that the dry-run-migration
+// reporter must NOT descend into (HC-4). MindSpec spec directories live
+// under .mindspec/docs/specs/, never under viz/, agentmind/, or bench/;
+// the guard makes the contract explicit so a future restructure that
+// accidentally co-locates spec-shaped directories under those trees does
+// not silently feed them through the reporter.
+var excludedSpecPathPrefixes = []string{"viz/", "agentmind/", "bench/"}
+
+// checkDryRunMigration walks .mindspec/docs/specs/ and reports each
+// legacy spec (one whose lifecycle epic lacks the mindspec_phase
+// metadata key) that would migrate on its next lifecycle command.
+//
+// Output: one Check per legacy spec, of the form
+//
+//	Check{
+//	  Name:    "would-migrate: spec=<spec-id>",
+//	  Status:  Warn,
+//	  Message: "epic=<epic-id> phase=<derived>",
+//	}
+//
+// Writes nothing. Per ADR-0034 and spec 089 Requirement 11, this
+// reporter is the pre-mutation visibility surface for the auto-migrator
+// in internal/phase/migrate.go. A single shared phase.Cache is used so
+// the walk costs one bd list per epic-set rather than N show calls.
+func checkDryRunMigration(r *Report, root string) {
+	specsRoot := filepath.Join(root, ".mindspec", "docs", "specs")
+	entries, err := os.ReadDir(specsRoot)
+	if err != nil {
+		// No specs dir = nothing to migrate; reporter is a no-op.
+		// Surfacing an Error here would conflate "no specs" with
+		// "broken workspace" and would also trip HasFailures, which
+		// violates spec 089 Requirement 11.
+		return
+	}
+
+	// Stable order so the report is deterministic across runs.
+	names := make([]string, 0, len(entries))
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		names = append(names, ent.Name())
+	}
+	sort.Strings(names)
+
+	cache := phase.NewCache()
+	for _, specID := range names {
+		// HC-4 excluded-tree guard. The walk is rooted at
+		// .mindspec/docs/specs/ which is itself outside the excluded
+		// trees; this check is defensive against a future spec
+		// directory naming that begins with one of the excluded
+		// prefixes (e.g. a hypothetical `bench/<spec>` artifact
+		// accidentally placed under the specs tree).
+		skip := false
+		for _, prefix := range excludedSpecPathPrefixes {
+			if strings.HasPrefix(specID, strings.TrimSuffix(prefix, "/")+"-") ||
+				strings.HasPrefix(specID, prefix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		epicID, err := phase.FindEpicBySpecIDWithCache(cache, specID)
+		if err != nil || epicID == "" {
+			continue // no epic yet, nothing to migrate
+		}
+
+		epic, err := cache.FindEpic(epicID)
+		if err != nil || epic == nil {
+			continue
+		}
+		// Already-migrated (or post-080 native) epics carry
+		// mindspec_phase in metadata. Skip without report.
+		if epic.Metadata != nil {
+			if raw, ok := epic.Metadata["mindspec_phase"]; ok {
+				if s, ok := raw.(string); ok && s != "" {
+					continue
+				}
+			}
+		}
+
+		children, _ := cache.GetChildren(epicID)
+		derived := phase.DerivePhaseFromChildren(children)
+
+		r.Checks = append(r.Checks, Check{
+			Name:    fmt.Sprintf("would-migrate: spec=%s", specID),
+			Status:  Warn,
+			Message: fmt.Sprintf("epic=%s phase=%s", epicID, derived),
+		})
+	}
+}
 
 type lineageManifest struct {
 	RunID   string                 `json:"run_id"`
