@@ -12,8 +12,13 @@
 
 ## Status
 
-Stub created during spec 087-adr-semantic-gate drafting. Finalized in spec
-087 Bead N alongside the semantic-gate implementation.
+Finalized in spec 087 Bead 4 alongside the semantic-gate
+implementation. Plan-time gates land in Bead 1 (`checkADRCoverage` +
+`walkSupersededChain` + `IsDomainCovered`); per-bead divergence check
+lands in Bead 2 (`internal/validate/divergence.go::ValidateDivergence`
++ filled `CheckADRDivergence` body); `--override-adr` /
+`--supersede-adr` CLI flags + `adr.CreateWithID` + audit metadata land
+in Bead 3.
 
 ## Context
 
