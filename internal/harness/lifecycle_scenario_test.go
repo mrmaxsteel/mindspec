@@ -76,10 +76,32 @@ enforcement:
   agent_hooks: true
 `)
 
+	// Spec 087: plan-time ADR coverage gate requires every impacted
+	// domain to have a cited Accepted ADR. Write a test-fixture ADR
+	// covering the `core` domain used by validSpecMD.
+	writeFile(t, root, ".mindspec/docs/adr/ADR-9999.md", testFixtureADR())
+
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "initial commit")
 
 	return root
+}
+
+// testFixtureADR returns an ADR body that covers the `core` domain so
+// the Spec 087 plan-time `adr-coverage-missing` / `adr-cite-irrelevant`
+// gates pass for lifecycle scenario plans citing ADR-9999.
+func testFixtureADR() string {
+	return `# ADR-9999: Test Fixture ADR
+
+- **Status**: Accepted
+- **Domain(s)**: core
+- **Supersedes**: n/a
+- **Superseded-by**: n/a
+
+## Decision
+
+Test fixture used by internal/harness lifecycle scenario tests.
+`
 }
 
 // writeFile writes a file under root, creating intermediate directories.
@@ -193,13 +215,16 @@ status: Draft
 version: 1
 last_updated: "2026-02-28"
 bead_ids: []
+adr_citations:
+  - id: ADR-9999
+    sections: ["Decision"]
 ---
 
 # Plan: %s — Test Plan
 
 ## ADR Fitness
 
-No relevant ADRs — this is a test fixture.
+Cites ADR-9999 (test-fixture ADR covering the core domain).
 
 ## Testing Strategy
 

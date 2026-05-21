@@ -39,6 +39,8 @@ func init() {
 	approveSpecCmd.Flags().String("approved-by", "user", "Identity of the approver")
 	approvePlanCmd.Flags().String("approved-by", "user", "Identity of the approver")
 	approveImplCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
+	approveImplCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on spec epic metadata)")
+	approveImplCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on spec epic metadata)")
 	approveCmd.AddCommand(approveSpecCmd)
 	approveCmd.AddCommand(approvePlanCmd)
 	approveCmd.AddCommand(approveImplCmd)

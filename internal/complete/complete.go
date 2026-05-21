@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
@@ -20,16 +21,22 @@ import (
 
 // Package-level function variables for testability.
 var (
-	closeBeadFn       = bead.Close
-	worktreeListFn    = bead.WorktreeList
-	runBDFn           = bead.RunBD
-	listJSONFn        = bead.ListJSON
-	resolveTargetFn   = resolve.ResolveTarget
-	findLocalRootFn   = defaultFindLocalRoot
-	fetchBeadByIDFn   = next.FetchBeadByID
-	findEpicForBeadFn = phase.FindEpicForBead
-	mergeMetadataFn   = bead.MergeMetadata
-	gitUserEmailFn    = bead.GitUserEmail
+	closeBeadFn             = bead.Close
+	worktreeListFn          = bead.WorktreeList
+	runBDFn                 = bead.RunBD
+	listJSONFn              = bead.ListJSON
+	resolveTargetFn         = resolve.ResolveTarget
+	findLocalRootFn         = defaultFindLocalRoot
+	fetchBeadByIDFn         = next.FetchBeadByID
+	findEpicForBeadFn       = phase.FindEpicForBead
+	completeMergeMetadataFn = bead.MergeMetadata
+	gitUserEmailFn          = bead.GitUserEmail
+	// adrCreateWithIDFn is the package-level seam for the placeholder-
+	// ADR creation step in the --supersede-adr flow. Tests swap this
+	// to avoid writing real ADR files when only asserting flow
+	// behavior, though the default is the real implementation since
+	// TestSupersedeUnblocks asserts on-disk presence.
+	adrCreateWithIDFn = adr.CreateWithID
 )
 
 // CompleteOpts holds options for bead completion.
@@ -44,6 +51,34 @@ var (
 // the failure itself is the audit trail.
 type CompleteOpts struct {
 	AllowDocSkew string
+
+	// OverrideADR is the human-readable reason for bypassing the
+	// ADR-divergence gate. Empty string means "no override". A
+	// non-empty string causes the gate to be SKIPPED (treated as
+	// passed) regardless of detected divergence. After the terminal
+	// mutation (`exec.CompleteBead`) returns nil the reason is
+	// recorded on the bead's metadata under the
+	// `mindspec_adr_override_*` namespace (reason / by / at).
+	// Spec 087 Bead 3.
+	OverrideADR string
+
+	// SupersedeADR is the user-supplied ADR ID (e.g. "ADR-0099") for
+	// the supersede flow. Empty string means "no supersede". When set:
+	//   1. A placeholder ADR is pre-created on disk at the supplied
+	//      ID via `adr.CreateWithID` with `Status: Proposed` and
+	//      Domain(s) seeded from the first uncovered
+	//      DivergenceFinding's Domain. This happens BEFORE the
+	//      gate-skip decision so the file exists even when downstream
+	//      steps fail.
+	//   2. The ADR-divergence gate is SKIPPED (same semantics as
+	//      OverrideADR).
+	//   3. After `exec.CompleteBead` returns nil the four
+	//      `mindspec_adr_supersede_*` keys (id / reason / by / at)
+	//      are written to bead metadata.
+	// OverrideADR and SupersedeADR are mutually exclusive at the CLI
+	// layer; the override metadata namespaces are distinct.
+	// Spec 087 Bead 3.
+	SupersedeADR string
 }
 
 // Result summarizes what mindspec complete did.
@@ -162,12 +197,44 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// Override path: fall through. Metadata is written AFTER the
 		// terminal mutation succeeds (panel CONSENSUS revision 4).
 	}
-	adrResult := validate.CheckADRDivergence(root, base, exec)
-	if adrResult.HasFailures() {
-		// ADR divergence is NOT covered by `--allow-doc-skew` per panel
-		// CONSENSUS revision 6. The stub never sets failures today, but
-		// the gate is wired so spec 087 inherits the boundary contract.
-		return nil, fmt.Errorf("adr-divergence: %s", joinResultErrorMessages(adrResult))
+	specDir, sdErr := workspace.SpecDir(root, specID)
+	if sdErr != nil {
+		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
+	}
+	// The gate runs EXACTLY ONCE (revision 3 — no probe-call). The
+	// findings slice is consumed by the supersede path below to seed
+	// the placeholder ADR's Domains field. The failure-decision is
+	// bypassed when either override or supersede flag is set.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID)
+
+	// Pre-create the placeholder ADR FIRST when --supersede-adr is
+	// requested, so the new file exists on disk even if a downstream
+	// step fails (Bead 3 step 4 ordering rule).
+	var supersedeNewID string
+	if opts.SupersedeADR != "" {
+		// Seed Domains from the structured findings slice (revision 2
+		// — NO fmt.Sprintf parsing of Issue messages). When no
+		// violation exists the seed list is empty and the operator
+		// fills it in later when editing the placeholder.
+		var seedDomains []string
+		for _, f := range adrFindings {
+			if f.Kind == "uncovered" && f.Domain != "" {
+				seedDomains = []string{f.Domain}
+				break
+			}
+		}
+		title := "Placeholder for " + opts.SupersedeADR
+		if _, err := adrCreateWithIDFn(root, opts.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
+			return nil, fmt.Errorf("--supersede-adr: %w", err)
+		}
+		supersedeNewID = opts.SupersedeADR
+	}
+
+	// Gate-failure decision: only fatal when no override/supersede
+	// flag is set.
+	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
+		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
+			joinResultErrorMessages(adrResult))
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -219,8 +286,43 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			"mindspec_doc_skew_at",
 			"mindspec_doc_skew_by",
 		)
-		if err := mergeMetadataFn(beadID, meta); err != nil {
+		if err := completeMergeMetadataFn(beadID, meta); err != nil {
 			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", beadID, err)
+		}
+	}
+
+	// Spec 087 Bead 3: record ADR-divergence override metadata on
+	// the bead AFTER the terminal mutation succeeds, mirroring the
+	// doc-skew discipline above. The keys live under DISTINCT
+	// namespaces (`mindspec_adr_override_*` vs
+	// `mindspec_adr_supersede_*`) per spec.md Requirement 13.
+	if opts.OverrideADR != "" && completeErr == nil {
+		meta := buildSkewMetadata(opts.OverrideADR,
+			"mindspec_adr_override_reason",
+			"mindspec_adr_override_at",
+			"mindspec_adr_override_by",
+		)
+		if err := completeMergeMetadataFn(beadID, meta); err != nil {
+			fmt.Printf("Warning: could not record adr-override metadata on %s: %v\n", beadID, err)
+		}
+	}
+	if opts.SupersedeADR != "" && completeErr == nil {
+		// Auto-fill the reason when no separate --override-adr reason
+		// was passed alongside (these flags are mutually exclusive at
+		// the CLI, but defending in depth in case a future direct
+		// caller passes both).
+		reason := opts.OverrideADR
+		if reason == "" {
+			reason = "superseded by " + supersedeNewID
+		}
+		meta := map[string]interface{}{
+			"mindspec_adr_supersede_id":     supersedeNewID,
+			"mindspec_adr_supersede_reason": reason,
+			"mindspec_adr_supersede_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_adr_supersede_by":     gitUserEmailFn(),
+		}
+		if err := completeMergeMetadataFn(beadID, meta); err != nil {
+			fmt.Printf("Warning: could not record adr-supersede metadata on %s: %v\n", beadID, err)
 		}
 	}
 

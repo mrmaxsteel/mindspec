@@ -1,25 +1,48 @@
 package validate
 
 import (
+	"path/filepath"
+
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-// CheckADRDivergence is a named-symbol stub for the ADR-divergence lane that
-// spec-087 (F1) will fill in. The body is intentionally empty; this stub
-// exists so spec-086 Bead 3 can wire the call site and so AST-based
-// call-order tests have an anchor symbol to assert against.
+// CheckADRDivergence is the Spec 087 Bead 2 implementation of the
+// ADR-divergence enforcement lane. It bridges the executor.Executor
+// + diff-ref idiom used by callers in internal/{complete,approve} to
+// the package-internal ValidateDivergence helper that does the actual
+// work.
 //
-// Contract (forward-looking, not implemented here):
-//   - Walk ADRs under .mindspec/docs/adr/**.md
-//   - Detect divergence between accepted ADRs and code/docs that contradict
-//     them in the current diff (diffRef)
-//   - Emit findings under the "adr-divergence" sub-command
+// Behavior:
+//   - When `specDir` is empty the function cannot load citations or
+//     impacted-domains; it returns a *Result with a single
+//     `adr-divergence-load` error and nil findings.
+//   - When `beadID` is non-empty (complete.Run path) the diff range is
+//     base..HEAD — the bead's commits relative to the spec branch.
+//   - When `beadID` is empty (approve.ImplOptions impl backstop) the
+//     diff range is base..<spec branch tip>; the spec branch is
+//     derived from filepath.Base(specDir) via workspace.SpecBranch.
 //
-// Until spec-087 lands, callers receive an empty *Result so the gate stays
-// neutral.
-func CheckADRDivergence(root, diffRef string, exec executor.Executor) *Result {
-	_ = root
-	_ = diffRef
-	_ = exec
-	return &Result{SubCommand: "adr-divergence"}
+// The SubCommand label "adr-divergence" is preserved across the
+// transition from the spec-086 stub for HC-3 traceability.
+func CheckADRDivergence(
+	root, diffRef string,
+	exec executor.Executor,
+	specDir string,
+	beadID string,
+) (*Result, []DivergenceFinding) {
+	r := &Result{SubCommand: "adr-divergence", TargetID: beadID}
+	if specDir == "" {
+		r.AddError("adr-divergence-load", "specDir required")
+		return r, nil
+	}
+
+	headRef := "HEAD"
+	if beadID == "" {
+		// Impl backstop path: scan the full spec branch tip vs the
+		// caller-supplied base (typically merge-base with main).
+		headRef = workspace.SpecBranch(filepath.Base(specDir))
+	}
+
+	return ValidateDivergence(exec, root, specDir, beadID, diffRef, headRef)
 }
