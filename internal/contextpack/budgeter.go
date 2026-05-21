@@ -7,14 +7,14 @@
 //
 // Section order (fixed, per spec 088 Requirement 9):
 //
-//	1. # Bead Context: <Title>
-//	2. ## Bead          (must-tier; errors on overflow)
-//	3. ## Spec
-//	4. ## Cited ADRs    (verbatim ## Decision per cited ADR)
-//	5. ## Plan          (bead's section of plan.md)
-//	6. ## Domain Docs   (overview + interfaces per domain)
-//	7. ## File Paths    (only if file_paths non-empty)
-//	8. ## Provenance    (SHA-256 of every input artefact)
+//  1. # Bead Context: <Title>
+//  2. ## Bead          (must-tier; errors on overflow)
+//  3. ## Spec
+//  4. ## Cited ADRs    (verbatim ## Decision per cited ADR)
+//  5. ## Plan          (bead's section of plan.md)
+//  6. ## Domain Docs   (overview + interfaces per domain)
+//  7. ## File Paths    (only if file_paths non-empty)
+//  8. ## Provenance    (SHA-256 of every input artifact)
 //
 // Tail-shaving on tiers 2-6 is rune-aligned via
 // utf8.DecodeLastRuneInString. The truncation marker is the constant

@@ -33,7 +33,7 @@ type beadShowEntry struct {
 // flow — all context is pre-populated in the bead at plan approval time (Spec 074).
 //
 // Deprecated: New callers should use BuildBead (internal/contextpack/budgeter.go)
-// which honours a token budget, emits the spec 088 six-tier layout, and appends a
+// which honors a token budget, emits the spec 088 six-tier layout, and appends a
 // SHA-256 Provenance block. RenderBeadContext is preserved for byte-identical
 // output when `mindspec context bead <id>` is invoked without `--max-tokens`.
 func RenderBeadContext(beadID string) (string, error) {
