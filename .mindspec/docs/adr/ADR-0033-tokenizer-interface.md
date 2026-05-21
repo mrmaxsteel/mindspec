@@ -12,8 +12,9 @@
 
 ## Status
 
-Stub created during spec 088-context-pack-budgeter drafting. Finalized
-in spec 088 Bead N alongside the budgeter + Tokenizer implementation.
+Finalized in spec 088 Bead 3 alongside the `internal/tokenize/`
+package, the `internal/contextpack/budgeter.go::BuildBead` entry
+point, and the `--max-tokens` flag in `cmd/mindspec/context.go`.
 
 ## Context
 
