@@ -12,7 +12,7 @@ Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 document
 | 4 | Codex-substitution logic is prose, not deterministic | `c8ef5c8` | CLOSED |
 | 11 (new) | Plugin SKILL.md files not embedded in `skillFiles()` — projects had to opt in by copying skills/ | `4562985` | CLOSED |
 | 12 (new) | `MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented in `/ms-bead-fix` + `/ms-spec-final-review` | `a85f432` | CLOSED |
-| 13 (new) | Item-4 codex-detection used wrong signal (`"Output JSON to"` is prompt echo, not write confirmation) | `<SHA>` | CLOSED |
+| 13 (new) | Item-4 codex-detection used wrong signal (`"Output JSON to"` is prompt echo, not write confirmation) | `64b8eec` | CLOSED |
 
 Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
 
@@ -74,7 +74,7 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
 12. **`MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented.** **[CLOSED — commit `a85f432`]**
     The implement-mode commit gate blocks direct commits on `spec/<slug>` and `bead/<id>` branches as a scope-creep guardrail. Final-review fix-ups (panel-driven chore commits that intentionally land on the spec branch — PR-body precision corrections, stray-file reverts, CI-unblocking test fixes) hit the gate. The env-var escape hatch existed but wasn't documented. Surfaced by lola spec-050 commits `1bb9751` and `04d26f5`. Closed by adding a "Working around the implement-mode commit gate" section to `/ms-bead-fix/SKILL.md` and `/ms-spec-final-review/SKILL.md`.
 
-13. **Item-4's deterministic codex-failure check used the wrong signal.** **[CLOSED — commit `<SHA>`]**
+13. **Item-4's deterministic codex-failure check used the wrong signal.** **[CLOSED — commit `64b8eec`]**
     `c8ef5c8` checked for `"Output JSON to"` in the codex `.out` log as the healthy-ack signal, but that string is the codex echoing back the prompt — it appears even if codex never writes the file. Reported by user in a follow-up session: "codex finished thinking but didn't write to disk. Extracting verdicts from the .out logs." Fixed by replacing the single-grep with three-layer detection (file-exists primary, attempt-marker diagnostic, log-extraction recovery), strengthening the prompt template's write-or-error instruction, documenting the codex sandbox workdir convention, and shipping a `codex_verdict_extract.sh` helper.
 
 ## Part 2 — Claude Code "Workflows" research
