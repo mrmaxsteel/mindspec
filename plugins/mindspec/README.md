@@ -17,7 +17,7 @@ Proven on `lola` (specs 044-050) across ~25 beads. The pattern reliably catches 
 
 ## Skills
 
-### Spec lifecycle (already in `internal/setup/claude.go::skillFiles()`)
+### Spec lifecycle (defined in `internal/setup/claude.go::lifecycleSkillFiles()`)
 
 | Skill | Purpose |
 |:------|:--------|
@@ -34,6 +34,7 @@ These are the existing mindspec gating skills. The new skills in this plugin ass
 | Skill | Purpose |
 |:------|:--------|
 | `/ms-bead-next` | Read `bd ready` + plan dep graph, pick the next eligible bead, claim it, set up worktree |
+| `/ms-bead-prep` | Draft a pre-staged impl prompt at `review/prep/bead<N>_impl_prompt.md` from plan section + dep helper signatures |
 | `/ms-bead-impl` | Dispatch an implementation subagent for the claimed bead (uses pre-staged prompt if present) |
 | `/ms-bead-merge` | Run `mindspec complete <bead-id> "msg"` once the panel has approved |
 
@@ -52,6 +53,7 @@ These are the existing mindspec gating skills. The new skills in this plugin ass
 |:------|:--------|
 | `/ms-bead-cycle` | Single bead end-to-end: impl → panel → fix → re-panel → merge |
 | `/ms-spec-autopilot` | Whole spec: keep calling `/ms-bead-cycle` until no beads remain |
+| `/ms-spec-final-review` | Final panel of the whole spec branch vs main, before `/ms-impl-approve` |
 
 ## The autonomous loop
 
@@ -114,10 +116,20 @@ When codex hits its usage limit mid-panel, the orchestrator detects the empty/tr
 
 ## Integration with mindspec core
 
-This plugin lives under `plugins/mindspec/` so it can be iterated on without touching `internal/setup/claude.go::skillFiles()`. To ship to all `mindspec setup` users, lift the SKILL.md contents into that map. The split is intentional:
+As of 2026-06, the plugin's SKILL.md files are embedded into the `mindspec`
+binary via `plugins/mindspec/embed.go` (a `//go:embed skills/*/SKILL.md`
+block) and merged into `internal/setup/claude.go::skillFiles()` alongside
+the 5 lifecycle gate skills. Every `mindspec setup <agent>` user gets the
+full autonomous-loop skill set by default — no opt-in copy step.
 
-- **Core skills** (currently in `skillFiles()`) are the lifecycle gates — every mindspec project needs them.
-- **Plugin skills** (here) are an opinionated autonomous workflow — projects opt in.
+- **Lifecycle gate skills** are defined inline in
+  `internal/setup/claude.go::lifecycleSkillFiles()` (the 5 spec lifecycle
+  transitions). They win on key collision — they are the canonical
+  authority.
+- **Plugin skills** live here as on-disk SKILL.md files and are embedded
+  via `pluginmindspec.SkillFiles()`. Editing the SKILL.md on this branch
+  + rebuilding the binary is the iteration path; the on-disk copy under
+  `plugins/mindspec/skills/` is the source of truth.
 
 ## Stop conditions for autopilot
 
