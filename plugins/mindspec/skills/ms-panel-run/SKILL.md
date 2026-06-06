@@ -24,9 +24,18 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
      - Name the slot id (`R4 codex`, etc.) and the lens.
      - For round >= 2, point at the previous round's JSON (`<repo>/review/<panel-slug>/codex-<slot>-round-<N-1>.json`) and list the `concrete_changes_required` the slot raised.
      - End: "Output JSON to `<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json`. ≤200 words."
-   - Launch:
+
+     **Prompt MUST include this terminal instruction verbatim:**
+
+     ```
+     Your final step before terminating is to WRITE the verdict JSON to `<EXPECTED_JSON>` using a `Write` tool call (or a single-file patch). Do NOT terminate after just composing the verdict in your output — the orchestrator reads the file, not the log. If you cannot write to that exact path (sandbox or permissions), STOP and write a short error message to the same path describing why.
+     ```
+
+     Codex without this instruction reliably "finishes thinking" without writing — particularly when its working directory is outside the panel JSON path's sandbox.
+   - Launch (always `cd <repo>` first — see "Working directory matters" below):
      ```bash
-     nohup bash -c 'codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<N>.md' > /tmp/codex_<panel-slug>_r<N>.out 2>&1 &
+     cd <repo>
+     codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<N>.md > /tmp/codex_<panel-slug>_r<N>.out 2>&1 &
      ```
      Use `run_in_background: true`.
 
@@ -44,22 +53,58 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
 
 ## Codex failure detection (deterministic)
 
-A healthy codex run does two things: it writes a JSON verdict to the named output path AND its `/tmp/codex_*.out` log contains the line where the prompt acknowledged the output target (the prompt always ends with `Output JSON to <path>`, and a healthy codex echoes that target back as it processes the prompt). A failed run shows the usage-limit error string OR never even tries.
-
-Encode this as a one-shot check per slot after the completion notification fires (do NOT poll the file mid-run — see anti-patterns):
+A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order:
 
 ```bash
+EXPECTED_JSON="<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json"
 OUT="/tmp/codex_<panel-slug>_r<slot>.out"
-if grep -q "ERROR: You've hit your usage limit" "$OUT" \
-   || ! grep -q "Output JSON to" "$OUT"; then
-    # codex hit its limit OR didn't even acknowledge the task — substitute claude
+
+# Layer 1 (primary): did the file land?
+if [ -f "$EXPECTED_JSON" ]; then
+    : # healthy, nothing to do
+elif grep -q "ERROR: You've hit your usage limit" "$OUT"; then
+    # codex hit usage limit — sub claude
     launch_claude_sub_for_slot <slot>
+elif grep -qE "apply patch|patch: completed|\+\+\+ " "$OUT"; then
+    # Layer 2 (diagnostic): codex *tried* to write but file is absent → sandbox path issue
+    echo "WARN: codex attempted file-write but sandbox rejected — check workdir vs $EXPECTED_JSON"
+    # Layer 3 (recovery): extract verdict from log
+    extract_verdict_from_log "$OUT" > "$EXPECTED_JSON" \
+      || launch_claude_sub_for_slot <slot>
+else
+    # codex finished thinking without ever attempting a write
+    # Layer 3 (recovery): try log extraction first; sub if nothing extractable
+    extract_verdict_from_log "$OUT" > "$EXPECTED_JSON" \
+      || launch_claude_sub_for_slot <slot>
 fi
 ```
+
+`extract_verdict_from_log` is the helper script shipped alongside this skill:
+
+```bash
+extract_verdict_from_log() {
+    "$MINDSPEC_PLUGIN_DIR/scripts/codex_verdict_extract.sh" "$1"
+}
+```
+
+(Where `$MINDSPEC_PLUGIN_DIR` is `plugins/mindspec/` resolved from wherever the plugin is embedded.) The script scans the codex `.out` log for the largest contiguous JSON object containing both `"verdict"` and `"confidence"` keys and emits it on stdout; non-zero exit means nothing extractable.
 
 `launch_claude_sub_for_slot` spawns a `general-purpose` `Agent` with the same BRIEF + slot id + lens prompt the codex slot used, but writes its verdict JSON with `reviewer_id: "R<slot> claude-sub"` so the tally can see the family-substitution explicitly. Keep the slot name (R4 stays R4) so verdict comparability is preserved across rounds.
 
 When deciding whether to retry codex once before substituting: don't. Empirically on lola spec-050, every codex slot that tripped the usage-limit detector stayed tripped on retry — the user's account quota refreshes hourly, not per-process. Skip straight to claude-sub.
+
+## Working directory matters
+
+Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<repo>/review/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
+
+**Launch convention**: always `cd <repo>` first so `<repo>/review/...` is inside the sandbox:
+
+```bash
+cd <repo>
+codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<slot>.md > /tmp/codex_<panel-slug>_r<slot>.out 2>&1 &
+```
+
+If the panel runs in a worktree under a parent repo, `cd` to the worktree, not the parent — the worktree's `review/` subtree is where the verdict needs to land.
 
 ## Slot lens defaults
 
