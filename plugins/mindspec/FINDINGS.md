@@ -2,6 +2,19 @@
 
 Captured during the spec-050 (lola) session that wrote the plugin and ran it live against four beads (Bead 2 round-2 fix, Bead 3 round-1, Bead 4 round-1). This document is the punch list of gaps + open questions; the README is the polished view.
 
+## Closed in this PR (spec-050 followups)
+
+Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 documented gaps.
+
+| # | Finding | Commit | Status |
+|:--|:--------|:-------|:-------|
+| 3 | No `/ms-bead-prep` skill for drafting impl prompts | `f823476` | CLOSED |
+| 4 | Codex-substitution logic is prose, not deterministic | `c8ef5c8` | CLOSED |
+| 11 (new) | Plugin SKILL.md files not embedded in `skillFiles()` — projects had to opt in by copying skills/ | `4562985` | CLOSED |
+| 12 (new) | `MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented in `/ms-bead-fix` + `/ms-spec-final-review` | `a85f432` | CLOSED |
+
+Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
+
 ## Part 1 — Plugin self-review
 
 ### Gaps surfaced while writing the skills
@@ -17,10 +30,10 @@ Captured during the spec-050 (lola) session that wrote the plugin and ran it liv
    - Roll back to a known-good commit and start over.
    Should be a skill so the resumption path is reproducible.
 
-3. **No `/ms-bead-prep` skill for drafting impl prompts.**
+3. **No `/ms-bead-prep` skill for drafting impl prompts.** **[CLOSED — commit `f823476`]**
    The pre-staged prompts at `<repo>/review/prep/bead<N>_impl_prompt.md` are referenced by `/ms-bead-impl` as "if absent, draft one in-conversation". In practice good prompts are the single biggest lever on impl-subagent quality — they should have their own skill that reads the plan section + spec context + prior-bead helper signatures and produces a structured prompt. The lola session benefited massively from pre-staged prompts; the plugin doesn't tell you how to write them.
 
-4. **Codex-substitution logic is prose, not deterministic.**
+4. **Codex-substitution logic is prose, not deterministic.** **[CLOSED — commit `c8ef5c8`]**
    `/ms-panel-run` says "if output is empty or just the prompt echoed, substitute a Claude `Agent` in the same slot". In practice the detection signal is `"ERROR: You've hit your usage limit"` in the codex output file. Should be a one-liner: `grep -q "ERROR: You've hit your usage limit" /tmp/codex_*.out && launch_claude_sub`. The plugin should encode this as a check, not as advice.
 
 ### Gaps surfaced while running the skills live
@@ -51,6 +64,14 @@ Captured during the spec-050 (lola) session that wrote the plugin and ran it liv
 9. **Why 6 reviewers specifically.** The README says "mixed families catch different defects" but doesn't justify 6 vs 4 or 8. Empirically on lola: ≥5 covers comfortable majority-vote; <5 has too much variance (one reviewer flagging changes is a 33% reroute, vs 20% at 5/6). But that's an empirical claim, not a derived one. Could be documented as "tunable, 6 was the sweet spot for our compute budget".
 
 10. **Why round-2 panels and not just one-shot review.** The pattern "fix → re-review" is described in `/ms-bead-cycle` but the rationale isn't pinned. In practice the round-2 panel catches fix-author deviations the original BRIEF couldn't predict (the lola Bead 2 r2 panel found a routing bug the r1 panel approved). Should be a sidebar in the README.
+
+### Gaps surfaced while shipping spec-050 (added during this PR)
+
+11. **Plugin SKILL.md files not embedded in `mindspec` setup binary.** **[CLOSED — commit `4562985`]**
+    Before this PR, `internal/setup/claude.go::skillFiles()` shipped only the 5 lifecycle gate skills inline. The 11 bead/panel/orchestrator skills under `plugins/mindspec/skills/` were opt-in — projects had to copy the skills/ tree into `.claude/skills/` manually. Closed by adding `plugins/mindspec/embed.go` with a `//go:embed skills/*/SKILL.md` block and merging `pluginmindspec.SkillFiles()` into `skillFiles()`; lifecycle skills win on key collision. Every `mindspec setup <agent>` user now gets the full autonomous loop out of the box.
+
+12. **`MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented.** **[CLOSED — commit `a85f432`]**
+    The implement-mode commit gate blocks direct commits on `spec/<slug>` and `bead/<id>` branches as a scope-creep guardrail. Final-review fix-ups (panel-driven chore commits that intentionally land on the spec branch — PR-body precision corrections, stray-file reverts, CI-unblocking test fixes) hit the gate. The env-var escape hatch existed but wasn't documented. Surfaced by lola spec-050 commits `1bb9751` and `04d26f5`. Closed by adding a "Working around the implement-mode commit gate" section to `/ms-bead-fix/SKILL.md` and `/ms-spec-final-review/SKILL.md`.
 
 ## Part 2 — Claude Code "Workflows" research
 
