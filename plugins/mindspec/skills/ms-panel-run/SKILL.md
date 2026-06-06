@@ -38,11 +38,28 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
 
 3. **Wait for completion notifications.** Each finishes asynchronously; you receive `<task-notification>` messages. Don't poll outputs — wait for the notification.
 
-4. **Detect codex failures.** Codex can hit usage limits or get killed mid-stream. If a codex JSON is missing after the process completes (exit 0 but no JSON written), check the `.out` file:
-   - Empty output / just the prompt echoed → usage limit. Retry once.
-   - Retry also fails → substitute a Claude `Agent` in the same slot with `reviewer_id: "R<N> claude-sub"`.
+4. **Detect codex failures.** See "Codex failure detection (deterministic)" below.
 
 5. **Verify all six JSON files exist** at `<repo>/review/<panel-slug>/<slot>-round-<N>.json`.
+
+## Codex failure detection (deterministic)
+
+A healthy codex run does two things: it writes a JSON verdict to the named output path AND its `/tmp/codex_*.out` log contains the line where the prompt acknowledged the output target (the prompt always ends with `Output JSON to <path>`, and a healthy codex echoes that target back as it processes the prompt). A failed run shows the usage-limit error string OR never even tries.
+
+Encode this as a one-shot check per slot after the completion notification fires (do NOT poll the file mid-run — see anti-patterns):
+
+```bash
+OUT="/tmp/codex_<panel-slug>_r<slot>.out"
+if grep -q "ERROR: You've hit your usage limit" "$OUT" \
+   || ! grep -q "Output JSON to" "$OUT"; then
+    # codex hit its limit OR didn't even acknowledge the task — substitute claude
+    launch_claude_sub_for_slot <slot>
+fi
+```
+
+`launch_claude_sub_for_slot` spawns a `general-purpose` `Agent` with the same BRIEF + slot id + lens prompt the codex slot used, but writes its verdict JSON with `reviewer_id: "R<slot> claude-sub"` so the tally can see the family-substitution explicitly. Keep the slot name (R4 stays R4) so verdict comparability is preserved across rounds.
+
+When deciding whether to retry codex once before substituting: don't. Empirically on lola spec-050, every codex slot that tripped the usage-limit detector stayed tripped on retry — the user's account quota refreshes hourly, not per-process. Skip straight to claude-sub.
 
 ## Slot lens defaults
 
