@@ -54,6 +54,18 @@ Given a consolidated `concrete_changes_required` list from `/ms-panel-tally`, di
    - Test summary (pass/fail/skip)
    - Any flagged deviations — these go into the next BRIEF's deviations section
 
+## Working around the implement-mode commit gate
+
+mindspec blocks direct commits to `spec/<slug>` and `bead/<id>` branches when the spec is in implement mode — this is a guardrail against accidental scope creep on the wrong branch. For panel-driven chore fixes (fix-up commits that fold consolidated reviewer asks into the bead branch), `mindspec complete` is the right path; the gate only blocks commits *outside* the bead-cycle loop.
+
+For final-review fix-ups that need to land on the spec branch directly (not on a fresh bead branch — e.g. PR-body precision corrections, stray-file reverts), use the escape hatch:
+
+```bash
+MINDSPEC_ALLOW_MAIN=1 git commit -m "..."
+```
+
+Surfaced by lola spec-050 final-review fix commits `1bb9751` (revert stray files + PR body precision) and `04d26f5` (lola-90pp test fix to unblock CI).
+
 ## Anti-patterns
 
 - Don't dispatch separate subagents for separate items in the consolidated list. One subagent, one commit. Coordinated state is easier to review than fragmented commits.

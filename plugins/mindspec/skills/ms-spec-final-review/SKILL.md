@@ -76,6 +76,18 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
 - Don't reuse the per-bead BRIEFs. Each bead BRIEF was scoped to one increment; the final BRIEF must summarise the cumulative state.
 - Don't ask the final reviewers to re-do the per-bead empirical probes. They have different lenses — don't waste their context running tests the bead panels already ran. Do ask F2 to run the cumulative regression once.
 
+## Working around the implement-mode commit gate
+
+Final-review fix-ups land on the spec branch directly (not on a fresh bead branch), which trips mindspec's implement-mode commit gate. The escape hatch:
+
+```bash
+MINDSPEC_ALLOW_MAIN=1 git commit -m "..."
+```
+
+Use this for the panel-driven chore commits that fold consolidated F-reviewer asks into the spec branch — e.g. PR-body precision corrections, stray-file reverts, CI-unblocking test fixes. The gate exists to prevent accidental scope creep on the wrong branch; the env var is the documented opt-out for the final-review fix loop where spec-branch commits are exactly the right path.
+
+Surfaced by lola spec-050 final-review fix commits `1bb9751` (revert stray files + PR body precision) and `04d26f5` (lola-90pp test fix to unblock CI).
+
 ## Then
 
 - APPROVE → `/ms-impl-approve <spec-slug>`
