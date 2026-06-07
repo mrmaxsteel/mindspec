@@ -32,12 +32,20 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
      ```
 
      Codex without this instruction reliably "finishes thinking" without writing — particularly when its working directory is outside the panel JSON path's sandbox.
-   - Launch (always `cd <repo>` first — see "Working directory matters" below):
+   - Launch (always `cd <repo>` first — see "Working directory matters" below). Use a SINGLE source of backgrounding — the Bash tool's `run_in_background: true`. **No** trailing `&`, **no** `nohup` wrapper:
      ```bash
      cd <repo>
-     codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<N>.md > /tmp/codex_<panel-slug>_r<N>.out 2>&1 &
+     codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<N>.md > /tmp/codex_<panel-slug>_r<N>.out 2>&1
      ```
-     Use `run_in_background: true`.
+     Tool call shape: `Bash` with the command above and `run_in_background: true`. The Bash tool backgrounds the process itself and fires a `<task-notification>` when codex actually exits.
+
+   > **Anti-pattern: do NOT double-background codex.**
+   >
+   > The combination `nohup bash -c '...' &` + `run_in_background: true` puts codex into two layers of background. The shell-level `&` returns immediately, so the Bash tool's task-notification fires on bash-exit (~1 sec), not codex-exit (~5–10 min). The orchestrator then reads an empty output file and falsely concludes codex failed.
+   >
+   > Pick ONE source of backgrounding. Recommended: the Bash tool's `run_in_background: true` — it gives you a real `<task-notification>` when codex actually exits, plus a clean path to grep the output log via `Read` (or, for log-extraction recovery per the "Codex failure detection" section below, via `codex_verdict_extract.sh`).
+   >
+   > If you must shell-background instead (e.g. to capture `$!` for explicit PID tracking), drop `run_in_background: true` from the Bash tool call so the tool returns synchronously after the `&` — then poll separately. This path is harder; default to the tool-level backgrounding.
 
 2. **Launch Claude `Agent`s second** (faster; start after Codex is already running).
 
@@ -53,7 +61,9 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
 
 ## Codex failure detection (deterministic)
 
-A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order:
+A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order.
+
+**Pre-condition: honest task-notification timing.** This check is only reliable when the `<task-notification>` fires on *codex* exit, not on a shell-wrapper exit. That requires single-source backgrounding (see step 1 above) — drop `&` and `nohup`; use only the Bash tool's `run_in_background: true`. The earlier double-backgrounded pattern made the file-existence primary check race against still-running codex, producing false "completed in 1 sec, file empty" reports. With the timing honest, layer 1 below is reliable on first read.
 
 ```bash
 EXPECTED_JSON="<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json"
@@ -97,11 +107,11 @@ When deciding whether to retry codex once before substituting: don't. Empiricall
 
 Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<repo>/review/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
 
-**Launch convention**: always `cd <repo>` first so `<repo>/review/...` is inside the sandbox:
+**Launch convention**: always `cd <repo>` first so `<repo>/review/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
 
 ```bash
 cd <repo>
-codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<slot>.md > /tmp/codex_<panel-slug>_r<slot>.out 2>&1 &
+codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<slot>.md > /tmp/codex_<panel-slug>_r<slot>.out 2>&1
 ```
 
 If the panel runs in a worktree under a parent repo, `cd` to the worktree, not the parent — the worktree's `review/` subtree is where the verdict needs to land.
