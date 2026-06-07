@@ -13,7 +13,7 @@ Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 document
 | 11 (new) | Plugin SKILL.md files not embedded in `skillFiles()` — projects had to opt in by copying skills/ | `4562985` | CLOSED |
 | 12 (new) | `MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented in `/ms-bead-fix` + `/ms-spec-final-review` | `a85f432` | CLOSED |
 | 13 (new) | Item-4 codex-detection used wrong signal (`"Output JSON to"` is prompt echo, not write confirmation) | `64b8eec` | CLOSED |
-| 14 (new) | Codex launch double-backgrounded (`&` + `run_in_background: true`) — task-notification fired on bash-exit not codex-exit | `<SHA>` | CLOSED |
+| 14 (new) | Codex launch double-backgrounded (`&` + `run_in_background: true`) — task-notification fired on bash-exit not codex-exit | `777deff` | CLOSED |
 
 Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
 
@@ -78,7 +78,7 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
 13. **Item-4's deterministic codex-failure check used the wrong signal.** **[CLOSED — commit `64b8eec`]**
     `c8ef5c8` checked for `"Output JSON to"` in the codex `.out` log as the healthy-ack signal, but that string is the codex echoing back the prompt — it appears even if codex never writes the file. Reported by user in a follow-up session: "codex finished thinking but didn't write to disk. Extracting verdicts from the .out logs." Fixed by replacing the single-grep with three-layer detection (file-exists primary, attempt-marker diagnostic, log-extraction recovery), strengthening the prompt template's write-or-error instruction, documenting the codex sandbox workdir convention, and shipping a `codex_verdict_extract.sh` helper.
 
-14. **Codex launches double-backgrounded.** **[CLOSED — commit `<SHA>`]**
+14. **Codex launches double-backgrounded.** **[CLOSED — commit `777deff`]**
     The launch pattern `nohup bash -c '... codex exec ...' &` combined with `run_in_background: true` puts codex into two background layers. Bash exits ~immediately after `&` returns; the Claude Code task-notification fires on bash-exit, not codex-exit. The orchestrator sees "completed in 1 sec, output file empty" and falsely concludes codex failed.
 
     This is the root cause of the "codex hit usage limit" interpretations throughout spec-050 panels that turned out to have empty output but no `usage limit` error string. The orchestrator was reading the file before codex finished writing to it.
