@@ -29,6 +29,19 @@ Given a consolidated `concrete_changes_required` list from `/ms-panel-tally`, di
      - Document the deviation in the commit message under `Deviations:`
      - The next-round panel BRIEF will surface these as "Fix-author deviations (assess these)".
 
+   **Anti-pattern: do NOT mark an artifact-gate finding as ADDRESSED via a PR-body edit alone.**
+
+   If a consolidated `concrete_changes_required` item names a measurement artifact, cost projection, drift report, or regression baseline that does not exist at the stated path on the spec branch, the fix subagent MUST refuse to mark it ADDRESSED until the artifact actually exists. PR-body precision (naming the path, naming the ops-handoff mechanism) is necessary but not sufficient.
+
+   If the fix subagent cannot produce the artifact within its scope, it should:
+   1. Land any body-precision improvements it can.
+   2. Return the artifact-gate findings UNCHANGED in its report.
+   3. Flag explicitly: "PARTIAL — body precision improved; artifact at `<path>` still missing; HARD block stands".
+
+   The orchestrator then commissions the artifact run as a separate work unit (not part of the fix-up subagent's job).
+
+   Real failure case: spec-050 R1+R3+R5 final-review flagged AC8c `cost_projection.json` missing. Fix subagent's round-2 edit named the artifact's landing path in the PR body. F5 round-2 flipped to APPROVE on body precision. PR merged. lola-f4a8 was the bill.
+
 2. **Constraints to enforce on the subagent:**
    - **One commit.** Not three small commits; a single fold-in commit on the bead branch.
    - **No scope creep.** Address the consolidated list; don't fix unrelated nits.

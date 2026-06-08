@@ -51,13 +51,30 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD. |
    | F3 | Main integration | Does the branch merge cleanly into current `main` HEAD? Any conflicts? Any post-cut main commits that should have been rebased through the spec branch? |
    | F4 | PR description accuracy | Does the PR body match the actual diff? Are claimed bead numbers right, file counts correct, follow-ups all filed in `bd`? |
-   | F5 | AC release-gate readiness | For each AC the spec claims, is the gate evidence surfaced in the PR body? `gate_status.json`-style artifacts present? Operator sign-off ask explicit? |
+   | F5 | AC release-gate readiness | For each AC the spec.md claims, identify the expected gate-evidence artifact path. For each path, check `[ -f <path> ]` on the spec branch. If the artifact does NOT exist at the path: emit a `concrete_changes_required` item of the form `"materialize <artifact-name> at <path>"` and mark as HARD-BLOCK (not a body-precision fix — see § "Artifact gates" below). PR-body naming the path is necessary but not sufficient. |
    | F6 | Operator readiness | Runbooks updated, revert MTTR claim verifiable, on-call escalation paths defined, follow-up beads filed with concrete IDs. |
 
    Each reviewer writes a verdict JSON to `<repo>/review/<spec-slug>-final/<slot>-round-1.json`.
 
-5. **Tally.** Same shape as `/ms-panel-tally`:
-   - ≥5/6 APPROVE → proceed to `/ms-impl-approve`.
+## Artifact gates (HARD block, not body fix)
+
+Some F5 findings name a measurement artifact (e.g. `cost_projection.json`) that the spec.md plan declared as a release-gate precondition. These are **HARD blocks** distinct from PR-body precision fixes:
+
+| Finding shape | Treatment |
+|:--------------|:----------|
+| "Evidence path UNNAMED in PR body" | Soft fix — name the path in the PR body, F5 re-verifies. |
+| "Evidence path NAMED but artifact MISSING at that path" | **HARD block** — orchestrator must commission the measurement run + land the artifact at the named path. Cannot be resolved by editing the PR body. |
+| "Operator sign-off PENDING" | Soft fix — capture sign-off reference in PR body or as a PR comment. |
+
+The distinguishing question: **could the missing artifact have caught a real defect?** If yes (measurement artifact, cost projection, drift report, regression baseline), it's a HARD block. If no (operator acknowledgement, follow-up bd link), it's a soft fix.
+
+Real failure case: spec-050 F5 round 1 flagged AC8c `cost_projection.json` as missing. Round 2 fix was a PR-body precision update naming the artifact landing path. F5 round 2 flipped to APPROVE because the path was named. PR #522 merged. Today's Monday cron — the first post-spec-050 — burned $417 in one run because the alias-intersect prefilter has no cap, exactly what AC8c was meant to project. Postmortem: `bd show lola-f4a8`.
+
+The HARD-block treatment forces: either run the measurement and produce the artifact, OR halt and ask the user to explicitly waive the gate (which is a recorded decision, not a silent default).
+
+5. **Tally.** Same shape as `/ms-panel-tally`, plus an artifact-gate check:
+   - **Any reviewer flagged a HARD-block artifact-gate** (see § "Artifact gates") → halt regardless of vote count. Orchestrator must materialize the artifact OR escalate to user for explicit waiver. PR-body fixes cannot satisfy this.
+   - ≥5/6 APPROVE AND no HARD-block flags → proceed to `/ms-impl-approve`.
    - 3-4 APPROVE with concrete fixes → dispatch `/ms-bead-fix` style fix-up on the spec branch (NOT a new bead — direct commit to spec branch, then `git push --force-with-lease` to update the PR).
    - ≤2 APPROVE → halt, ask user. This is rare and usually means the spec was over-scoped or beads diverged from spec.md.
    - Any REJECT → halt, ask user.

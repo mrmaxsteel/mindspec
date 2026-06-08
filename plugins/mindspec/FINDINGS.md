@@ -14,6 +14,7 @@ Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 document
 | 12 (new) | `MINDSPEC_ALLOW_MAIN=1` escape hatch undocumented in `/ms-bead-fix` + `/ms-spec-final-review` | `a85f432` | CLOSED |
 | 13 (new) | Item-4 codex-detection used wrong signal (`"Output JSON to"` is prompt echo, not write confirmation) | `64b8eec` | CLOSED |
 | 14 (new) | Codex launch double-backgrounded (`&` + `run_in_background: true`) — task-notification fired on bash-exit not codex-exit | `777deff` | CLOSED |
+| 15 (new) | F5 artifact-gate findings could flip to APPROVE on PR-body-only fixes — caused lola-f4a8 ($417 prod incident) | `<SHA>` | CLOSED |
 
 Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
 
@@ -86,6 +87,18 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
     User-reported in a third-spec session: "my codex launches use & inside the command AND run_in_background: true on the Bash tool. That double-backgrounds them so the task-notification fires immediately when bash exits, not when codex finishes. That's why I never got R4/R5/R6 done-notifications."
 
     Fixed by dropping `&` and `nohup` from the launch example in `ms-panel-run/SKILL.md`, using only the Bash tool's `run_in_background: true`. Added an explicit anti-pattern callout. Confirms item 13's three-layer detection works correctly when the notification timing is honest.
+
+15. **F5 artifact-gate findings could be soft-fixed via PR-body edits.** **[CLOSED — commit `<SHA>`]**
+    `/ms-spec-final-review` F5 lens flagged "Evidence MISSING (4 ACs)" for spec-050 round 1, including AC8c `cost_projection.json`. The round-2 fix-up subagent treated this as a PR-body precision update — named the artifact landing path in the PR description without actually producing the artifact. F5 round-2 flipped to APPROVE because the body precision was correct. The plugin's 5/6 APPROVE merge gate cleared, PR #522 merged, prod deployed.
+
+    The first post-deploy Monday cron (today, 2026-06-08) burned **$417+** on OpenRouter in one run — 26,044 LLM calls vs 18 baseline, 3,221 brands/creator vs 133 baseline. The spec-050 alias-intersect prefilter has no cap; AC8c's `cost_projection.json` measurement was specifically what would have projected the post-cutover Stage-2 envelope and caught this.
+
+    Postmortem: `bd show lola-f4a8`.
+
+    Fixed by:
+    - `/ms-spec-final-review`: F5 lens explicitly distinguishes "evidence path unnamed" (soft fix) from "evidence path named but artifact missing" (HARD block). The step 5 tally adds a HARD-block terminal that halts regardless of vote count.
+    - `/ms-panel-tally`: decision matrix adds a HARD-block row for missing measurement artifacts at the top of the table.
+    - `/ms-bead-fix`: anti-pattern callout that the fix subagent MUST NOT mark an artifact-gate finding as ADDRESSED via a body edit alone. If the subagent cannot produce the artifact in its scope, it returns the finding UNCHANGED and flags PARTIAL.
 
 ## Part 2 — Claude Code "Workflows" research
 

@@ -31,10 +31,13 @@ Read `<repo>/review/<panel-slug>/*-round-<N>.json`, summarise verdicts, consolid
 
    | Condition | Action |
    |:----------|:-------|
+   | Any verdict's `concrete_changes_required` references a missing measurement artifact, drift report, cost projection, or regression baseline | **HARD block**. Halt the cycle; orchestrator must commission the measurement run before merge can proceed. Not satisfiable by PR-body fixes. |
    | Any REJECT | Halt the cycle; ask the user. REJECTs usually mean the brief or plan needs work. |
-   | ≥5/6 APPROVE | Panel passes. Hand off to `/ms-bead-merge`. |
+   | ≥5/6 APPROVE AND no HARD-block flags | Panel passes. Hand off to `/ms-bead-merge`. |
    | 3-4 APPROVE with mixed families | Fix-up needed. Hand off to `/ms-bead-fix`. |
    | ≤2 APPROVE | Significant rework. Hand off to `/ms-bead-fix`, but flag to the user. |
+
+   The HARD-block check exists because round-2 fix-up subagents can flip a REQUEST_CHANGES to APPROVE by editing the PR body to name the artifact's intended landing path — without producing the artifact. This is a real failure mode (lola-f4a8: spec-050 shipped without the AC8c cost projection artifact; first prod Mon cron burned $417 because the missing measurement would have caught the no-cap prefilter blow-up). Body-precision fixes are necessary but not sufficient for evidence-bearing gates.
 
 4. **Consolidate `concrete_changes_required`.** This is the input to `/ms-bead-fix`. Process:
 
