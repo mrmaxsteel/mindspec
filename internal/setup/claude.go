@@ -641,7 +641,7 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-panel-create`" + ` | Initialise the panel directory + BRIEF.md for 6 reviewers |
+| ` + "`/ms-panel-create`" + ` | Initialize the panel directory + BRIEF.md for 6 reviewers |
 | ` + "`/ms-panel-run`" + ` | Launch 3 Claude Agents + 3 Codex sessions in parallel; collect verdicts |
 | ` + "`/ms-panel-tally`" + ` | Read all 6 verdict JSONs and consolidate ` + "`concrete_changes_required`" + ` |
 | ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
