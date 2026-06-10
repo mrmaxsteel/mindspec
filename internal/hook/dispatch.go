@@ -22,10 +22,14 @@ type HookState struct {
 }
 
 // Run dispatches to the named hook and returns its result.
-func Run(name string, inp *Input, st *HookState, enforce bool) Result {
+// stateFn lazily resolves workflow state (e.g. ReadState); it is only
+// invoked once a hook decides state is actually needed, so cheap
+// short-circuits (non-protected branches, enforcement disabled) skip
+// the beads subprocess fan-out entirely.
+func Run(name string, inp *Input, stateFn func() *HookState, enforce bool) Result {
 	switch name {
 	case "pre-commit":
-		return runPreCommit(st)
+		return runPreCommit(stateFn)
 	default:
 		return Result{Action: Pass}
 	}
@@ -34,14 +38,9 @@ func Run(name string, inp *Input, st *HookState, enforce bool) Result {
 // runPreCommit implements branch protection: blocks commits on protected
 // branches regardless of mode (including idle).
 // Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit
-func runPreCommit(st *HookState) Result {
+func runPreCommit(stateFn func() *HookState) Result {
 	// Escape hatch
 	if os.Getenv("MINDSPEC_ALLOW_MAIN") == "1" {
-		return Result{Action: Pass}
-	}
-
-	// No state at all → mindspec not initialized, allow
-	if st == nil {
 		return Result{Action: Pass}
 	}
 
@@ -66,9 +65,28 @@ func runPreCommit(st *HookState) Result {
 		return Result{Action: Pass}
 	}
 
+	protected := cfg.IsProtectedBranch(branch)
+
+	// Short-circuit: non-protected, non-spec branches always pass — return
+	// before resolving state, so the beads phase-context fan-out never runs.
+	if !protected && !strings.HasPrefix(branch, "spec/") {
+		return Result{Action: Pass}
+	}
+
+	// State is needed from here on: resolve it now.
+	var st *HookState
+	if stateFn != nil {
+		st = stateFn()
+	}
+
+	// No state at all → mindspec not initialized, allow
+	if st == nil {
+		return Result{Action: Pass}
+	}
+
 	// Block: commits on protected branches in ANY mode (including idle).
 	// The guidance says "main is protected" — the hook enforces it.
-	if cfg.IsProtectedBranch(branch) {
+	if protected {
 		mode := st.Mode
 		if mode == "" {
 			mode = "idle"

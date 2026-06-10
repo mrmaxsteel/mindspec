@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+// staticState wraps a fixed HookState in the lazy provider shape Run expects.
+func staticState(st *HookState) func() *HookState {
+	return func() *HookState { return st }
+}
+
 func TestRun_UnknownHook(t *testing.T) {
 	t.Parallel()
 	r := Run("nonexistent", &Input{}, nil, true)
@@ -32,7 +37,7 @@ enforcement:
 	os.Chdir(root)
 	defer os.Chdir(origDir)
 
-	r := Run("pre-commit", &Input{}, &HookState{Mode: "idle"}, true)
+	r := Run("pre-commit", &Input{}, staticState(&HookState{Mode: "idle"}), true)
 	if r.Action != Block {
 		t.Errorf("expected block for idle mode on protected branch, got %v", r.Action)
 	}
@@ -61,24 +66,84 @@ enforcement:
 	os.Chdir(root)
 	defer os.Chdir(origDir)
 
-	r := Run("pre-commit", &Input{}, &HookState{Mode: "idle"}, true)
+	r := Run("pre-commit", &Input{}, staticState(&HookState{Mode: "idle"}), true)
 	if r.Action != Pass {
 		t.Errorf("expected pass for idle mode on non-protected branch, got %v", r.Action)
 	}
 }
 
 func TestPreCommit_AllowWhenNilState(t *testing.T) {
+	// Even on a protected branch, nil state means mindspec is not
+	// initialized — the hook must allow the commit.
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	r := Run("pre-commit", &Input{}, staticState(nil), true)
+	if r.Action != Pass {
+		t.Errorf("expected pass for nil state, got %v", r.Action)
+	}
+}
+
+func TestPreCommit_AllowWhenNilStateFn(t *testing.T) {
 	t.Parallel()
 	r := Run("pre-commit", &Input{}, nil, true)
 	if r.Action != Pass {
-		t.Errorf("expected pass for nil state, got %v", r.Action)
+		t.Errorf("expected pass for nil state provider, got %v", r.Action)
+	}
+}
+
+func TestPreCommit_StateNotResolvedOnNonProtectedBranch(t *testing.T) {
+	// PERF-3: on a non-protected, non-spec branch the hook short-circuits
+	// to Pass without resolving state (no beads subprocess fan-out).
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	cmd := exec.Command("git", "checkout", "-b", "fix/something")
+	cmd.Dir = root
+	cmd.CombinedOutput()
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	resolved := false
+	stateFn := func() *HookState {
+		resolved = true
+		return &HookState{Mode: "implement"}
+	}
+	r := Run("pre-commit", &Input{}, stateFn, true)
+	if r.Action != Pass {
+		t.Errorf("expected pass on non-protected branch, got %v", r.Action)
+	}
+	if resolved {
+		t.Error("state should not be resolved on a non-protected, non-spec branch")
 	}
 }
 
 func TestPreCommit_AllowWithEscapeHatch(t *testing.T) {
 	// Can't be parallel — modifies environment
 	t.Setenv("MINDSPEC_ALLOW_MAIN", "1")
-	r := Run("pre-commit", &Input{}, &HookState{Mode: "implement"}, true)
+	r := Run("pre-commit", &Input{}, staticState(&HookState{Mode: "implement"}), true)
 	if r.Action != Pass {
 		t.Errorf("expected pass with escape hatch, got %v", r.Action)
 	}
@@ -107,7 +172,7 @@ enforcement:
 		Mode:           "implement",
 		ActiveWorktree: "/some/worktree",
 	}
-	r := Run("pre-commit", &Input{}, st, true)
+	r := Run("pre-commit", &Input{}, staticState(st), true)
 	if r.Action != Block {
 		t.Errorf("expected block on protected branch, got %v", r.Action)
 	}
@@ -138,7 +203,7 @@ enforcement:
 	defer os.Chdir(origDir)
 
 	st := &HookState{Mode: "implement"}
-	r := Run("pre-commit", &Input{}, st, true)
+	r := Run("pre-commit", &Input{}, staticState(st), true)
 	if r.Action != Pass {
 		t.Errorf("expected pass on non-protected branch, got %v", r.Action)
 	}
@@ -161,7 +226,7 @@ enforcement:
 	defer os.Chdir(origDir)
 
 	st := &HookState{Mode: "implement"}
-	r := Run("pre-commit", &Input{}, st, true)
+	r := Run("pre-commit", &Input{}, staticState(st), true)
 	if r.Action != Pass {
 		t.Errorf("expected pass when enforcement disabled, got %v", r.Action)
 	}
@@ -192,7 +257,7 @@ enforcement:
 		Mode:           "implement",
 		ActiveWorktree: "/some/bead-worktree",
 	}
-	r := Run("pre-commit", &Input{}, st, true)
+	r := Run("pre-commit", &Input{}, staticState(st), true)
 	if r.Action != Block {
 		t.Errorf("expected block on spec/ branch during implement, got %v", r.Action)
 	}
@@ -226,7 +291,7 @@ enforcement:
 
 	// Spec mode — commits on spec/ branches are fine
 	st := &HookState{Mode: "spec"}
-	r := Run("pre-commit", &Input{}, st, true)
+	r := Run("pre-commit", &Input{}, staticState(st), true)
 	if r.Action != Pass {
 		t.Errorf("expected pass on spec/ branch during spec mode, got %v", r.Action)
 	}
