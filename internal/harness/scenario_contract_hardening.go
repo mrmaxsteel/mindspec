@@ -141,7 +141,9 @@ implementation so the project returns to idle.`,
 				args := eventArgs(e)
 				if e.Command == "bd" && containsAll(args, "update") {
 					for _, a := range args {
-						if a == "--metadata" || strings.HasPrefix(a, "--metadata=") {
+						// Catches --metadata, --metadata=..., --set-metadata,
+						// and --set-metadata=... — all raw surgery paths.
+						if strings.HasPrefix(a, "--metadata") || strings.HasPrefix(a, "--set-metadata") {
 							t.Errorf("agent performed raw bd metadata surgery: %v", args)
 							break
 						}
@@ -158,13 +160,21 @@ implementation so the project returns to idle.`,
 
 // ScenarioCompleteFromDoomedWorktree pins field note mindspec-qxsy: the
 // agent's working directory IS the bead worktree that `mindspec complete`
-// removes on success. Pre-fix the mindspec process (and the agent's shell)
-// end up in a deleted directory: state advance silently degrades, follow-up
-// commands fail on getcwd, and agents respond by re-running complete or
-// reaching for git worktree repair. The discriminating assertions are the
-// no-retry/no-repair checks — the shim records mindspec's own exit code, so
-// `ExitCode 0` on the first complete may already hold pre-fix (the field
-// exit-1 came from the invoking shell's getcwd).
+// removes on success. In the field the invoking shell is left in a deleted
+// directory: getcwd errors and a spurious exit 1 AFTER the command fully
+// succeeded, so agents re-run complete or reach for git worktree repair.
+//
+// Baseline redesign (spec 092 Req 22): the spec's original discriminators
+// were the no-retry/no-repair event assertions, but the recorded pre-fix
+// baseline run showed Claude Code's Bash tool transparently self-heals the
+// deleted cwd in this harness — the agent never observes the field failure,
+// so those assertions cannot go red here. The discriminating assertion is
+// therefore a DETERMINISTIC post-session probe pinning mindspec-qxsy's own
+// acceptance criterion (spec 092 Req 4): a `mindspec complete` invoked from
+// inside the bead worktree it removes must exit 0 AND emit the cd-back
+// NOTE ("your shell's working directory was removed — run: cd <root>") —
+// absent pre-fix, emitted post-Bead-4. The LLM half (StartDir = bead
+// worktree, no retry/no repair) is retained as the behavioral envelope.
 func ScenarioCompleteFromDoomedWorktree() Scenario {
 	var epicID, beadID string
 	return Scenario{
@@ -232,7 +242,7 @@ project state and report the current mode.`,
 				beadID: "closed",
 			})
 
-			// Discriminating assertions (qxsy): after the first successful
+			// Behavioral envelope (qxsy): after the first successful
 			// complete, the agent must NOT re-run complete or reach for
 			// git worktree repair surgery.
 			firstOK := firstEventIndex(events, func(e ActionEvent) bool {
@@ -254,7 +264,57 @@ project state and report the current mode.`,
 					}
 				}
 			}
+
+			// DISCRIMINATING assertion (qxsy / spec 092 Req 4, deterministic):
+			// run a second `mindspec complete` from INSIDE a fresh bead
+			// worktree that the command will remove. The mindspec process
+			// must exit 0 (the terminal mutation succeeded) and its output
+			// must carry the cd-back NOTE, because the invoking shell cannot
+			// be repaired by the process — the NOTE is the only channel.
+			assertDoomedCompleteEmitsCdNote(t, sandbox, epicID, "001-doomed")
 		},
+	}
+}
+
+// assertDoomedCompleteEmitsCdNote claims a fresh probe bead, builds its
+// worktree nested under the spec worktree, commits work there, and runs
+// `mindspec complete` with the process cwd INSIDE that worktree. It asserts
+// exit 0 and the Req 4 cd-back NOTE ("working directory was removed") in
+// the combined output. Pre-fix the NOTE does not exist anywhere in the
+// binary, so this fails deterministically at the pinned baseline.
+func assertDoomedCompleteEmitsCdNote(t *testing.T, sandbox *Sandbox, epicID, specID string) {
+	t.Helper()
+
+	specWt := ".worktrees/worktree-spec-" + specID
+	if !sandbox.FileExists(specWt) {
+		t.Errorf("spec worktree %s missing — cannot run the doomed-complete probe", specWt)
+		return
+	}
+
+	probeID := sandbox.CreateBead("["+specID+"] cd-note probe", "task", epicID)
+	sandbox.ClaimBead(probeID)
+
+	probeBranch := "bead/" + probeID
+	probeWt := specWt + "/.worktrees/worktree-" + probeID
+	mustRunGit(sandbox, "branch", probeBranch, "spec/"+specID)
+	mustRunGit(sandbox, "worktree", "add", probeWt, probeBranch)
+	sandbox.WriteFile(probeWt+"/probe.go", `package main
+
+func Probe() string { return "probe" }
+`)
+	mustRunGit(sandbox, "-C", probeWt, "add", "-A")
+	mustRunGit(sandbox, "-C", probeWt, "commit", "-m", "impl: cd-note probe")
+
+	cmd := exec.Command(filepath.Join(sandbox.mindspecBinDir, "mindspec"),
+		"complete", probeID, "cd-note probe")
+	cmd.Dir = filepath.Join(sandbox.Root, probeWt) // the directory complete will remove
+	cmd.Env = sandbox.Env()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("mindspec complete from inside its own bead worktree exited non-zero (qxsy): %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "working directory was removed") {
+		t.Errorf("complete output lacks the cd-back NOTE (\"your shell's working directory was removed — run: cd <root>\", spec 092 Req 4); got:\n%s", out)
 	}
 }
 
