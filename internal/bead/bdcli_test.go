@@ -210,16 +210,10 @@ func TestWorktreeCreate_ArgsConstruction(t *testing.T) {
 // `bd worktree create` must be able to query the main repo's beads DB from
 // inside the worktree (the whole point of a shared-beads worktree).
 //
-// Current status (bd 1.0.2): skipped — `bd` eagerly spawns a sidecar Dolt
-// server from the worktree's local `.beads/` (tracked `metadata.json` and
-// `config.yaml` trigger the local-path branch ahead of the git common-dir
-// fallback promised by `bd worktree create --help`). The fix surface is
-// upstream bd or a structural change to what mindspec tracks under `.beads/`
-// — both larger than this bead's spike timebox, so the patch is deferred.
-// Removing the skip should be the first commit of the follow-up bead.
+// bd 1.0.4's embedded Dolt mode spawns no sidecar server, so the bd 1.0.2
+// sidecar-server issue that previously forced a skip here is gone and the
+// test runs for real.
 func TestWorktreeCreate_SharesMainDB(t *testing.T) {
-	t.Skip("deferred to follow-up bead mindspec-4u93: bd 1.0.2 sidecar-dolt-server issue")
-
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skipf("bd not on PATH: %v", err)
 	}
