@@ -69,8 +69,10 @@ Use --format to override protocol auto-detection.`,
 			return fmt.Errorf("unknown format %q (use claude or copilot)", hookFormat)
 		}
 
-		st := hook.ReadState()
-		result := hook.Run(name, inp, st, true)
+		// Pass ReadState lazily — it fans out to bd subprocesses, and the
+		// hook only invokes it after the branch-protection short-circuit
+		// decides state is actually needed.
+		result := hook.Run(name, inp, hook.ReadState, true)
 		code := hook.Emit(result, proto)
 		if code != 0 {
 			os.Exit(code)
