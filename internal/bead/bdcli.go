@@ -185,10 +185,10 @@ func WorktreeRemove(name string) error {
 
 // minBdVersionMsg is the bd version mentioned in ListJSON's non-JSON error.
 // Keep in sync with doctor.bdVersionFloor — bead must not import doctor (cycle).
-const minBdVersionMsg = "1.0.2"
+const minBdVersionMsg = "1.0.4"
 
 // ListJSON runs `bd list <args> --json` and returns valid JSON bytes (a JSON array).
-// Requires `bd` >= 1.0.2 (the floor enforced by `mindspec doctor`). When `bd`
+// Requires `bd` >= 1.0.4 (the floor enforced by `mindspec doctor`). When `bd`
 // emits non-JSON output (older versions where --json was ignored), this returns
 // a structured error directing the user to upgrade — no human-output scraping.
 func ListJSON(args ...string) ([]byte, error) {

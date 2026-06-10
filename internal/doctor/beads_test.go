@@ -393,7 +393,8 @@ func TestCompareSemver(t *testing.T) {
 }
 
 func TestCheckBdVersionFloor_BelowFloor(t *testing.T) {
-	path := stubBd(t, "bd version 1.0.1 (Homebrew)")
+	// 1.0.3 is server-mode bd — below the 1.0.4 embedded-mode floor.
+	path := stubBd(t, "bd version 1.0.3 (Homebrew)")
 	t.Setenv("PATH", path)
 	root := beadsRoot(t, false)
 
@@ -404,13 +405,13 @@ func TestCheckBdVersionFloor_BelowFloor(t *testing.T) {
 	if c == nil || c.Status != Warn {
 		t.Fatalf("got %+v, want Warn", c)
 	}
-	if !strings.Contains(c.Message, "1.0.1") {
+	if !strings.Contains(c.Message, "1.0.3") {
 		t.Errorf("message should include actual version; got %q", c.Message)
 	}
 }
 
 func TestCheckBdVersionFloor_AtOrAbove(t *testing.T) {
-	path := stubBd(t, "bd version 1.0.2 (Homebrew)")
+	path := stubBd(t, "bd version 1.0.4 (Homebrew)")
 	t.Setenv("PATH", path)
 	root := beadsRoot(t, false)
 

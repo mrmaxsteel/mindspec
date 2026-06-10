@@ -37,9 +37,9 @@ env -u CLAUDECODE go test ./internal/harness/ -v -run TestLLM_SingleBead -timeou
 ### Critical Gotchas
 1. **`env -u CLAUDECODE`** -- MUST unset this env var or nested claude sessions won't launch
 2. **`make build`** -- MUST rebuild after changing any `cmd/mindspec/` or `internal/` code. The shims delegate to `./bin/mindspec`
-3. **Dolt isolation** -- Each sandbox gets its own dolt server on a random port (Spec 070). No need to kill orphans before testing
+3. **Beads isolation** -- bd >= 1.0.4 runs Dolt embedded: no server, no ports, no orphan processes. Each sandbox gets its own isolated `.beads/` database. (Spec 070's per-sandbox dolt servers are historical — that plumbing has been removed.)
 4. **Timeout** -- SpecToIdle needs 15min timeout; simpler tests need 10min
-5. **Parallel tests** -- Each sandbox has its own dolt server, but parallel LLM tests still compete for LLM API quota
+5. **Parallel tests** -- Sandboxes are fully isolated (embedded per-sandbox databases), but parallel LLM tests still compete for LLM API quota
 
 ## Test Design Principles
 
@@ -166,7 +166,7 @@ command "mindspec" with arg "complete" was not found in events   <-- FAIL
 | **Conversational response** | Agent says "What would you like?" instead of executing | Prompt wording, hooks, CLAUDE.md |
 | **Command exits non-zero** | Agent retries same command repeatedly | CLI code (`cmd/mindspec/`, `internal/`) |
 | **CWD mismatch** | `mindspec complete` fails from wrong directory | Guard logic, auto-chdir, prompt |
-| **Beads not initialized** | `bd init` fails, no bead IDs available | Dolt orphans, sandbox setup |
+| **Beads not initialized** | `bd init` fails, no bead IDs available | bd version (harness requires >= 1.0.4 embedded mode), sandbox setup |
 | **Hook blocks tool call** | PreToolUse hook rejects Write/Edit/Bash | settings.json hook config |
 | **Max turns exhausted** | Agent runs out of turns before finishing | MaxTurns budget, prompt efficiency |
 | **Worktree issues** | git worktree creation fails or wrong path | `internal/next/`, sandbox git setup |

@@ -138,11 +138,14 @@ func isRuntimeArtifact(filename string) bool {
 	return false
 }
 
-// bdVersionFloor is the minimum supported bd version. v1.0.2 ships the
-// worktree-redirect fixes mindspec relies on, and is also the floor below
-// which `bd list --json` may emit non-JSON (which bead.ListJSON now rejects
-// rather than fall back to scraping). Keep bead.minBdVersionMsg in sync.
-const bdVersionFloor = "1.0.2"
+// bdVersionFloor is the minimum supported bd version. v1.0.2 shipped the
+// worktree-redirect fixes mindspec relies on (and is the floor below which
+// `bd list --json` may emit non-JSON, which bead.ListJSON rejects rather
+// than fall back to scraping). v1.0.4 ships embedded Dolt mode — mindspec
+// (including the test harness) assumes embedded mode and no longer carries
+// server-mode plumbing, so the floor is 1.0.4. Keep bead.minBdVersionMsg
+// in sync.
+const bdVersionFloor = "1.0.4"
 
 // checkBeadsConfigDrift reports missing or drifted mindspec-required keys in
 // .beads/config.yaml. When a drift exists, a FixFunc is attached that calls
@@ -301,7 +304,7 @@ func checkBdVersionFloor(r *Report, root string) {
 			Name:   "bd version floor",
 			Status: Warn,
 			Message: fmt.Sprintf("bd %s is below minimum %s — mindspec relies on worktree redirect fixes "+
-				"introduced in v1.0.2; upgrade with `brew upgrade beads`", ver, bdVersionFloor),
+				"(v1.0.2) and embedded Dolt mode (v1.0.4); upgrade with `brew upgrade beads`", ver, bdVersionFloor),
 		})
 		return
 	}
