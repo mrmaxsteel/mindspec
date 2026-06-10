@@ -3,15 +3,11 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/setup"
@@ -26,8 +22,6 @@ type Sandbox struct {
 	ShimBinDir string
 	// EventLogPath is the JSONL file where shims log command invocations.
 	EventLogPath string
-	// DoltPort is the sandbox's dolt server port (0 if beads init failed).
-	DoltPort int
 	// mindspecBinDir is the project's bin/ directory (contains mindspec binary).
 	mindspecBinDir string
 
@@ -88,15 +82,14 @@ enforcement:
 	mustRunWithBin(t, root, binDir, "git", "commit", "-m", "initial commit")
 
 	// Initialize beads in sandbox mode (no auto-sync, no git hooks).
-	// Add .beads/ to .gitignore first — dolt server writes runtime files
-	// (dolt-server.activity, dolt-server.port) that would make the worktree
-	// appear dirty to mindspec complete's clean-tree check.
+	// Add .beads/ to .gitignore first — bd writes runtime files that would
+	// make the worktree appear dirty to mindspec complete's clean-tree check.
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n"), 0o644); err != nil {
 		t.Fatalf("writing .gitignore: %v", err)
 	}
 	mustRun(t, root, "git", "add", ".gitignore")
 	mustRun(t, root, "git", "commit", "-m", "add gitignore")
-	doltPort := initBeads(t, root)
+	initBeads(t, root)
 
 	// Set up recording shims — temporarily extend PATH so mindspec shim is created
 	shimDir := filepath.Join(root, ".harness", "bin")
@@ -126,7 +119,6 @@ enforcement:
 		Root:           root,
 		ShimBinDir:     shimDir,
 		EventLogPath:   logPath,
-		DoltPort:       doltPort,
 		mindspecBinDir: binDir,
 		t:              t,
 	}
@@ -245,10 +237,6 @@ func (s *Sandbox) Env() []string {
 		}
 	}
 	env = append(env, "PATH="+newPath)
-	// Route the agent's bd commands to this sandbox's dolt server.
-	if s.DoltPort > 0 {
-		env = append(env, fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", s.DoltPort))
-	}
 	return env
 }
 
@@ -347,105 +335,24 @@ func (s *Sandbox) WriteFocus(content string) {
 }
 
 // initBeads runs bd init in sandbox mode within the given root directory.
-// Each sandbox gets its own dolt server on a unique random port to avoid
-// collisions with the host project's dolt server or other test sandboxes.
-// Returns the dolt server port (0 if init failed or port unreadable).
-// Registers t.Cleanup() to stop the sandbox's dolt server on test teardown.
-func initBeads(t *testing.T, root string) int {
+// bd 1.0.4+ runs in embedded mode, so each sandbox gets its own isolated
+// .beads/ database — no per-sandbox server or port management is needed.
+func initBeads(t *testing.T, root string) {
 	t.Helper()
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
 		t.Logf("warning: bd not found, skipping beads init")
-		return 0
+		return
 	}
 
-	// NOTE: We intentionally do NOT call `bd dolt killall` here.
-	// It kills ALL dolt servers system-wide, including the host project's.
-
-	// Find a free port for this sandbox's dolt server. We use a listener
-	// to get an OS-assigned port, close it, then pass the port to bd init.
-	// This avoids collisions with the host project's server on port 3307.
-	ln, listenErr := net.Listen("tcp", "127.0.0.1:0")
-	if listenErr != nil {
-		t.Logf("warning: finding free port: %v", listenErr)
-		return 0
-	}
-	freePort := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-
-	// Use explicit --database beads and BEADS_DOLT_SERVER_PORT to avoid:
-	// 1. Auto-detect database name from CWD ("repo" in sandboxes)
-	// 2. Connecting to the host project's dolt server on port 3307
+	// Use explicit --database beads to avoid auto-detecting the database
+	// name from CWD ("repo" in sandboxes).
 	cmd := exec.Command(bdPath, "init", "--sandbox", "--skip-hooks", "-q",
-		"--database", "beads", "--server-port", strconv.Itoa(freePort))
+		"--database", "beads")
 	cmd.Dir = root
-	// Set BEADS_DOLT_SERVER_PORT so all bd subprocesses (including auto-start)
-	// use the sandbox-specific port, not the host project's port.
-	cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", freePort))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("warning: bd init: %v\n%s", err, out)
-		return 0
-	}
-
-	// Read the dolt server port assigned to this sandbox.
-	port := readDoltPort(root)
-
-	// Register cleanup to stop this sandbox's dolt server on test teardown.
-	t.Cleanup(func() {
-		stopSandboxDolt(root)
-	})
-
-	return port
-}
-
-// readDoltPort reads the dolt server port from .beads/dolt-server.port.
-func readDoltPort(root string) int {
-	data, err := os.ReadFile(filepath.Join(root, ".beads", "dolt-server.port"))
-	if err != nil {
-		return 0
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0
-	}
-	return port
-}
-
-// stopSandboxDolt stops the dolt server for a sandbox and waits for it to exit.
-func stopSandboxDolt(root string) {
-	// Read PID before stopping — we need it to wait for exit.
-	pidData, _ := os.ReadFile(filepath.Join(root, ".beads", "dolt-server.pid"))
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
-
-	// Try graceful stop via bd dolt stop.
-	bdPath, err := exec.LookPath("bd")
-	if err != nil {
-		return
-	}
-	cmd := exec.Command(bdPath, "dolt", "stop")
-	cmd.Dir = root
-	_ = cmd.Run()
-
-	// Wait for the process to actually exit so t.TempDir() cleanup can
-	// remove the .beads/dolt directory without "directory not empty" errors.
-	if pid > 0 {
-		waitForProcessExit(pid, 5)
-	}
-}
-
-// waitForProcessExit polls until the given PID no longer exists, up to maxSeconds.
-func waitForProcessExit(pid, maxSeconds int) {
-	for i := 0; i < maxSeconds*10; i++ {
-		proc, err := os.FindProcess(pid)
-		if err != nil {
-			return
-		}
-		// On Unix, FindProcess always succeeds. Use Signal(0) to check existence.
-		if err := proc.Signal(syscall.Signal(0)); err != nil {
-			return // process gone
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -531,10 +438,6 @@ func (s *Sandbox) runBD(args ...string) (string, error) {
 	}
 	cmd := exec.Command(bdPath, args...)
 	cmd.Dir = s.Root
-	// Route bd commands to this sandbox's dolt server, not the host project's.
-	if s.DoltPort > 0 {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DOLT_SERVER_PORT=%d", s.DoltPort))
-	}
 	out, err := cmd.Output() // stdout only (bd emits warnings to stderr)
 	return string(out), err
 }

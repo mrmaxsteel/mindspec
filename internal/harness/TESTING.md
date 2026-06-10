@@ -184,7 +184,6 @@ command "mindspec" with arg "complete" was not found in events   <-- FAIL
 
 **Infrastructure:**
 
-- Use `--server-port 0` for dolt (random port avoids collisions)
 - Add `.beads/` and `.harness/` to `.gitignore` in sandbox
 
 ---
