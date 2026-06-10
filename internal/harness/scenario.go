@@ -22,6 +22,14 @@ type Scenario struct {
 	MaxTurns    int                                                        // turn budget (0 = unlimited)
 	TimeoutMin  int                                                        // scenario runtime timeout in minutes (0 = default 10m)
 	Model       string                                                     // model override (e.g. "haiku")
+
+	// StartDir is the agent's starting working directory, relative to the
+	// sandbox root (Spec 092 Req 16). Empty means sandbox root. It is
+	// resolved AFTER Setup runs and may contain a glob pattern (e.g.
+	// ".worktrees/worktree-spec-001-x/.worktrees/worktree-*") because bead
+	// worktree paths embed IDs that bd assigns dynamically during Setup.
+	// The pattern must resolve to exactly one existing directory.
+	StartDir string
 }
 
 // AllScenarios returns all defined behavior scenarios.
@@ -48,5 +56,10 @@ func AllScenarios() []Scenario {
 		ScenarioStopAfterComplete(),
 		ScenarioStopDoesNotBlockApproveImpl(),
 		ScenarioBeadsArtifactPassthrough(),
+		ScenarioStalePhaseImplApprove(),
+		ScenarioCompleteFromDoomedWorktree(),
+		ScenarioPrecommitReexportComplete(),
+		ScenarioWrongDirectoryGuardRecovery(),
+		ScenarioApprovalGateDiscovery(),
 	}
 }
