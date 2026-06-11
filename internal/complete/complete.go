@@ -39,6 +39,10 @@ var (
 	// next's classifier — internal/complete already imports internal/next).
 	// Tests swap this to simulate artifact/user dirt without a real repo.
 	checkDirtyTreeFn = next.CheckDirtyTreeDetail
+	// completeGetwdFn feeds the Req 8 worktree-context line on the
+	// user-dirt guard failure (spec 092, mindspec-tjat). Tests swap it
+	// to pin the worktree kind regardless of where `go test` runs.
+	completeGetwdFn = os.Getwd
 	// adrCreateWithIDFn is the package-level seam for the placeholder-
 	// ADR creation step in the --supersede-adr flow. Tests swap this
 	// to avoid writing real ADR files when only asserting flow
@@ -203,10 +207,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
 			strings.Join(userDirt, "\n  "))
 		if wtPath == "" {
-			return nil, guard.NewFailure(
-				msg+"\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`",
-				"mindspec next",
-			)
+			msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
+		}
+		// Spec 092 Req 8 (mindspec-tjat): worktree-context line naming
+		// where the command ran vs. the checkout this guard evaluated.
+		// Last body line — it precedes the final recovery line (Req 12
+		// ordering). Getwd failure falls back to checkPath: a degraded
+		// but truthful context line beats no line.
+		cwd, cwdErr := completeGetwdFn()
+		if cwdErr != nil || cwd == "" {
+			cwd = checkPath
+		}
+		msg += "\n" + workspace.ContextLine(cwd, checkPath)
+		if wtPath == "" {
+			return nil, guard.NewFailure(msg, "mindspec next")
 		}
 		// Existing auto-commit hint, now a Req 12 recovery line.
 		return nil, guard.NewFailure(msg,

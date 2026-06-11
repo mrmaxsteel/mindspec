@@ -29,6 +29,7 @@ func saveAndRestore(t *testing.T) {
 	origMergeMeta := completeMergeMetadataFn
 	origGitEmail := gitUserEmailFn
 	origCheckDirty := checkDirtyTreeFn
+	origGetwd := completeGetwdFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -41,6 +42,7 @@ func saveAndRestore(t *testing.T) {
 		completeMergeMetadataFn = origMergeMeta
 		gitUserEmailFn = origGitEmail
 		checkDirtyTreeFn = origCheckDirty
+		completeGetwdFn = origGetwd
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -67,6 +69,10 @@ func saveAndRestore(t *testing.T) {
 	checkDirtyTreeFn = func(repoRoot, cwd string) (artifactDirt, userDirt []string, err error) {
 		return nil, nil, nil
 	}
+	// Spec 092 Req 8: pin the context-line cwd so the asserted worktree
+	// kind does not depend on where `go test` runs (the repo checkout
+	// itself may be a bead worktree).
+	completeGetwdFn = func() (string, error) { return "/testcwd", nil }
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
@@ -281,6 +287,18 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("user-dirt block must end with a recovery line, got: %v", err)
 	}
+	// Req 8 (mindspec-tjat): worktree-context line naming where the
+	// command ran (the pinned /testcwd → main kind) and the checkout
+	// this guard evaluated (the bead worktree), preceding the final
+	// recovery line.
+	wantCtx := "you are in the main worktree (/testcwd); this check evaluated /tmp/worktree-bead-1"
+	if !strings.Contains(err.Error(), wantCtx) {
+		t.Errorf("user-dirt block missing context line %q, got: %v", wantCtx, err)
+	}
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
+		t.Errorf("context line must immediately precede the final recovery line, got: %v", err)
+	}
 	// Honest behavior: a blocked completion mutates nothing — no
 	// artifact-sync commit, no bead close, no merge.
 	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
@@ -316,6 +334,12 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	}
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("no-worktree user-dirt block must end with a recovery line, got: %v", err)
+	}
+	// Req 8 (mindspec-tjat): with no bead worktree the check evaluated
+	// root; the context line still names where the command ran.
+	wantCtx := "you are in the main worktree (/testcwd); this check evaluated " + root
+	if !strings.Contains(err.Error(), wantCtx) {
+		t.Errorf("no-worktree user-dirt block missing context line %q, got: %v", wantCtx, err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -98,17 +99,14 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return fmt.Errorf("checking working tree: %w", err)
 		}
 		if len(userDirt) > 0 {
-			fmt.Fprintln(os.Stderr, "Cannot claim work: workspace has uncommitted user changes:")
-			for _, p := range userDirt {
-				fmt.Fprintf(os.Stderr, "  %s\n", p)
-			}
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "Note: .beads/issues.jsonl is auto-handled (ADR-0025) and does not need stashing.")
-			fmt.Fprintln(os.Stderr, "Recovery steps:")
-			fmt.Fprintln(os.Stderr, "  1. Commit your changes: mindspec complete \"wip\"")
-			fmt.Fprintln(os.Stderr, "  2. Or discard them: git restore .")
-			fmt.Fprintln(os.Stderr, "  3. Then re-run: mindspec next")
-			return fmt.Errorf("dirty working tree")
+			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
+			// worktree-context line and ends with a `recovery:` line. The
+			// old multi-line "Recovery steps: 1..3" stderr block advised
+			// `git restore .` — destructive over the HUMAN's dirt when the
+			// agent merely ran `next` from the wrong directory. The active
+			// worktree (when one exists) is the steer-to target; resolving
+			// it costs bd calls only on this failure path.
+			return next.DirtyTreeFailure(cwd, userDirt, guard.ActiveWorktreePath(root))
 		}
 
 		// Step 1.5: Resolve target spec if ambiguous

@@ -37,7 +37,24 @@ var (
 	// placeholder-ADR creation step in the supersede flow on the
 	// backstop (`approve impl`) path.
 	implCreateWithIDFn = adr.CreateWithID
+	// implGetwdFn feeds the Req 8 worktree-context line on the phase
+	// and plan-bead gate failures (spec 092, mindspec-tjat). Tests swap
+	// it to pin the worktree kind regardless of where `go test` runs.
+	implGetwdFn = os.Getwd
 )
+
+// implContextLine renders the Req 8 worktree-context line for impl
+// approve's gate failures (spec 092, mindspec-tjat): the directory the
+// command ran from, plus root — the repo whose bd-derived state (epic
+// phase, plan bead statuses) the gate evaluated. Getwd failure falls
+// back to root: a degraded but truthful line beats no line.
+func implContextLine(root string) string {
+	cwd, err := implGetwdFn()
+	if err != nil || cwd == "" {
+		cwd = root
+	}
+	return workspace.ContextLine(cwd, root)
+}
 
 // ImplOpts holds options for implementation approval.
 //
@@ -154,8 +171,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		// gate — name both phases and end with the spec-mandated
 		// recovery line. Raw `bd update` metadata commands are never
 		// emitted (Req 19: replace semantics over the whole map).
+		// Req 8: the worktree-context line precedes the recovery line.
 		return nil, guard.NewFailure(
-			fmt.Sprintf("expected review mode for spec %s: stored phase %q and child-derived phase %q both fail the review/done gate", specID, phaseDetail.Stored, phaseDetail.Derived),
+			fmt.Sprintf("expected review mode for spec %s: stored phase %q and child-derived phase %q both fail the review/done gate\n%s", specID, phaseDetail.Stored, phaseDetail.Derived, implContextLine(root)),
 			fmt.Sprintf("close remaining beads with 'mindspec complete <bead-id>', or if bead states are already correct run: mindspec repair phase %s", specID),
 		)
 	}
@@ -178,7 +196,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				return nil, fmt.Errorf("checking bead %s status: %w", bid, err)
 			}
 			if status != "closed" {
-				return nil, fmt.Errorf("bead %s is still %q — close all beads before approving implementation", bid, status)
+				// Spec 092 Reqs 8/12 (mindspec-tjat): context line plus
+				// a final copy-pastable recovery line.
+				return nil, guard.NewFailure(
+					fmt.Sprintf("bead %s is still %q — close all beads before approving implementation\n%s", bid, status, implContextLine(root)),
+					fmt.Sprintf("mindspec complete %s", bid),
+				)
 			}
 		}
 	}
