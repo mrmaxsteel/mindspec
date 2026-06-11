@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -833,4 +834,108 @@ func isAncestorIn(t *testing.T, dir, anc, desc string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", anc, desc)
 	return cmd.Run() == nil
+}
+
+// --- Spec 092 Bead 4: withWorkingDir cwd safety (Req 3a, mindspec-qxsy) ---
+
+// TestWithWorkingDir_RestoreFailureRemainsAtDirAndWarns covers the
+// hardened restore path: when fn deletes the directory the process was
+// invoked from, the deferred restore cannot chdir back. The process
+// must remain at dir (never an undefined cwd) and emit the structured
+// `event=executor.cwd_restore_failed dir=<dir>` warning on stderr.
+func TestWithWorkingDir_RestoreFailureRemainsAtDirAndWarns(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "target")
+	doomed := filepath.Join(base, "doomed")
+	for _, d := range []string{dir, doomed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(doomed); err != nil {
+		t.Fatalf("chdir doomed: %v", err)
+	}
+
+	// Capture stderr around the call.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	wwdErr := withWorkingDir(dir, func() error {
+		// fn removes the invocation directory — the deferred restore
+		// will fail.
+		return os.RemoveAll(doomed)
+	})
+
+	w.Close()
+	os.Stderr = origStderr
+	stderrBytes, _ := io.ReadAll(r)
+	stderr := string(stderrBytes)
+
+	if wwdErr != nil {
+		t.Fatalf("withWorkingDir returned error: %v", wwdErr)
+	}
+
+	// The process remains at dir — never an undefined cwd.
+	wd, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("process left in unresolvable cwd: %v", wdErr)
+	}
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if realWd != realDir {
+		t.Errorf("cwd after restore failure: got %q, want dir %q", wd, dir)
+	}
+
+	want := "event=executor.cwd_restore_failed dir=" + dir
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr should contain %q; got: %q", want, stderr)
+	}
+}
+
+// TestWithWorkingDir_RestoresOriginalCwd pins the unchanged happy path:
+// when the original cwd survives fn, it is restored and no
+// cwd_restore_failed warning is emitted.
+func TestWithWorkingDir_RestoresOriginalCwd(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "target")
+	home := filepath.Join(base, "home")
+	for _, d := range []string{dir, home} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(home); err != nil {
+		t.Fatalf("chdir home: %v", err)
+	}
+
+	var cwdInFn string
+	if err := withWorkingDir(dir, func() error {
+		cwdInFn, _ = os.Getwd()
+		return nil
+	}); err != nil {
+		t.Fatalf("withWorkingDir: %v", err)
+	}
+
+	realInFn, _ := filepath.EvalSymlinks(cwdInFn)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if realInFn != realDir {
+		t.Errorf("cwd inside fn: got %q, want %q", cwdInFn, dir)
+	}
+
+	wd, _ := os.Getwd()
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realHome, _ := filepath.EvalSymlinks(home)
+	if realWd != realHome {
+		t.Errorf("cwd after return: got %q, want restored %q", wd, home)
+	}
 }

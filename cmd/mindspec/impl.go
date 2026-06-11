@@ -42,6 +42,12 @@ func init() {
 func approveImplRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
 
+	// Spec 092 Req 4 (mindspec-qxsy): capture the shell's invocation
+	// directory BEFORE any auto-chdir. FinalizeEpic removes the spec
+	// worktree, so if the shell sat inside it the cd-back NOTE below is
+	// the only way to tell the agent how to recover its cwd.
+	invocationCwd := captureInvocationCwd()
+
 	root, err := findRoot()
 	if err != nil {
 		return err
@@ -91,6 +97,17 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		OverrideADR:  overrideADR,
 		SupersedeADR: supersedeADR,
 	})
+
+	// Spec 092 Req 3b (mindspec-qxsy): FinalizeEpic (inside ApproveImpl)
+	// removes the spec worktree this command auto-chdir'd into above.
+	// Move to the repo root immediately after it returns — before any
+	// tail output and before emitInstruct — so the rest of the command
+	// (and the bd subprocesses emitInstruct spawns) runs from a valid
+	// cwd and the process exits 0.
+	if chdirErr := os.Chdir(root); chdirErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not chdir to repo root %s: %v\n", root, chdirErr)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -121,6 +138,11 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 	if err := emitInstruct(root); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
 	}
+
+	// Spec 092 Req 4: when the shell's invocation directory was removed
+	// by the terminal mutation, the cd-back NOTE is the LAST line of
+	// stdout.
+	emitCdBackNote(os.Stdout, invocationCwd, root)
 
 	return nil
 }

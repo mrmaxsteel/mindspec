@@ -522,7 +522,16 @@ func withWorkingDir(dir string, fn func() error) error {
 		return fmt.Errorf("chdir %s: %w", dir, err)
 	}
 	defer func() {
-		_ = os.Chdir(wd)
+		if restoreErr := os.Chdir(wd); restoreErr != nil {
+			// Spec 092 Req 3a (mindspec-qxsy): the original cwd was
+			// removed while fn ran (e.g. fn deleted the worktree the
+			// process was invoked from). chdir is atomic, so the process
+			// is still at dir — the path that was just valid. Re-assert
+			// it defensively and emit one structured warning; never
+			// return with the process in an undefined cwd.
+			_ = os.Chdir(dir)
+			fmt.Fprintf(os.Stderr, "event=executor.cwd_restore_failed dir=%s\n", dir)
+		}
 	}()
 	return fn()
 }

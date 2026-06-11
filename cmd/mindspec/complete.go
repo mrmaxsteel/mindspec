@@ -31,6 +31,12 @@ Usage:
 The bead ID is required as the first argument.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Spec 092 Req 4 (mindspec-qxsy): capture the shell's invocation
+		// directory BEFORE any auto-chdir. `complete` removes the bead
+		// worktree the shell may be sitting in; the cd-back NOTE at the
+		// end is the only channel that can repair the shell's cwd.
+		invocationCwd := captureInvocationCwd()
+
 		root, err := findRoot()
 		if err != nil {
 			return err
@@ -117,6 +123,13 @@ The bead ID is required as the first argument.`,
 		if err := emitInstruct(root); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
 		}
+
+		// Spec 092 Req 4: when the shell's invocation directory was
+		// removed by the terminal mutation (complete run from inside the
+		// bead worktree it deletes), the cd-back NOTE is the LAST line
+		// of stdout.
+		emitCdBackNote(os.Stdout, invocationCwd, root)
+
 		return nil
 	},
 }

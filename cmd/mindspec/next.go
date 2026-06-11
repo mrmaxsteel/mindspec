@@ -268,9 +268,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 				// Completion reminder — ensures agents see "how to finish" right
 				// before they start coding. Without this, the implement template's
 				// completion section may scroll out of small-context models.
-				fmt.Println("---")
-				fmt.Printf("**When done**: `cd` into the worktree, then run `mindspec complete %s \"describe what you did\"` to close this bead.\n", selected.ID)
-				fmt.Println("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.")
+				fmt.Print(completionGuidance(selected.ID))
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
 				if err := emitInstruct(root); err != nil {
@@ -285,6 +283,22 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		return nil
 	},
+}
+
+// completionGuidance renders the "When done" tail appended to the bead
+// context. Spec 092 Req 5 (mindspec-qxsy / mindspec-tjat): the guidance
+// is location-agnostic — it must NOT instruct agents to `cd` into the
+// bead worktree before running `mindspec complete`. The command resolves
+// the bead worktree itself (internal/complete/complete.go) and may be
+// run from the repo root; it removes the bead worktree when it succeeds,
+// so a shell that followed a cd-then-complete instruction is stranded in
+// a deleted directory.
+func completionGuidance(beadID string) string {
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	fmt.Fprintf(&sb, "**When done**: do the work and commit it in the worktree. Then run `mindspec complete %s \"describe what you did\"` to close this bead — run it from the repo root (it resolves the bead worktree itself) and note it will remove the bead worktree when it succeeds.\n", beadID)
+	sb.WriteString("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.\n")
+	return sb.String()
 }
 
 // runEmitOnly handles the --emit-only path: build and print primer without claiming.

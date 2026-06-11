@@ -3,6 +3,7 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -281,6 +282,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		result.WorktreeRemoved = true
 	}
 
+	// Spec 092 Req 3c (mindspec-qxsy): CompleteBead may have removed the
+	// very directory this process was invoked from — running `complete`
+	// from inside the bead worktree is supported. Move to the repo root
+	// NOW, before any bd subprocess below: advanceState swallows all bd
+	// errors and would silently degrade to ModeIdle when those
+	// subprocesses are spawned from a deleted cwd, producing a false
+	// `Mode: idle` AND skipping the mindspec_phase sync at step 6.5 —
+	// recreating the exact stale-phase condition the Req 1 reconcile
+	// exists to heal. The chdir lives INSIDE Run (not at the cmd layer)
+	// so the metadata writes and advanceState are protected for every
+	// caller.
+	if chdirErr := os.Chdir(root); chdirErr != nil {
+		fmt.Printf("Warning: could not chdir to repo root %s: %v\n", root, chdirErr)
+	}
+
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
 	// terminal bead→spec merge (`exec.CompleteBead`) returns nil. This
 	// mirrors ApproveImpl's post-FinalizeEpic discipline — the override
@@ -346,7 +362,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// downstream commands like `mindspec impl approve`.
 	if nextMode != "" {
 		if eid, findErr := phase.FindEpicBySpecID(specID); findErr == nil && eid != "" {
-			_ = bead.MergeMetadata(eid, map[string]interface{}{"mindspec_phase": nextMode})
+			_ = completeMergeMetadataFn(eid, map[string]interface{}{"mindspec_phase": nextMode})
 		}
 	}
 
@@ -369,6 +385,12 @@ func FormatResult(r *Result) string {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead ready: %s\n", r.NextBead)
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", r.NextSpec)
+		// Spec 092 Req 4 (mindspec-qxsy): the implement branch carries
+		// the same cd hint as plan/review — the removed bead worktree
+		// may have been the shell's cwd.
+		if r.WorktreeRemoved && r.SpecWorktree != "" {
+			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
