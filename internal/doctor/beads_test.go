@@ -424,6 +424,253 @@ func TestCheckBdVersionFloor_AtOrAbove(t *testing.T) {
 	}
 }
 
+// ─── checkBeadsMergeDriver ────────────────────────────────────────────────
+
+// gitConfigGet reads a git config key in a test repo, returning "" when unset.
+func gitConfigGet(t *testing.T, root, key string) string {
+	t.Helper()
+	cmd := exec.Command("git", "config", "--get", key)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// writeExecutable drops an executable shell stub at path.
+func writeExecutable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const beadsMergeAttr = ".beads/issues.jsonl merge=beads\n"
+
+func TestCheckBeadsMergeDriver(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, root string)
+		wantNone   bool   // no check at all
+		wantStatus Status // when !wantNone
+		wantMsg    []string
+		wantFix    bool
+	}{
+		{
+			name:     "no attribute and no driver is silent",
+			setup:    func(t *testing.T, root string) {},
+			wantNone: true,
+		},
+		{
+			name: "dead bd merge driver flagged",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				writeExecutable(t, filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh"))
+				runGit(t, root, "config", "merge.beads.driver", "bd merge %A %O %A %B")
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"bd merge", "removed in bd 1.0.x", "recovery: git config merge.beads.driver"},
+		},
+		{
+			name: "driver command not on PATH flagged",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				runGit(t, root, "config", "merge.beads.driver", "no-such-merge-driver-xyz %A %O %B")
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"not found on PATH", "recovery:"},
+		},
+		{
+			name: "driver absolute path missing flagged",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				runGit(t, root, "config", "merge.beads.driver", "/nonexistent/bd-jsonl-merge-driver.sh %A %O %B")
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"does not exist", "recovery:"},
+		},
+		{
+			name: "driver script without execute bit flagged",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				script := filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh")
+				writeFile(t, script, "#!/bin/sh\nexit 0\n") // 0644
+				runGit(t, root, "config", "merge.beads.driver", script+" %A %O %B")
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"not executable", "recovery:"},
+		},
+		{
+			name: "healthy wrapper with absolute path passes",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				script := filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh")
+				writeExecutable(t, script)
+				runGit(t, root, "config", "merge.beads.driver", script+" %A %O %B")
+			},
+			wantStatus: OK,
+			wantMsg:    []string{"resolves"},
+		},
+		{
+			name: "healthy wrapper with relative path resolves against root",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				writeExecutable(t, filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh"))
+				runGit(t, root, "config", "merge.beads.driver", "scripts/bd-jsonl-merge-driver.sh %A %O %B")
+			},
+			wantStatus: OK,
+			wantMsg:    []string{"resolves"},
+		},
+		{
+			name: "attribute without driver flagged fixable when script exists",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				writeExecutable(t, filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh"))
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"merge.beads.driver is not", "plain text merge", "recovery: git config merge.beads.driver"},
+			wantFix:    true,
+		},
+		{
+			name: "attribute without driver warns manual when script missing",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+			},
+			wantStatus: Warn,
+			wantMsg:    []string{"does not exist in this repo", "recovery: git config merge.beads.driver"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := beadsRoot(t, true)
+			tc.setup(t, root)
+
+			r := &Report{}
+			checkBeadsMergeDriver(r, root)
+
+			c := findCheck(r, "Beads merge driver")
+			if tc.wantNone {
+				if c != nil {
+					t.Fatalf("expected no check, got %+v", c)
+				}
+				return
+			}
+			if c == nil {
+				t.Fatal("missing check")
+			}
+			if c.Status != tc.wantStatus {
+				t.Errorf("status = %d, want %d (message %q)", c.Status, tc.wantStatus, c.Message)
+			}
+			for _, want := range tc.wantMsg {
+				if !strings.Contains(c.Message, want) {
+					t.Errorf("message should contain %q; got %q", want, c.Message)
+				}
+			}
+			if tc.wantFix && c.FixFunc == nil {
+				t.Fatal("expected FixFunc")
+			}
+			if !tc.wantFix && c.FixFunc != nil {
+				t.Error("FixFunc must be nil for this case")
+			}
+		})
+	}
+}
+
+func TestCheckBeadsMergeDriver_FixWritesConfigAndRecheckPasses(t *testing.T) {
+	root := beadsRoot(t, true)
+	writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+	script := filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh")
+	writeExecutable(t, script)
+
+	r1 := &Report{}
+	checkBeadsMergeDriver(r1, root)
+	c1 := findCheck(r1, "Beads merge driver")
+	if c1 == nil || c1.FixFunc == nil {
+		t.Fatalf("expected fixable check, got %+v", c1)
+	}
+	if err := c1.FixFunc(); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+
+	got := gitConfigGet(t, root, "merge.beads.driver")
+	if !filepath.IsAbs(strings.SplitN(got, " ", 2)[0]) {
+		t.Errorf("fix should write an absolute script path; got %q", got)
+	}
+	if !strings.HasSuffix(got, " %A %O %B") {
+		t.Errorf("fix should pass %%A %%O %%B; got %q", got)
+	}
+	if !strings.Contains(got, "bd-jsonl-merge-driver.sh") {
+		t.Errorf("fix should point at the wrapper script; got %q", got)
+	}
+
+	// Re-run: the repaired config must now pass.
+	r2 := &Report{}
+	checkBeadsMergeDriver(r2, root)
+	c2 := findCheck(r2, "Beads merge driver")
+	if c2 == nil || c2.Status != OK {
+		t.Fatalf("post-fix: got %+v, want OK", c2)
+	}
+}
+
+func TestDriverTokens(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"bd merge %A %O %A %B", []string{"bd", "merge", "%A", "%O", "%A", "%B"}},
+		{"/abs/path/driver.sh %A %O %B", []string{"/abs/path/driver.sh", "%A", "%O", "%B"}},
+		{"'/path with space/d.sh' %A", []string{"/path with space/d.sh", "%A"}},
+		{`"/path with space/d.sh" %A`, []string{"/path with space/d.sh", "%A"}},
+		{"  spaced   out  ", []string{"spaced", "out"}},
+		{"", nil},
+		{"   ", nil},
+	}
+	for _, tc := range cases {
+		got := driverTokens(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("driverTokens(%q) = %v, want %v", tc.in, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("driverTokens(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestGitattributesHasBeadsMerge(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string // "" means no file at all
+		write   bool
+		want    bool
+	}{
+		{name: "no file", write: false, want: false},
+		{name: "attribute present", write: true, content: ".beads/issues.jsonl merge=beads\n", want: true},
+		{name: "comment only", write: true, content: "# .beads/issues.jsonl merge=beads\n", want: false},
+		{name: "other attributes", write: true, content: "*.go text eol=lf\n", want: false},
+		{name: "different merge driver", write: true, content: "*.lock merge=ours\n", want: false},
+		{name: "among other lines", write: true, content: "*.go text\n.beads/issues.jsonl merge=beads\n", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.write {
+				writeFile(t, filepath.Join(root, ".gitattributes"), tc.content)
+			}
+			if got := gitattributesHasBeadsMerge(root); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // ─── integration: full doctor flow on a bd-default config ────────────────
 
 // bdDefaultConfig is a config.yaml shape similar to what `bd init` produces
