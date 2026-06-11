@@ -316,6 +316,278 @@ func checkBdVersionFloor(r *Report, root string) {
 	})
 }
 
+// beadsMergeDriverScript is the repo-relative path of the tracked wrapper
+// that regenerates .beads/issues.jsonl from the Dolt DB on merge (ADR-0025:
+// the jsonl is a deterministic projection, so regenerate-from-DB is the
+// correct merge). It replaced the orphaned `bd merge` driver removed in
+// bd 1.0.x (incident 2026-06-11, mindspec-oe0u).
+const beadsMergeDriverScript = "scripts/bd-jsonl-merge-driver.sh"
+
+// recoveryLine formats the agent-contract failure footer: a final line of
+// the form `recovery: <command>` naming the exact command to run. Matches
+// the convention used by scripts/bd-jsonl-merge-driver.sh; hand-rolled here
+// because internal/guard exports no formatter for it (doctor is not an
+// ADR-0030 enforcement package, so the import itself would be legal — the
+// helper just doesn't exist there).
+func recoveryLine(command string) string {
+	return "\nrecovery: " + command
+}
+
+// checkBeadsMergeDriver validates the merge.beads.driver git config against
+// the merge=beads attribute in .gitattributes. Two failure classes from the
+// 2026-06-11 incident (mindspec-oe0u):
+//
+//  1. A configured driver whose command does not resolve/execute — e.g. the
+//     orphaned `bd merge %A %O %A %B` form after the bd 1.0.x upgrade
+//     removed that subcommand. Every both-sides-changed merge of
+//     .beads/issues.jsonl fails loudly (path left unmerged with 3 stages).
+//  2. A merge=beads attribute with NO driver configured — git silently
+//     falls back to a plain TEXT merge of the jsonl. The more dangerous
+//     sibling: silent semantic corruption instead of a loud failure. This
+//     one is fixable: --fix writes the config pointing at the tracked
+//     wrapper script (absolute path), when that script exists in the repo;
+//     when it doesn't, the check stays ERROR with the manual command.
+//
+// The inverse hole is flagged too: a configured driver with NO merge=beads
+// attribute in .gitattributes — git text-merges the jsonl despite the
+// configured driver. A repo with neither the attribute nor the driver is
+// silent — there is nothing to validate.
+func checkBeadsMergeDriver(r *Report, root string) {
+	hasAttr := gitattributesHasBeadsMerge(root)
+	driver, configured := readGitConfig(root, "merge.beads.driver")
+
+	scriptAbs, scriptExists := mergeDriverScriptPath(root)
+	// Single-quote the script path: git runs merge drivers via `sh -c`, so
+	// an unquoted absolute path word-splits when the repo lives under a
+	// directory with spaces. driverTokens parses the quotes back out, so
+	// the written value re-validates cleanly.
+	wantDriver := "'" + scriptAbs + "' %A %O %B"
+
+	if !configured || strings.TrimSpace(driver) == "" {
+		if !hasAttr {
+			return
+		}
+		if scriptExists {
+			r.Checks = append(r.Checks, Check{
+				Name:   "Beads merge driver",
+				Status: Error,
+				Message: ".gitattributes maps .beads/issues.jsonl to merge=beads but merge.beads.driver is not " +
+					"configured — git silently falls back to a plain text merge of the jsonl (silent semantic " +
+					"corruption of same-record divergence); run `mindspec doctor --fix` to point it at " +
+					beadsMergeDriverScript +
+					recoveryLine(fmt.Sprintf("git config merge.beads.driver %q", wantDriver)),
+				FixFunc: func() error {
+					return writeGitConfig(root, "merge.beads.driver", wantDriver)
+				},
+			})
+			return
+		}
+		// No FixFunc here — the wrapper script is missing, so there is
+		// nothing safe to point the config at. Still ERROR, not Warn: this
+		// unfixable state is strictly worse than the fixable sibling above.
+		r.Checks = append(r.Checks, Check{
+			Name:   "Beads merge driver",
+			Status: Error,
+			Message: ".gitattributes maps .beads/issues.jsonl to merge=beads but merge.beads.driver is not " +
+				"configured and " + beadsMergeDriverScript + " does not exist in this repo — git silently " +
+				"text-merges the jsonl; restore the wrapper script, then configure the driver manually" +
+				recoveryLine("git config merge.beads.driver '<abs-path-to>/bd-jsonl-merge-driver.sh %A %O %B'"),
+		})
+		return
+	}
+
+	// Inverse hole: driver configured but the merge=beads attribute is gone
+	// from .gitattributes — git never consults the driver and silently
+	// text-merges the jsonl despite the healthy-looking config.
+	if !hasAttr {
+		r.Checks = append(r.Checks, Check{
+			Name:   "Beads merge driver",
+			Status: Error,
+			Message: fmt.Sprintf("merge.beads.driver is configured (%q) but .gitattributes has no merge=beads "+
+				"mapping for .beads/issues.jsonl — git silently text-merges the jsonl despite the configured "+
+				"driver", driver) +
+				recoveryLine(`printf '.beads/issues.jsonl merge=beads\n' >> .gitattributes`),
+		})
+		return
+	}
+
+	recovery := recoveryLine(fmt.Sprintf("git config merge.beads.driver %q", wantDriver))
+	if !scriptExists {
+		recovery = recoveryLine("git config merge.beads.driver '<abs-path-to>/bd-jsonl-merge-driver.sh %A %O %B'")
+	}
+
+	toks := driverTokens(driver)
+	if len(toks) == 0 {
+		r.Checks = append(r.Checks, Check{
+			Name:    "Beads merge driver",
+			Status:  Error,
+			Message: "merge.beads.driver is configured but empty — merges of .beads/issues.jsonl will fail" + recovery,
+		})
+		return
+	}
+
+	// The incident's exact shape: `bd merge ...` survived the bd 1.0.x
+	// upgrade in .git/config even though the subcommand was removed. The
+	// `bd` binary itself resolves on PATH, so the executable-existence
+	// gate below would pass — flag the dead subcommand explicitly.
+	if filepath.Base(toks[0]) == "bd" && len(toks) > 1 && toks[1] == "merge" {
+		r.Checks = append(r.Checks, Check{
+			Name:   "Beads merge driver",
+			Status: Error,
+			Message: fmt.Sprintf("merge.beads.driver %q invokes `bd merge`, which was removed in bd 1.0.x — "+
+				"every both-sides-changed merge of .beads/issues.jsonl fails, leaving the path unmerged "+
+				"(incident 2026-06-11)", driver) + recovery,
+		})
+		return
+	}
+
+	if err := resolveDriverCommand(root, toks[0]); err != nil {
+		r.Checks = append(r.Checks, Check{
+			Name:   "Beads merge driver",
+			Status: Error,
+			Message: fmt.Sprintf("merge.beads.driver %q: %v — merges of .beads/issues.jsonl will fail",
+				driver, err) + recovery,
+		})
+		return
+	}
+
+	r.Checks = append(r.Checks, Check{
+		Name:    "Beads merge driver",
+		Status:  OK,
+		Message: fmt.Sprintf("merge.beads.driver resolves (%s)", toks[0]),
+	})
+}
+
+// gitattributesHasBeadsMerge reports whether <root>/.gitattributes assigns
+// the merge=beads attribute to any pattern. Only the top-level file is
+// scanned — that is where mindspec (and bd) write it.
+func gitattributesHasBeadsMerge(root string) bool {
+	data, err := os.ReadFile(filepath.Join(root, ".gitattributes"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		for _, attr := range fields[1:] {
+			if attr == "merge=beads" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mergeDriverScriptPath returns the absolute path of the tracked wrapper
+// script and whether it exists as a regular file in this repo.
+func mergeDriverScriptPath(root string) (abs string, exists bool) {
+	p := filepath.Join(root, beadsMergeDriverScript)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		return abs, false
+	}
+	return abs, true
+}
+
+// driverTokens splits a git merge-driver command line into tokens with
+// shell-style single/double quoting honored (git runs the driver via sh).
+// No escape processing beyond quote pairing — driver lines are simple.
+func driverTokens(s string) []string {
+	var toks []string
+	var cur strings.Builder
+	var quote rune // 0 when outside quotes
+	inTok := false
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			inTok = true
+		case r == ' ' || r == '\t':
+			if inTok {
+				toks = append(toks, cur.String())
+				cur.Reset()
+				inTok = false
+			}
+		default:
+			cur.WriteRune(r)
+			inTok = true
+		}
+	}
+	if inTok {
+		toks = append(toks, cur.String())
+	}
+	return toks
+}
+
+// resolveDriverCommand checks that the first token of a merge-driver
+// command resolves to an executable. Tokens containing a path separator
+// are treated as paths (relative ones resolve against the worktree
+// top-level, which is where git runs merge drivers); bare names go
+// through PATH lookup.
+func resolveDriverCommand(root, tok string) error {
+	if strings.Contains(tok, "/") {
+		path := tok
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("command %s does not exist", path)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("command %s is a directory", path)
+		}
+		if info.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("command %s is not executable", path)
+		}
+		return nil
+	}
+	if _, err := exec.LookPath(tok); err != nil {
+		return fmt.Errorf("command %q not found on PATH", tok)
+	}
+	return nil
+}
+
+// readGitConfig returns the value of a git config key for the repo at
+// root. ok=false when the key is unset or git is unavailable.
+func readGitConfig(root, key string) (string, bool) {
+	cmd := exec.Command("git", "config", "--get", key)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// writeGitConfig sets a git config key for the repo at root. In a linked
+// worktree this lands in the shared .git/config, covering main and all
+// worktrees at once.
+func writeGitConfig(root, key, value string) error {
+	cmd := exec.Command("git", "config", key, value)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git config %s: %v: %s", key, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 var bdVersionRE = regexp.MustCompile(`\bv?([0-9]+)\.([0-9]+)\.([0-9]+)`)
 
 // parseBdVersion extracts the first dotted triple from `bd --version` output.

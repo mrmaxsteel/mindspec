@@ -9,3 +9,5 @@ paths:
   - internal/guard/**
   - internal/setup/**
   - cmd/**
+  - scripts/bd-jsonl-merge-driver.sh
+  - .mindspec/docs/domains/workflow/OWNERSHIP.yaml
