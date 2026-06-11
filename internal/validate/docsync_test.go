@@ -181,14 +181,16 @@ func TestValidateDocsErrorsOnInternalDocSkew(t *testing.T) {
 	}
 }
 
-// TestValidateDocsErrorsOnInternalDocSkew_Fallback covers the fallback
-// marker path: when OWNERSHIP.yaml is absent for a domain the message
-// must include the literal "<fallback: internal/<domain>/**>" marker so
-// operators know which manifest to author.
+// TestValidateDocsErrorsOnInternalDocSkew_Fallback covers the
+// post-spec-091 (Req 13) semantics of a manifest-less domain: when
+// OWNERSHIP.yaml is absent the domain claims NOTHING, so a source
+// change under internal/<domain>/ produces NO internal-docs error —
+// the old synthetic "internal/<domain>/**" fallback claim is removed.
 func TestValidateDocsErrorsOnInternalDocSkew_Fallback(t *testing.T) {
 	root := t.TempDir()
-	// Create the domain directory WITHOUT OWNERSHIP.yaml so loadOwnership
-	// returns the synthetic fallback Ownership.
+	// Create the domain directory WITHOUT OWNERSHIP.yaml so
+	// LoadOwnership returns the claims-nothing Ownership
+	// (Source() == "missing").
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "domains", "workflow"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +198,70 @@ func TestValidateDocsErrorsOnInternalDocSkew_Fallback(t *testing.T) {
 	r := &Result{SubCommand: "docs"}
 	source := []string{"internal/workflow/run.go"}
 	docs := []string{"CLAUDE.md"}
+
+	checkInternalPackages(r, root, source, docs)
+
+	for _, issue := range r.Issues {
+		if issue.Name == "internal-docs" {
+			t.Fatalf("manifest-less domain must claim nothing (no internal-docs error); got %+v", issue)
+		}
+	}
+	if r.HasFailures() {
+		t.Errorf("expected no failures for manifest-less domain, got %+v", r.Issues)
+	}
+}
+
+// TestCheckInternalPackages_ZeroDomainsDisclosedDefault pins the
+// zero-domains DISCLOSED DEFAULT branch (spec 091 Req 13 disclosure
+// obligation, panel V1-1): when NO domain directories exist at all,
+// changed internal/<pkg>/ files are still attributed per-package and
+// emit a BLOCKING internal-docs error carrying the literal
+// "<fallback: internal/<pkg>/**>" marker. No other test reaches
+// len(domains)==0 — this coverage is part of the disclosure.
+func TestCheckInternalPackages_ZeroDomainsDisclosedDefault(t *testing.T) {
+	root := t.TempDir() // no .mindspec/docs/domains/ at all
+
+	r := &Result{SubCommand: "docs"}
+	source := []string{"internal/foo/bar.go"}
+	docs := []string{"CLAUDE.md"} // not a domain doc
+
+	checkInternalPackages(r, root, source, docs)
+
+	var issue *Issue
+	for i := range r.Issues {
+		if r.Issues[i].Name == "internal-docs" {
+			issue = &r.Issues[i]
+			break
+		}
+	}
+	if issue == nil {
+		t.Fatalf("expected internal-docs error from zero-domains disclosed default, got %+v", r.Issues)
+	}
+	if issue.Severity != SevError {
+		t.Errorf("zero-domains internal-docs severity = %v, want SevError (blocking)", issue.Severity)
+	}
+	if !strings.Contains(issue.Message, "<fallback: internal/foo/**>") {
+		t.Errorf("zero-domains message must carry the literal disclosure marker; got %q", issue.Message)
+	}
+	if !r.HasFailures() {
+		t.Error("result should report failures")
+	}
+}
+
+// TestPerDomainMarkerNamesManifest pins the spec 091 Req 13 marker
+// audit outcome (panel V2-4): the per-domain empty-ManifestPath
+// "<fallback: internal/<domain>/**>" marker branch was DEAD after the
+// loader fallback removal (attribution requires non-empty Paths,
+// which implies a manifest-backed load) and has been DELETED. Every
+// per-domain internal-docs message names the manifest path that
+// decided ownership and never carries a fallback marker.
+func TestPerDomainMarkerNamesManifest(t *testing.T) {
+	root := t.TempDir()
+	manifest := writeOwnershipFixture(t, root, "workflow", []string{"internal/validate/**"})
+
+	r := &Result{SubCommand: "docs"}
+	source := []string{"internal/validate/spec.go"}
+	docs := []string{"CLAUDE.md"} // not a domain doc
 
 	checkInternalPackages(r, root, source, docs)
 
@@ -209,8 +275,11 @@ func TestValidateDocsErrorsOnInternalDocSkew_Fallback(t *testing.T) {
 	if issue == nil {
 		t.Fatalf("expected internal-docs issue, got %+v", r.Issues)
 	}
-	if !strings.Contains(issue.Message, "<fallback: internal/workflow/**>") {
-		t.Errorf("internal-docs message must include fallback marker; got %q", issue.Message)
+	if !strings.Contains(issue.Message, manifest) {
+		t.Errorf("per-domain message must name manifest %q; got %q", manifest, issue.Message)
+	}
+	if strings.Contains(issue.Message, "<fallback:") {
+		t.Errorf("per-domain message must never carry a fallback marker (deleted as dead code); got %q", issue.Message)
 	}
 }
 
