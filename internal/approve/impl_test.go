@@ -6,12 +6,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -352,11 +354,13 @@ func saveAndRestore(t *testing.T) {
 	origRunBDCombined := implRunBDCombinedFn
 	origMergeMeta := implMergeMetadataFn
 	origGitEmail := implGitUserEmailFn
+	origPhaseMeta := implPhaseMetadataFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
 		implMergeMetadataFn = origMergeMeta
 		implGitUserEmailFn = origGitEmail
+		implPhaseMetadataFn = origPhaseMeta
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into approve-impl) shells to
@@ -381,6 +385,8 @@ func saveAndRestore(t *testing.T) {
 	// inert by default. Tests that observe the write swap these in.
 	implMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
 	implGitUserEmailFn = func() string { return "test@example.invalid" }
+	// Spec 092 Bead 3: phase reconcile/done writes inert by default.
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
 }
 
 func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
@@ -614,16 +620,25 @@ func TestApproveImplOverrideRecordsToEpic(t *testing.T) {
 }
 
 // TestApproveImplCallOrder parses internal/approve/impl.go and asserts
-// the SEVEN anchored call expressions inside ApproveImpl appear in
-// strict source order. Per panel CONSENSUS revision 9 the contract is:
+// the EIGHT anchored call expressions inside ApproveImpl appear in
+// strict source order. Per Spec 086 panel CONSENSUS revision 9 plus
+// the Spec 092 Req 1 reconcile placement, the contract is:
 //
 //  1. readBeadStatus            (bead-status loop)
 //  2. validate.ValidateDocs     (doc-sync gate)
-//  3. validate.CheckADRDivergence (ADR-divergence gate)
-//  4. implRunBDCombinedFn("close", ...)  (EPIC CLOSE)
-//  5. bead.MergeMetadata with "mindspec_phase" literal (phase write)
-//  6. exec.CommitCount          (pre-flight)
-//  7. exec.FinalizeEpic         (terminal mutation)
+//  3. validate.CheckADRDivergence (ADR-divergence gate — LAST
+//     pre-terminal gate)
+//  4. implPhaseMetadataFn with "mindspec_phase" but WITHOUT
+//     "mindspec_done" (Spec 092 Req 1 deferred stale-phase
+//     reconcile: after the last pre-terminal gate, before the epic
+//     close, and NEVER after the done write — a placement after the
+//     done write would clobber `done` with the derived `review`)
+//  5. implRunBDCombinedFn("close", ...)  (EPIC CLOSE)
+//  6. implPhaseMetadataFn with "mindspec_done" literal (phase=done
+//     write — supersedes the reconcile)
+//  7. exec.CommitCount          (pre-flight; NOT a pre-terminal gate
+//     for the reconcile — placement pinned by Spec 086 rev 9)
+//  8. exec.FinalizeEpic         (terminal mutation)
 //
 // Additionally the override metadata write (implMergeMetadataFn with
 // "mindspec_impl_skew_reason") must appear AFTER FinalizeEpic per
@@ -652,6 +667,13 @@ func TestApproveImplCallOrder(t *testing.T) {
 		{label: "validate.CheckADRDivergence", match: func(c *ast.CallExpr) bool {
 			return isSelectorCall(c.Fun, "validate", "CheckADRDivergence")
 		}},
+		{label: "implPhaseMetadataFn(reconcile, mindspec_phase only)", match: func(c *ast.CallExpr) bool {
+			id, ok := c.Fun.(*ast.Ident)
+			if !ok || id.Name != "implPhaseMetadataFn" || len(c.Args) < 2 {
+				return false
+			}
+			return callMapHasKey(c.Args[1], "mindspec_phase") && !callMapHasKey(c.Args[1], "mindspec_done")
+		}},
 		{label: "implRunBDCombinedFn(\"close\")", match: func(c *ast.CallExpr) bool {
 			id, ok := c.Fun.(*ast.Ident)
 			if !ok || id.Name != "implRunBDCombinedFn" || len(c.Args) == 0 {
@@ -659,11 +681,12 @@ func TestApproveImplCallOrder(t *testing.T) {
 			}
 			return firstArgStringLit(c) == "close"
 		}},
-		{label: "bead.MergeMetadata(mindspec_phase)", match: func(c *ast.CallExpr) bool {
-			if !isSelectorCall(c.Fun, "bead", "MergeMetadata") || len(c.Args) < 2 {
+		{label: "implPhaseMetadataFn(mindspec_phase=done)", match: func(c *ast.CallExpr) bool {
+			id, ok := c.Fun.(*ast.Ident)
+			if !ok || id.Name != "implPhaseMetadataFn" || len(c.Args) < 2 {
 				return false
 			}
-			return callMapHasKey(c.Args[1], "mindspec_phase")
+			return callMapHasKey(c.Args[1], "mindspec_done")
 		}},
 		{label: "exec.CommitCount", match: func(c *ast.CallExpr) bool {
 			return isSelectorCall(c.Fun, "exec", "CommitCount")
@@ -841,6 +864,322 @@ func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
 	}
 	if seenBeforeFinalize {
 		t.Error("override metadata write occurred before FinalizeEpic — panel CONSENSUS rev 4 violation")
+	}
+}
+
+// --- Spec 092 Bead 3 (Req 1, 2): stale-phase reconcile tests ---
+
+// stubPhaseStoredChildren sets up the phase package stubs with an epic
+// "epic-parent" for spec "010-test" carrying the given stored
+// mindspec_phase metadata value ("" = key absent) and the given
+// children. Unrelated metadata (mindspec_migrated_at) is always
+// present so preservation can be observed.
+func stubPhaseStoredChildren(t *testing.T, stored string, children []phase.ChildInfo) {
+	t.Helper()
+	meta := map[string]interface{}{
+		"spec_num":             float64(10),
+		"spec_title":           "test",
+		"mindspec_migrated_at": "2026-01-01T00:00:00Z",
+	}
+	if stored != "" {
+		meta["mindspec_phase"] = stored
+	}
+	epics := []phase.EpicInfo{{
+		ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+		IssueType: "epic", Metadata: meta,
+	}}
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
+			}
+		}
+		if contains(args, "--parent") {
+			return json.Marshal(children)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" && args[1] == "epic-parent" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+}
+
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// everything written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	defer func() {
+		os.Stderr = orig
+	}()
+	fn()
+	w.Close()
+	os.Stderr = orig
+	return <-done
+}
+
+// TestApproveImpl_StalePhaseReconcilesForward is the spec AC "3smk
+// unit" success path: stored mindspec_phase=implement, all children
+// closed (child-derived = review). ApproveImpl must succeed, write the
+// phase forward via the merge seam ONLY after all pre-terminal gates
+// pass (i.e. before the epic close, after the ADR gate), emit the
+// lifecycle.phase_reconciled stderr event, and end with stored
+// mindspec_phase exactly "done" (the :206-equivalent done write runs
+// after, and supersedes, the reconcile — a placement that clobbered
+// done with review would fail the end-state assertion).
+func TestApproveImpl_StalePhaseReconcilesForward(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	stubPhaseStoredChildren(t, "implement", []phase.ChildInfo{
+		{ID: "bead-1", Status: "closed", IssueType: "task"},
+	})
+
+	// Simulated epic metadata store: the seam emulates the
+	// read-merge-write semantics of bead.MergeMetadata.
+	store := map[string]interface{}{
+		"mindspec_phase":       "implement",
+		"mindspec_migrated_at": "2026-01-01T00:00:00Z",
+	}
+	var events []string
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		if id != "epic-parent" {
+			t.Errorf("phase metadata write targeted %q, want epic-parent", id)
+		}
+		if _, done := updates["mindspec_done"]; done {
+			events = append(events, "done-write")
+		} else {
+			events = append(events, fmt.Sprintf("reconcile-write:%v", updates["mindspec_phase"]))
+		}
+		for k, v := range updates {
+			store[k] = v
+		}
+		return nil
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "close" {
+			events = append(events, "epic-close")
+		}
+		return []byte("ok"), nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	var result *ImplResult
+	var err error
+	stderr := captureStderr(t, func() {
+		result, err = ApproveImpl(tmp, "010-test", mock)
+	})
+	if err != nil {
+		t.Fatalf("stale-phase approve should self-heal, got: %v", err)
+	}
+	if result == nil || result.SpecID != "010-test" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	// Ordering: reconcile write (review) → epic close → done write.
+	want := []string{"reconcile-write:review", "epic-close", "done-write"}
+	if len(events) != len(want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("events = %v, want %v", events, want)
+		}
+	}
+
+	// End-state assertion: stored phase is exactly "done" — the done
+	// write superseded the reconcile.
+	if got := store["mindspec_phase"]; got != "done" {
+		t.Errorf("end-state mindspec_phase = %v, want done (reconcile must not clobber the done write)", got)
+	}
+	// Merge semantics: unrelated key survived every write.
+	if got := store["mindspec_migrated_at"]; got != "2026-01-01T00:00:00Z" {
+		t.Errorf("mindspec_migrated_at = %v, want preserved", got)
+	}
+
+	// Structured self-heal event (HC-3): one stderr line.
+	wantEvent := "event=lifecycle.phase_reconciled spec=010-test epic=epic-parent stored=implement derived=review"
+	if !strings.Contains(stderr, wantEvent) {
+		t.Errorf("stderr missing %q; stderr=%q", wantEvent, stderr)
+	}
+	// No emitted output may contain a raw bd metadata-update command.
+	if strings.Contains(stderr, "bd update --metadata") {
+		t.Errorf("stderr contains banned raw metadata command: %q", stderr)
+	}
+}
+
+// TestApproveImpl_LaterGateFailureLeavesPhaseUntouched is the spec AC
+// "3smk unit" deferred-write half: with a stale stored phase AND a
+// failing later gate (doc-sync), the command errors and NO phase
+// metadata write of any kind happens — the reconcile is deferred past
+// the last pre-terminal gate, so a gate failure leaves metadata
+// untouched (HC-4: exit non-zero having mutated nothing).
+func TestApproveImpl_LaterGateFailureLeavesPhaseUntouched(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	stubPhaseStoredChildren(t, "implement", []phase.ChildInfo{
+		{ID: "bead-1", Status: "closed", IssueType: "task"},
+	})
+
+	phaseWrites := 0
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		phaseWrites++
+		return nil
+	}
+	closes := 0
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "close" {
+			closes++
+		}
+		return []byte("ok"), nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// spec.md-only change → doc-sync gate (a LATER pre-terminal
+		// gate than the phase gate) fails.
+		ChangedFilesResult: []string{".mindspec/docs/specs/010-test/spec.md"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected doc-sync gate failure")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should mention doc-sync: %v", err)
+	}
+	if phaseWrites != 0 {
+		t.Errorf("phase metadata writes = %d, want 0 — a later-gate failure must leave metadata untouched", phaseWrites)
+	}
+	if closes != 0 {
+		t.Errorf("epic close calls = %d, want 0", closes)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must not be called when a gate fails: got %d calls", len(calls))
+	}
+}
+
+// TestApproveImpl_PhaseGateFailureNamesBothPhasesWithRecovery is the
+// spec AC "3smk unit" fallback half (Req 2): when neither the stored
+// nor the child-derived phase satisfies the gate, the error names both
+// phases and ends with the exact spec-mandated recovery line. This is
+// also the per-site recovery-convention test for the approve package
+// (Req 21 mirror — see internal/guard/recovery_convention_test.go).
+func TestApproveImpl_PhaseGateFailureNamesBothPhasesWithRecovery(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	// stored=plan, one child in_progress → derived=implement: both fail.
+	stubPhaseStoredChildren(t, "plan", []phase.ChildInfo{
+		{ID: "bead-1", Status: "in_progress", IssueType: "task"},
+	})
+
+	phaseWrites := 0
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		phaseWrites++
+		return nil
+	}
+
+	mock := &executor.MockExecutor{}
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected phase-gate failure when neither phase satisfies the gate")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"plan"`) || !strings.Contains(msg, `"implement"`) {
+		t.Errorf("error must name both stored and derived phases: %v", msg)
+	}
+	wantRecovery := "recovery: close remaining beads with 'mindspec complete <bead-id>', or if bead states are already correct run: mindspec repair phase 010-test"
+	if !strings.Contains(msg, wantRecovery) {
+		t.Errorf("error missing the spec-mandated recovery line %q: %v", wantRecovery, msg)
+	}
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("phase-gate failure must end with a recovery line (Req 12/21): %v", msg)
+	}
+	if strings.Contains(msg, "bd update --metadata") {
+		t.Errorf("emitted message contains banned raw metadata command (Req 19): %v", msg)
+	}
+	if phaseWrites != 0 {
+		t.Errorf("gate failure must not write phase metadata; writes = %d", phaseWrites)
+	}
+}
+
+// TestApproveImpl_ReconcileWriteFailureHasRecoveryLine: when the
+// deferred reconcile write itself fails, the command exits non-zero
+// BEFORE any mutation (no epic close, no FinalizeEpic) and the error
+// ends with a recovery line (guard convention).
+func TestApproveImpl_ReconcileWriteFailureHasRecoveryLine(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	stubPhaseStoredChildren(t, "implement", []phase.ChildInfo{
+		{ID: "bead-1", Status: "closed", IssueType: "task"},
+	})
+
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		return fmt.Errorf("dolt offline")
+	}
+	closes := 0
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "close" {
+			closes++
+		}
+		return []byte("ok"), nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected error when the reconcile write fails")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("reconcile-write failure must end with a recovery line: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mindspec repair phase 010-test") {
+		t.Errorf("recovery should name mindspec repair phase: %v", err)
+	}
+	if strings.Contains(err.Error(), "bd update --metadata") {
+		t.Errorf("emitted message contains banned raw metadata command (Req 19): %v", err)
+	}
+	if closes != 0 {
+		t.Errorf("epic close calls = %d, want 0 (HC-4: nothing mutated)", closes)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must not run after a reconcile-write failure: %d calls", len(calls))
 	}
 }
 

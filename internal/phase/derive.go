@@ -123,8 +123,18 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		// Run child-based derivation as consistency check.
 		childPhase := deriveFromChildrenOrStatusWithCache(c, epicID, epicStatus)
 		if childPhase != "" && childPhase != storedPhase {
-			fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\n",
-				epicID, storedPhase, childPhase)
+			// Spec 092 Req 2: the consistency warning carries the
+			// recovery-line convention (ADR-0035) so agents can grep
+			// and paste the fix. The recovery command is
+			// `mindspec repair phase <spec-id>` — NEVER a raw
+			// `bd update` metadata command, which has replace
+			// semantics over the entire metadata map (Req 19/HC-5).
+			// The line is hand-formatted here because internal/guard
+			// imports this package (import cycle); the external-
+			// package test derive_recovery_test.go keeps the format
+			// aligned with guard.HasFinalRecoveryLine.
+			fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
+				epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
 		}
 		return storedPhase, nil
 	}
@@ -142,6 +152,51 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 	}
 	children, _ := c.GetChildren(epicID)
 	return DerivePhaseFromChildren(children), nil
+}
+
+// PhaseDetail exposes the stored (metadata-cached) phase alongside the
+// child-derived phase for one epic. Spec 092 Req 1: child bead statuses
+// are the ground truth of the lifecycle phase (ADR-0023 §3/§5);
+// `mindspec_phase` is a trusted CACHE of that derivation (ADR-0034
+// amendment). Gate callers use this to evaluate gates on the derived
+// value read-only and defer the forward reconcile write;
+// `mindspec repair phase` uses it to re-derive before its merge-write.
+type PhaseDetail struct {
+	EpicID  string
+	Stored  string // mindspec_phase metadata value; "" when absent or invalid
+	Derived string // phase derived from children/epic status; "" when derivation fails
+}
+
+// DerivePhaseDetail returns the stored vs child-derived phase for an
+// epic so callers do not duplicate the cache plumbing. Constructs a
+// fresh cache; hot-path callers should use DerivePhaseDetailWithCache.
+func DerivePhaseDetail(epicID string) (PhaseDetail, error) {
+	return DerivePhaseDetailWithCache(NewCache(), epicID)
+}
+
+// DerivePhaseDetailWithCache is the cache-aware variant of
+// DerivePhaseDetail. The derivation is deterministic and read-only —
+// it never writes metadata (the reconcile write is the caller's
+// decision, sequenced per spec 092 Req 1).
+func DerivePhaseDetailWithCache(c *Cache, epicID string) (PhaseDetail, error) {
+	return PhaseDetail{
+		EpicID:  epicID,
+		Stored:  readStoredPhaseWithCache(c, epicID),
+		Derived: deriveFromChildrenOrStatusWithCache(c, epicID, ""),
+	}, nil
+}
+
+// specIDForEpicWithCache resolves the spec ID for an epic so emitted
+// recovery commands are copy-pastable. Falls back to the "<spec-id>"
+// placeholder when the epic carries no resolvable spec metadata.
+func specIDForEpicWithCache(c *Cache, epicID string) string {
+	epic, err := c.FindEpic(epicID)
+	if err == nil && epic != nil {
+		if num, title := ExtractSpecMetadata(*epic); num > 0 && title != "" {
+			return SpecIDFromMetadata(num, title)
+		}
+	}
+	return "<spec-id>"
 }
 
 // readStoredPhaseWithCache reads the mindspec_phase metadata field from an epic.
