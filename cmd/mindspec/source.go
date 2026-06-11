@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/mrmaxsteel/mindspec/internal/ownership"
 	"github.com/spf13/cobra"
@@ -30,9 +31,16 @@ everything the doc-sync gate should treat as source. The framework
 itself proposes no globs (ZFC).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(ownership.BuildSourcePopulatePrompt())
-		return nil
+		return runSourcePopulate(cmd.OutOrStdout())
 	},
+}
+
+// runSourcePopulate emits the Req 12 repo-wide source-globs prompt to
+// w. Extracted from the RunE so the command's print behavior is
+// unit-covered (panel R3-1).
+func runSourcePopulate(w io.Writer) error {
+	fmt.Fprintln(w, ownership.BuildSourcePopulatePrompt())
+	return nil
 }
 
 func init() {

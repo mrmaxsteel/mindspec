@@ -92,6 +92,13 @@ func TestBuildPopulatePrompt_NoFrameworkProposedGlobs(t *testing.T) {
 			t.Errorf("populate prompt contains framework-proposed glob %q (ZFC violation)\n--- prompt ---\n%s", b, prompt)
 		}
 	}
+
+	// Structural ZFC pin (panel R3-3): the verbatim prompt contains no
+	// `**` token at all, so any framework-injected glob (which carries
+	// `**`) is caught even when it isn't in the banned list above.
+	if strings.Contains(prompt, "**") {
+		t.Errorf("populate prompt contains a `**` glob token (ZFC structural violation)\n--- prompt ---\n%s", prompt)
+	}
 }
 
 // --- DomainsNeedingPopulate (Req 10 no-arg enumeration) ---
@@ -181,5 +188,12 @@ func TestBuildSourcePopulatePrompt_NoPreFilledGlobs(t *testing.T) {
 		if strings.Contains(prompt, b) {
 			t.Errorf("source-populate prompt contains pre-filled glob %q (ZFC violation)\n--- prompt ---\n%s", b, prompt)
 		}
+	}
+
+	// Structural ZFC pin (panel R3-3): the verbatim prompt contains no
+	// `**` token, so any framework-injected glob is caught even when
+	// it isn't in the banned list above.
+	if strings.Contains(prompt, "**") {
+		t.Errorf("source-populate prompt contains a `**` glob token (ZFC structural violation)\n--- prompt ---\n%s", prompt)
 	}
 }

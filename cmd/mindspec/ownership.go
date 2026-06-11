@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/mrmaxsteel/mindspec/internal/ownership"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -32,38 +33,51 @@ argument the prompt is emitted regardless of the manifest's populated
 state — useful for widening an existing paths: list.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 1 {
-			// Explicit-arg form: emit regardless of populated state
-			// (Req 10; the Req 16 widen-hint relies on this).
-			if err := validate.DomainName(args[0]); err != nil {
-				return err
-			}
-			fmt.Println(ownership.BuildPopulatePrompt(args[0]))
-			return nil
-		}
-
-		// No-arg form: one prompt per missing-or-empty manifest.
 		root, err := findRoot()
 		if err != nil {
 			return err
 		}
-		domains, err := ownership.DomainsNeedingPopulate(root)
-		if err != nil {
+		return runOwnershipPopulate(cmd.OutOrStdout(), root, args)
+	},
+}
+
+// runOwnershipPopulate emits the Req 10 populate prompt(s) to w. It is
+// the testable core of `mindspec ownership populate` (extracted from
+// the RunE so command behavior is unit-covered without a subprocess —
+// panel R3-1). root is resolved by the caller so the no-arg
+// enumeration form can be driven against a fixture workspace.
+//
+//   - explicit <domain> arg: validate the name (rejecting traversal /
+//     malformed names with exit-1) then emit regardless of populated
+//     state (Req 10; the Req 16 widen-hint relies on this).
+//   - no arg: one prompt per missing-or-empty manifest, joined by a
+//     `---` separator; an all-populated workspace prints the re-emit
+//     hint instead.
+func runOwnershipPopulate(w io.Writer, root string, args []string) error {
+	if len(args) == 1 {
+		if err := validate.DomainName(args[0]); err != nil {
 			return err
 		}
-		if len(domains) == 0 {
-			fmt.Println("All domain OWNERSHIP.yaml manifests are populated (or no domains exist).")
-			fmt.Println("To re-emit the prompt for a specific domain, run: mindspec ownership populate <domain>")
-			return nil
-		}
-		for i, d := range domains {
-			if i > 0 {
-				fmt.Println("---")
-			}
-			fmt.Println(ownership.BuildPopulatePrompt(d))
-		}
+		fmt.Fprintln(w, ownership.BuildPopulatePrompt(args[0]))
 		return nil
-	},
+	}
+
+	domains, err := ownership.DomainsNeedingPopulate(root)
+	if err != nil {
+		return err
+	}
+	if len(domains) == 0 {
+		fmt.Fprintln(w, "All domain OWNERSHIP.yaml manifests are populated (or no domains exist).")
+		fmt.Fprintln(w, "To re-emit the prompt for a specific domain, run: mindspec ownership populate <domain>")
+		return nil
+	}
+	for i, d := range domains {
+		if i > 0 {
+			fmt.Fprintln(w, "---")
+		}
+		fmt.Fprintln(w, ownership.BuildPopulatePrompt(d))
+	}
+	return nil
 }
 
 func init() {

@@ -155,6 +155,20 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 			t.Errorf("prompt missing required content: %q", r)
 		}
 	}
+
+	// Pin the renumbered Instructions text (panel R3-2). The Bead 1
+	// audit renumbers the Instructions section "Phases 1-4"→"1-6" and
+	// "Phase 5"→"Phase 7"; without these assertions mutant 4 (leaving
+	// the old "Phases 1-4" / "per Phase 5") survives.
+	if !strings.Contains(prompt, "Complete Phases 1-6 first") {
+		t.Errorf("Instructions missing renumbered \"Phases 1-6\" (mutant 4):\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "per Phase 7") {
+		t.Errorf("Instructions missing renumbered \"per Phase 7\" (mutant 4):\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Phases 1-4 first") || strings.Contains(prompt, "per Phase 5") {
+		t.Errorf("Instructions still contain stale pre-renumber text (mutant 4):\n%s", prompt)
+	}
 }
 
 // TestBuildMigratePrompt_PopulatePhaseOrdering pins the spec 091
