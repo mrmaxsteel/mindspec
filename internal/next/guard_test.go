@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
@@ -655,5 +656,52 @@ func TestWorktreeSetupFailure_NoSpecContext_Placeholders(t *testing.T) {
 	lines := strings.Split(msg, "\n")
 	if got := lines[len(lines)-1]; got != "recovery: mindspec next   (re-run detects the in-progress bead and auto-recovers the worktree)" {
 		t.Errorf("final recovery line = %q, want plain `mindspec next` re-run", got)
+	}
+}
+
+// TestClaimFailure_HonorsCustomWorktreeRoot (spec 093 R3-3): the
+// constructor tests above pass cfg=nil (default ".worktrees"); this one
+// passes a non-default cfg.WorktreeRoot and asserts the interpolated
+// nested bead-worktree path honors it (the `git -C <spec-worktree>`
+// target is always ".worktrees" because spec worktrees live under the
+// repo's own root, but the nested bead worktree path is the configurable
+// half).
+func TestClaimFailure_HonorsCustomWorktreeRoot(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = "custom-trees"
+	err := ClaimFailure("/repo", cfg, "mindspec-ab12", "093-skills-thin-down",
+		errors.New("claim failed (may already be claimed): boom"))
+	if err == nil {
+		t.Fatal("ClaimFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	// Spec worktree path lives under the repo root's WorktreeRoot…
+	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add") {
+		t.Errorf("spec-worktree path must honor cfg.WorktreeRoot: %q", msg)
+	}
+	// …and the nested bead worktree path also honors it.
+	if !strings.Contains(msg, "worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12") {
+		t.Errorf("nested bead worktree path must honor cfg.WorktreeRoot: %q", msg)
+	}
+	if strings.Contains(msg, ".worktrees/worktree-mindspec-ab12") {
+		t.Errorf("default .worktrees path leaked despite custom WorktreeRoot: %q", msg)
+	}
+}
+
+func TestWorktreeSetupFailure_HonorsCustomWorktreeRoot(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = "custom-trees"
+	err := WorktreeSetupFailure("/repo", cfg, "mindspec-ab12", "093-skills-thin-down",
+		errors.New("exit status 128"))
+	if err == nil {
+		t.Fatal("WorktreeSetupFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down") {
+		t.Errorf("recipe must honor cfg.WorktreeRoot end-to-end: %q", msg)
 	}
 }
