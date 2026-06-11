@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -217,8 +218,19 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	}
 	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if _, err := os.Stat(specWtPath); err == nil {
-		if err := gitutil.MergeInto(specWtPath, beadBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", beadBranch, specBranch, err)
+		if mergeErr := gitutil.MergeInto(specWtPath, beadBranch); mergeErr != nil {
+			// Spec 092 Req 14(a) incident amendment (2026-06-11
+			// merge-driver incident, panel j3-recurrence): a failed
+			// bead→spec merge must NEVER be downgraded to a warning.
+			// The old warn-and-continue let the caller proceed past a
+			// conflicted merge, leaving a closed-but-unmerged bead with
+			// the spec worktree stuck mid-merge. New behavior: abort
+			// the in-progress merge (spec worktree back to pre-merge
+			// state), preserve the bead branch + bead worktree (no
+			// cleanup below runs), and return non-zero with the
+			// conflicted files and resolve-in-spec-worktree recovery.
+			return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath,
+				fmt.Sprintf("mindspec complete %s", beadID), mergeErr)
 		}
 	}
 
@@ -286,10 +298,22 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 				if ancErr == nil && !isAnc {
 					if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
-						fmt.Fprintf(os.Stderr, "warning: could not merge %s into %s: %v\n", e.Branch, specBranch, mergeErr)
-					} else {
-						fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
+						// Spec 092 Req 14(a) — SEMANTIC abort, not a
+						// warning: a bead→spec conflict here used to
+						// warn-and-continue, removing the spec worktree,
+						// direct-merging spec→main WITHOUT the conflicted
+						// bead's commits, deleting the spec branch, and
+						// exiting 0. New behavior: abort the in-progress
+						// merge, perform NO worktree removal, NO direct
+						// merge to main, NO branch deletion, and return
+						// non-zero (HC-4: the bead→spec merge is part of
+						// the terminal mutation). The recovery matches the
+						// post-abort reality: the spec worktree still
+						// exists because the abort preserved it.
+						return result, beadToSpecConflictFailure(e.Branch, specBranch, specWtPath,
+							fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
 					}
+					fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
 				}
 			}
 		}
@@ -336,7 +360,19 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		// Direct merge for local (no-remote) workflows.
 		if result.MergeStrategy == "direct" {
 			if err := gitutil.MergeBranch(g.Root, specBranch, "main"); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not merge %s into main: %v\n", specBranch, err)
+				// Spec 092 Req 14(b) + Req 18: a direct spec→main
+				// conflict used to warn-and-continue into
+				// DeleteBranch(specBranch) — destroying the only
+				// recovery source moments after the merge failed. New
+				// behavior: abort the in-progress merge (main left
+				// clean), SKIP branch deletion (the early return below
+				// never reaches it), and return non-zero (HC-4: for
+				// no-remote workflows the direct merge is part of the
+				// terminal mutation). This site runs at g.Root on main,
+				// AFTER the spec worktree was removed above — the
+				// recovery is root-anchored and references no worktree
+				// path.
+				return directMergeConflictFailure(g.Root, specBranch, err)
 			}
 		}
 
@@ -496,6 +532,77 @@ func (g *MindspecExecutor) resolveAnchorRoot(specID string) string {
 		return specWt
 	}
 	return g.Root
+}
+
+// abortMergeState collects the conflicted files of the failed merge in
+// workdir and aborts the in-progress merge (if any), restoring the
+// pre-merge working tree. Returns the conflicted paths and a
+// human-readable note describing the post-abort state. Spec 092
+// Reqs 14/18: every conflict-abort site routes through this so the
+// failure message names the conflicted files and describes the state
+// the recovery commands will actually find.
+func abortMergeState(workdir string) (conflicted []string, note string) {
+	conflicted = gitutil.ConflictedFiles(workdir)
+	if !gitutil.MergeInProgress(workdir) {
+		return conflicted, ""
+	}
+	if abortErr := gitutil.AbortMerge(workdir); abortErr != nil {
+		return conflicted, fmt.Sprintf("warning: could not abort the in-progress merge in %s: %v — run `git merge --abort` there before resolving", workdir, abortErr)
+	}
+	return conflicted, fmt.Sprintf("the in-progress merge in %s was aborted; its working tree is back to the pre-merge state", workdir)
+}
+
+// beadToSpecConflictFailure is the Req 14(a) guard failure for a failed
+// bead→spec merge (CompleteBead's MergeInto and FinalizeEpic's
+// auto-merge — the spec worktree still exists on both paths, so the
+// recovery resolves there). rerun is the lifecycle command to re-run
+// once the conflict is resolved (`mindspec complete <bead-id>` /
+// `mindspec impl approve <spec-id>`); both converge after a manual
+// merge because the re-attempted merge sees the bead branch as an
+// ancestor.
+func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string, mergeErr error) error {
+	conflicted, note := abortMergeState(specWtPath)
+	var b strings.Builder
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into %s: %v", beadBranch, specBranch, mergeErr)
+	if len(conflicted) > 0 {
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+	}
+	if note != "" {
+		b.WriteString("\n")
+		b.WriteString(note)
+	}
+	fmt.Fprintf(&b, "\nnothing was removed: the %s branch, its worktree, and the spec worktree are preserved.", beadBranch)
+	fmt.Fprintf(&b, "\nresolve in the spec worktree (%s): re-run the merge there, fix the conflicts, commit the merge, then re-run the lifecycle command", specWtPath)
+	return guard.NewFailure(b.String(),
+		"cd "+specWtPath,
+		"git merge --no-ff "+beadBranch,
+		rerun,
+	)
+}
+
+// directMergeConflictFailure is the Req 14(b)/Req 18 guard failure for
+// a failed direct spec→main merge. It runs at root on main AFTER the
+// spec worktree was removed, so the message and recovery are
+// root-anchored and reference no worktree path. The merge is aborted
+// (main clean) and branch deletion is skipped by the caller's early
+// return — the spec branch is the only copy of the work and survives.
+func directMergeConflictFailure(root, specBranch string, mergeErr error) error {
+	conflicted, note := abortMergeState(root)
+	var b strings.Builder
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into main: %v", specBranch, mergeErr)
+	if len(conflicted) > 0 {
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+	}
+	if note != "" {
+		b.WriteString("\n")
+		b.WriteString(note)
+	}
+	fmt.Fprintf(&b, "\nmain is clean and the %s branch is preserved (branch deletion was skipped).", specBranch)
+	fmt.Fprintf(&b, "\nresolve at the repo root: re-run the merge there, fix the conflicts, commit the merge, then delete the branch with `git branch -d %s`", specBranch)
+	return guard.NewFailure(b.String(),
+		"cd "+root,
+		"git merge --no-ff "+specBranch,
+	)
 }
 
 func isAlreadyRemovedErr(err error) bool {

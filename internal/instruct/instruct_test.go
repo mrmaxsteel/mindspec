@@ -155,6 +155,27 @@ func TestRender_ImplementMode(t *testing.T) {
 	}
 }
 
+// TestRender_ImplementMode_AntiMergeMain pins the spec 092 Req 14
+// (mindspec-pi24) anti-merge-main warning in the implement-phase
+// template's completion guidance (AC "Req 14 guidance"): agents must
+// not merge `main` into bead branches mid-implementation — that
+// topology creates merge conflicts when `impl approve` merges the spec
+// branch back to main.
+func TestRender_ImplementMode_AntiMergeMain(t *testing.T) {
+	root := setupTestProject(t)
+	s := &state.Focus{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
+	ctx := BuildContext(root, s)
+
+	output, err := Render(ctx)
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Do NOT merge `main` into the bead branch mid-implementation") {
+		t.Errorf("implement guidance must warn against merging main into bead branches mid-implementation; got:\n%s", output)
+	}
+}
+
 // TestRender_ReviewMode pins the review-phase canonical gate command in
 // the markdown render — the SessionStart channel (spec 092 Req 11b).
 func TestRender_ReviewMode(t *testing.T) {

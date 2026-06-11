@@ -298,6 +298,10 @@ func completionGuidance(beadID string) string {
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "**When done**: do the work and commit it in the worktree. Then run `mindspec complete %s \"describe what you did\"` to close this bead — run it from the repo root (it resolves the bead worktree itself) and note it will remove the bead worktree when it succeeds.\n", beadID)
 	sb.WriteString("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.\n")
+	// Spec 092 Req 14 (mindspec-pi24): anti-merge-main warning in the
+	// bead-context channel too — the implement template's completion
+	// section may scroll out of small-context models.
+	sb.WriteString("Do NOT merge `main` into the bead branch mid-implementation — bead work flows bead → spec → main, and pulling `main` in creates merge conflicts at `mindspec impl approve`.\n")
 	return sb.String()
 }
 
