@@ -1,13 +1,16 @@
 # Bead 9 — Green (post-fix) Verification Evidence (Spec 092, Req 22 / HC-6)
 
 **Bead**: mindspec-fwo5.9
-**Green-run HEAD**: commit `8123c70` on `bead/mindspec-fwo5.9` (fully-assembled
+**Green-run HEAD**: commit `8eccb04` on `bead/mindspec-fwo5.9` (fully-assembled
 spec branch: fork point `a1a58d9` = spec tip incl. Beads 3–8 + both integration
-fix-ups, plus this bead's three Phase-1 punch-list commits `145c335`, `da3be5b`,
-`8123c70`). The binary under test is `make build` from this tree.
+fix-ups, plus this bead's Phase-1 punch-list commits `145c335`, `da3be5b`,
+`8123c70`, the run-1 stop evidence `0281dc3`, and the orchestrator-adjudicated
+scenario-1 redesign `8eccb04` — see review/scenario1-fix-design.md). The
+binary under test is `make build` from this tree.
 **Red baseline**: commit `c4a1c7e` (scenarios added in `e9f0400`) — failing
 excerpts recorded in `review/prep/bead2_baseline_evidence.md` and as a bd
-comment on `mindspec-fwo5.2`.
+comment on `mindspec-fwo5.2`. The redesigned stale_phase scenario carries its
+own FRESH baseline-red run (§1a below), per the design's §3 obligation.
 **Agent version (B3)**: `claude --version` → `2.1.173 (Claude Code)`.
 The doomed-worktree redesign rests on version-dependent self-healing-Bash
 behavior (Claude Code 2.1.x's Bash tool transparently repairs a deleted cwd in
@@ -138,22 +141,28 @@ fix required; discharged by that run.
 
 ---
 
-## Scenario runs — **STOPPED AT RUN 1 (FAIL)**
+## Scenario runs
 
-Per the bead's no-fix-forward discipline, the serial run sequence STOPPED at
-the first failure. Runs 2–5 were NOT executed; their slots below are
-explicitly empty pending the orchestrator's routing decision.
+History: the first verification attempt STOPPED at run 1 (no-fix-forward
+discipline). The orchestrator adjudicated the stop (§1-history below;
+review/scenario1-fix-design.md), sanctioned the scenario-1 redesign as Bead 9
+scope under the Req 22 redesign precedent, and the verification sequence was
+RESTARTED from run 1 against `8eccb04`.
 
-### 1. stale_phase_impl_approve (mindspec-3smk, owning fix bead: **Bead 3** / mindspec-fwo5.3)
+### 1-history. stale_phase_impl_approve — pre-redesign STOP record (run 1a)
 
-**Red baseline**: FAIL at `c4a1c7e` (132.27s) — no successful approval event
-possible; the stale stored phase rejected the gate
+**Red baseline (original assertions)**: FAIL at `c4a1c7e` (132.27s) — no
+successful approval event possible; the stale stored phase rejected the gate
 (bead2_baseline_evidence.md §1).
 
-**Green run**: **FAIL** at `8123c70` (138.12s, 2026-06-11, agent
-`2.1.173 (Claude Code)`). Full verbatim `go test -v` transcript:
-`review/prep/bead9_run1_stale_phase_FAIL.log` (336 lines, committed
-alongside this file).
+**Pre-redesign verification run**: **FAIL** at `8123c70` (138.12s,
+2026-06-11, agent `2.1.173 (Claude Code)`). Full verbatim `go test -v`
+transcript: `review/prep/bead9_run1_stale_phase_FAIL.log` (336 lines,
+committed alongside this file). Adjudicated outcome: fixture confound
+(spec-087 ADR-divergence gate on unowned `stale.go`) verified by two
+independent channels; "no `mindspec repair`" assertion superseded by Req 2's
+shipped guidance; redesign sanctioned — see review/scenario1-fix-design.md
+§§1-4 and the spec.md annotations in `8eccb04`.
 
 Failing assertions (verbatim):
 
@@ -219,7 +228,111 @@ Key event sequence (verbatim, from the recorded 308-event stream):
 **Stop condition honored**: no assertion weakened, no production/scenario
 code changed, no retry. Defect routed to the orchestrator with Bead 3 as the
 owning fix bead for the scenario, and Bead 2 (fixture) flagged for the
-ADR-divergence confound.
+ADR-divergence confound. The orchestrator's adjudication
+(review/scenario1-fix-design.md) confirmed the diagnosis and sanctioned the
+redesign as Bead 9 scope; landed in `8eccb04`.
+
+### 1a. stale_phase_impl_approve — FRESH baseline red for the REDESIGNED scenario
+
+Per scenario1-fix-design.md §3 (the `1603723` procedure: scenario code from
+this branch at `8eccb04`, binary built from `c4a1c7e`): the redesigned
+scenario was run once against the baseline binary. Pre-check: the string
+`phase_reconciled` has ZERO occurrences in the baseline binary
+(`strings bin/mindspec | grep -c` → 0; the post-fix binary has 1).
+
+**Result: FAIL at baseline (113.55s, 2026-06-11)** — both the LLM half and
+the deterministic probe red. Full verbatim transcript:
+`review/prep/bead9_baseline_rerun_stale_phase_FAIL.log`. Failing assertions
+(verbatim):
+
+```
+scenario_contract_hardening.go:183: command "mindspec" was not found with exit code 0 for any expected arg patterns [[impl approve] [approve impl]]
+scenario_contract_hardening.go:229: stale-phase `mindspec impl approve 002-staleprobe` must self-heal and exit 0 (3smk / spec 092 Req 1): exit status 1
+    stdout:
+
+    stderr:
+    warning: epic repo-q0q: stored phase "implement" disagrees with child-derived phase "review" (trusting stored phase)
+    error: expected review mode, got "implement"
+scenario_contract_hardening.go:229: impl approve stderr lacks "event=lifecycle.phase_reconciled" — the Req 1 phase reconcile did not execute; stderr: [as above]
+scenario_contract_hardening.go:229: impl approve stderr lacks "stored=implement" — the Req 1 phase reconcile did not execute; stderr: [as above]
+scenario_contract_hardening.go:229: impl approve stderr lacks "derived=review" — the Req 1 phase reconcile did not execute; stderr: [as above]
+--- FAIL: TestLLM_StalePhaseImplApprove (113.55s)
+FAIL
+FAIL	github.com/mrmaxsteel/mindspec/internal/harness	113.851s
+FAIL
+```
+
+The probe reproduced the EXACT 3smk field failure at baseline
+(`error: expected review mode, got "implement"`, preceded by the no-recovery
+derive-consistency warning). Red-pin integrity of the redesigned scenario
+HOLDS (design §3): the deterministic floor is red regardless of agent
+behavior, and the LLM half found no green path without the (red-flagged)
+surgery.
+
+### 1b. stale_phase_impl_approve — REDESIGNED scenario green attempt (run 1b): **FAIL — second STOP**
+
+**Run**: 2026-06-11, foreground, binary + scenario at `8eccb04`, agent
+`2.1.173 (Claude Code)`. **FAIL (130.70s)**. Full verbatim transcript:
+`review/prep/bead9_green_run1_stale_phase_FAIL.log`.
+
+What went GREEN (the redesign verified):
+
+- `assertStaleApproveSelfHeals` (the Req 1 deterministic probe): PASSED —
+  zero `:229` assertion errors; the post-session
+  `mindspec impl approve 002-staleprobe` self-healed and exited 0.
+- The fixture confound is GONE: `[222] mindspec approve impl 001-stale
+  (exit=0)` — the gate passed ON THE MERITS; no `--override-adr` /
+  `--supersede-adr` / `--allow-doc-skew` anywhere (the new no-bypass guard
+  stayed silent).
+- `assertCommandRanEither`: satisfied.
+
+What stayed RED (verbatim):
+
+```
+scenario_contract_hardening.go:196: agent performed raw bd metadata surgery: [update repo-4o8 --metadata {"mindspec_phase":"review","spec_num":1,"spec_title":"stale"}]
+scenario_contract_hardening.go:221: informational: agent used sanctioned `mindspec repair`: [repair phase 001-stale]
+scenario_contract_hardening.go:196: agent performed raw bd metadata surgery: [update repo-4o8 --metadata {"mindspec_done":true,"mindspec_phase":"done","spec_num":1,"spec_title":"stale"}]
+--- FAIL: TestLLM_StalePhaseImplApprove (130.70s)
+FAIL
+FAIL	github.com/mrmaxsteel/mindspec/internal/harness	131.102s
+FAIL
+```
+
+Key events: `[55] mindspec state show` → `[92] bd update repo-4o8
+--metadata {"mindspec_phase":"review",...}` (surgery, pre-gate) → `[93]
+mindspec repair phase 001-stale` (sanctioned) → `[150] bd close repo-4o8`
+(raw epic close) → `[164] bd update ... mindspec_phase=done` (surgery) →
+`[222] mindspec approve impl 001-stale (exit=0)`.
+
+**Diagnosis (stop-condition report #2, not actioned):** the no-surgery ban —
+the heart of the 3smk pin, explicitly KEPT verbatim by the adjudication —
+fails on reproducible agent behavior: in BOTH post-fix runs (1a at `8123c70`,
+1b at `8eccb04`) the haiku agent's first mutating act was `bd update
+--metadata` at the same orientation point (event [92], immediately after
+`state show` + `bd show` of the epic), BEFORE any gate attempt. Critically,
+at the `c4a1c7e` Bead-2 baseline the SAME prompt + model produced NO surgery
+(bead2_baseline_evidence.md §1: "no metadata surgery") — the surgery behavior
+appears only on the POST-FIX tree. Hypotheses for the trigger (unverified —
+the event stream carries no per-command stdout): (i) post-Bead-3, every
+phase-deriving command the agent runs during orientation (e.g. `state show`,
+[55]) emits the derive-consistency warning + `recovery: mindspec repair
+phase <id>` — diagnostics that frame the situation as "metadata is wrong,
+fix it", which a small model belt-and-braces fixes BOTH ways (raw update
+[92] + sanctioned repair [93]); (ii) the SessionStart render for stored
+phase=implement is the implement template, whose Forbidden-Actions line
+literally names `bd update --metadata`
+(internal/instruct/templates/implement.md:71) — a prohibition-context
+mention that may teach the command to a weak model. The product outcome
+3smk demands is intact (sanctioned paths exist and work; the gate
+self-heals; the probe proves it deterministically); what fails is the
+behavioral expectation that a haiku agent will not ALSO touch metadata
+gratuitously while sanctioned paths surround it. Whether to (a) re-scope the
+LLM-half surgery ban (e.g. surgery-as-ONLY-escape, or a
+post-first-gate-attempt window), (b) raise the scenario model, (c) treat it
+as a real guidance defect and route to a fix bead, or (d) accept a
+known-flaky behavioral pin with the deterministic probe as the load-bearing
+discriminator — is an adjudication beyond this bead's authority. No retry
+was performed (retry-until-green is forbidden); runs 2–5 not started.
 
 ### 2. complete_from_doomed_worktree — NOT RUN (stopped at run 1)
 
