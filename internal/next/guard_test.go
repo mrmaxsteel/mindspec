@@ -363,6 +363,45 @@ func TestCheckDirtyTreeDetail_UserDirtOnly_NoArtifactNoExport(t *testing.T) {
 	}
 }
 
+// TestCheckDirtyTreeDetail_SecondPorcelainFailurePropagates covers the
+// post-export re-snapshot error branch (the SECOND statusPorcelainFn
+// call, after `bd export` normalized the artifact) — Bead 9 punch-list
+// B11. The first snapshot succeeds with artifact dirt; the re-snapshot
+// fails and must propagate, after the export ran.
+func TestCheckDirtyTreeDetail_SecondPorcelainFailurePropagates(t *testing.T) {
+	origStatus := statusPorcelainFn
+	origExport := exportBeadsFn
+	t.Cleanup(func() {
+		statusPorcelainFn = origStatus
+		exportBeadsFn = origExport
+	})
+
+	calls := 0
+	statusPorcelainFn = func(cwd string) (string, error) {
+		calls++
+		if calls == 1 {
+			return " M .beads/issues.jsonl\n", nil
+		}
+		return "", fmt.Errorf("git status boom after export")
+	}
+	exported := false
+	exportBeadsFn = func(workdir string) error { exported = true; return nil }
+
+	_, _, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err == nil {
+		t.Fatal("expected the post-export status failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "git status boom after export") {
+		t.Errorf("error should carry the second status failure, got: %v", err)
+	}
+	if !exported {
+		t.Error("bd export must have run before the failing re-snapshot")
+	}
+	if calls != 2 {
+		t.Errorf("statusPorcelainFn calls = %d, want 2", calls)
+	}
+}
+
 // --- DirtyTreeFailure (spec 092 Reqs 8/12, mindspec-tjat) ---
 //
 // Per-site recovery-convention tests (Req 21 mirror — see

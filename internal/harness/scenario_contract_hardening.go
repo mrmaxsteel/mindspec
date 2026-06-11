@@ -1,12 +1,14 @@
 package harness
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // This file owns the five Spec 092 (agent-contract-hardening) regression
@@ -42,6 +44,42 @@ func argsInOrder(args []string, first, second string) bool {
 	return false
 }
 
+// writeSandboxDomainCoverage writes the file half of the minimal
+// ADR-divergence coverage triple for sandbox fixtures (run-1
+// adjudication, review/scenario1-fix-design.md §1): an OWNERSHIP.yaml
+// claiming the given fixture source files for the `sandbox` domain,
+// plus an Accepted ADR-0001 covering that domain. Callers must
+// (a) COMMIT these at the sandbox ROOT BEFORE the worktree fork so
+// every branch carries them (ownership + ADR resolve root-relative:
+// internal/validate/ownership.go, adr.NewFileStore(root)), and
+// (b) add `adr_citations:\n- ADR-0001` to the fixture plan.md
+// frontmatter — IsDomainCovered requires the covering ADR to be
+// plan-CITED. Without the triple, the pre-existing spec-087
+// ADR-divergence gate flags any committed fixture .go file as
+// `adr-divergence-unowned`, and a perfectly-behaved `impl approve` /
+// `complete` exits 1 on a gate unrelated to the scenario's pin.
+func writeSandboxDomainCoverage(sandbox *Sandbox, files ...string) {
+	var b strings.Builder
+	b.WriteString("paths:\n")
+	for _, f := range files {
+		fmt.Fprintf(&b, "- %s\n", f)
+	}
+	sandbox.WriteFile(".mindspec/docs/domains/sandbox/OWNERSHIP.yaml", b.String())
+	sandbox.WriteFile(".mindspec/docs/adr/ADR-0001-sandbox-domain.md", `# ADR-0001: Sandbox Domain
+
+- **Date**: 2026-06-11
+- **Status**: Accepted
+- **Domain(s)**: sandbox
+
+## Decision
+
+Scenario fixture source files at the sandbox root belong to the
+sandbox domain. This is the minimal coverage triple that lets
+lifecycle gates pass on the merits in harness sandboxes, mirroring how
+a compliant field repo carries ownership + ADR coverage.
+`)
+}
+
 // firstEventIndex returns the index of the first event matching the
 // predicate, or -1.
 func firstEventIndex(events []ActionEvent, match func(ActionEvent) bool) int {
@@ -58,8 +96,11 @@ func firstEventIndex(events []ActionEvent, match func(ActionEvent) bool) int {
 // bead is already closed (child-derived phase = review). Pre-fix,
 // `mindspec impl approve` trusts the stored phase and fails with
 // "expected review mode" — the only way out is raw `bd update --metadata`
-// surgery, which the assertions forbid. Post-fix (spec 092 Req 1) the gate
-// re-derives the phase from children and self-heals.
+// surgery. Post-fix (spec 092 Req 1) the gate re-derives the phase from
+// children and self-heals; the load-bearing discriminators are the
+// deterministic assertStaleApproveSelfHeals probe, the no-gate-bypass
+// guard, and the exit-0-on-the-merits success assertion (surgery events
+// are logged informationally — stop-#2 adjudication fallback).
 //
 // Topology is spec-worktree-only (no bead branches/worktrees) so the stale
 // phase is the ONLY blocking condition — otherwise the unmerged-bead gate
@@ -90,6 +131,14 @@ func ScenarioStalePhaseImplApprove() Scenario {
 			sandbox.runBDMust("update", epicID, "--metadata",
 				`{"spec_num":1,"spec_title":"stale","mindspec_phase":"implement"}`)
 
+			// ADR-divergence coverage triple (run-1 adjudication): stale.go
+			// on the spec branch must pass the spec-087 gate on the merits,
+			// otherwise every clean `impl approve` exits 1 on a gate
+			// unrelated to this scenario's pin. Committed pre-fork so both
+			// main and the spec branch carry it.
+			writeSandboxDomainCoverage(sandbox, "stale.go")
+			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
+
 			// Spec-worktree-only topology: spec branch + worktree, NO bead
 			// branches — the stale phase is the only blocking condition.
 			wt := setupWorktrees(sandbox, specID, "", "plan")
@@ -109,6 +158,8 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement feature
@@ -136,25 +187,128 @@ implementation so the project returns to idle.`,
 			assertCommandRanEither(t, events, "mindspec",
 				[]string{"impl", "approve"}, []string{"approve", "impl"})
 
-			// No raw metadata surgery: the gate must self-heal, not the agent.
 			for _, e := range events {
 				args := eventArgs(e)
+				// Raw metadata surgery — INFORMATIONAL ONLY (stop-#2
+				// adjudication fallback, DQ-7/doomed precedent): in three
+				// post-fix runs (1a/1b/1c, the last after the R1-M1
+				// guidance fix) the haiku agent gratuitously ran `bd update
+				// --metadata` during orientation while sanctioned paths
+				// existed, worked, and were ALSO used — model
+				// belt-and-braces disposition, not a product gap (it did
+				// NOT fire at the Bead 2 baseline). The load-bearing 3smk
+				// discriminators are deterministic: the
+				// assertStaleApproveSelfHeals probe below (the gate
+				// self-heals; the reconcile event fires) plus the hard
+				// no-bypass guard and the exit-0-on-the-merits success
+				// assertion. Logged for run-report color instead of failed.
 				if e.Command == "bd" && containsAll(args, "update") {
 					for _, a := range args {
 						// Catches --metadata, --metadata=..., --set-metadata,
 						// and --set-metadata=... — all raw surgery paths.
 						if strings.HasPrefix(a, "--metadata") || strings.HasPrefix(a, "--set-metadata") {
-							t.Errorf("agent performed raw bd metadata surgery: %v", args)
+							t.Logf("informational (downgraded per stop-#2 adjudication): agent performed raw bd metadata surgery: %v", args)
 							break
 						}
 					}
 				}
-				// No `mindspec repair` needed — the gate heals in-line.
+				// No gate bypass: with the coverage fixture in place nothing
+				// legitimately diverges, so an override-assisted approval
+				// means a fixture/gate confound is being masked, not healed.
+				if e.Command == "mindspec" {
+					for _, a := range args {
+						if a == "--override-adr" || a == "--supersede-adr" || a == "--allow-doc-skew" {
+							t.Errorf("agent bypassed an approval gate (%s) — the gate must pass on the merits: %v", a, args)
+						}
+					}
+				}
+				// NOTE (Req 22 redesign, run-1 adjudication): `mindspec
+				// repair phase` is NOT forbidden — it is the recovery
+				// command Req 2/19 themselves advertise on every
+				// phase-deriving command while the stored phase is stale.
+				// Punishing it would test against the product's own
+				// contract. Req 1's gate self-heal is pinned
+				// deterministically by assertStaleApproveSelfHeals below
+				// (the doomed-worktree probe precedent) and by the 3smk
+				// unit AC.
 				if e.Command == "mindspec" && containsAll(args, "repair") {
-					t.Errorf("agent needed `mindspec repair` — phase gate did not self-heal: %v", args)
+					t.Logf("informational: agent used sanctioned `mindspec repair`: %v", args)
 				}
 			}
+
+			// DISCRIMINATING deterministic probe (3smk / spec 092 Req 1): a
+			// fresh stale-phase spec approved by the binary directly must
+			// exit 0 and emit the lifecycle.phase_reconciled self-heal
+			// event line.
+			assertStaleApproveSelfHeals(t, sandbox)
 		},
+	}
+}
+
+// assertStaleApproveSelfHeals is the deterministic post-session probe for
+// spec 092 Req 1 (mindspec-3smk), per the doomed-worktree probe precedent
+// (assertDoomedCompleteEmitsCdNote): build a SECOND stale-phase spec with
+// real bd state and a docs-only spec branch (so the ADR-divergence gate
+// no-ops and needs no coverage triple), then run the sandbox binary's
+// `mindspec impl approve` directly. Pre-fix the phase gate trusts the
+// stale stored phase and exits non-zero, and the string
+// `event=lifecycle.phase_reconciled` does not exist in the binary — so
+// this fails deterministically at the pinned baseline regardless of
+// anything the LLM half did.
+func assertStaleApproveSelfHeals(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+
+	specID := "002-staleprobe"
+	epicID := sandbox.CreateSpecEpic(specID)
+	beadID := sandbox.CreateBead("["+specID+"] Probe feature", "task", epicID)
+	sandbox.ClaimBead(beadID)
+	sandbox.runBDMust("close", beadID)
+	// Stale stored phase while every child is closed (derived = review).
+	// Test-side setup write — only the agent event stream is scanned by
+	// the no-surgery assertion. spec_num/spec_title repeated to preserve
+	// the ADR-0023 epic binding (bd update --metadata replaces the map).
+	sandbox.runBDMust("update", epicID, "--metadata",
+		`{"spec_num":2,"spec_title":"staleprobe","mindspec_phase":"implement"}`)
+
+	wt := setupWorktrees(sandbox, specID, "", "plan")
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Stale Probe Feature
+status: Approved
+---
+# Stale Probe Feature
+Deterministic Req 1 self-heal probe (docs-only spec branch).
+`)
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+status: Approved
+spec_id: %s
+bead_ids:
+- %s
+---
+# Plan
+## Bead 1: Probe feature
+Docs-only probe; the work is the lifecycle close itself.
+`, specID, beadID))
+	mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+	mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "docs: staleprobe spec+plan")
+
+	cmd := exec.Command(filepath.Join(sandbox.mindspecBinDir, "mindspec"),
+		"impl", "approve", specID)
+	cmd.Dir = sandbox.Root
+	cmd.Env = sandbox.Env()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Errorf("stale-phase `mindspec impl approve %s` must self-heal and exit 0 (3smk / spec 092 Req 1): %v\nstdout:\n%s\nstderr:\n%s",
+			specID, err, stdout.String(), stderr.String())
+	}
+	// The Req 1 self-heal demonstrably executed end-to-end: the HC-3
+	// structured event line names the stored→derived reconcile.
+	for _, want := range []string{"event=lifecycle.phase_reconciled", "stored=implement", "derived=review"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("impl approve stderr lacks %q — the Req 1 phase reconcile did not execute; stderr:\n%s\nstdout:\n%s",
+				want, stderr.String(), stdout.String())
+		}
 	}
 }
 
@@ -207,11 +361,18 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement doomed
 Create doomed.go with a Doomed function.
 `, specID, beadID))
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): doomed.go and the cd-note probe's probe.go
+			// must pass the spec-087 gate on the merits if complete's diff
+			// range ever includes them (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "doomed.go", "probe.go")
 			sandbox.Commit("setup: approved spec and plan")
 
 			wt := setupWorktrees(sandbox, specID, beadID, "implement")
@@ -276,11 +437,26 @@ project state and report the current mode.`,
 	}
 }
 
+// lastNonEmptyLine returns the last non-empty (after TrimSpace) line of s,
+// or "" when none exists.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
 // assertDoomedCompleteEmitsCdNote claims a fresh probe bead, builds its
 // worktree nested under the spec worktree, commits work there, and runs
 // `mindspec complete` with the process cwd INSIDE that worktree. It asserts
-// exit 0 and the Req 4 cd-back NOTE ("working directory was removed") in
-// the combined output. Pre-fix the NOTE does not exist anywhere in the
+// exit 0 and the Req 4 cd-back NOTE as the LAST non-empty line of STDOUT,
+// carrying the copy-pastable `run: cd <root>` command (post-panel B7: the
+// unit half is pinned in cmd/mindspec/cwdsafety_test.go — completeTail
+// emits the NOTE after FormatResult and the instruct tail; this closes the
+// end-to-end half). Pre-fix the NOTE does not exist anywhere in the
 // binary, so this fails deterministically at the pinned baseline.
 func assertDoomedCompleteEmitsCdNote(t *testing.T, sandbox *Sandbox, epicID, specID string) {
 	t.Helper()
@@ -309,12 +485,24 @@ func Probe() string { return "probe" }
 		"complete", probeID, "cd-note probe")
 	cmd.Dir = filepath.Join(sandbox.Root, probeWt) // the directory complete will remove
 	cmd.Env = sandbox.Env()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Errorf("mindspec complete from inside its own bead worktree exited non-zero (qxsy): %v\n%s", err, out)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Errorf("mindspec complete from inside its own bead worktree exited non-zero (qxsy): %v\nstdout:\n%s\nstderr:\n%s",
+			err, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(string(out), "working directory was removed") {
-		t.Errorf("complete output lacks the cd-back NOTE (\"your shell's working directory was removed — run: cd <root>\", spec 092 Req 4); got:\n%s", out)
+	if !strings.Contains(stdout.String(), "working directory was removed") {
+		t.Errorf("complete stdout lacks the cd-back NOTE (\"your shell's working directory was removed — run: cd <root>\", spec 092 Req 4); stdout:\n%s\nstderr:\n%s",
+			stdout.String(), stderr.String())
+	}
+	// Post-panel B7 tightening: the NOTE is the LAST non-empty stdout line
+	// (after FormatResult and the instruct tail — the placement the agent's
+	// shell actually sees) and carries the copy-pastable `run: cd` command.
+	note := lastNonEmptyLine(stdout.String())
+	if !strings.Contains(note, "working directory was removed") || !strings.Contains(note, "run: cd ") {
+		t.Errorf("last non-empty stdout line is not the cd-back NOTE with its `run: cd <root>` command (spec 092 Req 4); last line: %q\nfull stdout:\n%s",
+			note, stdout.String())
 	}
 }
 
@@ -336,6 +524,173 @@ fi
 bd export -o "$(git rev-parse --show-toplevel)/.beads/issues.jsonl"
 exit 0
 `
+
+// isHooksPathAssignment reports whether a git invocation's args ASSIGN
+// core.hooksPath — either the inline `-c core.hooksPath=<path>` override
+// or `git config [scope] core.hooksPath <path>`. Read-only forms
+// (`--get`, `--get-all`, `--get-regexp`, `--list`) and unsets are NOT
+// assignments (post-panel B8b: flagging bare "hooksPath" substrings
+// false-failed on read-only diagnostics).
+func isHooksPathAssignment(args []string) bool {
+	for i, a := range args {
+		if strings.Contains(a, "core.hooksPath=") {
+			return true // -c core.hooksPath=<path>
+		}
+		if a != "core.hooksPath" {
+			continue
+		}
+		readOnly := false
+		for _, b := range args {
+			switch b {
+			case "--get", "--get-all", "--get-regexp", "--list", "--unset", "--unset-all":
+				readOnly = true
+			}
+		}
+		if !readOnly && i+1 < len(args) {
+			return true // config core.hooksPath <path>
+		}
+	}
+	return false
+}
+
+// assertNoManualArtifactCommit flags any agent-issued git add/commit that
+// touches (or sweeps up) the beads artifact before the first SUCCESSFUL
+// `mindspec complete` (post-panel B8). Matched forms:
+//   - explicit `.beads` pathspec on add or commit;
+//   - commit with all-tracked staging flags (-a / -am / --all);
+//   - bare commit after a blanket stage (`git add -A` / `--all` / `.`)
+//     earlier in the window — the staged artifact rides along.
+//
+// A blanket `git add` ALONE is not flagged: `mindspec complete`'s
+// sanctioned auto-commit path re-exports and commits whatever is staged
+// through the executor, so staging without a manual commit is not the
+// manual-recovery loophole.
+func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
+	t.Helper()
+	for _, v := range manualArtifactCommitViolations(events) {
+		t.Errorf("%s", v)
+	}
+}
+
+// manualArtifactCommitViolations is the pure evidence-gating core behind
+// assertNoManualArtifactCommit, extracted so the attribution logic is
+// unit-testable against synthetic event streams (panel R2-M1/R3). It
+// SCANS only events before the first successful complete, but
+// ATTRIBUTES against the UNTRUNCATED stream: the shim logs each command
+// at exit, so the parent mindspec-complete event lands AT (or after)
+// the scan boundary, AFTER its own git children — truncating the
+// attribution slice to the scan window excluded the parent and made
+// attribution work only by accident of the hook-children's ±1s slack
+// (panel R3-MAJ-1).
+func manualArtifactCommitViolations(events []ActionEvent) []string {
+	window := events
+	if firstOK := firstEventIndex(events, func(e ActionEvent) bool {
+		return e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "complete")
+	}); firstOK >= 0 {
+		window = events[:firstOK]
+	}
+
+	namesBeads := func(args []string) bool {
+		for _, a := range args {
+			if strings.Contains(a, ".beads") {
+				return true
+			}
+		}
+		return false
+	}
+
+	var violations []string
+	artifactStaged := false
+	for _, e := range window {
+		if e.Command != "git" {
+			continue
+		}
+		args := eventArgs(e)
+		switch {
+		case containsAll(args, "add"):
+			// Explicit .beads pathspec: only the agent ever passes one
+			// (mindspec's executor stages via blanket `git add -A`, bd
+			// never git-adds) — flag unconditionally.
+			if namesBeads(args) {
+				violations = append(violations,
+					fmt.Sprintf("agent staged the beads artifact before the first successful complete: %v", args))
+				artifactStaged = true
+				continue
+			}
+			// Blanket stage: attribution matters — mindspec's own
+			// CommitAll runs `git add -A` as a recorded subprocess
+			// (run-3 false-positive fix, see mindspecSpawnedGit). The
+			// FULL stream is passed so the parent's window is visible.
+			if !mindspecSpawnedGit(events, e) {
+				for _, a := range args {
+					if a == "-A" || a == "--all" || a == "." || a == "-u" {
+						artifactStaged = true
+					}
+				}
+			}
+		case containsAll(args, "commit"):
+			// Explicit .beads pathspec on a commit: agent-only, flag
+			// unconditionally.
+			if namesBeads(args) {
+				violations = append(violations,
+					fmt.Sprintf("agent manually committed the beads artifact before the first successful complete: %v", args))
+				continue
+			}
+			// Blanket-form commits need attribution: mindspec's
+			// auto-commit and `chore: sync beads artifact` follow-up are
+			// recorded git subprocesses of the complete event.
+			if mindspecSpawnedGit(events, e) {
+				continue
+			}
+			allTracked := false
+			for _, a := range args {
+				if a == "-a" || a == "-am" || a == "--all" {
+					allTracked = true
+				}
+			}
+			if allTracked || artifactStaged {
+				violations = append(violations,
+					fmt.Sprintf("agent manually committed the beads artifact before the first successful complete: %v", args))
+			}
+		}
+	}
+	return violations
+}
+
+// mindspecSpawnedGit reports whether git event g falls within the
+// execution window of a recorded mindspec command in all. The PATH shim
+// records mindspec's OWN git subprocesses (complete's auto-commit, the
+// Req 7 `chore: sync beads artifact` follow-up) indistinguishably from
+// agent-issued ones — the run-3 false positive that failed a perfectly
+// sanctioned completion. Shim timestamps are END times (recorder.go
+// logs after the real binary exits), so a child's end lies within
+// [parentEnd-parentDuration, parentEnd]; ±1s slack absorbs the shim's
+// second-resolution timestamps.
+//
+// `all` MUST be the untruncated event stream (panel R3-MAJ-1): exit-
+// time logging puts the parent mindspec event AFTER its git children in
+// the stream — at or beyond any scan-window boundary — so a slice
+// truncated at the first successful complete excludes the very parent
+// whose duration window performs the attribution. Used ONLY for the
+// fuzzy blanket-form heuristics — explicit `.beads` pathspecs are
+// flagged regardless of attribution (mindspec never passes one).
+func mindspecSpawnedGit(all []ActionEvent, g ActionEvent) bool {
+	if g.Timestamp.IsZero() {
+		return false
+	}
+	gEnd := g.Timestamp
+	for _, m := range all {
+		if m.Command != "mindspec" || m.Timestamp.IsZero() || m.DurationMS <= 0 {
+			continue
+		}
+		mEnd := m.Timestamp
+		mStart := mEnd.Add(-m.Duration())
+		if !gEnd.Before(mStart.Add(-time.Second)) && !gEnd.After(mEnd.Add(time.Second)) {
+			return true
+		}
+	}
+	return false
+}
 
 // ScenarioPrecommitReexportComplete pins field note mindspec-i4ad: a
 // pre-commit hook re-exports .beads/issues.jsonl during `mindspec
@@ -378,11 +733,19 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Create reexport.go
 Create reexport.go with a Reexport() function.
 `, specID, beadID))
+
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): the agent-authored reexport.go must pass the
+			// spec-087 gate on the merits if complete's diff range ever
+			// includes it (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "reexport.go")
 
 			// Baseline JSONL tracked by git BEFORE the bead is claimed, so
 			// the claim leaves Dolt state ahead of every checked-out copy —
@@ -428,13 +791,20 @@ Do not close beads directly with bd commands.`,
 				beadID: "closed",
 			})
 
-			// Field workarounds are forbidden (i4ad): no --no-verify, no
-			// core.hooksPath bypass anywhere in the event stream.
+			// Field workarounds are forbidden (i4ad): no --no-verify
+			// anywhere, and no core.hooksPath ASSIGNMENT (post-panel B8b:
+			// read-only diagnostics like `git config --get core.hooksPath`
+			// are legitimate orientation, not a bypass — only setting the
+			// hooks path reroutes the pre-commit hook under test).
 			for _, e := range events {
-				for _, a := range eventArgs(e) {
-					if a == "--no-verify" || strings.Contains(a, "hooksPath") {
-						t.Errorf("agent used a hook bypass workaround: %s %v", e.Command, eventArgs(e))
+				args := eventArgs(e)
+				for _, a := range args {
+					if a == "--no-verify" {
+						t.Errorf("agent used a hook bypass workaround: %s %v", e.Command, args)
 					}
+				}
+				if e.Command == "git" && isHooksPathAssignment(args) {
+					t.Errorf("agent reassigned core.hooksPath (hook bypass workaround): %s %v", e.Command, args)
 				}
 			}
 
@@ -448,25 +818,17 @@ Do not close beads directly with bd commands.`,
 			if firstFailed >= 0 {
 				t.Errorf("mindspec complete failed (exit=%d) — artifact dirt blocked completion: %v",
 					events[firstFailed].ExitCode, eventArgs(events[firstFailed]))
-
-				// Loophole closure (spec 092 NEW-6): the eventual success must
-				// not be a manual artifact-commit recovery.
-				for _, e := range events[firstFailed+1:] {
-					if e.Command != "git" {
-						continue
-					}
-					args := eventArgs(e)
-					if !containsAll(args, "add") && !containsAll(args, "commit") {
-						continue
-					}
-					for _, a := range args {
-						if strings.Contains(a, ".beads") {
-							t.Errorf("agent manually committed the beads artifact after the failed complete: %v", args)
-							break
-						}
-					}
-				}
 			}
+
+			// Loophole closure (spec 092 NEW-6, post-panel B8 tightening):
+			// no agent-issued git add/commit may touch the beads artifact
+			// BEFORE the first successful complete — regardless of whether
+			// a complete failed first. The old detector only scanned events
+			// after a failed complete and only matched explicit `.beads`
+			// args, so `git add -A` + bare `git commit -am` (or a
+			// pre-emptive commit before the first complete attempt) evaded
+			// it.
+			assertNoManualArtifactCommit(t, events)
 		},
 	}
 }
@@ -508,11 +870,19 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Create wrongdir.go
 Create wrongdir.go with a WrongDir() function.
 `, specID, beadID))
+
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): the agent-authored wrongdir.go must pass the
+			// spec-087 gate on the merits if complete's diff range ever
+			// includes it (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "wrongdir.go")
 
 			// Tracked file committed clean, then modified: the human's
 			// work-in-progress dirt on main.
@@ -600,6 +970,13 @@ func ScenarioApprovalGateDiscovery() Scenario {
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
 
+			// ADR-divergence coverage triple (run-1 adjudication): gate.go
+			// on the spec branch hits the IDENTICAL impl-approve confound
+			// the stale_phase run exposed — without coverage, no canonical
+			// `impl approve` can succeed un-bypassed. Committed pre-fork.
+			writeSandboxDomainCoverage(sandbox, "gate.go")
+			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
+
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Gate Feature
@@ -613,6 +990,8 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement feature
@@ -640,14 +1019,20 @@ implementation. Approve the implementation so the project returns to idle.`,
 				if e.Command != "mindspec" {
 					continue
 				}
-				if e.ExitCode == 0 && argsInOrder(e.ArgsList, "impl", "approve") {
+				// Post-panel B8c: use the order-preserving accessor
+				// (ArgsList when shim-recorded, else the positional
+				// flatArgs of the Args map) instead of raw e.ArgsList, so
+				// Args-map-only events can't silently escape the
+				// deprecated-order check.
+				args := eventArgsList(e)
+				if e.ExitCode == 0 && argsInOrder(args, "impl", "approve") {
 					canonical = true
 				}
 				// NO event may use the deprecated `approve impl` order —
 				// regardless of exit code (even a failed attempt proves the
 				// guidance taught the deprecated form).
-				if argsInOrder(e.ArgsList, "approve", "impl") {
-					t.Errorf("agent used the deprecated `approve impl` order: %v", e.ArgsList)
+				if argsInOrder(args, "approve", "impl") {
+					t.Errorf("agent used the deprecated `approve impl` order: %v", args)
 				}
 			}
 			if !canonical {

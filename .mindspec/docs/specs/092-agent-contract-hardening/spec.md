@@ -467,7 +467,25 @@ The same session class produced backlog beads triaged in §Triage below.
       merges/deletes bead branches before the session, so the stale
       `mindspec_phase` is the ONLY blocking condition (otherwise the
       unmerged-bead gate at `impl.go:143` masks the pin — cf.
-      `ScenarioUnmergedBeadGuard`).
+      `ScenarioUnmergedBeadGuard`). *[Bead 9 annotation, 2026-06-11
+      (run-1 adjudication, review/scenario1-fix-design.md): two
+      amendments under the Req 22 redesign principle. (i) The fixture
+      additionally needs the sandbox coverage triple (OWNERSHIP.yaml +
+      Accepted, plan-cited ADR-0001), because the pre-existing
+      spec-087 ADR-divergence gate otherwise flags the fixture's
+      `stale.go` as unowned and NO clean `impl approve` can exit 0 —
+      a blocking condition unrelated to this pin. (ii) The original
+      "no `mindspec repair`" assertion is SUPERSEDED: it predates
+      Req 2's shipped guidance, which deliberately advertises
+      `recovery: mindspec repair phase <spec-id>` on every
+      phase-deriving command while the phase is stale. The Req 1
+      self-heal is instead pinned deterministically by the
+      post-session probe `assertStaleApproveSelfHeals` (exit 0 +
+      `event=lifecycle.phase_reconciled stored=implement
+      derived=review`), per the doomed-worktree probe precedent. The
+      no-surgery ban stays; a no-gate-bypass guard
+      (`--override-adr`/`--supersede-adr`/`--allow-doc-skew`) is
+      added.]*
     - **`complete_from_doomed_worktree`** (qxsy): uses `StartDir` to
       start the agent inside the bead worktree.
     - **`precommit_reexport_complete`** (i4ad): must defeat two sandbox
@@ -570,7 +588,20 @@ The same session class produced backlog beads triaged in §Triage below.
     check may ALREADY hold pre-fix (the recording shim captures
     mindspec's own exit code, `recorder.go:23-24`; the field exit-1 came
     from the invoking shell's getcwd), so the discriminators are the
-    no-retry/no-repair assertions. A scenario that cannot be made to
+    no-retry/no-repair assertions. *[Bead 9 annotation, 2026-06-11: the
+    no-retry/no-repair discriminator named here is SUPERSEDED — the
+    recorded Bead 2 baseline showed Claude Code's Bash tool
+    transparently self-heals the deleted cwd in the harness, so those
+    assertions could not go red. The sanctioned Req-22 redesign (commit
+    `1603723`) replaced the discriminator with the deterministic
+    cd-back-NOTE probe `assertDoomedCompleteEmitsCdNote`
+    (`internal/harness/scenario_contract_hardening.go`): a second
+    `mindspec complete` run from inside the bead worktree it removes
+    must exit 0 AND emit the Req 4 NOTE as the last non-empty stdout
+    line. The no-retry/no-repair assertions are retained as the
+    behavioral envelope only. Bead 9's green verification anchors on the
+    redesigned probe, exactly as the redesign clause below requires.]*
+    A scenario that cannot be made to
     fail pre-fix is not a regression pin and must be redesigned or
     replaced before its fix bead closes (HC-6). This close-gate is
     ENCODED in the bead dependency graph — every fix bead (Beads 3-8)
@@ -703,12 +734,55 @@ The same session class produced backlog beads triaged in §Triage below.
   `assertCommandRanEither(t, events, "mindspec", ["impl","approve"],
   ["approve","impl"])` with no `bd update --metadata` surgery event and
   no `mindspec repair` needed.
+  *[Bead 9 annotation, 2026-06-11 (run-1 adjudication): the trailing
+  "no `mindspec repair` needed" clause is SUPERSEDED — it predates and
+  contradicts Req 2's shipped guidance, which advertises
+  `recovery: mindspec repair phase <spec-id>` on every phase-deriving
+  command while the stored phase is stale; an assertion punishing the
+  binary's own sanctioned recovery command tests against the product
+  contract. The redesigned assertion set keeps `assertCommandRanEither`
+  and the no-surgery ban verbatim, ADDS a no-gate-bypass guard (no
+  agent approve event carries `--override-adr`/`--supersede-adr`/
+  `--allow-doc-skew`), and pins the Req 1 self-heal deterministically
+  via the post-session probe `assertStaleApproveSelfHeals`: a fresh
+  docs-only stale spec (`002-staleprobe`) approved by the sandbox
+  binary directly must exit 0 with stderr carrying
+  `event=lifecycle.phase_reconciled stored=implement derived=review` —
+  red at the `c4a1c7e` baseline (the event string does not exist
+  there), green post-Bead-3. The fixture additionally carries the
+  sandbox coverage triple so the spec-087 ADR-divergence gate passes
+  on the merits. See review/scenario1-fix-design.md.]*
+  *[Bead 9 annotation addendum, 2026-06-11 (stop-#2 adjudication,
+  pre-authorized fallback per the DQ-7/doomed precedent): the
+  no-surgery assertion on the LLM half is DOWNGRADED to an
+  informational log. In three post-fix runs (1a/1b/1c — 1c after the
+  Bead-3-panel R1-M1 guidance fix removed `bd update --metadata` from
+  all rendered templates) the haiku agent gratuitously performed
+  pre-gate metadata surgery while the sanctioned paths existed,
+  worked, and were ALSO used; the same prompt+model produced NO
+  surgery at the `c4a1c7e` baseline, so the assertion pinned model
+  disposition on the post-fix tree, not a product property. The HARD
+  3smk discriminators are: the deterministic
+  `assertStaleApproveSelfHeals` probe (red at baseline, fresh red run
+  recorded in Bead 9 evidence §1a), the no-gate-bypass guard, and the
+  exit-0-on-the-merits approval. Surgery events remain visible in
+  every run report.]*
 - [ ] **Harness — `complete_from_doomed_worktree`** (qxsy): agent starts
   with cwd inside the bead worktree via `Scenario.StartDir`; completes
   the bead. Assert the `mindspec complete` event has ExitCode 0, the
   bead is closed, and — the discriminating assertions — the agent did
   NOT re-run `complete`/repair after success (no second complete event
   for the same bead, no `git worktree` repair commands).
+  *[Bead 9 annotation, 2026-06-11: the no-retry/no-repair assertions
+  named here are the behavioral envelope only — they could not be made
+  to fail at the Bead 2 baseline (Claude Code's Bash tool self-heals
+  the deleted cwd in the harness). The DISCRIMINATING assertion is the
+  sanctioned Req-22 redesign (commit `1603723`): the deterministic
+  post-session probe `assertDoomedCompleteEmitsCdNote` — a `mindspec
+  complete` invoked from inside the bead worktree it removes must exit
+  0 and emit the Req 4 cd-back NOTE as the last non-empty stdout line.
+  Red at the `c4a1c7e` baseline, green post-Bead-4; Bead 9's evidence
+  pairs both runs.]*
 - [ ] **Harness — `precommit_reexport_complete`** (i4ad): sandbox
   `.gitignore` overridden to track `.beads/issues.jsonl`; pre-commit
   hook runs

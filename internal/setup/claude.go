@@ -553,7 +553,7 @@ description: Approve a spec and transition to Plan Mode
 # Spec Approval
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve spec <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
+2. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
 3. If approval fails, show the validation errors and help the user fix them
 4. On success: immediately begin planning (the approval is the authorization)
 `,
@@ -566,7 +566,7 @@ description: Approve a plan and transition toward Implementation Mode
 # Plan Approval
 
 1. Identify the active spec/plan via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve plan <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
+2. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
 3. If approval fails, show the validation errors and help the user fix them
 4. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
 `,
@@ -580,7 +580,7 @@ description: Approve implementation and close out the spec lifecycle
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
 2. If not in review mode, run ` + "`mindspec complete`" + ` first to transition
-3. Run ` + "`mindspec approve impl <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
+3. Run ` + "`mindspec impl approve <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
 4. If approval fails, show the error and help the user resolve it
 5. On success: run the session close protocol:
    - ` + "`bd sync`" + `

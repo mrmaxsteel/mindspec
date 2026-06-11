@@ -1136,6 +1136,17 @@ func TestImplPhaseMetadataFnDefaultsToBeadMergeMetadata(t *testing.T) {
 	}
 }
 
+// TestImplGetwdFnDefaultsToOsGetwd kills Bead 7 panel mutant M7: the
+// Req 8 context-line seam MUST default to os.Getwd — every test swaps
+// the seam in saveAndRestore, so a severed default would go undetected
+// without this identity pin (recurring class; same pattern as the
+// phase-write pin above).
+func TestImplGetwdFnDefaultsToOsGetwd(t *testing.T) {
+	if reflect.ValueOf(implGetwdFn).Pointer() != reflect.ValueOf(os.Getwd).Pointer() {
+		t.Fatal("implGetwdFn must default to os.Getwd (spec 092 Req 8)")
+	}
+}
+
 // TestApproveImpl_LaterGateFailureLeavesPhaseUntouched is the spec AC
 // "3smk unit" deferred-write half: with a stale stored phase AND a
 // failing later gate (doc-sync), the command errors and NO phase

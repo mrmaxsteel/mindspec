@@ -68,7 +68,7 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Making changes outside the assigned worktree
 - Creating worktrees via raw tooling (`bd worktree create`, `git worktree add`) instead of `mindspec next`
 - Closing beads directly with `bd close` — use `mindspec complete` instead
-- Running `bd update --metadata` on lifecycle epics — phase metadata is managed by `mindspec complete` and `mindspec impl approve`
+- Never edit phase metadata directly — if phase state looks wrong, run `mindspec repair phase <spec-id>`
 - Manually closing the lifecycle epic — `mindspec impl approve` handles epic closure automatically
 
 ## Obligations
@@ -94,7 +94,7 @@ When the bead is done:
 4. **STOP** — do NOT run `mindspec next` or claim another bead. Tell the user: run `/clear` (or start a fresh agent), then `mindspec next`
 
 **Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
-**Do NOT use `bd update` on lifecycle epics.** Phase metadata is managed automatically by `mindspec complete`.
+**Never edit phase metadata directly.** Phase metadata is managed automatically by `mindspec complete` — if phase state looks wrong, run `mindspec repair phase <spec-id>`.
 **Do NOT merge `main` into the bead branch mid-implementation.** Bead work flows bead → spec → main; pulling `main` into a bead branch creates merge conflicts when `mindspec impl approve` merges the spec branch back to `main`. If the branch feels stale, finish the bead — the lifecycle merges handle integration.
 
 ## Next Action

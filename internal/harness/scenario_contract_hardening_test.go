@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // --- Spec 092 LLM regression scenarios (HC-6) ---
@@ -201,4 +203,125 @@ func TestRunSessionStartDirPlumbing(t *testing.T) {
 			t.Error("expected error for unresolvable StartDir")
 		}
 	})
+}
+
+// --- Evidence-gating helper unit tests (panel R2-M1 + R3-MAJ-1) ---
+//
+// Synthetic event streams derived from the committed run-3 falsepos
+// transcript (review/prep/bead9_green_run3_reexport_FAIL_falsepos.log):
+// a parent `mindspec complete` event logged at EXIT (so it appears
+// AFTER its git children in the stream) whose duration window covers
+// mindspec's own executor-spawned `git add -A` / auto-commit /
+// `chore: sync beads artifact` subprocesses.
+
+// falseposStyleEvents builds the run-3 falsepos shape: agent runs
+// complete at t0; the executor's git children land (shim exit-time
+// stamps) inside the parent's window; the parent complete event is
+// logged LAST, at t0+8s, with DurationMS=8000.
+func falseposStyleEvents(beadWt string) (events []ActionEvent, parentEnd time.Time) {
+	parentEnd = time.Date(2026, 6, 11, 15, 30, 8, 0, time.UTC) // t0+8s
+	events = []ActionEvent{
+		{Command: "git", ArgsList: []string{"-C", beadWt, "add", "-A"},
+			Timestamp: parentEnd.Add(-6 * time.Second), ExitCode: 0},
+		{Command: "git", ArgsList: []string{"-C", beadWt, "commit", "-m", "impl(repo-11s.1): Created reexport.go with Reexport() function"},
+			Timestamp: parentEnd.Add(-5 * time.Second), ExitCode: 0},
+		{Command: "git", ArgsList: []string{"-C", beadWt, "add", "-A"},
+			Timestamp: parentEnd.Add(-3 * time.Second), ExitCode: 0},
+		{Command: "git", ArgsList: []string{"-C", beadWt, "commit", "-m", "chore: sync beads artifact"},
+			Timestamp: parentEnd.Add(-2 * time.Second), ExitCode: 0},
+		{Command: "mindspec", ArgsList: []string{"complete", "repo-11s.1", "Created reexport.go with Reexport() function"},
+			Timestamp: parentEnd, DurationMS: 8000, ExitCode: 0},
+	}
+	return events, parentEnd
+}
+
+// TestManualArtifactCommitViolations_FalseposEventsExcluded replays the
+// run-3 falsepos shape under the corrected logic: mindspec's own
+// executor-spawned add/commit children must NOT be flagged.
+func TestManualArtifactCommitViolations_FalseposEventsExcluded(t *testing.T) {
+	events, _ := falseposStyleEvents("/sandbox/.worktrees/worktree-repo-11s.1")
+	if got := manualArtifactCommitViolations(events); len(got) != 0 {
+		t.Errorf("mindspec-spawned executor commits must not be flagged; got violations: %v", got)
+	}
+}
+
+// TestManualArtifactCommitViolations_ParentWindowNeedsUntruncatedStream
+// pins the R3-MAJ-1 mechanism itself: the parent complete event is
+// logged at exit and lands AFTER its git children — at the scan
+// boundary — so attribution against the TRUNCATED scan window (the
+// pre-fix bug) cannot see the parent, while attribution against the
+// full stream can. The child here ends 5s before the parent, far
+// outside any ±1s slack, so only the parent's duration window (not the
+// slack accident) can attribute it.
+func TestManualArtifactCommitViolations_ParentWindowNeedsUntruncatedStream(t *testing.T) {
+	events, _ := falseposStyleEvents("/wt")
+	child := events[1] // executor auto-commit, parentEnd-5s
+	parentIdx := len(events) - 1
+
+	if !mindspecSpawnedGit(events, child) {
+		t.Error("full-stream attribution must cover the executor child via the parent's duration window")
+	}
+	if mindspecSpawnedGit(events[:parentIdx], child) {
+		t.Error("truncated-window attribution unexpectedly matched — the parent is outside the slice; this test's premise is broken")
+	}
+}
+
+// TestManualArtifactCommitViolations_AgentBlanketCommitFlagged: an
+// agent-issued `git commit -am` BEFORE the complete and OUTSIDE any
+// mindspec window (90s earlier) must be flagged.
+func TestManualArtifactCommitViolations_AgentBlanketCommitFlagged(t *testing.T) {
+	events, parentEnd := falseposStyleEvents("/wt")
+	agent := ActionEvent{
+		Command:   "git",
+		ArgsList:  []string{"commit", "-am", "checkpoint everything"},
+		Timestamp: parentEnd.Add(-90 * time.Second),
+		ExitCode:  0,
+	}
+	events = append([]ActionEvent{agent}, events...)
+
+	got := manualArtifactCommitViolations(events)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 violation for the agent's blanket commit, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "checkpoint everything") {
+		t.Errorf("violation should cite the agent commit; got %q", got[0])
+	}
+}
+
+// TestManualArtifactCommitViolations_ExplicitBeadsInsideWindowStillFlagged:
+// an explicit `.beads` pathspec is agent-only (mindspec never passes
+// one) and must be flagged even INSIDE a mindspec window — attribution
+// applies only to the fuzzy blanket heuristics.
+func TestManualArtifactCommitViolations_ExplicitBeadsInsideWindowStillFlagged(t *testing.T) {
+	events, parentEnd := falseposStyleEvents("/wt")
+	inWindow := ActionEvent{
+		Command:   "git",
+		ArgsList:  []string{"add", ".beads/issues.jsonl"},
+		Timestamp: parentEnd.Add(-4 * time.Second),
+		ExitCode:  0,
+	}
+	// Insert before the parent (stream order: children first).
+	events = append(events[:4:4], append([]ActionEvent{inWindow}, events[4:]...)...)
+
+	got := manualArtifactCommitViolations(events)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 violation for the explicit .beads add, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], ".beads/issues.jsonl") {
+		t.Errorf("violation should cite the .beads pathspec; got %q", got[0])
+	}
+}
+
+// TestManualArtifactCommitViolations_ZeroDurationParentNoAttribution:
+// a parent with DurationMS=0 (shim clock fallback) has no window — the
+// <=0 guard skips it, so its in-stream "children" are treated as
+// agent-issued and the blanket commit is flagged.
+func TestManualArtifactCommitViolations_ZeroDurationParentNoAttribution(t *testing.T) {
+	events, _ := falseposStyleEvents("/wt")
+	events[len(events)-1].DurationMS = 0
+
+	got := manualArtifactCommitViolations(events)
+	if len(got) == 0 {
+		t.Error("with a zero-duration parent there is no attribution window; the blanket add+commit chain must be flagged")
+	}
 }
