@@ -15,9 +15,11 @@ import (
 // (`mindspec approve ...` / `approve <noun>`) that spec 092 Req 11
 // removes from every instruct emission channel. The canonical order is
 // noun-verb: `mindspec spec approve <id>`, `mindspec plan approve <id>`,
-// `mindspec impl approve <id>`. Word boundaries keep canonical prose
-// like "approved spec" from false-matching.
-var deprecatedApproveOrder = regexp.MustCompile(`mindspec approve\b|\bapprove (spec|plan|impl)\b`)
+// `mindspec impl approve <id>`. Case-insensitive and
+// whitespace-tolerant (panel R3 hardening) so casing/spacing variants
+// of the deprecated order cannot sneak back in; word boundaries keep
+// canonical prose like "approved spec" from false-matching.
+var deprecatedApproveOrder = regexp.MustCompile(`(?i)mindspec\s+approve\b|\bapprove\s+(spec|plan|impl)\b`)
 
 func setupTestProject(t *testing.T) string {
 	t.Helper()
