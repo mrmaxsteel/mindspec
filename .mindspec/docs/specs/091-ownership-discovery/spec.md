@@ -152,13 +152,29 @@ documented in HC-6.
 
 ## Impacted Domains
 
-- **`workflow/`** (the doctor surface): `internal/doctor/docs.go`
+- workflow: the doctor surface, domain scaffolding, doc-sync
+  validation, and the complete/approve warnings pipe — the
+  workflow OWNERSHIP manifest claims `internal/doctor/**`,
+  `internal/validate/**`, `internal/complete/**`, and
+  `internal/approve/**`, which are this spec's primary code
+  surfaces. Per-surface detail in the next section.
+- execution: the CLI command surface (`cmd/mindspec`, per the
+  spec-092 precedent for command-layer changes) gains the two
+  new populate subcommands and the two new migrate phases
+  (Requirements 10, 12, 14, 19).
+- core: `.mindspec/config.yaml` parsing (`internal/config`,
+  claimed by the core OWNERSHIP manifest) gains the single new
+  optional `source_globs:` field (Requirement 11).
+
+## Affected surfaces (per domain)
+
+- **workflow** (the doctor surface): `internal/doctor/docs.go`
   gains the ability to mark the per-domain OWNERSHIP check as
   `Fixable` and to write an empty-stub manifest (`paths: []` +
   populate-this comment) under `--fix`.
   `cmd/mindspec/doctor.go` is unchanged — the existing `--fix`
   plumbing dispatches to the new fixer.
-- **`workflow/`** (domain scaffolding):
+- **workflow** (domain scaffolding):
   `internal/domain/scaffold.go` (`Add()`, reached via
   `mindspec domain add <name>`) is extended to write the
   empty-stub `OWNERSHIP.yaml` alongside the four standard
@@ -167,7 +183,7 @@ documented in HC-6.
   (Requirement 9). `cmd/mindspec/init.go` is intentionally NOT
   modified — init scaffolds no domain directories (audit
   recorded in Requirement 9).
-- **`workflow/`** (complete/approve output): `mindspec complete`
+- **workflow** (complete/approve output): `mindspec complete`
   and `mindspec approve impl` currently consume the doc-sync
   `*Result` only via `HasFailures()` and error messages
   (`internal/complete/complete.go:201-204`,
@@ -175,7 +191,7 @@ documented in HC-6.
   are silently dropped. Requirement 22 makes both flows print
   doc-sync warnings and adds the recurring migration-status
   line for unset `source_globs`.
-- **`validate/`**: `internal/validate/docsync.go` and
+- **workflow** (doc-sync validation): `internal/validate/docsync.go` and
   `internal/validate/ownership.go` cooperate to emit a new Warn
   (`unclaimed-source`) whenever a diff modifies source files
   (files matching the operator-declared `source_globs:` from
@@ -193,7 +209,7 @@ documented in HC-6.
   The silent per-domain fallback in
   `internal/validate/ownership.go` is removed — a missing
   manifest claims nothing (Requirement 13).
-- **`doctor/`**: a new static-time check emits a `dead-manifest`
+- **workflow** (doctor diagnostics): a new static-time check emits a `dead-manifest`
   Warn for any domain whose EXISTING `OWNERSHIP.yaml` `paths`
   glob resolves to zero files in the live workspace (including
   the freshly-scaffolded empty stubs, until populated). Runs on
@@ -205,7 +221,8 @@ documented in HC-6.
   `dead-manifest`. The paths
   themselves are never auto-proposed — the agent or operator
   populates the manifest (rationale per Requirement 17).
-- **`.mindspec/docs/adr/`**: A new ADR-0035 records the Zero
+- **ADR record** (`.mindspec/docs/adr/`, not a code domain): A
+  new ADR-0035 records the Zero
   Framework Cognition stance, the empty-stub scaffold default
   (`paths: []` + populate-this comment), the removal of the
   silent per-domain fallback, the demotion of the hard-coded
