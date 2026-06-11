@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -276,11 +277,26 @@ project state and report the current mode.`,
 	}
 }
 
+// lastNonEmptyLine returns the last non-empty (after TrimSpace) line of s,
+// or "" when none exists.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
 // assertDoomedCompleteEmitsCdNote claims a fresh probe bead, builds its
 // worktree nested under the spec worktree, commits work there, and runs
 // `mindspec complete` with the process cwd INSIDE that worktree. It asserts
-// exit 0 and the Req 4 cd-back NOTE ("working directory was removed") in
-// the combined output. Pre-fix the NOTE does not exist anywhere in the
+// exit 0 and the Req 4 cd-back NOTE as the LAST non-empty line of STDOUT,
+// carrying the copy-pastable `run: cd <root>` command (post-panel B7: the
+// unit half is pinned in cmd/mindspec/cwdsafety_test.go — completeTail
+// emits the NOTE after FormatResult and the instruct tail; this closes the
+// end-to-end half). Pre-fix the NOTE does not exist anywhere in the
 // binary, so this fails deterministically at the pinned baseline.
 func assertDoomedCompleteEmitsCdNote(t *testing.T, sandbox *Sandbox, epicID, specID string) {
 	t.Helper()
@@ -309,12 +325,24 @@ func Probe() string { return "probe" }
 		"complete", probeID, "cd-note probe")
 	cmd.Dir = filepath.Join(sandbox.Root, probeWt) // the directory complete will remove
 	cmd.Env = sandbox.Env()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Errorf("mindspec complete from inside its own bead worktree exited non-zero (qxsy): %v\n%s", err, out)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Errorf("mindspec complete from inside its own bead worktree exited non-zero (qxsy): %v\nstdout:\n%s\nstderr:\n%s",
+			err, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(string(out), "working directory was removed") {
-		t.Errorf("complete output lacks the cd-back NOTE (\"your shell's working directory was removed — run: cd <root>\", spec 092 Req 4); got:\n%s", out)
+	if !strings.Contains(stdout.String(), "working directory was removed") {
+		t.Errorf("complete stdout lacks the cd-back NOTE (\"your shell's working directory was removed — run: cd <root>\", spec 092 Req 4); stdout:\n%s\nstderr:\n%s",
+			stdout.String(), stderr.String())
+	}
+	// Post-panel B7 tightening: the NOTE is the LAST non-empty stdout line
+	// (after FormatResult and the instruct tail — the placement the agent's
+	// shell actually sees) and carries the copy-pastable `run: cd` command.
+	note := lastNonEmptyLine(stdout.String())
+	if !strings.Contains(note, "working directory was removed") || !strings.Contains(note, "run: cd ") {
+		t.Errorf("last non-empty stdout line is not the cd-back NOTE with its `run: cd <root>` command (spec 092 Req 4); last line: %q\nfull stdout:\n%s",
+			note, stdout.String())
 	}
 }
 
@@ -336,6 +364,97 @@ fi
 bd export -o "$(git rev-parse --show-toplevel)/.beads/issues.jsonl"
 exit 0
 `
+
+// isHooksPathAssignment reports whether a git invocation's args ASSIGN
+// core.hooksPath — either the inline `-c core.hooksPath=<path>` override
+// or `git config [scope] core.hooksPath <path>`. Read-only forms
+// (`--get`, `--get-all`, `--get-regexp`, `--list`) and unsets are NOT
+// assignments (post-panel B8b: flagging bare "hooksPath" substrings
+// false-failed on read-only diagnostics).
+func isHooksPathAssignment(args []string) bool {
+	for i, a := range args {
+		if strings.Contains(a, "core.hooksPath=") {
+			return true // -c core.hooksPath=<path>
+		}
+		if a != "core.hooksPath" {
+			continue
+		}
+		readOnly := false
+		for _, b := range args {
+			switch b {
+			case "--get", "--get-all", "--get-regexp", "--list", "--unset", "--unset-all":
+				readOnly = true
+			}
+		}
+		if !readOnly && i+1 < len(args) {
+			return true // config core.hooksPath <path>
+		}
+	}
+	return false
+}
+
+// assertNoManualArtifactCommit flags any agent-issued git add/commit that
+// touches (or sweeps up) the beads artifact before the first SUCCESSFUL
+// `mindspec complete` (post-panel B8). Matched forms:
+//   - explicit `.beads` pathspec on add or commit;
+//   - commit with all-tracked staging flags (-a / -am / --all);
+//   - bare commit after a blanket stage (`git add -A` / `--all` / `.`)
+//     earlier in the window — the staged artifact rides along.
+//
+// A blanket `git add` ALONE is not flagged: `mindspec complete`'s
+// sanctioned auto-commit path re-exports and commits whatever is staged
+// through the executor, so staging without a manual commit is not the
+// manual-recovery loophole.
+func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
+	t.Helper()
+
+	window := events
+	if firstOK := firstEventIndex(events, func(e ActionEvent) bool {
+		return e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "complete")
+	}); firstOK >= 0 {
+		window = events[:firstOK]
+	}
+
+	namesBeads := func(args []string) bool {
+		for _, a := range args {
+			if strings.Contains(a, ".beads") {
+				return true
+			}
+		}
+		return false
+	}
+
+	artifactStaged := false
+	for _, e := range window {
+		if e.Command != "git" {
+			continue
+		}
+		args := eventArgs(e)
+		switch {
+		case containsAll(args, "add"):
+			if namesBeads(args) {
+				t.Errorf("agent staged the beads artifact before the first successful complete: %v", args)
+				artifactStaged = true
+				continue
+			}
+			for _, a := range args {
+				if a == "-A" || a == "--all" || a == "." || a == "-u" {
+					artifactStaged = true
+				}
+			}
+		case containsAll(args, "commit"):
+			allTracked := false
+			for _, a := range args {
+				if a == "-a" || a == "-am" || a == "--all" {
+					allTracked = true
+				}
+			}
+			if namesBeads(args) || allTracked || artifactStaged {
+				t.Errorf("agent manually committed the beads artifact before the first successful complete: %v", args)
+			}
+		}
+	}
+}
 
 // ScenarioPrecommitReexportComplete pins field note mindspec-i4ad: a
 // pre-commit hook re-exports .beads/issues.jsonl during `mindspec
@@ -428,13 +547,20 @@ Do not close beads directly with bd commands.`,
 				beadID: "closed",
 			})
 
-			// Field workarounds are forbidden (i4ad): no --no-verify, no
-			// core.hooksPath bypass anywhere in the event stream.
+			// Field workarounds are forbidden (i4ad): no --no-verify
+			// anywhere, and no core.hooksPath ASSIGNMENT (post-panel B8b:
+			// read-only diagnostics like `git config --get core.hooksPath`
+			// are legitimate orientation, not a bypass — only setting the
+			// hooks path reroutes the pre-commit hook under test).
 			for _, e := range events {
-				for _, a := range eventArgs(e) {
-					if a == "--no-verify" || strings.Contains(a, "hooksPath") {
-						t.Errorf("agent used a hook bypass workaround: %s %v", e.Command, eventArgs(e))
+				args := eventArgs(e)
+				for _, a := range args {
+					if a == "--no-verify" {
+						t.Errorf("agent used a hook bypass workaround: %s %v", e.Command, args)
 					}
+				}
+				if e.Command == "git" && isHooksPathAssignment(args) {
+					t.Errorf("agent reassigned core.hooksPath (hook bypass workaround): %s %v", e.Command, args)
 				}
 			}
 
@@ -448,25 +574,17 @@ Do not close beads directly with bd commands.`,
 			if firstFailed >= 0 {
 				t.Errorf("mindspec complete failed (exit=%d) — artifact dirt blocked completion: %v",
 					events[firstFailed].ExitCode, eventArgs(events[firstFailed]))
-
-				// Loophole closure (spec 092 NEW-6): the eventual success must
-				// not be a manual artifact-commit recovery.
-				for _, e := range events[firstFailed+1:] {
-					if e.Command != "git" {
-						continue
-					}
-					args := eventArgs(e)
-					if !containsAll(args, "add") && !containsAll(args, "commit") {
-						continue
-					}
-					for _, a := range args {
-						if strings.Contains(a, ".beads") {
-							t.Errorf("agent manually committed the beads artifact after the failed complete: %v", args)
-							break
-						}
-					}
-				}
 			}
+
+			// Loophole closure (spec 092 NEW-6, post-panel B8 tightening):
+			// no agent-issued git add/commit may touch the beads artifact
+			// BEFORE the first successful complete — regardless of whether
+			// a complete failed first. The old detector only scanned events
+			// after a failed complete and only matched explicit `.beads`
+			// args, so `git add -A` + bare `git commit -am` (or a
+			// pre-emptive commit before the first complete attempt) evaded
+			// it.
+			assertNoManualArtifactCommit(t, events)
 		},
 	}
 }
@@ -640,14 +758,20 @@ implementation. Approve the implementation so the project returns to idle.`,
 				if e.Command != "mindspec" {
 					continue
 				}
-				if e.ExitCode == 0 && argsInOrder(e.ArgsList, "impl", "approve") {
+				// Post-panel B8c: use the order-preserving accessor
+				// (ArgsList when shim-recorded, else the positional
+				// flatArgs of the Args map) instead of raw e.ArgsList, so
+				// Args-map-only events can't silently escape the
+				// deprecated-order check.
+				args := eventArgsList(e)
+				if e.ExitCode == 0 && argsInOrder(args, "impl", "approve") {
 					canonical = true
 				}
 				// NO event may use the deprecated `approve impl` order —
 				// regardless of exit code (even a failed attempt proves the
 				// guidance taught the deprecated form).
-				if argsInOrder(e.ArgsList, "approve", "impl") {
-					t.Errorf("agent used the deprecated `approve impl` order: %v", e.ArgsList)
+				if argsInOrder(args, "approve", "impl") {
+					t.Errorf("agent used the deprecated `approve impl` order: %v", args)
 				}
 			}
 			if !canonical {
