@@ -183,10 +183,15 @@ func applyBeadsConfig(root string, check bool, r *Result) {
 
 // ensureSettings creates or merges .claude/settings.json with MindSpec hooks.
 func ensureSettings(root string, check bool, r *Result) error {
+	return ensureSettingsWith(root, check, r, wantedHooks())
+}
+
+// ensureSettingsWith is ensureSettings with an explicit wanted set, so tests
+// can exercise the merge machinery against hook shapes that wantedHooks()
+// does not carry yet (e.g. the PreToolUse pre-complete gate entry).
+func ensureSettingsWith(root string, check bool, r *Result, wanted map[string][]map[string]any) error {
 	relPath := filepath.Join(".claude", "settings.json")
 	absPath := filepath.Join(root, relPath)
-
-	wanted := wantedHooks()
 
 	if fileExists(absPath) {
 		// Read existing, check if hooks already present
@@ -209,20 +214,22 @@ func ensureSettings(root string, check bool, r *Result) error {
 		for event, entries := range wanted {
 			existing, _ := hooks[event].([]any)
 			for _, entry := range entries {
-				if !hookEntryExists(existing, entry) {
-					existing = append(existing, entry)
-					anyChanged = true
-				} else if hookEntryStale(existing, entry) {
-					existing = replaceHookEntry(existing, entry)
+				var changed bool
+				existing, changed = mergeWantedEntry(existing, entry)
+				if changed {
 					anyChanged = true
 				}
 			}
 			hooks[event] = existing
 		}
 
-		// Remove stale PreToolUse entries that reference mindspec commands.
-		// These guard hooks were removed in spec-072.
-		if cleaned := removeStalePreToolUse(hooks); cleaned {
+		// Remove stale mindspec-owned entries: hooks mindspec installed in
+		// the past but no longer wants (e.g. the spec-072 retired PreToolUse
+		// guard hooks, including their legacy `mindspec instruct` form).
+		// Staleness = mindspec-owned AND not in the current wanted set; the
+		// keep-list is derived from `wanted` itself, so an entry merged in
+		// above can never be stripped by this same pass.
+		if removeStaleMindspecEntries(hooks, wanted) {
 			anyChanged = true
 		}
 
@@ -282,121 +289,154 @@ func wantedHooks() map[string][]map[string]any {
 	}
 }
 
-// hookEntryExists checks if a hook entry with the same matcher already exists.
-func hookEntryExists(existing []any, entry map[string]any) bool {
-	wantMatcher, _ := entry["matcher"].(string)
-	for _, e := range existing {
-		m, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		if matcher, _ := m["matcher"].(string); matcher == wantMatcher {
+// Hook-entry ownership markers. An entry is mindspec-owned iff one of its
+// hook commands prefix-matches mindspecOwnedCmdPrefix OR contains
+// mindspecLegacyCmdMarker. Ownership is decided by command CONTENT, never by
+// matcher: for shared matchers like PreToolUse "Bash", user lint/guard hooks
+// routinely collide on the matcher string, and matcher-keyed identity would
+// silently overwrite them (spec 093 Req 7, HC-6).
+//
+// The `mindspec instruct` arm is retained deliberately: the spec-072 retired
+// guard hooks include that legacy form, and instruct-form entries are never
+// in the wanted set, so wanted-set-derived staleness removes them (N1).
+const (
+	mindspecOwnedCmdPrefix  = "mindspec hook "
+	mindspecLegacyCmdMarker = "mindspec instruct"
+)
+
+// isMindspecOwned reports whether a hook entry is mindspec-owned, judged by
+// the content of its hook commands (see the ownership-marker comment above).
+func isMindspecOwned(entry map[string]any) bool {
+	for _, cmd := range entryCommands(entry) {
+		if strings.HasPrefix(cmd, mindspecOwnedCmdPrefix) || strings.Contains(cmd, mindspecLegacyCmdMarker) {
 			return true
 		}
 	}
 	return false
 }
 
-// hookEntryStale checks if an existing hook entry with the same matcher has
-// different command content than the wanted entry (i.e. needs updating).
-func hookEntryStale(existing []any, entry map[string]any) bool {
-	wantMatcher, _ := entry["matcher"].(string)
-	wantHooks, _ := entry["hooks"].([]map[string]any)
-	for _, e := range existing {
+// entryCommands extracts the ordered hook command strings from an entry.
+// Handles both the JSON-decoded shape ([]any of map[string]any) and the
+// wantedHooks() literal shape ([]map[string]any).
+func entryCommands(entry map[string]any) []string {
+	var cmds []string
+	appendCmd := func(hm map[string]any) {
+		if cmd, ok := hm["command"].(string); ok {
+			cmds = append(cmds, cmd)
+		}
+	}
+	switch hooksList := entry["hooks"].(type) {
+	case []any:
+		for _, h := range hooksList {
+			if hm, ok := h.(map[string]any); ok {
+				appendCmd(hm)
+			}
+		}
+	case []map[string]any:
+		for _, hm := range hooksList {
+			appendCmd(hm)
+		}
+	}
+	return cmds
+}
+
+// entryEqualsWanted reports whether an existing entry already carries the
+// wanted entry's identity: same matcher and the same ordered hook commands.
+func entryEqualsWanted(entry, want map[string]any) bool {
+	entryMatcher, _ := entry["matcher"].(string)
+	wantMatcher, _ := want["matcher"].(string)
+	if entryMatcher != wantMatcher {
+		return false
+	}
+	entryCmds := entryCommands(entry)
+	wantCmds := entryCommands(want)
+	if len(entryCmds) != len(wantCmds) {
+		return false
+	}
+	for i := range entryCmds {
+		if entryCmds[i] != wantCmds[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeWantedEntry merges one wanted hook entry into the existing entries
+// for its event. Only mindspec-owned entries are candidates for in-place
+// update; user entries are NEVER replaced — when a user entry shares the
+// wanted matcher, mindspec's entry is APPENDED alongside it (HC-6).
+// Returns the (possibly grown) slice and whether anything changed.
+func mergeWantedEntry(existing []any, want map[string]any) ([]any, bool) {
+	wantMatcher, _ := want["matcher"].(string)
+	for i, e := range existing {
 		m, ok := e.(map[string]any)
-		if !ok {
+		if !ok || !isMindspecOwned(m) {
 			continue
 		}
 		if matcher, _ := m["matcher"].(string); matcher != wantMatcher {
 			continue
 		}
-		// Same matcher — compare hook commands
-		existHooks, _ := m["hooks"].([]any)
-		if len(existHooks) != len(wantHooks) {
-			return true
+		// Mindspec-owned entry on the wanted matcher: update in place if
+		// its command content drifted; otherwise it is already current.
+		if entryEqualsWanted(m, want) {
+			return existing, false
 		}
-		for i, wh := range wantHooks {
-			if i >= len(existHooks) {
-				return true
-			}
-			eh, ok := existHooks[i].(map[string]any)
-			if !ok {
-				return true
-			}
-			wantCmd, _ := wh["command"].(string)
-			existCmd, _ := eh["command"].(string)
-			if wantCmd != existCmd {
-				return true
-			}
-		}
-		return false
+		existing[i] = want
+		return existing, true
 	}
-	return false // not found = not stale (it's new)
+	// No mindspec-owned entry on this matcher — append, leaving any user
+	// entries sharing the matcher untouched.
+	return append(existing, want), true
 }
 
-// replaceHookEntry replaces an existing hook entry matching the same matcher.
-func replaceHookEntry(existing []any, entry map[string]any) []any {
-	wantMatcher, _ := entry["matcher"].(string)
-	for i, e := range existing {
-		m, ok := e.(map[string]any)
-		if !ok {
+// removeStaleMindspecEntries removes mindspec-owned hook entries that are
+// not in the current wanted set. Staleness = mindspec-owned AND absent from
+// `wanted`; the keep-list is DERIVED from the wanted set passed in (the same
+// one ensureSettings just merged), never a hardcoded whitelist — so a newly
+// wanted entry can never be added and stripped in the same pass, and the
+// next new hook cannot re-create that bug. Non-mindspec (user) entries are
+// never touched. A duplicate owned copy of a wanted entry beyond the first
+// is also removed, keeping re-runs idempotent. Returns true if any entries
+// were removed.
+func removeStaleMindspecEntries(hooks map[string]any, wanted map[string][]map[string]any) bool {
+	removedAny := false
+	for event, raw := range hooks {
+		entries, ok := raw.([]any)
+		if !ok || len(entries) == 0 {
 			continue
 		}
-		if matcher, _ := m["matcher"].(string); matcher == wantMatcher {
-			existing[i] = entry
-			return existing
+		wantedForEvent := wanted[event]
+		matchedWanted := make([]bool, len(wantedForEvent))
+		var kept []any
+		for _, e := range entries {
+			m, ok := e.(map[string]any)
+			if !ok || !isMindspecOwned(m) {
+				kept = append(kept, e)
+				continue
+			}
+			keep := false
+			for i, w := range wantedForEvent {
+				if !matchedWanted[i] && entryEqualsWanted(m, w) {
+					matchedWanted[i] = true
+					keep = true
+					break
+				}
+			}
+			if keep {
+				kept = append(kept, e)
+			}
 		}
-	}
-	return append(existing, entry)
-}
-
-// removeStalePreToolUse removes PreToolUse entries that reference mindspec
-// hook commands. Returns true if any entries were removed.
-func removeStalePreToolUse(hooks map[string]any) bool {
-	preToolUse, ok := hooks["PreToolUse"].([]any)
-	if !ok || len(preToolUse) == 0 {
-		return false
-	}
-
-	var kept []any
-	for _, entry := range preToolUse {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			kept = append(kept, entry)
+		if len(kept) == len(entries) {
 			continue
 		}
-		if isMindspecHookEntry(m) {
-			continue // drop it
-		}
-		kept = append(kept, entry)
-	}
-
-	if len(kept) == len(preToolUse) {
-		return false // nothing removed
-	}
-
-	if len(kept) == 0 {
-		delete(hooks, "PreToolUse")
-	} else {
-		hooks["PreToolUse"] = kept
-	}
-	return true
-}
-
-// isMindspecHookEntry returns true if a hook entry references a mindspec command.
-func isMindspecHookEntry(entry map[string]any) bool {
-	hooksList, _ := entry["hooks"].([]any)
-	for _, h := range hooksList {
-		hm, ok := h.(map[string]any)
-		if !ok {
-			continue
-		}
-		cmd, _ := hm["command"].(string)
-		if strings.Contains(cmd, "mindspec hook") || strings.Contains(cmd, "mindspec instruct") {
-			return true
+		removedAny = true
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
 		}
 	}
-	return false
+	return removedAny
 }
 
 // ensureClaudeMD creates or appends MindSpec block to CLAUDE.md.
