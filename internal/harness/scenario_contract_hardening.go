@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // This file owns the five Spec 092 (agent-contract-hardening) regression
@@ -584,35 +585,85 @@ func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 	}
 
 	artifactStaged := false
-	for _, e := range window {
+	for i, e := range window {
 		if e.Command != "git" {
 			continue
 		}
 		args := eventArgs(e)
 		switch {
 		case containsAll(args, "add"):
+			// Explicit .beads pathspec: only the agent ever passes one
+			// (mindspec's executor stages via blanket `git add -A`, bd
+			// never git-adds) — flag unconditionally.
 			if namesBeads(args) {
 				t.Errorf("agent staged the beads artifact before the first successful complete: %v", args)
 				artifactStaged = true
 				continue
 			}
-			for _, a := range args {
-				if a == "-A" || a == "--all" || a == "." || a == "-u" {
-					artifactStaged = true
+			// Blanket stage: attribution matters — mindspec's own
+			// CommitAll runs `git add -A` as a recorded subprocess
+			// (run-3 false-positive fix, see mindspecSpawnedGit).
+			if !mindspecSpawnedGit(window, i) {
+				for _, a := range args {
+					if a == "-A" || a == "--all" || a == "." || a == "-u" {
+						artifactStaged = true
+					}
 				}
 			}
 		case containsAll(args, "commit"):
+			// Explicit .beads pathspec on a commit: agent-only, flag
+			// unconditionally.
+			if namesBeads(args) {
+				t.Errorf("agent manually committed the beads artifact before the first successful complete: %v", args)
+				continue
+			}
+			// Blanket-form commits need attribution: mindspec's
+			// auto-commit and `chore: sync beads artifact` follow-up are
+			// recorded git subprocesses of the complete event.
+			if mindspecSpawnedGit(window, i) {
+				continue
+			}
 			allTracked := false
 			for _, a := range args {
 				if a == "-a" || a == "-am" || a == "--all" {
 					allTracked = true
 				}
 			}
-			if namesBeads(args) || allTracked || artifactStaged {
+			if allTracked || artifactStaged {
 				t.Errorf("agent manually committed the beads artifact before the first successful complete: %v", args)
 			}
 		}
 	}
+}
+
+// mindspecSpawnedGit reports whether the git event at index i falls
+// within the execution window of a recorded mindspec command. The PATH
+// shim records mindspec's OWN git subprocesses (complete's auto-commit,
+// the Req 7 `chore: sync beads artifact` follow-up) indistinguishably
+// from agent-issued ones — the run-3 false positive that failed a
+// perfectly sanctioned completion. Shim timestamps are END times
+// (recorder.go logs after the real binary exits), so a child's end lies
+// within [parentEnd-parentDuration, parentEnd]; 1s slack absorbs the
+// shim's second-resolution timestamps. Used ONLY for the fuzzy
+// blanket-form heuristics — explicit `.beads` pathspecs are flagged
+// regardless of attribution (mindspec never passes one).
+func mindspecSpawnedGit(events []ActionEvent, i int) bool {
+	g := events[i]
+	if g.Timestamp.IsZero() {
+		return false
+	}
+	gEnd := g.Timestamp
+	for _, m := range events {
+		if m.Command != "mindspec" || m.Timestamp.IsZero() || m.DurationMS <= 0 {
+			continue
+		}
+		mEnd := m.Timestamp
+		mStart := mEnd.Add(-m.Duration())
+		if !gEnd.Before(mStart.Add(-time.Second)) && !gEnd.After(mEnd.Add(time.Second)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ScenarioPrecommitReexportComplete pins field note mindspec-i4ad: a

@@ -436,6 +436,43 @@ actions. This run is also the B18 discharge (integration-grade evidence
 for the cwd-deletion path on darwin).
 
 
+### 3-falsepos. precommit_reexport_complete — first attempt FAIL was a Bead-9 detector bug (self-authored, fixed)
+
+**Run 3 first attempt** (foreground, `0a08c28`+`1412143` tree): **FAIL
+(106.71s)** — transcript
+`review/prep/bead9_green_run3_reexport_FAIL_falsepos.log`. Verbatim
+failing assertions:
+
+```
+scenario_contract_hardening.go:754: agent manually committed the beads artifact before the first successful complete: [-C .../worktree-repo-11s.1 commit -m impl(repo-11s.1): Created reexport.go with Reexport() function]
+scenario_contract_hardening.go:754: agent manually committed the beads artifact before the first successful complete: [-C .../worktree-repo-11s.1 commit -m chore: sync beads artifact]
+--- FAIL: TestLLM_PrecommitReexportComplete (106.71s)
+```
+
+**This was NOT a product or pin failure.** The product behaved exactly per
+Reqs 6/7: `[380] mindspec complete repo-11s.1 ... (exit=0)` — FIRST
+attempt, no --no-verify, no hooksPath assignment, the chained hook
+re-exports visible in-stream. The two flagged commits are mindspec's OWN
+executor-spawned subprocesses (the auto-commit `impl(<bead>): ...` and the
+sanctioned Req 7 `chore: sync beads artifact` follow-up): the recording
+shim logs EVERY git invocation in the sandbox with no parent attribution
+(recorder.go shim script), and Bead 9's OWN B8 tightening (`145c335`)
+introduced the false positive — mindspec's internal `git add -A`
+(CommitAll) set the detector's artifactStaged latch, flagging the very
+behavior Bead 5 implemented. The pre-B8 detector never fired on these
+(it matched only explicit `.beads` args).
+
+**Correction (self-authored harness code, this bead's own punch-list
+item)**: `assertNoManualArtifactCommit` now attributes blanket-form git
+events via `mindspecSpawnedGit` — a git event whose shim END-timestamp
+falls within [end-duration, end] (±1s) of a recorded `mindspec` event is
+mindspec's own subprocess and is excluded from the FUZZY blanket
+heuristics; explicit `.beads` pathspecs stay flagged UNCONDITIONALLY
+(mindspec never passes one), so the NEW-6 loophole closure is intact.
+This is a correction of a Bead-9-introduced defect back to B8's intended
+semantics ("agent-issued"), not a weakening of any spec pin; flagged for
+orchestrator review in the run report.
+
 ### 3. precommit_reexport_complete — NOT RUN (stopped at run 1)
 
 ### 4. wrong_directory_guard_recovery — NOT RUN (stopped at run 1)
