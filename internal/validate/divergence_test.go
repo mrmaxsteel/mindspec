@@ -277,3 +277,54 @@ func TestValidateDivergenceDiffErrorSurfaces(t *testing.T) {
 		t.Errorf("expected nil findings, got %+v", findings)
 	}
 }
+
+// TestProcessArtifactsFiltered confirms the spec-092 fix-up: non-source
+// process artifacts (.beads/, .mindspec/docs/** and the rest of the
+// doc-sync isDocFile set, review/) are dropped before attribution and
+// can never surface as adr-divergence-unowned. A control source file in
+// the same diff still surfaces, proving the filter does not silence the
+// lane wholesale.
+func TestProcessArtifactsFiltered(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "105-artifacts")
+	writeSpecAndPlan(t, root, specDir, "105-artifacts",
+		[]string{"core"},
+		[]string{},
+	)
+	writeManifest(t, root, "core", "paths:\n  - internal/core/**\n")
+
+	artifacts := []string{
+		".beads/issues.jsonl",
+		".mindspec/docs/adr/ADR-0099-test.md",
+		".mindspec/docs/specs/105-artifacts/spec.md",
+		".mindspec/docs/specs/105-artifacts/plan.md",
+		".mindspec/docs/core/WORKFLOW-STATE-MACHINE.md",
+		".mindspec/docs/domains/core/OWNERSHIP.yaml",
+		"review/prep/bead2_baseline_evidence.md",
+		"docs/extra.md",
+		"CLAUDE.md",
+		"AGENTS.md",
+	}
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: append(append([]string{}, artifacts...),
+			"internal/payments/charge.go"), // control: still unowned
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly 1 finding (the control file), got %+v", findings)
+	}
+	if findings[0].Path != "internal/payments/charge.go" || findings[0].Kind != "unowned" {
+		t.Errorf("control finding = %+v, want unowned internal/payments/charge.go", findings[0])
+	}
+	for _, i := range r.Issues {
+		for _, a := range artifacts {
+			if strings.Contains(i.Message, a) {
+				t.Errorf("process artifact %q leaked into issue %+v", a, i)
+			}
+		}
+	}
+}

@@ -39,6 +39,17 @@ func TestCrossValidate_SpecMode_PlanExistsSkippedGate(t *testing.T) {
 	for _, w := range warnings {
 		if w.Field == "mode" && strings.Contains(w.Message, "SKIPPED GATE") {
 			found = true
+			// Bead 9 punch-list B17 (spec 092 Req 11): the advised gate
+			// command is the CANONICAL noun-verb form. This kill was
+			// previously only cross-package (the instruct fixture);
+			// pin it locally so a regression to the deprecated
+			// `approve spec` order fails in this package's own tests.
+			if !strings.Contains(w.Message, "mindspec spec approve 004-instruct") {
+				t.Errorf("SKIPPED GATE warning must advise the canonical `mindspec spec approve <id>`; got %q", w.Message)
+			}
+			if strings.Contains(w.Message, "approve spec") {
+				t.Errorf("SKIPPED GATE warning must not use the deprecated `approve spec` order; got %q", w.Message)
+			}
 		}
 	}
 	if !found {

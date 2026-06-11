@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,6 +273,21 @@ func DetectWorktreeContext(dir string) (kind, specID, beadID string) {
 		}
 	}
 	return lastKind, lastSpecID, lastBeadID
+}
+
+// ContextLine renders the worktree context of dir for guard-failure
+// messages (spec 092 Req 8). It names the kind of worktree dir is in
+// (via DetectWorktreeContext) and the path the failing check actually
+// evaluated — often a different directory. Guard call sites append this
+// line to their failure message so an agent that ran a command from the
+// wrong directory sees both where it is and what was checked.
+//
+// The format is fixed:
+//
+//	you are in the <main|spec|bead> worktree (<dir>); this check evaluated <checkedPath>
+func ContextLine(dir, checkedPath string) string {
+	kind, _, _ := DetectWorktreeContext(dir)
+	return fmt.Sprintf("you are in the %s worktree (%s); this check evaluated %s", kind, dir, checkedPath)
 }
 
 func exists(path string) bool {

@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -25,11 +26,35 @@ var (
 	implRunBDFn         = bead.RunBD
 	implMergeMetadataFn = bead.MergeMetadata
 	implGitUserEmailFn  = bead.GitUserEmail
+	// implPhaseMetadataFn is the Spec 092 Bead 3 seam for the two
+	// mindspec_phase writes inside ApproveImpl: the deferred stale-
+	// phase reconcile (Req 1) and the MUTATION (2/3) done write. Both
+	// are merge-writes (bead.MergeMetadata) so unrelated metadata keys
+	// — mindspec_migrated_at, doc-skew audit keys, ADR-override keys —
+	// are preserved (Req 19).
+	implPhaseMetadataFn = bead.MergeMetadata
 	// implCreateWithIDFn is the Spec 087 Bead 3 seam for the
 	// placeholder-ADR creation step in the supersede flow on the
 	// backstop (`approve impl`) path.
 	implCreateWithIDFn = adr.CreateWithID
+	// implGetwdFn feeds the Req 8 worktree-context line on the phase
+	// and plan-bead gate failures (spec 092, mindspec-tjat). Tests swap
+	// it to pin the worktree kind regardless of where `go test` runs.
+	implGetwdFn = os.Getwd
 )
+
+// implContextLine renders the Req 8 worktree-context line for impl
+// approve's gate failures (spec 092, mindspec-tjat): the directory the
+// command ran from, plus root — the repo whose bd-derived state (epic
+// phase, plan bead statuses) the gate evaluated. Getwd failure falls
+// back to root: a degraded but truthful line beats no line.
+func implContextLine(root string) string {
+	cwd, err := implGetwdFn()
+	if err != nil || cwd == "" {
+		cwd = root
+	}
+	return workspace.ContextLine(cwd, root)
+}
 
 // ImplOpts holds options for implementation approval.
 //
@@ -84,11 +109,16 @@ type ImplResult struct {
 //  1. readBeadStatus loop (bead-status verification, non-mutating)
 //  2. validate.ValidateDocs (doc-sync gate; honors AllowDocSkew override)
 //  3. validate.CheckADRDivergence (ADR-divergence gate; NOT covered by override)
-//  4. implRunBDCombinedFn("close", epicID) (EPIC CLOSE — first mutation)
-//  5. bead.MergeMetadata(epicID, mindspec_phase=done) (PHASE METADATA)
-//  6. exec.CommitCount (pre-flight)
-//  7. exec.FinalizeEpic (TERMINAL MUTATION)
-//  8. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
+//  4. implPhaseMetadataFn(epicID, mindspec_phase=<derived>) — Spec 092
+//     Req 1 deferred stale-phase reconcile; runs ONLY when the stored
+//     phase failed the review/done gate but the child-derived phase
+//     passed it, after the LAST pre-terminal gate (step 3) and before
+//     the first mutation (step 5); never after step 6's done write
+//  5. implRunBDCombinedFn("close", epicID) (EPIC CLOSE — first mutation)
+//  6. implPhaseMetadataFn(epicID, mindspec_phase=done) (PHASE METADATA)
+//  7. exec.CommitCount (pre-flight)
+//  8. exec.FinalizeEpic (TERMINAL MUTATION)
+//  9. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
 //     AllowDocSkew set AND FinalizeEpic returned nil
 func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) (*ImplResult, error) {
 	if err := validate.SpecID(specID); err != nil {
@@ -114,12 +144,38 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 
 	// Verify state is review mode: all children closed, pending final merge.
-	epicPhase, err := phase.DerivePhase(epicID)
+	//
+	// Spec 092 Req 1 (mindspec-3smk): the stored mindspec_phase is a
+	// trusted CACHE of the child-derived truth (ADR-0023 §3/§5,
+	// ADR-0034 amendment). When the stored phase fails the review/done
+	// gate but the child-derived phase satisfies it, gate evaluation
+	// CONTINUES on the derived phase READ-ONLY — nothing is written
+	// here. The forward reconcile write is deferred until after the
+	// LAST pre-terminal gate (the ADR-divergence gate below) passes;
+	// see the reconcile block immediately before MUTATION (1/3).
+	phaseDetail, err := phase.DerivePhaseDetail(epicID)
 	if err != nil {
 		return nil, fmt.Errorf("deriving phase for spec %s: %w", specID, err)
 	}
-	if epicPhase != state.ModeReview && epicPhase != state.ModeDone {
-		return nil, fmt.Errorf("expected review mode, got %q", epicPhase)
+	implGateOK := func(p string) bool { return p == state.ModeReview || p == state.ModeDone }
+	needsPhaseReconcile := false
+	switch {
+	case implGateOK(phaseDetail.Stored):
+		// Stored phase satisfies the gate — no reconcile needed.
+	case implGateOK(phaseDetail.Derived):
+		// Stale cache, healthy ground truth: continue on the derived
+		// phase; reconcile forward after the last pre-terminal gate.
+		needsPhaseReconcile = true
+	default:
+		// Spec 092 Req 2: neither stored nor derived satisfies the
+		// gate — name both phases and end with the spec-mandated
+		// recovery line. Raw `bd update` metadata commands are never
+		// emitted (Req 19: replace semantics over the whole map).
+		// Req 8: the worktree-context line precedes the recovery line.
+		return nil, guard.NewFailure(
+			fmt.Sprintf("expected review mode for spec %s: stored phase %q and child-derived phase %q both fail the review/done gate\n%s", specID, phaseDetail.Stored, phaseDetail.Derived, implContextLine(root)),
+			fmt.Sprintf("close remaining beads with 'mindspec complete <bead-id>', or if bead states are already correct run: mindspec repair phase %s", specID),
+		)
 	}
 
 	// Derive spec branch from convention.
@@ -140,7 +196,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				return nil, fmt.Errorf("checking bead %s status: %w", bid, err)
 			}
 			if status != "closed" {
-				return nil, fmt.Errorf("bead %s is still %q — close all beads before approving implementation", bid, status)
+				// Spec 092 Reqs 8/12 (mindspec-tjat): context line plus
+				// a final copy-pastable recovery line.
+				return nil, guard.NewFailure(
+					fmt.Sprintf("bead %s is still %q — close all beads before approving implementation\n%s", bid, status, implContextLine(root)),
+					fmt.Sprintf("mindspec complete %s", bid),
+				)
 			}
 		}
 	}
@@ -195,6 +256,33 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			joinResultErrorMessages(adrResult))
 	}
 
+	// Spec 092 Req 1: deferred forward reconcile of the stale phase
+	// cache. Placement is panel-pinned: AFTER the last pre-terminal
+	// gate (the ADR-divergence gate above, the last of phase gate /
+	// plan-bead gate / doc-sync gate / ADR-divergence gate) and BEFORE
+	// MUTATION (1/3) below — and NEVER after the mindspec_phase=done
+	// write, which must run after (and supersede) the reconcile. The
+	// CommitCount preflight further down is NOT a pre-terminal gate
+	// for this purpose (its post-mutation placement is pinned by Spec
+	// 086 panel CONSENSUS revision 9). If this write fails the command
+	// exits non-zero having performed no terminal mutation (HC-4);
+	// re-derivation is deterministic, so a re-run repeats the
+	// reconcile idempotently.
+	if needsPhaseReconcile && epicID != "" {
+		if err := implPhaseMetadataFn(epicID, map[string]interface{}{
+			"mindspec_phase": phaseDetail.Derived,
+		}); err != nil {
+			return nil, guard.NewFailure(
+				fmt.Sprintf("reconciling stale phase for spec %s (stored %q, child-derived %q): %v", specID, phaseDetail.Stored, phaseDetail.Derived, err),
+				fmt.Sprintf("mindspec repair phase %s", specID),
+			)
+		}
+		// HC-3: silent-on-success self-heal — one structured stderr
+		// line in the event=<ns>.<name> key=value convention.
+		fmt.Fprintf(os.Stderr, "event=lifecycle.phase_reconciled spec=%s epic=%s stored=%s derived=%s\n",
+			specID, epicID, phaseDetail.Stored, phaseDetail.Derived)
+	}
+
 	// MUTATION (1/3): close epic and mark as explicitly done.
 	if epicID != "" {
 		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
@@ -202,8 +290,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
 			}
 		}
-		// MUTATION (2/3): Spec 080 phase metadata write.
-		if err := bead.MergeMetadata(epicID, map[string]interface{}{
+		// MUTATION (2/3): Spec 080 phase metadata write. Runs after
+		// (and supersedes) the Req 1 reconcile above — the end state
+		// of a fully successful ApproveImpl is mindspec_phase=done.
+		if err := implPhaseMetadataFn(epicID, map[string]interface{}{
 			"mindspec_phase": "done",
 			"mindspec_done":  true,
 		}); err != nil {

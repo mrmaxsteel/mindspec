@@ -1,14 +1,29 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
+// approveCmd is the hidden deprecated verb-noun alias (`mindspec
+// approve <noun>`). It stays hidden per spec 092 DQ-3; the canonical
+// commands are the noun-verb forms (`mindspec spec approve <id>` etc.,
+// see approvalGatesBlock in root.go). Its subcommands keep working for
+// backward compatibility; bare or unknown targets error with the
+// canonical commands (spec 092 Req 10b).
 var approveCmd = &cobra.Command{
 	Use:    "approve",
-	Short:  "Approve a spec or plan, resolving its gate and transitioning state",
-	Long:   `Validates, updates frontmatter, resolves the Beads human gate, transitions MindSpec state, and emits guidance for the new mode.`,
+	Short:  "Deprecated alias — approval gates use the noun-verb order (spec/plan/impl approve)",
+	Long:   "Deprecated verb-noun alias kept for backward compatibility. Use the canonical noun-verb commands:\n\n" + approvalGatesBlock,
 	Hidden: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		msg := "missing approval target"
+		if len(args) > 0 {
+			msg = fmt.Sprintf("unknown approval target %q", args[0])
+		}
+		return fmt.Errorf("%s — approval gates use the noun-verb order:\n%s", msg, approvalGatesBlock)
+	},
 }
 
 var approveSpecCmd = &cobra.Command{

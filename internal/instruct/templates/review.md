@@ -58,4 +58,4 @@ All implementation beads are complete. Present the work for human review before 
 
 1. Read the spec's acceptance criteria and verify each one
 2. Present the review summary to the human
-3. **STOP and wait** — do NOT run `mindspec approve impl` until the human explicitly approves
+3. **STOP and wait** — do NOT run `mindspec impl approve <id>` until the human explicitly approves

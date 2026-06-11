@@ -94,7 +94,7 @@ MindSpec tracks three things:
 
 | Category | What happens |
 |:---------|:-------------|
-| **Guard** | Must run from **spec worktree** (hard error from main or bead worktree); clean tree required; session freshness gate |
+| **Guard** | Location-agnostic (Spec 079) — runs from main, the spec worktree, or a bead worktree, auto-resolving the active spec; clean tree required (user-authored dirt blocks; `.beads/issues.jsonl` artifact dirt is auto-normalized per ADR-0025); session freshness gate |
 | **Git** | Creates branch `bead/<beadID>` from spec branch; creates worktree `.worktrees/worktree-<beadID>` under the spec worktree |
 | **Files created** | Bead worktree directory with `.mindspec/focus` |
 | **Beads** | Queries `bd ready` for the spec's epic; claims the selected bead (`status=in_progress`) |
@@ -108,13 +108,13 @@ MindSpec tracks three things:
 
 | Category | What happens |
 |:---------|:-------------|
-| **Guard** | Must run from **bead worktree** (hard error from main or spec worktree; auto-redirects from focus if possible); if no message and dirty tree → error with hint |
+| **Guard** | Location-agnostic (Spec 079) — resolves the bead's worktree from the git worktree list; may be run from the repo root or any worktree; if no message and dirty tree → error with hint |
 | **Git** | If message provided: `git add -A && git commit` with `impl(<beadID>): <message>`; merges `bead/<beadID>` → `spec/<specID>`; removes bead worktree; deletes `bead/<beadID>` branch |
 | **Files removed** | Bead worktree directory |
 | **Beads** | Closes the active bead; queries remaining work to determine next state |
 | **Focus** | Next mode based on remaining beads: `implement` (ready beads exist), `plan` (only blocked beads), `review` (all closed) |
 | **Lifecycle** | Unchanged |
-| **CWD after** | Returns to spec worktree |
+| **CWD after** | Unchanged — the process cannot move your shell; output prints a `cd <spec-worktree>` hint when continuing in the spec worktree is the next step |
 
 **Next-state logic after closing a bead:**
 
@@ -158,14 +158,15 @@ repo/                                    # main checkout (idle)
 
 Each worktree has its own `.mindspec/focus` file. Bead worktrees nest under spec worktrees.
 
-**Worktree scoping rules (hard errors, no bypass):**
+**Worktree location rules (Spec 079 — lifecycle commands are location-agnostic):**
 
-| Command | Must run from | Error if run from |
-|:--------|:-------------|:------------------|
-| `mindspec next` | Spec worktree | Main or bead worktree |
-| `mindspec complete` | Bead worktree | Main or spec worktree |
+| Command | Where it can run | How it resolves location |
+|:--------|:-----------------|:-------------------------|
+| `mindspec next` | Main, spec worktree, or bead worktree | Auto-resolves the active spec; creates the bead worktree under the spec worktree |
+| `mindspec complete` | Repo root or any worktree | Resolves the bead's worktree from the git worktree list |
+| `mindspec impl approve` | Repo root or any worktree | Auto-resolves the spec worktree for phase resolution (Spec 063) |
 
-`complete` will auto-redirect to the active bead worktree (from focus) if not already in one, then re-check.
+Do the implementation work inside the bead worktree; the lifecycle commands themselves do not require a particular working directory. Note that guards still evaluate the tree they check — e.g. `next` run from main with user-authored dirt on main blocks on that dirt.
 
 ---
 

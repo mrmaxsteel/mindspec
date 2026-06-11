@@ -3,3 +3,4 @@ paths:
   - internal/bead/**
   - internal/gitutil/**
   - internal/safeio/**
+  - internal/harness/**

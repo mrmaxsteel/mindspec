@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -688,5 +689,51 @@ func TestRunClaude_CheckModeScansBeadsConfigWithoutMutating(t *testing.T) {
 	data, _ := os.ReadFile(cfgPath)
 	if string(data) != original {
 		t.Errorf("check mode modified config.yaml:\nwant: %q\ngot:  %q", original, string(data))
+	}
+}
+
+// deprecatedApproveOrder is the hardened Req 11 pattern from
+// internal/instruct/instruct_test.go: matches any verb-noun
+// `mindspec approve ...` plus bare `approve spec|plan|impl` so partial
+// regressions can't sneak back in; word boundaries keep canonical
+// noun-verb forms (`mindspec spec approve`) from matching.
+var deprecatedApproveOrder = regexp.MustCompile(`(?i)mindspec\s+approve\b|\bapprove\s+(spec|plan|impl)\b`)
+
+// TestLifecycleSkills_CanonicalApproveOrder pins spec 092 Req 11 on the
+// setup-generated lifecycle skills (Bead 9 verification stop-#3, Bead 8
+// panel R2 minor): the inlined ms-*-approve SKILL.md contents taught the
+// deprecated verb-noun order, were installed agent-visible into every
+// project (and harness sandbox) by setup, and seeded the deprecated
+// `approve impl` in the approval_gate_discovery scenario. Every rendered
+// lifecycle skill must be free of the deprecated order AND each approve
+// skill must teach its canonical noun-verb command.
+//
+// NOTE (boundary): this fixes the TEMPLATE only. Existing installs keep
+// their old skill files — setup's create-or-skip semantics never refresh
+// them; the provenance-gated refresh that propagates wording fixes to
+// existing installs is jkhd.3 Req 19's charter, not this test's.
+func TestLifecycleSkills_CanonicalApproveOrder(t *testing.T) {
+	skills := lifecycleSkillFiles()
+
+	for name, content := range skills {
+		if m := deprecatedApproveOrder.FindString(content); m != "" {
+			t.Errorf("lifecycle skill %s teaches deprecated approve order %q (spec 092 Req 11)\n--- content ---\n%s\n--- end ---", name, m, content)
+		}
+	}
+
+	wantCanonical := map[string]string{
+		"ms-spec-approve": "mindspec spec approve <id>",
+		"ms-plan-approve": "mindspec plan approve <id>",
+		"ms-impl-approve": "mindspec impl approve <id>",
+	}
+	for name, want := range wantCanonical {
+		content, ok := skills[name]
+		if !ok {
+			t.Errorf("lifecycle skill %s missing from lifecycleSkillFiles()", name)
+			continue
+		}
+		if !strings.Contains(content, want) {
+			t.Errorf("lifecycle skill %s must teach the canonical %q; content:\n%s", name, want, content)
+		}
 	}
 }
