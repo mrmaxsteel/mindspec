@@ -21,11 +21,16 @@ const (
 	VerdictReject         = "REJECT"
 )
 
-// verdictFileRE matches reviewer verdict files: <slot>-round-<N>.json.
-// The consolidated change list (consolidated-round-<N>.md) does not
-// match (different extension); arbitrary other JSON files without the
-// -round-<N> suffix are ignored.
-var verdictFileRE = regexp.MustCompile(`^(.+)-round-(\d+)\.json$`)
+// verdictFileRE matches reviewer verdict files: <slot>-round-<N>.json
+// where N >= 1 (rounds are 1-based; a `-round-0.json` file is a
+// nonconforming writer and must NOT match — if it did, LatestRound
+// would be 0, which reads as "no verdict files", and a directory of
+// round-0 APPROVEs would present as a clean, mismatch-free state in
+// the gate-passing direction). The consolidated change list
+// (consolidated-round-<N>.md) does not match (different extension);
+// arbitrary other JSON files without the -round-<N> suffix are
+// ignored.
+var verdictFileRE = regexp.MustCompile(`^(.+)-round-([1-9][0-9]*)\.json$`)
 
 // ConsolidatedName returns the basename of the consolidated
 // concrete_changes_required list for a round, as written by

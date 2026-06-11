@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -329,5 +330,76 @@ func TestTally_VerdictsSortedBySlot(t *testing.T) {
 	}
 	if !reflect.DeepEqual(slots, sixSlots) {
 		t.Errorf("verdicts not sorted by slot: %v", slots)
+	}
+}
+
+// --- R2 regression: round-0 verdict files (nonconforming writer) ----
+
+func TestTally_RoundZeroVerdictFilesNeverTallied(t *testing.T) {
+	// R2's reproduced blocker: panel.json says round 1, a
+	// nonconforming writer drops six <slot>-round-0.json APPROVEs.
+	// Under the old `\d+` regex these matched, LatestRound stayed 0
+	// ("no verdict files"), RoundMismatch stayed false, and the round
+	// presented as clean and Complete — in the gate-passing
+	// direction. Round numbers are 1-based: round-0 files must not
+	// match at all, and the result must NEVER read as complete.
+	files := make(map[string]string)
+	for _, slot := range sixSlots {
+		files[slot+"-round-0.json"] = `{"verdict":"APPROVE"}`
+	}
+	dir := panelDir(t, registered(1, 6), files)
+	res, err := Tally(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LatestRound != 0 || len(res.Verdicts) != 0 || res.Approves != 0 {
+		t.Errorf("round-0 files leaked into tally: latest=%d verdicts=%d approves=%d",
+			res.LatestRound, len(res.Verdicts), res.Approves)
+	}
+	if res.Complete() {
+		t.Fatal("six round-0 APPROVEs must never present as a complete round")
+	}
+	if res.MissingCount() != 6 {
+		t.Errorf("MissingCount = %d, want 6 (no valid verdicts)", res.MissingCount())
+	}
+}
+
+func TestTally_MissingCountClampsAtZero(t *testing.T) {
+	// More valid verdicts than expected_reviewers (writer lowered N
+	// after fan-out, or an extra slot wrote a file): never negative.
+	files := map[string]string{
+		"claude-a-round-1.json": `{"verdict":"APPROVE"}`,
+		"claude-b-round-1.json": `{"verdict":"APPROVE"}`,
+		"claude-c-round-1.json": `{"verdict":"APPROVE"}`,
+		"codex-a-round-1.json":  `{"verdict":"APPROVE"}`,
+	}
+	dir := panelDir(t, registered(1, 3), files)
+	res, err := Tally(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Verdicts) != 4 || res.MissingCount() != 0 {
+		t.Errorf("verdicts=%d missing=%d, want 4/0 (clamped)", len(res.Verdicts), res.MissingCount())
+	}
+	if !res.Complete() {
+		t.Error("4 valid verdicts vs expected 3 must be complete")
+	}
+}
+
+func TestTally_DirectoryNamedLikeVerdictFileSkipped(t *testing.T) {
+	dir := panelDir(t, registered(1, 6), roundFiles(1, "APPROVE", "APPROVE"))
+	if err := os.MkdirAll(filepath.Join(dir, "claude-z-round-9.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Tally(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LatestRound != 1 || len(res.Verdicts) != 2 {
+		t.Errorf("directory entry leaked into round derivation: latest=%d verdicts=%d",
+			res.LatestRound, len(res.Verdicts))
+	}
+	if len(res.Malformed) != 0 {
+		t.Errorf("directory must not count as malformed: %v", res.Malformed)
 	}
 }

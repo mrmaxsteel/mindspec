@@ -54,7 +54,16 @@ type Panel struct {
 	ExpectedReviewers int     `json:"expected_reviewers"`
 	ReviewedHeadSHA   string  `json:"reviewed_head_sha"`
 	Abandoned         bool    `json:"abandoned,omitempty"`
-	AbandonReason     string  `json:"abandon_reason,omitempty"`
+	// AbandonReason is REQUIRED (who/why) when Abandoned is true,
+	// but that requirement is deliberately NOT enforced at parse
+	// time: flagging a reason-less abandonment as malformed here
+	// would set Registration.Err, drop the panel from ForBead, and
+	// tip the gate toward fail-open — the wrong direction.
+	// Enforcement belongs to the consumers: the Bead 4 decision
+	// matrix's abandoned Warn and the complete-side panel_abandoned
+	// audit write (Spec 093 Reqs 12/13e) surface the reason and can
+	// complain when it is empty.
+	AbandonReason string `json:"abandon_reason,omitempty"`
 }
 
 // ApproveThreshold is the single home of the N−1 threshold rule
