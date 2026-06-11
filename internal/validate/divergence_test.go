@@ -283,6 +283,36 @@ func TestValidateDivergenceSpecBranchADRVisible(t *testing.T) {
 	}
 }
 
+// TestValidateDivergenceProposedCitedCovers — mindspec-53qx at the
+// bead-complete lane: a cited Proposed ADR covering the changed file's
+// domain satisfies the divergence check (the bead being completed is
+// precisely the implementation that validates the Proposed ADR).
+func TestValidateDivergenceProposedCitedCovers(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "106-proposed")
+	writeSpecAndPlan(t, root, specDir, "106-proposed",
+		[]string{"payments"},
+		[]string{"ADR-0099"},
+	)
+	writeADR(t, root, "ADR-0099", "Proposed", []string{"payments"})
+	writeManifest(t, root, "payments", "paths:\n  - internal/payments/**\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/payments/charge.go"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Errorf("expected no failures with cited Proposed covering ADR, got %+v", r.Issues)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
 // TestValidateDivergenceDiffErrorSurfaces confirms a ChangedFiles
 // failure surfaces as `adr-divergence-diff` and short-circuits with
 // nil findings.

@@ -465,12 +465,18 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 }
 
 // checkADRCoverage ensures every spec impacted-domain is covered by at
-// least one cited Accepted ADR. Coverage is the predicate "there exists a
-// cited ADR `a` such that a.Status == Accepted AND a.Domains contains
-// domain (case-folded)". A cited Superseded ADR satisfies coverage only
-// when the chain head (resolved by walkSupersededChain) is ALSO cited and
-// itself Accepted+covering — see IsDomainCovered for the canonical
-// predicate (revision 5 single source of truth).
+// least one cited ADR. Coverage is tri-state (mindspec-53qx):
+//
+//   - coveredAccepted: a cited Accepted ADR (directly, or transitively
+//     via a cited Superseded ADR whose chain head is also cited and
+//     Accepted+covering) declares the domain → silent pass.
+//   - coveredProposedOnly: the ONLY covering cited ADR(s) are Proposed
+//     → advisory `adr-coverage-proposed` warning, not an error. Citing
+//     a Proposed ADR in adr_citations is the author's explicit
+//     acknowledgement of architectural intent; spec-introduced ADRs
+//     are legitimately Proposed until post-impl validation (ADR-0030
+//     precedent).
+//   - notCovered → `adr-coverage-missing` error, as before.
 //
 // Suppressed when impactedDomains is empty: a spec without a declared
 // impacted-domains list cannot be coverage-checked.
@@ -479,63 +485,99 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 		return
 	}
 	for _, d := range impactedDomains {
-		// Spec 087 Bead 1 (Rev 1 fixup): use the Ctx variant so walker
-		// errors (cycle, too-long chain) surface on the Result instead
-		// of being swallowed silently. The Result is deduped by
+		// Spec 087 Bead 1 (Rev 1 fixup): pass r so walker errors
+		// (cycle, too-long chain) surface on the Result instead of
+		// being swallowed silently. The Result is deduped by
 		// {Name,Message} via AddError so repeat walks of the same
 		// broken chain across multiple domains don't spam diagnostics.
-		if !IsDomainCoveredCtx(r, store, citations, d) {
+		cov, proposedID := coverageOf(r, store, citations, d)
+		switch cov {
+		case notCovered:
 			r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
+		case coveredProposedOnly:
+			r.AddWarning("adr-coverage-proposed", fmt.Sprintf("impacted domain %q is covered only by Proposed ADR %s — flip it to Accepted after the implementation ships", d, proposedID))
 		}
 	}
 }
 
-// IsDomainCovered is the canonical predicate "domain X is covered by an
-// Accepted cited ADR, transitively through one supersede-chain hop".
-// Exported as the single source of truth for both plan-time (Bead 1) and
-// bead-time divergence (Bead 2) coverage decisions — divergence.go MUST
-// call this helper rather than duplicate the Accepted+intersect logic.
+// domainCoverage is the tri-state result of the coverage probe
+// (mindspec-53qx).
+type domainCoverage int
+
+const (
+	// notCovered: no cited ADR (of any tolerated status) declares the
+	// domain.
+	notCovered domainCoverage = iota
+	// coveredProposedOnly: at least one cited Proposed ADR declares the
+	// domain, and no cited Accepted ADR does. Plan-time this downgrades
+	// the coverage error to the advisory adr-coverage-proposed warning;
+	// bead-time divergence treats it as covered.
+	coveredProposedOnly
+	// coveredAccepted: a cited Accepted ADR declares the domain
+	// (directly or transitively via a cited Superseded chain head).
+	coveredAccepted
+)
+
+// IsDomainCovered is the canonical predicate "domain X is covered by a
+// cited ADR, transitively through one supersede-chain hop". Exported as
+// the single source of truth for both plan-time (Bead 1) and bead-time
+// divergence (Bead 2) coverage decisions — divergence.go MUST call this
+// helper rather than duplicate the status+intersect logic.
 //
 // Coverage rules:
 //   - A cited ADR with Status Accepted whose Domains contain `domain`
 //     (case-folded) → covered.
+//   - A cited ADR with Status Proposed whose Domains contain `domain`
+//     → covered (mindspec-53qx; plan-time additionally emits the
+//     advisory adr-coverage-proposed warning via checkADRCoverage).
+//     NOTE: this deliberately REVERSES spec-087 "revision 11", which
+//     excluded Proposed from coverage. Revision 11 created a
+//     chicken-and-egg: a spec-introduced ADR is legitimately Proposed
+//     until post-impl validation (ADR-0030 precedent), so authors were
+//     forced to flip ADRs to Accepted prematurely just to pass the
+//     gate. Citing the Proposed ADR in adr_citations is the explicit
+//     opt-in acknowledgement of intent; uncited Proposed ADRs still do
+//     not count.
 //   - A cited ADR with Status Superseded → covered ONLY IF the supersede
 //     chain head is also cited AND itself Accepted AND its Domains
 //     contain `domain`.
-//   - Proposed (including placeholders pre-created by the supersede flow)
-//     does NOT satisfy coverage (revision 11).
 //
 // Walker failures (cycle, too-long chain) cause the Superseded path to
 // be treated as not-covering. This wrapper SWALLOWS walker errors —
 // callers that need diagnostic propagation (e.g. plan-time
-// checkADRCoverage) must use IsDomainCoveredCtx instead. The wrapper
-// is retained for Bead 2 / divergence consumers that only need the
-// bool predicate.
+// checkADRCoverage) must use IsDomainCoveredCtx or coverageOf instead.
+// The wrapper is retained for Bead 2 / divergence consumers that only
+// need the bool predicate.
 func IsDomainCovered(store adr.Store, citations []ADRCitation, domain string) bool {
-	return isDomainCoveredImpl(nil, store, citations, domain)
+	cov, _ := coverageOf(nil, store, citations, domain)
+	return cov != notCovered
 }
 
 // IsDomainCoveredCtx is the diagnostic-emitting variant of
 // IsDomainCovered: walker errors (adr-supersede-cycle,
 // adr-supersede-chain-too-long, adr-supersede-chain-broken) are emitted
 // via r.AddError before the function returns false. This is the
-// variant plan-time checkADRCoverage uses so structural ADR-graph
-// failures surface to the user rather than being silently treated as
-// "not covered".
+// variant callers use so structural ADR-graph failures surface to the
+// user rather than being silently treated as "not covered".
 //
 // Spec 087 Bead 1 (Rev 1 fixup): added to address the unanimous
 // reviewer concern that walker errors were swallowed in the original
 // IsDomainCovered implementation, hiding cycle / too-long failures
 // behind the generic adr-coverage-missing error.
 func IsDomainCoveredCtx(r *Result, store adr.Store, citations []ADRCitation, domain string) bool {
-	return isDomainCoveredImpl(r, store, citations, domain)
+	cov, _ := coverageOf(r, store, citations, domain)
+	return cov != notCovered
 }
 
-// isDomainCoveredImpl is the shared body. When r is non-nil, walker
-// errors are emitted via r.AddError; a per-call dedup map prevents the
-// same broken chain from spamming the Result when multiple impacted
-// domains all probe the same Superseded ADR.
-func isDomainCoveredImpl(r *Result, store adr.Store, citations []ADRCitation, domain string) bool {
+// coverageOf is the shared tri-state probe body. When r is non-nil,
+// walker errors are emitted via r.AddError; a per-call dedup map
+// prevents the same broken chain from spamming the Result when multiple
+// impacted domains all probe the same Superseded ADR.
+//
+// The second return value is the ID of the (first) covering Proposed
+// ADR when the result is coveredProposedOnly, for use in the advisory
+// warning message; it is "" otherwise.
+func coverageOf(r *Result, store adr.Store, citations []ADRCitation, domain string) (domainCoverage, string) {
 	// Build a set of cited ADR IDs for O(1) "is this ADR cited" checks
 	// during the Superseded-chain resolution. Spec 087 Bead 1 (Rev 5
 	// fixup): normalise to upper-case — ADR IDs are ASCII and the
@@ -553,6 +595,8 @@ func isDomainCoveredImpl(r *Result, store adr.Store, citations []ADRCitation, do
 	emittedWalkerErr := map[string]struct{}{}
 
 	wantDomain := strings.ToLower(strings.TrimSpace(domain))
+	best := notCovered
+	proposedID := ""
 	for _, c := range citations {
 		a, err := store.Get(c.ID)
 		if err != nil {
@@ -560,7 +604,20 @@ func isDomainCoveredImpl(r *Result, store adr.Store, citations []ADRCitation, do
 		}
 		if strings.EqualFold(a.Status, "Accepted") {
 			if domainSliceContains(a.Domains, wantDomain) {
-				return true
+				return coveredAccepted, ""
+			}
+			continue
+		}
+		// mindspec-53qx: a cited Proposed ADR declaring the domain
+		// yields the intermediate state — recorded but the scan
+		// continues, since a later cited Accepted ADR upgrades the
+		// result to coveredAccepted. Relies on parse-time Status
+		// normalization (mindspec-f115) so qualified statuses like
+		// "Proposed (part of spec 091)" match.
+		if strings.EqualFold(a.Status, "Proposed") {
+			if domainSliceContains(a.Domains, wantDomain) && best == notCovered {
+				best = coveredProposedOnly
+				proposedID = a.ID
 			}
 			continue
 		}
@@ -597,11 +654,14 @@ func isDomainCoveredImpl(r *Result, store adr.Store, citations []ADRCitation, do
 				continue
 			}
 			if strings.EqualFold(head.Status, "Accepted") && domainSliceContains(head.Domains, wantDomain) {
-				return true
+				return coveredAccepted, ""
 			}
 		}
 	}
-	return false
+	if best == coveredProposedOnly {
+		return coveredProposedOnly, proposedID
+	}
+	return notCovered, ""
 }
 
 // walkSupersededChain follows the `SupersededBy` pointer from startID

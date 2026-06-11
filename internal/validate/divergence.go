@@ -175,6 +175,11 @@ func ValidateDivergence(
 			continue
 		}
 
+		// mindspec-53qx: IsDomainCovered treats a cited Proposed ADR as
+		// covering. That is deliberately consistent at bead-complete
+		// time — the bead being completed is precisely the
+		// implementation that validates the Proposed ADR, so blocking
+		// here would force a premature status flip to Accepted.
 		if IsDomainCovered(store, fm.ADRCitations, domain) {
 			continue
 		}
