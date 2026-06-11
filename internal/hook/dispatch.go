@@ -107,13 +107,30 @@ func runPreCommit(stateFn func() *HookState) Result {
 	}
 
 	// Block: on a spec/ branch during implement mode — code belongs on bead branches.
+	//
+	// Spec 093 Req 1: the message carries the when-is-it-legitimate
+	// context that used to live only in skill prose (ms-bead-fix /
+	// ms-spec-final-review), and states the ACTUAL gate coverage per
+	// C2-1: protected branches any-mode + spec/ branches implement-mode
+	// only; bead/ branches always pass (extending the gate to bead
+	// branches is an explicit Non-Goal — it would block the autopilot's
+	// own impl subagents). The conditional "Or switch to your bead
+	// worktree" line is preserved, conditionality included (G1-3).
+	// Hook Block messages follow the Emit protocol (HC-5 exception),
+	// not the guard.FormatFailure error-return convention, but still
+	// end with actionable guidance.
 	if st.Mode == "implement" && strings.HasPrefix(branch, "spec/") {
 		msg := fmt.Sprintf("mindspec: commits on spec branch '%s' are blocked during implement mode.\n  Implementation code belongs on bead branches.", branch)
 		msg += "\n  Run: mindspec next   (to claim a bead and create a bead worktree)"
 		if st.ActiveWorktree != "" {
 			msg += fmt.Sprintf("\n  Or switch to your bead worktree: cd %s", st.ActiveWorktree)
 		}
-		msg += "\n  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ..."
+		msg += "\n  Legitimate direct spec-branch commits (final-review fix-ups: PR-body precision,"
+		msg += "\n  stray-file reverts, CI-unblocking test fixes) may use the escape hatch:"
+		msg += "\n    MINDSPEC_ALLOW_MAIN=1 git commit ..."
+		msg += "\n  Do NOT use the escape hatch to land feature code outside a bead branch."
+		msg += "\n  (Gate coverage: protected branches in any mode; spec/ branches during implement"
+		msg += "\n  mode only. bead/ branches always pass — commit there freely.)"
 		return Result{Action: Block, Message: msg}
 	}
 

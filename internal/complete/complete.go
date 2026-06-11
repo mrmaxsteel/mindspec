@@ -300,8 +300,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Gate-failure decision: only fatal when no override/supersede
 	// flag is set.
 	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
-		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
-			joinResultErrorMessages(adrResult))
+		return nil, adrDivergenceFailure(beadID, joinResultErrorMessages(adrResult))
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -550,6 +549,30 @@ func buildSkewMetadata(reason, reasonKey, atKey, byKey string) map[string]interf
 		atKey:     time.Now().UTC().Format(time.RFC3339),
 		byKey:     gitUserEmailFn(),
 	}
+}
+
+// adrDivergenceFailure formats the ADR-divergence gate failure with the
+// repair-first triage ladder (spec 093 Req 2, replacing the bypass-first
+// `--override-adr`/`--supersede-adr` hint and the ms-bead-merge skill
+// prose). findings is joinResultErrorMessages(adrResult) — it carries
+// the offending file names, so the ladder is actionable without any
+// skill. Ladder order is deliberate: repair (OWNERSHIP.yaml), then
+// revert, and only LAST the bypass flags. Per HC-5 the ladder lives in
+// the body and the final `recovery:` lines carry the re-run and bypass
+// commands (guard.NewFailure, ADR-0035 convention).
+func adrDivergenceFailure(beadID, findings string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "adr-divergence: %s\n", findings)
+	b.WriteString("triage before bypassing (repair-first):\n")
+	b.WriteString("  1. the file belongs to this bead's domain → add it to the relevant\n")
+	b.WriteString("     .mindspec/docs/domains/<name>/OWNERSHIP.yaml and re-run\n")
+	b.WriteString("  2. the file is an accidental stray edit picked up by auto-stage → revert it and re-run\n")
+	b.WriteString("  3. only after 1-2 do not apply, bypass with --override-adr \"<reason>\"\n")
+	b.WriteString("     (recorded on bead metadata) or --supersede-adr ADR-NNNN")
+	return guard.NewFailure(b.String(),
+		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", beadID),
+		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", beadID),
+		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", beadID))
 }
 
 // joinResultErrorMessages flattens SevError-severity Issues from a

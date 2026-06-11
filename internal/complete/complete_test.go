@@ -1758,3 +1758,99 @@ func TestFormatResult_ImplementIncludesCdHint(t *testing.T) {
 		t.Errorf("cd hint should be omitted when no worktree was removed; got:\n%s", out)
 	}
 }
+
+// --- Spec 093 Req 2: ADR-divergence repair-first ladder ---
+
+// TestADRDivergenceFailure_RepairFirstLadder forces the ADR-divergence
+// gate through the real Run path (same fixture as TestOverrideUnblocks)
+// and asserts the spec 093 Req 2 message contract: the repair-first
+// triage ladder in the body (OWNERSHIP.yaml fix, then revert, bypass
+// flags LAST), the offending file name carried by the findings, and the
+// final `recovery:` lines carrying the re-run + bypass commands — the
+// per-site mirror of the 092 Req 21 convention test.
+func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "093-test")
+	stubPhaseEpic(t, "093-test", "epic-093")
+	resolveTargetFn = func(r, flag string) (string, error) { return "093-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// Source touch attributed to the uncovered "core" domain.
+	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "test setup"})
+	if err == nil {
+		t.Fatal("expected adr-divergence failure, got nil")
+	}
+	msg := err.Error()
+
+	// 092 Req 12/21: final recovery line, no banned commands.
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("adr-divergence failure must end with a recovery line: %q", msg)
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) && guard.IsBannedRecoveryCommand(strings.TrimPrefix(line, guard.RecoveryPrefix)) {
+			t.Errorf("recovery line emits a banned command (092 Req 19): %q", line)
+		}
+	}
+
+	// The findings carry the file name — the ladder is actionable
+	// without any skill.
+	if !strings.Contains(msg, "adr-divergence:") {
+		t.Errorf("failure must keep the adr-divergence label: %q", msg)
+	}
+	if !strings.Contains(msg, "internal/core/foo.go") {
+		t.Errorf("failure must name the offending file: %q", msg)
+	}
+
+	// Req 2 AC: repair-first ladder order — OWNERSHIP.yaml fix, then
+	// revert, bypass flags LAST.
+	iOwnership := strings.Index(msg, "OWNERSHIP.yaml")
+	iRevert := strings.Index(msg, "revert it and re-run")
+	iBypass := strings.Index(msg, "--override-adr")
+	if iOwnership < 0 || iRevert < 0 || iBypass < 0 {
+		t.Fatalf("ladder steps missing (OWNERSHIP.yaml=%d revert=%d bypass=%d): %q", iOwnership, iRevert, iBypass, msg)
+	}
+	if !(iOwnership < iRevert && iRevert < iBypass) {
+		t.Errorf("ladder must be repair-first (OWNERSHIP.yaml < revert < bypass), got %d/%d/%d: %q", iOwnership, iRevert, iBypass, msg)
+	}
+	if !strings.Contains(msg, ".mindspec/docs/domains/<name>/OWNERSHIP.yaml") {
+		t.Errorf("ladder must name the OWNERSHIP.yaml path: %q", msg)
+	}
+
+	// The bypass-first hint is gone.
+	if strings.Contains(msg, "hint: re-run with") {
+		t.Errorf("the pre-093 bypass-first hint must be gone: %q", msg)
+	}
+
+	// Recovery lines: re-run first, bypass commands last; the final
+	// line is the --supersede-adr bypass (extracted command, not just a
+	// substring).
+	var recoveries []string
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			recoveries = append(recoveries, strings.TrimPrefix(line, guard.RecoveryPrefix))
+		}
+	}
+	if len(recoveries) != 3 {
+		t.Fatalf("want 3 recovery lines (re-run + 2 bypasses), got %d: %q", len(recoveries), msg)
+	}
+	if !strings.HasPrefix(recoveries[0], "mindspec complete bead-1 ") || strings.Contains(recoveries[0], "--") {
+		t.Errorf("first recovery must be the plain re-run: %q", recoveries[0])
+	}
+	if want := `mindspec complete bead-1 --override-adr "<reason>"`; recoveries[1] != want {
+		t.Errorf("second recovery = %q, want %q", recoveries[1], want)
+	}
+	if want := "mindspec complete bead-1 --supersede-adr ADR-NNNN"; recoveries[2] != want {
+		t.Errorf("final recovery = %q, want %q", recoveries[2], want)
+	}
+	if got := finalRecoveryCommand(t, msg); got != "mindspec complete bead-1 --supersede-adr ADR-NNNN" {
+		t.Errorf("finalRecoveryCommand = %q", got)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -216,7 +217,11 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		// Step 5: Claim
 		fmt.Printf("Claiming [%s] %s ...\n", selected.ID, selected.Title)
 		if err := next.ClaimBead(selected.ID); err != nil {
-			return fmt.Errorf("claiming bead: %w", err)
+			// Spec 093 Req 3: the recovery recipe lives at this caller —
+			// it has the root/specFlag context the interpolation needs.
+			// All interpolation work runs on the failure path only.
+			return next.ClaimFailure(root, recoveryConfig(root),
+				selected.ID, recoverySpecSlug(root, specFlag, selected), err)
 		}
 
 		// Step 5.1: Record bead claim time for session freshness gate
@@ -228,7 +233,12 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 		// Step 5.5: Create or reuse worktree
 		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
 		if wtErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: worktree setup failed: %v\n", wtErr)
+			// Spec 093 Req 4: warn-and-continue is preserved (zero
+			// behavior change), but the message now carries the concrete
+			// `git worktree add` recipe and the auto-recovery re-run —
+			// the agent is claimed-but-homeless without it.
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", next.WorktreeSetupFailure(root, recoveryConfig(root),
+				selected.ID, recoverySpecSlug(root, specFlag, selected), wtErr))
 		} else if wtPath != "" {
 			fmt.Printf("Worktree: %s\n", wtPath)
 			fmt.Printf("  cd %s\n", wtPath)
@@ -360,6 +370,29 @@ func runEmitOnly(specFlag string, args []string) error {
 // containsSpecID checks if a bead title references the given spec ID.
 func containsSpecID(title, specID string) bool {
 	return strings.Contains(title, specID)
+}
+
+// recoveryConfig loads config for failure-path message interpolation
+// (spec 093 Reqs 3-4). Falls back to defaults so a config problem never
+// masks the original failure. Runs only on failure paths.
+func recoveryConfig(root string) *config.Config {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return config.DefaultConfig()
+	}
+	return cfg
+}
+
+// recoverySpecSlug resolves the spec slug for the Req 3/4 recovery
+// recipes: the explicit --spec flag wins; otherwise the slug is parsed
+// from the selected bead's title (next.ResolveMode). May return "" —
+// the recipe constructors then fall back to placeholders. Runs only on
+// failure paths.
+func recoverySpecSlug(root, specFlag string, selected next.BeadInfo) string {
+	if specFlag != "" {
+		return specFlag
+	}
+	return next.ResolveMode(root, selected).SpecID
 }
 
 // checkUnmergedBeads checks for closed sibling beads that still have a bead/<id>

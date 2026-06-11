@@ -315,3 +315,119 @@ func mustGitInit(t *testing.T, dir string) {
 	cmd.Dir = dir
 	cmd.Run()
 }
+
+// --- Spec 093 Req 1: commit-gate legitimacy context + C2-1 coverage truth ---
+//
+// The spec-branch Block message is a hook Block (HC-5 exception: Emit
+// protocol, no `recovery:` line) — its text is asserted here instead of
+// the guard convention test.
+
+// specBranchBlock drives the pre-commit hook on a spec/ branch during
+// implement mode and returns the Block message.
+func specBranchBlock(t *testing.T, st *HookState) string {
+	t.Helper()
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	cmd := exec.Command("git", "checkout", "-b", "spec/093-skills-thin-down")
+	cmd.Dir = root
+	cmd.CombinedOutput()
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	r := Run("pre-commit", &Input{}, staticState(st), true)
+	if r.Action != Block {
+		t.Fatalf("expected block on spec/ branch during implement, got %v", r.Action)
+	}
+	return r.Message
+}
+
+func TestPreCommit_SpecBranchBlock_LegitimacyContext(t *testing.T) {
+	msg := specBranchBlock(t, &HookState{
+		Mode:           "implement",
+		ActiveWorktree: "/repo/.worktrees/worktree-spec-093/.worktrees/worktree-mindspec-ab12",
+	})
+
+	// Core block text (spec 093 Req 1 message, verbatim fragments).
+	for _, want := range []string{
+		"mindspec: commits on spec branch 'spec/093-skills-thin-down' are blocked during implement mode.",
+		"Implementation code belongs on bead branches.",
+		"Run: mindspec next   (to claim a bead and create a bead worktree)",
+		// G1-3: the conditional cd affordance is PRESERVED.
+		"Or switch to your bead worktree: cd /repo/.worktrees/worktree-spec-093/.worktrees/worktree-mindspec-ab12",
+		// Legitimacy context migrated from ms-bead-fix / ms-spec-final-review.
+		"Legitimate direct spec-branch commits (final-review fix-ups: PR-body precision,",
+		"stray-file reverts, CI-unblocking test fixes) may use the escape hatch:",
+		"MINDSPEC_ALLOW_MAIN=1 git commit ...",
+		"Do NOT use the escape hatch to land feature code outside a bead branch.",
+		// C2-1 coverage truth: bead/ branches are NEVER commit-gated.
+		"bead/ branches always pass",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("block message missing %q:\n%s", want, msg)
+		}
+	}
+
+	// C2-1: the message must not claim the gate covers bead branches.
+	if !strings.Contains(msg, "spec/ branches during implement") {
+		t.Errorf("block message must state the actual gate coverage (spec/ implement-only):\n%s", msg)
+	}
+}
+
+func TestPreCommit_SpecBranchBlock_NoActiveWorktree_OmitsCdLine(t *testing.T) {
+	// G1-3 conditionality: with no active worktree there is no cd line —
+	// the rewrite must not turn the conditional affordance into an
+	// unconditional one.
+	msg := specBranchBlock(t, &HookState{Mode: "implement"})
+	if strings.Contains(msg, "Or switch to your bead worktree") {
+		t.Errorf("cd line must be conditional on an active worktree:\n%s", msg)
+	}
+	// The legitimacy context is unconditional.
+	if !strings.Contains(msg, "Legitimate direct spec-branch commits") {
+		t.Errorf("legitimacy context must be present without an active worktree:\n%s", msg)
+	}
+}
+
+func TestPreCommit_ProtectedBranchBlock_KeepsBareHint(t *testing.T) {
+	// Spec 093 Req 1: the protected-branch message keeps its BARE escape
+	// hatch hint — there is no legitimate routine use on main, so it
+	// gains none of the spec-branch legitimacy context.
+	root := t.TempDir()
+	mustGitInit(t, root)
+
+	mindspecDir := filepath.Join(root, ".mindspec")
+	os.MkdirAll(mindspecDir, 0o755)
+	os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origDir)
+
+	r := Run("pre-commit", &Input{}, staticState(&HookState{Mode: "implement"}), true)
+	if r.Action != Block {
+		t.Fatalf("expected block on protected branch, got %v", r.Action)
+	}
+	if !strings.Contains(r.Message, "Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ...") {
+		t.Errorf("protected-branch message must keep its bare hint:\n%s", r.Message)
+	}
+	if strings.Contains(r.Message, "Legitimate direct spec-branch commits") {
+		t.Errorf("protected-branch message must NOT gain the spec-branch legitimacy context:\n%s", r.Message)
+	}
+	if strings.Contains(r.Message, "Gate coverage:") {
+		t.Errorf("protected-branch message is unchanged save the bare hint:\n%s", r.Message)
+	}
+}
