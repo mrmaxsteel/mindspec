@@ -536,12 +536,35 @@ func TestCheckBeadsMergeDriver(t *testing.T) {
 			wantFix:    true,
 		},
 		{
-			name: "attribute without driver warns manual when script missing",
+			name: "attribute without driver and missing script flagged manual",
 			setup: func(t *testing.T, root string) {
 				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
 			},
-			wantStatus: Warn,
+			// The unfixable state must not be milder than the fixable one.
+			wantStatus: Error,
 			wantMsg:    []string{"does not exist in this repo", "recovery: git config merge.beads.driver"},
+		},
+		{
+			name: "configured driver without merge=beads attribute flagged",
+			setup: func(t *testing.T, root string) {
+				script := filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh")
+				writeExecutable(t, script)
+				runGit(t, root, "config", "merge.beads.driver", script+" %A %O %B")
+			},
+			wantStatus: Error,
+			wantMsg:    []string{"no merge=beads", "despite the configured", "recovery: printf"},
+		},
+		{
+			name: "bare command name resolving on PATH passes",
+			setup: func(t *testing.T, root string) {
+				writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+				dir := t.TempDir()
+				writeExecutable(t, filepath.Join(dir, "stub-bd-merge-driver"))
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				runGit(t, root, "config", "merge.beads.driver", "stub-bd-merge-driver %A %O %B")
+			},
+			wantStatus: OK,
+			wantMsg:    []string{"resolves"},
 		},
 	}
 
@@ -598,8 +621,9 @@ func TestCheckBeadsMergeDriver_FixWritesConfigAndRecheckPasses(t *testing.T) {
 	}
 
 	got := gitConfigGet(t, root, "merge.beads.driver")
-	if !filepath.IsAbs(strings.SplitN(got, " ", 2)[0]) {
-		t.Errorf("fix should write an absolute script path; got %q", got)
+	toks := driverTokens(got)
+	if len(toks) == 0 || !filepath.IsAbs(toks[0]) {
+		t.Errorf("fix should write an absolute script path; got %q (tokens %v)", got, toks)
 	}
 	if !strings.HasSuffix(got, " %A %O %B") {
 		t.Errorf("fix should pass %%A %%O %%B; got %q", got)
@@ -614,6 +638,84 @@ func TestCheckBeadsMergeDriver_FixWritesConfigAndRecheckPasses(t *testing.T) {
 	c2 := findCheck(r2, "Beads merge driver")
 	if c2 == nil || c2.Status != OK {
 		t.Fatalf("post-fix: got %+v, want OK", c2)
+	}
+}
+
+// TestCheckBeadsMergeDriver_FixSurvivesPathWithSpaces is the PR #128 panel
+// blocker regression test: git runs merge drivers via `sh -c`, so an
+// unquoted absolute script path word-splits when the repo lives under a
+// directory with spaces. The written config must single-quote the path,
+// round-trip through driverTokens, re-validate OK, AND drive an actual
+// both-sides-changed git merge in the fixture repo.
+func TestCheckBeadsMergeDriver_FixSurvivesPathWithSpaces(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pr128 space", "repo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "init", "-q", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "config", "commit.gpgsign", "false")
+
+	writeFile(t, filepath.Join(root, ".gitattributes"), beadsMergeAttr)
+	// Stub wrapper: writes a sentinel into %A so the merge result proves
+	// the driver actually ran (a silent text merge could never produce it).
+	script := filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'driver-merged\\n' > \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	issues := filepath.Join(root, ".beads", "issues.jsonl")
+	writeFile(t, issues, "base\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "base")
+
+	// Attribute present, no driver configured → fixable check.
+	r1 := &Report{}
+	checkBeadsMergeDriver(r1, root)
+	c1 := findCheck(r1, "Beads merge driver")
+	if c1 == nil || c1.FixFunc == nil {
+		t.Fatalf("expected fixable check, got %+v", c1)
+	}
+	if err := c1.FixFunc(); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+
+	// Written value must round-trip through driverTokens to the script path.
+	got := gitConfigGet(t, root, "merge.beads.driver")
+	toks := driverTokens(got)
+	if len(toks) == 0 || toks[0] != script {
+		t.Fatalf("written config %q does not round-trip through driverTokens to %q (tokens %v)", got, script, toks)
+	}
+
+	// Re-validation must pass despite the space in the path.
+	r2 := &Report{}
+	checkBeadsMergeDriver(r2, root)
+	c2 := findCheck(r2, "Beads merge driver")
+	if c2 == nil || c2.Status != OK {
+		t.Fatalf("post-fix: got %+v, want OK", c2)
+	}
+
+	// Live proof: a both-sides-changed merge must invoke the driver. With
+	// an unquoted path this fails under sh word-splitting (reproduced on
+	// the pre-fix code with root '/tmp/pr128 space/repo').
+	runGit(t, root, "checkout", "-q", "-b", "side")
+	writeFile(t, issues, "side\n")
+	runGit(t, root, "commit", "-q", "-am", "side")
+	runGit(t, root, "checkout", "-q", "main")
+	writeFile(t, issues, "main\n")
+	runGit(t, root, "commit", "-q", "-am", "main")
+	runGit(t, root, "merge", "-q", "--no-edit", "side")
+
+	data, err := os.ReadFile(issues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "driver-merged\n" {
+		t.Errorf("merge driver did not run; issues.jsonl = %q", data)
 	}
 }
 
@@ -657,6 +759,9 @@ func TestGitattributesHasBeadsMerge(t *testing.T) {
 		{name: "other attributes", write: true, content: "*.go text eol=lf\n", want: false},
 		{name: "different merge driver", write: true, content: "*.lock merge=ours\n", want: false},
 		{name: "among other lines", write: true, content: "*.go text\n.beads/issues.jsonl merge=beads\n", want: true},
+		// D2 mutation coverage: merge=beads must be found beyond fields[1].
+		{name: "multi-attribute line", write: true, content: ".beads/issues.jsonl -text merge=beads\n", want: true},
+		{name: "tab separated", write: true, content: ".beads/issues.jsonl\tmerge=beads\n", want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

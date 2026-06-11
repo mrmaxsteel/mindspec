@@ -345,16 +345,23 @@ func recoveryLine(command string) string {
 //     falls back to a plain TEXT merge of the jsonl. The more dangerous
 //     sibling: silent semantic corruption instead of a loud failure. This
 //     one is fixable: --fix writes the config pointing at the tracked
-//     wrapper script (absolute path), when that script exists in the repo.
+//     wrapper script (absolute path), when that script exists in the repo;
+//     when it doesn't, the check stays ERROR with the manual command.
 //
-// A repo with neither the attribute nor the driver is silent — there is
-// nothing to validate.
+// The inverse hole is flagged too: a configured driver with NO merge=beads
+// attribute in .gitattributes — git text-merges the jsonl despite the
+// configured driver. A repo with neither the attribute nor the driver is
+// silent — there is nothing to validate.
 func checkBeadsMergeDriver(r *Report, root string) {
 	hasAttr := gitattributesHasBeadsMerge(root)
 	driver, configured := readGitConfig(root, "merge.beads.driver")
 
 	scriptAbs, scriptExists := mergeDriverScriptPath(root)
-	wantDriver := scriptAbs + " %A %O %B"
+	// Single-quote the script path: git runs merge drivers via `sh -c`, so
+	// an unquoted absolute path word-splits when the repo lives under a
+	// directory with spaces. driverTokens parses the quotes back out, so
+	// the written value re-validates cleanly.
+	wantDriver := "'" + scriptAbs + "' %A %O %B"
 
 	if !configured || strings.TrimSpace(driver) == "" {
 		if !hasAttr {
@@ -375,13 +382,31 @@ func checkBeadsMergeDriver(r *Report, root string) {
 			})
 			return
 		}
+		// No FixFunc here — the wrapper script is missing, so there is
+		// nothing safe to point the config at. Still ERROR, not Warn: this
+		// unfixable state is strictly worse than the fixable sibling above.
 		r.Checks = append(r.Checks, Check{
 			Name:   "Beads merge driver",
-			Status: Warn,
+			Status: Error,
 			Message: ".gitattributes maps .beads/issues.jsonl to merge=beads but merge.beads.driver is not " +
 				"configured and " + beadsMergeDriverScript + " does not exist in this repo — git silently " +
 				"text-merges the jsonl; restore the wrapper script, then configure the driver manually" +
 				recoveryLine("git config merge.beads.driver '<abs-path-to>/bd-jsonl-merge-driver.sh %A %O %B'"),
+		})
+		return
+	}
+
+	// Inverse hole: driver configured but the merge=beads attribute is gone
+	// from .gitattributes — git never consults the driver and silently
+	// text-merges the jsonl despite the healthy-looking config.
+	if !hasAttr {
+		r.Checks = append(r.Checks, Check{
+			Name:   "Beads merge driver",
+			Status: Error,
+			Message: fmt.Sprintf("merge.beads.driver is configured (%q) but .gitattributes has no merge=beads "+
+				"mapping for .beads/issues.jsonl — git silently text-merges the jsonl despite the configured "+
+				"driver", driver) +
+				recoveryLine(`printf '.beads/issues.jsonl merge=beads\n' >> .gitattributes`),
 		})
 		return
 	}
