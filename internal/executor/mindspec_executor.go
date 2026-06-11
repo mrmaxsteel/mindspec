@@ -522,7 +522,23 @@ func withWorkingDir(dir string, fn func() error) error {
 		return fmt.Errorf("chdir %s: %w", dir, err)
 	}
 	defer func() {
-		_ = os.Chdir(wd)
+		if restoreErr := os.Chdir(wd); restoreErr != nil {
+			// Spec 092 Req 3a (mindspec-qxsy): the restore target is
+			// unreachable. chdir is atomic, so the process is still at
+			// dir — the path that was just valid. Re-assert it
+			// defensively; never return with the process in an
+			// undefined cwd.
+			_ = os.Chdir(dir)
+			// Panel R2-2: when wd no longer exists the failed restore
+			// is EXPECTED — the operation itself removed the directory
+			// (e.g. FinalizeEpic removing the spec worktree the process
+			// was invoked from) — so stay silent. Only a genuine
+			// failure (wd still exists but cannot be re-entered)
+			// warrants the structured warning.
+			if _, statErr := os.Stat(wd); statErr == nil {
+				fmt.Fprintf(os.Stderr, "event=executor.cwd_restore_failed dir=%s\n", dir)
+			}
+		}
 	}()
 	return fn()
 }

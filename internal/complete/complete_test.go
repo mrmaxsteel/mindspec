@@ -82,7 +82,19 @@ func stubPhaseEpic(t *testing.T, specID, epicID string) {
 // stubPhaseEpicInMode stubs phase functions for a specific lifecycle mode.
 func stubPhaseEpicInMode(t *testing.T, specID, epicID, mode string) {
 	t.Helper()
-	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+	restoreList := phase.SetListJSONForTest(phaseEpicListJSONStub(specID, epicID, mode))
+	t.Cleanup(restoreList)
+
+	restoreRun := phase.SetRunBDForTest(phaseEpicRunBDStub(epicID))
+	t.Cleanup(restoreRun)
+}
+
+// phaseEpicListJSONStub returns the listJSON stub behind
+// stubPhaseEpicInMode as a plain closure so tests can wrap it (e.g.
+// with a cwd-sensitivity guard, see
+// TestRun_FromInsideBeadWorktree_PhaseIntegrity).
+func phaseEpicListJSONStub(specID, epicID, mode string) func(args ...string) ([]byte, error) {
+	return func(args ...string) ([]byte, error) {
 		// Epic type queries (FindEpicBySpecID, DiscoverActiveSpecs)
 		for _, a := range args {
 			if a == "--type=epic" {
@@ -135,17 +147,19 @@ func stubPhaseEpicInMode(t *testing.T, specID, epicID, mode string) {
 		}
 
 		return []byte("[]"), nil
-	})
-	t.Cleanup(restoreList)
+	}
+}
 
-	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+// phaseEpicRunBDStub returns the runBD stub behind stubPhaseEpicInMode
+// as a plain closure (see phaseEpicListJSONStub).
+func phaseEpicRunBDStub(epicID string) func(args ...string) ([]byte, error) {
+	return func(args ...string) ([]byte, error) {
 		// queryEpicStatus: bd show <id> --json
 		if len(args) >= 1 && args[0] == "show" {
 			return json.Marshal([]phase.EpicInfo{{ID: epicID, Status: "open"}})
 		}
 		return []byte("[]"), nil
-	})
-	t.Cleanup(restoreRun)
+	}
 }
 
 func TestRun_HappyPath(t *testing.T) {
@@ -831,12 +845,16 @@ func TestCompleteAllowsOverride(t *testing.T) {
 	mock.MergeBaseResult = "merge-base-sha"
 	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
 
-	// Recorder for the override metadata write.
-	var metaCalls []map[string]interface{}
-	var metaBeadID string
+	// Recorder for the override metadata write. The spec 080
+	// mindspec_phase sync also routes through this seam (spec 092
+	// Bead 4 testability change), so record the target id per call.
+	type metaWrite struct {
+		id      string
+		updates map[string]interface{}
+	}
+	var metaCalls []metaWrite
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
-		metaBeadID = id
-		metaCalls = append(metaCalls, updates)
+		metaCalls = append(metaCalls, metaWrite{id: id, updates: updates})
 		return nil
 	}
 	gitUserEmailFn = func() string { return "override-user@example.invalid" }
@@ -846,15 +864,16 @@ func TestCompleteAllowsOverride(t *testing.T) {
 		t.Fatalf("expected override to allow completion, got: %v", err)
 	}
 
-	if metaBeadID != "bead-1" {
-		t.Errorf("override metadata should target bead-1, got %q", metaBeadID)
-	}
 	// Two metadata writes are expected: the override skew write
 	// (this bead 3 feature) and the spec 080 mindspec_phase sync.
-	// We assert the override one is present.
+	// We assert the override one is present and targets the bead.
 	foundOverride := false
-	for _, m := range metaCalls {
+	for _, c := range metaCalls {
+		m := c.updates
 		if reason, ok := m["mindspec_doc_skew_reason"].(string); ok && reason == "doc PR in flight" {
+			if c.id != "bead-1" {
+				t.Errorf("override metadata should target bead-1, got %q", c.id)
+			}
 			if by, _ := m["mindspec_doc_skew_by"].(string); by != "override-user@example.invalid" {
 				t.Errorf("mindspec_doc_skew_by: got %q, want override-user@example.invalid", by)
 			}
@@ -1210,5 +1229,177 @@ func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
 		if _, ok := m["mindspec_doc_skew_reason"]; ok {
 			t.Errorf("override metadata written despite close failure: %v", m)
 		}
+	}
+}
+
+// --- Spec 092 Bead 4: terminal-command cwd safety (mindspec-qxsy) ---
+
+// doomedExec wraps MockExecutor so CompleteBead can reify the side
+// effect the real executor has in the field: removing the bead worktree
+// the process was invoked from.
+type doomedExec struct {
+	*executor.MockExecutor
+	onCompleteBead func()
+}
+
+func (d *doomedExec) CompleteBead(beadID, specBranch, msg string) error {
+	if d.onCompleteBead != nil {
+		d.onCompleteBead()
+	}
+	return d.MockExecutor.CompleteBead(beadID, specBranch, msg)
+}
+
+// cwdSensitive wraps a bd stub so it fails exactly the way a real bd
+// subprocess spawn fails when the process cwd has been deleted. This is
+// what makes TestRun_FromInsideBeadWorktree_PhaseIntegrity
+// discriminating: without the Req 3c chdir inside Run, every bd call
+// after CompleteBead errors, advanceState silently degrades to ModeIdle,
+// and the mindspec_phase sync is skipped.
+func cwdSensitive(fn func(args ...string) ([]byte, error)) func(args ...string) ([]byte, error) {
+	return func(args ...string) ([]byte, error) {
+		if _, err := os.Getwd(); err != nil {
+			return nil, fmt.Errorf("simulated bd spawn from deleted cwd: %w", err)
+		}
+		return fn(args...)
+	}
+}
+
+// TestRun_FromInsideBeadWorktree_PhaseIntegrity is the spec 092 AC
+// "qxsy unit (complete-side phase integrity, Req 3c)": running
+// complete.Run with the process cwd INSIDE the bead worktree that
+// CompleteBead removes must (a) leave the epic's mindspec_phase metadata
+// equal to the child-derived phase, (b) return a mode that is NOT
+// falsely idle, and (c) leave the process cwd at the repo root.
+func TestRun_FromInsideBeadWorktree_PhaseIntegrity(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	specID := "009-doomed"
+	epicID := "epic-doom"
+
+	// Phase stubs: all children closed → derived phase is review. Both
+	// channels fail when called from a deleted cwd, like real bd.
+	restoreList := phase.SetListJSONForTest(cwdSensitive(phaseEpicListJSONStub(specID, epicID, state.ModeReview)))
+	t.Cleanup(restoreList)
+	restoreRun := phase.SetRunBDForTest(cwdSensitive(phaseEpicRunBDStub(epicID)))
+	t.Cleanup(restoreRun)
+
+	resolveTargetFn = func(r, flag string) (string, error) { return specID, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+
+	// queryAllChildren channel (complete package seam): one closed
+	// child → review. Also cwd-sensitive.
+	listJSONFn = cwdSensitive(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--status=closed" {
+				return json.Marshal([]phase.ChildInfo{{
+					ID: "bead-doom", Title: "[" + specID + "] doomed", Status: "closed",
+				}})
+			}
+		}
+		return []byte("[]"), nil
+	})
+	runBDFn = cwdSensitive(func(args ...string) ([]byte, error) { return []byte("[]"), nil })
+
+	// Bead worktree on disk; the process is invoked from INSIDE it.
+	beadWt := filepath.Join(root, ".worktrees", "worktree-bead-doom")
+	if err := os.MkdirAll(beadWt, 0o755); err != nil {
+		t.Fatalf("mkdir bead worktree: %v", err)
+	}
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-doom", Path: beadWt, Branch: "bead/bead-doom"},
+		}, nil
+	}
+
+	// Record every metadata write (the phase sync routes through the
+	// seam since spec 092 Bead 4).
+	type metaWrite struct {
+		id      string
+		updates map[string]interface{}
+	}
+	var metaCalls []metaWrite
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		metaCalls = append(metaCalls, metaWrite{id: id, updates: updates})
+		return nil
+	}
+
+	// CompleteBead removes the worktree the process sits in — the
+	// field condition mindspec-qxsy pins.
+	mock := &doomedExec{
+		MockExecutor: newMockExec(),
+		onCompleteBead: func() {
+			if err := os.RemoveAll(beadWt); err != nil {
+				t.Fatalf("removing bead worktree: %v", err)
+			}
+		},
+	}
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(beadWt); err != nil {
+		t.Fatalf("chdir into bead worktree: %v", err)
+	}
+
+	result, err := Run(root, "bead-doom", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// (b) NOT falsely idle — children derive to review.
+	if result.NextMode != state.ModeReview {
+		t.Errorf("NextMode: got %q, want %q (a falsely idle mode means the deleted-cwd degradation was not prevented)", result.NextMode, state.ModeReview)
+	}
+
+	// (a) mindspec_phase synced to the child-derived phase on the epic.
+	foundPhaseSync := false
+	for _, c := range metaCalls {
+		if v, ok := c.updates["mindspec_phase"].(string); ok && v == state.ModeReview {
+			if c.id != epicID {
+				t.Errorf("mindspec_phase sync targeted %q, want epic %q", c.id, epicID)
+			}
+			foundPhaseSync = true
+		}
+	}
+	if !foundPhaseSync {
+		t.Errorf("expected a mindspec_phase=%q sync write on the epic; got %v", state.ModeReview, metaCalls)
+	}
+
+	// (c) the process cwd is the repo root, not the deleted worktree.
+	wd, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("process ended in an unresolvable cwd: %v", wdErr)
+	}
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realRoot, _ := filepath.EvalSymlinks(root)
+	if realWd != realRoot {
+		t.Errorf("process cwd after Run: got %q, want repo root %q", wd, root)
+	}
+}
+
+// TestFormatResult_ImplementIncludesCdHint is the spec 092 AC "qxsy
+// unit (Req 4 FormatResult)": the implement-mode branch emits the same
+// `Run: cd <spec-worktree>` hint as the plan/review branches.
+func TestFormatResult_ImplementIncludesCdHint(t *testing.T) {
+	r := &Result{
+		BeadID:          "bead-1",
+		BeadClosed:      true,
+		WorktreeRemoved: true,
+		NextMode:        state.ModeImplement,
+		NextBead:        "bead-2",
+		NextSpec:        "008-test",
+		SpecWorktree:    "/repo/.worktrees/worktree-spec-008-test",
+	}
+	out := FormatResult(r)
+	want := "Run: `cd /repo/.worktrees/worktree-spec-008-test`"
+	if !strings.Contains(out, want) {
+		t.Errorf("implement branch should contain %q (spec 092 Req 4); got:\n%s", want, out)
+	}
+
+	// Without a removed worktree there is nothing to cd back from.
+	r.WorktreeRemoved = false
+	out = FormatResult(r)
+	if strings.Contains(out, "Run: `cd") {
+		t.Errorf("cd hint should be omitted when no worktree was removed; got:\n%s", out)
 	}
 }
