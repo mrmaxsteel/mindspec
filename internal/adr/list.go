@@ -52,7 +52,7 @@ func FormatTable(adrs []ADR) string {
 
 	for _, a := range adrs {
 		domains := strings.Join(a.Domains, ", ")
-		b.WriteString(fmt.Sprintf("%-10s %-12s %-20s %s\n", a.ID, a.Status, domains, a.Title))
+		b.WriteString(fmt.Sprintf("%-10s %-12s %-20s %s\n", a.ID, a.DisplayStatus(), domains, a.Title))
 	}
 
 	return b.String()

@@ -29,7 +29,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
@@ -55,16 +54,33 @@ type DivergenceFinding struct {
 // diff range. It loads spec metadata + plan frontmatter from `specDir`
 // internally (revision 7 — callers do not pass citations or store).
 //
+// implApprove selects the severity for Proposed-only coverage
+// (mindspec-53qx panel condition C1 — the tolerance must reconcile):
+//   - false (bead-complete lane): a domain covered only by a cited
+//     Proposed ADR emits an advisory `adr-divergence-proposed` WARNING.
+//     Mid-implementation Proposed is the legitimate state the
+//     tri-state coverage exists to protect, so it never blocks here.
+//   - true (impl-approve backstop): the same condition is an ERROR —
+//     the implementation is shipping, so the Proposed ADR it validates
+//     must be flipped to Accepted now; the existing --override-adr /
+//     --supersede-adr flags remain the recorded escape hatch. Without
+//     this the lifecycle loop would never close: Proposed-covered
+//     would pass silently at every gate forever.
+//
 // Returns:
 //   - *Result with sub-command "adr-divergence" populated with one
 //     Issue per finding plus any load/IO errors.
 //   - []DivergenceFinding structured records (one per detection). When
 //     a load step fails before attribution can run the slice is nil
 //     and the *Result carries the failure as a single error.
+//     Proposed-only coverage does NOT produce a finding: the findings
+//     slice seeds supersede placeholders for genuinely uncovered
+//     domains, and a Proposed-covered domain already has its ADR.
 func ValidateDivergence(
 	exec executor.Executor,
 	root, specDir, beadID string,
 	base, head string,
+	implApprove bool,
 ) (*Result, []DivergenceFinding) {
 	targetID := beadID
 	if targetID == "" {
@@ -104,7 +120,10 @@ func ValidateDivergence(
 		return r, nil
 	}
 
-	store := adr.NewFileStore(root)
+	// mindspec-ew79: overlay the spec branch's ADR dir (the tree
+	// specDir lives in, e.g. a spec worktree) over the primary
+	// checkout, so spec-introduced ADRs count at bead-complete time.
+	store := adrStoreForSpec(root, specDir)
 
 	// Resolve domain list to consult for attribution. Prefer the
 	// spec's declared impacted-domains; when that's empty (spec has
@@ -173,7 +192,25 @@ func ValidateDivergence(
 			continue
 		}
 
-		if IsDomainCovered(store, fm.ADRCitations, domain) {
+		// mindspec-53qx + panel condition C1: tri-state probe instead of
+		// the bool predicate, so Proposed-only coverage is surfaced
+		// rather than passing silently at every gate.
+		cov, proposedID := coverageOf(nil, store, fm.ADRCitations, domain)
+		if cov == coveredAccepted {
+			continue
+		}
+		if cov == coveredProposedOnly {
+			if implApprove {
+				r.AddError("adr-divergence-proposed",
+					fmt.Sprintf("file %s attributed to domain %q is covered only by Proposed ADR %s — flip it to Accepted now that the implementation ships, or re-run with --override-adr \"<reason>\"",
+						path, domain, proposedID))
+			} else {
+				r.AddWarning("adr-divergence-proposed",
+					fmt.Sprintf("file %s attributed to domain %q is covered only by Proposed ADR %s — flip it to Accepted before impl approve",
+						path, domain, proposedID))
+			}
+			// No DivergenceFinding: the supersede-placeholder seed is
+			// for genuinely uncovered domains; this one has its ADR.
 			continue
 		}
 

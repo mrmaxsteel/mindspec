@@ -895,6 +895,117 @@ func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
 	}
 }
 
+// writeProposedADRFixtureImpl builds an approve-side fixture where the
+// only coverage for the touched domain rests on a cited PROPOSED ADR:
+// spec.md declares "core" impacted, plan.md cites ADR-9002, and
+// ADR-9002 is on disk with Status Proposed and Domain core.
+func writeProposedADRFixtureImpl(t *testing.T, root, specID string) {
+	t.Helper()
+
+	specDir := filepath.Join(root, "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"),
+		[]byte("# Spec "+specID+"\n\n## Impacted Domains\n\n- core\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	planMD := "---\nspec_id: " + specID + "\nstatus: Approved\nbead_ids:\n  - bead-1\nadr_citations:\n  - id: ADR-9002\n---\n\n# Plan\n"
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planMD), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("mkdir adr dir: %v", err)
+	}
+	adrMD := "# ADR-9002: Proposed core decision\n\n" +
+		"- **Date**: 2026-01-01\n" +
+		"- **Status**: Proposed\n" +
+		"- **Domain(s)**: core\n" +
+		"- **Supersedes**: n/a\n" +
+		"- **Superseded-by**: n/a\n\n" +
+		"## Decision\nTest fixture.\n"
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-9002.md"), []byte(adrMD), 0o644); err != nil {
+		t.Fatalf("write ADR-9002.md: %v", err)
+	}
+}
+
+// TestApproveImplProposedCoverageBlocks — panel condition C1 on
+// mindspec-53qx: the impl-approve ADR-divergence backstop must ERROR
+// when coverage of a touched domain rests on a still-Proposed cited
+// ADR, naming the ADR and pointing at --override-adr. This is the gate
+// that closes the lifecycle loop the plan-time Proposed tolerance
+// opens.
+func TestApproveImplProposedCoverageBlocks(t *testing.T) {
+	tmp := t.TempDir()
+	writeProposedADRFixtureImpl(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]string{{"status": "closed"}})
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// Source touch attributed to "core" via the fallback path.
+		ChangedFilesResult: []string{"internal/core/foo.go"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{
+		AllowDocSkew: "test setup",
+	})
+	if err == nil {
+		t.Fatal("expected impl approve to fail on Proposed-only coverage")
+	}
+	for _, want := range []string{"adr-divergence", "ADR-9002", "now that the implementation ships", "--override-adr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+	if len(mock.CallsTo("FinalizeEpic")) != 0 {
+		t.Error("FinalizeEpic must not run when the Proposed-coverage gate fails")
+	}
+}
+
+// TestApproveImplProposedCoverageOverride — the existing --override-adr
+// escape bypasses the Proposed-coverage error exactly like other
+// ADR-divergence failures, with the recorded-reason metadata flow
+// already pinned by TestApproveImplOverrideMetadataGoesThroughSeam.
+func TestApproveImplProposedCoverageOverride(t *testing.T) {
+	tmp := t.TempDir()
+	writeProposedADRFixtureImpl(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]string{{"status": "closed"}})
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		ChangedFilesResult: []string{"internal/core/foo.go"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{
+		AllowDocSkew: "test setup",
+		OverrideADR:  "ADR-9002 acceptance tracked in followup bead",
+	})
+	if err != nil {
+		t.Fatalf("--override-adr should bypass the Proposed-coverage gate, got: %v", err)
+	}
+	if len(mock.CallsTo("FinalizeEpic")) != 1 {
+		t.Errorf("expected FinalizeEpic to run under override, got %d calls", len(mock.CallsTo("FinalizeEpic")))
+	}
+}
+
 // --- Spec 092 Bead 3 (Req 1, 2): stale-phase reconcile tests ---
 
 // stubPhaseStoredChildren sets up the phase package stubs with an epic

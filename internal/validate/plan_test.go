@@ -1248,6 +1248,164 @@ func TestPlanRejectsUncoveredDomain(t *testing.T) {
 	}
 }
 
+func TestPlanSpecWorktreeADRVisible(t *testing.T) {
+	// mindspec-ew79: an ADR that exists ONLY on the spec branch (inside
+	// the spec worktree at root/.worktrees/worktree-spec-<id>/) must be
+	// visible to plan-time citation + coverage checks run from the
+	// primary checkout. Before the overlay store this fired spurious
+	// adr-cite-missing / adr-coverage-missing because the validator
+	// always read ADRs from the primary tree.
+	tmp := t.TempDir()
+	wtTree := filepath.Join(tmp, ".worktrees", "worktree-spec-999-test")
+	// Reuse the standard fixture helpers rooted at the worktree's
+	// .mindspec dir: they write to <arg>/docs/specs/999-test and
+	// <arg>/docs/adr, which lands at the canonical worktree layout
+	// .worktrees/worktree-spec-999-test/.mindspec/docs/... that
+	// workspace.SpecDir resolves first (ADR-0022).
+	wtMindspec := filepath.Join(wtTree, ".mindspec")
+	writeTestSpec(t, wtMindspec, []string{"payments"})
+	writeTestADRWithDomains(t, wtMindspec, "ADR-0001", "Accepted", "payments", "")
+	makePlanWithCitations(t, wtMindspec, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-missing" {
+			t.Errorf("unexpected adr-cite-missing for spec-branch ADR: %s", issue.Message)
+		}
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for spec-branch ADR: %s", issue.Message)
+		}
+	}
+}
+
+func TestPlanSpecWorktreeADRMissingEverywhereStillFails(t *testing.T) {
+	// Acceptance criterion companion: an ADR cited from a worktree-
+	// resolved plan that exists in NEITHER tree must still fail.
+	tmp := t.TempDir()
+	wtMindspec := filepath.Join(tmp, ".worktrees", "worktree-spec-999-test", ".mindspec")
+	writeTestSpec(t, wtMindspec, []string{"payments"})
+	makePlanWithCitations(t, wtMindspec, "  - id: ADR-0042\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-missing" && strings.Contains(issue.Message, "ADR-0042") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-cite-missing for ADR absent from both trees, got: %v", r.Issues)
+	}
+}
+
+func TestPlanCoverageAcceptsQualifiedAcceptedStatus(t *testing.T) {
+	// mindspec-f115: an ADR whose Status line carries a provenance
+	// qualifier — the live ADR-0029 case "Accepted (Finalized in spec
+	// 090 Bead 1)" — must still satisfy coverage. Before parse-time
+	// normalization this fired a spurious adr-coverage-missing.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted (Finalized in spec 090 Bead 1)", "payments", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for qualified Accepted status: %s", issue.Message)
+		}
+	}
+}
+
+func TestPlanCoverageProposedCitedDowngradesToWarning(t *testing.T) {
+	// mindspec-53qx: a CITED Proposed ADR covering an impacted domain
+	// suppresses adr-coverage-missing and instead emits the advisory
+	// adr-coverage-proposed warning. This deliberately reverses the
+	// spec-087 "revision 11" Proposed-exclusion (see coverageOf docs):
+	// spec-introduced ADRs are legitimately Proposed until post-impl
+	// validation, and citing them is the explicit opt-in.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Proposed", "payments", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	var hasProposedWarning, hasCiteProposed bool
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for cited Proposed covering ADR: %s", issue.Message)
+		}
+		if issue.Name == "adr-coverage-proposed" {
+			hasProposedWarning = true
+			if issue.Severity != SevWarning {
+				t.Errorf("adr-coverage-proposed severity = %v, want warning (advisory, never gates)", issue.Severity)
+			}
+			for _, want := range []string{"payments", "ADR-0001", "flip it to Accepted"} {
+				if !strings.Contains(issue.Message, want) {
+					t.Errorf("adr-coverage-proposed message missing %q: %s", want, issue.Message)
+				}
+			}
+		}
+		if issue.Name == "adr-cite-proposed" {
+			hasCiteProposed = true
+		}
+	}
+	if !hasProposedWarning {
+		t.Errorf("expected adr-coverage-proposed warning, got: %v", r.Issues)
+	}
+	// The existing per-citation adr-cite-proposed warning is preserved.
+	if !hasCiteProposed {
+		t.Errorf("expected adr-cite-proposed warning to be preserved, got: %v", r.Issues)
+	}
+}
+
+func TestPlanCoverageProposedUncitedStillMissing(t *testing.T) {
+	// mindspec-53qx companion: an UNCITED Proposed ADR covering the
+	// domain does NOT satisfy coverage — citation is the opt-in.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments", "search"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "search", "")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Proposed", "payments", "")
+	// Only the search ADR is cited; the Proposed payments ADR is not.
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	foundMissing := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" && strings.Contains(issue.Message, "payments") {
+			foundMissing = true
+		}
+		if issue.Name == "adr-coverage-proposed" {
+			t.Errorf("unexpected adr-coverage-proposed for uncited Proposed ADR: %s", issue.Message)
+		}
+	}
+	if !foundMissing {
+		t.Errorf("expected adr-coverage-missing for payments (Proposed ADR uncited), got: %v", r.Issues)
+	}
+}
+
+func TestPlanCoverageAcceptedUpgradesOverProposed(t *testing.T) {
+	// When BOTH a Proposed and an Accepted cited ADR cover the domain,
+	// the Accepted one wins: no adr-coverage-proposed noise.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Proposed", "payments", "")
+	writeTestADRWithDomains(t, tmp, "ADR-0002", "Accepted", "payments", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n  - id: ADR-0002\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" || issue.Name == "adr-coverage-proposed" {
+			t.Errorf("unexpected %s when an Accepted ADR also covers: %s", issue.Name, issue.Message)
+		}
+	}
+}
+
 func TestSupersededADRDoesNotSatisfyCoverage(t *testing.T) {
 	// ADR-0001 (Superseded by ADR-0002) is cited, but ADR-0002 is NOT
 	// cited — coverage must NOT be satisfied. ADR-0002 itself exists

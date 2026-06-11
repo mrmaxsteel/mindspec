@@ -109,7 +109,7 @@ func TestCompleteRejectsUndeclaredDomainTouch(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-zy4u.2", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-zy4u.2", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -157,7 +157,7 @@ func TestVizAgentmindBenchFiltered(t *testing.T) {
 		},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -190,7 +190,7 @@ func TestUnownedFileRejected(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -236,7 +236,7 @@ func TestValidateDivergenceCoveredDomainPasses(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -245,6 +245,152 @@ func TestValidateDivergenceCoveredDomainPasses(t *testing.T) {
 	}
 	if len(findings) != 0 {
 		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
+// TestValidateDivergenceSpecBranchADRVisible — mindspec-ew79 mirror of
+// the plan-lane test: an ADR that exists only inside the spec worktree
+// (the spec branch) must satisfy the bead-complete divergence check run
+// from the primary checkout. Before the overlay store the FileStore was
+// rooted at the primary tree only, so the cited spec-branch ADR was
+// invisible and the changed file surfaced as adr-divergence-uncovered.
+func TestValidateDivergenceSpecBranchADRVisible(t *testing.T) {
+	root := t.TempDir()
+	wtTree := filepath.Join(root, ".worktrees", "worktree-spec-105-wt")
+	specDir := filepath.Join(wtTree, ".mindspec", "docs", "specs", "105-wt")
+	writeSpecAndPlan(t, root, specDir, "105-wt",
+		[]string{"payments"},
+		[]string{"ADR-0099"},
+	)
+	// ADR lives ONLY in the spec worktree tree (writeADR joins
+	// <arg>/.mindspec/docs/adr).
+	writeADR(t, wtTree, "ADR-0099", "Accepted", []string{"payments"})
+	writeManifest(t, root, "payments", "paths:\n  - internal/payments/**\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/payments/charge.go"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Errorf("expected no failures with spec-branch ADR visible, got %+v", r.Issues)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
+// proposedCoverageFixture builds the shared mindspec-53qx scenario: a
+// cited Proposed ADR covering the changed file's domain.
+func proposedCoverageFixture(t *testing.T) (root, specDir string, mock *executor.MockExecutor) {
+	t.Helper()
+	root = t.TempDir()
+	specDir = filepath.Join(root, ".mindspec", "docs", "specs", "106-proposed")
+	writeSpecAndPlan(t, root, specDir, "106-proposed",
+		[]string{"payments"},
+		[]string{"ADR-0099"},
+	)
+	writeADR(t, root, "ADR-0099", "Proposed", []string{"payments"})
+	writeManifest(t, root, "payments", "paths:\n  - internal/payments/**\n")
+	mock = &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/payments/charge.go"},
+	}
+	return root, specDir, mock
+}
+
+// TestValidateDivergenceProposedCitedWarnsAtBeadComplete — mindspec-53qx
+// + panel condition C1 at the bead-complete lane: a cited Proposed ADR
+// covering the changed file's domain satisfies the divergence check (no
+// failure — the bead being completed is precisely the implementation
+// that validates the Proposed ADR) but surfaces the advisory
+// adr-divergence-proposed WARNING so the pending status flip is
+// visible, not silent.
+func TestValidateDivergenceProposedCitedWarnsAtBeadComplete(t *testing.T) {
+	root, specDir, mock := proposedCoverageFixture(t)
+
+	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-bead.1", "BASE", "HEAD", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Errorf("expected no failures with cited Proposed covering ADR at bead-complete, got %+v", r.Issues)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+	var warned bool
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-proposed" {
+			warned = true
+			if i.Severity != SevWarning {
+				t.Errorf("adr-divergence-proposed severity = %v at bead-complete, want warning", i.Severity)
+			}
+			for _, want := range []string{"payments", "ADR-0099", "flip it to Accepted"} {
+				if !strings.Contains(i.Message, want) {
+					t.Errorf("warning message missing %q: %s", want, i.Message)
+				}
+			}
+		}
+	}
+	if !warned {
+		t.Errorf("expected adr-divergence-proposed warning at bead-complete, got %+v", r.Issues)
+	}
+}
+
+// TestValidateDivergenceProposedCitedErrorsAtImplApprove — panel
+// condition C1's other half: the same Proposed-only coverage that is
+// tolerated mid-implementation is an ERROR at the impl-approve
+// backstop, closing the lifecycle loop. The message names the ADR and
+// points at the existing --override-adr escape.
+func TestValidateDivergenceProposedCitedErrorsAtImplApprove(t *testing.T) {
+	root, specDir, mock := proposedCoverageFixture(t)
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", true)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if !r.HasFailures() {
+		t.Fatalf("expected failure for Proposed-only coverage at impl-approve, got %+v", r.Issues)
+	}
+	var errored bool
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-proposed" && i.Severity == SevError {
+			errored = true
+			for _, want := range []string{"payments", "ADR-0099", "now that the implementation ships", "--override-adr"} {
+				if !strings.Contains(i.Message, want) {
+					t.Errorf("error message missing %q: %s", want, i.Message)
+				}
+			}
+		}
+	}
+	if !errored {
+		t.Errorf("expected adr-divergence-proposed error at impl-approve, got %+v", r.Issues)
+	}
+	// Proposed-covered yields NO finding — the supersede-placeholder
+	// seed contract is for genuinely uncovered domains.
+	if len(findings) != 0 {
+		t.Errorf("expected no findings for Proposed-covered domain, got %+v", findings)
+	}
+}
+
+// TestCheckADRDivergenceLaneSelection pins the wiring: beadID == ""
+// (the approve.ApproveImpl backstop) selects impl-approve severity for
+// Proposed-only coverage; a non-empty beadID (complete.Run) selects the
+// advisory warning.
+func TestCheckADRDivergenceLaneSelection(t *testing.T) {
+	root, specDir, mock := proposedCoverageFixture(t)
+
+	rImpl, _ := CheckADRDivergence(root, "BASE", mock, specDir, "")
+	if !rImpl.HasFailures() {
+		t.Errorf("beadID==\"\" (impl backstop) should fail on Proposed-only coverage, got %+v", rImpl.Issues)
+	}
+
+	rBead, _ := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1")
+	if rBead.HasFailures() {
+		t.Errorf("non-empty beadID (bead-complete) should not fail on Proposed-only coverage, got %+v", rBead.Issues)
 	}
 }
 
@@ -263,7 +409,7 @@ func TestValidateDivergenceDiffErrorSurfaces(t *testing.T) {
 		ChangedFilesErr: fmt.Errorf("boom"),
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -310,7 +456,7 @@ func TestProcessArtifactsFiltered(t *testing.T) {
 			"internal/payments/charge.go"), // control: still unowned
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}

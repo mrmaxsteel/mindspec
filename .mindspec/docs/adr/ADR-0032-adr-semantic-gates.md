@@ -56,7 +56,8 @@ Four sub-decisions:
    cited Accepted ADR whose `Domains` contains it. Rejected: cite-
    relevant only (allows uncovered domains to slip through); a separate
    `mindspec adr verify` step (defers the check past plan approval where
-   it belongs).
+   it belongs). *(Amended — the "at least one cited Accepted ADR"
+   predicate is now tri-state; see the Amendment section below.)*
 
 3. **Bead-time gate: divergence check via `Executor.ChangedFiles` +
    `attributeDomain`.** `internal/validate/divergence.go::ValidateDivergence`
@@ -91,6 +92,41 @@ Four sub-decisions:
   short tags matching `OWNERSHIP.yaml` directory names.
 - (−) ADR authors must populate the `Domains` field carefully — sloppy
   domain tagging poisons both gates.
+
+## Amendment — tri-state coverage (2026-06-11, PR #126)
+
+PR #126 (`fix(validate): ADR-lane batch`, bead mindspec-53qx, panel
+verdict UPHOLD_WITH_CONDITIONS) amends sub-decision 2's coverage
+predicate, deliberately reversing spec 087 plan revision 11. The
+"at least one cited **Accepted** ADR" requirement at plan time created
+a chicken-and-egg for spec-introduced ADRs — legitimately `Proposed`
+until the implementation that validates them ships — pressuring
+authors to flip ADRs to `Accepted` prematurely.
+
+Coverage is now **tri-state**, with the Accepted obligation moved to
+the lifecycle gate where the implementation actually ships:
+
+- **`coveredAccepted`** — a cited Accepted ADR (directly, or
+  transitively via a cited Superseded chain head) declares the domain.
+  Silent pass at every gate. Unchanged.
+- **`coveredProposedOnly`** — the only covering cited ADR(s) are
+  `Proposed`. Plan time: passes with an advisory
+  `adr-coverage-proposed` warning. Bead complete: passes with an
+  advisory `adr-divergence-proposed` warning (mid-implementation
+  Proposed is the legitimate state). **Impl approve: ERROR** — the
+  `adr-divergence-proposed` failure demands the ADR be flipped to
+  `Accepted` now that the implementation ships, with the existing
+  `--override-adr` / `--supersede-adr` flags as the audit-trailed
+  escape. This closes the loop the plan-time tolerance opens.
+- **`notCovered`** — no cited ADR of any tolerated status declares the
+  domain. Error (`adr-coverage-missing` / `adr-divergence-uncovered`).
+  Unchanged.
+
+Citing the Proposed ADR in `adr_citations` is the explicit opt-in;
+uncited Proposed ADRs never satisfy coverage. Implementation:
+`internal/validate/plan.go::coverageOf` (plan lane) and
+`internal/validate/divergence.go::ValidateDivergence` (bead-complete
+and impl-approve lanes, selected by the `implApprove` parameter).
 
 ## Rollback
 
