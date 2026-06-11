@@ -7,4 +7,5 @@ paths:
   - internal/validate/**
   - internal/doctor/**
   - internal/guard/**
+  - internal/setup/**
   - cmd/**
