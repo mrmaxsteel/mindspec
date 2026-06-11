@@ -1,7 +1,9 @@
 # Bead 9 — Green (post-fix) Verification Evidence (Spec 092, Req 22 / HC-6)
 
 **Bead**: mindspec-fwo5.9
-**Green-run HEAD**: commit `8eccb04` on `bead/mindspec-fwo5.9` (fully-assembled
+**Green-run HEAD**: commits `0a08c28`..`657e4c8` on `bead/mindspec-fwo5.9`
+(per-run tree SHAs in the Summary table below; branch base `8eccb04` — the
+fully-assembled
 spec branch: fork point `a1a58d9` = spec tip incl. Beads 3–8 + both integration
 fix-ups, plus this bead's Phase-1 punch-list commits `145c335`, `da3be5b`,
 `8123c70`, the run-1 stop evidence `0281dc3`, and the orchestrator-adjudicated
@@ -573,10 +575,64 @@ letter exists on the post-fix tree, and the deprecated form still exits
 requirement — beyond this verification bead's authority without
 adjudication.
 
+**Stop-#3 adjudication**: sanctioned as Bead 9 scope (the gap was flagged
+by Bead 8's own panel as R2 minor and routed forward; run 5 gave it
+teeth). Fix landed in `657e4c8`: all three lifecycle-skill inlines
+reworded to canonical noun-verb, pinned by
+`TestLifecycleSkills_CanonicalApproveOrder` (instruct_test.go's hardened
+deprecated-order regex + per-skill canonical presence). BOUNDARY: the fix
+is template-only — existing installs keep their old skill files (setup is
+create-or-skip); the provenance-gated refresh that propagates wording
+fixes to existing installs remains jkhd.3 Req 19's charter.
+
+### 5-GREEN. approval_gate_discovery — **PASS (91.89s)**
+
+**Green run** (foreground, `657e4c8`, agent 2.1.173, 2026-06-11):
+**PASS**. Transcript: `review/prep/bead9_green_run5_gate_PASS.log`.
+
+```
+[222] mindspec impl approve 001-gate (exit=0)
+--- PASS: TestLLM_ApprovalGateDiscovery (91.89s)
+PASS
+ok  	github.com/mrmaxsteel/mindspec/internal/harness	92.165s
+```
+
+**Red→green flip (HC-6, Req 11 / v7ez)**: given only "the human
+explicitly approves" with no command named, the agent discovered and ran
+the CANONICAL `mindspec impl approve 001-gate` (exit 0, on the merits, no
+bypass flags) with ZERO deprecated-order events — where the baseline
+agent copied `approve impl` from the rendered guidance twice and never
+found the canonical form, and the first post-fix attempt (§5) still
+copied it from the setup-generated skills. The order-preserving
+`eventArgsList` accessor (B8c) and `argsInOrder` carried the assertion.
+
+**B2 corroboration (behavioral pin)**: no deprecated-order event exists
+anywhere in the stream (the assertion scans EVERY mindspec event, any
+exit code) — the pass is not a lucky success ordering.
+
 
 ---
 
-## Validation-proof set at `8123c70` (Phase 1 close-out state)
+## Summary — all five red→green (HC-6 / Req 22 closed)
+
+| Scenario | Red baseline (c4a1c7e) | Green run | Flipped discriminator |
+|:--|:--|:--|:--|
+| stale_phase_impl_approve | FAIL 132.27s (orig) / FAIL 113.55s (redesigned, §1a) | **PASS 104.57s** @ `0a08c28` | `assertStaleApproveSelfHeals` probe: exit 0 + `event=lifecycle.phase_reconciled stored=implement derived=review`; approve on the merits, no bypass |
+| complete_from_doomed_worktree | FAIL 170.03s (1603723 redesign) | **PASS 164.67s** @ `957472f` | cd-back NOTE as last non-empty stdout line of the doomed probe (B7 placement) |
+| precommit_reexport_complete | FAIL 129.62s | **PASS 115.04s** @ `c23111a` | FIRST `mindspec complete` exit=0 — artifact dirt never blocked; no --no-verify / hooksPath assignment |
+| wrong_directory_guard_recovery | FAIL 257.00s | **PASS 129.69s** @ `9be25fa` | guard fired then steered; zero `git stash`; notes.txt byte-identical AND still uncommitted |
+| approval_gate_discovery | FAIL 106.70s | **PASS 91.89s** @ `657e4c8` | canonical `mindspec impl approve` discovered and succeeded; zero deprecated-order events |
+
+Agent for every run: `2.1.173 (Claude Code)` (B3). All transcripts
+verbatim-committed under review/prep/.
+
+**skip_next analyzer (Req 17 precondition)**: CLEAN — zero `skip_next`
+wrong-action reports across all five green-run transcripts (grep over the
+five PASS logs: 0 occurrences each). The only wrong actions reported
+anywhere are `bd_close_shortcut` in runs 1 and 5 — logged-not-failed by
+design for these recovery-style scenarios.
+
+## Validation-proof set at `657e4c8` (final)
 
 - `go build ./...` — green.
 - `go test -short ./...` — green across all packages EXCEPT the known
@@ -586,8 +642,12 @@ adjudication.
   fixed here per the brief).
 - `go test ./internal/lint/...` — green (HC-2 boundary).
 - `gofmt -l cmd internal` — clean.
+- `mindspec --help` Approval-gates listing (all three canonical noun-verb):
 
-The skip_next analyzer-cleanliness check and the `mindspec --help`
-Approval-gates listing are deferred with the run sequence (they are
-"after all five PASS" obligations).
+```
+Approval Gates:
+  mindspec spec approve <id>   Approve a spec and transition to Plan Mode
+  mindspec plan approve <id>   Approve a plan and transition toward Implementation Mode
+  mindspec impl approve <id>   Approve implementation and transition to idle
+```
 
