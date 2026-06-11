@@ -531,7 +531,48 @@ demonstrably fired first ([41] exit=1), no `git stash`/`restore`/
 user's dirt at root (asserted byte-identical and still dirty post-run).
 
 
-### 5. approval_gate_discovery — NOT RUN (stopped at run 1)
+### 5. approval_gate_discovery — **FAIL (105.34s) — STOP #3** (owning fix bead: **Bead 8** / mindspec-fwo5.8)
+
+**Red baseline**: FAIL at `c4a1c7e` (106.70s) — agent copied the
+deprecated `approve impl` order from templates/review.md
+(bead2_baseline_evidence.md §5). **Green attempt** (foreground, tree at
+the run-4 evidence commit, agent 2.1.173, 2026-06-11): **FAIL**.
+Transcript: `review/prep/bead9_green_run5_gate_FAIL.log`. Verbatim:
+
+```
+[220] mindspec approve impl 001-gate (exit=0)
+scenario_contract_hardening.go:1009: agent used the deprecated `approve impl` order: [approve impl 001-gate]
+scenario_contract_hardening.go:1013: no successful canonical `mindspec impl approve` event found
+--- FAIL: TestLLM_ApprovalGateDiscovery (105.34s)
+FAIL
+FAIL	github.com/mrmaxsteel/mindspec/internal/harness	105.859s
+```
+
+(The redesign-fixed parts held: the coverage triple worked — [220] exited
+0 on the merits with NO --override-adr, where the pre-fix confound would
+have forced one. The failure is the v7ez pin itself.)
+
+**Diagnosis (stop-condition #3, not actioned)**: Bead 8's Req 11 channel
+inventory ("every emission channel teaches only the canonical
+`mindspec impl approve <id>`") missed the SETUP-GENERATED slash-command
+files. `internal/setup/claude.go` still teaches the deprecated verb-noun
+order in THREE places: `mindspec approve spec <id>` (:556, ms-spec-approve),
+`mindspec approve plan <id>` (:569, ms-plan-approve), and
+`mindspec approve impl <id>` (:583, ms-impl-approve). These are installed
+into every sandbox by `setupClaudeForSandbox` → `setup.RunClaude`
+(internal/harness/sandbox.go:75/448-451) — and into every REAL project by
+`mindspec setup` — as agent-visible .claude command files. The
+baseline's vector (templates/review.md) WAS fixed by Bead 8 (it now
+teaches canonical at :21/:55); the agent nonetheless produced the
+deprecated order on a tree where the only remaining teaching channel is
+the setup-generated one. (The shim-based recorder captures no Read
+events, so "the agent read ms-impl-approve.md" cannot be proven from the
+stream; what IS proven is that an agent-visible channel violating Req 11's
+letter exists on the post-fix tree, and the deprecated form still exits
+0.) Fix is production code (internal/setup/claude.go) owned by Bead 8's
+requirement — beyond this verification bead's authority without
+adjudication.
+
 
 ---
 
