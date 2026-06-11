@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -92,57 +93,76 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	exec := newExecutor(root)
-	result, err := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{
+	result, approveErr := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{
 		AllowDocSkew: allowDocSkew,
 		OverrideADR:  overrideADR,
 		SupersedeADR: supersedeADR,
 	})
 
-	// Spec 092 Req 3b (mindspec-qxsy): FinalizeEpic (inside ApproveImpl)
-	// removes the spec worktree this command auto-chdir'd into above.
-	// Move to the repo root immediately after it returns — before any
-	// tail output and before emitInstruct — so the rest of the command
-	// (and the bd subprocesses emitInstruct spawns) runs from a valid
-	// cwd and the process exits 0.
-	if chdirErr := os.Chdir(root); chdirErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not chdir to repo root %s: %v\n", root, chdirErr)
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	if tailErr := implApproveTail(os.Stdout, os.Stderr, root, invocationCwd, specID, result, approveErr, emitInstruct); tailErr != nil {
 		os.Exit(1)
 	}
+	return nil
+}
 
-	fmt.Printf("Implementation for %s approved. Mode: idle.\n", result.SpecID)
+// implApproveTail is the production tail of `impl approve` — everything
+// after ApproveImpl returns. Extracted (spec 092 panel R3-1) so unit
+// tests exercise the REAL wiring and ordering instead of a simulation:
+//
+//  1. Spec 092 Req 3b (mindspec-qxsy): chdir to the repo root
+//     immediately — FinalizeEpic (inside ApproveImpl) removes the spec
+//     worktree this command auto-chdir'd into — so all tail output and
+//     the bd subprocesses instructFn spawns run from a valid cwd.
+//  2. On ApproveImpl failure (panel R2-3): FinalizeEpic can fail AFTER
+//     removing the spec worktree, so the error path still emits the
+//     Req 4 cd-back NOTE — as the LAST line of stderr. Channel choice,
+//     stated once: stdout carries success output only, so the
+//     error-path NOTE goes to stderr; on success the NOTE is the LAST
+//     line of stdout.
+//  3. On success: summary, instruct tail, then the Req 4 cd-back NOTE
+//     as the LAST line of stdout.
+//
+// Returns approveErr unchanged so the caller owns the exit code (HC-4).
+func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID string, result *approve.ImplResult, approveErr error, instructFn func(string) error) error {
+	if chdirErr := os.Chdir(root); chdirErr != nil {
+		fmt.Fprintf(stderr, "warning: could not chdir to repo root %s: %v\n", root, chdirErr)
+	}
+
+	if approveErr != nil {
+		fmt.Fprintf(stderr, "error: %v\n", approveErr)
+		emitCdBackNote(stderr, invocationCwd, root)
+		return approveErr
+	}
+
+	fmt.Fprintf(stdout, "Implementation for %s approved. Mode: idle.\n", result.SpecID)
 	for _, w := range result.Warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		fmt.Fprintf(stderr, "warning: %s\n", w)
 	}
 
 	if result.SpecBranch != "" {
-		fmt.Println()
-		fmt.Printf("Summary:\n")
-		fmt.Printf("  Branch:   %s\n", result.SpecBranch)
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "Summary:\n")
+		fmt.Fprintf(stdout, "  Branch:   %s\n", result.SpecBranch)
 		if result.CommitCount > 0 {
-			fmt.Printf("  Commits:  %d\n", result.CommitCount)
+			fmt.Fprintf(stdout, "  Commits:  %d\n", result.CommitCount)
 		}
 		if result.DiffStat != "" {
-			fmt.Printf("\n%s\n", result.DiffStat)
+			fmt.Fprintf(stdout, "\n%s\n", result.DiffStat)
 		}
 		if result.Pushed {
-			fmt.Printf("\nBranch pushed to remote. Create a PR to merge into main:\n")
-			fmt.Printf("  gh pr create --head %s --base main --title \"[SPEC %s] <title>\" --body \"<description>\"\n", result.SpecBranch, specID)
+			fmt.Fprintf(stdout, "\nBranch pushed to remote. Create a PR to merge into main:\n")
+			fmt.Fprintf(stdout, "  gh pr create --head %s --base main --title \"[SPEC %s] <title>\" --body \"<description>\"\n", result.SpecBranch, specID)
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(stdout)
 
-	if err := emitInstruct(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+	if err := instructFn(root); err != nil {
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
 	}
 
 	// Spec 092 Req 4: when the shell's invocation directory was removed
 	// by the terminal mutation, the cd-back NOTE is the LAST line of
 	// stdout.
-	emitCdBackNote(os.Stdout, invocationCwd, root)
-
+	emitCdBackNote(stdout, invocationCwd, root)
 	return nil
 }

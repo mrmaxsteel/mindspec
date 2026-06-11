@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -116,22 +117,27 @@ The bead ID is required as the first argument.`,
 			os.Exit(1)
 		}
 
-		fmt.Print(complete.FormatResult(result))
-
-		// Instruct-tail: emit guidance for the new mode
-		fmt.Println() // separator between summary and guidance
-		if err := emitInstruct(root); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
-		}
-
-		// Spec 092 Req 4: when the shell's invocation directory was
-		// removed by the terminal mutation (complete run from inside the
-		// bead worktree it deletes), the cd-back NOTE is the LAST line
-		// of stdout.
-		emitCdBackNote(os.Stdout, invocationCwd, root)
-
+		completeTail(os.Stdout, os.Stderr, root, invocationCwd, result, emitInstruct)
 		return nil
 	},
+}
+
+// completeTail is the production tail of `mindspec complete` after a
+// successful Run: result summary, instruct guidance, then the spec 092
+// Req 4 cd-back NOTE as the LAST line of stdout (the bead worktree the
+// shell sat in may have been removed by the terminal mutation).
+// Extracted (spec 092 panel R3-2) so the last-line ordering is pinned
+// by a unit test against the real wiring, not a simulation.
+func completeTail(stdout, stderr io.Writer, root, invocationCwd string, result *complete.Result, instructFn func(string) error) {
+	fmt.Fprint(stdout, complete.FormatResult(result))
+
+	// Instruct-tail: emit guidance for the new mode
+	fmt.Fprintln(stdout) // separator between summary and guidance
+	if err := instructFn(root); err != nil {
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+	}
+
+	emitCdBackNote(stdout, invocationCwd, root)
 }
 
 func init() {
