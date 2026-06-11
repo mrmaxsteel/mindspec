@@ -357,12 +357,14 @@ func saveAndRestore(t *testing.T) {
 	origMergeMeta := implMergeMetadataFn
 	origGitEmail := implGitUserEmailFn
 	origPhaseMeta := implPhaseMetadataFn
+	origGetwd := implGetwdFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
 		implMergeMetadataFn = origMergeMeta
 		implGitUserEmailFn = origGitEmail
 		implPhaseMetadataFn = origPhaseMeta
+		implGetwdFn = origGetwd
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into approve-impl) shells to
@@ -389,6 +391,10 @@ func saveAndRestore(t *testing.T) {
 	implGitUserEmailFn = func() string { return "test@example.invalid" }
 	// Spec 092 Bead 3: phase reconcile/done writes inert by default.
 	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
+	// Spec 092 Req 8: pin the context-line cwd so the asserted worktree
+	// kind does not depend on where `go test` runs (the repo checkout
+	// itself may be a bead worktree).
+	implGetwdFn = func() (string, error) { return "/testcwd", nil }
 }
 
 func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
@@ -473,6 +479,26 @@ func TestApproveImpl_OpenBeads(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bead-bbb") || !strings.Contains(err.Error(), "in_progress") {
 		t.Errorf("error should mention open bead: %v", err)
+	}
+	// Spec 092 Reqs 8/12 (mindspec-tjat): the plan-bead gate failure
+	// carries the worktree-context line and ends with a copy-pastable
+	// recovery line naming the open bead. This is the per-site
+	// recovery-convention test for this gate (Req 21 mirror — see
+	// internal/guard/recovery_convention_test.go).
+	msg := err.Error()
+	wantCtx := "you are in the main worktree (/testcwd); this check evaluated " + tmp
+	if !strings.Contains(msg, wantCtx) {
+		t.Errorf("plan-bead gate failure missing context line %q: %v", wantCtx, msg)
+	}
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("plan-bead gate failure must end with a recovery line (Req 12/21): %v", msg)
+	}
+	lines := strings.Split(msg, "\n")
+	if got, want := lines[len(lines)-1], "recovery: mindspec complete bead-bbb"; got != want {
+		t.Errorf("final recovery line = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
+		t.Errorf("context line must immediately precede the final recovery line: %v", msg)
 	}
 }
 
@@ -1204,6 +1230,18 @@ func TestApproveImpl_PhaseGateFailureNamesBothPhasesWithRecovery(t *testing.T) {
 	}
 	if !guard.HasFinalRecoveryLine(msg) {
 		t.Errorf("phase-gate failure must end with a recovery line (Req 12/21): %v", msg)
+	}
+	// Spec 092 Req 8 (mindspec-tjat): the failure carries the worktree-
+	// context line — where the command ran (pinned /testcwd → main kind)
+	// and the repo whose state the gate evaluated — preceding the final
+	// recovery line (Req 12 ordering).
+	wantCtx := "you are in the main worktree (/testcwd); this check evaluated " + tmp
+	if !strings.Contains(msg, wantCtx) {
+		t.Errorf("phase-gate failure missing context line %q: %v", wantCtx, msg)
+	}
+	lines := strings.Split(msg, "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
+		t.Errorf("context line must immediately precede the final recovery line: %v", msg)
 	}
 	if strings.Contains(msg, "bd update --metadata") {
 		t.Errorf("emitted message contains banned raw metadata command (Req 19): %v", msg)
