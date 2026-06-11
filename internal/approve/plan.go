@@ -94,7 +94,13 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		planPath := filepath.Join(specDir, "plan.md")
 		if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
 			if !specIsApproved(specDir, specID) {
-				return nil, fmt.Errorf("spec %s has not been approved yet — no plan.md exists.\nRun: mindspec approve spec %s", specID, specID)
+				// Spec 092 Req 12 (integration finding INT-2): canonical
+				// noun-verb form with a machine-greppable recovery line —
+				// never the deprecated `mindspec approve spec` order.
+				return nil, guard.NewFailure(
+					fmt.Sprintf("spec %s has not been approved yet — no plan.md exists", specID),
+					fmt.Sprintf("mindspec spec approve %s", specID),
+				)
 			}
 		}
 		return nil, planValidationFailure(specID, vr)
@@ -438,8 +444,16 @@ func beadCreateFailure(specID, heading string, created []string, createArgs []st
 	}
 	fmt.Fprintf(&b, "\nbeads already created before the failure (PARTIAL set — the plan's remaining beads do not exist): %s", strings.Join(created, ", "))
 	b.WriteString("\nremove the partial set first, then re-run plan approve (it recreates the full set)")
+	// Integration finding INT-1: the recovery must CONVERGE. `bd close`
+	// left closed children behind, which handleExistingBeads hard-rejects
+	// on the re-run — a guaranteed dead end. `bd delete --force` actually
+	// removes the partial set (it works on open AND closed beads, so even
+	// a previously-pasted `bd close` still converges); `--force` is
+	// mandatory because without it bd 1.0.4 only previews the deletion.
+	// The IDs are by construction the partial set this failure created
+	// (named state, HC-5-safe).
 	return guard.NewFailure(b.String(),
-		fmt.Sprintf("bd close %s --reason \"partial create from failed plan approve\"", strings.Join(created, " ")),
+		fmt.Sprintf("bd delete %s --force", strings.Join(created, " ")),
 		fmt.Sprintf("mindspec plan approve %s", specID),
 	)
 }
@@ -465,7 +479,9 @@ func largestPayloadField(createArgs []string) (string, int) {
 }
 
 // handleExistingBeads checks if beads already exist under the epic (re-approval).
-// If any are in_progress or closed, returns an error. If all are open, closes them.
+// If any are in_progress or closed, returns an error — the Spec 074
+// supersede-safety rejection, with status-appropriate recovery lines per
+// spec 092 Req 12 (integration finding INT-1). If all are open, closes them.
 func handleExistingBeads(parentID, planContent string) error {
 	out, err := planListJSONFn("--parent", parentID)
 	if err != nil {
@@ -480,11 +496,23 @@ func handleExistingBeads(parentID, planContent string) error {
 		return nil // No existing children — first approval
 	}
 
-	// Check for in-progress or closed beads
+	// Check for in-progress or closed beads. The rejection keeps its
+	// teeth (Spec 074 supersede safety: closed children can be
+	// legitimately completed work that a re-approve must not silently
+	// supersede), but each dead end ends with a recovery line (spec 092
+	// Req 12, integration finding INT-1).
 	for _, c := range children {
-		status := strings.ToLower(c.Status)
-		if status == "in_progress" || status == "closed" {
-			return fmt.Errorf("cannot re-approve plan: bead %s is %s — close or complete active work first", c.ID, c.Status)
+		switch strings.ToLower(c.Status) {
+		case "in_progress":
+			return guard.NewFailure(
+				fmt.Sprintf("cannot re-approve plan: bead %s is in_progress — complete the active work first, then re-run plan approve", c.ID),
+				fmt.Sprintf("mindspec complete %s", c.ID),
+			)
+		case "closed":
+			return guard.NewFailure(
+				fmt.Sprintf("cannot re-approve plan: bead %s is closed — a closed child is either completed work under this epic (stop: re-approving would supersede a done record; reconsider the re-approve) or a leftover from a failed partial bead create. ONLY in the partial-create case, delete the leftover and re-run plan approve", c.ID),
+				fmt.Sprintf("bd delete %s --force", c.ID),
+			)
 		}
 	}
 

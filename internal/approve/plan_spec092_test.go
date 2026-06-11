@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -25,6 +26,32 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
+
+// finalRecoveryCommand extracts the command from the FINAL `recovery: `
+// line of a guard-failure message (the line agents paste verbatim),
+// failing the test when the message does not end with one.
+func finalRecoveryCommand(t *testing.T, msg string) string {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, guard.RecoveryPrefix) {
+		t.Fatalf("final line is not a recovery line: %q in:\n%s", last, msg)
+	}
+	return strings.TrimPrefix(last, guard.RecoveryPrefix)
+}
+
+// assertNoBannedRecoveryLines applies the Req 19 per-site check to every
+// recovery line in msg (Bead-9 punch-list pattern).
+func assertNoBannedRecoveryLines(t *testing.T, msg string) {
+	t.Helper()
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			if cmd := strings.TrimPrefix(line, guard.RecoveryPrefix); guard.IsBannedRecoveryCommand(cmd) {
+				t.Errorf("recovery command %q is banned (Req 19); got:\n%s", cmd, msg)
+			}
+		}
+	}
+}
 
 // writeLargeADRFixtures creates a canonical-layout project root with
 // n ADRs, each carrying a LARGE Decision section, plus a spec dir.
@@ -205,9 +232,12 @@ func TestCreateImplementationBeads_MidBatchFailureContainment(t *testing.T) {
 	if !strings.Contains(msg, "likely oversized payload: --") || !strings.Contains(msg, "bytes") {
 		t.Errorf("error must name the offending field and its byte size for Error 1105; got:\n%s", msg)
 	}
-	// Recovery: remove the partial set, then re-run plan approve.
-	if !strings.Contains(msg, "recovery: bd close test-bead-1 test-bead-2") {
-		t.Errorf("recovery must remove the partial set; got:\n%s", msg)
+	// Recovery: remove the partial set (INT-1: `bd delete --force`, the
+	// only command that actually removes beads and thus converges — and
+	// --force is mandatory, a bare `bd delete` is a preview-only no-op),
+	// then re-run plan approve.
+	if !strings.Contains(msg, "recovery: bd delete test-bead-1 test-bead-2 --force") {
+		t.Errorf("recovery must remove the partial set via bd delete --force; got:\n%s", msg)
 	}
 	if !strings.Contains(msg, "recovery: mindspec plan approve 042-test") {
 		t.Errorf("recovery must re-run plan approve; got:\n%s", msg)
@@ -378,5 +408,204 @@ None
 	}
 	if !strings.Contains(msg, "recovery: mindspec plan approve "+specID) {
 		t.Errorf("recovery must re-run plan approve; got:\n%s", msg)
+	}
+}
+
+// TestCreateImplementationBeads_DeleteRecoveryConverges is the INT-1
+// convergence pin: the Req 13b recovery round-trip must actually WORK,
+// not just read well.
+//
+//	(a) a mid-batch create failure leaves a partial set and emits
+//	    `recovery: bd delete <ids> --force`;
+//	(b) the OLD `bd close` recovery's outcome — the partial set left
+//	    CLOSED under the epic — dead-ends the re-run in
+//	    handleExistingBeads, and that dead end itself ends with a
+//	    recovery line (no recovery-less wall);
+//	(c) the NEW recovery's outcome — the partial set DELETED, children
+//	    listing empty — lets the re-run succeed and create the full set.
+func TestCreateImplementationBeads_DeleteRecoveryConverges(t *testing.T) {
+	tmp := t.TempDir()
+	planPath := filepath.Join(tmp, "plan.md")
+	if err := os.WriteFile(planPath, []byte(midBatchPlan), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	// Children-listing seam: mutable state standing in for the bd DB.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	listState := []byte(`[]`) // first approval: no children yet
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		return listState, nil
+	}
+
+	// bd-create fake: fail the third create while failThird is set.
+	origRun := planRunBDFn
+	defer func() { planRunBDFn = origRun }()
+	calls := 0
+	failThird := true
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			calls++
+			if failThird && calls == 3 {
+				return nil, fmt.Errorf("running bd create: Error 1105 (HY000): serialized transaction of size 70000 bytes exceeds limit")
+			}
+			return []byte(fmt.Sprintf(`{"id":"test-bead-%d"}`, calls)), nil
+		}
+		return nil, nil // dep add etc.
+	}
+
+	// (a) First run: mid-batch failure → partial set + delete recovery.
+	partial, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err == nil {
+		t.Fatal("expected a mid-batch containment error, got nil")
+	}
+	if len(partial) != 2 {
+		t.Fatalf("expected a 2-bead partial set, got %v", partial)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "recovery: bd delete test-bead-1 test-bead-2 --force") {
+		t.Fatalf("recovery must delete the partial set with --force; got:\n%s", msg)
+	}
+	assertNoBannedRecoveryLines(t, msg)
+
+	// (b) The old `bd close` outcome: partial set CLOSED under the epic.
+	// The re-run is still rejected (Spec 074 supersede safety keeps its
+	// teeth), but the rejection now carries its own recovery line.
+	listState = []byte(`[{"id":"test-bead-1","status":"closed"},{"id":"test-bead-2","status":"closed"}]`)
+	if _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err == nil {
+		t.Fatal("re-run with closed leftovers must still be rejected")
+	} else if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("the closed-leftovers dead end must end with a `recovery:` line; got:\n%s", err)
+	}
+
+	// (c) Simulate the pasted `bd delete test-bead-1 test-bead-2 --force`:
+	// the partial set is GONE, so the children listing is empty. The
+	// re-run must now SUCCEED and create the full set.
+	listState = []byte(`[]`)
+	failThird = false
+	calls = 0
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	if err != nil {
+		t.Fatalf("re-run after the emitted recovery must succeed, got: %v", err)
+	}
+	if len(beadIDs) != 3 {
+		t.Fatalf("re-run must create the FULL set (3 beads), got %v", beadIDs)
+	}
+}
+
+// TestHandleExistingBeads_DeadEndsEndWithRecovery is the second half of
+// INT-1: the supersede-safety rejection keeps rejecting closed and
+// in_progress children, but each rejection ends with a status-appropriate,
+// non-banned recovery line naming the blocking bead (Req 12 + HC-5).
+func TestHandleExistingBeads_DeadEndsEndWithRecovery(t *testing.T) {
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+
+	t.Run("closed child", func(t *testing.T) {
+		planListJSONFn = func(args ...string) ([]byte, error) {
+			return []byte(`[{"id":"bead-done","status":"closed"}]`), nil
+		}
+		err := handleExistingBeads("epic-123", "version: 1\n")
+		if err == nil {
+			t.Fatal("closed child must still be rejected")
+		}
+		msg := err.Error()
+		if !guard.HasFinalRecoveryLine(msg) {
+			t.Fatalf("rejection must end with a `recovery:` line; got:\n%s", msg)
+		}
+		cmd := finalRecoveryCommand(t, msg)
+		if cmd != "bd delete bead-done --force" {
+			t.Errorf("closed-child recovery must name the bead: want %q, got %q", "bd delete bead-done --force", cmd)
+		}
+		if guard.IsBannedRecoveryCommand(cmd) {
+			t.Errorf("recovery command %q is banned (Req 19)", cmd)
+		}
+		// The prose names BOTH ways into this state, so an agent only
+		// deletes in the partial-create case.
+		if !strings.Contains(msg, "completed work") || !strings.Contains(msg, "partial") {
+			t.Errorf("prose must distinguish completed work from partial-create leftovers; got:\n%s", msg)
+		}
+	})
+
+	t.Run("in_progress child", func(t *testing.T) {
+		planListJSONFn = func(args ...string) ([]byte, error) {
+			return []byte(`[{"id":"bead-active","status":"in_progress"}]`), nil
+		}
+		err := handleExistingBeads("epic-123", "version: 1\n")
+		if err == nil {
+			t.Fatal("in_progress child must still be rejected")
+		}
+		msg := err.Error()
+		if !guard.HasFinalRecoveryLine(msg) {
+			t.Fatalf("rejection must end with a `recovery:` line; got:\n%s", msg)
+		}
+		cmd := finalRecoveryCommand(t, msg)
+		if cmd != "mindspec complete bead-active" {
+			t.Errorf("in_progress recovery must complete the active bead: want %q, got %q", "mindspec complete bead-active", cmd)
+		}
+		if guard.IsBannedRecoveryCommand(cmd) {
+			t.Errorf("recovery command %q is banned (Req 19)", cmd)
+		}
+	})
+}
+
+// deprecatedApproveOrder mirrors Bead 8's negative regex from
+// internal/instruct/instruct_test.go: the deprecated verb-noun gate
+// order (`mindspec approve ...` / `approve <noun>`) must not appear.
+var deprecatedApproveOrder = regexp.MustCompile(`(?i)mindspec\s+approve\b|\bapprove\s+(spec|plan|impl)\b`)
+
+// TestApprovePlan_MissingPlanUnapprovedSpec_CanonicalRecovery is the
+// INT-2 per-site pin: plan-approve against a spec that was never
+// approved (no plan.md) must hint the CANONICAL `mindspec spec approve
+// <id>` via a Req 12 recovery line — never the deprecated
+// `mindspec approve spec` order or a bare `Run:` hint.
+func TestApprovePlan_MissingPlanUnapprovedSpec_CanonicalRecovery(t *testing.T) {
+	tmp := t.TempDir()
+	specID := "042-test"
+	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Draft spec, NO plan.md — the wrong-subcommand path.
+	specContent := "---\nstatus: Draft\n---\n\n# Spec\n"
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specContent), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	// No epic anywhere: EnsureMigrated no-ops and specIsApproved falls
+	// back to the Draft frontmatter.
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[]`), nil
+	})
+	defer restoreList()
+	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[]`), nil
+	})
+	defer restoreRunBD()
+
+	_, err := ApprovePlan(tmp, specID, "tester", nil)
+	if err == nil {
+		t.Fatal("expected the unapproved-spec error, got nil")
+	}
+	msg := err.Error()
+
+	if !strings.Contains(msg, "has not been approved yet") {
+		t.Errorf("error must explain the spec is unapproved; got:\n%s", msg)
+	}
+	// (a) Canonical noun-verb hint.
+	if !strings.Contains(msg, "mindspec spec approve "+specID) {
+		t.Errorf("error must hint the canonical `mindspec spec approve %s`; got:\n%s", specID, msg)
+	}
+	// (b) Deprecated verb-noun order must NOT appear.
+	if deprecatedApproveOrder.MatchString(msg) {
+		t.Errorf("error must not use the deprecated `approve spec` order; got:\n%s", msg)
+	}
+	// (c) Req 12 final recovery line.
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("error must end with a `recovery:` line; got:\n%s", msg)
+	}
+	// (d) The extracted recovery command is not banned.
+	if cmd := finalRecoveryCommand(t, msg); guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("recovery command %q is banned (Req 19)", cmd)
 	}
 }
