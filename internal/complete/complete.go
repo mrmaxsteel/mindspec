@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -32,6 +33,11 @@ var (
 	findEpicForBeadFn       = phase.FindEpicForBead
 	completeMergeMetadataFn = bead.MergeMetadata
 	gitUserEmailFn          = bead.GitUserEmail
+	// checkDirtyTreeFn is the ADR-0025 artifact-aware tree classification
+	// shared with `mindspec next` (spec 092 Req 6, DQ-2: direct reuse of
+	// next's classifier — internal/complete already imports internal/next).
+	// Tests swap this to simulate artifact/user dirt without a real repo.
+	checkDirtyTreeFn = next.CheckDirtyTreeDetail
 	// adrCreateWithIDFn is the package-level seam for the placeholder-
 	// ADR creation step in the --supersede-adr flow. Tests swap this
 	// to avoid writing real ADR files when only asserting flow
@@ -174,16 +180,52 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 3. Check clean tree
+	// 3. Artifact-aware clean-tree check (spec 092 Reqs 6/7, ADR-0025,
+	// mindspec-i4ad). The classification is the exact one `mindspec next`
+	// uses (next.CheckDirtyTreeDetail, DQ-2): artifact dirt
+	// (.beads/issues.jsonl) is normalized via `bd export` and never
+	// blocks; only user-authored dirt blocks. checkPath is passed as BOTH
+	// repoRoot and cwd so the normalization targets the same checkout
+	// whose status is being classified (bead.Export writes
+	// <workdir>/.beads/issues.jsonl).
 	checkPath := wtPath
 	if checkPath == "" {
 		checkPath = root // No worktree — check main tree
 	}
-	if err := exec.IsTreeClean(checkPath); err != nil {
+	artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(checkPath, checkPath)
+	if dirtErr != nil {
+		return nil, fmt.Errorf("checking working tree: %w", dirtErr)
+	}
+	if len(userDirt) > 0 {
+		// User dirt blocks even when artifact dirt coexists — the
+		// artifact handling below must never mask user-authored changes.
+		msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
+			strings.Join(userDirt, "\n  "))
 		if wtPath == "" {
-			return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
+			return nil, guard.NewFailure(
+				msg+"\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`",
+				"mindspec next",
+			)
 		}
-		return nil, fmt.Errorf("%w\nhint: use `mindspec complete %s \"describe what you did\"` to auto-commit", err, beadID)
+		// Existing auto-commit hint, now a Req 12 recovery line.
+		return nil, guard.NewFailure(msg,
+			fmt.Sprintf("mindspec complete %s \"describe what you did\"", beadID))
+	}
+	if len(artifactDirt) > 0 {
+		// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
+		// a pre-commit hook re-exported the JSONL during the auto-commit
+		// above) is COMMITTED, not ignored — as a follow-up commit, never
+		// an amend — so the bead→spec merge below operates on a genuinely
+		// clean tree and field workarounds (--no-verify, core.hooksPath)
+		// are never necessary. The commit stays behind the executor
+		// (ADR-0030); CommitAll re-exports the JSONL from Dolt before
+		// staging (ADR-0025 §3), so the committed bytes match Dolt.
+		if err := exec.CommitAll(checkPath, "chore: sync beads artifact"); err != nil {
+			return nil, fmt.Errorf("committing beads artifact sync: %w", err)
+		}
+		// HC-3: self-heal is silent-on-success save one structured line.
+		fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
+			strings.Join(artifactDirt, ","))
 	}
 
 	// 3.5. Spec 086 (F2) doc-sync enforcement gate. Computes the

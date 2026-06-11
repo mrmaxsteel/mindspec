@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -27,6 +28,7 @@ func saveAndRestore(t *testing.T) {
 	origFetchBeadByID := fetchBeadByIDFn
 	origMergeMeta := completeMergeMetadataFn
 	origGitEmail := gitUserEmailFn
+	origCheckDirty := checkDirtyTreeFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -38,6 +40,7 @@ func saveAndRestore(t *testing.T) {
 		fetchBeadByIDFn = origFetchBeadByID
 		completeMergeMetadataFn = origMergeMeta
 		gitUserEmailFn = origGitEmail
+		checkDirtyTreeFn = origCheckDirty
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -58,6 +61,12 @@ func saveAndRestore(t *testing.T) {
 	// default so the existing tests don't shell out to bd or git.
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
 	gitUserEmailFn = func() string { return "test@example.invalid" }
+	// Spec 092 Reqs 6/7: the artifact-aware tree classification shells
+	// out to git/bd in production (next.CheckDirtyTreeDetail); default to
+	// a clean tree so existing tests stay hermetic.
+	checkDirtyTreeFn = func(repoRoot, cwd string) (artifactDirt, userDirt []string, err error) {
+		return nil, nil, nil
+	}
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
@@ -245,7 +254,9 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.IsTreeCleanErr = fmt.Errorf("workspace has uncommitted changes:\n M modified-file.go")
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return nil, []string{"modified-file.go"}, nil
+	}
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 
@@ -259,8 +270,24 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for dirty worktree")
 	}
-	if !strings.Contains(err.Error(), "uncommitted changes") {
-		t.Errorf("error should mention uncommitted changes: %v", err)
+	if !strings.Contains(err.Error(), "uncommitted user changes") {
+		t.Errorf("error should mention uncommitted user changes: %v", err)
+	}
+	// Req 6: the block message names the dirty paths.
+	if !strings.Contains(err.Error(), "modified-file.go") {
+		t.Errorf("error should name the dirty path: %v", err)
+	}
+	// Req 12: guard failure ends with a recovery line.
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("user-dirt block must end with a recovery line, got: %v", err)
+	}
+	// Honest behavior: a blocked completion mutates nothing — no
+	// artifact-sync commit, no bead close, no merge.
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("expected no CommitAll calls on user-dirt block, got %d", len(calls))
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead calls on user-dirt block, got %d", len(calls))
 	}
 }
 
@@ -270,7 +297,9 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.IsTreeCleanErr = fmt.Errorf("workspace has uncommitted changes:\n M hello.go")
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return nil, []string{"hello.go"}, nil
+	}
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
@@ -281,6 +310,12 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mindspec next") {
 		t.Fatalf("expected recovery hint to mention `mindspec next`, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "hello.go") {
+		t.Errorf("error should name the dirty path: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("no-worktree user-dirt block must end with a recovery line, got: %v", err)
 	}
 }
 
@@ -776,7 +811,9 @@ func TestRun_DirtyTreeHintIncludesBeadID(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.IsTreeCleanErr = fmt.Errorf("workspace has uncommitted changes")
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return nil, []string{"some-user-file.go"}, nil
+	}
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
@@ -789,8 +826,226 @@ func TestRun_DirtyTreeHintIncludesBeadID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for dirty tree")
 	}
+	// The existing auto-commit hint, now the Req 12 recovery line.
 	if !strings.Contains(err.Error(), "mindspec complete my-bead") {
 		t.Errorf("hint should include bead ID, got: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("auto-commit hint must be a final recovery line, got: %v", err)
+	}
+}
+
+// --- Spec 092 Reqs 6/7 (mindspec-i4ad): artifact-aware clean-tree check ---
+
+// TestRun_ArtifactOnlyDirtSucceeds: when the only dirt surviving the
+// ADR-0025 normalization is .beads/issues.jsonl, complete.Run folds it
+// into a follow-up `chore: sync beads artifact` commit (via the
+// executor) and proceeds — never blocking, never requiring --no-verify.
+func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	var gotRepoRoot, gotCwd string
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		gotRepoRoot, gotCwd = repoRoot, cwd
+		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("artifact-only dirt must never block completion, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+
+	// The normalization must target the same checkout being status-checked.
+	if gotRepoRoot != "/tmp/worktree-bead-1" || gotCwd != "/tmp/worktree-bead-1" {
+		t.Errorf("classification paths: got repoRoot=%q cwd=%q, want both the bead worktree", gotRepoRoot, gotCwd)
+	}
+
+	// Req 7: exactly one follow-up commit, through the executor, at the
+	// bead worktree, with the DQ-4 message.
+	commitCalls := mock.CallsTo("CommitAll")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 CommitAll (artifact sync), got %d", len(commitCalls))
+	}
+	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
+		t.Errorf("artifact-sync commit path: got %q, want bead worktree", path)
+	}
+	if msg := commitCalls[0].Args[1].(string); msg != "chore: sync beads artifact" {
+		t.Errorf("artifact-sync commit msg: got %q, want %q", msg, "chore: sync beads artifact")
+	}
+
+	// The terminal mutation still ran.
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 1 {
+		t.Fatalf("expected 1 CompleteBead call, got %d", len(calls))
+	}
+}
+
+// TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit: the i4ad field
+// case — a pre-commit hook re-exports the JSONL DURING the auto-commit,
+// re-dirtying the tree immediately after. The residual artifact dirt is
+// folded into a follow-up commit (DQ-4: follow-up, never amend), so the
+// completion succeeds with two commits: impl(...) then the chore sync.
+func TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		// Post-auto-commit snapshot: the hook's re-export survives
+		// normalization (Dolt state changed since the commit's export).
+		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	_, err := Run(root, "bead-1", "", "implement the thing", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("post-auto-commit artifact re-export must never block, got: %v", err)
+	}
+
+	commitCalls := mock.CallsTo("CommitAll")
+	if len(commitCalls) != 2 {
+		t.Fatalf("expected 2 CommitAll calls (auto-commit + follow-up sync), got %d", len(commitCalls))
+	}
+	first := commitCalls[0].Args[1].(string)
+	second := commitCalls[1].Args[1].(string)
+	if !strings.Contains(first, "impl(bead-1)") || !strings.Contains(first, "implement the thing") {
+		t.Errorf("first commit should be the auto-commit, got %q", first)
+	}
+	if second != "chore: sync beads artifact" {
+		t.Errorf("second commit should be the follow-up artifact sync, got %q", second)
+	}
+}
+
+// TestRun_ArtifactAndUserDirtBlocks: when BOTH artifact and user dirt
+// exist, user dirt blocks — the artifact handling must not mask it. No
+// artifact-sync commit, no terminal mutation.
+func TestRun_ArtifactAndUserDirtBlocks(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return []string{".beads/issues.jsonl"}, []string{"main.go", "internal/foo/bar.go"}, nil
+	}
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected user dirt to block even alongside artifact dirt")
+	}
+	for _, p := range []string{"main.go", "internal/foo/bar.go"} {
+		if !strings.Contains(err.Error(), p) {
+			t.Errorf("block message should name dirty path %q, got: %v", p, err)
+		}
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("user-dirt block must end with a recovery line, got: %v", err)
+	}
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("artifact handling must not run when user dirt blocks; got %d CommitAll calls", len(calls))
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on block, got %d", len(calls))
+	}
+}
+
+// TestRun_ArtifactSyncCommitFailureAborts: HC-4 — if the follow-up
+// artifact-sync commit fails, the command fails BEFORE the terminal
+// mutation (no bead close, no merge).
+func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+	mock.CommitAllErr = fmt.Errorf("commit hook exploded")
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected error when the artifact-sync commit fails")
+	}
+	if !strings.Contains(err.Error(), "committing beads artifact sync") {
+		t.Errorf("error should name the artifact-sync step, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the pre-terminal artifact sync fails")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call, got %d", len(calls))
+	}
+}
+
+// TestRun_DirtyTreeCheckErrorPropagates: a classification failure (git
+// status unavailable, bd export failure) aborts before any mutation.
+func TestRun_DirtyTreeCheckErrorPropagates(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return nil, nil, fmt.Errorf("normalizing beads export: bd export in /tmp: boom")
+	}
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected classification error to propagate")
+	}
+	if !strings.Contains(err.Error(), "checking working tree") {
+		t.Errorf("error should be wrapped as a working-tree check failure, got: %v", err)
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call, got %d", len(calls))
 	}
 }
 
