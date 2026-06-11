@@ -118,6 +118,17 @@ the surgery). These name the banned command in order to ban it and are exempt
 from the grep; no emission channel (error message, recovery line, template
 guidance, help text) teaches it.
 
+**Amendment (stop #2 adjudication)**: exemption (i) is RETIRED — Bead 3's
+panel minor R1-M1 gained empirical teeth when runs 1a/1b showed the named
+string seeding the banned behavior (negation does not remove salience). Both
+agent-RENDERED mentions (implement.md:71 Forbidden-Actions line and the :97
+completion-section line, the only two found by a full grep over emitted/
+rendered text) were reworded to "Never edit phase metadata directly — if
+phase state looks wrong, run `mindspec repair phase <spec-id>`", which names
+only the sanctioned command. Exemptions (ii) and (iii) stand: the guard
+panic is dev-time enforcement never emitted on any reachable path, and the
+harness mentions are test code, not rendered output.
+
 ### B16 — Defensive abort-plumbing branches: residual note
 
 Covered this bead: `abortMergeState` no-MERGE_HEAD early return
