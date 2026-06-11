@@ -383,12 +383,12 @@ func TestValidateDivergenceProposedCitedErrorsAtImplApprove(t *testing.T) {
 func TestCheckADRDivergenceLaneSelection(t *testing.T) {
 	root, specDir, mock := proposedCoverageFixture(t)
 
-	rImpl, _ := CheckADRDivergence(root, "BASE", mock, specDir, "")
+	rImpl, _ := CheckADRDivergence(root, "BASE", mock, specDir, "", "")
 	if !rImpl.HasFailures() {
 		t.Errorf("beadID==\"\" (impl backstop) should fail on Proposed-only coverage, got %+v", rImpl.Issues)
 	}
 
-	rBead, _ := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1")
+	rBead, _ := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "")
 	if rBead.HasFailures() {
 		t.Errorf("non-empty beadID (bead-complete) should not fail on Proposed-only coverage, got %+v", rBead.Issues)
 	}
