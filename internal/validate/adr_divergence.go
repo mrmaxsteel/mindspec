@@ -18,9 +18,15 @@ import (
 //     impacted-domains; it returns a *Result with a single
 //     `adr-divergence-load` error and nil findings.
 //   - When `beadID` is non-empty (complete.Run path) the diff range is
-//     base..HEAD — the bead's commits relative to the spec branch.
-//     Proposed-only ADR coverage is an advisory WARNING on this lane
-//     (panel condition C1 on mindspec-53qx).
+//     base..headRef where headRef is the bead branch tip the caller
+//     resolved (or the canonical workspace.BeadBranch(beadID) when
+//     headRef is empty). The range is anchored to the BEAD's work —
+//     never the ambient HEAD of whatever checkout the process runs
+//     from, which measured main-side drift from the repo root (false
+//     blocks, mindspec-aqey) and an empty range from the spec worktree
+//     (vacuous passes, mindspec-perm). Proposed-only ADR coverage is
+//     an advisory WARNING on this lane (panel condition C1 on
+//     mindspec-53qx).
 //   - When `beadID` is empty (approve.ImplOptions impl backstop) the
 //     diff range is base..<spec branch tip>; the spec branch is
 //     derived from filepath.Base(specDir) via workspace.SpecBranch.
@@ -35,6 +41,7 @@ func CheckADRDivergence(
 	exec executor.Executor,
 	specDir string,
 	beadID string,
+	headRef string,
 ) (*Result, []DivergenceFinding) {
 	r := &Result{SubCommand: "adr-divergence", TargetID: beadID}
 	if specDir == "" {
@@ -42,12 +49,18 @@ func CheckADRDivergence(
 		return r, nil
 	}
 
-	headRef := "HEAD"
 	implApprove := beadID == ""
-	if implApprove {
-		// Impl backstop path: scan the full spec branch tip vs the
-		// caller-supplied base (typically merge-base with main).
-		headRef = workspace.SpecBranch(filepath.Base(specDir))
+	if headRef == "" {
+		if implApprove {
+			// Impl backstop path: scan the full spec branch tip vs the
+			// caller-supplied base (typically merge-base with main).
+			headRef = workspace.SpecBranch(filepath.Base(specDir))
+		} else {
+			// Per-bead path: default to the canonical bead branch so
+			// the lane is self-anchoring even when the caller does not
+			// resolve a head ref explicitly.
+			headRef = workspace.BeadBranch(beadID)
+		}
 	}
 
 	return ValidateDivergence(exec, root, specDir, beadID, diffRef, headRef, implApprove)

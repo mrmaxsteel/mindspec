@@ -13,7 +13,7 @@ import (
 // SubCommand label is preserved across the transition from the spec-086
 // stub (HC-3 traceability).
 func TestCheckADRDivergenceEmptySpecDir(t *testing.T) {
-	r, findings := CheckADRDivergence("/tmp/root", "HEAD~1", &executor.MockExecutor{}, "", "")
+	r, findings := CheckADRDivergence("/tmp/root", "HEAD~1", &executor.MockExecutor{}, "", "", "")
 	if r == nil {
 		t.Fatal("CheckADRDivergence returned nil *Result")
 	}
@@ -52,7 +52,7 @@ func TestCheckADRDivergenceReturnsPopulated(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-zy4u.2")
+	r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-zy4u.2", "")
 	if r == nil {
 		t.Fatal("nil result")
 	}

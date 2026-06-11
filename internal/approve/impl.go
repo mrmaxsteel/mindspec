@@ -230,7 +230,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// bypass the gate; `--allow-doc-skew` does NOT (panel CONSENSUS
 	// rev 6). The findings slice seeds the supersede placeholder's
 	// Domains field structurally (revision 2 — no string parsing).
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "")
+	// headRef "" + beadID "" → the lane derives the spec branch tip
+	// itself; the measured refs stay main-merge-base..spec-branch-tip.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "", "")
 
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested so the new file exists on disk even if a downstream

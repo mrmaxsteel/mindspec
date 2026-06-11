@@ -1758,3 +1758,163 @@ func TestFormatResult_ImplementIncludesCdHint(t *testing.T) {
 		t.Errorf("cd hint should be omitted when no worktree was removed; got:\n%s", out)
 	}
 }
+
+// --- mindspec-aqey / mindspec-perm: per-bead gate anchoring tests ---
+//
+// The per-bead doc-sync + ADR-divergence gates must measure
+// merge-base(specBranch, beadBranch)..beadBranch — the bead's own work
+// — regardless of which checkout `mindspec complete` runs from. The
+// old code measured MergeBase(specBranch, HEAD) and then diffed
+// relative to the ambient checkout, which was wrong on BOTH sides:
+// from the repo root the range was main-side drift (false blocks,
+// mindspec-aqey — hit live twice on 2026-06-11 at spec-092 Bead 9);
+// from the spec worktree the range was empty (vacuous passes,
+// mindspec-perm — every spec-092 bead passed this way).
+
+// TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock pins the
+// mindspec-aqey false-block case: the bead's own diff is clean, but
+// every OTHER measurable range (the ambient HEAD / working-tree drift
+// the old code measured) is full of doc-sync violations. The gates
+// must pass, and every gate diff must be exactly
+// fork-sha..bead/bead-1.
+func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	// Reuse-resolution path: the bead worktree exists and carries the
+	// bead branch; beadHead must come from this entry.
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
+		if base == "fork-sha" && head == "bead/bead-1" {
+			// The bead's own diff: clean (no files at all).
+			return nil, nil
+		}
+		// ANY other range — notably the old working-tree-vs-base and
+		// base..HEAD measurements — sees main-side drift that would
+		// trip both gates (doc-less source change). If the gates
+		// consult such a range, they false-block and this test fails.
+		return []string{"README.md", "SECURITY.md", "internal/contextpack/drift.go"}, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("gates must pass when the BEAD diff is clean despite main-side drift (mindspec-aqey), got: %v", err)
+	}
+
+	// The fork point must be computed against the bead branch, never HEAD.
+	mbCalls := mock.CallsTo("MergeBase")
+	if len(mbCalls) == 0 {
+		t.Fatal("expected a MergeBase call for the per-bead gates")
+	}
+	for _, c := range mbCalls {
+		if c.Args[0] != "spec/086-doc-sync" || c.Args[1] != "bead/bead-1" {
+			t.Errorf("MergeBase(%v, %v): per-bead gates must anchor to (spec/086-doc-sync, bead/bead-1)", c.Args[0], c.Args[1])
+		}
+	}
+
+	// Every gate diff must be the bead range — no ambient-HEAD or
+	// working-tree measurement may remain.
+	cfCalls := mock.CallsTo("ChangedFiles")
+	if len(cfCalls) == 0 {
+		t.Fatal("expected ChangedFiles calls from the gates")
+	}
+	for _, c := range cfCalls {
+		if c.Args[0] != "fork-sha" || c.Args[1] != "bead/bead-1" {
+			t.Errorf("ChangedFiles(%v, %v): per-bead gates must diff fork-sha..bead/bead-1 only", c.Args[0], c.Args[1])
+		}
+	}
+}
+
+// TestPerBeadGatesFireDespiteEmptyAmbientRange pins the mindspec-perm
+// vacuous-pass case: simulate the checkout where the OLD code measured
+// an empty range (complete run from the spec worktree, HEAD == spec
+// tip ⇒ ambient diff empty) while the bead's real diff carries a
+// genuine doc-sync violation. The gates must FIRE.
+func TestPerBeadGatesFireDespiteEmptyAmbientRange(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	// No worktree entry: beadHead falls back to the canonical
+	// workspace.BeadBranch name.
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
+		if base == "fork-sha" && head == "bead/bead-1" {
+			// The bead's real work: a doc-less source change — a
+			// genuine doc-sync violation.
+			return []string{"internal/contextpack/foo.go"}, nil
+		}
+		// Every other range is empty — exactly what the old code saw
+		// from the spec worktree and passed vacuously on.
+		return nil, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("gates must fire on a real bead-diff violation even when the ambient range is empty (mindspec-perm)")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should name the doc-sync lane, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the gate blocks")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on gate block, got %d", len(calls))
+	}
+}
+
+// TestPerBeadGateBlockKeepsRecoveryContract pins the honest case under
+// the new anchoring: a violation IN the bead diff blocks completion
+// with the existing recovery contract (the --allow-doc-skew override
+// hint) and performs no terminal mutation.
+func TestPerBeadGateBlockKeepsRecoveryContract(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	// Plain result: every range (there is only the bead range now)
+	// carries the doc-less source change.
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the doc-sync gate to block a bead-diff violation")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should name the doc-sync lane, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--allow-doc-skew") {
+		t.Errorf("block must keep the --allow-doc-skew recovery hint, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the gate blocks")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on gate block, got %d", len(calls))
+	}
+}
