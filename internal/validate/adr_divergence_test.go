@@ -75,3 +75,60 @@ func TestCheckADRDivergenceReturnsPopulated(t *testing.T) {
 		t.Errorf("Path = %q, want internal/payments/charge.go", findings[0].Path)
 	}
 }
+
+// TestCheckADRDivergenceHeadRefResolution pins the headRef resolution
+// table (PR #132 panel C2 medium / mutation M4): the recorded
+// ChangedFiles call args distinguish every head value, so a severed or
+// re-pointed default cannot survive.
+//
+//   - per-bead default (beadID set, headRef ""): the canonical
+//     workspace.BeadBranch — bead/<id> — never the ambient HEAD
+//   - impl-approve default (beadID "", headRef ""): the spec branch
+//     derived from specDir
+//   - explicit headRef: passed through verbatim (complete.Run's
+//     resolved bead worktree branch)
+func TestCheckADRDivergenceHeadRefResolution(t *testing.T) {
+	newFixture := func(t *testing.T) (string, string) {
+		t.Helper()
+		root := t.TempDir()
+		specDir := filepath.Join(root, ".mindspec", "docs", "specs", "107-headref")
+		writeSpecAndPlan(t, root, specDir, "107-headref",
+			[]string{"payments"},
+			[]string{},
+		)
+		writeManifest(t, root, "payments", "paths:\n  - internal/payments/**\n")
+		return root, specDir
+	}
+
+	assertDiffRange := func(t *testing.T, mock *executor.MockExecutor, wantBase, wantHead string) {
+		t.Helper()
+		calls := mock.CallsTo("ChangedFiles")
+		if len(calls) != 1 {
+			t.Fatalf("expected exactly 1 ChangedFiles call, got %d", len(calls))
+		}
+		if calls[0].Args[0] != wantBase || calls[0].Args[1] != wantHead {
+			t.Errorf("ChangedFiles(%v, %v), want (%q, %q)", calls[0].Args[0], calls[0].Args[1], wantBase, wantHead)
+		}
+	}
+
+	t.Run("per-bead default is the canonical bead branch", func(t *testing.T) {
+		root, specDir := newFixture(t)
+		mock := &executor.MockExecutor{}
+		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "")
+		assertDiffRange(t, mock, "BASE", "bead/mindspec-bead.1")
+	})
+
+	t.Run("impl-approve default derives the spec branch", func(t *testing.T) {
+		root, specDir := newFixture(t)
+		mock := &executor.MockExecutor{}
+		CheckADRDivergence(root, "BASE", mock, specDir, "", "")
+		assertDiffRange(t, mock, "BASE", "spec/107-headref")
+	})
+
+	t.Run("explicit headRef wins over both defaults", func(t *testing.T) {
+		root, specDir := newFixture(t)
+		mock := &executor.MockExecutor{}
+		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "bead/explicit-tip")
+		assertDiffRange(t, mock, "BASE", "bead/explicit-tip")
+	})
+}

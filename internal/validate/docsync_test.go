@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
 func TestClassifyChanges(t *testing.T) {
@@ -440,4 +442,49 @@ func TestOperatorDocsAdditiveAcceptSet(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateDocsWorkingTreeIdiom pins the head=="" diff semantics (PR
+// #132 panel C2 medium / mutation M5b): ValidateDocs — and
+// ValidateDocsRange with an empty head — MUST use the executor's
+// working-tree idiom, ChangedFiles("", base). This is the contract the
+// impl-approve gate (internal/approve/impl.go, run from the spec
+// worktree) and `mindspec validate docs` rely on; only an explicit head
+// switches to the committed range base..head (the per-bead complete
+// gate).
+func TestValidateDocsWorkingTreeIdiom(t *testing.T) {
+	assertSingleDiff := func(t *testing.T, mock *executor.MockExecutor, wantBase, wantHead string) {
+		t.Helper()
+		calls := mock.CallsTo("ChangedFiles")
+		if len(calls) != 1 {
+			t.Fatalf("expected exactly 1 ChangedFiles call, got %d", len(calls))
+		}
+		if calls[0].Args[0] != wantBase || calls[0].Args[1] != wantHead {
+			t.Errorf("ChangedFiles(%v, %v), want (%q, %q)", calls[0].Args[0], calls[0].Args[1], wantBase, wantHead)
+		}
+	}
+
+	t.Run("ValidateDocs diffs working tree vs ref", func(t *testing.T) {
+		mock := &executor.MockExecutor{}
+		ValidateDocs(t.TempDir(), "BASE", mock)
+		assertSingleDiff(t, mock, "", "BASE")
+	})
+
+	t.Run("ValidateDocs empty ref defaults to HEAD~1", func(t *testing.T) {
+		mock := &executor.MockExecutor{}
+		ValidateDocs(t.TempDir(), "", mock)
+		assertSingleDiff(t, mock, "", "HEAD~1")
+	})
+
+	t.Run("ValidateDocsRange with empty head keeps the working-tree idiom", func(t *testing.T) {
+		mock := &executor.MockExecutor{}
+		ValidateDocsRange(t.TempDir(), "BASE", "", mock)
+		assertSingleDiff(t, mock, "", "BASE")
+	})
+
+	t.Run("ValidateDocsRange with explicit head diffs the committed range", func(t *testing.T) {
+		mock := &executor.MockExecutor{}
+		ValidateDocsRange(t.TempDir(), "FORK", "bead/x-1", mock)
+		assertSingleDiff(t, mock, "FORK", "bead/x-1")
+	})
 }

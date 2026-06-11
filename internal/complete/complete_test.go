@@ -1781,6 +1781,12 @@ func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
+	// Full spec fixture (spec.md + plan.md + cited ADR) so the
+	// ADR-divergence lane RUNS through to its diff — without it,
+	// ValidateDivergence no-ops on the missing spec.md and the
+	// ChangedFiles assertions below would be vacuous for the ADR lane
+	// (PR #132 panel C2 major / mutation M2b).
+	writeADRDivergenceFixture(t, root, "086-doc-sync")
 	stubPhaseEpic(t, "086-doc-sync", "epic-086")
 	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
 	// Reuse-resolution path: the bead worktree exists and carries the
@@ -1824,15 +1830,86 @@ func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
 	}
 
 	// Every gate diff must be the bead range — no ambient-HEAD or
-	// working-tree measurement may remain.
+	// working-tree measurement may remain. BOTH lanes must have
+	// diffed: doc-sync (ValidateDocsRange) and ADR-divergence
+	// (ValidateDivergence, reached via the fixture above) each issue
+	// exactly one ChangedFiles call, so fewer than two means a lane
+	// never measured anything and its anchoring is unpinned. Mutation
+	// M2b (head→"HEAD" at the complete.go CheckADRDivergence call)
+	// dies on the per-call args check.
 	cfCalls := mock.CallsTo("ChangedFiles")
-	if len(cfCalls) == 0 {
-		t.Fatal("expected ChangedFiles calls from the gates")
+	if len(cfCalls) < 2 {
+		t.Fatalf("expected ChangedFiles calls from BOTH gate lanes (doc-sync + adr-divergence), got %d", len(cfCalls))
 	}
 	for _, c := range cfCalls {
 		if c.Args[0] != "fork-sha" || c.Args[1] != "bead/bead-1" {
 			t.Errorf("ChangedFiles(%v, %v): per-bead gates must diff fork-sha..bead/bead-1 only", c.Args[0], c.Args[1])
 		}
+	}
+}
+
+// TestPerBeadGateHeadFallsBackToCanonicalBranch pins the e.Branch != ""
+// guard in step 2: a worktree entry matched by NAME whose Branch field
+// is empty (detached / unreported) must not blank out beadHead — the
+// gates fall back to the canonical workspace.BeadBranch name.
+func TestPerBeadGateHeadFallsBackToCanonicalBranch(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: ""},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+
+	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{}); err != nil {
+		t.Fatalf("clean bead diff must complete, got: %v", err)
+	}
+	mbCalls := mock.CallsTo("MergeBase")
+	if len(mbCalls) == 0 {
+		t.Fatal("expected a MergeBase call for the per-bead gates")
+	}
+	if mbCalls[0].Args[0] != "spec/086-doc-sync" || mbCalls[0].Args[1] != "bead/bead-1" {
+		t.Errorf("MergeBase(%v, %v): empty worktree Branch must fall back to the canonical bead branch", mbCalls[0].Args[0], mbCalls[0].Args[1])
+	}
+}
+
+// TestPerBeadGateMergeBaseErrorNamesRefs pins the failure path: a
+// merge-base failure (e.g. the bead branch does not exist) surfaces
+// with BOTH anchoring refs named, before any mutation.
+func TestPerBeadGateMergeBaseErrorNamesRefs(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseErr = fmt.Errorf("fatal: not a valid ref: bead/bead-1")
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a merge-base failure to propagate")
+	}
+	want := "computing merge-base of spec/086-doc-sync and bead/bead-1 for the per-bead gates"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error must name both anchoring refs; want substring %q, got: %v", want, err)
+	}
+	if closed {
+		t.Error("bead must not be closed on a merge-base failure")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on merge-base failure, got %d", len(calls))
 	}
 }
 
