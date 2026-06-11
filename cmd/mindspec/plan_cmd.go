@@ -12,6 +12,9 @@ import (
 var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Plan lifecycle commands",
+	// Spec 092 Req 10b: typos of the deprecated `approve` verb suggest
+	// the noun-verb command families.
+	SuggestFor: []string{"approve", "aprove"},
 }
 
 var planApproveCmd = &cobra.Command{

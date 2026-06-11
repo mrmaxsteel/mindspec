@@ -76,12 +76,12 @@ func validateSpecMode(root string, s *state.Focus) []Warning {
 
 	// Check if plan.md exists (drift: molecule says spec mode but agent already started planning).
 	// This means the spec-approve gate was skipped — the agent jumped to plan writing
-	// without running `mindspec approve spec`.
+	// without running `mindspec spec approve`.
 	planPath := filepath.Join(specDir, "plan.md")
 	if _, err := os.Stat(planPath); err == nil {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
-			Message: fmt.Sprintf("SKIPPED GATE: spec-approve gate is still open but plan.md already exists for %s. Run `mindspec approve spec %s` to resolve the gate before continuing plan work.", s.ActiveSpec, s.ActiveSpec),
+			Message: fmt.Sprintf("SKIPPED GATE: spec-approve gate is still open but plan.md already exists for %s. Run `mindspec spec approve %s` to resolve the gate before continuing plan work.", s.ActiveSpec, s.ActiveSpec),
 		})
 	}
 
