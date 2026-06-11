@@ -2,7 +2,7 @@
 
 - **Date**: 2026-06-11
 - **Status**: Accepted
-- **Domain(s)**: workflow, execution
+- **Domain(s)**: workflow, execution, core
 - **Deciders**: Max
 - **Supersedes**: n/a
 - **Superseded-by**: n/a

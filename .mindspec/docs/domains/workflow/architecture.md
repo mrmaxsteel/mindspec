@@ -78,3 +78,25 @@ The execution engine trusts that approved plans are well-decomposed and simply e
 4. Bead closure requires proof-of-done + doc-sync.
 5. Beads is the single state store — no filesystem state files.
 6. Workflow packages never import `internal/gitutil/` — all execution goes through `Executor`.
+
+## Agent error contract (spec 092, ADR-0035)
+
+- Guard failures route through `internal/guard.NewFailure` /
+  `FormatFailure(msg, commands...)`: the final line of every guard
+  failure is a copy-pastable `recovery: <command>` line.
+  `IsBannedRecoveryCommand` rejects raw `bd update --metadata`
+  suggestions, and the convention test
+  (`internal/guard/recovery_convention_test.go`) fails when an
+  exported failure constructor produces a failure without one.
+- `mindspec impl approve` treats `mindspec_phase` as a trusted cache:
+  when the stored phase fails the review/done gate but the
+  child-derived phase passes, gating continues read-only on the
+  derived phase; the forward reconcile is deferred until after the
+  last pre-terminal gate (Reqs 1–2). `mindspec repair phase <spec-id>`
+  is the manual reconcile.
+- `internal/next.CheckDirtyTreeDetail` splits dirty-tree detection
+  into artifact dirt vs user dirt; only user dirt blocks, and the
+  failure names the offending paths and the active worktree.
+- Operator-facing command forms are noun-verb (`mindspec spec
+  approve`, `mindspec plan approve`, `mindspec impl approve`) across
+  instruct templates and skipped-gate warnings.

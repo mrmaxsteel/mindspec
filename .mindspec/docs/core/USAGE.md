@@ -331,3 +331,4 @@ Work is not complete until changes are committed.
 | `mindspec next` | Claim the next ready bead |
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
 | `mindspec complete` | Close current bead and advance |
+| `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |

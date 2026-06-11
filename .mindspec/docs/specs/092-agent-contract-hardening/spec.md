@@ -112,6 +112,7 @@ The same session class produced backlog beads triaged in §Triage below.
 
 - workflow
 - execution
+- core
 
 ## Affected packages (per domain)
 
@@ -166,6 +167,10 @@ The same session class produced backlog beads triaged in §Triage below.
   `Agent.Run` (`internal/harness/agent.go:24-28,55`); `lifecycleTurnSet`
   verb extension (`internal/harness/analyzer.go:378-394`; Req 16, 17);
   baseline-failure evidence per scenario (Req 22).
+- **`internal/phase/`**, **`internal/workspace/`** (core) — both
+  packages are claimed by the core domain's OWNERSHIP manifest, so the
+  `DerivePhaseDetail` split and the `workspace.ContextLine` helper make
+  core an impacted domain alongside their workflow/execution callers.
 - **ADR docs** — one-paragraph ADR-0034 amendment (Req 20).
 
 ## ADR Touchpoints

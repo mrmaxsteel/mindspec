@@ -4,6 +4,7 @@ adr_citations:
     - id: ADR-0025
     - id: ADR-0030
     - id: ADR-0034
+    - id: ADR-0035
 approved_at: "2026-06-10T22:53:39Z"
 approved_by: user
 bead_ids:
@@ -59,6 +60,10 @@ lean; full text lives in `spec.md`).
   via `mindspec adr create`, giving the doc-sync gate a stable doc
   target. The plan-approve panel may downgrade this to a
   glossary/core-doc section; Bead 1's steps accommodate either.
+  Landed as **ADR-0035** (agent error contract — Accepted, domains:
+  workflow, execution, core), cited above. Covers the `core` impacted
+  domain: `internal/phase` detail derivation and
+  `workspace.ContextLine` are the core-side surface of the contract.
 
 No accepted ADR is unfit for this work; no superseding ADR is proposed.
 

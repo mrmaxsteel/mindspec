@@ -51,3 +51,18 @@ Low-level git operations used only by `MindspecExecutor`:
 |:-----|:--------|:--------|
 | `MindspecExecutor` | `internal/executor/mindspec_executor.go` | Production: real git+worktree operations |
 | `MockExecutor` | `internal/executor/mock.go` | Testing: records calls, returns configured errors |
+
+## Merge-conflict hardening (spec 092 Reqs 13–15, 18)
+
+- `internal/gitutil` merge-state helpers: `MergeInProgress(workdir)`,
+  `ConflictedFiles(workdir)`, `AbortMerge(workdir)` — detect and
+  unwind an in-progress merge before reporting a guard failure.
+- `MindspecExecutor` conflict paths (`CompleteBead` bead→spec merge and
+  the direct spec-merge site) abort the conflicted merge
+  (`abortMergeState`) and emit structured failures
+  (`beadToSpecConflictFailure`, `directMergeConflictFailure`) that name
+  the conflicted files and end with a copy-pastable recovery command.
+- `internal/bead.MergeMetadata` error text no longer quotes a raw
+  `bd update --metadata` command line (Req 19 / HC-5: `--metadata`
+  REPLACES the whole metadata map; agents must never be handed one to
+  paste).

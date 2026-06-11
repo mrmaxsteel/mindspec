@@ -144,6 +144,17 @@ func ValidateDivergence(
 			continue
 		}
 
+		// Spec 092 fix-up: skip non-source process artifacts before
+		// attribution. The lane previously iterated EVERY changed
+		// file, so beads JSONL snapshots, ADR/spec/domain docs under
+		// .mindspec/docs/**, and review-panel notes were flagged as
+		// "unowned" — claiming them in an OWNERSHIP.yaml would be
+		// semantically wrong (they are the process record, not owned
+		// source).
+		if isProcessArtifact(path) {
+			continue
+		}
+
 		domain, own, attrErr := attributeDomain(root, path, candidateDomains)
 		if attrErr != nil {
 			r.AddError("adr-divergence-attribute",
@@ -189,4 +200,18 @@ func ValidateDivergence(
 	}
 
 	return r, findings
+}
+
+// isProcessArtifact reports whether path is a non-source process
+// artifact the ADR-divergence lane must skip before domain
+// attribution: documentation (doc-sync's isDocFile set, which covers
+// .mindspec/docs/** — ADRs, specs, domain docs, OWNERSHIP manifests —
+// plus docs/, CLAUDE.md, AGENTS.md), the beads JSONL build artifact
+// tree (.beads/, ADR-0025), and review-panel working notes (review/).
+// Mirrors doc-sync's classification so the two gates agree on what
+// counts as governable source.
+func isProcessArtifact(path string) bool {
+	return isDocFile(path) ||
+		strings.HasPrefix(path, ".beads/") ||
+		strings.HasPrefix(path, "review/")
 }

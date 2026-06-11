@@ -6,3 +6,5 @@ paths:
   - internal/instruct/**
   - internal/validate/**
   - internal/doctor/**
+  - internal/guard/**
+  - cmd/**
