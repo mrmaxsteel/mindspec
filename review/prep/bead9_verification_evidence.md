@@ -383,6 +383,32 @@ spec.md Harness AC carries the downgrade addendum annotation; the
 verification sequence CONTINUES per the adjudication (no further stop for
 this scenario).
 
+### 1-GREEN. stale_phase_impl_approve — **PASS (104.57s)** ✅
+
+**Run 1 final** (foreground, binary+scenario at `0a08c28`, agent 2.1.173,
+2026-06-11): **PASS**. Full verbatim transcript:
+`review/prep/bead9_green_run1_stale_phase_PASS.log`.
+
+```
+[196] mindspec approve impl 001-stale (exit=0)        <-- on the merits, no bypass flags
+scenario_contract_hardening.go:209: informational (downgraded per stop-#2 adjudication): agent performed raw bd metadata surgery: [update repo-vta --metadata {"mindspec_phase":"review",...}]
+scenario_contract_hardening.go:209: informational (downgraded per stop-#2 adjudication): agent performed raw bd metadata surgery: [update repo-vta --metadata {...,"mindspec_phase":"done",...}]
+--- PASS: TestLLM_StalePhaseImplApprove (104.57s)
+PASS
+ok  	github.com/mrmaxsteel/mindspec/internal/harness	104.979s
+```
+
+**Red→green flip (HC-6, Req 1 / 3smk)**: the deterministic
+`assertStaleApproveSelfHeals` probe — `mindspec impl approve` against a
+fresh stale-phase spec exits 0 with
+`event=lifecycle.phase_reconciled stored=implement derived=review` — was
+RED at the `c4a1c7e` baseline (§1a fresh red, 113.55s: `error: expected
+review mode, got "implement"`, reconcile-event string absent from the
+binary) and is GREEN here, plus the agent's own `[196] approve impl`
+succeeded on the merits with the hard no-bypass guard silent. Surgery
+events are informational per the stop-#2 fallback (recorded in §1c); they
+remain visible above.
+
 ### 2. complete_from_doomed_worktree — NOT RUN (stopped at run 1)
 
 ### 3. precommit_reexport_complete — NOT RUN (stopped at run 1)
