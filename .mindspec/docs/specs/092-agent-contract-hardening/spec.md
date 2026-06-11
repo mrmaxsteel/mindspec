@@ -570,7 +570,20 @@ The same session class produced backlog beads triaged in §Triage below.
     check may ALREADY hold pre-fix (the recording shim captures
     mindspec's own exit code, `recorder.go:23-24`; the field exit-1 came
     from the invoking shell's getcwd), so the discriminators are the
-    no-retry/no-repair assertions. A scenario that cannot be made to
+    no-retry/no-repair assertions. *[Bead 9 annotation, 2026-06-11: the
+    no-retry/no-repair discriminator named here is SUPERSEDED — the
+    recorded Bead 2 baseline showed Claude Code's Bash tool
+    transparently self-heals the deleted cwd in the harness, so those
+    assertions could not go red. The sanctioned Req-22 redesign (commit
+    `1603723`) replaced the discriminator with the deterministic
+    cd-back-NOTE probe `assertDoomedCompleteEmitsCdNote`
+    (`internal/harness/scenario_contract_hardening.go`): a second
+    `mindspec complete` run from inside the bead worktree it removes
+    must exit 0 AND emit the Req 4 NOTE as the last non-empty stdout
+    line. The no-retry/no-repair assertions are retained as the
+    behavioral envelope only. Bead 9's green verification anchors on the
+    redesigned probe, exactly as the redesign clause below requires.]*
+    A scenario that cannot be made to
     fail pre-fix is not a regression pin and must be redesigned or
     replaced before its fix bead closes (HC-6). This close-gate is
     ENCODED in the bead dependency graph — every fix bead (Beads 3-8)
@@ -709,6 +722,16 @@ The same session class produced backlog beads triaged in §Triage below.
   bead is closed, and — the discriminating assertions — the agent did
   NOT re-run `complete`/repair after success (no second complete event
   for the same bead, no `git worktree` repair commands).
+  *[Bead 9 annotation, 2026-06-11: the no-retry/no-repair assertions
+  named here are the behavioral envelope only — they could not be made
+  to fail at the Bead 2 baseline (Claude Code's Bash tool self-heals
+  the deleted cwd in the harness). The DISCRIMINATING assertion is the
+  sanctioned Req-22 redesign (commit `1603723`): the deterministic
+  post-session probe `assertDoomedCompleteEmitsCdNote` — a `mindspec
+  complete` invoked from inside the bead worktree it removes must exit
+  0 and emit the Req 4 cd-back NOTE as the last non-empty stdout line.
+  Red at the `c4a1c7e` baseline, green post-Bead-4; Bead 9's evidence
+  pairs both runs.]*
 - [ ] **Harness — `precommit_reexport_complete`** (i4ad): sandbox
   `.gitignore` overridden to track `.beads/issues.jsonl`; pre-commit
   hook runs
