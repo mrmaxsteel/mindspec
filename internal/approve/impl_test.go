@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -1026,6 +1028,85 @@ func TestApproveImpl_StalePhaseReconcilesForward(t *testing.T) {
 	// No emitted output may contain a raw bd metadata-update command.
 	if strings.Contains(stderr, "bd update --metadata") {
 		t.Errorf("stderr contains banned raw metadata command: %q", stderr)
+	}
+}
+
+// TestApproveImpl_StoredFreshSkipsReconcile kills panel-R3 mutant M2a:
+// when the STORED phase already satisfies the gate (review) while the
+// child-derived phase disagrees (implement — e.g. a bead got reopened
+// after review started), ApproveImpl proceeds WITHOUT any reconcile
+// metadata write. The Req 1 reconcile fires ONLY when the stored phase
+// fails the gate — an unconditional reconcile would be a spurious
+// backward write (clobbering review with implement here).
+func TestApproveImpl_StoredFreshSkipsReconcile(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	// stored=review passes the gate; one in_progress child derives
+	// "implement", which disagrees with (and fails) the gate.
+	stubPhaseStoredChildren(t, "review", []phase.ChildInfo{
+		{ID: "bead-1", Status: "in_progress", IssueType: "task"},
+	})
+
+	var events []string
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		if _, done := updates["mindspec_done"]; done {
+			events = append(events, "done-write")
+		} else {
+			events = append(events, fmt.Sprintf("reconcile-write:%v", updates["mindspec_phase"]))
+		}
+		return nil
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "close" {
+			events = append(events, "epic-close")
+		}
+		return []byte("ok"), nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	var err error
+	stderr := captureStderr(t, func() {
+		_, err = ApproveImpl(tmp, "010-test", mock)
+	})
+	if err != nil {
+		t.Fatalf("fresh stored phase must approve without reconcile, got: %v", err)
+	}
+
+	// No mindspec_phase-without-done write happened anywhere — in
+	// particular not before the epic close.
+	for _, e := range events {
+		if strings.HasPrefix(e, "reconcile-write") {
+			t.Fatalf("reconcile write fired although the stored phase passed the gate: events=%v", events)
+		}
+	}
+	want := []string{"epic-close", "done-write"}
+	if len(events) != len(want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("events = %v, want %v", events, want)
+		}
+	}
+	if strings.Contains(stderr, "event=lifecycle.phase_reconciled") {
+		t.Errorf("phase_reconciled event emitted although no reconcile happened; stderr=%q", stderr)
+	}
+}
+
+// TestImplPhaseMetadataFnDefaultsToBeadMergeMetadata kills panel-R3
+// mutant M4a-2: the production binding of the phase-write seam MUST be
+// bead.MergeMetadata (read-merge-write). A rebind to a raw replace
+// path would silently wipe unrelated metadata keys (Req 19).
+func TestImplPhaseMetadataFnDefaultsToBeadMergeMetadata(t *testing.T) {
+	if reflect.ValueOf(implPhaseMetadataFn).Pointer() != reflect.ValueOf(bead.MergeMetadata).Pointer() {
+		t.Fatal("implPhaseMetadataFn must default to bead.MergeMetadata (merge semantics, spec 092 Req 19)")
 	}
 }
 

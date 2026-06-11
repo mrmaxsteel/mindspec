@@ -109,3 +109,37 @@ func TestConsistencyWarningSilentWhenPhasesAgree(t *testing.T) {
 		t.Errorf("no warning expected when stored and derived agree; stderr=%q", stderr)
 	}
 }
+
+// TestConsistencyWarningPlaceholderWhenSpecUnresolvable covers the
+// specIDForEpicWithCache fallback: an epic with a stored phase but no
+// resolvable spec binding (no spec_num/spec_title metadata, no
+// "[SPEC ...]" title) still gets a final recovery line, with the
+// documented "<spec-id>" placeholder.
+func TestConsistencyWarningPlaceholderWhenSpecUnresolvable(t *testing.T) {
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"b1","title":"bead","status":"closed","issue_type":"task"}]`), nil
+	})
+	defer restoreList()
+	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if args[0] == "show" {
+			// No spec_num/spec_title, title not in [SPEC ...] form.
+			return []byte(`[{"id":"epic-legacy","title":"legacy epic","status":"open","issue_type":"epic","metadata":{"mindspec_phase":"implement"}}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	stderr := captureStderrPhase(t, func() {
+		_, _ = phase.DerivePhaseWithStatus("epic-legacy", "open")
+	})
+	warning := strings.TrimRight(stderr, "\n")
+	if !strings.Contains(warning, "disagrees with child-derived phase") {
+		t.Fatalf("expected the consistency warning to fire; stderr=%q", stderr)
+	}
+	if !strings.Contains(warning, "recovery: mindspec repair phase <spec-id>") {
+		t.Errorf("warning missing the <spec-id> placeholder recovery line: %q", warning)
+	}
+	if !guard.HasFinalRecoveryLine(warning) {
+		t.Errorf("warning must still end with a recovery line: %q", warning)
+	}
+}

@@ -10,12 +10,25 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// TestRepairMergeMetadataFnDefaultsToBeadMergeMetadata kills panel-R3
+// mutant M4a-2: the production binding of the repair write seam MUST
+// be bead.MergeMetadata (read-merge-write). A rebind to a raw replace
+// path would silently wipe unrelated metadata keys — the exact failure
+// `mindspec repair phase` exists to prevent (Req 19).
+func TestRepairMergeMetadataFnDefaultsToBeadMergeMetadata(t *testing.T) {
+	if reflect.ValueOf(repairMergeMetadataFn).Pointer() != reflect.ValueOf(bead.MergeMetadata).Pointer() {
+		t.Fatal("repairMergeMetadataFn must default to bead.MergeMetadata (merge semantics, spec 092 Req 19)")
+	}
+}
 
 // stubRepairPhaseEnv wires the phase package stubs with one epic
 // ("epic-92") for spec "092-agent-contract-hardening" whose stored
@@ -122,6 +135,29 @@ func TestRepairPhase_WriteFailureHasRecoveryLine(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "bd update --metadata") {
 		t.Errorf("emitted message contains banned raw metadata command (Req 19): %v", err)
+	}
+}
+
+// TestRepairPhase_AlreadyConsistentStillMergeWrites covers the
+// stored==derived re-run path (repair.go): the command still performs
+// the merge-write (idempotent refresh) and succeeds.
+func TestRepairPhase_AlreadyConsistentStillMergeWrites(t *testing.T) {
+	calls := 0
+	var gotUpdates map[string]interface{}
+	stubRepairPhaseEnv(t, "review", func(id string, updates map[string]interface{}) error {
+		calls++
+		gotUpdates = updates
+		return nil
+	})
+
+	if err := repairPhaseRunE(repairPhaseCmd, []string{"092-agent-contract-hardening"}); err != nil {
+		t.Fatalf("already-consistent repair must succeed, got: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("merge seam calls = %d, want 1 (idempotent refresh)", calls)
+	}
+	if len(gotUpdates) != 1 || gotUpdates["mindspec_phase"] != "review" {
+		t.Errorf("merge updates = %v, want only mindspec_phase=review", gotUpdates)
 	}
 }
 
