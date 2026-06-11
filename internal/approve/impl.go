@@ -3,6 +3,7 @@ package approve
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,11 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
 	}
 	docResult := validate.ValidateDocs(root, base, exec)
+	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
+	// failure decision so they print on every run — including when
+	// HasFailures() is false and the flow proceeds normally, and on
+	// the override/error paths.
+	printResultWarnings(warnWriter, docResult)
 	if docResult.HasFailures() {
 		if o.AllowDocSkew == "" {
 			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason on the spec epic's metadata)", joinResultErrorMessages(docResult))
@@ -170,6 +176,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// rev 6). The findings slice seeds the supersede placeholder's
 	// Domains field structurally (revision 2 — no string parsing).
 	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "")
+	// Same severity-generic pipe for the ADR-divergence backstop: any
+	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
+	// without further wiring. No-op while the gate emits none.
+	printResultWarnings(warnWriter, adrResult)
 
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested so the new file exists on disk even if a downstream
@@ -344,6 +354,28 @@ func buildImplSkewMetadata(reason string) map[string]interface{} {
 		"mindspec_impl_skew_reason": reason,
 		"mindspec_impl_skew_at":     time.Now().UTC().Format(time.RFC3339),
 		"mindspec_impl_skew_by":     implGitUserEmailFn(),
+	}
+}
+
+// warnWriter is the destination for WARN lines rendered from
+// validation results (Spec 091 Bead 5, Req 22). Production writes to
+// stderr; package-level seam so tests can capture the output.
+var warnWriter io.Writer = os.Stderr
+
+// printResultWarnings renders every warning-severity issue carried by
+// a *validate.Result as `WARN <name>: <message>` — one line per
+// issue. Severity-generic: it prints ANY SevWarning regardless of
+// which validator lane produced it (cmd-docs, missing-source-globs,
+// adr-divergence-proposed, ...). Stateless by construction (HC-2):
+// no marker files, no seen-tracking, no dedup — the same warning
+// prints on every invocation for as long as the Result carries it.
+// Warnings never affect the pass/fail decision.
+func printResultWarnings(w io.Writer, r *validate.Result) {
+	for _, i := range r.Issues {
+		if i.Severity != validate.SevWarning {
+			continue
+		}
+		fmt.Fprintf(w, "WARN %s: %s\n", i.Name, i.Message)
 	}
 }
 
