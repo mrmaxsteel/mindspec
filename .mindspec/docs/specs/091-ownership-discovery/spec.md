@@ -380,6 +380,15 @@ No other ADR is amended.
      itself does not mention missing manifests.
      After `doctor --fix` scaffolds the empty stubs,
      `dead-manifest` fires until the stubs are populated.
+     The break also runs in the OPPOSITE direction on the
+     adr-divergence lane, which TIGHTENS: files that
+     previously auto-attributed to a spec-declared impacted
+     domain via the fallback now attribute to no domain and
+     fire blocking `adr-divergence-unowned` errors until
+     that domain's manifest is populated — previously-
+     passing diffs now fail (see ADR-0036 §(d), including
+     the `writeADRDivergenceFixture` proof from this spec's
+     own implementation).
    - Repos that lack `source_globs:` in
      `.mindspec/config.yaml` (including repos with no
      config.yaml at all) lose NOTHING at upgrade time:

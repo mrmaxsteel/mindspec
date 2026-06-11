@@ -123,6 +123,30 @@ is byte-identical (HC-7). No deprecation window (panel D1): mindspec
 is primarily a single-operator tool; one `doctor --fix` run on
 upgrade is cheaper than a deprecation period.
 
+**The break runs in BOTH directions.** The paragraph above covers
+the doc-sync LOOSENING (manifest-less domains claim nothing, so
+previously-failing diffs now pass). The same removal simultaneously
+TIGHTENS the adr-divergence lane: pre-091, a spec-declared impacted
+domain with no manifest auto-claimed `internal/<domain>/**` via the
+loader fallback, so changed files under that tree attributed cleanly
+and the lane could pass; post-removal those files attribute to no
+domain and fire blocking `adr-divergence-unowned` errors —
+previously-passing diffs now FAIL until the domain's manifest is
+populated (remedy: `mindspec doctor --fix` + `mindspec ownership
+populate <domain>`, same migration path as above). Proof from this
+spec's own implementation (commit 5f39a94): the
+`writeADRDivergenceFixture` helper in
+`internal/complete/complete_test.go` relied on exactly that fallback
+for attribution and had to be adapted to write a real
+`OWNERSHIP.yaml` for its "core" domain. That fixture modification is
+itself a disclosed exception to HC-3's enumerated test-update list —
+the enumeration named only `TestOwnershipFallback` and
+`TestValidateDocsErrorsOnInternalDocSkew_Fallback` and missed this
+fixture's indirect dependence on the removed fallback; the edit is
+test-fixture-only (no production code in `internal/complete/` was
+touched) and is recorded here as part of the accepted break's full
+disclosure.
+
 ### (e) Continuous-accuracy Warn loop
 
 Three advisory Warns keep manifests and globs honest over time, none
