@@ -2,6 +2,7 @@ package complete
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -318,9 +319,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
 	// Pass empty msg since we already handled commit+clean-tree above.
 	completeErr := exec.CompleteBead(beadID, specBranch, "")
-	if completeErr != nil {
-		fmt.Printf("Warning: bead cleanup: %v\n", completeErr)
-	} else {
+	if completeErr == nil {
 		result.WorktreeRemoved = true
 	}
 
@@ -337,6 +336,41 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// caller.
 	if chdirErr := os.Chdir(root); chdirErr != nil {
 		fmt.Printf("Warning: could not chdir to repo root %s: %v\n", root, chdirErr)
+	}
+
+	// Spec 092 Req 14(a) incident amendment (2026-06-11 merge-driver
+	// incident): a CompleteBead failure used to be downgraded to
+	// `Warning: bead cleanup: ...` and Run continued to exit 0 —
+	// leaving a closed-but-unmerged bead the lifecycle could not see.
+	// HC-4: the bead→spec merge is part of complete's terminal
+	// mutation, so its failure must surface as a non-zero exit.
+	//
+	// ORDERING DECISION (incident amendment iii): close-before-merge is
+	// KEPT. Closing first keeps Dolt — the single state authority
+	// (ADR-0023) — ahead of the git projection, so the merge commit's
+	// re-exported issues.jsonl (ADR-0025 §3) records the bead as
+	// closed; merge-before-close would invert that and require
+	// splitting CompleteBead's merge from its cleanup. The
+	// closed-but-unmerged window this leaves is made EXPLICIT (named
+	// in the error below, never hidden behind a warning) and
+	// RECONVERGENT: the close step is idempotent (step 4 above
+	// tolerates already-closed beads), so after the operator resolves
+	// the merge, re-running `mindspec complete <bead-id>` converges —
+	// the re-attempted merge sees the bead branch as an ancestor and
+	// cleanup proceeds.
+	if completeErr != nil {
+		msg := fmt.Sprintf(
+			"bead %s is CLOSED in Dolt but completion did NOT finish — its branch may not be merged into %s (closed-but-unmerged).\n"+
+				"this state is recoverable: fix the cause below, then re-run `mindspec complete %s` — the close step is idempotent and completion converges.\n"+
+				"cause: %v",
+			beadID, specBranch, beadID, completeErr)
+		if guard.HasFinalRecoveryLine(msg) {
+			// The executor failure already carries Req 12 recovery
+			// lines (e.g. the conflict-abort failures) — keep them
+			// final instead of stacking a redundant generic one.
+			return nil, errors.New(msg)
+		}
+		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
 	}
 
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the

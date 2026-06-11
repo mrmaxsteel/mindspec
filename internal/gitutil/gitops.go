@@ -67,6 +67,41 @@ func MergeInto(targetWorkdir, sourceBranch string) error {
 	return nil
 }
 
+// ConflictedFiles returns the paths with unmerged index entries in
+// workdir (the conflicted files of an in-progress merge). Best-effort:
+// returns nil when git fails or there are no unmerged entries.
+func ConflictedFiles(workdir string) []string {
+	cmd := execCommand("git", "-C", workdir, "diff", "--name-only", "--diff-filter=U")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files
+}
+
+// MergeInProgress reports whether workdir has an in-progress merge
+// (MERGE_HEAD present).
+func MergeInProgress(workdir string) bool {
+	cmd := execCommand("git", "-C", workdir, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+	return cmd.Run() == nil
+}
+
+// AbortMerge aborts an in-progress merge in workdir, restoring the
+// pre-merge working tree (`git merge --abort`).
+func AbortMerge(workdir string) error {
+	cmd := execCommand("git", "-C", workdir, "merge", "--abort")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("aborting merge in %s: %s", workdir, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // DeleteBranch deletes a local branch.
 func DeleteBranch(name string) error {
 	cmd := execCommand("git", "branch", "-D", name)

@@ -43,3 +43,19 @@ func TestCompletionGuidance_LocationAgnostic(t *testing.T) {
 		}
 	}
 }
+
+// TestCompletionGuidance_AntiMergeMain pins the spec 092 Req 14
+// (mindspec-pi24) anti-merge-main warning in the bead-context tail —
+// the channel an agent reads right before it starts coding (AC "Req 14
+// guidance").
+func TestCompletionGuidance_AntiMergeMain(t *testing.T) {
+	out := completionGuidance("mindspec-abc.1")
+
+	if !strings.Contains(out, "Do NOT merge `main` into the bead branch mid-implementation") {
+		t.Errorf("guidance must warn against merging main into bead branches mid-implementation; got:\n%s", out)
+	}
+	// The warning explains the blast radius: conflicts at impl approve.
+	if !strings.Contains(out, "mindspec impl approve") {
+		t.Errorf("anti-merge-main warning should name where the conflict bites (`mindspec impl approve`); got:\n%s", out)
+	}
+}

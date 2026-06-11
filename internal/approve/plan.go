@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -96,7 +97,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 				return nil, fmt.Errorf("spec %s has not been approved yet — no plan.md exists.\nRun: mindspec approve spec %s", specID, specID)
 			}
 		}
-		return nil, fmt.Errorf("plan validation failed:\n%s", vr.FormatText())
+		return nil, planValidationFailure(specID, vr)
 	}
 
 	// Step 2: Find epic ID via beads metadata query (ADR-0023).
@@ -120,7 +121,11 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	if parentID != "" {
 		beadIDs, err := createImplementationBeads(planPath, specID, parentID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create implementation beads: %w\n\nThe plan has been approved but beads were NOT created.\nFix the issue and re-run: mindspec bead create-from-plan %s", err, specID)
+			// Spec 092 Req 12: context is PREPENDED so the cause's final
+			// `recovery:` line stays the last line of the message
+			// (`mindspec bead create-from-plan` can recreate beads
+			// without re-approving when the plan itself is fine).
+			return nil, fmt.Errorf("failed to create implementation beads — the plan frontmatter is already marked Approved but the bead set was NOT (fully) created:\n%w", err)
 		} else if len(beadIDs) > 0 {
 			result.BeadIDs = beadIDs
 			if err := writeBeadIDsToFrontmatter(planPath, beadIDs); err != nil {
@@ -337,14 +342,15 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		}
 		out, err := planRunBDFn(args...)
 		if err != nil {
-			return beadIDs, fmt.Errorf("creating bead for %q: %w", sec.Heading, err)
+			return beadIDs, beadCreateFailure(specID, sec.Heading, beadIDs, args, err)
 		}
 
 		var created struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(out, &created); err != nil {
-			return beadIDs, fmt.Errorf("parsing create output for %q: %w", sec.Heading, err)
+			return beadIDs, beadCreateFailure(specID, sec.Heading, beadIDs, args,
+				fmt.Errorf("parsing create output: %w", err))
 		}
 
 		beadIDs = append(beadIDs, created.ID)
@@ -387,6 +393,75 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	}
 
 	return beadIDs, nil
+}
+
+// planValidationFailure aggregates EVERY error-severity validation
+// issue into ONE guard failure: one bullet per issue, one final
+// recovery line (spec 092 Req 15, mindspec-e6qq). Reporting all N
+// violations in a single plan-approve invocation replaces the
+// one-discovery-per-attempt loop the old first-failure formatting
+// forced on agents.
+func planValidationFailure(specID string, vr *validate.Result) error {
+	var bullets []string
+	for _, issue := range vr.Issues {
+		if issue.Severity != validate.SevError {
+			continue
+		}
+		bullets = append(bullets, fmt.Sprintf("  - [%s] %s", issue.Name, issue.Message))
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "plan validation failed: %d issue(s) — fix ALL of them, then re-run plan approve:\n", len(bullets))
+	b.WriteString(strings.Join(bullets, "\n"))
+	return guard.NewFailure(b.String(), fmt.Sprintf("mindspec plan approve %s", specID))
+}
+
+// beadCreateFailure is the spec 092 Req 13b mid-batch containment
+// failure (mindspec-lawq): ANY `bd create` failure inside
+// createImplementationBeads — Dolt row-size ceiling (server Error
+// 1105), daemon crash, lock contention, unparsable output — aborts
+// with a structured error that names the failing bead heading, the
+// likely offending field + byte size when the cause is 1105, LISTS the
+// bead IDs already created (the partial set), and ends with recovery
+// lines. Never a raw `Error 1105` with a silent partial bead set: exit
+// codes never lie, and partial mutations always name their cleanup.
+func beadCreateFailure(specID, heading string, created []string, createArgs []string, cause error) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "creating bead for %q failed: %v", heading, cause)
+	if strings.Contains(cause.Error(), "1105") {
+		if field, size := largestPayloadField(createArgs); field != "" {
+			fmt.Fprintf(&b, "\nlikely oversized payload: %s is %d bytes (Dolt row-size ceiling — server Error 1105, not a mindspec limit)", field, size)
+		}
+	}
+	if len(created) == 0 {
+		b.WriteString("\nno beads were created before the failure — fix the cause, then re-run plan approve")
+		return guard.NewFailure(b.String(), fmt.Sprintf("mindspec plan approve %s", specID))
+	}
+	fmt.Fprintf(&b, "\nbeads already created before the failure (PARTIAL set — the plan's remaining beads do not exist): %s", strings.Join(created, ", "))
+	b.WriteString("\nremove the partial set first, then re-run plan approve (it recreates the full set)")
+	return guard.NewFailure(b.String(),
+		fmt.Sprintf("bd close %s --reason \"partial create from failed plan approve\"", strings.Join(created, " ")),
+		fmt.Sprintf("mindspec plan approve %s", specID),
+	)
+}
+
+// largestPayloadField returns the bd-create payload flag carrying the
+// most bytes (the likely Error-1105 culprit) and its size. createArgs
+// is the exact argv handed to `bd create`.
+func largestPayloadField(createArgs []string) (string, int) {
+	payloadFlags := map[string]bool{
+		"--description": true,
+		"--acceptance":  true,
+		"--design":      true,
+		"--metadata":    true,
+	}
+	field, size := "", -1
+	for i := 0; i+1 < len(createArgs); i++ {
+		if payloadFlags[createArgs[i]] && len(createArgs[i+1]) > size {
+			field = createArgs[i]
+			size = len(createArgs[i+1])
+		}
+	}
+	return field, size
 }
 
 // handleExistingBeads checks if beads already exist under the epic (re-approval).
@@ -446,7 +521,17 @@ func extractPlanVersion(content string) string {
 	return "unknown"
 }
 
-// buildDesignField assembles the design field content: spec requirements + ADR decision snapshots.
+// buildDesignField assembles the design field content: spec requirements + ADR citations.
+//
+// Spec 092 Req 13a (mindspec-lawq): ADRs are cited by ID + title
+// (`see ADR-NNNN — <title>`) instead of inlining each ADR's Decision
+// snapshot. Inlining multiplied every cited ADR's Decision text into
+// EVERY bead's --design payload, overflowing Dolt's row-size ceiling
+// (server Error 1105) on plans citing many/large ADRs. By-ID citations
+// bound the payload by construction — no size-limit constant is
+// invented, because the ceiling is a Dolt server behavior, not a
+// mindspec contract. The full text stays available under
+// `.mindspec/docs/adr/`.
 func buildDesignField(specDir, specContent, requirements string) string {
 	var parts []string
 
@@ -463,19 +548,16 @@ func buildDesignField(specDir, specContent, requirements string) string {
 		root := filepath.Join(specDir, "..", "..", "..")
 		store := adr.NewFileStore(root)
 
-		var decisions []string
+		var citations []string
 		for _, id := range adrIDs {
 			a, err := store.Get(id)
 			if err != nil {
 				continue
 			}
-			decision := contextpack.ExtractSection(a.Content, "Decision")
-			if decision != "" {
-				decisions = append(decisions, fmt.Sprintf("### %s\n\n%s", id, decision))
-			}
+			citations = append(citations, fmt.Sprintf("- see %s — %s", id, a.Title))
 		}
-		if len(decisions) > 0 {
-			parts = append(parts, "## ADR Decisions\n\n"+strings.Join(decisions, "\n\n"))
+		if len(citations) > 0 {
+			parts = append(parts, "## ADR Decisions\n\nCited by ID — full text under `.mindspec/docs/adr/`:\n\n"+strings.Join(citations, "\n"))
 		}
 	}
 

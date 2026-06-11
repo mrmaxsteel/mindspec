@@ -95,6 +95,7 @@ When the bead is done:
 
 **Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
 **Do NOT use `bd update` on lifecycle epics.** Phase metadata is managed automatically by `mindspec complete`.
+**Do NOT merge `main` into the bead branch mid-implementation.** Bead work flows bead → spec → main; pulling `main` into a bead branch creates merge conflicts when `mindspec impl approve` merges the spec branch back to `main`. If the branch feels stale, finish the bead — the lifecycle merges handle integration.
 
 ## Next Action
 {{- if .ActiveBead}}
