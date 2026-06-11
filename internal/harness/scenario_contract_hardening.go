@@ -43,6 +43,42 @@ func argsInOrder(args []string, first, second string) bool {
 	return false
 }
 
+// writeSandboxDomainCoverage writes the file half of the minimal
+// ADR-divergence coverage triple for sandbox fixtures (run-1
+// adjudication, review/scenario1-fix-design.md §1): an OWNERSHIP.yaml
+// claiming the given fixture source files for the `sandbox` domain,
+// plus an Accepted ADR-0001 covering that domain. Callers must
+// (a) COMMIT these at the sandbox ROOT BEFORE the worktree fork so
+// every branch carries them (ownership + ADR resolve root-relative:
+// internal/validate/ownership.go, adr.NewFileStore(root)), and
+// (b) add `adr_citations:\n- ADR-0001` to the fixture plan.md
+// frontmatter — IsDomainCovered requires the covering ADR to be
+// plan-CITED. Without the triple, the pre-existing spec-087
+// ADR-divergence gate flags any committed fixture .go file as
+// `adr-divergence-unowned`, and a perfectly-behaved `impl approve` /
+// `complete` exits 1 on a gate unrelated to the scenario's pin.
+func writeSandboxDomainCoverage(sandbox *Sandbox, files ...string) {
+	var b strings.Builder
+	b.WriteString("paths:\n")
+	for _, f := range files {
+		fmt.Fprintf(&b, "- %s\n", f)
+	}
+	sandbox.WriteFile(".mindspec/docs/domains/sandbox/OWNERSHIP.yaml", b.String())
+	sandbox.WriteFile(".mindspec/docs/adr/ADR-0001-sandbox-domain.md", `# ADR-0001: Sandbox Domain
+
+- **Date**: 2026-06-11
+- **Status**: Accepted
+- **Domain(s)**: sandbox
+
+## Decision
+
+Scenario fixture source files at the sandbox root belong to the
+sandbox domain. This is the minimal coverage triple that lets
+lifecycle gates pass on the merits in harness sandboxes, mirroring how
+a compliant field repo carries ownership + ADR coverage.
+`)
+}
+
 // firstEventIndex returns the index of the first event matching the
 // predicate, or -1.
 func firstEventIndex(events []ActionEvent, match func(ActionEvent) bool) int {
@@ -91,6 +127,14 @@ func ScenarioStalePhaseImplApprove() Scenario {
 			sandbox.runBDMust("update", epicID, "--metadata",
 				`{"spec_num":1,"spec_title":"stale","mindspec_phase":"implement"}`)
 
+			// ADR-divergence coverage triple (run-1 adjudication): stale.go
+			// on the spec branch must pass the spec-087 gate on the merits,
+			// otherwise every clean `impl approve` exits 1 on a gate
+			// unrelated to this scenario's pin. Committed pre-fork so both
+			// main and the spec branch carry it.
+			writeSandboxDomainCoverage(sandbox, "stale.go")
+			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
+
 			// Spec-worktree-only topology: spec branch + worktree, NO bead
 			// branches — the stale phase is the only blocking condition.
 			wt := setupWorktrees(sandbox, specID, "", "plan")
@@ -110,6 +154,8 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement feature
@@ -137,9 +183,11 @@ implementation so the project returns to idle.`,
 			assertCommandRanEither(t, events, "mindspec",
 				[]string{"impl", "approve"}, []string{"approve", "impl"})
 
-			// No raw metadata surgery: the gate must self-heal, not the agent.
 			for _, e := range events {
 				args := eventArgs(e)
+				// No raw metadata surgery (3smk's essential ban, Req 19/
+				// HC-5): the lifecycle must offer a sanctioned path — never
+				// replace-semantics surgery over the epic's metadata map.
 				if e.Command == "bd" && containsAll(args, "update") {
 					for _, a := range args {
 						// Catches --metadata, --metadata=..., --set-metadata,
@@ -150,12 +198,103 @@ implementation so the project returns to idle.`,
 						}
 					}
 				}
-				// No `mindspec repair` needed — the gate heals in-line.
+				// No gate bypass: with the coverage fixture in place nothing
+				// legitimately diverges, so an override-assisted approval
+				// means a fixture/gate confound is being masked, not healed.
+				if e.Command == "mindspec" {
+					for _, a := range args {
+						if a == "--override-adr" || a == "--supersede-adr" || a == "--allow-doc-skew" {
+							t.Errorf("agent bypassed an approval gate (%s) — the gate must pass on the merits: %v", a, args)
+						}
+					}
+				}
+				// NOTE (Req 22 redesign, run-1 adjudication): `mindspec
+				// repair phase` is NOT forbidden — it is the recovery
+				// command Req 2/19 themselves advertise on every
+				// phase-deriving command while the stored phase is stale.
+				// Punishing it would test against the product's own
+				// contract. Req 1's gate self-heal is pinned
+				// deterministically by assertStaleApproveSelfHeals below
+				// (the doomed-worktree probe precedent) and by the 3smk
+				// unit AC.
 				if e.Command == "mindspec" && containsAll(args, "repair") {
-					t.Errorf("agent needed `mindspec repair` — phase gate did not self-heal: %v", args)
+					t.Logf("informational: agent used sanctioned `mindspec repair`: %v", args)
 				}
 			}
+
+			// DISCRIMINATING deterministic probe (3smk / spec 092 Req 1): a
+			// fresh stale-phase spec approved by the binary directly must
+			// exit 0 and emit the lifecycle.phase_reconciled self-heal
+			// event line.
+			assertStaleApproveSelfHeals(t, sandbox)
 		},
+	}
+}
+
+// assertStaleApproveSelfHeals is the deterministic post-session probe for
+// spec 092 Req 1 (mindspec-3smk), per the doomed-worktree probe precedent
+// (assertDoomedCompleteEmitsCdNote): build a SECOND stale-phase spec with
+// real bd state and a docs-only spec branch (so the ADR-divergence gate
+// no-ops and needs no coverage triple), then run the sandbox binary's
+// `mindspec impl approve` directly. Pre-fix the phase gate trusts the
+// stale stored phase and exits non-zero, and the string
+// `event=lifecycle.phase_reconciled` does not exist in the binary — so
+// this fails deterministically at the pinned baseline regardless of
+// anything the LLM half did.
+func assertStaleApproveSelfHeals(t *testing.T, sandbox *Sandbox) {
+	t.Helper()
+
+	specID := "002-staleprobe"
+	epicID := sandbox.CreateSpecEpic(specID)
+	beadID := sandbox.CreateBead("["+specID+"] Probe feature", "task", epicID)
+	sandbox.ClaimBead(beadID)
+	sandbox.runBDMust("close", beadID)
+	// Stale stored phase while every child is closed (derived = review).
+	// Test-side setup write — only the agent event stream is scanned by
+	// the no-surgery assertion. spec_num/spec_title repeated to preserve
+	// the ADR-0023 epic binding (bd update --metadata replaces the map).
+	sandbox.runBDMust("update", epicID, "--metadata",
+		`{"spec_num":2,"spec_title":"staleprobe","mindspec_phase":"implement"}`)
+
+	wt := setupWorktrees(sandbox, specID, "", "plan")
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+title: Stale Probe Feature
+status: Approved
+---
+# Stale Probe Feature
+Deterministic Req 1 self-heal probe (docs-only spec branch).
+`)
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+status: Approved
+spec_id: %s
+bead_ids:
+- %s
+---
+# Plan
+## Bead 1: Probe feature
+Docs-only probe; the work is the lifecycle close itself.
+`, specID, beadID))
+	mustRunGit(sandbox, "-C", wt.SpecWtDir, "add", "-A")
+	mustRunGit(sandbox, "-C", wt.SpecWtDir, "commit", "-m", "docs: staleprobe spec+plan")
+
+	cmd := exec.Command(filepath.Join(sandbox.mindspecBinDir, "mindspec"),
+		"impl", "approve", specID)
+	cmd.Dir = sandbox.Root
+	cmd.Env = sandbox.Env()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Errorf("stale-phase `mindspec impl approve %s` must self-heal and exit 0 (3smk / spec 092 Req 1): %v\nstdout:\n%s\nstderr:\n%s",
+			specID, err, stdout.String(), stderr.String())
+	}
+	// The Req 1 self-heal demonstrably executed end-to-end: the HC-3
+	// structured event line names the stored→derived reconcile.
+	for _, want := range []string{"event=lifecycle.phase_reconciled", "stored=implement", "derived=review"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("impl approve stderr lacks %q — the Req 1 phase reconcile did not execute; stderr:\n%s\nstdout:\n%s",
+				want, stderr.String(), stdout.String())
+		}
 	}
 }
 
@@ -208,11 +347,18 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement doomed
 Create doomed.go with a Doomed function.
 `, specID, beadID))
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): doomed.go and the cd-note probe's probe.go
+			// must pass the spec-087 gate on the merits if complete's diff
+			// range ever includes them (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "doomed.go", "probe.go")
 			sandbox.Commit("setup: approved spec and plan")
 
 			wt := setupWorktrees(sandbox, specID, beadID, "implement")
@@ -497,11 +643,19 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Create reexport.go
 Create reexport.go with a Reexport() function.
 `, specID, beadID))
+
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): the agent-authored reexport.go must pass the
+			// spec-087 gate on the merits if complete's diff range ever
+			// includes it (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "reexport.go")
 
 			// Baseline JSONL tracked by git BEFORE the bead is claimed, so
 			// the claim leaves Dolt state ahead of every checked-out copy —
@@ -626,11 +780,19 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Create wrongdir.go
 Create wrongdir.go with a WrongDir() function.
 `, specID, beadID))
+
+			// ADR-divergence coverage triple (run-1 adjudication, applied
+			// scenario-wide): the agent-authored wrongdir.go must pass the
+			// spec-087 gate on the merits if complete's diff range ever
+			// includes it (HEAD-resolution dependent).
+			writeSandboxDomainCoverage(sandbox, "wrongdir.go")
 
 			// Tracked file committed clean, then modified: the human's
 			// work-in-progress dirt on main.
@@ -718,6 +880,13 @@ func ScenarioApprovalGateDiscovery() Scenario {
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
 
+			// ADR-divergence coverage triple (run-1 adjudication): gate.go
+			// on the spec branch hits the IDENTICAL impl-approve confound
+			// the stale_phase run exposed — without coverage, no canonical
+			// `impl approve` can succeed un-bypassed. Committed pre-fork.
+			writeSandboxDomainCoverage(sandbox, "gate.go")
+			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
+
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
 title: Gate Feature
@@ -731,6 +900,8 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement feature

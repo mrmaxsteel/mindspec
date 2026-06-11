@@ -467,7 +467,25 @@ The same session class produced backlog beads triaged in §Triage below.
       merges/deletes bead branches before the session, so the stale
       `mindspec_phase` is the ONLY blocking condition (otherwise the
       unmerged-bead gate at `impl.go:143` masks the pin — cf.
-      `ScenarioUnmergedBeadGuard`).
+      `ScenarioUnmergedBeadGuard`). *[Bead 9 annotation, 2026-06-11
+      (run-1 adjudication, review/scenario1-fix-design.md): two
+      amendments under the Req 22 redesign principle. (i) The fixture
+      additionally needs the sandbox coverage triple (OWNERSHIP.yaml +
+      Accepted, plan-cited ADR-0001), because the pre-existing
+      spec-087 ADR-divergence gate otherwise flags the fixture's
+      `stale.go` as unowned and NO clean `impl approve` can exit 0 —
+      a blocking condition unrelated to this pin. (ii) The original
+      "no `mindspec repair`" assertion is SUPERSEDED: it predates
+      Req 2's shipped guidance, which deliberately advertises
+      `recovery: mindspec repair phase <spec-id>` on every
+      phase-deriving command while the phase is stale. The Req 1
+      self-heal is instead pinned deterministically by the
+      post-session probe `assertStaleApproveSelfHeals` (exit 0 +
+      `event=lifecycle.phase_reconciled stored=implement
+      derived=review`), per the doomed-worktree probe precedent. The
+      no-surgery ban stays; a no-gate-bypass guard
+      (`--override-adr`/`--supersede-adr`/`--allow-doc-skew`) is
+      added.]*
     - **`complete_from_doomed_worktree`** (qxsy): uses `StartDir` to
       start the agent inside the bead worktree.
     - **`precommit_reexport_complete`** (i4ad): must defeat two sandbox
@@ -716,6 +734,24 @@ The same session class produced backlog beads triaged in §Triage below.
   `assertCommandRanEither(t, events, "mindspec", ["impl","approve"],
   ["approve","impl"])` with no `bd update --metadata` surgery event and
   no `mindspec repair` needed.
+  *[Bead 9 annotation, 2026-06-11 (run-1 adjudication): the trailing
+  "no `mindspec repair` needed" clause is SUPERSEDED — it predates and
+  contradicts Req 2's shipped guidance, which advertises
+  `recovery: mindspec repair phase <spec-id>` on every phase-deriving
+  command while the stored phase is stale; an assertion punishing the
+  binary's own sanctioned recovery command tests against the product
+  contract. The redesigned assertion set keeps `assertCommandRanEither`
+  and the no-surgery ban verbatim, ADDS a no-gate-bypass guard (no
+  agent approve event carries `--override-adr`/`--supersede-adr`/
+  `--allow-doc-skew`), and pins the Req 1 self-heal deterministically
+  via the post-session probe `assertStaleApproveSelfHeals`: a fresh
+  docs-only stale spec (`002-staleprobe`) approved by the sandbox
+  binary directly must exit 0 with stderr carrying
+  `event=lifecycle.phase_reconciled stored=implement derived=review` —
+  red at the `c4a1c7e` baseline (the event string does not exist
+  there), green post-Bead-3. The fixture additionally carries the
+  sandbox coverage triple so the spec-087 ADR-divergence gate passes
+  on the merits. See review/scenario1-fix-design.md.]*
 - [ ] **Harness — `complete_from_doomed_worktree`** (qxsy): agent starts
   with cwd inside the bead worktree via `Scenario.StartDir`; completes
   the bead. Assert the `mindspec complete` event has ExitCode 0, the
