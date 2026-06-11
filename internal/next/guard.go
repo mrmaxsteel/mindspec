@@ -104,24 +104,45 @@ func parsePorcelain(out string) []string {
 // directory whose git status is authoritative — typically the same as
 // repoRoot but callers are free to pass a worktree path.
 func CheckDirtyTree(repoRoot, cwd string) (userDirt []string, err error) {
+	_, userDirt, err = CheckDirtyTreeDetail(repoRoot, cwd)
+	return userDirt, err
+}
+
+// CheckDirtyTreeDetail is CheckDirtyTree with the residual artifact dirt
+// exposed alongside the user dirt. The classification flow is identical;
+// the extra return value is the artifact dirt that SURVIVES the `bd export`
+// normalization (snapshot 2) — i.e. artifact content that genuinely differs
+// from the last commit, not just a stale throttled export.
+//
+// Spec 092 Req 7 (mindspec-i4ad): `mindspec complete` consumes the residual
+// artifact dirt to fold it into a follow-up `chore: sync beads artifact`
+// commit instead of ignoring it, so the bead→spec merge operates on a
+// genuinely clean tree. Per ADR-0025 the artifact list is explicit and small
+// (today: .beads/issues.jsonl only).
+//
+// Note: bead.Export writes <repoRoot>/.beads/issues.jsonl (the path resolves
+// relative to the export workdir), so callers checking a worktree should
+// pass that worktree as repoRoot too — otherwise the normalization targets a
+// different checkout than the one being status-checked.
+func CheckDirtyTreeDetail(repoRoot, cwd string) (artifactDirt, userDirt []string, err error) {
 	out, err := statusPorcelainFn(cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	artifactDirt, userDirt := classifyDirty(parsePorcelain(out))
+	artifactDirt, userDirt = classifyDirty(parsePorcelain(out))
 
 	if len(artifactDirt) == 0 {
-		return userDirt, nil
+		return nil, userDirt, nil
 	}
 
 	if err := exportBeadsFn(repoRoot); err != nil {
-		return nil, fmt.Errorf("normalizing beads export: %w", err)
+		return nil, nil, fmt.Errorf("normalizing beads export: %w", err)
 	}
 
 	out2, err := statusPorcelainFn(cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	_, userDirt = classifyDirty(parsePorcelain(out2))
-	return userDirt, nil
+	artifactDirt, userDirt = classifyDirty(parsePorcelain(out2))
+	return artifactDirt, userDirt, nil
 }

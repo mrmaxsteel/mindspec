@@ -276,3 +276,86 @@ func TestCheckDirtyTree_PorcelainFailurePropagates(t *testing.T) {
 		t.Fatal("expected error when git status fails")
 	}
 }
+
+// --- CheckDirtyTreeDetail (spec 092 Reqs 6/7, mindspec-i4ad) ---
+
+func TestCheckDirtyTreeDetail_ResidualArtifactDirtExposed(t *testing.T) {
+	// The artifact diff survives bd export (legitimate Dolt change, or a
+	// pre-commit hook re-export). Detail exposes the residual so
+	// `mindspec complete` can fold it into a follow-up commit.
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n",
+		" M .beads/issues.jsonl\n",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(artifactDirt, []string{".beads/issues.jsonl"}) {
+		t.Errorf("artifactDirt = %v, want [.beads/issues.jsonl]", artifactDirt)
+	}
+	if len(userDirt) != 0 {
+		t.Errorf("userDirt = %v, want empty", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_NormalizedArtifactDirtIsEmpty(t *testing.T) {
+	// Stale throttled export: bd export normalizes the diff away. No
+	// residual artifact dirt — the caller has nothing to commit.
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n",
+		"",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(artifactDirt) != 0 {
+		t.Errorf("artifactDirt = %v, want empty after normalization", artifactDirt)
+	}
+	if len(userDirt) != 0 {
+		t.Errorf("userDirt = %v, want empty", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_MixedDirtReturnsBoth(t *testing.T) {
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n M foo.txt\n",
+		" M .beads/issues.jsonl\n M foo.txt\n",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(artifactDirt, []string{".beads/issues.jsonl"}) {
+		t.Errorf("artifactDirt = %v", artifactDirt)
+	}
+	if !reflect.DeepEqual(userDirt, []string{"foo.txt"}) {
+		t.Errorf("userDirt = %v", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_UserDirtOnly_NoArtifactNoExport(t *testing.T) {
+	g := &fakeGuard{porcelainResponses: []string{" M foo.txt\n"}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(artifactDirt) != 0 {
+		t.Errorf("artifactDirt = %v, want empty", artifactDirt)
+	}
+	if !reflect.DeepEqual(userDirt, []string{"foo.txt"}) {
+		t.Errorf("userDirt = %v", userDirt)
+	}
+	if g.exportCalled {
+		t.Error("export should NOT run when no artifact path is dirty")
+	}
+}
