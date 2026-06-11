@@ -567,7 +567,22 @@ func isHooksPathAssignment(args []string) bool {
 // manual-recovery loophole.
 func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 	t.Helper()
+	for _, v := range manualArtifactCommitViolations(events) {
+		t.Errorf("%s", v)
+	}
+}
 
+// manualArtifactCommitViolations is the pure evidence-gating core behind
+// assertNoManualArtifactCommit, extracted so the attribution logic is
+// unit-testable against synthetic event streams (panel R2-M1/R3). It
+// SCANS only events before the first successful complete, but
+// ATTRIBUTES against the UNTRUNCATED stream: the shim logs each command
+// at exit, so the parent mindspec-complete event lands AT (or after)
+// the scan boundary, AFTER its own git children — truncating the
+// attribution slice to the scan window excluded the parent and made
+// attribution work only by accident of the hook-children's ±1s slack
+// (panel R3-MAJ-1).
+func manualArtifactCommitViolations(events []ActionEvent) []string {
 	window := events
 	if firstOK := firstEventIndex(events, func(e ActionEvent) bool {
 		return e.Command == "mindspec" && e.ExitCode == 0 && containsAll(eventArgs(e), "complete")
@@ -584,8 +599,9 @@ func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 		return false
 	}
 
+	var violations []string
 	artifactStaged := false
-	for i, e := range window {
+	for _, e := range window {
 		if e.Command != "git" {
 			continue
 		}
@@ -596,14 +612,16 @@ func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 			// (mindspec's executor stages via blanket `git add -A`, bd
 			// never git-adds) — flag unconditionally.
 			if namesBeads(args) {
-				t.Errorf("agent staged the beads artifact before the first successful complete: %v", args)
+				violations = append(violations,
+					fmt.Sprintf("agent staged the beads artifact before the first successful complete: %v", args))
 				artifactStaged = true
 				continue
 			}
 			// Blanket stage: attribution matters — mindspec's own
 			// CommitAll runs `git add -A` as a recorded subprocess
-			// (run-3 false-positive fix, see mindspecSpawnedGit).
-			if !mindspecSpawnedGit(window, i) {
+			// (run-3 false-positive fix, see mindspecSpawnedGit). The
+			// FULL stream is passed so the parent's window is visible.
+			if !mindspecSpawnedGit(events, e) {
 				for _, a := range args {
 					if a == "-A" || a == "--all" || a == "." || a == "-u" {
 						artifactStaged = true
@@ -614,13 +632,14 @@ func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 			// Explicit .beads pathspec on a commit: agent-only, flag
 			// unconditionally.
 			if namesBeads(args) {
-				t.Errorf("agent manually committed the beads artifact before the first successful complete: %v", args)
+				violations = append(violations,
+					fmt.Sprintf("agent manually committed the beads artifact before the first successful complete: %v", args))
 				continue
 			}
 			// Blanket-form commits need attribution: mindspec's
 			// auto-commit and `chore: sync beads artifact` follow-up are
 			// recorded git subprocesses of the complete event.
-			if mindspecSpawnedGit(window, i) {
+			if mindspecSpawnedGit(events, e) {
 				continue
 			}
 			allTracked := false
@@ -630,30 +649,37 @@ func assertNoManualArtifactCommit(t *testing.T, events []ActionEvent) {
 				}
 			}
 			if allTracked || artifactStaged {
-				t.Errorf("agent manually committed the beads artifact before the first successful complete: %v", args)
+				violations = append(violations,
+					fmt.Sprintf("agent manually committed the beads artifact before the first successful complete: %v", args))
 			}
 		}
 	}
+	return violations
 }
 
-// mindspecSpawnedGit reports whether the git event at index i falls
-// within the execution window of a recorded mindspec command. The PATH
-// shim records mindspec's OWN git subprocesses (complete's auto-commit,
-// the Req 7 `chore: sync beads artifact` follow-up) indistinguishably
-// from agent-issued ones — the run-3 false positive that failed a
-// perfectly sanctioned completion. Shim timestamps are END times
-// (recorder.go logs after the real binary exits), so a child's end lies
-// within [parentEnd-parentDuration, parentEnd]; 1s slack absorbs the
-// shim's second-resolution timestamps. Used ONLY for the fuzzy
-// blanket-form heuristics — explicit `.beads` pathspecs are flagged
-// regardless of attribution (mindspec never passes one).
-func mindspecSpawnedGit(events []ActionEvent, i int) bool {
-	g := events[i]
+// mindspecSpawnedGit reports whether git event g falls within the
+// execution window of a recorded mindspec command in all. The PATH shim
+// records mindspec's OWN git subprocesses (complete's auto-commit, the
+// Req 7 `chore: sync beads artifact` follow-up) indistinguishably from
+// agent-issued ones — the run-3 false positive that failed a perfectly
+// sanctioned completion. Shim timestamps are END times (recorder.go
+// logs after the real binary exits), so a child's end lies within
+// [parentEnd-parentDuration, parentEnd]; ±1s slack absorbs the shim's
+// second-resolution timestamps.
+//
+// `all` MUST be the untruncated event stream (panel R3-MAJ-1): exit-
+// time logging puts the parent mindspec event AFTER its git children in
+// the stream — at or beyond any scan-window boundary — so a slice
+// truncated at the first successful complete excludes the very parent
+// whose duration window performs the attribution. Used ONLY for the
+// fuzzy blanket-form heuristics — explicit `.beads` pathspecs are
+// flagged regardless of attribution (mindspec never passes one).
+func mindspecSpawnedGit(all []ActionEvent, g ActionEvent) bool {
 	if g.Timestamp.IsZero() {
 		return false
 	}
 	gEnd := g.Timestamp
-	for _, m := range events {
+	for _, m := range all {
 		if m.Command != "mindspec" || m.Timestamp.IsZero() || m.DurationMS <= 0 {
 			continue
 		}
