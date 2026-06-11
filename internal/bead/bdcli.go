@@ -245,7 +245,10 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 
 	_, err = tracedCombined("update", []string{"update", issueID, "--metadata", string(metaJSON)})
 	if err != nil {
-		return fmt.Errorf("bd update --metadata failed for %s: %w", issueID, err)
+		// Spec 092 Req 19/HC-5: emitted messages never contain a raw
+		// bd metadata-update command line (replace semantics over the
+		// whole map); describe the operation without quoting it.
+		return fmt.Errorf("bd metadata merge-write failed for %s: %w", issueID, err)
 	}
 	return nil
 }

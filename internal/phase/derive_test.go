@@ -725,3 +725,61 @@ func TestDiscoverActiveSpecs_MetadataDone_Excluded(t *testing.T) {
 		t.Errorf("expected 0 specs (done excluded), got %d", len(specs))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Spec 092 Bead 3 (Req 1): stored-vs-derived phase detail
+// ---------------------------------------------------------------------------
+
+func TestDerivePhaseDetail_StoredAndDerived(t *testing.T) {
+	// Stored phase says "implement"; all children closed → derived "review".
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"b1","title":"bead","status":"closed","issue_type":"task"}]`), nil
+	})
+	defer restoreList()
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if args[0] == "show" {
+			return []byte(`[{"id":"epic-1","title":"test","status":"open","issue_type":"epic","metadata":{"mindspec_phase":"implement","spec_num":1,"spec_title":"test"}}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	detail, err := DerivePhaseDetail("epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if detail.EpicID != "epic-1" {
+		t.Errorf("EpicID = %q, want epic-1", detail.EpicID)
+	}
+	if detail.Stored != state.ModeImplement {
+		t.Errorf("Stored = %q, want %q", detail.Stored, state.ModeImplement)
+	}
+	if detail.Derived != state.ModeReview {
+		t.Errorf("Derived = %q, want %q", detail.Derived, state.ModeReview)
+	}
+}
+
+func TestDerivePhaseDetail_StoredAbsent(t *testing.T) {
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"b1","title":"bead","status":"in_progress","issue_type":"task"}]`), nil
+	})
+	defer restoreList()
+	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if args[0] == "show" {
+			return []byte(`[{"id":"epic-1","title":"test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+
+	detail, err := DerivePhaseDetail("epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if detail.Stored != "" {
+		t.Errorf("Stored = %q, want \"\" (key absent)", detail.Stored)
+	}
+	if detail.Derived != state.ModeImplement {
+		t.Errorf("Derived = %q, want %q", detail.Derived, state.ModeImplement)
+	}
+}

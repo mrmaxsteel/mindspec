@@ -193,6 +193,7 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(repairCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(specCmd)
 	rootCmd.AddCommand(specInitCmd) // hidden backward-compat alias

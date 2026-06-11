@@ -521,3 +521,98 @@ func TestBeadExists_BdUnavailable(t *testing.T) {
 		t.Error("expected exists=false on bd invocation failure")
 	}
 }
+
+// --- MergeMetadata tests (Spec 092 Bead 3, Req 19) ---
+
+// TestMergeMetadata_PreservesUnrelatedKeys is the before/after diff
+// half of the spec AC "repair unit (Req 19)": MergeMetadata performs a
+// read-merge-write, so unrelated metadata keys (mindspec_migrated_at,
+// spec binding keys, audit keys) survive a phase update. This is the
+// reason every recovery line emits `mindspec repair phase <spec-id>`
+// instead of a raw `bd update` metadata command (replace semantics).
+func TestMergeMetadata_PreservesUnrelatedKeys(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	before := map[string]interface{}{
+		"mindspec_phase":            "implement",
+		"mindspec_migrated_at":      "2026-01-01T00:00:00Z",
+		"mindspec_impl_skew_reason": "audit trail",
+		"spec_num":                  float64(92),
+		"spec_title":                "agent-contract-hardening",
+	}
+	beforeJSON, err := json.Marshal([]map[string]interface{}{{"metadata": before}})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+
+	var capturedUpdate []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("echo", string(beforeJSON))
+		}
+		if len(args) > 0 && args[0] == "update" {
+			capturedUpdate = append([]string{name}, args...)
+			return exec.Command("echo", "updated")
+		}
+		t.Errorf("unexpected command: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+
+	if err := MergeMetadata("epic-92", map[string]interface{}{"mindspec_phase": "review"}); err != nil {
+		t.Fatalf("MergeMetadata: %v", err)
+	}
+
+	if len(capturedUpdate) < 5 || capturedUpdate[0] != "bd" || capturedUpdate[1] != "update" || capturedUpdate[2] != "epic-92" || capturedUpdate[3] != "--metadata" {
+		t.Fatalf("unexpected update invocation: %v", capturedUpdate)
+	}
+	var after map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedUpdate[4]), &after); err != nil {
+		t.Fatalf("parse written metadata: %v", err)
+	}
+
+	// Diff before vs after: exactly one key changed (the phase), every
+	// other key preserved byte-for-byte.
+	if got := after["mindspec_phase"]; got != "review" {
+		t.Errorf("mindspec_phase = %v, want review", got)
+	}
+	for k, want := range before {
+		if k == "mindspec_phase" {
+			continue
+		}
+		got, ok := after[k]
+		if !ok {
+			t.Errorf("unrelated key %q wiped by MergeMetadata", k)
+			continue
+		}
+		if got != want {
+			t.Errorf("unrelated key %q changed: got %v, want %v", k, got, want)
+		}
+	}
+	if len(after) != len(before) {
+		t.Errorf("metadata key count changed: got %d keys (%v), want %d", len(after), after, len(before))
+	}
+}
+
+// TestMergeMetadata_WriteFailureMessageOmitsRawCommand pins the Req 19
+// hygiene on the plumbing error: the failure text describes the
+// operation without quoting a pasteable raw metadata-replace command.
+func TestMergeMetadata_WriteFailureMessageOmitsRawCommand(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("echo", `[{"metadata":{"mindspec_phase":"implement"}}]`)
+		}
+		return exec.Command("false")
+	}
+
+	err := MergeMetadata("epic-92", map[string]interface{}{"mindspec_phase": "review"})
+	if err == nil {
+		t.Fatal("expected error when the update write fails")
+	}
+	if strings.Contains(err.Error(), "bd update --metadata") {
+		t.Errorf("plumbing error quotes the banned raw command (Req 19): %v", err)
+	}
+}
