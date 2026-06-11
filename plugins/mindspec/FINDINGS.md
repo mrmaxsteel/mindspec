@@ -18,6 +18,14 @@ Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 document
 
 Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
 
+## Open after this PR
+
+| # | Finding | Status | Notes |
+|:--|:--------|:-------|:------|
+| 16 (new) | F6 operator-readiness lens doesn't catch IaC-vs-manual-env-var drift risk | OPEN | filed (not yet closed) |
+
+See item 16 in Part 1 below for details.
+
 ## Part 1 — Plugin self-review
 
 ### Gaps surfaced while writing the skills
@@ -99,6 +107,15 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
     - `/ms-spec-final-review`: F5 lens explicitly distinguishes "evidence path unnamed" (soft fix) from "evidence path named but artifact missing" (HARD block). The step 5 tally adds a HARD-block terminal that halts regardless of vote count.
     - `/ms-panel-tally`: decision matrix adds a HARD-block row for missing measurement artifacts at the top of the table.
     - `/ms-bead-fix`: anti-pattern callout that the fix subagent MUST NOT mark an artifact-gate finding as ADDRESSED via a body edit alone. If the subagent cannot produce the artifact in its scope, it returns the finding UNCHANGED and flags PARTIAL.
+
+16. **`/ms-spec-final-review` F6 lens doesn't check rollout-flag IaC discipline.** **[OPEN]**
+    The F6 operator-readiness lens currently checks for runbook coherence (revert commands, MTTR claims, escalation paths) but doesn't audit whether rollout flags / cost-bounding env vars are defined in IaC (`infra/tofu/`) versus set manually via `gcloud run ... --set-env-vars`. The latter is silently lost on any service-recreate deploy.
+
+    Surfaced by lola-f4a8 revision (Mon + Thu 2026-06-08 / 2026-06-11 OR spikes both root-caused to manual env-var drift, NOT to spec-050 alias-intersect as initially diagnosed). Both spec-049's `SUGGESTION_SKIP_STAGE_1_7` and spec-050's `ZPAW_ENABLED` were set manually; a later deploy lost them and prod silently fell back to the unbounded pre-spec-049 legacy scorer.
+
+    The plugin's F6 lens should add a sub-check: for every release-gate flag the spec names, is it set in IaC (`infra/tofu/`), in app-config defaults (Pydantic Field default), or only via deploy-time manual env? Manual-only is a HARD finding. App-config-pinned defaults that can't be overridden to dangerous values are acceptable.
+
+    Distinct from item 15 (artifact-gate HARD-block): item 15 covers measurement artifacts the spec.md plan declared; item 16 covers config-surface drift over the spec's prod lifetime.
 
 ## Part 2 — Claude Code "Workflows" research
 
