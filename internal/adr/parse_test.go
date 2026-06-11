@@ -102,6 +102,115 @@ func TestParseADR_SupersededBy(t *testing.T) {
 	}
 }
 
+func TestParseADR_StatusQualifiers(t *testing.T) {
+	// Authors append provenance qualifiers to the Status line — e.g. the
+	// live ADR-0029 case "Accepted (Finalized in spec 090 Bead 1)".
+	// Status must normalize to the first token; StatusRaw must preserve
+	// the full value.
+	cases := []struct {
+		name    string
+		raw     string
+		status  string
+		rawWant string
+	}{
+		{
+			name:    "live ADR-0029 case",
+			raw:     "Accepted (Finalized in spec 090 Bead 1)",
+			status:  "Accepted",
+			rawWant: "Accepted (Finalized in spec 090 Bead 1)",
+		},
+		{
+			name:    "withdrawn with supersede note",
+			raw:     "Withdrawn (superseded by ADR-0015 — consolidated supply-chain policy)",
+			status:  "Withdrawn",
+			rawWant: "Withdrawn (superseded by ADR-0015 — consolidated supply-chain policy)",
+		},
+		{
+			name:    "bare accepted",
+			raw:     "Accepted",
+			status:  "Accepted",
+			rawWant: "Accepted",
+		},
+		{
+			name:    "bare proposed",
+			raw:     "Proposed",
+			status:  "Proposed",
+			rawWant: "Proposed",
+		},
+		{
+			name:    "qualifier attached without space",
+			raw:     "Accepted(panel round 3)",
+			status:  "Accepted",
+			rawWant: "Accepted(panel round 3)",
+		},
+		{
+			name:    "trailing punctuation",
+			raw:     "Superseded; see ADR-0010",
+			status:  "Superseded",
+			rawWant: "Superseded; see ADR-0010",
+		},
+		{
+			name:    "proposed with spec qualifier",
+			raw:     "Proposed (part of spec 091)",
+			status:  "Proposed",
+			rawWant: "Proposed (part of spec 091)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			adrDir := filepath.Join(root, "docs", "adr")
+			os.MkdirAll(adrDir, 0o755)
+			content := "# ADR-0099: Qualifier Test\n\n- **Date**: 2026-06-01\n- **Status**: " + tc.raw + "\n- **Domain(s)**: core\n\n## Decision\nX.\n"
+			path := filepath.Join(adrDir, "ADR-0099.md")
+			os.WriteFile(path, []byte(content), 0o644)
+
+			a, err := ParseADR(path)
+			if err != nil {
+				t.Fatalf("ParseADR: %v", err)
+			}
+			if a.Status != tc.status {
+				t.Errorf("Status = %q, want %q", a.Status, tc.status)
+			}
+			if a.StatusRaw != tc.rawWant {
+				t.Errorf("StatusRaw = %q, want %q", a.StatusRaw, tc.rawWant)
+			}
+		})
+	}
+}
+
+func TestFilterADRs_QualifiedAcceptedStatus(t *testing.T) {
+	// A parsed ADR whose Status line carries a qualifier must still be
+	// treated as Accepted by FilterADRs (normalization happens at parse
+	// time, so the in-memory Status is already bare).
+	root := t.TempDir()
+	adrDir := filepath.Join(root, "docs", "adr")
+	os.MkdirAll(adrDir, 0o755)
+	content := "# ADR-0029: Supply Chain\n\n- **Date**: 2026-05-01\n- **Status**: Accepted (Finalized in spec 090 Bead 1)\n- **Domain(s)**: workflow\n\n## Decision\nY.\n"
+	os.WriteFile(filepath.Join(adrDir, "ADR-0029.md"), []byte(content), 0o644)
+
+	adrs, err := ScanADRs(root)
+	if err != nil {
+		t.Fatalf("ScanADRs: %v", err)
+	}
+	filtered := FilterADRs(adrs, []string{"workflow"})
+	if len(filtered) != 1 {
+		t.Fatalf("got %d filtered ADRs, want 1 (qualified Accepted status must count)", len(filtered))
+	}
+}
+
+func TestDisplayStatus(t *testing.T) {
+	withRaw := ADR{Status: "Accepted", StatusRaw: "Accepted (note)"}
+	if got := withRaw.DisplayStatus(); got != "Accepted (note)" {
+		t.Errorf("DisplayStatus = %q, want raw form", got)
+	}
+	bare := ADR{Status: "Proposed"}
+	if got := bare.DisplayStatus(); got != "Proposed" {
+		t.Errorf("DisplayStatus = %q, want normalized fallback", got)
+	}
+}
+
 func TestScanADRs_Sorted(t *testing.T) {
 	root := setupTestADRs(t)
 

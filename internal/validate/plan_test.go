@@ -1248,6 +1248,25 @@ func TestPlanRejectsUncoveredDomain(t *testing.T) {
 	}
 }
 
+func TestPlanCoverageAcceptsQualifiedAcceptedStatus(t *testing.T) {
+	// mindspec-f115: an ADR whose Status line carries a provenance
+	// qualifier — the live ADR-0029 case "Accepted (Finalized in spec
+	// 090 Bead 1)" — must still satisfy coverage. Before parse-time
+	// normalization this fired a spurious adr-coverage-missing.
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted (Finalized in spec 090 Bead 1)", "payments", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for qualified Accepted status: %s", issue.Message)
+		}
+	}
+}
+
 func TestSupersededADRDoesNotSatisfyCoverage(t *testing.T) {
 	// ADR-0001 (Superseded by ADR-0002) is cited, but ADR-0002 is NOT
 	// cited — coverage must NOT be satisfied. ADR-0002 itself exists

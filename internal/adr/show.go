@@ -93,7 +93,7 @@ func FormatSummary(a *ADR) string {
 
 	b.WriteString(fmt.Sprintf("ID:             %s\n", a.ID))
 	b.WriteString(fmt.Sprintf("Title:          %s\n", a.Title))
-	b.WriteString(fmt.Sprintf("Status:         %s\n", a.Status))
+	b.WriteString(fmt.Sprintf("Status:         %s\n", a.DisplayStatus()))
 	b.WriteString(fmt.Sprintf("Date:           %s\n", a.Date))
 	b.WriteString(fmt.Sprintf("Domain(s):      %s\n", strings.Join(a.Domains, ", ")))
 
@@ -114,9 +114,12 @@ func FormatSummary(a *ADR) string {
 
 // adrJSON is the JSON representation of an ADR for --json output.
 type adrJSON struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Status       string   `json:"status"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	// StatusRaw carries the unnormalized **Status**: line value (with
+	// provenance qualifiers) when it differs from the normalized Status.
+	StatusRaw    string   `json:"status_raw,omitempty"`
 	Date         string   `json:"date"`
 	Domains      []string `json:"domains"`
 	Supersedes   string   `json:"supersedes,omitempty"`
@@ -135,6 +138,9 @@ func FormatJSON(a *ADR) (string, error) {
 		Supersedes:   a.Supersedes,
 		SupersededBy: a.SupersededBy,
 		Decision:     ExtractDecision(a.Content),
+	}
+	if a.StatusRaw != "" && a.StatusRaw != a.Status {
+		j.StatusRaw = a.StatusRaw
 	}
 	if j.Domains == nil {
 		j.Domains = []string{}

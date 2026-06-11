@@ -14,11 +14,21 @@ import (
 
 // ADR represents a parsed Architecture Decision Record.
 type ADR struct {
-	ID           string
-	Path         string
-	Title        string
-	Date         string
-	Status       string
+	ID    string
+	Path  string
+	Title string
+	Date  string
+	// Status is the normalized lifecycle status: the first token of the
+	// raw **Status**: line value (e.g. "Accepted" for a line reading
+	// "Accepted (Finalized in spec 090 Bead 1)"). All known statuses are
+	// single words (Proposed/Accepted/Superseded/Deprecated/Withdrawn/
+	// Rejected), so comparisons like strings.EqualFold(a.Status,
+	// "Accepted") work regardless of trailing provenance qualifiers.
+	Status string
+	// StatusRaw preserves the full **Status**: line value, including any
+	// parenthetical qualifiers, for display paths (show / list) so
+	// provenance notes aren't lost by normalization.
+	StatusRaw    string
 	Domains      []string
 	Supersedes   string
 	SupersededBy string
@@ -58,7 +68,8 @@ func ParseADR(path string) (ADR, error) {
 			a.Date = extractValue(trimmed, "**Date**:")
 		}
 		if strings.Contains(trimmed, "**Status**:") {
-			a.Status = extractValue(trimmed, "**Status**:")
+			a.StatusRaw = extractValue(trimmed, "**Status**:")
+			a.Status = normalizeStatus(a.StatusRaw)
 		}
 		if strings.Contains(trimmed, "**Domain(s)**:") {
 			domStr := extractValue(trimmed, "**Domain(s)**:")
@@ -84,6 +95,41 @@ func ParseADR(path string) (ADR, error) {
 	}
 
 	return a, nil
+}
+
+// DisplayStatus returns the status string for human-facing output:
+// StatusRaw (full provenance, e.g. "Accepted (Finalized in spec 090
+// Bead 1)") when available, falling back to the normalized Status for
+// ADR values constructed without a raw line (struct literals, mocks).
+func (a *ADR) DisplayStatus() string {
+	if a.StatusRaw != "" {
+		return a.StatusRaw
+	}
+	return a.Status
+}
+
+// normalizeStatus reduces a raw **Status**: line value to its canonical
+// single-token form. Authors routinely append provenance qualifiers —
+// e.g. "Accepted (Finalized in spec 090 Bead 1)" or "Withdrawn
+// (superseded by ADR-0015)" — which previously broke every exact
+// strings.EqualFold(status, "Accepted") comparison downstream
+// (FilterADRs, plan coverage, adr list --status). The normalized form is
+// the first whitespace-delimited token, with any leading parenthetical
+// split off and trailing punctuation trimmed.
+func normalizeStatus(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// Split off a directly-attached qualifier: "Accepted(note)".
+	if idx := strings.IndexAny(raw, "([{"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.TrimRight(fields[0], "(:;,.")
 }
 
 // extractValue extracts the value after a metadata key in a line.
