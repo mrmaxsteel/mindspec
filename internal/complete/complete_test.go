@@ -876,14 +876,26 @@ func TestCompleteAllowsOverride(t *testing.T) {
 
 // writeADRDivergenceFixture builds a fixture under root that trips
 // the ADR-divergence gate: a spec.md declaring "core" as an impacted
-// domain, a plan.md citing only an execution-domain ADR, and that
-// Accepted ADR on disk. Returns the spec ID.
+// domain, an OWNERSHIP.yaml claiming internal/core/** for that domain
+// (spec 091 Req 13 removed the silent loader fallback, so attribution
+// requires a real manifest — a manifest-less domain claims nothing),
+// a plan.md citing only an execution-domain ADR, and that Accepted
+// ADR on disk. Returns the spec ID.
 func writeADRDivergenceFixture(t *testing.T, root, specID string) {
 	t.Helper()
 
 	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
+	}
+
+	coreDir := filepath.Join(root, ".mindspec", "docs", "domains", "core")
+	if err := os.MkdirAll(coreDir, 0o755); err != nil {
+		t.Fatalf("mkdir core domain dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coreDir, "OWNERSHIP.yaml"),
+		[]byte("paths:\n  - internal/core/**\n"), 0o644); err != nil {
+		t.Fatalf("write core OWNERSHIP.yaml: %v", err)
 	}
 	specMD := "# Spec " + specID + "\n\n## Impacted Domains\n\n- core\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specMD), 0o644); err != nil {
@@ -930,7 +942,7 @@ func TestOverrideUnblocks(t *testing.T) {
 	mock := newMockExec()
 	mock.MergeBaseResult = "merge-base-sha"
 	// Source touch that ValidateDivergence will attribute to "core"
-	// via the fallback `internal/core/**` (no OWNERSHIP.yaml present).
+	// via the fixture's OWNERSHIP.yaml (`internal/core/**`).
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
 
 	// Recorder for metadata writes.

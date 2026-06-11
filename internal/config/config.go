@@ -18,6 +18,21 @@ type Config struct {
 	Enforcement       Enforcement   `yaml:"enforcement"`
 	Recording         Recording     `yaml:"recording"`
 	Decomposition     Decomposition `yaml:"decomposition"`
+
+	// SourceGlobs declares which path globs count as "source" for the
+	// doc-sync gate (spec 091 Req 11). OVERRIDE semantics: a non-empty
+	// list FULLY REPLACES mindspec's built-in classifier (never a
+	// union with it); while the list is empty or the field/file is
+	// absent, the built-in classifier (.go files under cmd/ or
+	// internal/, excluding _test.go) stays active as the disclosed
+	// default. The default is EMPTY — the framework never guesses
+	// repo-specific globs; `mindspec doctor --fix` scaffolds the
+	// commented config block and `mindspec source populate` emits the
+	// agent prompt to populate it. Note: an absent `source_globs:` key
+	// and `source_globs: []` are indistinguishable through this typed
+	// struct — raw-YAML inspection is required to tell them apart
+	// (the doctor --fix scaffolder's concern, not Load's).
+	SourceGlobs []string `yaml:"source_globs"`
 }
 
 // Decomposition holds advisory thresholds for plan decomposition-quality

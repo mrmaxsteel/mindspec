@@ -164,6 +164,82 @@ recording:
 	}
 }
 
+// TestSourceGlobs_RoundTrip covers the populated state of the spec
+// 091 Req 11 `source_globs:` field: declared globs round-trip through
+// Load unchanged.
+func TestSourceGlobs_RoundTrip(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `
+source_globs:
+  - cmd/**
+  - internal/**
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.SourceGlobs) != 2 {
+		t.Fatalf("expected 2 source_globs, got %d: %v", len(cfg.SourceGlobs), cfg.SourceGlobs)
+	}
+	if cfg.SourceGlobs[0] != "cmd/**" || cfg.SourceGlobs[1] != "internal/**" {
+		t.Errorf("unexpected source_globs: %v", cfg.SourceGlobs)
+	}
+}
+
+// TestSourceGlobs_DefaultEmptyWhenFieldAbsent covers the field-absent
+// state: a config.yaml without `source_globs:` yields an empty slice
+// (the documented empty default — no backfill, the framework never
+// guesses globs).
+func TestSourceGlobs_DefaultEmptyWhenFieldAbsent(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("merge_strategy: pr\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.SourceGlobs) != 0 {
+		t.Errorf("expected empty source_globs when field absent, got %v", cfg.SourceGlobs)
+	}
+}
+
+// TestSourceGlobs_DefaultEmptyWhenFileAbsent covers the file-absent
+// state (the common brownfield case — `mindspec init` does not create
+// config.yaml): Load returns defaults with empty SourceGlobs.
+func TestSourceGlobs_DefaultEmptyWhenFileAbsent(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.SourceGlobs) != 0 {
+		t.Errorf("expected empty source_globs when config file absent, got %v", cfg.SourceGlobs)
+	}
+}
+
 func TestIsProtectedBranch(t *testing.T) {
 	cfg := DefaultConfig()
 

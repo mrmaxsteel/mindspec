@@ -114,8 +114,10 @@ func isSourceFile(path string) bool {
 // listDomainDirs returns the lexicographically-sorted list of domain
 // directory names under .mindspec/docs/domains/ in the given root.
 // Returns an empty slice (no error) when the domains directory is
-// missing — callers fall back to the legacy "internal/<domain>/**"
-// heuristic via attributeDomain's per-domain loadOwnership fallback.
+// missing — checkInternalPackages then takes its zero-domains
+// disclosed default (per-package internal/<pkg>/ attribution). The
+// per-domain loader itself has NO fallback: a domain directory whose
+// manifest is missing claims nothing (spec 091 Req 13).
 func listDomainDirs(root string) ([]string, error) {
 	dir := filepath.Join(root, ".mindspec", "docs", "domains")
 	entries, err := os.ReadDir(dir)
@@ -137,13 +139,15 @@ func listDomainDirs(root string) ([]string, error) {
 
 // checkInternalPackages errors when internal/ packages changed without
 // the corresponding domain docs being updated in the same diff.
-// Attribution uses the Bead-1 ownership machinery (loadOwnership +
+// Attribution uses the ownership machinery (LoadOwnership +
 // attributeDomain): each changed source path is resolved to its
-// owning domain via .mindspec/docs/domains/<domain>/OWNERSHIP.yaml,
-// or via the "internal/<domain>/**" fallback when the manifest is
-// absent. The error message NAMES the manifest file that decided
-// ownership (or "<fallback: internal/<domain>/**>") so the operator
-// knows which OWNERSHIP.yaml to edit.
+// owning domain via .mindspec/docs/domains/<domain>/OWNERSHIP.yaml.
+// A domain whose manifest is absent claims NOTHING — the silent
+// "internal/<domain>/**" loader fallback was removed by spec 091
+// Req 13. The error message NAMES the manifest file that decided
+// ownership so the operator knows which OWNERSHIP.yaml to edit. The
+// only surviving fallback is the zero-domains disclosed default
+// below, which applies when no domain directories exist at all.
 func checkInternalPackages(r *Result, root string, source, docs []string) {
 	domains, err := listDomainDirs(root)
 	if err != nil {
@@ -152,16 +156,22 @@ func checkInternalPackages(r *Result, root string, source, docs []string) {
 	}
 
 	// Group source files by attributed domain, retaining the
-	// manifest/fallback marker that decided ownership.
+	// manifest path that decided ownership.
 	type attribution struct {
-		manifest string // o.ManifestPath, or "" → use fallback marker
+		manifest string // o.ManifestPath; never empty post spec 091 (attribution requires non-empty Paths ⇒ manifest-backed load)
 		files    []string
 	}
 	byDomain := map[string]*attribution{}
 
-	// Legacy fallback when there are no domain manifests at all:
-	// preserve the pre-Bead-1 internal/<pkg>/ heuristic so we still
-	// surface drift on bare checkouts.
+	// Zero-domains DISCLOSED DEFAULT (spec 091 Req 13): when no
+	// domain directories exist at all, attribute changed
+	// internal/<pkg>/ files per-package and emit blocking
+	// internal-docs errors carrying the literal
+	// "<fallback: internal/<pkg>/**>" marker. This branch is the
+	// deliberate no-domains default — NOT a leftover of the removed
+	// per-domain loader fallback — and is the only drift coverage
+	// for bare checkouts with no domain docs. The marker in the
+	// error text is the disclosure.
 	if len(domains) == 0 {
 		pkgs := map[string][]string{}
 		for _, f := range source {
@@ -253,15 +263,17 @@ func checkInternalPackages(r *Result, root string, source, docs []string) {
 		if hasDomainDocs {
 			continue
 		}
-		marker := a.manifest
-		if marker == "" {
-			marker = fmt.Sprintf("<fallback: internal/%s/**>", domain)
-		}
+		// a.manifest is always non-empty here: attributeDomain only
+		// returns a domain whose Paths matched, and post spec 091
+		// (Req 13) a non-empty Paths implies a manifest-backed load.
+		// The old empty-ManifestPath "<fallback: internal/<domain>/**>"
+		// marker branch was therefore dead and has been removed (panel
+		// V2-4); TestPerDomainMarkerNamesManifest pins this outcome.
 		r.AddError("internal-docs", fmt.Sprintf(
 			"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by %s",
 			domain, strings.Join(a.files, ", "),
 			filepath.Join(".mindspec", "docs", "domains", domain),
-			marker,
+			a.manifest,
 		))
 	}
 }

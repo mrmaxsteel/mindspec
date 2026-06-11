@@ -17,12 +17,36 @@ import (
 
 // Ownership describes which source-tree paths a domain owns for
 // doc-sync attribution. ManifestPath is the absolute path to the
-// OWNERSHIP.yaml that produced this value; an empty ManifestPath
-// signals the fallback "internal/<domain>/**" heuristic.
+// OWNERSHIP.yaml that produced this value; it is empty only when the
+// manifest file is absent on disk, in which case the domain claims
+// NOTHING (Paths is empty — spec 091 Req 13 removed the silent
+// "internal/<domain>/**" fallback heuristic). Use Source to
+// distinguish the three post-load states.
 type Ownership struct {
 	Paths        []string // glob patterns (e.g. "internal/foo/**")
 	Exclude      []string // glob patterns subtracted from Paths
-	ManifestPath string   // absolute path; "" signals fallback
+	ManifestPath string   // absolute path; "" when the manifest is absent
+}
+
+// Source reports where this Ownership's claims came from. It is
+// DERIVED from the existing fields (not a stored field — spec 091
+// panel D2 resolution), so there is exactly one decision point and
+// no loader path-specific assignment. Three states (spec 091 Req 13):
+//
+//	OWNERSHIP.yaml absent on disk            → "missing"    (ManifestPath "", Paths empty)
+//	file exists, paths: [] (empty stub)      → "empty-stub" (ManifestPath set, Paths empty)
+//	file exists, paths: [...] non-empty      → "manifest"   (ManifestPath set, Paths non-empty)
+//
+// Doc-sync uses Source only for diagnostic Warn text; the gate's
+// pass/fail rule does not branch on it.
+func (o *Ownership) Source() string {
+	if o.ManifestPath == "" {
+		return "missing"
+	}
+	if len(o.Paths) == 0 {
+		return "empty-stub"
+	}
+	return "manifest"
 }
 
 // excludedFirstSegments enumerates the first-path-segment prefixes
@@ -34,20 +58,26 @@ var excludedFirstSegments = map[string]struct{}{
 	"bench":     {},
 }
 
-// loadOwnership reads .mindspec/docs/domains/<domain>/OWNERSHIP.yaml
+// LoadOwnership reads .mindspec/docs/domains/<domain>/OWNERSHIP.yaml
 // and returns the parsed Ownership. When the manifest file does not
-// exist, it returns the fallback Ownership with Paths set to
-// "internal/<domain>/**" and an empty ManifestPath (no error). On
-// schema violation (an entry whose first path segment is in
-// excludedFirstSegments) it returns a descriptive error.
-func loadOwnership(root, domain string) (*Ownership, error) {
+// exist, it returns an Ownership that claims NOTHING — empty Paths,
+// empty ManifestPath, Source() == "missing" (no error). The silent
+// fallback that synthesized "internal/<domain>/**" claims for a
+// missing manifest was removed by spec 091 Req 13 (ZFC correction;
+// see ADR-0036). On schema violation (an entry whose first path
+// segment is in excludedFirstSegments) it returns a descriptive
+// error.
+//
+// Exported so internal/doctor can reuse the loader (spec 091) —
+// doctor must NOT reimplement manifest loading.
+func LoadOwnership(root, domain string) (*Ownership, error) {
 	manifestPath := filepath.Join(root, ".mindspec", "docs", "domains", domain, "OWNERSHIP.yaml")
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Ownership{
-				Paths:        []string{"internal/" + domain + "/**"},
+				Paths:        []string{},
 				Exclude:      nil,
 				ManifestPath: "",
 			}, nil
@@ -99,7 +129,7 @@ func checkExcludedSegment(entry string) error {
 // file.
 func attributeDomain(root, sourcePath string, domains []string) (string, *Ownership, error) {
 	for _, d := range domains {
-		o, err := loadOwnership(root, d)
+		o, err := LoadOwnership(root, d)
 		if err != nil {
 			return "", nil, err
 		}
@@ -115,19 +145,20 @@ func attributeDomain(root, sourcePath string, domains []string) (string, *Owners
 }
 
 // matchesAny returns true when path matches at least one pattern in
-// patterns via globMatch.
+// patterns via GlobMatch.
 func matchesAny(patterns []string, path string) bool {
 	for _, p := range patterns {
-		if globMatch(p, path) {
+		if GlobMatch(p, path) {
 			return true
 		}
 	}
 	return false
 }
 
-// globMatch reports whether path matches pattern. The implementation
-// supports the small dialect described in spec 086 plan Bead 1 step
-// 6:
+// GlobMatch reports whether path matches pattern. Exported so
+// internal/doctor can reuse the matcher (spec 091) — doctor must NOT
+// reimplement glob matching. The implementation supports the small
+// dialect described in spec 086 plan Bead 1 step 6:
 //
 //   - leading `**/`   — matches zero or more leading path segments
 //   - trailing `/**`  — matches the directory itself OR any
@@ -140,7 +171,7 @@ func matchesAny(patterns []string, path string) bool {
 //     path/filepath.Match)
 //
 // Segment-level matching delegates to path/filepath.Match.
-func globMatch(pattern, path string) bool {
+func GlobMatch(pattern, path string) bool {
 	// Special-case: trailing /** matches the directory itself.
 	if strings.HasSuffix(pattern, "/**") {
 		prefix := strings.TrimSuffix(pattern, "/**")

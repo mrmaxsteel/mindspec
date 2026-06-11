@@ -222,7 +222,7 @@ documented in HC-6.
   themselves are never auto-proposed — the agent or operator
   populates the manifest (rationale per Requirement 17).
 - **ADR record** (`.mindspec/docs/adr/`, not a code domain): A
-  new ADR-0035 records the Zero
+  new ADR-0036 records the Zero
   Framework Cognition stance, the empty-stub scaffold default
   (`paths: []` + populate-this comment), the removal of the
   silent per-domain fallback, the demotion of the hard-coded
@@ -237,7 +237,7 @@ documented in HC-6.
 
 ## ADR Touchpoints
 
-- [ADR-0035-ownership-discovery.md](../../adr/ADR-0035-ownership-discovery.md)
+- [ADR-0036-ownership-discovery.md](../../adr/ADR-0036-ownership-discovery.md)
   (**new**): Records (a) the **Zero Framework Cognition**
   stance (citing Yegge 2024) and the empty-stub scaffold
   default — `paths: []` with a populate-this comment that
@@ -277,23 +277,25 @@ documented in HC-6.
   intersection is the named follow-up candidate.
 
   **ADR number reservation.** At spec-draft time the highest
-  existing ADR is `ADR-0034-ceremony-collapse.md`, so
-  `ADR-0035` is free. **Creation of the ADR file is
-  deferred to the first implementation bead**: the bead
-  whose responsibility it is to author the ADR re-checks
-  `.mindspec/docs/adr/` at bead-claim time, takes the
-  next free integer (`0035` if still free, otherwise the
-  next), and updates all cross-references in this spec to
-  match in the same commit. This eliminates the
-  PR-open-time renumbering race: the ADR is created at
-  implementation time, after sibling-spec contention is
-  resolved.
+  existing ADR was `ADR-0034-ceremony-collapse.md`.
+  **Creation of the ADR file is deferred to the first
+  implementation bead**: the bead whose responsibility it is
+  to author the ADR re-checks `.mindspec/docs/adr/` at
+  bead-claim time, takes the next free integer, and updates
+  all cross-references in this spec to match in the same
+  commit. This eliminates the PR-open-time renumbering race:
+  the ADR is created at implementation time, after
+  sibling-spec contention is resolved. *Claimed at Bead 1:
+  spec 092's agent-error-contract ADR had taken the next
+  integer on main, so this spec's ADR is `ADR-0036`; every
+  cross-reference in this spec was updated to match in the
+  same commit that created the ADR file.*
 - [ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md):
   Prerequisite, **amended with a superseded-in-part note**.
   ADR-0031 records the silent `internal/<domain>/**` fallback
   as live behavior (ADR-0031 lines 54, 81); Requirement 13
   removes exactly that fallback, so this spec adds a short
-  superseded-in-part note to ADR-0031 pointing at ADR-0035
+  superseded-in-part note to ADR-0031 pointing at ADR-0036
   for the replacement semantics. The manifest schema and the
   warning-to-error promotion that ADR-0031 records are
   unchanged; only the fallback semantics are superseded. The
@@ -378,6 +380,15 @@ No other ADR is amended.
      itself does not mention missing manifests.
      After `doctor --fix` scaffolds the empty stubs,
      `dead-manifest` fires until the stubs are populated.
+     The break also runs in the OPPOSITE direction on the
+     adr-divergence lane, which TIGHTENS: files that
+     previously auto-attributed to a spec-declared impacted
+     domain via the fallback now attribute to no domain and
+     fire blocking `adr-divergence-unowned` errors until
+     that domain's manifest is populated — previously-
+     passing diffs now fail (see ADR-0036 §(d), including
+     the `writeADRDivergenceFixture` proof from this spec's
+     own implementation).
    - Repos that lack `source_globs:` in
      `.mindspec/config.yaml` (including repos with no
      config.yaml at all) lose NOTHING at upgrade time:
@@ -419,7 +430,7 @@ No other ADR is amended.
    SHOULD have claimed. Verification of populate output is
    therefore on the operator/agent; extending
    `domain-overlap` to resolved-file-set intersection is
-   recorded in ADR-0035 item (i) as the follow-up candidate.
+   recorded in ADR-0036 item (i) as the follow-up candidate.
 
    **Accepted gap — partial-dead manifests.** A sibling
    gap: `dead-manifest` (Requirement 17) evaluates the
@@ -493,7 +504,7 @@ No other ADR is amended.
    # mindspec deliberately does NOT guess which paths belong to
    # the "<domain>" domain — that is a semantic decision a coding
    # agent or human operator makes by inspecting the repo. See
-   # spec 086 / ADR-0031 for the schema and ADR-0035 for the
+   # spec 086 / ADR-0031 for the schema and ADR-0036 for the
    # Zero-Framework-Cognition rationale.
    #
    # To populate this manifest:
@@ -1040,7 +1051,7 @@ No other ADR is amended.
     whole-set evaluation) means neither a wrong-but-RESOLVING
     glob nor a PARTIALLY-dead manifest (one dead glob among
     live ones) fires it — both accepted gaps are documented
-    in HC-6 and ADR-0035 item (i).
+    in HC-6 and ADR-0036 item (i).
 
 18. **`mindspec doctor` emits a new Warn
     `missing-source-globs`** when ANY of the following holds:
@@ -1103,7 +1114,7 @@ No other ADR is amended.
       split). Literal-string comparison only: two different
       glob strings that resolve to overlapping file sets are
       NOT flagged (the wrong-but-resolving accepted gap,
-      HC-6 / ADR-0035 item (i); resolved-file-set
+      HC-6 / ADR-0036 item (i); resolved-file-set
       intersection is the named follow-up).
 
     These checks run on every `mindspec doctor` invocation,
@@ -1114,7 +1125,7 @@ No other ADR is amended.
     new hygiene checks are advisory Warns).
 
     **Out of scope for v1 of this spec** (deliberate
-    deferrals; recorded in ADR-0035): canonical ordering of
+    deferrals; recorded in ADR-0036): canonical ordering of
     entries (alphabetical sort) is NOT enforced — manifests
     work in any order; auto-normalization (rewriting the
     manifest in canonical form) is NOT introduced;
@@ -1287,9 +1298,9 @@ No other ADR is amended.
   `unclaimed-source` Warn per Requirement 16, using the
   derived `Ownership.Source()` (Requirement 13) for the
   Warn's mechanical domain-state report.
-- `.mindspec/docs/adr/ADR-0035-ownership-discovery.md` (new).
+- `.mindspec/docs/adr/ADR-0036-ownership-discovery.md` (new).
 - `.mindspec/docs/adr/ADR-0031-doc-sync-gate.md` — add the
-  superseded-in-part note pointing at ADR-0035 (the fallback
+  superseded-in-part note pointing at ADR-0036 (the fallback
   semantics recorded at ADR-0031 lines 54 and 81 are removed
   by Requirement 13).
 - Tests for every behavior above (`doctor_test.go`, `init_test.go`
@@ -1323,10 +1334,10 @@ No other ADR is amended.
   Requirement 16 override semantics, `isSourceFile` survives
   as the disclosed empty-`source_globs` fallback. Its full
   deletion (making `source_globs` mandatory) is deferred to a
-  future spec, recorded in ADR-0035 item (h).
+  future spec, recorded in ADR-0036 item (h).
 - **Resolved-file-set `domain-overlap`.** Requirement 20
   compares literal path strings only; glob-resolution
-  intersection is the named follow-up (ADR-0035 item (i)).
+  intersection is the named follow-up (ADR-0036 item (i)).
 
 ## Non-Goals
 
@@ -1531,7 +1542,7 @@ No other ADR is amended.
   `domain-overlap` compares literal strings. The misclaim
   surfaces only as this `unclaimed-source` Warn on the
   orphaned file; the residual gap is accepted per HC-6 /
-  ADR-0035 item (i).
+  ADR-0036 item (i).
   Tests (a) and (b) are the regression gates proving the
   fallback-removal semantics work: case (b) proves
   "initial accuracy is not forever accuracy" (empty stub
@@ -1613,10 +1624,9 @@ No other ADR is amended.
   unit test seeds a hand-authored manifest, runs the fixer, and
   asserts the file bytes are byte-identical before and after.
 - [ ] **The ownership-discovery ADR exists** under
-  `.mindspec/docs/adr/` (as `ADR-0035-ownership-discovery.md`
-  if `0035` is still free at bead-claim time, else the next
-  free integer per the ADR Touchpoints reservation
-  procedure) and records the ZFC stance, the empty-stub
+  `.mindspec/docs/adr/` (as `ADR-0036-ownership-discovery.md`
+  — the number claimed at Bead 1 per the ADR Touchpoints
+  reservation procedure) and records the ZFC stance, the empty-stub
   scaffold content, the fallback removal, the
   disclosed-default override semantics, the accepted
   wrong-but-resolving-glob gap, and
@@ -1625,7 +1635,7 @@ No other ADR is amended.
   cross-reference in this spec in the same commit that
   creates the file — no PR-open-time renumbering followup
   exists or is needed. **ADR-0031 carries the
-  superseded-in-part note** pointing at ADR-0035.
+  superseded-in-part note** pointing at ADR-0036.
 - [ ] **`go build ./... && go test -short ./...` is green** on
   the 091 branch with no skipped or excluded tests vs. `main`,
   modulo the two existing-test updates enumerated in HC-3
@@ -1863,9 +1873,9 @@ YAML
   ```bash
   go test -short ./...
   ```
-- **ADR-0035 present, ADR-0031 amended:**
+- **ADR-0036 present, ADR-0031 amended:**
   ```bash
-  test -f .mindspec/docs/adr/ADR-0035-ownership-discovery.md
+  test -f .mindspec/docs/adr/ADR-0036-ownership-discovery.md
   grep -qi 'superseded in part' .mindspec/docs/adr/ADR-0031-doc-sync-gate.md
   ```
 
@@ -1933,7 +1943,7 @@ these two are tracked here explicitly):
     HC-7 genuinely holds and the silent-regression window of
     an inert gate never opens. Goal 8 reworded from "replaced"
     to "overridable disclosed default"; full classifier
-    deletion deferred (ADR-0035 item (h)). The unsatisfiable
+    deletion deferred (ADR-0036 item (h)). The unsatisfiable
     exact-equivalence regression AC was replaced with the
     two-sided override-semantics ACs.
   - **Q-B (3/3):** `dead-manifest` fires ONLY for existing
