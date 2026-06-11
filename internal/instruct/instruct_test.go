@@ -4,11 +4,22 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
+
+// deprecatedApproveOrder matches the deprecated verb-noun gate order
+// (`mindspec approve ...` / `approve <noun>`) that spec 092 Req 11
+// removes from every instruct emission channel. The canonical order is
+// noun-verb: `mindspec spec approve <id>`, `mindspec plan approve <id>`,
+// `mindspec impl approve <id>`. Case-insensitive and
+// whitespace-tolerant (panel R3 hardening) so casing/spacing variants
+// of the deprecated order cannot sneak back in; word boundaries keep
+// canonical prose like "approved spec" from false-matching.
+var deprecatedApproveOrder = regexp.MustCompile(`(?i)mindspec\s+approve\b|\bapprove\s+(spec|plan|impl)\b`)
 
 func setupTestProject(t *testing.T) string {
 	t.Helper()
@@ -144,6 +155,93 @@ func TestRender_ImplementMode(t *testing.T) {
 	}
 }
 
+// TestRender_ReviewMode pins the review-phase canonical gate command in
+// the markdown render — the SessionStart channel (spec 092 Req 11b).
+func TestRender_ReviewMode(t *testing.T) {
+	root := setupTestProject(t)
+	s := &state.Focus{Mode: state.ModeReview, ActiveSpec: "004-instruct"}
+	ctx := BuildContext(root, s)
+
+	output, err := Render(ctx)
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Review Mode") {
+		t.Error("expected review mode heading")
+	}
+	if !strings.Contains(output, "mindspec impl approve") {
+		t.Error("expected canonical `mindspec impl approve` gate command in review-mode output")
+	}
+}
+
+// TestRender_NoDeprecatedApproveOrder is the spec 092 Req 11b negative
+// assertion against the MARKDOWN Render output (the channel the
+// SessionStart hook emits, cmd/mindspec/hook.go): no rendered mode may
+// teach the deprecated verb-noun `approve <noun>` order. This pins the
+// templates/review.md rewrite (and the validate.CrossValidate SKIPPED
+// GATE warning, which the spec-mode fixture injects into the render).
+func TestRender_NoDeprecatedApproveOrder(t *testing.T) {
+	root := setupTestProject(t)
+
+	modes := []string{state.ModeIdle, state.ModeSpec, state.ModePlan, state.ModeImplement, state.ModeReview}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			s := &state.Focus{Mode: mode, ActiveSpec: "004-instruct"}
+			ctx := BuildContext(root, s)
+
+			output, err := Render(ctx)
+			if err != nil {
+				t.Fatalf("Render failed for mode %s: %v", mode, err)
+			}
+
+			if m := deprecatedApproveOrder.FindString(output); m != "" {
+				t.Errorf("mode %s markdown render teaches deprecated approve order %q (spec 092 Req 11)\n--- output ---\n%s\n--- end ---", mode, m, output)
+			}
+		})
+	}
+}
+
+// TestRenderJSON_GatesNoDeprecatedApproveOrder is the spec 092 Req 11b
+// negative assertion against the RenderJSON `Gates` field (the
+// `mindspec instruct --format json` channel) — pins the gatesForMode
+// rewrite — plus the canonical-command positive assertions per phase.
+func TestRenderJSON_GatesNoDeprecatedApproveOrder(t *testing.T) {
+	root := setupTestProject(t)
+
+	wantCanonical := map[string]string{
+		state.ModeSpec:   "mindspec spec approve",
+		state.ModePlan:   "mindspec plan approve",
+		state.ModeReview: "mindspec impl approve",
+	}
+
+	modes := []string{state.ModeIdle, state.ModeSpec, state.ModePlan, state.ModeImplement, state.ModeReview}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			s := &state.Focus{Mode: mode, ActiveSpec: "004-instruct"}
+			ctx := BuildContext(root, s)
+
+			output, err := RenderJSON(ctx)
+			if err != nil {
+				t.Fatalf("RenderJSON failed for mode %s: %v", mode, err)
+			}
+
+			var parsed JSONOutput
+			if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+				t.Fatalf("JSON parse failed for mode %s: %v", mode, err)
+			}
+
+			gates := strings.Join(parsed.Gates, "\n")
+			if m := deprecatedApproveOrder.FindString(gates); m != "" {
+				t.Errorf("mode %s Gates field teaches deprecated approve order %q (spec 092 Req 11): %v", mode, m, parsed.Gates)
+			}
+			if want := wantCanonical[mode]; want != "" && !strings.Contains(gates, want) {
+				t.Errorf("mode %s Gates field missing canonical command %q: %v", mode, want, parsed.Gates)
+			}
+		})
+	}
+}
+
 func TestRender_SpecGoalExtracted(t *testing.T) {
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
@@ -241,6 +339,7 @@ func TestGatesForMode(t *testing.T) {
 		{state.ModeSpec, 1},
 		{state.ModePlan, 2},
 		{state.ModeImplement, 2},
+		{state.ModeReview, 1},
 	}
 
 	for _, tt := range tests {

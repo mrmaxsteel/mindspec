@@ -68,7 +68,7 @@ Never report completion unless required files exist and `mindspec complete` succ
 - Making changes outside the assigned worktree
 - Creating worktrees via raw tooling (`bd worktree create`, `git worktree add`) instead of `mindspec next`
 - Closing beads directly with `bd close` — use `mindspec complete` instead
-- Running `bd update --metadata` on lifecycle epics — phase metadata is managed by `mindspec complete` and `mindspec approve`
+- Running `bd update --metadata` on lifecycle epics — phase metadata is managed by `mindspec complete` and `mindspec impl approve`
 - Manually closing the lifecycle epic — `mindspec impl approve` handles epic closure automatically
 
 ## Obligations

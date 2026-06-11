@@ -15,6 +15,9 @@ import (
 var implCmd = &cobra.Command{
 	Use:   "impl",
 	Short: "Implementation lifecycle commands",
+	// Spec 092 Req 10b: typos of the deprecated `approve` verb suggest
+	// the noun-verb command families.
+	SuggestFor: []string{"approve", "aprove"},
 }
 
 var implApproveCmd = &cobra.Command{
