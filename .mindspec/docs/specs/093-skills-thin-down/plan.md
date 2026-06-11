@@ -4,6 +4,7 @@ adr_citations:
     - id: ADR-0025
     - id: ADR-0030
     - id: ADR-0035
+    - id: ADR-0037
 approved_at: "2026-06-11T20:07:59Z"
 approved_by: user
 bead_ids:
