@@ -248,6 +248,41 @@ func TestValidateDivergenceCoveredDomainPasses(t *testing.T) {
 	}
 }
 
+// TestValidateDivergenceSpecBranchADRVisible — mindspec-ew79 mirror of
+// the plan-lane test: an ADR that exists only inside the spec worktree
+// (the spec branch) must satisfy the bead-complete divergence check run
+// from the primary checkout. Before the overlay store the FileStore was
+// rooted at the primary tree only, so the cited spec-branch ADR was
+// invisible and the changed file surfaced as adr-divergence-uncovered.
+func TestValidateDivergenceSpecBranchADRVisible(t *testing.T) {
+	root := t.TempDir()
+	wtTree := filepath.Join(root, ".worktrees", "worktree-spec-105-wt")
+	specDir := filepath.Join(wtTree, ".mindspec", "docs", "specs", "105-wt")
+	writeSpecAndPlan(t, root, specDir, "105-wt",
+		[]string{"payments"},
+		[]string{"ADR-0099"},
+	)
+	// ADR lives ONLY in the spec worktree tree (writeADR joins
+	// <arg>/.mindspec/docs/adr).
+	writeADR(t, wtTree, "ADR-0099", "Accepted", []string{"payments"})
+	writeManifest(t, root, "payments", "paths:\n  - internal/payments/**\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/payments/charge.go"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD")
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Errorf("expected no failures with spec-branch ADR visible, got %+v", r.Issues)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
 // TestValidateDivergenceDiffErrorSurfaces confirms a ChangedFiles
 // failure surfaces as `adr-divergence-diff` and short-circuits with
 // nil findings.

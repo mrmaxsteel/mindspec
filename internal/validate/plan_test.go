@@ -1248,6 +1248,58 @@ func TestPlanRejectsUncoveredDomain(t *testing.T) {
 	}
 }
 
+func TestPlanSpecWorktreeADRVisible(t *testing.T) {
+	// mindspec-ew79: an ADR that exists ONLY on the spec branch (inside
+	// the spec worktree at root/.worktrees/worktree-spec-<id>/) must be
+	// visible to plan-time citation + coverage checks run from the
+	// primary checkout. Before the overlay store this fired spurious
+	// adr-cite-missing / adr-coverage-missing because the validator
+	// always read ADRs from the primary tree.
+	tmp := t.TempDir()
+	wtTree := filepath.Join(tmp, ".worktrees", "worktree-spec-999-test")
+	// Reuse the standard fixture helpers rooted at the worktree's
+	// .mindspec dir: they write to <arg>/docs/specs/999-test and
+	// <arg>/docs/adr, which lands at the canonical worktree layout
+	// .worktrees/worktree-spec-999-test/.mindspec/docs/... that
+	// workspace.SpecDir resolves first (ADR-0022).
+	wtMindspec := filepath.Join(wtTree, ".mindspec")
+	writeTestSpec(t, wtMindspec, []string{"payments"})
+	writeTestADRWithDomains(t, wtMindspec, "ADR-0001", "Accepted", "payments", "")
+	makePlanWithCitations(t, wtMindspec, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-missing" {
+			t.Errorf("unexpected adr-cite-missing for spec-branch ADR: %s", issue.Message)
+		}
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for spec-branch ADR: %s", issue.Message)
+		}
+	}
+}
+
+func TestPlanSpecWorktreeADRMissingEverywhereStillFails(t *testing.T) {
+	// Acceptance criterion companion: an ADR cited from a worktree-
+	// resolved plan that exists in NEITHER tree must still fail.
+	tmp := t.TempDir()
+	wtMindspec := filepath.Join(tmp, ".worktrees", "worktree-spec-999-test", ".mindspec")
+	writeTestSpec(t, wtMindspec, []string{"payments"})
+	makePlanWithCitations(t, wtMindspec, "  - id: ADR-0042\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-missing" && strings.Contains(issue.Message, "ADR-0042") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-cite-missing for ADR absent from both trees, got: %v", r.Issues)
+	}
+}
+
 func TestPlanCoverageAcceptsQualifiedAcceptedStatus(t *testing.T) {
 	// mindspec-f115: an ADR whose Status line carries a provenance
 	// qualifier — the live ADR-0029 case "Accepted (Finalized in spec

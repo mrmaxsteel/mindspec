@@ -29,7 +29,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
@@ -104,7 +103,10 @@ func ValidateDivergence(
 		return r, nil
 	}
 
-	store := adr.NewFileStore(root)
+	// mindspec-ew79: overlay the spec branch's ADR dir (the tree
+	// specDir lives in, e.g. a spec worktree) over the primary
+	// checkout, so spec-introduced ADRs count at bead-complete time.
+	store := adrStoreForSpec(root, specDir)
 
 	// Resolve domain list to consult for attribution. Prefer the
 	// spec's declared impacted-domains; when that's empty (spec has

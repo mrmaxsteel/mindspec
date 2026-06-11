@@ -558,3 +558,49 @@ func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 		t.Errorf("LegacyDocsDir: got %q", got)
 	}
 }
+
+func TestTreeRootForSpecDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		specDir string
+		want    string
+	}{
+		{
+			name:    "canonical layout in spec worktree",
+			specDir: "/repo/.worktrees/worktree-spec-091-x/.mindspec/docs/specs/091-x",
+			want:    "/repo/.worktrees/worktree-spec-091-x",
+		},
+		{
+			name:    "canonical layout in primary checkout",
+			specDir: "/repo/.mindspec/docs/specs/091-x",
+			want:    "/repo",
+		},
+		{
+			name:    "legacy layout",
+			specDir: "/repo/docs/specs/091-x",
+			want:    "/repo",
+		},
+		{
+			name:    "legacy layout in spec worktree",
+			specDir: "/repo/.worktrees/worktree-spec-091-x/docs/specs/091-x",
+			want:    "/repo/.worktrees/worktree-spec-091-x",
+		},
+		{
+			name:    "trailing slash cleaned",
+			specDir: "/repo/.mindspec/docs/specs/091-x/",
+			want:    "/repo",
+		},
+		{
+			name:    "unrecognized layout",
+			specDir: "/repo/somewhere/091-x",
+			want:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TreeRootForSpecDir(tc.specDir); got != tc.want {
+				t.Errorf("TreeRootForSpecDir(%q) = %q, want %q", tc.specDir, got, tc.want)
+			}
+		})
+	}
+}

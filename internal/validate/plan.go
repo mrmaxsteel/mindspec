@@ -109,6 +109,13 @@ func ValidatePlan(root, specID string) *Result {
 		r.AddError("impacted-domains-load", impErr.Error())
 	}
 
+	// Build the ADR store ONCE for both the citation and coverage
+	// lanes. mindspec-ew79: the store overlays the tree SpecDir
+	// actually resolved into (which may be a spec worktree carrying
+	// branch-only ADRs) over the primary checkout, instead of always
+	// reading the primary checkout's ADR dir.
+	store := adrStoreForSpec(root, specDir)
+
 	// Check ADR citations + fitness (Spec 039)
 	if len(fm.ADRCitations) == 0 {
 		if isApproved {
@@ -119,7 +126,6 @@ func ValidatePlan(root, specID string) *Result {
 			r.AddError("adr-citations", "no ADR citations in frontmatter and no ## ADR Fitness section — plan shows no evidence of architectural evaluation")
 		}
 	} else {
-		store := adr.NewFileStore(root)
 		checkADRCitations(r, store, fm.ADRCitations, impacted)
 	}
 
@@ -130,7 +136,6 @@ func ValidatePlan(root, specID string) *Result {
 	// the user expects, not silence. The check itself short-circuits
 	// on empty impactedDomains (no domains, nothing to cover).
 	if len(impacted) > 0 {
-		store := adr.NewFileStore(root)
 		checkADRCoverage(r, store, fm.ADRCitations, impacted)
 	}
 
@@ -177,6 +182,27 @@ func ValidatePlan(root, specID string) *Result {
 	}
 
 	return r
+}
+
+// adrStoreForSpec builds the ADR store for validating a spec whose
+// files live at specDir. When specDir resolved into a different tree
+// than root (i.e. a spec worktree under .worktrees/, per the ADR-0022
+// resolution order in workspace.SpecDir), the returned store overlays
+// that tree's ADR dir over the primary checkout's — so ADRs that exist
+// only on the spec branch are visible to citation and coverage checks
+// run from the primary checkout (mindspec-ew79). When specDir lives in
+// the primary tree (or is unrecognizable), this is a plain FileStore
+// over root, preserving prior behavior.
+func adrStoreForSpec(root, specDir string) adr.Store {
+	treeRoot := workspace.TreeRootForSpecDir(specDir)
+	if treeRoot == "" {
+		return adr.NewFileStore(root)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err == nil && filepath.Clean(absRoot) == treeRoot {
+		return adr.NewFileStore(root)
+	}
+	return adr.NewOverlayStore(adr.NewFileStore(treeRoot), adr.NewFileStore(root))
 }
 
 func checkPlanApprovalGateConsistency(r *Result, specID string, fm *PlanFrontmatter) {
