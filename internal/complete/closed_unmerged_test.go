@@ -93,6 +93,10 @@ func TestRun_CompleteBeadFailurePropagatesClosedButUnmerged(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(msg) {
 		t.Errorf("error must end with a `recovery:` line; got:\n%s", msg)
 	}
+	// B9: the final recovery command is never a banned (Req 19) command.
+	if cmd := finalRecoveryCommand(t, msg); guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
 
 	// No post-terminal mutations ran: the mindspec_phase sync (step 6.5)
 	// must not have fired.
@@ -123,5 +127,9 @@ func TestRun_CompleteBeadPlainFailureGainsRecoveryLine(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
 	if got := lines[len(lines)-1]; got != "recovery: mindspec complete bead-1" {
 		t.Errorf("final recovery line = %q, want %q", got, "recovery: mindspec complete bead-1")
+	}
+	// B9: the final recovery command is never a banned (Req 19) command.
+	if cmd := finalRecoveryCommand(t, msg); guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
 	}
 }

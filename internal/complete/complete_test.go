@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,6 +16,41 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
+
+// finalRecoveryCommand extracts the command of the FINAL `recovery: `
+// line of a guard-failure message (Bead 9 punch-list B9: per-site tests
+// assert on the extracted command, not just message substrings).
+func finalRecoveryCommand(t *testing.T, msg string) string {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, guard.RecoveryPrefix) {
+		t.Fatalf("message does not end with a recovery line: %q", msg)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(last, guard.RecoveryPrefix))
+}
+
+// TestCheckDirtyTreeFnDefaultsToNextCheckDirtyTreeDetail kills mutant
+// M6d (Bead 9 punch-list B10): the production binding of the Reqs 6/7
+// classification seam MUST be next.CheckDirtyTreeDetail — a one-line
+// rebind disables the entire artifact-aware dirty-tree gate with all
+// other tests green. Pattern: Bead 3's reflect-Pointer identity pin
+// (cmd/mindspec/repair_test.go, internal/approve/impl_test.go).
+func TestCheckDirtyTreeFnDefaultsToNextCheckDirtyTreeDetail(t *testing.T) {
+	if reflect.ValueOf(checkDirtyTreeFn).Pointer() != reflect.ValueOf(next.CheckDirtyTreeDetail).Pointer() {
+		t.Fatal("checkDirtyTreeFn must default to next.CheckDirtyTreeDetail (spec 092 Reqs 6/7, DQ-2)")
+	}
+}
+
+// TestCompleteGetwdFnDefaultsToOsGetwd kills Bead 7 panel mutant M7:
+// the Req 8 context-line seam MUST default to os.Getwd — every test
+// swaps the seam in saveAndRestore, so a severed default would go
+// undetected without this identity pin.
+func TestCompleteGetwdFnDefaultsToOsGetwd(t *testing.T) {
+	if reflect.ValueOf(completeGetwdFn).Pointer() != reflect.ValueOf(os.Getwd).Pointer() {
+		t.Fatal("completeGetwdFn must default to os.Getwd (spec 092 Req 8)")
+	}
+}
 
 // saveAndRestore saves all function variables and returns a restore function.
 func saveAndRestore(t *testing.T) {
@@ -299,6 +335,15 @@ func TestRun_DirtyTreeRefuses(t *testing.T) {
 	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
 		t.Errorf("context line must immediately precede the final recovery line, got: %v", err)
 	}
+	// B9 (bead5 R3-1, mutant M5c): the FINAL recovery command is the
+	// auto-commit re-run and is never a banned (Req 19) command.
+	cmd := finalRecoveryCommand(t, err.Error())
+	if guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
+	if want := `mindspec complete bead-1 "describe what you did"`; cmd != want {
+		t.Errorf("final recovery command = %q, want %q", cmd, want)
+	}
 	// Honest behavior: a blocked completion mutates nothing — no
 	// artifact-sync commit, no bead close, no merge.
 	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
@@ -340,6 +385,24 @@ func TestRun_DirtyTreeWithoutWorktreeSuggestsNext(t *testing.T) {
 	wantCtx := "you are in the main worktree (/testcwd); this check evaluated " + root
 	if !strings.Contains(err.Error(), wantCtx) {
 		t.Errorf("no-worktree user-dirt block missing context line %q, got: %v", wantCtx, err)
+	}
+	// M5b (Bead 7 panel): the context line immediately precedes the
+	// final recovery line (Req 12 ordering) on the NO-WORKTREE branch
+	// too — mirrors TestRun_DirtyTreeRefuses' assertion for the
+	// with-worktree branch.
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
+		t.Errorf("context line must immediately precede the final recovery line, got: %v", err)
+	}
+	// B9 (bead5 R3-1, mutant M5c): the FINAL recovery command itself —
+	// not just the message body — is `mindspec next`, and it is never a
+	// banned (Req 19) command.
+	cmd := finalRecoveryCommand(t, err.Error())
+	if guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
+	if cmd != "mindspec next" {
+		t.Errorf("final recovery command = %q, want %q", cmd, "mindspec next")
 	}
 }
 
@@ -857,6 +920,15 @@ func TestRun_DirtyTreeHintIncludesBeadID(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("auto-commit hint must be a final recovery line, got: %v", err)
 	}
+	// B9: the FINAL recovery command carries the bead ID and is never a
+	// banned (Req 19) command.
+	cmd := finalRecoveryCommand(t, err.Error())
+	if guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
+	if want := `mindspec complete my-bead "describe what you did"`; cmd != want {
+		t.Errorf("final recovery command = %q, want %q", cmd, want)
+	}
 }
 
 // --- Spec 092 Reqs 6/7 (mindspec-i4ad): artifact-aware clean-tree check ---
@@ -997,6 +1069,10 @@ func TestRun_ArtifactAndUserDirtBlocks(t *testing.T) {
 	}
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("user-dirt block must end with a recovery line, got: %v", err)
+	}
+	// B9: the final recovery command is never a banned (Req 19) command.
+	if cmd := finalRecoveryCommand(t, err.Error()); guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
 	}
 	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
 		t.Errorf("artifact handling must not run when user dirt blocks; got %d CommitAll calls", len(calls))
