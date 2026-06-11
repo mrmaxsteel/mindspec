@@ -409,7 +409,32 @@ succeeded on the merits with the hard no-bypass guard silent. Surgery
 events are informational per the stop-#2 fallback (recorded in §1c); they
 remain visible above.
 
-### 2. complete_from_doomed_worktree — NOT RUN (stopped at run 1)
+### 2. complete_from_doomed_worktree — **PASS (164.67s)** ✅
+
+**Red baseline**: FAIL at `c4a1c7e` after the sanctioned 1603723 redesign
+(170.03s) — the probe complete's output carried NO cd-back NOTE
+(bead2_baseline_evidence.md §2). **Green run** (foreground, `0a08c28`,
+agent 2.1.173, 2026-06-11): **PASS**. Transcript:
+`review/prep/bead9_green_run2_doomed_PASS.log`.
+
+```
+[360] mindspec complete repo-sub.1 Implemented doomed feature (exit=0)
+--- PASS: TestLLM_CompleteFromDoomedWorktree (164.67s)
+PASS
+ok  	github.com/mrmaxsteel/mindspec/internal/harness	164.984s
+```
+
+**Red→green flip (HC-6, Req 4 / qxsy)**: the DISCRIMINATING deterministic
+probe `assertDoomedCompleteEmitsCdNote` — a second `mindspec complete` run
+with the process cwd INSIDE the bead worktree it removes — exited 0 AND
+emitted the cd-back NOTE as the last non-empty stdout line with its
+`run: cd <root>` command (B7-tightened placement), where the baseline
+output had no NOTE at all. Behavioral envelope also clean: the agent's
+own complete `[360]` exited 0, with no complete re-run and no
+`git worktree` repair surgery after success, and zero analyzer wrong
+actions. This run is also the B18 discharge (integration-grade evidence
+for the cwd-deletion path on darwin).
+
 
 ### 3. precommit_reexport_complete — NOT RUN (stopped at run 1)
 
