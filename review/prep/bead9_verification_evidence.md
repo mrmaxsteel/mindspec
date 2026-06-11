@@ -473,7 +473,30 @@ This is a correction of a Bead-9-introduced defect back to B8's intended
 semantics ("agent-issued"), not a weakening of any spec pin; flagged for
 orchestrator review in the run report.
 
-### 3. precommit_reexport_complete — NOT RUN (stopped at run 1)
+### 3. precommit_reexport_complete — **PASS (115.04s)** ✅
+
+**Red baseline**: FAIL at `c4a1c7e` (129.62s) — the first complete
+attempt exit=1, artifact dirt blocked completion
+(bead2_baseline_evidence.md §3). **Green run** (foreground, `c23111a`,
+agent 2.1.173, 2026-06-11): **PASS**. Transcript:
+`review/prep/bead9_green_run3_reexport_PASS.log`.
+
+```
+[381] mindspec complete repo-0wz.1 Add Reexport() function returning reexport string (exit=0)
+--- PASS: TestLLM_PrecommitReexportComplete (115.04s)
+PASS
+ok  	github.com/mrmaxsteel/mindspec/internal/harness	115.255s
+```
+
+**Red→green flip (HC-6, Reqs 6/7 / i4ad)**: at baseline the chained
+pre-commit hook's re-export re-dirtied the tree during the auto-commit
+and the plain IsTreeClean check rejected the FIRST complete (exit=1);
+here the FIRST complete `[381]` exited 0 — artifact dirt was classified
+per ADR-0025 and folded into the sanctioned follow-up commit. Zero
+assertion errors: no --no-verify, no core.hooksPath assignment, no failed
+complete anywhere, and the (corrected, §3-falsepos) manual-artifact-commit
+detector found no agent-issued artifact commit.
+
 
 ### 4. wrong_directory_guard_recovery — NOT RUN (stopped at run 1)
 
