@@ -3,6 +3,7 @@ package adr
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -175,6 +176,79 @@ func TestParseADR_StatusQualifiers(t *testing.T) {
 			}
 			if a.StatusRaw != tc.rawWant {
 				t.Errorf("StatusRaw = %q, want %q", a.StatusRaw, tc.rawWant)
+			}
+		})
+	}
+}
+
+func TestParseADR_DomainsParenAware(t *testing.T) {
+	// mindspec-wgcw: the Domain(s) tokenizer must split only on commas
+	// at bracket depth 0 — parenthesized qualifiers with embedded commas
+	// (the lola spec-044 case) are single tokens.
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "lola spec-044 case",
+			raw:  "core, webapp (`app/`, react navigation native-stack), api/app/...",
+			want: []string{"core", "webapp (`app/`, react navigation native-stack)", "api/app/..."},
+		},
+		{
+			name: "simple comma list unchanged",
+			raw:  "core, context-system, workflow",
+			want: []string{"core", "context-system", "workflow"},
+		},
+		{
+			name: "nested parens",
+			raw:  "alpha (outer (inner, deep), tail), beta",
+			want: []string{"alpha (outer (inner, deep), tail)", "beta"},
+		},
+		{
+			name: "posix-class brackets and braces",
+			raw:  "regex ([[:alpha:]]{2,4}, [[:digit:]]+), core",
+			want: []string{"regex ([[:alpha:]]{2,4}, [[:digit:]]+)", "core"},
+		},
+		{
+			name: "square brackets",
+			raw:  "matrix [a, b], vector",
+			want: []string{"matrix [a, b]", "vector"},
+		},
+		{
+			name: "unbalanced open paren degrades to one token",
+			raw:  "broken (no close, here, more",
+			want: []string{"broken (no close, here, more"},
+		},
+		{
+			name: "unmatched close bracket clamps at depth 0",
+			raw:  "weird), still, splits",
+			want: []string{"weird)", "still", "splits"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			adrDir := filepath.Join(root, "docs", "adr")
+			os.MkdirAll(adrDir, 0o755)
+			content := "# ADR-0098: Domain Tokenizer Test\n\n- **Date**: 2026-06-01\n- **Status**: Accepted\n- **Domain(s)**: " + tc.raw + "\n\n## Decision\nX.\n"
+			path := filepath.Join(adrDir, "ADR-0098.md")
+			os.WriteFile(path, []byte(content), 0o644)
+
+			a, err := ParseADR(path)
+			if err != nil {
+				t.Fatalf("ParseADR: %v", err)
+			}
+			if len(a.Domains) != len(tc.want) {
+				t.Fatalf("Domains = %q (len %d), want %q (len %d)", a.Domains, len(a.Domains), tc.want, len(tc.want))
+			}
+			for i := range tc.want {
+				// ParseADR lowercases and trims each token.
+				wantNorm := strings.ToLower(strings.TrimSpace(tc.want[i]))
+				if a.Domains[i] != wantNorm {
+					t.Errorf("Domains[%d] = %q, want %q", i, a.Domains[i], wantNorm)
+				}
 			}
 		})
 	}

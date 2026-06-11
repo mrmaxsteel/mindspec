@@ -73,7 +73,7 @@ func ParseADR(path string) (ADR, error) {
 		}
 		if strings.Contains(trimmed, "**Domain(s)**:") {
 			domStr := extractValue(trimmed, "**Domain(s)**:")
-			for _, d := range strings.Split(domStr, ",") {
+			for _, d := range splitTopLevel(domStr) {
 				d = strings.ToLower(strings.TrimSpace(d))
 				if d != "" {
 					a.Domains = append(a.Domains, d)
@@ -130,6 +130,43 @@ func normalizeStatus(raw string) string {
 		return ""
 	}
 	return strings.TrimRight(fields[0], "(:;,.")
+}
+
+// splitTopLevel splits s on commas that are NOT nested inside any of
+// ( ) [ ] { } — a depth-tracking variant of strings.Split(s, ",").
+// Domain annotations routinely carry parenthesized qualifiers with
+// embedded commas, e.g.:
+//
+//	webapp (`app/`, react navigation native-stack), api, infra
+//
+// which a naive comma split shreds into broken tokens. Depth never
+// goes negative: an unmatched closing bracket is ignored (clamped at
+// 0) so a malformed value degrades to the naive behavior rather than
+// swallowing the rest of the line. With no brackets present the
+// output is identical to strings.Split.
+func splitTopLevel(s string) []string {
+	var (
+		out   []string
+		depth int
+		start int
+	)
+	for i, r := range s {
+		switch r {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + len(",")
+			}
+		}
+	}
+	out = append(out, s[start:])
+	return out
 }
 
 // extractValue extracts the value after a metadata key in a line.
