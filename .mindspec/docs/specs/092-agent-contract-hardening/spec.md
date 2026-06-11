@@ -752,6 +752,21 @@ The same session class produced backlog beads triaged in §Triage below.
   there), green post-Bead-3. The fixture additionally carries the
   sandbox coverage triple so the spec-087 ADR-divergence gate passes
   on the merits. See review/scenario1-fix-design.md.]*
+  *[Bead 9 annotation addendum, 2026-06-11 (stop-#2 adjudication,
+  pre-authorized fallback per the DQ-7/doomed precedent): the
+  no-surgery assertion on the LLM half is DOWNGRADED to an
+  informational log. In three post-fix runs (1a/1b/1c — 1c after the
+  Bead-3-panel R1-M1 guidance fix removed `bd update --metadata` from
+  all rendered templates) the haiku agent gratuitously performed
+  pre-gate metadata surgery while the sanctioned paths existed,
+  worked, and were ALSO used; the same prompt+model produced NO
+  surgery at the `c4a1c7e` baseline, so the assertion pinned model
+  disposition on the post-fix tree, not a product property. The HARD
+  3smk discriminators are: the deterministic
+  `assertStaleApproveSelfHeals` probe (red at baseline, fresh red run
+  recorded in Bead 9 evidence §1a), the no-gate-bypass guard, and the
+  exit-0-on-the-merits approval. Surgery events remain visible in
+  every run report.]*
 - [ ] **Harness — `complete_from_doomed_worktree`** (qxsy): agent starts
   with cwd inside the bead worktree via `Scenario.StartDir`; completes
   the bead. Assert the `mindspec complete` event has ExitCode 0, the

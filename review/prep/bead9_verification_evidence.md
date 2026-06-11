@@ -345,6 +345,44 @@ known-flaky behavioral pin with the deterministic probe as the load-bearing
 discriminator — is an adjudication beyond this bead's authority. No retry
 was performed (retry-until-green is forbidden); runs 2–5 not started.
 
+### 1c. stale_phase_impl_approve — post-guidance-fix attempt (run 1c): FAIL → pre-authorized fallback
+
+**Stop-#2 adjudication step 1** (Bead 3 panel R1-M1): both agent-rendered
+`bd update --metadata` mentions (implement.md:71 and :97) reworded to name
+only `mindspec repair phase <spec-id>` — commit `1412143`.
+
+**Run 1c** (foreground, binary+scenario at `1412143`, agent 2.1.173):
+**FAIL (114.16s)** — transcript
+`review/prep/bead9_green_run1c_stale_phase_FAIL.log`. IDENTICAL shape to
+1b: probe green (zero `:229` errors), `[220] mindspec approve impl
+001-stale (exit=0)` on the merits, zero bypass flags — and the same
+pre-gate surgery pair (`[92]` phase=review + `[162]` phase=done around the
+sanctioned `[93] repair phase` and a raw `[148] bd close` of the epic):
+
+```
+scenario_contract_hardening.go:196: agent performed raw bd metadata surgery: [update repo-o1y --metadata {"mindspec_phase":"review","spec_num":1,"spec_title":"stale"}]
+scenario_contract_hardening.go:221: informational: agent used sanctioned `mindspec repair`: [repair phase 001-stale]
+scenario_contract_hardening.go:196: agent performed raw bd metadata surgery: [update repo-o1y --metadata {"mindspec_done":true,"mindspec_phase":"done","spec_num":1,"spec_title":"stale"}]
+--- FAIL: TestLLM_StalePhaseImplApprove (114.16s)
+```
+
+The guidance fix did NOT deter the behavior — the salience hypothesis (ii)
+is falsified as the sole driver; the disposition is the model's
+belt-and-braces reaction to the (correct, sanctioned) stale-phase
+diagnostics it sees during orientation.
+
+**Pre-authorized fallback executed** (adjudication step 4, DQ-7/doomed
+precedent): the LLM-half surgery ban is DOWNGRADED to an informational
+`t.Logf` (surgery events stay visible in every run report). HARD
+assertions retained: `assertCommandRanEither`, the no-gate-bypass guard,
+and the deterministic `assertStaleApproveSelfHeals` probe. **The probe is
+the spec's core 3smk proof and it has now PASSED in all three post-fix
+runs (1b, 1c, and the green run below) while failing deterministically at
+the `c4a1c7e` baseline (§1a)** — that is the red→green flip for Req 1.
+spec.md Harness AC carries the downgrade addendum annotation; the
+verification sequence CONTINUES per the adjudication (no further stop for
+this scenario).
+
 ### 2. complete_from_doomed_worktree — NOT RUN (stopped at run 1)
 
 ### 3. precommit_reexport_complete — NOT RUN (stopped at run 1)
