@@ -36,6 +36,13 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
+      # HC-1 keystone (spec 094): the adversarial redaction golden-corpus
+      # gate. Listed as its own non-skippable step (in addition to being
+      # covered by `./...` below) so a redaction leak fails the build
+      # loudly and visibly, never as an advisory.
+      - name: Redaction golden-corpus gate (spec 094 HC-1)
+        run: go test ./internal/redact/...
+
       - name: Run tests
         run: go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
 
