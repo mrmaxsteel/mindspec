@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/ownership"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -80,21 +81,66 @@ func checkDomains(r *Report, root, docsRel string) {
 			}
 		}
 
-		// OWNERSHIP.yaml check (spec-086 Bead 4).
-		// Warn (not Missing) per spec Requirement 15: existing repos must
-		// not start failing `mindspec doctor` on day one when the manifest
-		// is absent — doc-sync falls back to internal/<domain>/** mapping.
+		// OWNERSHIP.yaml check (spec-086 Bead 4; rewritten by spec 091
+		// Bead 4). Warn (not Missing) per spec 086 Requirement 15:
+		// existing repos must not start failing `mindspec doctor` on day
+		// one when the manifest is absent. Spec 091 Req 13 removed the
+		// silent internal/<domain>/** fallback — a missing manifest now
+		// claims NOTHING — so the Warn no longer mentions a fallback; it
+		// names the remedies instead (Req 21). This Warn is the SOLE
+		// coverage for the Source()=="missing" state; existing manifests
+		// that resolve to zero files are covered by the separate
+		// dead-manifest Warn (Req 17). The check is Fixable: --fix writes
+		// the Req 8 empty stub via internal/ownership.RenderStub and
+		// surfaces the populate prompt (Req 15).
 		ownerPath := filepath.Join(domainDir, "OWNERSHIP.yaml")
 		ownerName := filepath.ToSlash(filepath.Join(docsRel, "domains", domain, "OWNERSHIP.yaml"))
 		if fileExists(ownerPath) {
 			r.Checks = append(r.Checks, Check{Name: ownerName, Status: OK})
 		} else {
 			r.Checks = append(r.Checks, Check{
-				Name:    ownerName,
-				Status:  Warn,
-				Message: fmt.Sprintf("missing OWNERSHIP.yaml; doc-sync falls back to internal/%s/**", domain),
+				Name:   ownerName,
+				Status: Warn,
+				Message: "missing OWNERSHIP.yaml; this domain claims no source " +
+					"paths until the manifest exists — run 'mindspec doctor " +
+					"--fix' to scaffold a default manifest, then 'mindspec " +
+					"ownership populate " + domain + "' to populate it",
+				FixFunc: makeOwnershipFixFunc(r, len(r.Checks), ownerPath, domain),
 			})
 		}
+	}
+}
+
+// makeOwnershipFixFunc returns a FixFunc that writes the Req 8 empty
+// stub for a missing OWNERSHIP.yaml and surfaces the populate prompt
+// (Req 15). The fixer is idempotent and NEVER overwrites an existing
+// manifest — including under --fix --force (the documented carve-out:
+// manifest content is operator/agent cognition; spec 091 Req 8). The
+// stub is rendered by internal/ownership.RenderStub (the single
+// templating helper, Bead 3) — doctor does NOT reimplement it.
+//
+// idx is the index of this check in r.Checks; the FixFunc rewrites
+// r.Checks[idx].Message to carry the populate prompt so cmd/doctor
+// prints it after Fix() runs (a FixFunc has no other output channel).
+// r.Checks is fully built before Report.Fix runs, so the index is
+// stable by the time the closure executes.
+func makeOwnershipFixFunc(r *Report, idx int, ownerPath, domain string) func() error {
+	return func() error {
+		// Idempotent / no-overwrite: never touch an existing manifest.
+		if fileExists(ownerPath) {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+			return err
+		}
+		stub := ownership.RenderStub("mindspec doctor --fix")
+		if err := os.WriteFile(ownerPath, stub, 0o644); err != nil {
+			return err
+		}
+		// Surface the populate prompt for this scaffolded domain (Req 15).
+		r.Checks[idx].Message = "scaffolded empty-stub OWNERSHIP.yaml — populate it:\n" +
+			ownership.BuildPopulatePrompt(domain)
+		return nil
 	}
 }
 
