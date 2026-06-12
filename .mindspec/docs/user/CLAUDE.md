@@ -22,4 +22,3 @@ make test     # Run all tests
 | `/ms-spec-approve` | Approve spec → Plan Mode |
 | `/ms-plan-approve` | Approve plan → Implementation Mode |
 | `/ms-impl-approve` | Approve implementation → Idle |
-| `/ms-spec-status` | Check current mode and active spec/bead state |

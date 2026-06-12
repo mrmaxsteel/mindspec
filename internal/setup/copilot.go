@@ -25,23 +25,11 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 3. Skills (.agents/skills/<name>/SKILL.md)
-	for name, content := range skillFiles() {
-		relPath := filepath.Join(".agents", "skills", name, "SKILL.md")
-		absPath := filepath.Join(root, relPath)
-		if fileExists(absPath) {
-			r.Skipped = append(r.Skipped, relPath)
-		} else {
-			r.Created = append(r.Created, relPath)
-			if !check {
-				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-					return nil, fmt.Errorf("creating dir for %s: %w", relPath, err)
-				}
-				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-					return nil, fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		}
+	// 3. Skills (.agents/skills/<name>/SKILL.md) — create new, refresh
+	// previously-shipped (provenance-gated), skip user-modified with a
+	// notice (Reqs 18-19, HC-6).
+	if err := installSkills(filepath.Join(root, ".agents", "skills"), filepath.Join(".agents", "skills"), skillFiles(), check, r); err != nil {
+		return nil, err
 	}
 
 	// 4. Surface .beads/config.yaml drift. Copilot setup doesn't chain

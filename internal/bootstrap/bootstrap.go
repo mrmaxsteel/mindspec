@@ -308,13 +308,36 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 ## Skills
 
+### Spec lifecycle gates
+
 | Skill | Purpose |
 |:------|:--------|
 | ` + "`/ms-spec-create`" + ` | Create a new specification (enters Spec Mode) |
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
+
+### Bead lifecycle
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-impl`" + ` | Stage the impl prompt (Phase A) + dispatch the subagent (Phase B) |
+| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
+
+### Review panel
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-panel-run`" + ` | Launch 6 reviewers and collect verdicts |
+| ` + "`/ms-panel-tally`" + ` | Single decision authority: decision matrix, artifact gates, consolidation |
+
+### Orchestrators
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: pick+claim → impl → panel → fix → re-panel → merge |
+| ` + "`/ms-spec-autopilot`" + ` | Whole spec: cycle every bead until the spec is done |
+| ` + "`/ms-spec-final-review`" + ` | Final panel of the whole spec branch vs main, before ` + "`/ms-impl-approve`" + ` |
 <!-- END mindspec:managed -->
 `
 
@@ -363,13 +386,36 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 ### Skills
 
+#### Spec lifecycle gates
+
 | Skill | Purpose |
 |:------|:--------|
 | ` + "`/ms-spec-create`" + ` | Create a new specification (enters Spec Mode) |
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
+
+#### Bead lifecycle
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-impl`" + ` | Stage the impl prompt (Phase A) + dispatch the subagent (Phase B) |
+| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
+
+#### Review panel
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-panel-run`" + ` | Launch 6 reviewers and collect verdicts |
+| ` + "`/ms-panel-tally`" + ` | Single decision authority: decision matrix, artifact gates, consolidation |
+
+#### Orchestrators
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: pick+claim → impl → panel → fix → re-panel → merge |
+| ` + "`/ms-spec-autopilot`" + ` | Whole spec: cycle every bead until the spec is done |
+| ` + "`/ms-spec-final-review`" + ` | Final panel of the whole spec branch vs main, before ` + "`/ms-impl-approve`" + ` |
 `
 
 // starterCopilotInstructionsMD is written when .github/copilot-instructions.md doesn't exist.
