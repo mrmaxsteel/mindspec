@@ -23,7 +23,7 @@ Read ` + "`.mindspec/docs/domains/<domain>/overview.md`" + ` and
 Then inspect THIS repo's actual layout — ` + "`ls`, `find`" + `,
 ` + "`go list ./...`" + `, or whatever discovery commands fit your
 tools — and identify the source globs that implement the
-behaviour described in those docs.
+behavior described in those docs.
 
 The framework deliberately provides no pattern hints. The
 domain name is a semantic label; the source paths are an

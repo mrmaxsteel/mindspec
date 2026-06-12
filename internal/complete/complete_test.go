@@ -57,6 +57,27 @@ func TestCompleteGetwdFnDefaultsToOsGetwd(t *testing.T) {
 // saveAndRestore saves all function variables and returns a restore function.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
+
+	// Spec 092 Req 3c moved an unconditional os.Chdir(repoRoot) INSIDE
+	// complete.Run (complete.go) so the terminal mutation survives the
+	// bead worktree being removed out from under the process. As a
+	// side effect, every Run-calling test leaves the process cwd parked
+	// at its own setupTempRoot() temp dir; once that t.TempDir() is
+	// removed at test teardown the process cwd is a deleted directory,
+	// and the NEXT test that opens with os.Getwd() (e.g.
+	// TestPrintResultWarningsRecursStatelessly) fails `getwd: no such
+	// file or directory` under CI's serialized `-race` ordering.
+	//
+	// saveAndRestore runs first in every Run-calling test (before
+	// setupTempRoot), so this cwd-restoring cleanup is registered first
+	// and — cleanups being LIFO — runs LAST, after every t.TempDir
+	// removal, leaving the process cwd at a stable real directory for
+	// the next test in the package.
+	origWd, wdErr := os.Getwd()
+	if wdErr == nil {
+		t.Cleanup(func() { _ = os.Chdir(origWd) })
+	}
+
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
