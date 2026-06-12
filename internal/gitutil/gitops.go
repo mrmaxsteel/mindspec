@@ -1,11 +1,20 @@
 package gitutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 )
+
+// ErrRefNotFound is returned by RevParseRef when the named ref genuinely does
+// not exist (git `rev-parse --verify --quiet` exits 1 with empty output). It
+// is distinguished from a transient/structural git failure (exit 128, git
+// missing, lock contention) so callers can treat the "ref absent" case as the
+// expected branch-already-deleted condition without also fail-clearing on a
+// transient error (Spec 093 Req 11 missing-ref pass-through).
+var ErrRefNotFound = errors.New("ref not found")
 
 // Package-level function variables for testability.
 var execCommand = exec.Command
@@ -286,19 +295,32 @@ func RevParseHEAD(workdir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// RevParseRef returns the commit SHA that ref resolves to in workdir
-// (workdir=="" → cwd), trimmed. The error is non-nil when ref does not
-// exist (e.g. a deleted bead branch) — callers distinguish "branch
-// gone" from a real failure by treating any error as not-found
-// (Spec 093 Req 11 missing-ref semantics). `--verify --quiet` keeps git
-// silent on stderr for the expected not-found case.
+// RevParseRef resolves an arbitrary ref (e.g. "bead/<id>") to its commit
+// SHA in workdir, trimmed. Unlike RevParseHEAD it targets a named ref, so a
+// missing ref returns an error (the panel gate reads this as the
+// rerun-after-merge case where the bead branch was already deleted — Spec
+// 093 Req 11 missing-ref pass-through). `^{commit}` peels annotated tags to
+// their commit so the result is always comparable to a reviewed_head_sha.
 func RevParseRef(workdir, ref string) (string, error) {
 	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
 	out, err := cmd.Output()
 	if err != nil {
+		// `--verify --quiet` exits 1 with empty output when the ref is simply
+		// absent — the expected branch-already-deleted case. Any other exit
+		// code (128 not-a-repo / git missing / lock contention) is a transient
+		// or structural failure, which the caller must NOT treat as a confirmed
+		// missing ref.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "", fmt.Errorf("rev-parse %s: %w", ref, ErrRefNotFound)
+		}
 		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		// Empty output with a zero exit also means the ref did not resolve.
+		return "", fmt.Errorf("rev-parse %s: %w", ref, ErrRefNotFound)
+	}
+	return sha, nil
 }
 
 // LogOneline returns `git log -1 --oneline <ref>` for workdir

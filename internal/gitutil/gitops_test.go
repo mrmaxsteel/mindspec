@@ -1,12 +1,47 @@
 package gitutil
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestRevParseRef_DistinguishesAbsentFromTransient pins the round-2 hardening
+// (Spec 093): a genuinely-absent ref returns ErrRefNotFound (exit 1), while a
+// transient/structural failure (running against a non-repo dir → exit 128)
+// returns a non-ErrRefNotFound error. A present ref resolves to its SHA.
+func TestRevParseRef_DistinguishesAbsentFromTransient(t *testing.T) {
+	repo := initGitRepo(t)
+
+	// Present ref (the HEAD branch) resolves.
+	sha, err := RevParseRef(repo, "main")
+	if err != nil {
+		t.Fatalf("present ref: unexpected error: %v", err)
+	}
+	if len(sha) < 7 {
+		t.Errorf("present ref: expected a sha, got %q", sha)
+	}
+
+	// Absent ref → ErrRefNotFound (exit 1, --verify --quiet).
+	_, err = RevParseRef(repo, "bead/does-not-exist")
+	if !errors.Is(err, ErrRefNotFound) {
+		t.Errorf("absent ref: expected ErrRefNotFound, got %v", err)
+	}
+
+	// Transient/structural failure: a non-git directory → git exits 128.
+	// MUST NOT be reported as ErrRefNotFound.
+	nonRepo := t.TempDir()
+	_, err = RevParseRef(nonRepo, "main")
+	if err == nil {
+		t.Fatal("non-repo: expected an error")
+	}
+	if errors.Is(err, ErrRefNotFound) {
+		t.Errorf("non-repo transient error must NOT be ErrRefNotFound: %v", err)
+	}
+}
 
 func TestEnsureGitignoreEntry_New(t *testing.T) {
 	root := t.TempDir()

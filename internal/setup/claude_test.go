@@ -42,9 +42,10 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Error("missing SessionStart hook")
 	}
-	// PreToolUse should NOT be present
-	if _, ok := hooks["PreToolUse"]; ok {
-		t.Error("PreToolUse should not be present (guard hooks removed)")
+	// Spec 093 Req 9: the PreToolUse pre-complete panel-gate entry ships
+	// from wantedHooks(). It must be present after a fresh setup.
+	if !hooksContainCommand(hooks, "PreToolUse", "mindspec hook pre-complete") {
+		t.Error("missing PreToolUse pre-complete panel-gate hook")
 	}
 
 	// Verify skill files exist — both the 5 lifecycle gates and the 11
@@ -220,12 +221,28 @@ func TestWantedHooks_SessionStartUsesShim(t *testing.T) {
 	}
 }
 
-func TestWantedHooks_NoPreToolUse(t *testing.T) {
+// TestWantedHooks_HasPreCompletePreToolUse pins the Spec 093 Req 9 entry:
+// wantedHooks() ships a PreToolUse "Bash" entry whose command is
+// `mindspec hook pre-complete` with the "Checking panel verdicts..."
+// statusMessage.
+func TestWantedHooks_HasPreCompletePreToolUse(t *testing.T) {
 	t.Parallel()
 
 	hooks := wantedHooks()
-	if _, ok := hooks["PreToolUse"]; ok {
-		t.Error("wantedHooks should not include PreToolUse (guard hooks removed)")
+	entries, ok := hooks["PreToolUse"]
+	if !ok || len(entries) != 1 {
+		t.Fatalf("wantedHooks should include exactly one PreToolUse entry, got %v", entries)
+	}
+	e := entries[0]
+	if e["matcher"] != "Bash" {
+		t.Errorf("PreToolUse matcher = %v, want Bash", e["matcher"])
+	}
+	hl, _ := e["hooks"].([]map[string]any)
+	if len(hl) != 1 || hl[0]["command"] != "mindspec hook pre-complete" {
+		t.Errorf("PreToolUse command = %v, want mindspec hook pre-complete", hl)
+	}
+	if hl[0]["statusMessage"] != "Checking panel verdicts..." {
+		t.Errorf("PreToolUse statusMessage = %v", hl[0]["statusMessage"])
 	}
 }
 
@@ -506,6 +523,25 @@ func entriesWithCommandPrefix(hooks map[string]any, event, prefix string) []map[
 	return out
 }
 
+// hooksContainCommand reports whether any entry under event carries a hook
+// command exactly equal to cmd. Handles both decoded ([]any) and literal
+// shapes via entryCommands.
+func hooksContainCommand(hooks map[string]any, event, cmd string) bool {
+	entries, _ := hooks[event].([]any)
+	for _, e := range entries {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, c := range entryCommands(m) {
+			if c == cmd {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // TestEnsureSettings_MergePathInstallsPreCompleteEntry is regression (i),
 // the merge path (spec AC "Merge path"): a repo with a PRE-EXISTING
 // settings.json (no mindspec entries) gets the wanted PreToolUse
@@ -717,13 +753,21 @@ func TestRunClaude_CleansStalePreToolUse(t *testing.T) {
 		t.Error("expected settings.json to be updated (stale PreToolUse cleaned)")
 	}
 
-	// Verify PreToolUse is removed
+	// Verify the STALE PreToolUse entries are removed but the legitimate
+	// Spec 093 pre-complete gate entry remains (it is in the wanted set, so
+	// the second run merges it in while cleaning the stale ones).
 	data, _ = os.ReadFile(settingsPath)
 	var updated map[string]any
 	json.Unmarshal(data, &updated)
 	updatedHooks := updated["hooks"].(map[string]any)
-	if _, ok := updatedHooks["PreToolUse"]; ok {
-		t.Error("PreToolUse should have been removed")
+	if n := len(entriesWithCommandPrefix(updatedHooks, "PreToolUse", "mindspec hook worktree-file")); n != 0 {
+		t.Errorf("stale worktree-file guard not removed, got %d", n)
+	}
+	if n := len(entriesWithCommandPrefix(updatedHooks, "PreToolUse", "mindspec instruct")); n != 0 {
+		t.Errorf("stale instruct-form guard not removed (N1), got %d", n)
+	}
+	if !hooksContainCommand(updatedHooks, "PreToolUse", "mindspec hook pre-complete") {
+		t.Error("legitimate pre-complete gate entry should be present after cleanup")
 	}
 }
 

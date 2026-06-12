@@ -151,6 +151,68 @@ func (r *Result) Complete() bool {
 	return r.ExpectedReviewers() > 0 && len(r.Verdicts) >= r.ExpectedReviewers()
 }
 
+// VoteVerdict is the deterministic vote-only gate outcome of a tally
+// (Spec 093 Req 12). It is the subset of the pre-complete hook's decision
+// that depends ONLY on fs-derived panel state — registration validity,
+// round consistency, verdict completeness, REJECT/hard_block, and the N−1
+// threshold — and deliberately EXCLUDES the staleness (reviewed_head_sha)
+// and dirty-tree checks, which require git the hook owns. The complete-side
+// advisory tally (Req 13d) renders this so its "gate would PASS/BLOCK" line
+// is computed by the SAME tally the hook consumes and can never disagree on
+// the vote portion.
+type VoteVerdict int
+
+const (
+	// VotePass means the vote portion would not block: threshold met, no
+	// REJECT/hard_block, complete, round-consistent.
+	VotePass VoteVerdict = iota
+	// VoteBlock means the vote portion would block (incomplete, REJECT,
+	// hard_block, sub-threshold, round mismatch, or malformed registration).
+	VoteBlock
+	// VoteAbandoned means the panel is a recorded abandonment — the gate
+	// passes with a warning, not a block.
+	VoteAbandoned
+)
+
+// VoteDecision renders the vote-only gate outcome plus a one-line summary
+// (Spec 093 Req 13d). Staleness and dirty-tree are NOT considered here — a
+// VotePass is necessary but not sufficient for the hook to Pass.
+func (r *Result) VoteDecision() (VoteVerdict, string) {
+	if r.Panel == nil {
+		if r.PanelErr != nil {
+			return VoteBlock, "panel registration unreadable"
+		}
+		return VotePass, "no registered panel"
+	}
+	p := r.Panel
+	round := r.LatestRound
+	if round == 0 {
+		round = p.Round
+	}
+	if p.Abandoned {
+		reason := strings.TrimSpace(p.AbandonReason)
+		if reason == "" {
+			reason = "(no abandon_reason recorded)"
+		}
+		return VoteAbandoned, fmt.Sprintf("round %d abandoned: %s", round, reason)
+	}
+	n := p.ExpectedReviewers
+	if r.RoundMismatch {
+		return VoteBlock, fmt.Sprintf("panel.json round %d disagrees with verdict files round %d", p.Round, r.LatestRound)
+	}
+	if !r.Complete() {
+		return VoteBlock, fmt.Sprintf("round %d incomplete: %d/%d verdicts present", round, len(r.Verdicts), n)
+	}
+	if r.Rejects > 0 || len(r.HardBlocks) > 0 {
+		return VoteBlock, fmt.Sprintf("round %d: REJECT/hard_block recorded (%d/%d APPROVE)", round, r.Approves, n)
+	}
+	threshold := p.ApproveThreshold()
+	if threshold > 0 && r.Approves >= threshold {
+		return VotePass, fmt.Sprintf("round %d: %d/%d APPROVE (threshold %d/%d)", round, r.Approves, n, threshold, n)
+	}
+	return VoteBlock, fmt.Sprintf("round %d: %d/%d APPROVE — threshold is %d/%d", round, r.Approves, n, threshold, n)
+}
+
 // Tally reads a panel directory and reports its registration plus
 // the verdict state of the filename-derived latest round.
 //
