@@ -20,6 +20,14 @@ Items 1, 2, 5-10 below remained OPEN after this PR. bd issue: `mindspec-ch8h`.
 
 **Spec 093 (skills-thin-down) update:** items 1, 2, 8, 9, 10 are now ADJUDICATED (annotated inline below), and the Part 2 `PreToolUse`-gate primitive (Part 3 follow-up 5) is ENFORCED — it ships as the panel gate on `mindspec complete`. Remaining OPEN: items 5, 6, 7 (upstream Dolt 1105, `.gitignore` OWNERSHIP, plan↔bd dep sync) — out of scope for 093, tracked separately. `mindspec-ch8h` is closed out by spec 093 Bead 7.
 
+## Open after this PR
+
+| # | Finding | Status | Notes |
+|:--|:--------|:-------|:------|
+| 16 (new) | F6 operator-readiness lens doesn't catch IaC-vs-manual-env-var drift risk | OPEN | filed (not yet closed) |
+
+See item 16 in Part 1 below for details.
+
 ## Part 1 — Plugin self-review
 
 ### Gaps surfaced while writing the skills
@@ -113,6 +121,39 @@ Items 1, 2, 5-10 below remained OPEN after this PR. bd issue: `mindspec-ch8h`.
     - `/ms-spec-final-review`: F5 lens explicitly distinguishes "evidence path unnamed" (soft fix) from "evidence path named but artifact missing" (HARD block). The step 5 tally adds a HARD-block terminal that halts regardless of vote count.
     - `/ms-panel-tally`: decision matrix adds a HARD-block row for missing measurement artifacts at the top of the table.
     - `/ms-bead-fix`: anti-pattern callout that the fix subagent MUST NOT mark an artifact-gate finding as ADDRESSED via a body edit alone. If the subagent cannot produce the artifact in its scope, it returns the finding UNCHANGED and flags PARTIAL.
+
+16. **`/ms-spec-final-review` F6 lens doesn't check rollout-flag IaC discipline.** **[OPEN]**
+    The F6 operator-readiness lens currently checks for runbook coherence (revert commands, MTTR claims, escalation paths) but doesn't audit whether rollout flags / cost-bounding env vars are defined in IaC (`infra/tofu/`) versus set manually via `gcloud run ... --set-env-vars`. The latter is silently lost on any service-recreate deploy.
+
+    Surfaced by lola-f4a8 revision (Mon + Thu 2026-06-08 / 2026-06-11 OR spikes both root-caused to manual env-var drift, NOT to spec-050 alias-intersect as initially diagnosed). Both spec-049's `SUGGESTION_SKIP_STAGE_1_7` and spec-050's `ZPAW_ENABLED` were set manually; a later deploy lost them and prod silently fell back to the unbounded pre-spec-049 legacy scorer.
+
+    **Taxonomy (four states, ranked ladder — strongest pin wins):**
+
+    For every release-gate / cost-bounding flag the spec names, classify by the strongest pin that applies:
+
+    1. **IaC-managed (plaintext)** — set via tofu `cloud_run_plain_env_vars` in the relevant per-env tfvars (`infra/tofu/environments/production.tfvars`, `staging.tfvars`). Acceptable.
+    2. **IaC-managed (Secret Manager mount)** — set via tofu `secret_env_vars` referencing a Secret Manager secret in the relevant per-env tfvars. Same status as state 1 — IaC-disciplined, not manual-only. Silence on this state would mis-classify legitimately-mounted secrets as HARD findings.
+    3. **App-config-default-pinned** — Pydantic `field_validator(mode="before")` clamps the runtime value to a safe default regardless of the env override (NOT plain `Field(default=...)` — that's still env-overridable, so the safe default is lost the moment the env var is set to a dangerous value or `None` is coerced). Acceptable when the safe default matches the lola-f4a8 ask: "behaviour is safe even if the env override goes missing."
+    4. **Manual-only** — set only via `gcloud run ... --set-env-vars`, no tfvars entry, no `field_validator` pin. **HARD finding** — silently lost on any service-recreate deploy.
+
+    **Per-environment classification.** The four states apply per env: a flag pinned only in `staging.tfvars` is IaC-managed for staging but manual-only for production (lola-f4a8 was prod-specific). F6 must classify each (flag, env) pair independently and flag any (flag, prod) pair that lands in state 4.
+
+    **States are orthogonal axes, not mutually exclusive.** A flag can be in multiple states at once (e.g. defaulted in `api/app/core/config.py` AND set in `production.tfvars`). Resolution rule: strongest pin wins for the (flag, env) pair — state 1 or 2 > state 3 > state 4.
+
+    **Detection rule (deterministic).** For each release-gate flag `<VAR>` named in the spec:
+    ```
+    rg "\b<VAR>\b" infra/tofu/environments/*.tfvars
+    ```
+    Classify by which tfvars files match — `production.tfvars` match → state 1 or 2 for prod (inspect surrounding key: `cloud_run_plain_env_vars` vs `secret_env_vars`); only `staging.tfvars` match → state 4 for prod, state 1/2 for staging; no match → fall through to grep `api/app/core/config.py` for `field_validator` referencing `<VAR>` (state 3) or `Field(default=...)` only (still state 4 — overridable).
+
+    **Spec-enumeration fallback.** The sub-check is gated on the spec enumerating its release-gate flags. If the spec under-enumerates, F6 must additionally grep `api/app/core/config.py` for `Field(default=...)` lines that look like release-gate / cost-bounding flags (heuristics: name contains `ENABLED`, `SKIP`, `THRESHOLD`, `MAX_`, `_RATE`, `ROLLOUT`) even if the spec doesn't list them, and audit each against the four-state taxonomy.
+
+    **Integration point — TWO surfaces, parallel to item 15's pattern:**
+
+    1. **F6 reviewer prompt** (`commands/ms-spec-final-review.md`): add a new sub-bullet under the existing F6 step that runs the detection rule above and reports each (flag, env) pair's state. The sub-bullet anchors under F6 (not a sibling lens F7) to keep operator-readiness concerns colocated.
+    2. **`/ms-panel-tally` decision matrix** (`commands/ms-panel-tally.md`): add a HARD-block row mirroring item 15's pattern — "any (flag, prod) pair classified as state 4 (manual-only) → HARD-block, must be IaC-pinned before merge". Without this row, a clean F6 finding doesn't actually block the tally and the lens ships half-integrated. The follow-up PR must touch both files.
+
+    Distinct from item 15 (artifact-gate HARD-block): item 15 covers measurement artifacts the spec.md plan declared; item 16 covers config-surface drift over the spec's prod lifetime. Same shape in the tally matrix; different reviewer-prompt anchor.
 
 ## Part 2 — Claude Code "Workflows" research
 
