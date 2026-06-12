@@ -76,28 +76,27 @@ for `checksums.txt`:
 
 - `<asset>.sig` — the cosign signature
 - `<asset>.pem` — the signing certificate
-- `<asset>.cosign.bundle` — the verification bundle
 
 Each archive additionally ships an SPDX SBOM as
 `<archive>.spdx.json`. (`checksums.txt` is signed but has no SBOM —
 a checksum manifest carries no content beyond itself.)
 
 To verify a downloaded archive, fetch it together with its `.sig` and
-`.cosign.bundle` companions, then run:
+`.pem` companions, then run:
 
 ```bash
 cosign verify-blob \
   --certificate-identity-regexp '^https://github\.com/mrmaxsteel/mindspec/\.github/workflows/release\.yml@refs/tags/v.*$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --signature "${ARCHIVE}.sig" \
-  --bundle "${ARCHIVE}.cosign.bundle" \
+  --certificate "${ARCHIVE}.pem" \
   "${ARCHIVE}"
 ```
 
 The identity regexp is pinned to this repository's release workflow
 running on a `v*` tag — a signature produced by a fork, or by any
 other workflow, will not verify. The same command verifies
-`checksums.txt` against its own `.sig` / `.cosign.bundle` files.
+`checksums.txt` against its own `.sig` / `.pem` files.
 
 The install scripts (`install.sh` / `install.ps1`) verify SHA-256
 checksums automatically; cosign verification of `checksums.txt` as
