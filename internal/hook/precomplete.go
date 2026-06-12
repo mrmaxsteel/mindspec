@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,10 +61,20 @@ type gateFacts struct {
 	res *panel.Result
 
 	// headSHA is the current `git rev-parse bead/<id>` in the scan root.
-	// missingRef true means the branch no longer exists (rerun-after-merge
-	// pass-through, Req 11). When missingRef is true headSHA is "".
+	// missingRef true means the branch GENUINELY no longer exists (exit-1 /
+	// ErrRefNotFound) — the rerun-after-merge pass-through (Req 11). When
+	// missingRef is true headSHA is "".
 	headSHA    string
 	missingRef bool
+
+	// gitErr true means the rev-parse failed with a TRANSIENT or structural
+	// error (not a clean "ref absent"): exit 128, git missing, lock
+	// contention. It is deliberately NOT folded into missingRef so a transient
+	// failure is not silently treated as a confirmed branch deletion (the
+	// false-clear noted by the round-2 panel). Still fail-open per the spec's
+	// deliberate posture (Req 11/12, advisory-backstopped), but surfaced
+	// HONESTLY as a distinct Warn rather than a "merge already landed" note.
+	gitErr error
 
 	// worktreeAbsent reports that the bead worktree could not be found, so
 	// the porcelain dirty check was skipped (Req 11 missing-worktree
@@ -146,13 +157,28 @@ func panelGateDecision(f gateFacts) Result {
 			slug, p.Round, f.res.LatestRound, rawMergeFence(f.beadID))}
 	}
 
-	// (5) Missing ref — the bead branch no longer exists. The merge already
-	// landed (completion deletes the branch); pass through to complete.Run's
-	// idempotent handling rather than false-block the recovery rerun (Req 11).
+	// (5) Missing ref — the bead branch GENUINELY no longer exists (exit-1
+	// ErrRefNotFound). The merge already landed (completion deletes the
+	// branch); pass through to complete.Run's idempotent handling rather than
+	// false-block the recovery rerun (Req 11).
 	if f.missingRef {
 		return Result{Action: Warn, Message: fmt.Sprintf(
 			"panel for %s references branch %s, which no longer exists — assuming the merge already landed; "+
 				"deferring to mindspec complete's own handling", f.beadID, workspace.BeadBranch(f.beadID))}
+	}
+
+	// (5b) Transient/structural git error — the staleness rev-parse could not
+	// run (not a clean "ref absent"). The spec's posture is deliberately
+	// fail-open (Req 11/12, advisory-backstopped), so we still Pass+Warn; but
+	// — unlike (5) — we do NOT claim the merge landed, because a transient
+	// error is NOT evidence the branch was deleted. Surfacing it honestly
+	// closes the round-2 false-clear (a transient error conflated with a
+	// genuine deletion) without false-blocking a legitimate completion.
+	if f.gitErr != nil {
+		return Result{Action: Warn, Message: fmt.Sprintf(
+			"panel for %s: could not verify branch %s (transient git error: %v) — staleness check skipped; "+
+				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
+			f.beadID, workspace.BeadBranch(f.beadID), f.gitErr)}
 	}
 
 	// (6) Stale SHA — verdicts reviewed a different commit. BLOCK, never
@@ -450,12 +476,21 @@ func segmentCompleteBeadID(seg string) string {
 // flags need listing; everything else is treated as a valueless toggle. An
 // inline `--flag=value` form carries its own value and never reaches here as
 // a bare flag.
+//
+// The set is enumerated against the ACTUAL flags reachable on a
+// `mindspec complete` invocation: the four local string flags on completeCmd
+// (cmd/mindspec/complete.go:144-147) — --spec, --allow-doc-skew,
+// --override-adr, --supersede-adr — PLUS the root-level persistent string
+// flag --trace (cmd/mindspec/root.go:167), which any subcommand inherits.
+// None of these has a shorthand (the previously-listed `-s` was bogus —
+// --spec carries no `-s` alias). Omitting --trace let
+// `mindspec complete --trace <file> <bead>` mis-extract <file> as the bead-id.
 func isValueFlag(tok string) bool {
 	if strings.Contains(tok, "=") {
 		return false
 	}
 	switch tok {
-	case "--spec", "-s", "--allow-doc-skew", "--override-adr", "--supersede-adr":
+	case "--spec", "--allow-doc-skew", "--override-adr", "--supersede-adr", "--trace":
 		return true
 	}
 	return false
@@ -658,8 +693,16 @@ func resolvePanelFacts(reg panel.Registration, beadID string, cfg *config.Config
 	// (7) staleness — one `git rev-parse bead/<id>` in the scan root.
 	sha, rerr := preCompleteRevParseFn(scanRoot, workspace.BeadBranch(beadID))
 	if rerr != nil {
-		// Branch gone → rerun-after-merge pass-through (Req 11).
-		f.missingRef = true
+		// Distinguish a GENUINE missing ref (branch deleted — the merge
+		// landed) from a transient/structural git error. Only the former is
+		// the rerun-after-merge pass-through (Req 11); a transient error is
+		// surfaced as a distinct Warn so it is not mistaken for a confirmed
+		// deletion (round-2 false-clear).
+		if errors.Is(rerr, gitutil.ErrRefNotFound) {
+			f.missingRef = true
+		} else {
+			f.gitErr = rerr
+		}
 		return f
 	}
 	f.headSHA = sha

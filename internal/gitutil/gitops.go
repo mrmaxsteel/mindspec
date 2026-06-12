@@ -1,11 +1,20 @@
 package gitutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 )
+
+// ErrRefNotFound is returned by RevParseRef when the named ref genuinely does
+// not exist (git `rev-parse --verify --quiet` exits 1 with empty output). It
+// is distinguished from a transient/structural git failure (exit 128, git
+// missing, lock contention) so callers can treat the "ref absent" case as the
+// expected branch-already-deleted condition without also fail-clearing on a
+// transient error (Spec 093 Req 11 missing-ref pass-through).
+var ErrRefNotFound = errors.New("ref not found")
 
 // Package-level function variables for testability.
 var execCommand = exec.Command
@@ -296,11 +305,20 @@ func RevParseRef(workdir, ref string) (string, error) {
 	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
 	out, err := cmd.Output()
 	if err != nil {
+		// `--verify --quiet` exits 1 with empty output when the ref is simply
+		// absent — the expected branch-already-deleted case. Any other exit
+		// code (128 not-a-repo / git missing / lock contention) is a transient
+		// or structural failure, which the caller must NOT treat as a confirmed
+		// missing ref.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "", fmt.Errorf("rev-parse %s: %w", ref, ErrRefNotFound)
+		}
 		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
 	}
 	sha := strings.TrimSpace(string(out))
 	if sha == "" {
-		return "", fmt.Errorf("rev-parse %s: ref not found", ref)
+		// Empty output with a zero exit also means the ref did not resolve.
+		return "", fmt.Errorf("rev-parse %s: %w", ref, ErrRefNotFound)
 	}
 	return sha, nil
 }

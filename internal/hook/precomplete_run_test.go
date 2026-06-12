@@ -2,6 +2,7 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // writePanelFixture writes review/<slug>/panel.json + verdict files under
@@ -231,6 +234,179 @@ func TestRunPreComplete_CwdIndependence_CdPrefix(t *testing.T) {
 	r := runPreComplete(&Input{Command: cmd})
 	if r.Action != Block {
 		t.Fatalf("cd-prefix cwd independence: expected Block (panel only in worktree), got %v (%s)", r.Action, r.Message)
+	}
+}
+
+// TestRunPreComplete_DirtyTree_ArtifactFilter exercises the REAL
+// `git status --porcelain` → userDirtPaths → isArtifactPath path (Spec 093
+// NF-1 round-2 blocker; spec.md:1044-1050 dirty-tree AC). The decision-table
+// test injects gateFacts.userDirt directly and BYPASSES the parse+filter;
+// this one feeds representative porcelain lines through preCompleteStatusFn
+// so resolvePanelFacts runs userDirtPaths/isArtifactPath for real.
+//
+// The panel is a passing 6/6 APPROVE with a matching reviewed_head_sha, so
+// the ONLY thing that can flip the verdict between Pass and Block is the
+// artifact filter's classification of the dirty paths.
+func TestRunPreComplete_DirtyTree_ArtifactFilter(t *testing.T) {
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+
+	passingVerdicts := map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "f-round-1.json": "APPROVE",
+	}
+
+	tests := []struct {
+		name      string
+		porcelain string // raw `git status --porcelain` output (real parse path)
+		statusErr error
+		want      Action
+		mustHave  []string // substrings required in a Block message
+		mustNot   []string // substrings that must NOT appear (artifact never named)
+	}{
+		{
+			name:      "artifact-only dirt (.beads/issues.jsonl) → Pass (filter ignores it)",
+			porcelain: " M .beads/issues.jsonl\n",
+			want:      Pass,
+		},
+		{
+			name:      "user-authored source file dirty → Block naming the file",
+			porcelain: " M internal/foo/bar.go\n",
+			want:      Block,
+			mustHave:  []string{"uncommitted changes", "internal/foo/bar.go", "CommitAll"},
+		},
+		{
+			name:      "mixed artifact + user dirt → Block (user file survives the filter)",
+			porcelain: " M .beads/issues.jsonl\n M cmd/mindspec/root.go\n",
+			want:      Block,
+			mustHave:  []string{"cmd/mindspec/root.go"},
+			mustNot:   []string{".beads/issues.jsonl"},
+		},
+		{
+			name:      "clean tree (empty porcelain) → Pass",
+			porcelain: "",
+			want:      Pass,
+		},
+		{
+			name:      "untracked artifact only (?? .beads/issues.jsonl) → Pass",
+			porcelain: "?? .beads/issues.jsonl\n",
+			want:      Pass,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			restore := stubScanRoots(t, root, sha, nil, tt.porcelain, tt.statusErr)
+			defer restore()
+			// The resolved bead worktree must EXIST for the dirty check to run
+			// (resolveBeadWorktree → BeadWorktreePath → dirExists). Create the
+			// nested bead-worktree path the resolver probes under the scan root.
+			wt := workspace.BeadWorktreePath(root, config.DefaultConfig(), "mindspec-bd01")
+			if err := os.MkdirAll(wt, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writePanelFixture(t, root, "093-bd01", panel.Panel{
+				BeadID: ptr("mindspec-bd01"), Spec: "093", Round: 1,
+				ExpectedReviewers: 6, ReviewedHeadSHA: sha,
+			}, passingVerdicts)
+
+			r := runPreComplete(&Input{Command: "mindspec complete mindspec-bd01"})
+			if r.Action != tt.want {
+				t.Fatalf("porcelain %q: expected %v, got %v (%s)", tt.porcelain, tt.want, r.Action, r.Message)
+			}
+			for _, want := range tt.mustHave {
+				if !strings.Contains(r.Message, want) {
+					t.Errorf("block message missing %q: %s", want, r.Message)
+				}
+			}
+			for _, no := range tt.mustNot {
+				if strings.Contains(r.Message, no) {
+					t.Errorf("block message must not name artifact %q: %s", no, r.Message)
+				}
+			}
+		})
+	}
+}
+
+// TestRunPreComplete_DirtyTree_WorktreeAbsent_SkipsCheck: the bead worktree
+// does not exist on disk and worktree-list returns nothing → the dirty check
+// is skipped (worktree-absent pass-through, Req 11 / NF-2) and the passing
+// panel falls through to a threshold Pass even though porcelain (were it run)
+// reports user dirt. Pins that the skip is the worktree-absence, not a clean
+// tree.
+func TestRunPreComplete_DirtyTree_WorktreeAbsent_SkipsCheck(t *testing.T) {
+	root := t.TempDir()
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	// porcelain would report user dirt, but statusErr is moot — the worktree
+	// is absent so preCompleteStatusFn is never consulted for the path.
+	restore := stubScanRoots(t, root, sha, nil, " M internal/foo/bar.go\n", nil)
+	defer restore()
+	// Do NOT create the bead worktree dir → resolveBeadWorktree returns "".
+	writePanelFixture(t, root, "093-bd01", panel.Panel{
+		BeadID: ptr("mindspec-bd01"), Spec: "093", Round: 1,
+		ExpectedReviewers: 6, ReviewedHeadSHA: sha,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "f-round-1.json": "APPROVE",
+	})
+
+	r := runPreComplete(&Input{Command: "mindspec complete mindspec-bd01"})
+	if r.Action != Pass {
+		t.Fatalf("worktree-absent: expected pass-through Pass, got %v (%s)", r.Action, r.Message)
+	}
+}
+
+// TestRunPreComplete_TransientGitError_DistinctWarn: a TRANSIENT rev-parse
+// error (not gitutil.ErrRefNotFound) is surfaced as a distinct Warn that does
+// NOT claim the merge landed — closing the round-2 false-clear where a
+// transient git failure was conflated with a genuine branch deletion. Still
+// fail-open Pass+Warn per the spec's deliberate posture (Req 11/12).
+func TestRunPreComplete_TransientGitError_DistinctWarn(t *testing.T) {
+	root := t.TempDir()
+	transient := errors.New("rev-parse bead/mindspec-bd01: exit status 128: not a git repository")
+	restore := stubScanRoots(t, root, "", transient, "", nil)
+	defer restore()
+	writePanelFixture(t, root, "093-bd01", panel.Panel{
+		BeadID: ptr("mindspec-bd01"), Spec: "093", Round: 1,
+		ExpectedReviewers: 6, ReviewedHeadSHA: "deadbeef",
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "f-round-1.json": "APPROVE",
+	})
+
+	r := runPreComplete(&Input{Command: "mindspec complete mindspec-bd01"})
+	if r.Action != Warn {
+		t.Fatalf("transient git error: expected fail-open Warn, got %v (%s)", r.Action, r.Message)
+	}
+	if !strings.Contains(r.Message, "transient git error") || !strings.Contains(r.Message, "NOT a confirmed merge") {
+		t.Errorf("transient warn should be honest (not claim a merge): %s", r.Message)
+	}
+	if strings.Contains(r.Message, "already landed") {
+		t.Errorf("transient warn must NOT claim the merge already landed: %s", r.Message)
+	}
+}
+
+// TestRunPreComplete_GenuineMissingRef_MergeLandedWarn: a genuine
+// ErrRefNotFound is the rerun-after-merge pass-through — Warn that DOES assume
+// the merge landed (decision row 5). Pins that the two error classes diverge.
+func TestRunPreComplete_GenuineMissingRef_MergeLandedWarn(t *testing.T) {
+	root := t.TempDir()
+	restore := stubScanRoots(t, root, "", gitutil.ErrRefNotFound, "", nil)
+	defer restore()
+	writePanelFixture(t, root, "093-bd01", panel.Panel{
+		BeadID: ptr("mindspec-bd01"), Spec: "093", Round: 1,
+		ExpectedReviewers: 6, ReviewedHeadSHA: "deadbeef",
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "f-round-1.json": "APPROVE",
+	})
+
+	r := runPreComplete(&Input{Command: "mindspec complete mindspec-bd01"})
+	if r.Action != Warn {
+		t.Fatalf("genuine missing ref: expected Warn, got %v (%s)", r.Action, r.Message)
+	}
+	if !strings.Contains(r.Message, "already landed") {
+		t.Errorf("genuine missing-ref warn should assume the merge landed: %s", r.Message)
 	}
 }
 

@@ -60,6 +60,14 @@ func TestCompleteBeadID(t *testing.T) {
 		{"mindspec complete mindspec-bd01", "mindspec-bd01"},
 		{"cd wt && mindspec complete mindspec-bd01 \"done\"", "mindspec-bd01"},
 		{"mindspec complete --spec 093 mindspec-bd01", "mindspec-bd01"},
+		{"mindspec complete --spec=093 mindspec-bd01", "mindspec-bd01"},
+		// --trace is a root-level persistent value-flag (root.go:167); its
+		// value token must be skipped so the bead-id, not the trace file, is
+		// extracted (R1 conformance: isValueFlag completeness).
+		{"mindspec complete --trace /tmp/t.jsonl mindspec-bd01", "mindspec-bd01"},
+		{"mindspec complete --trace=/tmp/t.jsonl mindspec-bd01", "mindspec-bd01"},
+		{"mindspec complete --override-adr x mindspec-bd01", "mindspec-bd01"},
+		{"mindspec complete --supersede-adr 0001 mindspec-bd01", "mindspec-bd01"},
 		{"FOO=1 mindspec complete X", "X"},
 		{"mindspec complete", ""},
 		{"mindspec complete --dry-run", ""},
