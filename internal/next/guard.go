@@ -154,7 +154,8 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 
 // ClaimFailure formats the claim-failure recovery recipe (spec 093
 // Req 3, replacing the bare "claiming bead: <err>" wrap and the
-// ms-bead-next/ms-bead-impl skill prose).
+// pick+claim skill prose that was folded into ms-bead-cycle and
+// ms-bead-impl per spec 093).
 //
 // The body carries the manual-claim recipe kept VERBATIM from the
 // battle-tested skill text: `bd update <id> --claim --status

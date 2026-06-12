@@ -574,8 +574,9 @@ func buildSkewMetadata(reason, reasonKey, atKey, byKey string) map[string]interf
 
 // adrDivergenceFailure formats the ADR-divergence gate failure with the
 // repair-first triage ladder (spec 093 Req 2, replacing the bypass-first
-// `--override-adr`/`--supersede-adr` hint and the ms-bead-merge skill
-// prose). findings is joinResultErrorMessages(adrResult) — it carries
+// `--override-adr`/`--supersede-adr` hint and the merge-skill prose that
+// was folded into ms-bead-cycle per spec 093). findings is
+// joinResultErrorMessages(adrResult) — it carries
 // the offending file names, so the ladder is actionable without any
 // skill. Ladder order is deliberate: repair (OWNERSHIP.yaml), then
 // revert, and only LAST the bypass flags. Per HC-5 the ladder lives in

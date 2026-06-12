@@ -78,6 +78,82 @@ func TestGrepClean_NoLiveRemovedSkillReferences(t *testing.T) {
 	}
 }
 
+// acGrepCleanSurfaces lists the NON-skill surfaces the binding grep-clean AC
+// (spec.md:815) enumerates beyond skillFiles(): the CLAUDE/AGENTS managed-block
+// sources (setup.claudeMDManagedBlock + bootstrap.go's init templates), both
+// READMEs, and the instruct templates. Paths are repo-root-relative; the test
+// runs from internal/setup, so repo root is two levels up. A removed-skill
+// reference reintroduced into any of these would otherwise pass undetected
+// (panel R3: the stale bootstrap.go /ms-spec-status table shipped green because
+// the AC test stopped at skillFiles()).
+var acGrepCleanSurfaces = []string{
+	"internal/setup/claude.go",        // claudeMDManagedBlock generator
+	"internal/bootstrap/bootstrap.go", // mindspec init CLAUDE/AGENTS/Copilot templates
+	"plugins/mindspec/README.md",
+	"README.md",
+}
+
+// TestGrepClean_NoLiveRemovedSkillReferences_ACSurfaces extends the grep-clean
+// AC (spec 093 Req 16/18) past skillFiles() to the AC's other enumerated
+// surfaces: the managed-block sources, both READMEs, and the instruct
+// templates. The same HC-2 fold-provenance exemption applies (a line that
+// documents WHERE a removed skill's prose went is allowed; a line that directs
+// a reader to invoke the removed skill is not). This is the regression guard
+// for panel R3's demonstrated bootstrap.go /ms-spec-status leak.
+func TestGrepClean_NoLiveRemovedSkillReferences_ACSurfaces(t *testing.T) {
+	root := repoRoot(t)
+
+	files := append([]string{}, acGrepCleanSurfaces...)
+	templates, err := filepath.Glob(filepath.Join(root, "internal", "instruct", "templates", "*.md"))
+	if err != nil {
+		t.Fatalf("globbing instruct templates: %v", err)
+	}
+	for _, tmpl := range templates {
+		rel, err := filepath.Rel(root, tmpl)
+		if err != nil {
+			t.Fatalf("relativizing %s: %v", tmpl, err)
+		}
+		files = append(files, rel)
+	}
+
+	for _, rel := range files {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("reading AC surface %s: %v", rel, err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if !removedNameToken.MatchString(line) {
+				continue
+			}
+			if provenanceLine.MatchString(line) {
+				continue // documented fold/superseded mapping (HC-2)
+			}
+			t.Errorf("%s line %d carries a live reference to a removed skill:\n  %s", rel, i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// repoRoot returns the module root by walking up from the test's working
+// directory (internal/setup) until it finds go.mod. Keeps the AC-surface scan
+// robust to where `go test` is invoked from.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not locate go.mod above %s", dir)
+		}
+		dir = parent
+	}
+}
+
 // TestInstallSkills_RefreshesPreviouslyShipped covers Req 19b: a skill file
 // whose on-disk content byte-matches a PREVIOUSLY-SHIPPED version is refreshed
 // in place to the canonical content; the marker-less pre-093 lifecycle skill
