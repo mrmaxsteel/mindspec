@@ -286,6 +286,25 @@ func RevParseHEAD(workdir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// RevParseRef resolves an arbitrary ref (e.g. "bead/<id>") to its commit
+// SHA in workdir, trimmed. Unlike RevParseHEAD it targets a named ref, so a
+// missing ref returns an error (the panel gate reads this as the
+// rerun-after-merge case where the bead branch was already deleted — Spec
+// 093 Req 11 missing-ref pass-through). `^{commit}` peels annotated tags to
+// their commit so the result is always comparable to a reviewed_head_sha.
+func RevParseRef(workdir, ref string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("rev-parse %s: ref not found", ref)
+	}
+	return sha, nil
+}
+
 // RevParseShowToplevel returns `git rev-parse --show-toplevel` from the
 // current working directory. No `-C` is set.
 func RevParseShowToplevel() (string, error) {
