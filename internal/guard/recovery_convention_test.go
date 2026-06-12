@@ -22,7 +22,12 @@ package guard
 // each bead routes a site through NewFailure/FormatFailure it must add
 // a unit test in that site's package asserting
 // guard.HasFinalRecoveryLine on the produced message, mirroring the
-// fixtures here.
+// fixtures here. Spec 093 Bead 1 sites follow the same per-site
+// pattern: ClaimFailure/WorktreeSetupFailure in internal/next
+// (guard_test.go) and adrDivergenceFailure in internal/complete
+// (complete_test.go); no new constructor lives in THIS package, so
+// conventionFixtures needs no extension (the AST walk below covers
+// this package only, and importing those packages here would cycle).
 
 import (
 	"errors"
