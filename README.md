@@ -185,6 +185,30 @@ irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex
 
 Releases from `v0.8.0` onward are cosign-signed — see [SECURITY.md](SECURITY.md#verifying-releases) to verify downloads.
 
+### Upgrading
+
+Upgrade the binary by re-running the installer with `--force`:
+
+```bash
+# Linux/macOS
+curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh -s -- --force
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -Force
+```
+
+For **existing projects** moving to `v0.8.0`:
+
+1. Ensure `bd` (beads) `>= 1.0.4` is installed — `mindspec doctor` enforces the minimum.
+2. Re-run `mindspec setup <agent>` to refresh the embedded skills.
+3. Configure the `.beads/issues.jsonl` merge driver in each existing clone:
+   ```bash
+   git config merge.beads.driver "$(git rev-parse --show-toplevel)/scripts/bd-jsonl-merge-driver.sh %A %O %B"
+   ```
+4. Scaffold ownership manifests: run `mindspec doctor --fix`, then `mindspec ownership populate`.
+
+See the [release notes](https://github.com/mrmaxsteel/mindspec/releases) for version-specific upgrade steps and breaking changes.
+
 ### Setup
 
 ```bash
