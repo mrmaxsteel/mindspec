@@ -59,7 +59,6 @@ signs:
     args:
       - "sign-blob"
       - "--yes"
-      - "--bundle=${artifact}.cosign.bundle"
       - "--output-signature=${artifact}.sig"
       - "--output-certificate=${artifact}.pem"
       - "${artifact}"
@@ -71,16 +70,25 @@ signs:
     args:
       - "sign-blob"
       - "--yes"
-      - "--bundle=${artifact}.cosign.bundle"
       - "--output-signature=${artifact}.sig"
       - "--output-certificate=${artifact}.pem"
       - "${artifact}"
     artifacts: checksum
 ```
 
-The explicit `--bundle=${artifact}.cosign.bundle` flag is load-bearing:
-the verification path in Bead 3 (and post-tag) consumes the
-`.cosign.bundle` companion file, so its filename is pinned here.
+The verification path consumes the uploaded `.sig` (signature) and
+`.pem` (certificate) companion files.
+
+> **Correction (post-v0.8.0, bug `mindspec-4kfm`):** the original Bead 2
+> config also passed `--bundle=${artifact}.cosign.bundle`. GoReleaser
+> v2's `signs:` block tracks/uploads only the files named by
+> `signature:` and `certificate:` — there is no field to register a
+> third `.cosign.bundle` output. The `--bundle` file was therefore
+> written on the runner and silently discarded, so v0.8.0 shipped no
+> `.cosign.bundle` assets. The flag has been removed and verification
+> documented against the `.sig` + `.pem` pair that the release actually
+> publishes (and that verifies today). The `.sig`/`.pem`-based
+> `verify-blob` is the canonical path going forward.
 
 **Rejected alternatives:**
 - *Key-based cosign* — rejected for the key-management burden (secret
@@ -147,7 +155,8 @@ Signing and SBOM generation target the **GoReleaser-produced archives**
 - (+) Attestable supply chain: every release archive carries a verifiable
   cosign signature tied to a GitHub-issued OIDC identity.
 - (+) No key-management burden — nothing to store, nothing to rotate.
-- (+) Auditable via `cosign verify` against the published bundle.
+- (+) Auditable via `cosign verify-blob` against the published `.sig` +
+  `.pem` companions (see SECURITY.md for the exact command).
 - (−) All downstream verifiers need `cosign` installed (and a recent
   enough version to handle keyless bundles).
 - (−) The release pipeline now depends on GitHub OIDC availability; a

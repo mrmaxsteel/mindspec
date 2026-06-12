@@ -5,9 +5,10 @@
 # snapshot mode, then manually invokes cosign and syft against the produced
 # archives (because `goreleaser --snapshot` skips the `signs:` block by
 # default — see https://goreleaser.com/customization/sign/), then asserts
-# that every expected `.sig` / `.cosign.bundle` / `.spdx.json` side-car
-# exists and is non-empty, and that each SBOM contains an `spdxVersion`
-# field.
+# that every expected `.sig` / `.pem` / `.spdx.json` side-car exists and is
+# non-empty, and that each SBOM contains an `spdxVersion` field. (The
+# `.goreleaser.yml` `signs:` block uploads only `.sig` + `.pem`; GoReleaser
+# v2 has no `.cosign.bundle` upload field — see bug mindspec-4kfm.)
 #
 # Per spec 090 Bead 3 (panel revision 8): the trigger is `pull_request`.
 # The intentionally-rejected privileged sibling event (the one whose name
@@ -112,7 +113,6 @@ jobs:
             cosign sign-blob \
               --yes \
               --tlog-upload=false \
-              --bundle="${artifact}.cosign.bundle" \
               --output-signature="${artifact}.sig" \
               --output-certificate="${artifact}.pem" \
               "$artifact"
@@ -131,9 +131,13 @@ jobs:
       # Block B — Structural assertion (spec 090 Bead 3 step 2, covers
       # spec Requirement #4 a–c).
       #
-      # Assertion shape mirrors the per-artifact-class division above:
-      #   - archives (.tar.gz / .zip) must have .sig + .cosign.bundle + .spdx.json
-      #   - checksums.txt must have .sig + .cosign.bundle only (no .spdx.json)
+      # Assertion shape mirrors the per-artifact-class division above and
+      # the `.goreleaser.yml` `signs:` outputs. GoReleaser v2 tracks/uploads
+      # only the `signature:` (.sig) and `certificate:` (.pem) files — there
+      # is no `.cosign.bundle` upload (see bug mindspec-4kfm), so the dryrun
+      # asserts the side-cars the real release actually publishes:
+      #   - archives (.tar.gz / .zip) must have .sig + .pem + .spdx.json
+      #   - checksums.txt must have .sig + .pem only (no .spdx.json)
       - name: Assert side-car presence + SPDX validity
         run: |
           set -euo pipefail
@@ -145,15 +149,15 @@ jobs:
           fi
           for archive in "${archives[@]}"; do
             [ -f "$archive" ] || continue
-            [ -s "${archive}.sig" ]           || { echo "missing ${archive}.sig"; exit 1; }
-            [ -s "${archive}.cosign.bundle" ] || { echo "missing ${archive}.cosign.bundle"; exit 1; }
-            [ -s "${archive}.spdx.json" ]     || { echo "missing ${archive}.spdx.json"; exit 1; }
+            [ -s "${archive}.sig" ]       || { echo "missing ${archive}.sig"; exit 1; }
+            [ -s "${archive}.pem" ]       || { echo "missing ${archive}.pem"; exit 1; }
+            [ -s "${archive}.spdx.json" ] || { echo "missing ${archive}.spdx.json"; exit 1; }
             jq -e '.spdxVersion' "${archive}.spdx.json" >/dev/null \
               || { echo "invalid SPDX in ${archive}.spdx.json"; exit 1; }
           done
           checksums="dist/checksums.txt"
           if [ -f "$checksums" ]; then
-            [ -s "${checksums}.sig" ]           || { echo "missing ${checksums}.sig"; exit 1; }
-            [ -s "${checksums}.cosign.bundle" ] || { echo "missing ${checksums}.cosign.bundle"; exit 1; }
+            [ -s "${checksums}.sig" ] || { echo "missing ${checksums}.sig"; exit 1; }
+            [ -s "${checksums}.pem" ] || { echo "missing ${checksums}.pem"; exit 1; }
           fi
           echo "release-dryrun: ${#archives[@]} archives + checksums.txt verified"

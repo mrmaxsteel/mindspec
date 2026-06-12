@@ -49,9 +49,15 @@ release:
 
 # Cosign keyless signing — spec 090 Bead 2 / ADR-0029.
 # Two entries: one signs each release archive, one signs `checksums.txt`.
-# `${artifact}` is the GoReleaser-substituted artifact filename. The
-# explicit `--bundle=${artifact}.cosign.bundle` flag is load-bearing —
-# the verification path consumes the `.cosign.bundle` companion file.
+# `${artifact}` is the GoReleaser-substituted artifact filename.
+#
+# GoReleaser v2's `signs:` block tracks and uploads only the files named
+# by `signature:` and `certificate:`. There is no field to register a
+# third `.cosign.bundle` output, so a `--bundle=...` file would be
+# written on the runner and then silently discarded (never attached to
+# the release) — exactly what happened in v0.8.0. The verification path
+# therefore uses the uploaded `.sig` + `.pem` pair (see SECURITY.md), and
+# the dead `--bundle` flag is intentionally absent here.
 signs:
   - id: archives
     cmd: cosign
@@ -60,7 +66,6 @@ signs:
     args:
       - "sign-blob"
       - "--yes"
-      - "--bundle=${artifact}.cosign.bundle"
       - "--output-signature=${artifact}.sig"
       - "--output-certificate=${artifact}.pem"
       - "${artifact}"
@@ -72,7 +77,6 @@ signs:
     args:
       - "sign-blob"
       - "--yes"
-      - "--bundle=${artifact}.cosign.bundle"
       - "--output-signature=${artifact}.sig"
       - "--output-certificate=${artifact}.pem"
       - "${artifact}"
