@@ -25,6 +25,9 @@ const (
 type Result struct {
 	Created      []string
 	Skipped      []string
+	Refreshed    []string           // mindspec-owned skill files refreshed in place to canonical content (Req 19)
+	Removed      []string           // stale mindspec-owned skill dirs removed (Req 18)
+	Notices      []string           // user-modified files left in place (provenance HC-6)
 	BeadsRan     bool               // true if bd setup <agent> was run
 	BeadsMsg     string             // output/error from bd setup <agent>
 	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig (or ScanBeadsConfig in check mode) after chained bd setup
@@ -45,6 +48,30 @@ func (r *Result) FormatSummary() string {
 		}
 	}
 
+	if len(r.Refreshed) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Refreshed (canonical content):\n")
+		for _, p := range r.Refreshed {
+			sb.WriteString("  ~ ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Removed) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Removed (stale mindspec skill):\n")
+		for _, p := range r.Removed {
+			sb.WriteString("  x ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
 	if len(r.Skipped) > 0 {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
@@ -52,6 +79,18 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("Already present:\n")
 		for _, p := range r.Skipped {
 			sb.WriteString("  - ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Notices) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Notices (user-modified, left in place):\n")
+		for _, p := range r.Notices {
+			sb.WriteString("  ! ")
 			sb.WriteString(p)
 			sb.WriteString("\n")
 		}
@@ -114,23 +153,11 @@ func RunClaude(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 2. Skills (.claude/skills/<name>/SKILL.md)
-	for name, content := range claudeSkillFiles() {
-		relPath := filepath.Join(".claude", "skills", name, "SKILL.md")
-		absPath := filepath.Join(root, relPath)
-		if fileExists(absPath) {
-			r.Skipped = append(r.Skipped, relPath)
-		} else {
-			r.Created = append(r.Created, relPath)
-			if !check {
-				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-					return nil, fmt.Errorf("creating dir for %s: %w", relPath, err)
-				}
-				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-					return nil, fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		}
+	// 2. Skills (.claude/skills/<name>/SKILL.md) — create new, refresh
+	// previously-shipped (provenance-gated), skip user-modified with a
+	// notice (Reqs 18-19, HC-6).
+	if err := installSkills(filepath.Join(root, ".claude", "skills"), filepath.Join(".claude", "skills"), claudeSkillFiles(), check, r); err != nil {
+		return nil, err
 	}
 
 	// 3. CLAUDE.md (append with marker)
@@ -572,9 +599,9 @@ func fileExists(path string) bool {
 // Shared across Codex and Copilot setup (both use .agents/skills/).
 //
 // The returned map merges two sources:
-//   - The 5 lifecycle gate skills inlined below (ms-spec-create,
-//     ms-spec-approve, ms-plan-approve, ms-impl-approve, ms-spec-status).
-//   - The 11 plugin skills embedded from plugins/mindspec/skills/ via
+//   - The 4 lifecycle gate skills inlined below (ms-spec-create,
+//     ms-spec-approve, ms-plan-approve, ms-impl-approve).
+//   - The 7 plugin skills embedded from plugins/mindspec/skills/ via
 //     pluginmindspec.SkillFiles() (ms-bead-* and ms-panel-* and ms-spec-*).
 //
 // Lifecycle skills always win on key collision (they're the canonical
@@ -587,14 +614,17 @@ func skillFiles() map[string]string {
 	return out
 }
 
-// lifecycleSkillFiles returns the 5 spec-lifecycle gate skills as raw-string
+// lifecycleSkillFiles returns the 4 spec-lifecycle gate skills as raw-string
 // literals. These are the canonical authority — they win on key collision
-// with the plugin-embedded skills in skillFiles().
+// with the plugin-embedded skills in skillFiles(). Each carries the
+// `managed-by: mindspec` provenance marker so the in-place refresh
+// (refreshManagedSkill) can tell a shipped file from a user-modified one.
 func lifecycleSkillFiles() map[string]string {
 	return map[string]string{
 		"ms-spec-create": `---
 name: ms-spec-create
 description: Create a new MindSpec specification
+managed-by: mindspec
 ---
 
 # Spec Create
@@ -608,6 +638,7 @@ description: Create a new MindSpec specification
 		"ms-spec-approve": `---
 name: ms-spec-approve
 description: Approve a spec and transition to Plan Mode
+managed-by: mindspec
 ---
 
 # Spec Approval
@@ -621,6 +652,7 @@ description: Approve a spec and transition to Plan Mode
 		"ms-plan-approve": `---
 name: ms-plan-approve
 description: Approve a plan and transition toward Implementation Mode
+managed-by: mindspec
 ---
 
 # Plan Approval
@@ -634,6 +666,7 @@ description: Approve a plan and transition toward Implementation Mode
 		"ms-impl-approve": `---
 name: ms-impl-approve
 description: Approve implementation and close out the spec lifecycle
+managed-by: mindspec
 ---
 
 # Implementation Approval
@@ -648,17 +681,6 @@ description: Approve implementation and close out the spec lifecycle
    - ` + "`git commit`" + `
    - ` + "`bd sync`" + `
    - ` + "`git push`" + `
-`,
-
-		"ms-spec-status": `---
-name: ms-spec-status
-description: Check the current MindSpec mode and active specification
----
-
-# Spec Status
-
-1. Run ` + "`mindspec state show`" + ` and ` + "`mindspec instruct`" + ` in the terminal
-2. Summarize the mode, active spec/bead, and any warnings to the user
 `,
 	}
 }
@@ -686,33 +708,32 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
 
 ### Bead lifecycle
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-bead-next`" + ` | Pick the next ready bead, claim it, set up the worktree |
-| ` + "`/ms-bead-prep`" + ` | Draft a pre-staged implementation prompt at ` + "`review/prep/bead<N>_impl_prompt.md`" + ` |
-| ` + "`/ms-bead-impl`" + ` | Dispatch an implementation subagent for the claimed bead |
-| ` + "`/ms-bead-merge`" + ` | Run ` + "`mindspec complete`" + ` once the panel has approved |
+| ` + "`/ms-bead-impl`" + ` | Stage the impl prompt (Phase A) + dispatch the subagent (Phase B) |
+| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
 
 ### Review panel
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-panel-create`" + ` | Initialize the panel directory + BRIEF.md for 6 reviewers |
-| ` + "`/ms-panel-run`" + ` | Launch 3 Claude Agents + 3 Codex sessions in parallel; collect verdicts |
-| ` + "`/ms-panel-tally`" + ` | Read all 6 verdict JSONs and consolidate ` + "`concrete_changes_required`" + ` |
-| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
+| ` + "`/ms-panel-run`" + ` | Step 0 writes the panel dir + BRIEF + ` + "`panel.json`" + `; then launch 6 reviewers and collect verdicts |
+| ` + "`/ms-panel-tally`" + ` | Single decision authority: decision matrix, artifact gates, consolidation, halt-recovery |
 
 ### Orchestrators
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: impl → panel → fix → re-panel → merge |
+| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: pick+claim → impl → panel → fix → re-panel → merge |
 | ` + "`/ms-spec-autopilot`" + ` | Whole spec: cycle every bead until the spec is done |
 | ` + "`/ms-spec-final-review`" + ` | Final panel of the whole spec branch vs main, before ` + "`/ms-impl-approve`" + ` |
+
+## Bead-loop guardrails (mindspec)
+
+See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestrator rules and subagent prompt fences (only the cycle runs ` + "`mindspec complete`" + `, after the panel gate passes; never raw ` + "`git merge bead/<id>`" + `; one ` + "`git push`" + ` at end-of-spec; subagents make exactly one commit, tests must PASS). Surviving skills reference that section rather than re-stating it.
 `
 
 // claudeMDFull is written when CLAUDE.md doesn't exist.

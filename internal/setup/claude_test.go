@@ -19,10 +19,10 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should create settings.json, 5 lifecycle skill files, 11 plugin skill
-	// files, and CLAUDE.md = 18 items.
-	if len(r.Created) != 18 {
-		t.Errorf("expected 18 created items, got %d: %v", len(r.Created), r.Created)
+	// Should create settings.json, 4 lifecycle skill files, 7 plugin skill
+	// files, and CLAUDE.md = 13 items (spec 093: skills thinned 16 → 11).
+	if len(r.Created) != 13 {
+		t.Errorf("expected 13 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -48,15 +48,14 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Error("missing PreToolUse pre-complete panel-gate hook")
 	}
 
-	// Verify skill files exist — both the 5 lifecycle gates and the 11
-	// plugin skills (embedded from plugins/mindspec/skills/).
+	// Verify skill files exist — both the 4 lifecycle gates and the 7
+	// plugin skills (embedded from plugins/mindspec/skills/) = 11 (spec 093).
 	for _, name := range []string{
 		// Lifecycle gates
-		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve", "ms-spec-status",
+		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve",
 		// Plugin skills (bead/panel/orchestrator)
-		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-bead-merge", "ms-bead-next",
-		"ms-bead-prep", "ms-panel-create", "ms-panel-run", "ms-panel-tally",
-		"ms-spec-autopilot", "ms-spec-final-review",
+		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-panel-run",
+		"ms-panel-tally", "ms-spec-autopilot", "ms-spec-final-review",
 	} {
 		skillPath := filepath.Join(root, ".claude", "skills", name, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
@@ -98,8 +97,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 18 {
-		t.Errorf("second run should skip 18 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 13 {
+		t.Errorf("second run should skip 13 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 

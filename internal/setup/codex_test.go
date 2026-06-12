@@ -7,6 +7,51 @@ import (
 	"testing"
 )
 
+// TestRunCodex_GuardrailsSection covers spec 093 Req 17: post-setup AGENTS.md
+// carries the "Bead-loop guardrails (mindspec)" section with both subsections
+// (orchestrator rules + subagent prompt fences, including tests-must-PASS and
+// the raw-merge rule); CLAUDE.md REFERENCES it rather than re-stating it.
+func TestRunCodex_GuardrailsSection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if _, err := RunCodex(root, false); err != nil {
+		t.Fatalf("RunCodex: %v", err)
+	}
+
+	agents, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("reading AGENTS.md: %v", err)
+	}
+	a := string(agents)
+	for _, want := range []string{
+		"## Bead-loop guardrails (mindspec)",
+		"### Orchestrator rules",
+		"### Subagent prompt fences",
+		"git merge bead/<id>", // raw-merge rule
+		"Tests must PASS",     // subagent fence
+		"end-of-spec",         // single-push rule
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md guardrails section missing %q", want)
+		}
+	}
+
+	// CLAUDE.md references the section; it must not duplicate the subagent
+	// fence body (single-sourced in AGENTS.md).
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("RunClaude: %v", err)
+	}
+	claude, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+	c := string(claude)
+	if !strings.Contains(c, "AGENTS.md § Bead-loop guardrails") {
+		t.Errorf("CLAUDE.md must reference AGENTS.md § Bead-loop guardrails")
+	}
+}
+
 // TestRunCodex_PatchesBeadsConfig mirrors the Claude/Copilot tests — a project
 // that already ran `bd init` should get a mindspec-ready .beads/config.yaml
 // after `mindspec setup codex`. Codex chains `bd setup codex`, so this covers
