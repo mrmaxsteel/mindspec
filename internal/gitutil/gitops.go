@@ -286,6 +286,21 @@ func RevParseHEAD(workdir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// RevParseRef returns the commit SHA that ref resolves to in workdir
+// (workdir=="" → cwd), trimmed. The error is non-nil when ref does not
+// exist (e.g. a deleted bead branch) — callers distinguish "branch
+// gone" from a real failure by treating any error as not-found
+// (Spec 093 Req 11 missing-ref semantics). `--verify --quiet` keeps git
+// silent on stderr for the expected not-found case.
+func RevParseRef(workdir, ref string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // RevParseShowToplevel returns `git rev-parse --show-toplevel` from the
 // current working directory. No `-C` is set.
 func RevParseShowToplevel() (string, error) {
