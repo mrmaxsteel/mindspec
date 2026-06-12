@@ -173,6 +173,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// 2.25. Panel advisory tally (Spec 093 Req 13d). Warning-only — the
+	// hard gate is the PreToolUse hook. This is the ONLY panel signal for
+	// flows that never route through Claude Code hooks (codex/raw-shell
+	// agents, externally-orchestrated panels). No registered panel → no
+	// output and no subprocess cost. The matched registration is reused
+	// below for the post-completion audit writes (Reqs 13b/13e).
+	advisoryOut := panelAdvisoryOut
+	if advisoryOut == nil {
+		advisoryOut = os.Stderr
+	}
+	panelReg := panelAdvisory(beadID, dedupeRoots(wtPath, root), advisoryOut)
+
 	// 2.5. Auto-commit if commit message provided (via Executor)
 	commitPath := wtPath
 	if commitPath == "" {
@@ -438,6 +450,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if err := completeMergeMetadataFn(beadID, meta); err != nil {
 			fmt.Printf("Warning: could not record adr-supersede metadata on %s: %v\n", beadID, err)
 		}
+	}
+
+	// 5.6. Panel-gate audit writes (Spec 093 Reqs 13b/13e): record
+	// panel_gate_skipped (env hatch used against a registered panel) and/or
+	// panel_abandoned (matched panel.json marked abandoned) AFTER the
+	// terminal mutation succeeds, mirroring the doc-skew discipline above.
+	// Best-effort; reuses the panelAdvisory scan (no second fs walk).
+	if completeErr == nil {
+		writePanelAuditMetadata(beadID, panelReg, advisoryOut)
 	}
 
 	// 6. Advance state

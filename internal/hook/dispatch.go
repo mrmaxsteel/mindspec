@@ -30,6 +30,14 @@ func Run(name string, inp *Input, stateFn func() *HookState, enforce bool) Resul
 	switch name {
 	case "pre-commit":
 		return runPreCommit(stateFn)
+	case "pre-complete":
+		// PreToolUse panel gate (Spec 093 Reqs 9-13, ADR-0037). Pure-stdin
+		// driven: it self-filters to `mindspec complete` command-position
+		// invocations and does ZERO config/git/fs/state work on every other
+		// Bash command (HC-3) — so it deliberately ignores stateFn (its
+		// scan-root resolution uses the COMMAND's bead-id, not the active
+		// phase, per Req 10 / gate finding T3-3).
+		return runPreComplete(inp)
 	default:
 		return Result{Action: Pass}
 	}
