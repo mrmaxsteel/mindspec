@@ -126,6 +126,112 @@ func doltChainFixture() goldenFixture {
 	}
 }
 
+// populateDirFixture reconstructs internal/ownership/populate.go:77
+// (`reading domains dir %s: %w`) VERBATIM, with a Windows root containing
+// SPACES — the exact shape codex-leak demonstrated leaking the path
+// suffix "Plans\domains" after the old drive-prefix replacement.
+func populateDirFixture() goldenFixture {
+	dir := `C:\Users\Max\Secret Plans\domains`
+	raw := fmt.Sprintf("reading domains dir %s: %s", dir,
+		"open: permission denied")
+	return goldenFixture{
+		name: "ownership/populate.go:77 windows path with spaces",
+		raw:  raw,
+		sensitive: []string{
+			`C:\Users`, "Secret Plans", `Plans\domains`, `Users\Max`,
+			"Max", "Secret",
+		},
+		scrub:          Scrub,
+		wantClassified: true,
+	}
+}
+
+// divergenceProposedFixture reconstructs the adr-divergence-proposed
+// template (internal/validate/divergence.go:204-210) VERBATIM — a real
+// user-data-bearing template (path + domain + ADR id + reason hint) that
+// codex-leak flagged as absent from the corpus.
+func divergenceProposedFixture() goldenFixture {
+	path := "internal/journal/journal.go"
+	domain := "execution"
+	proposedID := "ADR-0042"
+	inner := fmt.Sprintf(
+		"file %s attributed to domain %q is covered only by Proposed ADR %s — flip it to Accepted now that the implementation ships, or re-run with --override-adr \"<reason>\"",
+		path, domain, proposedID)
+	full := "adr-divergence: [adr-divergence-proposed] " + inner
+	return goldenFixture{
+		name: "divergence.go:204 adr-divergence-proposed",
+		raw:  full,
+		sensitive: []string{
+			"internal/journal/journal.go", "journal.go",
+			`"execution"`, "ADR-0042",
+		},
+		scrub:          Scrub,
+		wantClassified: true,
+	}
+}
+
+// divergenceUncoveredFixture reconstructs the adr-divergence-uncovered
+// template (internal/validate/divergence.go:224-226) VERBATIM — path +
+// domain + manifest path + domain again.
+func divergenceUncoveredFixture() goldenFixture {
+	path := "internal/redact/redact.go"
+	domain := "core"
+	manifestRef := ".mindspec/docs/domains/core/OWNERSHIP.yaml"
+	inner := fmt.Sprintf(
+		"file %s attributed to domain %q (manifest: %s) but no cited ADR covers %q",
+		path, domain, manifestRef, domain)
+	full := "adr-divergence: [adr-divergence-uncovered] " + inner
+	return goldenFixture{
+		name: "divergence.go:224 adr-divergence-uncovered",
+		raw:  full,
+		sensitive: []string{
+			"internal/redact/redact.go", "redact.go",
+			".mindspec/docs/domains", "OWNERSHIP.yaml",
+		},
+		scrub:          Scrub,
+		wantClassified: true,
+	}
+}
+
+// proseBeforeCodeFixture is a %w chain with sensitive prose BEFORE the
+// sentinel code — the ordering R2 proved leaks (the old ScrubError kept
+// everything up to the code). ScrubError must keep ONLY the code token.
+func proseBeforeCodeFixture() goldenFixture {
+	inner := errors.New("Dolt Error 1105: out of range")
+	chain := fmt.Errorf("failed to persist the user's private salary note %s: %w",
+		"max@cloudlete.ai", inner)
+	return goldenFixture{
+		name: "%w chain with PROSE BEFORE the sentinel code",
+		raw:  chain.Error(),
+		sensitive: []string{
+			"private salary note", "salary", "persist the user",
+			"max@cloudlete.ai", "out of range",
+		},
+		scrub:          func(string) (string, bool) { return ScrubError(chain) },
+		wantClassified: true,
+	}
+}
+
+// noCodeChainFixture is a %w chain with NO sentinel code — the branch
+// that previously shipped wrapped free-text prose (R3). ScrubError must
+// DROP it (ok=false), so wantClassified is FALSE: the zero-leakage check
+// still holds (empty clean leaks nothing) but the fixture asserts the
+// drop, not a classify.
+func noCodeChainFixture() goldenFixture {
+	chain := fmt.Errorf("complete: %w",
+		fmt.Errorf("validate: %w",
+			errors.New("could not open the confidential payroll spreadsheet for Q3")))
+	return goldenFixture{
+		name: "%w chain with NO code → must DROP",
+		raw:  chain.Error(),
+		sensitive: []string{
+			"confidential payroll", "payroll spreadsheet", "Q3",
+		},
+		scrub:          func(string) (string, bool) { return ScrubError(chain) },
+		wantClassified: false, // ScrubError drops the whole chain fail-closed.
+	}
+}
+
 func goldenFixtures(t *testing.T) []goldenFixture {
 	t.Helper()
 	return []goldenFixture{
@@ -133,6 +239,11 @@ func goldenFixtures(t *testing.T) []goldenFixture {
 		worktreeSetupFixture(t),
 		divergenceFoldedFixture(),
 		doltChainFixture(),
+		populateDirFixture(),
+		divergenceProposedFixture(),
+		divergenceUncoveredFixture(),
+		proseBeforeCodeFixture(),
+		noCodeChainFixture(),
 	}
 }
 
@@ -184,6 +295,49 @@ func TestGoldenCorpus_MutationDetectsLeak(t *testing.T) {
 				t.Fatalf("vacuous fixture %q: NONE of its sensitive tokens "+
 					"appear in the raw string — the zero-leakage gate would "+
 					"pass trivially", f.name)
+			}
+		})
+	}
+}
+
+// TestGoldenCorpus_TaintedEventsDrop is the RedactEvent arm of the
+// keystone corpus (C2): structured events carrying a tainted token in ANY
+// enum field — the demonstrated Version leak plus enum-masquerade in
+// Command/Subcommand/OS — MUST drop (ok=false), and a kept event must
+// carry ZERO of the would-be-leaked tokens.
+func TestGoldenCorpus_TaintedEventsDrop(t *testing.T) {
+	tainted := []struct {
+		name string
+		ev   Event
+	}{
+		{"PAT+path+bead via Version", Event{
+			Version: "ghp_ABCDEFGHIJKLMNOPQRST /Users/victim/key mindspec-cdk8.1",
+			Command: "next",
+		}},
+		{"decorated cobra version", Event{
+			Version: "1.4.2 (deadbeefcafebabe) 2026-06-12", Command: "complete",
+		}},
+		{"path smuggled as command", Event{
+			Command: "/Users/victim/secret.txt", Version: "dev",
+		}},
+		{"secret smuggled as subcommand", Event{
+			Command: "bead", Subcommand: "ghp_ABCDEFGHIJKLMNOPQRST", Version: "dev",
+		}},
+		{"path smuggled as OS", Event{
+			Command: "next", OS: "/etc/passwd", Version: "dev",
+		}},
+		{"tainted escape hatch", Event{
+			Command: "complete", EscapeHatch: "override-adr=the secret reason", Version: "dev",
+		}},
+	}
+	for _, c := range tainted {
+		t.Run(c.name, func(t *testing.T) {
+			re, ok := RedactEvent(c.ev)
+			if ok {
+				t.Fatalf("tainted event survived (ok=true): %+v", re)
+			}
+			if re != (RedactedEvent{}) {
+				t.Errorf("dropped event returned non-zero RedactedEvent: %+v", re)
 			}
 		})
 	}

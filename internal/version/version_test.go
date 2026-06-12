@@ -1,6 +1,18 @@
 package version
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
+
+// setCurrent / getCurrent access the guarded var under the same lock the
+// production code uses, so test setup/teardown does not itself race the
+// concurrent test below under -race.
+func setCurrent(v string) {
+	mu.Lock()
+	current = v
+	mu.Unlock()
+}
 
 func TestCurrent_DefaultsToDev(t *testing.T) {
 	// The bare version var (cmd/mindspec/root.go:35) defaults to "dev"
@@ -11,8 +23,10 @@ func TestCurrent_DefaultsToDev(t *testing.T) {
 }
 
 func TestSet_InjectsBareVersion(t *testing.T) {
+	mu.RLock()
 	orig := current
-	t.Cleanup(func() { current = orig })
+	mu.RUnlock()
+	t.Cleanup(func() { setCurrent(orig) })
 
 	Set("1.4.2")
 	if got := Current(); got != "1.4.2" {
@@ -23,6 +37,46 @@ func TestSet_InjectsBareVersion(t *testing.T) {
 	if got := Current(); got != "1.4.2" {
 		t.Fatalf("blank Set clobbered Current() = %q, want %q", got, "1.4.2")
 	}
+}
+
+// TestConcurrentSetCurrent proves Set/Current are race-free (D1 /
+// codex-correctness). Without the mutex, `go test -race` reports
+// read/write and write/write races on the package var. Many goroutines
+// hammer Set and Current concurrently; the test asserts no torn value
+// (every observed read is one of the written-in values or the default)
+// and relies on -race to flag any unsynchronized access.
+func TestConcurrentSetCurrent(t *testing.T) {
+	mu.RLock()
+	orig := current
+	mu.RUnlock()
+	t.Cleanup(func() { setCurrent(orig) })
+
+	const goroutines = 16
+	const iterations = 500
+	valid := map[string]struct{}{
+		"dev": {}, "1.0.0": {}, "2.0.0": {}, "3.0.0": {},
+	}
+	writes := []string{"1.0.0", "2.0.0", "3.0.0"}
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				if g%2 == 0 {
+					Set(writes[i%len(writes)])
+				} else {
+					got := Current()
+					if _, okv := valid[got]; !okv {
+						t.Errorf("Current() returned torn/unexpected value %q", got)
+						return
+					}
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
 }
 
 func TestParse(t *testing.T) {

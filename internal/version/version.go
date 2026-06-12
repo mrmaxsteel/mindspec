@@ -30,28 +30,47 @@ package version
 import (
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // current is the bare semver, single source of truth for Current().
 // Defaults to "dev" to match cmd/mindspec/root.go:35 on every
 // non-release/local/test build. Bead 2 wires main.version in via Set.
-var current = "dev"
+//
+// It is guarded by mu so Current()/Set() are safe to call from multiple
+// goroutines. The §API Contract documents Set as a startup-only seam,
+// but a privacy keystone must not race regardless of caller discipline
+// (codex-correctness, r2-correctness): a torn read of the version that
+// is stamped on every journal entry is unacceptable, so the access is
+// synchronized rather than relying on the precondition.
+var (
+	mu      sync.RWMutex
+	current = "dev"
+)
 
 // Current returns the bare semver string (e.g. "1.4.2" or "dev"), NOT
 // the decorated cobra `--version` string. This is the value stamped on
-// every journal entry and friction report (Req 3).
-func Current() string { return current }
+// every journal entry and friction report (Req 3). Safe for concurrent
+// use with Set.
+func Current() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return current
+}
 
 // Set wires the build's bare version (cmd/mindspec/root.go:35's
 // ldflags-injected `version` var) into the helper. Idempotent; a blank
 // argument is ignored so a caller that passes an unset var cannot
-// clobber the "dev" default. Bead 2 calls this once at startup.
+// clobber the "dev" default. Bead 2 calls this once at startup. Safe for
+// concurrent use with Current.
 func Set(v string) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return
 	}
+	mu.Lock()
 	current = v
+	mu.Unlock()
 }
 
 // Semver is a parsed major.minor.patch version. Pre-release and build
@@ -81,7 +100,7 @@ func Parse(s string) (Semver, bool) {
 		s = s[:i]
 	}
 	parts := strings.Split(s, ".")
-	if len(parts) == 0 || len(parts) > 3 {
+	if len(parts) > 3 {
 		return Semver{}, false
 	}
 	nums := make([]int, 3)

@@ -1,9 +1,149 @@
 package redact
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+// TestScrubError_KeepsCodeOnly is the B1 hardening (R2/R3): ScrubError
+// keeps ONLY the sentinel code token and discards ALL surrounding prose —
+// both leading wrapper context and the trailing wrapped message — and
+// DROPS the whole chain (ok=false) when no code is present, rather than
+// shipping arbitrary free-text prose.
+func TestScrubError_KeepsCodeOnly(t *testing.T) {
+	t.Parallel()
+
+	// Prose BEFORE the code must NOT survive (the old keep-up-to-code bug).
+	leadProse := errors.New("Dolt Error 1105: out of range")
+	wrapped := fmt.Errorf("failed to persist the user's private note about their salary: %w", leadProse)
+	clean, ok := ScrubError(wrapped)
+	if !ok {
+		t.Fatalf("coded chain dropped; want classified to the code token")
+	}
+	for _, leak := range []string{"salary", "private note", "persist", "out of range"} {
+		if strings.Contains(clean, leak) {
+			t.Errorf("ScrubError leaked surrounding prose %q in %q", leak, clean)
+		}
+	}
+	if !strings.Contains(clean, "Dolt Error 1105") {
+		t.Errorf("ScrubError dropped the sentinel code; got %q", clean)
+	}
+
+	// Trailing description after the code must NOT survive.
+	desc := errors.New("Dolt Error 1105: Out of range value for column description: SECRET BEAD TEXT")
+	clean, ok = ScrubError(fmt.Errorf("recording bead event: %w", desc))
+	if !ok || strings.Contains(clean, "SECRET BEAD TEXT") || strings.Contains(clean, "description") {
+		t.Errorf("ScrubError leaked trailing description: clean=%q ok=%v", clean, ok)
+	}
+
+	// NO sentinel code anywhere → DROP the whole chain (ok=false), never
+	// ship wrapper prose.
+	noCode := fmt.Errorf("complete: %w", fmt.Errorf("validate: %w", errors.New("could not open the confidential salary spreadsheet")))
+	clean, ok = ScrubError(noCode)
+	if ok {
+		t.Errorf("no-code chain shipped free text instead of dropping: clean=%q", clean)
+	}
+	if clean != "" {
+		t.Errorf("dropped chain returned non-empty clean=%q (raw must never be returned)", clean)
+	}
+
+	// nil error scrubs to ("", true).
+	if c, o := ScrubError(nil); c != "" || !o {
+		t.Errorf("ScrubError(nil) = (%q,%v), want (\"\",true)", c, o)
+	}
+}
+
+// TestRedactEvent_VersionValidated is the A1 keystone fix (R3/codex-*):
+// a tainted/decorated Version DROPS the whole event; only bare semver or
+// "dev"/"" survives.
+func TestRedactEvent_VersionValidated(t *testing.T) {
+	t.Parallel()
+	// The demonstrated leak: a PAT + abs path + bead id smuggled via Version.
+	tainted := Event{
+		Version: "ghp_ABCDEFGHIJKLMNOPQRST /Users/victim/key mindspec-cdk8.1",
+		Command: "next",
+	}
+	if re, ok := RedactEvent(tainted); ok {
+		t.Fatalf("tainted Version survived (ok=true): %+v", re)
+	}
+	// Decorated cobra version string also dropped.
+	if _, ok := RedactEvent(Event{Version: "1.4.2 (abc1234) 2026-06-12", Command: "next"}); ok {
+		t.Error("decorated cobra version string survived; want drop")
+	}
+	// Accepted forms.
+	for _, v := range []string{"", "dev", "1.4.2", "v2.0.0", "0.0.1-rc1"} {
+		if _, ok := RedactEvent(Event{Version: v, Command: "next"}); !ok {
+			t.Errorf("valid version %q was dropped", v)
+		}
+	}
+}
+
+// TestRedactEvent_EnumClosedSets is the A2 enum-masquerade fix
+// (codex-leak/codex-completeness): Command/Subcommand/OS are validated
+// against closed sets; a non-enum token (even one that would pass Scrub)
+// DROPS the event — it is never passed through as an arbitrary string.
+func TestRedactEvent_EnumClosedSets(t *testing.T) {
+	t.Parallel()
+	drops := []struct {
+		name string
+		ev   Event
+	}{
+		{"non-enum command", Event{Command: "exfiltrate", Version: "dev"}},
+		{"path-arg as command", Event{Command: "/Users/victim/secret", Version: "dev"}},
+		{"secret as subcommand", Event{Command: "next", Subcommand: "ghp_ABCDEFGHIJKLMNOPQRST", Version: "dev"}},
+		{"arbitrary subcommand", Event{Command: "bead", Subcommand: "rm -rf", Version: "dev"}},
+		{"non-goos os", Event{Command: "next", OS: "/etc/passwd", Version: "dev"}},
+		{"arbitrary os", Event{Command: "next", OS: "MyLeakyOS", Version: "dev"}},
+	}
+	for _, d := range drops {
+		t.Run(d.name, func(t *testing.T) {
+			if re, ok := RedactEvent(d.ev); ok {
+				t.Errorf("%s survived (ok=true): %+v", d.name, re)
+			}
+		})
+	}
+	// Valid enum tuples are KEPT.
+	keeps := []Event{
+		{Command: "complete", Subcommand: "", OS: "darwin", Version: "1.0.0", EscapeHatch: "override-adr"},
+		{Command: "bead", Subcommand: "start", OS: "linux", Version: "dev"},
+		{Command: "spec", Subcommand: "create", OS: "windows", Version: "v2.1.0"},
+		{Command: "", Subcommand: "", OS: "", Version: ""},
+	}
+	for _, ev := range keeps {
+		if _, ok := RedactEvent(ev); !ok {
+			t.Errorf("valid enum event dropped: %+v", ev)
+		}
+	}
+}
+
+// TestEntropyThresholds is the B3 off-by-one fix (R3/codex-leak): a
+// realistic secret one char under the OLD 16-hex / 24-b64 cutoffs is now
+// caught, while legitimate short ids stay unscrubbed.
+func TestEntropyThresholds(t *testing.T) {
+	t.Parallel()
+	caught := []string{
+		"f0e1d2c3b4a5968",         // 15 hex
+		"AbCdEfGhIjKlMnOpQrStUvW", // 23 b64
+	}
+	for _, s := range caught {
+		clean, ok := Scrub("val " + s + " end")
+		if !ok {
+			continue // a drop is also leak-free
+		}
+		if strings.Contains(clean, s) {
+			t.Errorf("sub-threshold secret %q survived: %q", s, clean)
+		}
+	}
+	// Legitimate short tokens must NOT be over-scrubbed.
+	for _, s := range []string{"abc1234", "deadbee", "v1", "094"} {
+		clean, ok := Scrub("ref " + s)
+		if !ok || !strings.Contains(clean, s) {
+			t.Errorf("legit short token %q over-scrubbed: clean=%q ok=%v", s, clean, ok)
+		}
+	}
+}
 
 // TestScrub_Categories exercises each scrub category (Req 1): the
 // dangerous token must be gone and a typed placeholder present.
@@ -128,6 +268,79 @@ func TestScrub_Categories(t *testing.T) {
 			in:      "commit deadbeefcafebabe0123456789abcdef stamped",
 			absent:  []string{"deadbeefcafebabe0123456789abcdef"},
 			present: []string{"<token>"},
+		},
+		// --- hardening leak classes (R2/R3/codex-leak) ---
+		{
+			name:    "pem private key block",
+			in:      "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAxYZ\n-----END RSA PRIVATE KEY-----",
+			absent:  []string{"MIIEpAIBAAKCAQEAxYZ", "BEGIN RSA"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "pem openssh private key",
+			in:      "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmU=\n-----END OPENSSH PRIVATE KEY-----",
+			absent:  []string{"b3BlbnNzaC1rZXktdjEAAAAABG5vbmU", "OPENSSH"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "authorization basic header",
+			in:      "Authorization: Basic dXNlcjpzdXBlcnNlY3JldA==",
+			absent:  []string{"dXNlcjpzdXBlcnNlY3JldA"},
+			present: []string{"Basic <secret>"},
+		},
+		{
+			name:    "authorization basic short credential",
+			in:      "Authorization: Basic dXNlcjpwYXNz",
+			absent:  []string{"dXNlcjpwYXNz"},
+			present: []string{"Basic <secret>"},
+		},
+		{
+			name:    "unc path",
+			in:      `copy from \\fileserver\confidential\payroll.xlsx failed`,
+			absent:  []string{"fileserver", "confidential", "payroll"},
+			present: []string{"<path>"},
+		},
+		{
+			name:    "unc path with spaces",
+			in:      `copy failed for \\corp-fs01\Payroll Share\June\alice bonus.xlsx`,
+			absent:  []string{"corp-fs01", "Payroll Share", "alice bonus"},
+			present: []string{"<path>"},
+		},
+		{
+			name:    "windows path with spaces terminated by colon",
+			in:      `reading domains dir C:\Users\Max\Secret Plans\domains: permission denied`,
+			absent:  []string{"Secret Plans", `Plans\domains`, `Users\Max`},
+			present: []string{"<path>"},
+		},
+		{
+			name:    "bare space-separated ownership domains",
+			in:      "OWNERSHIP domain core git state for spec",
+			absent:  []string{"core git state"},
+			present: []string{"<domains>"},
+		},
+		{
+			name:    "entropy hex one under old threshold (15 chars)",
+			in:      "key f0e1d2c3b4a5968 leaked",
+			absent:  []string{"f0e1d2c3b4a5968"},
+			present: []string{"<token>"},
+		},
+		{
+			name:    "entropy b64 one under old threshold (23 chars)",
+			in:      "cred AbCdEfGhIjKlMnOpQrStUvW now",
+			absent:  []string{"AbCdEfGhIjKlMnOpQrStUvW"},
+			present: []string{"<token>"},
+		},
+		{
+			name:    "gitlab pat",
+			in:      "token glpat-AbCdEfGhIjKlMnOpQrSt leaked",
+			absent:  []string{"glpat-AbCdEfGhIjKlMnOpQrSt"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "slack bot token",
+			in:      "token xoxb-12345678-abcdefghij here",
+			absent:  []string{"xoxb-12345678-abcdefghij"},
+			present: []string{"<secret>"},
 		},
 	}
 	for _, c := range cases {

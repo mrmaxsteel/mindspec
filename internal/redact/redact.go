@@ -24,6 +24,9 @@ import (
 	"encoding/hex"
 	"path/filepath"
 	"regexp"
+	"runtime"
+
+	"github.com/mrmaxsteel/mindspec/internal/version"
 )
 
 // maxScrubInput caps the input Scrub will attempt to classify. An input
@@ -46,6 +49,126 @@ var EscapeHatchTokens = map[string]struct{}{
 	"repair-phase":   {},
 }
 
+// CommandTokens is the closed-set enum of mindspec's TOP-LEVEL command
+// names (the cobra commands registered on rootCmd in cmd/mindspec —
+// root.go AddCommand block + ownership.go/source.go, plus the hidden
+// backward-compat aliases `approve`/`spec-init` and the deprecated
+// `agentmind`/`viz`/`bench` shims). RedactEvent (HC-2 structured-enum
+// FIRST) accepts a Command ONLY if it is in this set; ANY other token
+// (a flag value, a path arg smuggled into the field, anything) DROPS the
+// whole event — a Command is never passed through as an arbitrary
+// scrubbed string. "" is allowed (no command, e.g. bare `mindspec`).
+//
+// Keep this in lockstep with cmd/mindspec command registration; a new
+// top-level command must be added here or its success events drop.
+var CommandTokens = map[string]struct{}{
+	"":          {},
+	"adr":       {},
+	"approve":   {}, // hidden backward-compat alias
+	"bead":      {},
+	"cleanup":   {},
+	"complete":  {},
+	"context":   {},
+	"doctor":    {},
+	"domain":    {},
+	"hook":      {},
+	"impl":      {},
+	"init":      {},
+	"instruct":  {},
+	"migrate":   {},
+	"next":      {},
+	"otel":      {},
+	"ownership": {},
+	"plan":      {},
+	"record":    {},
+	"repair":    {},
+	"setup":     {},
+	"source":    {},
+	"spec":      {},
+	"spec-init": {}, // hidden backward-compat alias
+	"state":     {},
+	"trace":     {},
+	"validate":  {},
+	// Deprecated top-level shims (still dispatchable, so still emittable).
+	"agentmind": {},
+	"viz":       {},
+	"bench":     {},
+}
+
+// SubcommandTokens is the closed-set enum of mindspec leaf SUBCOMMAND
+// names — the first word of every child cobra command's Use string
+// across cmd/mindspec. As with CommandTokens, RedactEvent accepts a
+// Subcommand ONLY if it is here, else it DROPS the event. "" is allowed
+// (commands with no subcommand). Verbs shared across parents (add, list,
+// show, set, start, status, …) appear once.
+var SubcommandTokens = map[string]struct{}{
+	"":                 {},
+	"add":              {},
+	"adr":              {},
+	"approve":          {},
+	"claude":           {},
+	"cleanup":          {},
+	"codex":            {},
+	"complete":         {},
+	"context":          {},
+	"copilot":          {},
+	"create":           {},
+	"create-from-plan": {},
+	"docs":             {},
+	"hygiene":          {},
+	"list":             {},
+	"phase":            {},
+	"plan":             {},
+	"populate":         {},
+	"record":           {},
+	"repair":           {},
+	"replay":           {}, // agentmind replay shim
+	"serve":            {}, // agentmind serve shim
+	"set":              {},
+	"setup":            {},
+	"show":             {},
+	"source":           {},
+	"start":            {},
+	"status":           {},
+	"summary":          {},
+	"validate":         {},
+	"worktree":         {},
+	"write-session":    {},
+}
+
+// osTokens is the closed-set enum of OS values — exactly the runtime.GOOS
+// constants. An Event.OS not in this set DROPS the event (it can only
+// legitimately be runtime.GOOS at the emit site). Built once at init.
+var osTokens = map[string]struct{}{
+	"aix": {}, "android": {}, "darwin": {}, "dragonfly": {}, "freebsd": {},
+	"hurd": {}, "illumos": {}, "ios": {}, "js": {}, "linux": {}, "nacl": {},
+	"netbsd": {}, "openbsd": {}, "plan9": {}, "solaris": {}, "wasip1": {},
+	"windows": {}, "zos": {},
+	"": {}, // OS may legitimately be unset.
+}
+
+// validVersion reports whether v is an acceptable bare version token:
+// the empty string, "dev", or a parseable bare semver (A1). ANYTHING
+// else — a decorated cobra string, a path, a secret smuggled into the
+// field — is rejected so RedactEvent can drop/blank it fail-closed. This
+// closes the demonstrated `Version:"ghp_… /Users/victim/key …"` leak.
+func validVersion(v string) bool {
+	if v == "" || v == "dev" {
+		return true
+	}
+	_, ok := version.Parse(v)
+	return ok
+}
+
+// init guards against drift: runtime.GOOS must be in the OS allowlist on
+// the build's own platform, else this build would drop all its own
+// events.
+func init() {
+	if _, ok := osTokens[runtime.GOOS]; !ok {
+		panic("redact: runtime.GOOS not in osTokens allowlist: " + runtime.GOOS)
+	}
+}
+
 // scrubPanicHook is a test-only seam: when non-nil it is invoked at the
 // top of the scrub so a test can force a panic and prove the
 // recover→DROP (HC-7) path. Production leaves it nil.
@@ -65,12 +188,30 @@ type pass struct {
 }
 
 var scrubPasses = []pass{
+	// PEM private-key blocks FIRST — a multi-line "-----BEGIN ... PRIVATE
+	// KEY-----...-----END...-----" envelope. Matched before anything can
+	// fragment the body on whitespace/newlines (R3, codex-leak). (?s) so
+	// `.` spans the newline-broken base64 body.
+	{"secret-pem", regexp.MustCompile(`(?is)-----BEGIN[ A-Z0-9]*PRIVATE KEY-----.*?-----END[ A-Z0-9]*PRIVATE KEY-----`), "<secret>"},
+	// Authorization headers — Basic AND Bearer (R3, codex-leak: short
+	// Basic credentials sit under the entropy backstop). Matched before
+	// the entropy passes; the credential body is dropped regardless of
+	// length. The scheme word is kept for context, the secret replaced.
+	{"secret-auth-header", regexp.MustCompile(`(?i)\bAuthorization:\s*(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+`), "Authorization: $1 <secret>"},
 	// Secrets — provider-prefixed tokens and KEY/TOKEN/PASSWORD assignments.
 	{"secret-ghp", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{16,}\b`), "<secret>"},
 	{"secret-github-pat", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`), "<secret>"},
+	{"secret-gitlab-pat", regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{16,}\b`), "<secret>"},
+	{"secret-slack", regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{8,}\b`), "<secret>"},
 	{"secret-aws", regexp.MustCompile(`\bAKIA[0-9A-Z]{12,}\b`), "<secret>"},
 	{"secret-openai", regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}\b`), "<secret>"},
+	// Bearer outside an Authorization header (e.g. bare "Bearer <tok>").
 	{"secret-bearer", regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*`), "Bearer <secret>"},
+	// NOTE: there is deliberately NO bare "Basic <word>" pass — the word
+	// "Basic" is common English ("Basic validation") and a bare matcher
+	// over-scrubs prose. The real leak class is the Authorization header
+	// (handled by secret-auth-header above); any long bare base64
+	// credential is caught by the entropy backstop.
 	{"secret-jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b`), "<secret>"},
 	{"secret-assign", regexp.MustCompile(`(?i)\b([A-Z0-9_]*(?:TOKEN|KEY|PASSWORD|SECRET))=\S+`), "${1}=<secret>"},
 	// Emails before IPs/paths (the @ and dots are distinctive).
@@ -87,8 +228,23 @@ var scrubPasses = []pass{
 	{"bead-id", regexp.MustCompile(`\bmindspec-[a-z0-9]+(?:\.[0-9]+)?\b`), "<bead>"},
 	// Spec slugs (NNN-word-word...).
 	{"spec-slug", regexp.MustCompile(`\b\d{3}-[a-z0-9]+(?:-[a-z0-9]+)+\b`), "<spec>"},
-	// Windows absolute paths.
-	{"abspath-win", regexp.MustCompile(`[A-Za-z]:\\[^\s"']*`), "<path>"},
+	// ADR ids (ADR-NNNN) — a real identifier surfaced by the
+	// adr-divergence templates (divergence.go:204-226).
+	{"adr-id", regexp.MustCompile(`\bADR-\d{3,}\b`), "<adr>"},
+	// UNC paths (\\server\share\...) BEFORE the drive-letter pass. A
+	// leading \\ then backslash-separated segments that MAY contain
+	// spaces. Terminates at a colon, quote, newline, or angle/pipe so
+	// trailing prose ("...: permission denied") is not eaten as path
+	// (R3, codex-leak). The whole path is replaced — never a suffix
+	// fragment.
+	{"abspath-unc", regexp.MustCompile(`\\\\[^\\\n:"'<>|?*]+(?:\\[^\\\n:"'<>|?*]*)*`), "<path>"},
+	// Windows absolute paths WITH SPACES: drive letter then
+	// backslash-separated segments that may contain spaces (e.g.
+	// `C:\Users\Max\Secret Plans\domains`). The OLD pass stopped at the
+	// first space, leaking suffix fragments like "Plans\domains"
+	// (codex-leak). Same terminator set as UNC. The whole path is
+	// replaced — never a fragment.
+	{"abspath-win", regexp.MustCompile(`[A-Za-z]:(?:\\[^\\\n:"'<>|?*]*)+`), "<path>"},
 	// Any slash-bearing token (absolute OR relative: /a/b, ../../x,
 	// .mindspec/docs/x, internal/next/guard.go) → <path>. The char class
 	// excludes whitespace, quotes, brackets and the placeholder angle
@@ -100,11 +256,23 @@ var scrubPasses = []pass{
 	{"domains-slice", regexp.MustCompile(`(?i)domains?\s+\[[^\]]*\]`), "domains <domains>"},
 	// Quoted domain token: domain "core" → domain <domain>.
 	{"domain-quoted", regexp.MustCompile(`(?i)\bdomain\s+["'][^"']+["']`), "domain <domain>"},
+	// Bare / space-separated OWNERSHIP domain list: an unbracketed,
+	// unquoted rendering like `domains core git state for spec` leaks the
+	// domain names (R3, codex-leak). Match `domain(s)` followed by a run
+	// of bare lowercase words and collapse them to <domains>. Bounded to a
+	// short run of words (the known domain set is small) so it does not
+	// devour an entire sentence.
+	{"domains-bare", regexp.MustCompile(`(?i)\bdomains?\s+(?:[a-z][a-z0-9-]*)(?:\s+[a-z][a-z0-9-]*){0,7}`), "domains <domains>"},
 	// Bare file names with a known source/config extension (no slash).
-	{"filename", regexp.MustCompile(`\b[\w.-]+\.(?:go|ya?ml|json|jsonl|md|toml|sh|ps1)\b`), "<file>"},
-	// Entropy catch-all: long hex or base64-ish runs (token/secret backstop).
-	{"entropy-hex", regexp.MustCompile(`\b[0-9a-fA-F]{16,}\b`), "<token>"},
-	{"entropy-b64", regexp.MustCompile(`\b[A-Za-z0-9+/_-]{24,}={0,2}\b`), "<token>"},
+	{"filename", regexp.MustCompile(`\b[\w.-]+\.(?:go|ya?ml|json|jsonl|md|toml|sh|ps1|xlsx|docx|pdf|csv|txt)\b`), "<file>"},
+	// Entropy catch-all: long hex or base64-ish runs (token/secret
+	// backstop). Thresholds tightened by one (15 hex / 23 b64) to catch a
+	// realistic secret sitting one char under the old 16/24 cutoffs
+	// (R3, codex-leak: TestEntropyUnderThreshold). 15 hex chars = 60 bits,
+	// 23 b64 chars ≈ 137 bits — both squarely secret-length; legitimate
+	// short ids (commit-short 7-12, NNN-prefixes) stay under 15.
+	{"entropy-hex", regexp.MustCompile(`\b[0-9a-fA-F]{15,}\b`), "<token>"},
+	{"entropy-b64", regexp.MustCompile(`\b[A-Za-z0-9+/_-]{23,}={0,2}\b`), "<token>"},
 }
 
 // residualLeakPasses are the patterns that, if STILL present after
@@ -113,17 +281,25 @@ var scrubPasses = []pass{
 // the golden corpus asserts ZERO of, so this gate is the in-library
 // mirror of the CI gate.
 var residualLeakPasses = []*regexp.Regexp{
-	regexp.MustCompile(`[\w.@-]/[\w.@-]`),               // any slash path token
-	regexp.MustCompile(`[A-Za-z]:\\`),                   // windows abs path
-	regexp.MustCompile(`\bmindspec-[a-z0-9]`),           // bead id
-	regexp.MustCompile(`\b\d{3}-[a-z0-9]+-[a-z0-9]`),    // spec slug
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]`),       // gh secret
-	regexp.MustCompile(`\bAKIA[0-9A-Z]`),                // aws key
-	regexp.MustCompile(`\bsk-[A-Za-z0-9]`),              // openai key
-	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.`),      // jwt
-	regexp.MustCompile(`\b[0-9a-fA-F]{16,}\b`),          // entropy hex
-	regexp.MustCompile(`[A-Za-z0-9+/_-]{24,}={0,2}`),    // entropy b64
-	regexp.MustCompile(`@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`), // email
+	regexp.MustCompile(`[\w.@-]/[\w.@-]`),                                          // any slash path token
+	regexp.MustCompile(`[A-Za-z]:\\`),                                              // windows abs path
+	regexp.MustCompile(`\\\\[^\\\s]`),                                              // UNC path (\\server\…)
+	regexp.MustCompile(`[^\s<>]\\[^\s<>\\]`),                                       // any residual backslash path segment
+	regexp.MustCompile(`\bmindspec-[a-z0-9]`),                                      // bead id
+	regexp.MustCompile(`\b\d{3}-[a-z0-9]+-[a-z0-9]`),                               // spec slug
+	regexp.MustCompile(`\bADR-\d{3,}`),                                             // adr id
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]`),                                  // gh secret
+	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]`),                                // github fine-grained pat
+	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]`),                                    // gitlab pat
+	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]`),                                // slack token
+	regexp.MustCompile(`\bAKIA[0-9A-Z]`),                                           // aws key
+	regexp.MustCompile(`\bsk-[A-Za-z0-9]`),                                         // openai key
+	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.`),                                 // jwt
+	regexp.MustCompile(`(?i)\bPRIVATE KEY-----`),                                   // residual PEM envelope
+	regexp.MustCompile(`(?i)Authorization:\s*(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]`), // residual auth-header credential (Authorization-scoped to avoid flagging the English word "Basic"; the emitted "<secret>" placeholder lacks the trailing credential char so it is not re-flagged)
+	regexp.MustCompile(`\b[0-9a-fA-F]{15,}\b`),                                     // entropy hex (tightened)
+	regexp.MustCompile(`[A-Za-z0-9+/_-]{23,}={0,2}`),                               // entropy b64 (tightened)
+	regexp.MustCompile(`@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`),                            // email
 }
 
 // Scrub is the full tainted-string scrub (Req 1). It runs the
@@ -172,17 +348,23 @@ var errClassRe = regexp.MustCompile(`(?i)\b((?:[a-z]+ )?error(?: code)? \d+)\b`)
 // ScrubError is the `%w`/`%v` error-chain rule (Req 1). An error chain
 // (errors.Error() flattens every wrapped layer) frequently drags a
 // free-text payload the scrub cannot classify token-by-token — e.g. a
-// Dolt-1105 carrying a bead DESCRIPTION. The rule:
+// Dolt-1105 carrying a bead DESCRIPTION, or wrapper prose BEFORE the
+// code. The rule (hardened — R2, R3: the old behavior kept everything up
+// to the code, leaking leading prose, and shipped wrapped free-text when
+// no code was present):
 //
-//   - If a sentinel error class/code is present, UNWRAP to it: keep the
-//     chain only UP TO AND INCLUDING the code, scrub that head, and
-//     DISCARD the wrapped free-text message entirely. This is the
-//     "unwrap to the sentinel error class/code and discard the wrapped
-//     message" branch — the only way to guarantee an arbitrary
-//     description cannot survive.
-//   - Otherwise run the full scrub + entropy pass over the WHOLE chain
-//     and length-cap it (the "OR" branch); the residual-leak gate in
-//     Scrub still DROPS (ok=false) anything it cannot classify.
+//   - If a sentinel error class/code is present, UNWRAP to it: keep ONLY
+//     the matched code token itself (e.g. "Dolt Error 1105"), discarding
+//     ALL surrounding prose — both the leading wrapper context AND the
+//     trailing wrapped message. This honors the docstring guarantee that
+//     an arbitrary description cannot survive REGARDLESS of where the
+//     wrappers sit relative to the code.
+//   - Otherwise (NO recognizable code) the chain is arbitrary free-text
+//     prose we cannot token-classify. Fail closed: scrub the WHOLE string
+//     and let the residual-leak gate DROP it. Untokenizable English prose
+//     has no dangerous shape to trip the gate, so it would otherwise
+//     survive — we therefore DROP unconditionally (ok=false) to match the
+//     "%w-discard" guarantee instead of shipping wrapper prose.
 //
 // A nil error scrubs to ("", true). A raw wrapped chain is NEVER shipped.
 func ScrubError(err error) (clean string, ok bool) {
@@ -190,12 +372,16 @@ func ScrubError(err error) (clean string, ok bool) {
 		return "", true
 	}
 	text := err.Error()
-	if loc := errClassRe.FindStringIndex(text); loc != nil {
-		// Keep only the head up to the end of the recognised code; the
-		// wrapped free-text tail (the description) is discarded.
-		return Scrub(text[:loc[1]])
+	if m := errClassRe.FindString(text); m != "" {
+		// Keep ONLY the recognised code token; every wrapper (leading and
+		// trailing) is discarded. Scrub the token itself defensively.
+		return Scrub(m)
 	}
-	return Scrub(text)
+	// No sentinel code: this is unclassifiable wrapper prose. Prefer DROP
+	// (HC-7 fail-closed) over shipping arbitrary free text — untokenizable
+	// English prose has no dangerous shape for the residual gate to catch,
+	// so it would otherwise survive. Drop the whole chain.
+	return "", false
 }
 
 func hasResidualLeak(s string) bool {
@@ -246,45 +432,65 @@ type RedactedEvent struct {
 	Fingerprint string
 }
 
-// RedactEvent scrubs an Event over its structured enum fields and
-// returns (RedactedEvent, ok). ok == false drops the WHOLE entry (HC-7):
-// it fires when the escape-hatch is not a closed-set token (a tainted
-// value smuggled into the enum — M4) or when any string field fails the
-// scrub. Argv0 is reduced to basename BEFORE the scrub (M3) so the
-// verbatim home-dir/username invocation path is never returned.
+// RedactEvent is the structured-enum-FIRST redaction (HC-2): the journal
+// stores closed-set ENUM tokens, never arbitrary scrubbed strings.
+// RedactEvent VALIDATES every enum field against its allowlist and DROPS
+// the whole event (returns ok=false, HC-7 fail-closed) if ANY field
+// carries a non-enum token — it never passes an arbitrary string through.
+// This closes the enum-masquerade leaks (a secret/path smuggled into
+// Command/Subcommand/Version/OS that merely "passed Scrub").
+//
+// Field rules:
+//   - EscapeHatch ∈ EscapeHatchTokens else DROP (M4).
+//   - Command ∈ CommandTokens else DROP.
+//   - Subcommand ∈ SubcommandTokens else DROP.
+//   - OS ∈ osTokens (runtime.GOOS values) else DROP.
+//   - Version is a bare semver or "dev"/"" (validVersion) else DROP — a
+//     decorated/tainted version string never survives (A1).
+//   - Argv0 is reduced to basename BEFORE the scrub (M3) so the verbatim
+//     home-dir/username invocation path is never returned; a non-
+//     classifiable basename DROPS the event.
+//
+// Because the enum fields are validated (not scrubbed-then-trusted), the
+// stored value is the verbatim closed-set token; no free text reaches the
+// journal through this path.
 func RedactEvent(ev Event) (RedactedEvent, bool) {
-	// M4: the escape-hatch MUST be a closed-set token; anything else is
-	// a tainted value, not an allowlisted enum — drop the entry.
+	// M4 / A2: every structured enum field MUST be a closed-set token;
+	// anything else is a tainted value smuggled into the enum — drop.
 	if _, allowed := EscapeHatchTokens[ev.EscapeHatch]; !allowed {
 		return RedactedEvent{}, false
 	}
-
-	argv0, ok := Scrub(filepath.Base(ev.Argv0)) // M3: basename then scrub.
-	if !ok {
+	if _, allowed := CommandTokens[ev.Command]; !allowed {
 		return RedactedEvent{}, false
 	}
-	cmd, ok := Scrub(ev.Command)
-	if !ok {
+	if _, allowed := SubcommandTokens[ev.Subcommand]; !allowed {
 		return RedactedEvent{}, false
 	}
-	sub, ok := Scrub(ev.Subcommand)
-	if !ok {
+	if _, allowed := osTokens[ev.OS]; !allowed {
 		return RedactedEvent{}, false
 	}
-	// OS is a closed-set token (runtime.GOOS); scrub defensively.
-	osTok, ok := Scrub(ev.OS)
-	if !ok {
+	// A1: Version must be a bare semver or "dev"/""; a decorated or
+	// tainted version string DROPS the event fail-closed.
+	if !validVersion(ev.Version) {
 		return RedactedEvent{}, false
 	}
 
-	id := Identity{Command: cmd, EscapeHatch: ev.EscapeHatch, Subcommand: sub}
+	// M3: argv[0] → basename → scrub. argv[0] is the one field that is
+	// genuinely user-influenced (the invocation path), so it is still
+	// scrubbed rather than enum-validated.
+	argv0, ok := Scrub(filepath.Base(ev.Argv0))
+	if !ok {
+		return RedactedEvent{}, false
+	}
+
+	id := Identity{Command: ev.Command, EscapeHatch: ev.EscapeHatch, Subcommand: ev.Subcommand}
 	return RedactedEvent{
 		Argv0:       argv0,
-		Command:     cmd,
+		Command:     ev.Command,
 		EscapeHatch: ev.EscapeHatch,
-		Subcommand:  sub,
+		Subcommand:  ev.Subcommand,
 		Version:     ev.Version,
-		OS:          osTok,
+		OS:          ev.OS,
 		Identity:    id,
 		Fingerprint: Fingerprint(id),
 	}, true
