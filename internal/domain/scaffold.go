@@ -3,16 +3,26 @@ package domain
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/ownership"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-// Add scaffolds a new domain directory with 4 template files and appends
-// a bounded context entry to the context map.
+// populatePromptWriter receives the OWNERSHIP.yaml populate prompt
+// that Add prints after scaffolding (spec 091 Req 9). Defaults to
+// stdout; tests swap it to capture the output. Add keeps its
+// (root, name) signature so existing call sites are untouched.
+var populatePromptWriter io.Writer = os.Stdout
+
+// Add scaffolds a new domain directory with 4 template files plus an
+// empty-stub OWNERSHIP.yaml (spec 091 Req 9), appends a bounded
+// context entry to the context map, and prints the ownership populate
+// prompt for the new domain.
 //
 // The previously local `nameRe` regex was promoted into idvalidate.DomainName
 // (re-exported as validate.DomainName) so the validator is shared across all
@@ -52,9 +62,21 @@ func Add(root, name string) error {
 		}
 	}
 
+	// Spec 091 Req 9: after the four standard files, scaffold the
+	// empty-stub OWNERSHIP.yaml (Req 8 stub, `domain add` comment
+	// variant) and print the populate prompt. No flag, no opt-out —
+	// the framework writes the stub mechanically; the resident agent
+	// does the cognitive work of choosing paths (ZFC).
+	stub := ownership.RenderStub("mindspec domain add " + name)
+	if err := os.WriteFile(filepath.Join(domainDir, "OWNERSHIP.yaml"), stub, 0644); err != nil {
+		return fmt.Errorf("writing OWNERSHIP.yaml: %w", err)
+	}
+
 	if err := appendContextMap(root, name, title); err != nil {
 		return fmt.Errorf("updating context map: %w", err)
 	}
+
+	fmt.Fprintln(populatePromptWriter, ownership.BuildPopulatePrompt(name))
 
 	return nil
 }

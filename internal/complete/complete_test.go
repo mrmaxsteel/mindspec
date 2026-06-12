@@ -1,6 +1,7 @@
 package complete
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
 // finalRecoveryCommand extracts the command of the FINAL `recovery: `
@@ -55,6 +57,27 @@ func TestCompleteGetwdFnDefaultsToOsGetwd(t *testing.T) {
 // saveAndRestore saves all function variables and returns a restore function.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
+
+	// Spec 092 Req 3c moved an unconditional os.Chdir(repoRoot) INSIDE
+	// complete.Run (complete.go) so the terminal mutation survives the
+	// bead worktree being removed out from under the process. As a
+	// side effect, every Run-calling test leaves the process cwd parked
+	// at its own setupTempRoot() temp dir; once that t.TempDir() is
+	// removed at test teardown the process cwd is a deleted directory,
+	// and the NEXT test that opens with os.Getwd() (e.g.
+	// TestPrintResultWarningsRecursStatelessly) fails `getwd: no such
+	// file or directory` under CI's serialized `-race` ordering.
+	//
+	// saveAndRestore runs first in every Run-calling test (before
+	// setupTempRoot), so this cwd-restoring cleanup is registered first
+	// and — cleanups being LIFO — runs LAST, after every t.TempDir
+	// removal, leaving the process cwd at a stable real directory for
+	// the next test in the package.
+	origWd, wdErr := os.Getwd()
+	if wdErr == nil {
+		t.Cleanup(func() { _ = os.Chdir(origWd) })
+	}
+
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
@@ -1248,14 +1271,26 @@ func TestCompleteAllowsOverride(t *testing.T) {
 
 // writeADRDivergenceFixture builds a fixture under root that trips
 // the ADR-divergence gate: a spec.md declaring "core" as an impacted
-// domain, a plan.md citing only an execution-domain ADR, and that
-// Accepted ADR on disk. Returns the spec ID.
+// domain, an OWNERSHIP.yaml claiming internal/core/** for that domain
+// (spec 091 Req 13 removed the silent loader fallback, so attribution
+// requires a real manifest — a manifest-less domain claims nothing),
+// a plan.md citing only an execution-domain ADR, and that Accepted
+// ADR on disk. Returns the spec ID.
 func writeADRDivergenceFixture(t *testing.T, root, specID string) {
 	t.Helper()
 
 	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
+	}
+
+	coreDir := filepath.Join(root, ".mindspec", "docs", "domains", "core")
+	if err := os.MkdirAll(coreDir, 0o755); err != nil {
+		t.Fatalf("mkdir core domain dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coreDir, "OWNERSHIP.yaml"),
+		[]byte("paths:\n  - internal/core/**\n"), 0o644); err != nil {
+		t.Fatalf("write core OWNERSHIP.yaml: %v", err)
 	}
 	specMD := "# Spec " + specID + "\n\n## Impacted Domains\n\n- core\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specMD), 0o644); err != nil {
@@ -1302,7 +1337,7 @@ func TestOverrideUnblocks(t *testing.T) {
 	mock := newMockExec()
 	mock.MergeBaseResult = "merge-base-sha"
 	// Source touch that ValidateDivergence will attribute to "core"
-	// via the fallback `internal/core/**` (no OWNERSHIP.yaml present).
+	// via the fixture's OWNERSHIP.yaml (`internal/core/**`).
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
 
 	// Recorder for metadata writes.
@@ -1587,6 +1622,137 @@ func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
 	}
 }
 
+// --- Spec 091 Bead 5: warnings pipe (Req 22(a) + printing half of 22(b)) ---
+
+// captureWarnOutput swaps the package-level warnWriter seam for a
+// buffer and restores it on cleanup.
+func captureWarnOutput(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := warnWriter
+	warnWriter = &buf
+	t.Cleanup(func() { warnWriter = orig })
+	return &buf
+}
+
+// TestCompleteWarnStreamDefaultsToStderr pins the Req 22(a) stream
+// contract: in production, WARN lines go to stderr.
+func TestCompleteWarnStreamDefaultsToStderr(t *testing.T) {
+	if warnWriter != os.Stderr {
+		t.Errorf("warnWriter must default to os.Stderr, got %T", warnWriter)
+	}
+}
+
+// TestCompletePrintsDocSyncWarningAndProceeds: a diff that produces a
+// warning-severity doc-sync issue but NO errors must print
+// `WARN <name>: <message>` AND complete successfully (warnings never
+// block). Req 22(a), including the HasFailures()==false case.
+func TestCompletePrintsDocSyncWarningAndProceeds(t *testing.T) {
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "091-warn-pipe", "epic-091")
+	resolveTargetFn = func(r, flag string) (string, error) { return "091-warn-pipe", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// cmd/ source + a non-operator doc: the cmd-docs lane emits a
+	// SevWarning and no lane emits a SevError.
+	mock.ChangedFilesResult = []string{"cmd/mindspec/foo.go", "docs/notes.md"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("warning-only doc-sync result must not block completion, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "WARN cmd-docs: cmd/ changes without operator-docs update") {
+		t.Errorf("expected `WARN cmd-docs: <message>` line, got %q", out)
+	}
+	// Exact format: line starts with `WARN <name>: ` (no decoration).
+	if !strings.HasPrefix(out, "WARN cmd-docs: ") {
+		t.Errorf("WARN line must be formatted `WARN <name>: <message>`, got %q", out)
+	}
+	// Exactly one consumer prints — no double-print.
+	if n := strings.Count(out, "WARN cmd-docs:"); n != 1 {
+		t.Errorf("expected exactly 1 WARN line per issue per run, got %d in %q", n, out)
+	}
+}
+
+// TestCompleteNoWarningsPrintsNothing: zero warning-severity issues →
+// no WARN line (companion case for Req 22(a)).
+func TestCompleteNoWarningsPrintsNothing(t *testing.T) {
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "091-warn-pipe", "epic-091")
+	resolveTargetFn = func(r, flag string) (string, error) { return "091-warn-pipe", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = nil // empty diff → no issues at all
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("clean doc-sync result must complete, got: %v", err)
+	}
+	if strings.Contains(buf.String(), "WARN") {
+		t.Errorf("no warnings in result → no WARN output, got %q", buf.String())
+	}
+}
+
+// TestPrintResultWarningsRecursStatelessly pins the HC-2 printing
+// half: rendering the SAME warning-carrying result twice prints the
+// WARN line BOTH times (no suppression, no dedup) and creates no
+// marker/state file anywhere (the rendering path does no persistence).
+// It also pins severity-genericity: ANY SevWarning renders, error
+// issues never do.
+func TestPrintResultWarningsRecursStatelessly(t *testing.T) {
+	// Run from an empty dir so any sneaky relative-path persistence
+	// would be visible.
+	dir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	r := &validate.Result{}
+	r.AddWarning("missing-source-globs", "source_globs not set in .mindspec/config.yaml")
+	r.AddError("doc-sync", "errors are not rendered by the warnings pipe")
+
+	var buf bytes.Buffer
+	printResultWarnings(&buf, r)
+	printResultWarnings(&buf, r) // recurrence: same result, second run
+
+	want := "WARN missing-source-globs: source_globs not set in .mindspec/config.yaml\n"
+	if buf.String() != want+want {
+		t.Errorf("warning must print on BOTH runs, verbatim:\nwant %q\ngot  %q", want+want, buf.String())
+	}
+	if strings.Contains(buf.String(), "doc-sync") {
+		t.Errorf("SevError issues must not render as WARN lines: %q", buf.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rendering must persist NO marker/state file (HC-2); found %v", entries)
+	}
+}
+
 // --- Spec 092 Bead 4: terminal-command cwd safety (mindspec-qxsy) ---
 
 // doomedExec wraps MockExecutor so CompleteBead can reify the side
@@ -1852,5 +2018,242 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 	}
 	if got := finalRecoveryCommand(t, msg); got != "mindspec complete bead-1 --supersede-adr ADR-NNNN" {
 		t.Errorf("finalRecoveryCommand = %q", got)
+	}
+}
+
+// --- mindspec-aqey / mindspec-perm: per-bead gate anchoring tests ---
+//
+// The per-bead doc-sync + ADR-divergence gates must measure
+// merge-base(specBranch, beadBranch)..beadBranch — the bead's own work
+// — regardless of which checkout `mindspec complete` runs from. The
+// old code measured MergeBase(specBranch, HEAD) and then diffed
+// relative to the ambient checkout, which was wrong on BOTH sides:
+// from the repo root the range was main-side drift (false blocks,
+// mindspec-aqey — hit live twice on 2026-06-11 at spec-092 Bead 9);
+// from the spec worktree the range was empty (vacuous passes,
+// mindspec-perm — every spec-092 bead passed this way).
+
+// TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock pins the
+// mindspec-aqey false-block case: the bead's own diff is clean, but
+// every OTHER measurable range (the ambient HEAD / working-tree drift
+// the old code measured) is full of doc-sync violations. The gates
+// must pass, and every gate diff must be exactly
+// fork-sha..bead/bead-1.
+func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	// Full spec fixture (spec.md + plan.md + cited ADR) so the
+	// ADR-divergence lane RUNS through to its diff — without it,
+	// ValidateDivergence no-ops on the missing spec.md and the
+	// ChangedFiles assertions below would be vacuous for the ADR lane
+	// (PR #132 panel C2 major / mutation M2b).
+	writeADRDivergenceFixture(t, root, "086-doc-sync")
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	// Reuse-resolution path: the bead worktree exists and carries the
+	// bead branch; beadHead must come from this entry.
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
+		if base == "fork-sha" && head == "bead/bead-1" {
+			// The bead's own diff: clean (no files at all).
+			return nil, nil
+		}
+		// ANY other range — notably the old working-tree-vs-base and
+		// base..HEAD measurements — sees main-side drift that would
+		// trip both gates (doc-less source change). If the gates
+		// consult such a range, they false-block and this test fails.
+		return []string{"README.md", "SECURITY.md", "internal/contextpack/drift.go"}, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("gates must pass when the BEAD diff is clean despite main-side drift (mindspec-aqey), got: %v", err)
+	}
+
+	// The fork point must be computed against the bead branch, never HEAD.
+	mbCalls := mock.CallsTo("MergeBase")
+	if len(mbCalls) == 0 {
+		t.Fatal("expected a MergeBase call for the per-bead gates")
+	}
+	for _, c := range mbCalls {
+		if c.Args[0] != "spec/086-doc-sync" || c.Args[1] != "bead/bead-1" {
+			t.Errorf("MergeBase(%v, %v): per-bead gates must anchor to (spec/086-doc-sync, bead/bead-1)", c.Args[0], c.Args[1])
+		}
+	}
+
+	// Every gate diff must be the bead range — no ambient-HEAD or
+	// working-tree measurement may remain. BOTH lanes must have
+	// diffed: doc-sync (ValidateDocsRange) and ADR-divergence
+	// (ValidateDivergence, reached via the fixture above) each issue
+	// exactly one ChangedFiles call, so fewer than two means a lane
+	// never measured anything and its anchoring is unpinned. Mutation
+	// M2b (head→"HEAD" at the complete.go CheckADRDivergence call)
+	// dies on the per-call args check.
+	cfCalls := mock.CallsTo("ChangedFiles")
+	if len(cfCalls) < 2 {
+		t.Fatalf("expected ChangedFiles calls from BOTH gate lanes (doc-sync + adr-divergence), got %d", len(cfCalls))
+	}
+	for _, c := range cfCalls {
+		if c.Args[0] != "fork-sha" || c.Args[1] != "bead/bead-1" {
+			t.Errorf("ChangedFiles(%v, %v): per-bead gates must diff fork-sha..bead/bead-1 only", c.Args[0], c.Args[1])
+		}
+	}
+}
+
+// TestPerBeadGateHeadFallsBackToCanonicalBranch pins the e.Branch != ""
+// guard in step 2: a worktree entry matched by NAME whose Branch field
+// is empty (detached / unreported) must not blank out beadHead — the
+// gates fall back to the canonical workspace.BeadBranch name.
+func TestPerBeadGateHeadFallsBackToCanonicalBranch(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: ""},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+
+	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{}); err != nil {
+		t.Fatalf("clean bead diff must complete, got: %v", err)
+	}
+	mbCalls := mock.CallsTo("MergeBase")
+	if len(mbCalls) == 0 {
+		t.Fatal("expected a MergeBase call for the per-bead gates")
+	}
+	if mbCalls[0].Args[0] != "spec/086-doc-sync" || mbCalls[0].Args[1] != "bead/bead-1" {
+		t.Errorf("MergeBase(%v, %v): empty worktree Branch must fall back to the canonical bead branch", mbCalls[0].Args[0], mbCalls[0].Args[1])
+	}
+}
+
+// TestPerBeadGateMergeBaseErrorNamesRefs pins the failure path: a
+// merge-base failure (e.g. the bead branch does not exist) surfaces
+// with BOTH anchoring refs named, before any mutation.
+func TestPerBeadGateMergeBaseErrorNamesRefs(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseErr = fmt.Errorf("fatal: not a valid ref: bead/bead-1")
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a merge-base failure to propagate")
+	}
+	want := "computing merge-base of spec/086-doc-sync and bead/bead-1 for the per-bead gates"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error must name both anchoring refs; want substring %q, got: %v", want, err)
+	}
+	if closed {
+		t.Error("bead must not be closed on a merge-base failure")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on merge-base failure, got %d", len(calls))
+	}
+}
+
+// TestPerBeadGatesFireDespiteEmptyAmbientRange pins the mindspec-perm
+// vacuous-pass case: simulate the checkout where the OLD code measured
+// an empty range (complete run from the spec worktree, HEAD == spec
+// tip ⇒ ambient diff empty) while the bead's real diff carries a
+// genuine doc-sync violation. The gates must FIRE.
+func TestPerBeadGatesFireDespiteEmptyAmbientRange(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	// No worktree entry: beadHead falls back to the canonical
+	// workspace.BeadBranch name.
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
+		if base == "fork-sha" && head == "bead/bead-1" {
+			// The bead's real work: a doc-less source change — a
+			// genuine doc-sync violation.
+			return []string{"internal/contextpack/foo.go"}, nil
+		}
+		// Every other range is empty — exactly what the old code saw
+		// from the spec worktree and passed vacuously on.
+		return nil, nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("gates must fire on a real bead-diff violation even when the ambient range is empty (mindspec-perm)")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should name the doc-sync lane, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the gate blocks")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on gate block, got %d", len(calls))
+	}
+}
+
+// TestPerBeadGateBlockKeepsRecoveryContract pins the honest case under
+// the new anchoring: a violation IN the bead diff blocks completion
+// with the existing recovery contract (the --allow-doc-skew override
+// hint) and performs no terminal mutation.
+func TestPerBeadGateBlockKeepsRecoveryContract(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	// Plain result: every range (there is only the bead range now)
+	// carries the doc-less source change.
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the doc-sync gate to block a bead-diff violation")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should name the doc-sync lane, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--allow-doc-skew") {
+		t.Errorf("block must keep the --allow-doc-skew recovery hint, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the gate blocks")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call on gate block, got %d", len(calls))
 	}
 }

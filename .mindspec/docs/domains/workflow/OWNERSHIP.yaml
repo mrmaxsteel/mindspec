@@ -6,6 +6,8 @@ paths:
   - internal/instruct/**
   - internal/validate/**
   - internal/doctor/**
+  - internal/domain/**
+  - internal/ownership/**
   - internal/guard/**
   - internal/hook/**
   - internal/setup/**

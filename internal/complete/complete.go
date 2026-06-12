@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -159,8 +160,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Derive spec branch from conventions
 	specBranch := workspace.SpecBranch(specID)
 
-	// 2. Find worktree matching bead (needed for commit/clean-tree paths)
+	// 2. Find worktree matching bead (needed for commit/clean-tree paths).
+	// The same resolution also pins beadHead — the ref the per-bead
+	// gates (step 3.5) measure against: the matched worktree's actual
+	// branch when one exists, else the canonical bead branch name
+	// (mindspec-aqey / mindspec-perm anchoring).
 	var wtPath string
+	beadHead := workspace.BeadBranch(beadID)
 	entries, err := worktreeListFn()
 	if err == nil {
 		expectedName := workspace.BeadWorktreeName(beadID)
@@ -168,6 +174,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		for _, e := range entries {
 			if e.Name == expectedName || e.Branch == expectedBranch {
 				wtPath = e.Path
+				if e.Branch != "" {
+					beadHead = e.Branch
+				}
 				break
 			}
 		}
@@ -255,20 +264,31 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			strings.Join(artifactDirt, ","))
 	}
 
-	// 3.5. Spec 086 (F2) doc-sync enforcement gate. Computes the
-	// merge-base of HEAD against the spec branch so the gate sees
-	// exactly the bead's commits, then runs the doc-sync lane. The
+	// 3.5. Spec 086 (F2) doc-sync enforcement gate. The measured range
+	// is anchored to the BEAD's own work: base is the bead branch's
+	// fork point from the spec branch (merge-base(specBranch,
+	// beadHead)) and head is the bead branch tip (beadHead, resolved
+	// at step 2). It is deliberately NOT relative to the ambient HEAD
+	// of whatever checkout this process runs from — that measured
+	// main-side drift from the repo root (false blocks,
+	// mindspec-aqey) and an empty range from the spec worktree
+	// (vacuous passes, mindspec-perm). The whole-branch backstop at
+	// impl approve (internal/approve/impl.go) keeps its explicit
+	// main..specBranch refs and is unaffected. The
 	// `--allow-doc-skew "<reason>"` override allows the gate to pass
 	// without doc updates; the reason is recorded on bead metadata
 	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
-	// (see step 5.5 below). ADR divergence is a forward-compatible
-	// stub (spec 087) — it is called for AST-anchoring +
-	// future-proofing, but currently emits no failures.
-	base, mbErr := exec.MergeBase(specBranch, "HEAD")
+	// (see step 5.5 below).
+	base, mbErr := exec.MergeBase(specBranch, beadHead)
 	if mbErr != nil {
-		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
+		return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
 	}
-	docResult := validate.ValidateDocs(root, base, exec)
+	docResult := validate.ValidateDocsRange(root, base, beadHead, exec)
+	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
+	// failure decision so they print on every run — including when
+	// HasFailures() is false and the flow proceeds normally, and on
+	// the override/error paths.
+	printResultWarnings(warnWriter, docResult)
 	if docResult.HasFailures() {
 		if opts.AllowDocSkew == "" {
 			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
@@ -283,8 +303,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// The gate runs EXACTLY ONCE (revision 3 — no probe-call). The
 	// findings slice is consumed by the supersede path below to seed
 	// the placeholder ADR's Domains field. The failure-decision is
-	// bypassed when either override or supersede flag is set.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID)
+	// bypassed when either override or supersede flag is set. Same
+	// bead-branch anchoring as doc-sync above: base..beadHead.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead)
+	// Same severity-generic pipe for the ADR-divergence gate: any
+	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
+	// without further wiring. No-op while the gate emits none.
+	printResultWarnings(warnWriter, adrResult)
 
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested, so the new file exists on disk even if a downstream
@@ -595,6 +620,28 @@ func adrDivergenceFailure(beadID, findings string) error {
 		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", beadID),
 		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", beadID),
 		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", beadID))
+}
+
+// warnWriter is the destination for WARN lines rendered from
+// validation results (Spec 091 Bead 5, Req 22). Production writes to
+// stderr; package-level seam so tests can capture the output.
+var warnWriter io.Writer = os.Stderr
+
+// printResultWarnings renders every warning-severity issue carried by
+// a *validate.Result as `WARN <name>: <message>` — one line per
+// issue. Severity-generic: it prints ANY SevWarning regardless of
+// which validator lane produced it (cmd-docs, missing-source-globs,
+// adr-divergence-proposed, ...). Stateless by construction (HC-2):
+// no marker files, no seen-tracking, no dedup — the same warning
+// prints on every invocation for as long as the Result carries it.
+// Warnings never affect the pass/fail decision.
+func printResultWarnings(w io.Writer, r *validate.Result) {
+	for _, i := range r.Issues {
+		if i.Severity != validate.SevWarning {
+			continue
+		}
+		fmt.Fprintf(w, "WARN %s: %s\n", i.Name, i.Message)
+	}
 }
 
 // joinResultErrorMessages flattens SevError-severity Issues from a

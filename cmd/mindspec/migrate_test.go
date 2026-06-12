@@ -125,6 +125,12 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 		"Phase 3",
 		"Phase 4",
 		"Phase 5",
+		"Phase 6",
+		"Phase 7",
+		"Source-Globs Population",
+		"Ownership-Manifest Population",
+		"mindspec source populate",
+		"mindspec ownership populate",
 		"Canonical Structure",
 		"Category Rubric",
 		"adr",
@@ -148,6 +154,60 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 		if !strings.Contains(prompt, r) {
 			t.Errorf("prompt missing required content: %q", r)
 		}
+	}
+
+	// Pin the renumbered Instructions text (panel R3-2). The Bead 1
+	// audit renumbers the Instructions section "Phases 1-4"→"1-6" and
+	// "Phase 5"→"Phase 7"; without these assertions mutant 4 (leaving
+	// the old "Phases 1-4" / "per Phase 5") survives.
+	if !strings.Contains(prompt, "Complete Phases 1-6 first") {
+		t.Errorf("Instructions missing renumbered \"Phases 1-6\" (mutant 4):\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "per Phase 7") {
+		t.Errorf("Instructions missing renumbered \"per Phase 7\" (mutant 4):\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Phases 1-4 first") || strings.Contains(prompt, "per Phase 5") {
+		t.Errorf("Instructions still contain stale pre-renumber text (mutant 4):\n%s", prompt)
+	}
+}
+
+// TestBuildMigratePrompt_PopulatePhaseOrdering pins the spec 091
+// Req 14 binding ordering constraints — and ONLY those two; the new
+// phases' relative order and final phase numbers are the Bead 1
+// audit's call, not this test's:
+//
+//  1. the `mindspec source populate` instruction appears AFTER the
+//     Domain Identification phase heading (it needs the repo-layout
+//     understanding Phases 1-2 build);
+//  2. the `mindspec ownership populate` instruction appears AFTER the
+//     `mindspec domain add` instruction (the manifests it populates
+//     are the empty stubs `domain add` scaffolds).
+func TestBuildMigratePrompt_PopulatePhaseOrdering(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildMigratePrompt(nil, nil)
+
+	domainIdent := strings.Index(prompt, "Domain Identification")
+	domainAdd := strings.Index(prompt, "mindspec domain add")
+	sourcePopulate := strings.Index(prompt, "mindspec source populate")
+	ownershipPopulate := strings.Index(prompt, "mindspec ownership populate")
+
+	for name, idx := range map[string]int{
+		"Domain Identification":       domainIdent,
+		"mindspec domain add":         domainAdd,
+		"mindspec source populate":    sourcePopulate,
+		"mindspec ownership populate": ownershipPopulate,
+	} {
+		if idx < 0 {
+			t.Fatalf("prompt missing %q", name)
+		}
+	}
+
+	if sourcePopulate < domainIdent {
+		t.Errorf("`mindspec source populate` (idx %d) must appear AFTER the Domain Identification heading (idx %d)", sourcePopulate, domainIdent)
+	}
+	if ownershipPopulate < domainAdd {
+		t.Errorf("`mindspec ownership populate` (idx %d) must appear AFTER the `mindspec domain add` instruction (idx %d)", ownershipPopulate, domainAdd)
 	}
 }
 

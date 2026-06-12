@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -17,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
 func writeSpecDir(t *testing.T, root, specID string) {
@@ -902,7 +904,21 @@ func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
 func writeProposedADRFixtureImpl(t *testing.T, root, specID string) {
 	t.Helper()
 
-	specDir := filepath.Join(root, "docs", "specs", specID)
+	// Spec 091 Req 13 removed the silent "internal/<domain>/**" loader
+	// fallback, so the touched source file internal/core/foo.go is now
+	// "unowned" unless a domain manifest claims it — which would
+	// short-circuit the ADR-divergence lane at adr-divergence-unowned
+	// BEFORE the Proposed-coverage check this fixture exists to
+	// exercise. The manifest loader is canonical-only
+	// (.mindspec/docs/domains/<domain>/OWNERSHIP.yaml), and creating it
+	// makes CanonicalDocsDir exist, which flips DocsDir/ADRDir/SpecDir
+	// off the legacy `docs/` tree onto `.mindspec/docs/`. So the WHOLE
+	// fixture lives under the canonical tree for consistency, otherwise
+	// the ADR/spec/plan written under legacy `docs/` would no longer be
+	// found and the lane would report uncovered instead of Proposed.
+	docsRoot := filepath.Join(root, ".mindspec", "docs")
+
+	specDir := filepath.Join(docsRoot, "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
 	}
@@ -915,7 +931,7 @@ func writeProposedADRFixtureImpl(t *testing.T, root, specID string) {
 		t.Fatalf("write plan.md: %v", err)
 	}
 
-	adrDir := filepath.Join(root, "docs", "adr")
+	adrDir := filepath.Join(docsRoot, "adr")
 	if err := os.MkdirAll(adrDir, 0o755); err != nil {
 		t.Fatalf("mkdir adr dir: %v", err)
 	}
@@ -928,6 +944,15 @@ func writeProposedADRFixtureImpl(t *testing.T, root, specID string) {
 		"## Decision\nTest fixture.\n"
 	if err := os.WriteFile(filepath.Join(adrDir, "ADR-9002.md"), []byte(adrMD), 0o644); err != nil {
 		t.Fatalf("write ADR-9002.md: %v", err)
+	}
+
+	coreDomainDir := filepath.Join(docsRoot, "domains", "core")
+	if err := os.MkdirAll(coreDomainDir, 0o755); err != nil {
+		t.Fatalf("mkdir core domain dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coreDomainDir, "OWNERSHIP.yaml"),
+		[]byte("paths:\n  - internal/core/**\n"), 0o644); err != nil {
+		t.Fatalf("write core OWNERSHIP.yaml: %v", err)
 	}
 }
 
@@ -1480,4 +1505,139 @@ func callMapHasKey(expr ast.Expr, key string) bool {
 		}
 	}
 	return false
+}
+
+// --- Spec 091 Bead 5: warnings pipe (Req 22(a) + printing half of 22(b)) ---
+
+// captureWarnOutput swaps the package-level warnWriter seam for a
+// buffer and restores it on cleanup.
+func captureWarnOutput(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := warnWriter
+	warnWriter = &buf
+	t.Cleanup(func() { warnWriter = orig })
+	return &buf
+}
+
+// TestApproveImplWarnStreamDefaultsToStderr pins the Req 22(a) stream
+// contract: in production, WARN lines go to stderr.
+func TestApproveImplWarnStreamDefaultsToStderr(t *testing.T) {
+	if warnWriter != os.Stderr {
+		t.Errorf("warnWriter must default to os.Stderr, got %T", warnWriter)
+	}
+}
+
+// TestApproveImplPrintsDocSyncWarningAndProceeds: a diff that
+// produces a warning-severity doc-sync issue but NO errors must print
+// `WARN <name>: <message>` AND approve successfully (warnings never
+// block). Req 22(a), including the HasFailures()==false case.
+func TestApproveImplPrintsDocSyncWarningAndProceeds(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// cmd/ source + a non-operator doc: the cmd-docs lane emits a
+		// SevWarning and no lane emits a SevError.
+		ChangedFilesResult: []string{"cmd/mindspec/foo.go", "docs/notes.md"},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err != nil {
+		t.Fatalf("warning-only doc-sync result must not block approval, got: %v", err)
+	}
+	// The gate passed without override: FinalizeEpic ran.
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 1 {
+		t.Errorf("expected 1 FinalizeEpic call, got %d", len(calls))
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "WARN cmd-docs: cmd/ changes without operator-docs update") {
+		t.Errorf("expected `WARN cmd-docs: <message>` line, got %q", out)
+	}
+	// Exact format: line starts with `WARN <name>: ` (no decoration).
+	if !strings.HasPrefix(out, "WARN cmd-docs: ") {
+		t.Errorf("WARN line must be formatted `WARN <name>: <message>`, got %q", out)
+	}
+	// Exactly one consumer prints — no double-print.
+	if n := strings.Count(out, "WARN cmd-docs:"); n != 1 {
+		t.Errorf("expected exactly 1 WARN line per issue per run, got %d in %q", n, out)
+	}
+}
+
+// TestApproveImplNoWarningsPrintsNothing: zero warning-severity
+// issues → no WARN line (companion case for Req 22(a)).
+func TestApproveImplNoWarningsPrintsNothing(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		ChangedFilesResult: nil, // empty diff → no issues at all
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err != nil {
+		t.Fatalf("clean doc-sync result must approve, got: %v", err)
+	}
+	if strings.Contains(buf.String(), "WARN") {
+		t.Errorf("no warnings in result → no WARN output, got %q", buf.String())
+	}
+}
+
+// TestApproveImplPrintResultWarningsRecursStatelessly pins the HC-2
+// printing half: rendering the SAME warning-carrying result twice
+// prints the WARN line BOTH times (no suppression, no dedup) and
+// creates no marker/state file anywhere (the rendering path does no
+// persistence). It also pins severity-genericity: ANY SevWarning
+// renders, error issues never do.
+func TestApproveImplPrintResultWarningsRecursStatelessly(t *testing.T) {
+	// Run from an empty dir so any sneaky relative-path persistence
+	// would be visible.
+	dir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	r := &validate.Result{}
+	r.AddWarning("missing-source-globs", "source_globs not set in .mindspec/config.yaml")
+	r.AddError("doc-sync", "errors are not rendered by the warnings pipe")
+
+	var buf bytes.Buffer
+	printResultWarnings(&buf, r)
+	printResultWarnings(&buf, r) // recurrence: same result, second run
+
+	want := "WARN missing-source-globs: source_globs not set in .mindspec/config.yaml\n"
+	if buf.String() != want+want {
+		t.Errorf("warning must print on BOTH runs, verbatim:\nwant %q\ngot  %q", want+want, buf.String())
+	}
+	if strings.Contains(buf.String(), "doc-sync") {
+		t.Errorf("SevError issues must not render as WARN lines: %q", buf.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rendering must persist NO marker/state file (HC-2); found %v", entries)
+	}
 }

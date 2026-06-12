@@ -5,10 +5,21 @@
 - **Domain(s)**: validation, doc-sync, lifecycle, ownership
 - **Deciders**: Max
 - **Supersedes**: n/a
-- **Superseded-by**: n/a
+- **Superseded-by**: [ADR-0036](ADR-0036-ownership-discovery.md) (in part — fallback semantics only)
 - **Related**: [ADR-0030](ADR-0030-executor-boundary.md) (executor-boundary; doc-sync now uses `Executor.ChangedFiles`), [ADR-0011](ADR-0011.md) (lifecycle states)
 
 ---
+
+> **Superseded in part by [ADR-0036](ADR-0036-ownership-discovery.md)**
+> (spec 091): the silent `internal/<domain>/**` fallback this ADR
+> records as live behavior — in Decision 2 ("Fallback to
+> `internal/<domain>/**` when the file is missing") and in the
+> Consequences ("…or accept the `internal/<domain>/**` fallback
+> heuristic") — is REMOVED. A domain whose `OWNERSHIP.yaml` is absent
+> now claims nothing (`Paths: []`, `Source() == "missing"`); see
+> ADR-0036 for the replacement semantics and migration path. The
+> manifest schema and the warning-to-error promotion recorded here
+> remain authoritative.
 
 ## Status
 
