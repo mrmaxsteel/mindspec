@@ -301,6 +301,21 @@ func RevParseRef(workdir, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// LogOneline returns `git log -1 --oneline <ref>` for workdir
+// (workdir=="" → cwd), trimmed: the one-line "<short-sha> <subject>"
+// summary of the tip commit of ref. The error is non-nil when ref does
+// not resolve (e.g. a deleted branch); callers that only want a display
+// string treat an error as "no detail available" (Spec 093 Req 14
+// in-progress-beads last-commit line).
+func LogOneline(workdir, ref string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "log", "-1", "--oneline", ref)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("log -1 --oneline %s: %w", ref, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // RevParseShowToplevel returns `git rev-parse --show-toplevel` from the
 // current working directory. No `-C` is set.
 func RevParseShowToplevel() (string, error) {

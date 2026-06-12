@@ -159,15 +159,18 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		}
 	}
 
-	// Spec 093 Req 14: when --panel-state is requested, gather the
-	// open-panel-rounds block from the active bead's scan roots (worktree
-	// + main root, union/deduped by panel.Scan) and resolve each bead
-	// panel's live branch SHA for staleness. Empty when no panel is
-	// registered → Render appends nothing (zero-cost contract, Req 15).
+	// Spec 093 Req 14: when --panel-state is requested, gather the full
+	// Panel/Subagent State block — in-progress beads (capped git detail),
+	// open panel rounds (per-panel tally vs the complete gate, with each
+	// bead panel's live branch SHA resolved for staleness), and stale
+	// agent worktrees — from the active bead's scan roots (worktree +
+	// main root, union/deduped). All three render empty when nothing is
+	// open → Render appends nothing (zero-cost contract, Req 15). All
+	// git/bd subprocesses fire ONLY inside this branch — the Req 15
+	// stub-guard (the SessionStart hook gates entry on the fs-only
+	// HasIncompletePanel, so a panel-less session pays zero added cost).
 	if opts.PanelState {
-		bctx.PanelState = renderPanelState(
-			gatherPanelState(liveBranchSHA, panelScanRoots(mainRoot, mc.ActiveWorktree)...),
-		)
+		bctx.PanelState = buildPanelStateBlock(cache, mainRoot, mc.ActiveWorktree, mc.ActiveBead)
 	}
 
 	if err := ctx.Err(); err != nil {

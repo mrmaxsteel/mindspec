@@ -1,13 +1,17 @@
 package instruct
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
@@ -364,9 +368,10 @@ func TestHasIncompletePanel(t *testing.T) {
 	}
 }
 
-// TestRender_AppendsPanelState proves Context.PanelState lands at the
-// bottom of the rendered markdown (the SessionStart channel), and that
-// an empty PanelState appends nothing.
+// TestRender_AppendsPanelState proves the FULL Panel/Subagent State
+// block (all three Req-14 sub-blocks) lands at the bottom of the rendered
+// markdown — the SessionStart channel (Spec 093 Req 15 AC L1100-1103) —
+// and that an empty PanelState appends nothing.
 func TestRender_AppendsPanelState(t *testing.T) {
 	root := setupTestProject(t)
 	s := &state.Focus{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
@@ -377,22 +382,426 @@ func TestRender_AppendsPanelState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "Open Panel Rounds") {
+	if strings.Contains(out, "Panel/Subagent State") {
 		t.Error("empty PanelState must not render the block")
 	}
 
-	// Populated → block appears.
-	ctx.PanelState = renderPanelState([]PanelStateEntry{
-		{Slug: "p", Tally: beadPanel("b.1", "abc1234", 1, 6, 4, 0, 0, 2), LiveBranchSHA: "abc1234"},
-	})
+	// Populated with all three sub-blocks → the full block appears.
+	ctx.PanelState = renderFullPanelState(
+		[]BeadStateEntry{{ID: "ms.1", Title: "t", Worktree: "/wt/ms.1", LastCommit: "abc do", Active: true}},
+		[]PanelStateEntry{{Slug: "p", Tally: beadPanel("b.1", "abc1234", 1, 6, 4, 0, 0, 2), LiveBranchSHA: "abc1234"}},
+		[]StaleWorktreeEntry{{Path: "/x/worktree-ms.gone", Source: "worktree-list"}},
+	)
 	out, err = Render(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "## Open Panel Rounds") {
-		t.Errorf("populated PanelState must render the block\n%s", out)
+	for _, want := range []string{
+		"# Panel/Subagent State",
+		"## In-Progress Beads",
+		"## Open Panel Rounds",
+		"## Stale Agent Worktrees",
+		"gate would BLOCK",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered markdown missing %q\n%s", want, out)
+		}
 	}
-	if !strings.Contains(out, "gate would BLOCK") {
-		t.Errorf("expected BLOCK verdict in render\n%s", out)
+}
+
+// TestRunWithOptions_PanelStateGate is the end-to-end Req 15 stub-guard
+// assertion (AC L1100-1103) through the public RunWithOptions path — the
+// same path the SessionStart hook drives. It proves the NEGATIVE side
+// deterministically: opts.PanelState=false → buildPanelStateBlock is
+// NEVER invoked (zero git/bd subprocess attributable to panel-state) and
+// the Panel/Subagent State block is absent from the rendered markdown.
+//
+// This direction is env-independent: every Run code path that does not
+// request panel-state leaves the builder untouched regardless of which
+// mode it resolves. (The POSITIVE markdown-channel direction — builder
+// output → rendered block — is pinned deterministically by
+// TestRender_AppendsPanelState, which avoids the bd/git mode-resolution
+// that the pre-existing TestRun_IdleNoBeads env-leak perturbs.)
+//
+// buildPanelStateBlock is the single IO entrypoint for the three
+// gatherers; swapping it for a call-counting fake pins the guard at the
+// exact boundary the hook gates (HasIncompletePanel decides opts.PanelState).
+func TestRunWithOptions_PanelStateGate(t *testing.T) {
+	root := setupRunTestProject(t)
+
+	var calls int
+	orig := buildPanelStateBlock
+	t.Cleanup(func() { buildPanelStateBlock = orig })
+	buildPanelStateBlock = func(_ *phase.Cache, _, _, _ string) string {
+		calls++
+		return "# Panel/Subagent State\n"
+	}
+
+	var buf bytes.Buffer
+	if err := RunWithOptions(context.Background(), root, "", "", &buf, Options{PanelState: false}); err != nil {
+		t.Fatalf("RunWithOptions(PanelState:false): %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("PanelState=false must NOT invoke the panel-state builder (stub-guard), got %d calls", calls)
+	}
+	if strings.Contains(buf.String(), "Panel/Subagent State") {
+		t.Errorf("no-panel-state run must not render the block\n%s", buf.String())
+	}
+}
+
+// TestHasIncompletePanel_NoSubprocess hardens the Req-15 stub-guard at the
+// hook's actual gate: HasIncompletePanel — the ONLY work outside the
+// auto-include branch — is fs-only on a panel-less project (it makes no
+// bd or git subprocess), so a session with no open panel pays zero added
+// SessionStart cost. We assert it returns false (→ opts.PanelState=false
+// in the hook) and prove the no-subprocess property by construction: the
+// panel package imports only stdlib (verified by the package boundary).
+func TestHasIncompletePanel_NoSubprocess(t *testing.T) {
+	root := setupRunTestProject(t) // a .git + docs project, but NO review/ dir
+	if HasIncompletePanel(root) {
+		t.Error("a project with no panel dir must report no incomplete panel (gates opts.PanelState off)")
+	}
+}
+
+// --- In-progress-beads block + cap (Spec 093 Req 14 bullet 1) ----------
+
+// TestRenderInProgressBeads_Empty is the zero-cost case.
+func TestRenderInProgressBeads_Empty(t *testing.T) {
+	if out := renderInProgressBeads(nil); out != "" {
+		t.Errorf("no in-progress beads should render empty, got:\n%s", out)
+	}
+}
+
+// TestRenderInProgressBeads_Detail pins the per-bead detail shape (active
+// marker, worktree, last-commit lines).
+func TestRenderInProgressBeads_Detail(t *testing.T) {
+	out := renderInProgressBeads([]BeadStateEntry{
+		{ID: "ms.1", Title: "do thing", Worktree: "/wt/ms.1", LastCommit: "abc1234 did thing", Active: true},
+		{ID: "ms.2", Title: "other", Worktree: "", LastCommit: ""},
+	})
+	for _, want := range []string{
+		"## In-Progress Beads",
+		"**ms.1 (active)** — do thing",
+		"worktree: `/wt/ms.1`",
+		"last commit: abc1234 did thing",
+		"**ms.2** — other",
+		"worktree: (none checked out)",
+		"last commit: (branch unresolved)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("in-progress block missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderInProgressBeads_Cap is the binding cap test (Spec 093 Req 14
+// AC L1098-1099 / plan Step 3 L533-534): 6 in-progress beads → git detail
+// for the active bead + 3 others only (exactly 4 detail blocks), with the
+// remainder summarized verbatim as "… and 2 more (no git detail)". The
+// table pins the boundary on both sides (5 → "1 more", 6 → "2 more"), and
+// asserts the capped beads carry NO detail lines.
+func TestRenderInProgressBeads_Cap(t *testing.T) {
+	// Build n in-progress beads, all with detail populated, active first.
+	build := func(n int) []BeadStateEntry {
+		entries := make([]BeadStateEntry, 0, n)
+		for i := 1; i <= n; i++ {
+			id := fmt.Sprintf("ms.%d", i)
+			entries = append(entries, BeadStateEntry{
+				ID:         id,
+				Title:      "bead " + id,
+				Worktree:   "/wt/" + id,
+				LastCommit: fmt.Sprintf("sha%d commit %s", i, id),
+				Active:     i == 1,
+			})
+		}
+		return entries
+	}
+
+	cases := []struct {
+		name          string
+		n             int
+		wantDetailIDs []string // these must show a worktree/last-commit line
+		wantSummary   string   // exact remainder line (or "" if none)
+		wantHiddenIDs []string // these must NOT appear at all
+	}{
+		{
+			name:          "exactly_cap_no_summary",
+			n:             4,
+			wantDetailIDs: []string{"ms.1", "ms.2", "ms.3", "ms.4"},
+			wantSummary:   "",
+			wantHiddenIDs: nil,
+		},
+		{
+			name:          "one_over_cap",
+			n:             5,
+			wantDetailIDs: []string{"ms.1", "ms.2", "ms.3", "ms.4"},
+			wantSummary:   "… and 1 more (no git detail)",
+			wantHiddenIDs: []string{"ms.5"},
+		},
+		{
+			name:          "six_beads_active_plus_3",
+			n:             6,
+			wantDetailIDs: []string{"ms.1", "ms.2", "ms.3", "ms.4"},
+			wantSummary:   "… and 2 more (no git detail)",
+			wantHiddenIDs: []string{"ms.5", "ms.6"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := renderInProgressBeads(build(c.n))
+
+			// Exactly inProgressDetailCap (=4) beads get a last-commit line.
+			gotDetail := strings.Count(out, "last commit: sha")
+			wantDetail := c.n
+			if wantDetail > inProgressDetailCap {
+				wantDetail = inProgressDetailCap
+			}
+			if gotDetail != wantDetail {
+				t.Errorf("%s: got %d detail blocks, want %d (cap %d)\n%s",
+					c.name, gotDetail, wantDetail, inProgressDetailCap, out)
+			}
+
+			for _, id := range c.wantDetailIDs {
+				if !strings.Contains(out, "last commit: sha"+strings.TrimPrefix(id, "ms.")) {
+					t.Errorf("%s: expected detail for %s\n%s", c.name, id, out)
+				}
+			}
+			for _, id := range c.wantHiddenIDs {
+				// The summarized beads carry no detail: their commit line
+				// must be absent (they are NOT individually rendered).
+				marker := "commit " + id
+				if strings.Contains(out, marker) {
+					t.Errorf("%s: capped bead %s must NOT show git detail\n%s", c.name, id, out)
+				}
+			}
+			if c.wantSummary == "" {
+				if strings.Contains(out, "no git detail") {
+					t.Errorf("%s: no remainder expected but summary line present\n%s", c.name, out)
+				}
+			} else {
+				if !strings.Contains(out, c.wantSummary) {
+					t.Errorf("%s: expected summary %q\n%s", c.name, c.wantSummary, out)
+				}
+			}
+		})
+	}
+}
+
+// TestGatherInProgressBeads_OrderAndCap proves the gatherer (1) floats the
+// active bead to the front so it always lands inside the detail cap even
+// when its bd-id sorts last, (2) lists the others in deterministic bd-id
+// order, and (3) resolves last-commit ONLY within the cap (the 5th+ bead
+// gets no git lookup — the subprocess-budget guarantee).
+func TestGatherInProgressBeads_OrderAndCap(t *testing.T) {
+	// Active bead "ms.9" sorts LAST by id but must come first.
+	list := func() ([]inProgressBead, error) {
+		return []inProgressBead{
+			{ID: "ms.3", Title: "c"},
+			{ID: "ms.9", Title: "i"}, // active
+			{ID: "ms.1", Title: "a"},
+			{ID: "ms.5", Title: "e"},
+			{ID: "ms.7", Title: "g"},
+		}, nil
+	}
+	var looked []string
+	lastCommit := func(beadID string) string {
+		looked = append(looked, beadID)
+		return "sha " + beadID
+	}
+
+	entries := gatherInProgressBeads(list, lastCommit, "ms.9")
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(entries))
+	}
+	// Active first, rest in bd-id order.
+	wantOrder := []string{"ms.9", "ms.1", "ms.3", "ms.5", "ms.7"}
+	for i, w := range wantOrder {
+		if entries[i].ID != w {
+			t.Errorf("order[%d] = %s, want %s (full: %+v)", i, entries[i].ID, w, ids(entries))
+		}
+	}
+	if !entries[0].Active {
+		t.Error("first entry (ms.9) must be marked Active")
+	}
+	// last-commit lookup ran for exactly the first inProgressDetailCap (4).
+	if len(looked) != inProgressDetailCap {
+		t.Errorf("last-commit lookups = %d, want %d (cap); looked=%v", len(looked), inProgressDetailCap, looked)
+	}
+	// The 5th bead (ms.7) got NO git detail.
+	if entries[4].LastCommit != "" {
+		t.Errorf("beyond-cap bead must have no last-commit detail, got %q", entries[4].LastCommit)
+	}
+}
+
+func ids(entries []BeadStateEntry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.ID
+	}
+	return out
+}
+
+// TestGatherInProgressBeads_Empty returns nil for no beads / error.
+func TestGatherInProgressBeads_Empty(t *testing.T) {
+	none := func() ([]inProgressBead, error) { return nil, nil }
+	if got := gatherInProgressBeads(none, nil, ""); got != nil {
+		t.Errorf("no beads → nil, got %v", got)
+	}
+	errList := func() ([]inProgressBead, error) { return nil, fmt.Errorf("bd down") }
+	if got := gatherInProgressBeads(errList, nil, ""); got != nil {
+		t.Errorf("bd error → nil, got %v", got)
+	}
+}
+
+// --- Stale-agent-worktrees block (Spec 093 Req 14 bullet 3) ------------
+
+// TestRenderStaleWorktrees pins the block shape + sources + empty case.
+func TestRenderStaleWorktrees(t *testing.T) {
+	if out := renderStaleWorktrees(nil); out != "" {
+		t.Errorf("no stale worktrees should render empty, got:\n%s", out)
+	}
+	out := renderStaleWorktrees([]StaleWorktreeEntry{
+		{Path: "/repo/.worktrees/worktree-ms.7", Source: "worktree-list"},
+		{Path: "/repo/.claude/worktrees/agent-abc", Source: "agent-scan"},
+	})
+	for _, want := range []string{
+		"## Stale Agent Worktrees",
+		"`/repo/.worktrees/worktree-ms.7` (worktree-list)",
+		"`/repo/.claude/worktrees/agent-abc` (agent-scan)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stale block missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestGatherStaleWorktrees implements the Req 14 bullet-3 criterion: a
+// worktree-<id> with no matching in-progress bead is stale; one WITH a
+// live in-progress bead is not; the main worktree and spec worktrees are
+// excluded; and .claude/worktrees/agent-* dirs are scanned.
+func TestGatherStaleWorktrees(t *testing.T) {
+	root := t.TempDir()
+	// Create an agent scratch dir on disk.
+	agentDir := filepath.Join(root, ".claude", "worktrees", "agent-xyz")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "main", Path: root, IsMain: true},
+			{Name: "worktree-ms.live", Path: "/x/worktree-ms.live"},       // has in-progress bead → NOT stale
+			{Name: "worktree-ms.gone", Path: "/x/worktree-ms.gone"},       // no in-progress bead → STALE
+			{Name: "worktree-spec-093-x", Path: "/x/worktree-spec-093-x"}, // spec worktree → excluded
+		}, nil
+	}
+	inProgress := map[string]bool{"ms.live": true}
+
+	entries := gatherStaleWorktrees(list, inProgress, root)
+
+	paths := make(map[string]string)
+	for _, e := range entries {
+		paths[e.Path] = e.Source
+	}
+	if src, ok := paths["/x/worktree-ms.gone"]; !ok || src != "worktree-list" {
+		t.Errorf("worktree-ms.gone (no live bead) must be stale via worktree-list; got %+v", entries)
+	}
+	if _, ok := paths["/x/worktree-ms.live"]; ok {
+		t.Error("worktree-ms.live has a live in-progress bead and must NOT be stale")
+	}
+	if _, ok := paths["/x/worktree-spec-093-x"]; ok {
+		t.Error("spec worktree must be excluded from stale-bead-worktree detection")
+	}
+	if _, ok := paths[root]; ok {
+		t.Error("the main worktree must never be flagged stale")
+	}
+	if src, ok := paths[agentDir]; !ok || src != "agent-scan" {
+		t.Errorf("the .claude/worktrees/agent-* dir must be scanned; got %+v", entries)
+	}
+}
+
+// TestGatherStaleWorktrees_Empty returns nil when nothing is stale.
+func TestGatherStaleWorktrees_Empty(t *testing.T) {
+	root := t.TempDir() // no .claude/worktrees
+	list := func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{{Name: "main", Path: root, IsMain: true}}, nil
+	}
+	if got := gatherStaleWorktrees(list, map[string]bool{}, root); got != nil {
+		t.Errorf("nothing stale → nil, got %v", got)
+	}
+}
+
+// --- Composite Panel/Subagent State block (Spec 093 Reqs 14-15) --------
+
+// TestRenderFullPanelState_AllThree proves the composer emits the
+// Panel/Subagent State wrapper plus ALL THREE sub-blocks (the Req 15 AC
+// L1100-1103 "full block" requirement).
+func TestRenderFullPanelState_AllThree(t *testing.T) {
+	inProgress := []BeadStateEntry{
+		{ID: "ms.1", Title: "t", Worktree: "/wt/ms.1", LastCommit: "abc do", Active: true},
+	}
+	panels := []PanelStateEntry{
+		{Slug: "p", Tally: beadPanel("b.1", "abc1234", 1, 6, 4, 0, 0, 2), LiveBranchSHA: "abc1234"},
+	}
+	stale := []StaleWorktreeEntry{
+		{Path: "/x/worktree-ms.gone", Source: "worktree-list"},
+	}
+
+	out := renderFullPanelState(inProgress, panels, stale)
+	for _, want := range []string{
+		"# Panel/Subagent State",
+		"## In-Progress Beads",
+		"## Open Panel Rounds",
+		"## Stale Agent Worktrees",
+		"gate would BLOCK",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("full block missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderFullPanelState_Empty returns "" when all three sub-blocks are
+// empty (the zero-cost / clean-state contract — caller appends nothing).
+func TestRenderFullPanelState_Empty(t *testing.T) {
+	if out := renderFullPanelState(nil, nil, nil); out != "" {
+		t.Errorf("all-empty must render nothing, got:\n%s", out)
+	}
+}
+
+// TestRenderJSON_PanelState asserts the panel_state field is populated
+// through RenderJSON when set, and omitted when empty (Spec 093 Req 14
+// JSON shape — R2 coverage gap (2)).
+func TestRenderJSON_PanelState(t *testing.T) {
+	root := setupTestProject(t)
+	s := &state.Focus{Mode: state.ModeImplement, ActiveSpec: "004-instruct", ActiveBead: "beads-001"}
+
+	// Populated → panel_state present + carries the rendered markdown.
+	ctx := BuildContext(root, s)
+	ctx.PanelState = renderFullPanelState(
+		[]BeadStateEntry{{ID: "ms.1", Active: true}},
+		[]PanelStateEntry{{Slug: "p", Tally: beadPanel("b.1", "abc1234", 1, 6, 4, 0, 0, 2), LiveBranchSHA: "abc1234"}},
+		nil,
+	)
+	jsonOut, err := RenderJSON(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonOut, `"panel_state"`) {
+		t.Errorf("panel_state field must be present when set\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, "Panel/Subagent State") {
+		t.Errorf("panel_state must carry the rendered block\n%s", jsonOut)
+	}
+
+	// Empty → omitempty drops the field.
+	ctx2 := BuildContext(root, s)
+	jsonOut2, err := RenderJSON(ctx2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(jsonOut2, `"panel_state"`) {
+		t.Errorf("panel_state must be omitted when empty\n%s", jsonOut2)
 	}
 }

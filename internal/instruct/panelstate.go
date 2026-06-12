@@ -2,10 +2,16 @@ package instruct
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Spec 093 Req 14 (open-panel-rounds block) + Req 15 (SessionStart
@@ -269,4 +275,348 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// --- In-progress-beads block (Spec 093 Req 14 bullet 1) ----------------
+//
+// Lists the IN_PROGRESS beads of the active epics with their worktree
+// path and last-commit summary, CAPPED at the active bead + at most 3
+// other in-progress beads (deterministic bd-id order); the remainder is
+// summarized as "… and N more (no git detail)". The cap bounds the git
+// subprocess fan-out per ADR-0030 (Req 14 budget): only the capped beads
+// get a `git log -1 --oneline` call.
+
+// inProgressDetailCap is the number of in-progress beads that get full
+// git detail: the active bead + at most 3 others (Spec 093 Req 14
+// bullet 1 / AC L1098-1099 — "6 in-progress beads → git detail for
+// active+3 only"). The 4th..Nth are summarized.
+const inProgressDetailCap = 4
+
+// BeadStateEntry is one in-progress bead's resolved display state: the
+// caller (gatherInProgressBeads) fills Worktree + LastCommit by reading
+// git/bd, so the renderInProgressBeads formatter stays pure and
+// directly unit-testable (the cap-test target).
+type BeadStateEntry struct {
+	// ID is the bead ID (bd id), e.g. "mindspec-cter.5".
+	ID string
+	// Title is the bead's title (best-effort; may be empty).
+	Title string
+	// Worktree is the resolved worktree path, or "" if none is checked
+	// out for this bead.
+	Worktree string
+	// LastCommit is the `git log -1 --oneline bead/<id>` summary, or ""
+	// when the branch is unresolved / beyond the detail cap.
+	LastCommit string
+	// Active marks the currently-claimed bead; it always sorts first and
+	// always receives git detail (never summarized away by the cap).
+	Active bool
+}
+
+// renderInProgressBeads formats the in-progress-beads block (Spec 093
+// Req 14 bullet 1) from already-resolved entries. PURE: no git/bd/fs —
+// its inputs are pre-resolved by gatherInProgressBeads, which is what
+// makes the cap directly testable. Returns "" when there are no
+// in-progress beads (zero-cost contract). The caller passes entries in
+// the order they should render; this formatter applies the active+3 cap
+// and summarizes the remainder.
+func renderInProgressBeads(entries []BeadStateEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("## In-Progress Beads\n\n")
+	b.WriteString("Claimed beads (IN_PROGRESS) with their worktree and last commit. ")
+	b.WriteString("Git detail is capped at the active bead + 3 others (Req 14).\n")
+
+	for i, e := range entries {
+		if i >= inProgressDetailCap {
+			break
+		}
+		b.WriteString("\n")
+		label := e.ID
+		if e.Active {
+			label = e.ID + " (active)"
+		}
+		if e.Title != "" {
+			b.WriteString(fmt.Sprintf("- **%s** — %s\n", label, e.Title))
+		} else {
+			b.WriteString(fmt.Sprintf("- **%s**\n", label))
+		}
+		if e.Worktree != "" {
+			b.WriteString(fmt.Sprintf("  - worktree: `%s`\n", e.Worktree))
+		} else {
+			b.WriteString("  - worktree: (none checked out)\n")
+		}
+		if e.LastCommit != "" {
+			b.WriteString(fmt.Sprintf("  - last commit: %s\n", e.LastCommit))
+		} else {
+			b.WriteString("  - last commit: (branch unresolved)\n")
+		}
+	}
+
+	// Remainder beyond the cap → one summary line, no git detail (Spec
+	// 093 Req 14 bullet 1 / AC L1098-1099 verbatim wording).
+	if remainder := len(entries) - inProgressDetailCap; remainder > 0 {
+		b.WriteString(fmt.Sprintf("\n- … and %d more (no git detail)\n", remainder))
+	}
+
+	return b.String()
+}
+
+// inProgressBead is the minimal bd shape gatherInProgressBeads decodes
+// from `bd list --status=in_progress`.
+type inProgressBead struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// inProgressLister returns the in-progress beads of the active epics, in
+// deterministic bd-id order. Injected so gatherInProgressBeads is
+// testable without bd.
+type inProgressLister func() ([]inProgressBead, error)
+
+// beadLastCommitFn resolves the `git log -1 --oneline bead/<id>` summary
+// for a bead. Injected (defaults to git) so the gatherer is testable and
+// the single git fan-out point is explicit (Req 14 cap budget).
+type beadLastCommitFn func(beadID string) string
+
+// gitBeadLastCommit is the production beadLastCommitFn: the one-line tip
+// summary of bead/<id>, or "" when the branch is unresolved.
+func gitBeadLastCommit(beadID string) string {
+	line, err := gitutil.LogOneline("", workspace.BeadBranch(beadID))
+	if err != nil {
+		return ""
+	}
+	return line
+}
+
+// gatherInProgressBeads builds the (capped) BeadStateEntry list for the
+// in-progress-beads block. It is the IO half (bd list + worktree scan +
+// git log); the pure renderInProgressBeads does the formatting and cap.
+//
+// Ordering (Spec 093 Req 14 bullet 1): the active bead first, then the
+// other in-progress beads in deterministic bd-id order. The git
+// last-commit lookup runs ONLY for the active bead + the first 3 others
+// (inProgressDetailCap) — the remainder carries no git detail, bounding
+// the subprocess fan-out (ADR-0030). Worktree resolution reuses
+// resolveBeadWorktree (the existing helper) and is likewise capped.
+func gatherInProgressBeads(list inProgressLister, lastCommit beadLastCommitFn, activeBead string) []BeadStateEntry {
+	beads, err := list()
+	if err != nil || len(beads) == 0 {
+		return nil
+	}
+
+	// Deterministic bd-id order, then float the active bead to the front
+	// so it always lands inside the detail cap (Req 14).
+	sort.Slice(beads, func(i, j int) bool { return beads[i].ID < beads[j].ID })
+	sort.SliceStable(beads, func(i, j int) bool {
+		return beads[i].ID == activeBead && beads[j].ID != activeBead
+	})
+
+	entries := make([]BeadStateEntry, 0, len(beads))
+	for i, bd := range beads {
+		e := BeadStateEntry{ID: bd.ID, Title: bd.Title, Active: bd.ID == activeBead && activeBead != ""}
+		// Resolve worktree + last commit ONLY within the detail cap; the
+		// summarized remainder pays no git/worktree cost (Req 14 budget).
+		if i < inProgressDetailCap {
+			e.Worktree = resolveBeadWorktree(bd.ID)
+			if lastCommit != nil {
+				e.LastCommit = lastCommit(bd.ID)
+			}
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// activeEpicInProgressLister is the production inProgressLister: it lists
+// the in-progress children of the active (open/in_progress) epics via
+// the shared phase.Cache (PERF-1 — reuses the cache's epic/children bd
+// calls rather than issuing a fresh `bd list`), deduping by id.
+func activeEpicInProgressLister(cache *phase.Cache) inProgressLister {
+	return func() ([]inProgressBead, error) {
+		epics, err := cache.ActiveEpics()
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]bool)
+		var out []inProgressBead
+		for _, ep := range epics {
+			kids, err := cache.GetChildren(ep.ID)
+			if err != nil {
+				continue
+			}
+			for _, k := range kids {
+				if strings.EqualFold(strings.TrimSpace(k.Status), "in_progress") && !seen[k.ID] {
+					seen[k.ID] = true
+					out = append(out, inProgressBead{ID: k.ID, Title: k.Title})
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
+// --- Stale-agent-worktrees block (Spec 093 Req 14 bullet 3) ------------
+//
+// Spec 093 Req 14 criterion (verbatim): "Stale agent worktrees:
+// `bead.WorktreeList()` filtered to `.worktrees/worktree-*` without a
+// matching in-progress bead, plus dir-scan of `.claude/worktrees/agent-*`."
+// A worktree is STALE when it is a bead worktree (path basename starts
+// with worktree-) whose bead is NOT among the currently in-progress
+// beads — i.e. left behind after a merge/abandon — OR an
+// agent-scratch dir under .claude/worktrees/agent-*.
+
+// StaleWorktreeEntry is one stale worktree: its display path plus the
+// source that flagged it (so the render can hint at cleanup).
+type StaleWorktreeEntry struct {
+	// Path is the worktree directory path.
+	Path string
+	// Source is "worktree-list" (a bead.WorktreeList entry with no
+	// matching in-progress bead) or "agent-scan" (a .claude/worktrees/
+	// agent-* dir).
+	Source string
+}
+
+// renderStaleWorktrees formats the stale-agent-worktrees block (Spec 093
+// Req 14 bullet 3) from already-resolved entries. PURE: no fs/bd — the
+// scan is done by gatherStaleWorktrees. Returns "" when none are stale.
+func renderStaleWorktrees(entries []StaleWorktreeEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+
+	var b strings.Builder
+	b.WriteString("## Stale Agent Worktrees\n\n")
+	b.WriteString("Bead worktrees with no matching in-progress bead, plus `.claude/worktrees/agent-*` scratch dirs — ")
+	b.WriteString("candidates for cleanup (left behind after a merge/abandon).\n\n")
+
+	for _, e := range entries {
+		b.WriteString(fmt.Sprintf("- `%s` (%s)\n", e.Path, e.Source))
+	}
+
+	return b.String()
+}
+
+// worktreeLister returns the bd-known worktrees. Injected (defaults to
+// bead.WorktreeList) so gatherStaleWorktrees is testable without bd.
+type worktreeLister func() ([]bead.WorktreeListEntry, error)
+
+// gatherStaleWorktrees implements the Req 14 bullet-3 criterion: scan
+// bead.WorktreeList() for `worktree-*` entries (BeadWorktreePrefix) whose
+// bead is not currently in-progress, then dir-scan `.claude/worktrees/
+// agent-*` under each root. inProgressIDs is the set of currently
+// in-progress bead IDs (from the same gather pass). roots are the scan
+// roots (worktree + main). Returns nil when nothing is stale.
+func gatherStaleWorktrees(list worktreeLister, inProgressIDs map[string]bool, roots ...string) []StaleWorktreeEntry {
+	var entries []StaleWorktreeEntry
+	seen := make(map[string]bool)
+
+	// (a) bead.WorktreeList() filtered to worktree-* without a matching
+	// in-progress bead.
+	if list != nil {
+		if wts, err := list(); err == nil {
+			for _, wt := range wts {
+				if wt.IsMain {
+					continue
+				}
+				base := filepath.Base(wt.Path)
+				// Bead worktrees are "worktree-<beadID>"; spec worktrees
+				// ("worktree-spec-...") are NOT bead worktrees and are not
+				// stale-agent candidates (Req 14 targets bead worktrees).
+				if !strings.HasPrefix(base, workspace.BeadWorktreePrefix) ||
+					strings.HasPrefix(base, workspace.SpecWorktreePrefix) {
+					continue
+				}
+				beadID := strings.TrimPrefix(base, workspace.BeadWorktreePrefix)
+				if inProgressIDs[beadID] {
+					continue // has a live in-progress bead → not stale
+				}
+				if !seen[wt.Path] {
+					seen[wt.Path] = true
+					entries = append(entries, StaleWorktreeEntry{Path: wt.Path, Source: "worktree-list"})
+				}
+			}
+		}
+	}
+
+	// (b) dir-scan of .claude/worktrees/agent-* under each root.
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(root, ".claude", "worktrees", "agent-*"))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			info, err := os.Stat(m)
+			if err != nil || !info.IsDir() {
+				continue
+			}
+			if !seen[m] {
+				seen[m] = true
+				entries = append(entries, StaleWorktreeEntry{Path: m, Source: "agent-scan"})
+			}
+		}
+	}
+
+	return entries
+}
+
+// --- Composite Panel/Subagent State block (Spec 093 Reqs 14-15) --------
+
+// buildPanelStateBlock is the IO entrypoint for the full Panel/Subagent
+// State block (Spec 093 Reqs 14-15): it gathers the three sub-blocks
+// (each via its own injected-resolver gatherer) and composes them. It is
+// a package-level var so the Req-15 stub-guard test can install a
+// call-counting fake and prove it is invoked exactly once when
+// --panel-state is requested and NEVER when it is not (zero git/bd
+// subprocess attributable to panel-state on a panel-less session).
+var buildPanelStateBlock = func(cache *phase.Cache, mainRoot, activeWorktree, activeBead string) string {
+	roots := panelScanRoots(mainRoot, activeWorktree)
+
+	inProgress := gatherInProgressBeads(
+		activeEpicInProgressLister(cache), gitBeadLastCommit, activeBead)
+	inProgressIDs := make(map[string]bool, len(inProgress))
+	for _, e := range inProgress {
+		inProgressIDs[e.ID] = true
+	}
+
+	panels := gatherPanelState(liveBranchSHA, roots...)
+	stale := gatherStaleWorktrees(bead.WorktreeList, inProgressIDs, roots...)
+
+	return renderFullPanelState(inProgress, panels, stale)
+}
+
+// renderFullPanelState composes the three Req-14 sub-blocks under a
+// single "Panel/Subagent State" heading (Spec 093 Req 15 AC L1100-1103):
+// in-progress beads, open panel rounds, and stale agent worktrees. PURE:
+// every sub-block is rendered from pre-resolved inputs. Returns "" when
+// all three sub-blocks are empty (zero-cost / clean-state contract — the
+// caller appends nothing).
+func renderFullPanelState(inProgress []BeadStateEntry, panels []PanelStateEntry, stale []StaleWorktreeEntry) string {
+	ip := renderInProgressBeads(inProgress)
+	op := renderPanelState(panels)
+	sw := renderStaleWorktrees(stale)
+	if ip == "" && op == "" && sw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("# Panel/Subagent State\n\n")
+	b.WriteString("Recovery snapshot of in-flight panels and worktrees (post-compaction; Reqs 14-15). ")
+	b.WriteString("This INFORMS; the `mindspec complete` hook ENFORCES.\n")
+
+	for _, sub := range []string{ip, op, sw} {
+		if sub != "" {
+			b.WriteString("\n")
+			b.WriteString(sub)
+		}
+	}
+
+	return b.String()
 }
