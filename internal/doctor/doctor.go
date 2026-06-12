@@ -84,6 +84,14 @@ func RunWithOptions(root string, opts Options) *Report {
 		return r
 	}
 	checkDocs(r, root)
+	// Spec 091 Bead 4: static-time ownership manifest checks
+	// (dead-manifest Req 17 + the three hygiene Warns Req 20) and the
+	// missing-source-globs Warn (Req 18). All advisory; none blocks the
+	// gate. Run after checkDocs so the missing-OWNERSHIP Warn (Req 21,
+	// the "missing" state) is reported before dead-manifest (the
+	// existing-but-dead state) — one state, one Warn.
+	checkOwnershipManifests(r, root)
+	checkSourceGlobs(r, root)
 	checkBeads(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
