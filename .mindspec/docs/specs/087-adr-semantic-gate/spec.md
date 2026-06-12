@@ -306,6 +306,11 @@ spec implements that block verbatim; it does not redesign.
    `AddError("adr-coverage-missing", fmt.Sprintf("impacted
    domain %q has no cited Accepted ADR; run: mindspec adr
    create --domain %s", d, d))`.
+   *Annotation (2026-06-11): superseded in part by PR #126
+   (tri-state coverage) — a cited Proposed ADR now satisfies
+   plan-time coverage with an advisory `adr-coverage-proposed`
+   warning; Accepted is enforced at impl-approve. See ADR-0032
+   Amendment.*
 9. **Divergence check at complete (and unowned-file detection).**
    New file `internal/validate/divergence.go` exporting
    `ValidateDivergence(exec executor.Executor, root, specDir,
@@ -403,6 +408,12 @@ spec implements that block verbatim; it does not redesign.
       re-run after pre-creation — the new ADR has
       `Status: Proposed`, which would not satisfy Req 8's
       `Status: Accepted` requirement, so re-running would fail.
+      *Annotation (2026-06-11): superseded in part by PR #126
+      (tri-state coverage) — a cited Proposed placeholder now
+      satisfies coverage at plan/bead time (warning), so the
+      "re-running would fail" rationale no longer holds; the
+      bypass semantics themselves are unchanged. See ADR-0032
+      Amendment.*
 
     Audit metadata is written under the DISTINCT
     `mindspec_adr_supersede_*` namespace (revision 7), through

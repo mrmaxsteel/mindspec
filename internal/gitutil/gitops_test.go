@@ -657,3 +657,38 @@ func TestIsInsideWorkTree_RealRepo(t *testing.T) {
 		t.Error("expected outside work tree")
 	}
 }
+
+// --- Bead 9 punch-list B16: defensive error branches ---
+
+// TestAbortMerge_FailureWrapsOutput covers AbortMerge's error branch:
+// a failing `git merge --abort` (e.g. no merge to abort) surfaces the
+// workdir and git's combined output.
+func TestAbortMerge_FailureWrapsOutput(t *testing.T) {
+	calls := swapExec(t, "fatal: There is no merge to abort (MERGE_HEAD missing).", 1)
+
+	err := AbortMerge("/wd")
+	if err == nil {
+		t.Fatal("expected an error when git merge --abort fails")
+	}
+	if !strings.Contains(err.Error(), "aborting merge in /wd") {
+		t.Errorf("error should name the workdir, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no merge to abort") {
+		t.Errorf("error should carry git's output, got: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 git call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wd", "merge", "--abort")
+}
+
+// TestConflictedFiles_GitFailureReturnsNil covers ConflictedFiles'
+// best-effort error branch: a git failure yields nil, never a partial
+// or garbage list.
+func TestConflictedFiles_GitFailureReturnsNil(t *testing.T) {
+	swapExec(t, "", 1)
+
+	if got := ConflictedFiles("/wd"); got != nil {
+		t.Errorf("ConflictedFiles on git failure = %v, want nil (best-effort)", got)
+	}
+}

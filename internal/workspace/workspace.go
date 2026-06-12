@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,38 @@ func ADRDir(root string) string {
 	return filepath.Join(DocsDir(root), "adr")
 }
 
+// TreeRootForSpecDir returns the root of the checkout tree that a
+// SpecDir-resolved spec directory lives in. SpecDir is worktree-aware
+// (ADR-0022 resolution order: worktree → canonical → legacy), but
+// ADRDir is not — it always resolves under the primary checkout. This
+// helper lets validators that received a spec dir inside a spec
+// worktree build an ADR store rooted in the SAME tree, so ADRs
+// committed only on the spec branch are visible (mindspec-ew79).
+//
+// Recognized layouts:
+//   - <tree>/.mindspec/docs/specs/<id>  → returns <tree> (4 levels up)
+//   - <tree>/docs/specs/<id>            → returns <tree> (3 levels up, legacy)
+//
+// Returns "" when specDir does not match either layout; callers should
+// fall back to the primary root.
+func TreeRootForSpecDir(specDir string) string {
+	abs, err := filepath.Abs(specDir)
+	if err != nil {
+		return ""
+	}
+	abs = filepath.Clean(abs)
+	specs := filepath.Dir(abs)
+	docs := filepath.Dir(specs)
+	if filepath.Base(specs) != "specs" || filepath.Base(docs) != "docs" {
+		return ""
+	}
+	mindspec := filepath.Dir(docs)
+	if filepath.Base(mindspec) == ".mindspec" {
+		return filepath.Dir(mindspec)
+	}
+	return mindspec
+}
+
 // ADRFilePath returns the on-disk path for a single ADR file by ID.
 // Returns an error if adrID is not a well-formed ADR identifier.
 func ADRFilePath(root, adrID string) (string, error) {
@@ -272,6 +305,21 @@ func DetectWorktreeContext(dir string) (kind, specID, beadID string) {
 		}
 	}
 	return lastKind, lastSpecID, lastBeadID
+}
+
+// ContextLine renders the worktree context of dir for guard-failure
+// messages (spec 092 Req 8). It names the kind of worktree dir is in
+// (via DetectWorktreeContext) and the path the failing check actually
+// evaluated — often a different directory. Guard call sites append this
+// line to their failure message so an agent that ran a command from the
+// wrong directory sees both where it is and what was checked.
+//
+// The format is fixed:
+//
+//	you are in the <main|spec|bead> worktree (<dir>); this check evaluated <checkedPath>
+func ContextLine(dir, checkedPath string) string {
+	kind, _, _ := DetectWorktreeContext(dir)
+	return fmt.Sprintf("you are in the %s worktree (%s); this check evaluated %s", kind, dir, checkedPath)
 }
 
 func exists(path string) bool {

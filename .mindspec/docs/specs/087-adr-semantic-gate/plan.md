@@ -445,6 +445,11 @@ spec 086 OWNERSHIP.yaml seeding).
    "adr-coverage-missing", fmt.Sprintf("impacted domain %q
    has no cited Accepted ADR; run: mindspec adr create
    --domain %s", d, d))`.
+   *Annotation (2026-06-11): superseded in part by PR #126
+   (tri-state coverage) — revision 11's Proposed-exclusion is
+   reversed: a cited Proposed ADR satisfies coverage with an
+   advisory `adr-coverage-proposed` warning at plan time and
+   an error at impl-approve. See ADR-0032 Amendment.*
 
    Extract the predicate as an exported helper
    `IsDomainCovered(store adr.Store, citations []ADRCitation,

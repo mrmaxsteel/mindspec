@@ -183,6 +183,8 @@ irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex
 - Download from [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases)
 - Build from source: `make build && cp ./bin/mindspec /usr/local/bin/`
 
+Releases from `v0.8.0` onward are cosign-signed — see [SECURITY.md](SECURITY.md#verifying-releases) to verify downloads.
+
 ### Setup
 
 ```bash

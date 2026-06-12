@@ -70,6 +70,28 @@ Three sub-decisions:
    Operators get visibility into the upcoming migration surface
    before any production lifecycle command runs.
 
+### Amendment (2026-06-11, spec 092-agent-contract-hardening, Req 1)
+
+Decision 1's migration trigger is widened from metadata-ABSENT to
+metadata-STALE. Child bead statuses remain the ground truth of the
+lifecycle phase per [ADR-0023](ADR-0023.md) §3/§5 — `mindspec_phase`
+is a trusted CACHE of that derivation, not an independent authority.
+When a lifecycle gate finds the cache stale (the stored phase fails
+the gate while the child-derived phase satisfies it), the gate
+continues its evaluation on the derived phase read-only and
+mechanically reconciles the cache FORWARD — a `bead.MergeMetadata`
+merge-write of `mindspec_phase=<derived>`, emitting one
+`event=lifecycle.phase_reconciled` stderr line — after the last
+pre-terminal gate passes. This stale-cache forward reconcile is a
+second migration trigger beyond the key-absent case handled by
+`phase.EnsureMigrated`: the reconcile is forward-only (it heals only
+when the derived ground truth is ahead of the cache and would unblock
+the gate; gates never rewind a stored phase), and the explicit
+operator path for re-deriving and merge-writing the phase outside a
+lifecycle command is `mindspec repair phase <spec-id>` (spec 092
+Req 19 — raw metadata-replace commands are banned from emitted
+output).
+
 ## Consequences
 
 - (+) Mechanically removes ceremony drift as lifecycle commands

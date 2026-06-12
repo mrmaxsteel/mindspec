@@ -26,10 +26,15 @@ type MockExecutor struct {
 	CommitAllErr            error
 	ChangedFilesResult      []string
 	ChangedFilesErr         error
-	FileAtRefResult         []byte
-	FileAtRefErr            error
-	MergeBaseResult         string
-	MergeBaseErr            error
+	// ChangedFilesFn, when non-nil, takes precedence over
+	// ChangedFilesResult/ChangedFilesErr so tests can return
+	// range-dependent diffs (e.g. the per-bead gate anchoring tests,
+	// which must distinguish the bead range from any other range).
+	ChangedFilesFn  func(base, head string) ([]string, error)
+	FileAtRefResult []byte
+	FileAtRefErr    error
+	MergeBaseResult string
+	MergeBaseErr    error
 }
 
 // MockCall records a single method invocation.
@@ -109,6 +114,9 @@ func (m *MockExecutor) CommitAll(path, msg string) error {
 
 func (m *MockExecutor) ChangedFiles(base, head string) ([]string, error) {
 	m.record("ChangedFiles", base, head)
+	if m.ChangedFilesFn != nil {
+		return m.ChangedFilesFn(base, head)
+	}
 	return m.ChangedFilesResult, m.ChangedFilesErr
 }
 

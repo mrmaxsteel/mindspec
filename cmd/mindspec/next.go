@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -98,17 +99,14 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return fmt.Errorf("checking working tree: %w", err)
 		}
 		if len(userDirt) > 0 {
-			fmt.Fprintln(os.Stderr, "Cannot claim work: workspace has uncommitted user changes:")
-			for _, p := range userDirt {
-				fmt.Fprintf(os.Stderr, "  %s\n", p)
-			}
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "Note: .beads/issues.jsonl is auto-handled (ADR-0025) and does not need stashing.")
-			fmt.Fprintln(os.Stderr, "Recovery steps:")
-			fmt.Fprintln(os.Stderr, "  1. Commit your changes: mindspec complete \"wip\"")
-			fmt.Fprintln(os.Stderr, "  2. Or discard them: git restore .")
-			fmt.Fprintln(os.Stderr, "  3. Then re-run: mindspec next")
-			return fmt.Errorf("dirty working tree")
+			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
+			// worktree-context line and ends with a `recovery:` line. The
+			// old multi-line "Recovery steps: 1..3" stderr block advised
+			// `git restore .` — destructive over the HUMAN's dirt when the
+			// agent merely ran `next` from the wrong directory. The active
+			// worktree (when one exists) is the steer-to target; resolving
+			// it costs bd calls only on this failure path.
+			return next.DirtyTreeFailure(cwd, userDirt, guard.ActiveWorktreePath(root))
 		}
 
 		// Step 1.5: Resolve target spec if ambiguous
@@ -268,9 +266,7 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 				// Completion reminder — ensures agents see "how to finish" right
 				// before they start coding. Without this, the implement template's
 				// completion section may scroll out of small-context models.
-				fmt.Println("---")
-				fmt.Printf("**When done**: `cd` into the worktree, then run `mindspec complete %s \"describe what you did\"` to close this bead.\n", selected.ID)
-				fmt.Println("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.")
+				fmt.Print(completionGuidance(selected.ID))
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
 				if err := emitInstruct(root); err != nil {
@@ -285,6 +281,26 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 
 		return nil
 	},
+}
+
+// completionGuidance renders the "When done" tail appended to the bead
+// context. Spec 092 Req 5 (mindspec-qxsy / mindspec-tjat): the guidance
+// is location-agnostic — it must NOT instruct agents to `cd` into the
+// bead worktree before running `mindspec complete`. The command resolves
+// the bead worktree itself (internal/complete/complete.go) and may be
+// run from the repo root; it removes the bead worktree when it succeeds,
+// so a shell that followed a cd-then-complete instruction is stranded in
+// a deleted directory.
+func completionGuidance(beadID string) string {
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	fmt.Fprintf(&sb, "**When done**: do the work and commit it in the worktree. Then run `mindspec complete %s \"describe what you did\"` to close this bead — run it from the repo root (it resolves the bead worktree itself) and note it will remove the bead worktree when it succeeds.\n", beadID)
+	sb.WriteString("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.\n")
+	// Spec 092 Req 14 (mindspec-pi24): anti-merge-main warning in the
+	// bead-context channel too — the implement template's completion
+	// section may scroll out of small-context models.
+	sb.WriteString("Do NOT merge `main` into the bead branch mid-implementation — bead work flows bead → spec → main, and pulling `main` in creates merge conflicts at `mindspec impl approve`.\n")
+	return sb.String()
 }
 
 // runEmitOnly handles the --emit-only path: build and print primer without claiming.

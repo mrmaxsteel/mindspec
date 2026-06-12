@@ -2,6 +2,7 @@ package complete
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -33,6 +35,15 @@ var (
 	findEpicForBeadFn       = phase.FindEpicForBead
 	completeMergeMetadataFn = bead.MergeMetadata
 	gitUserEmailFn          = bead.GitUserEmail
+	// checkDirtyTreeFn is the ADR-0025 artifact-aware tree classification
+	// shared with `mindspec next` (spec 092 Req 6, DQ-2: direct reuse of
+	// next's classifier — internal/complete already imports internal/next).
+	// Tests swap this to simulate artifact/user dirt without a real repo.
+	checkDirtyTreeFn = next.CheckDirtyTreeDetail
+	// completeGetwdFn feeds the Req 8 worktree-context line on the
+	// user-dirt guard failure (spec 092, mindspec-tjat). Tests swap it
+	// to pin the worktree kind regardless of where `go test` runs.
+	completeGetwdFn = os.Getwd
 	// adrCreateWithIDFn is the package-level seam for the placeholder-
 	// ADR creation step in the --supersede-adr flow. Tests swap this
 	// to avoid writing real ADR files when only asserting flow
@@ -149,8 +160,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Derive spec branch from conventions
 	specBranch := workspace.SpecBranch(specID)
 
-	// 2. Find worktree matching bead (needed for commit/clean-tree paths)
+	// 2. Find worktree matching bead (needed for commit/clean-tree paths).
+	// The same resolution also pins beadHead — the ref the per-bead
+	// gates (step 3.5) measure against: the matched worktree's actual
+	// branch when one exists, else the canonical bead branch name
+	// (mindspec-aqey / mindspec-perm anchoring).
 	var wtPath string
+	beadHead := workspace.BeadBranch(beadID)
 	entries, err := worktreeListFn()
 	if err == nil {
 		expectedName := workspace.BeadWorktreeName(beadID)
@@ -158,6 +174,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		for _, e := range entries {
 			if e.Name == expectedName || e.Branch == expectedBranch {
 				wtPath = e.Path
+				if e.Branch != "" {
+					beadHead = e.Branch
+				}
 				break
 			}
 		}
@@ -175,32 +194,84 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 3. Check clean tree
+	// 3. Artifact-aware clean-tree check (spec 092 Reqs 6/7, ADR-0025,
+	// mindspec-i4ad). The classification is the exact one `mindspec next`
+	// uses (next.CheckDirtyTreeDetail, DQ-2): artifact dirt
+	// (.beads/issues.jsonl) is normalized via `bd export` and never
+	// blocks; only user-authored dirt blocks. checkPath is passed as BOTH
+	// repoRoot and cwd so the normalization targets the same checkout
+	// whose status is being classified (bead.Export writes
+	// <workdir>/.beads/issues.jsonl).
 	checkPath := wtPath
 	if checkPath == "" {
 		checkPath = root // No worktree — check main tree
 	}
-	if err := exec.IsTreeClean(checkPath); err != nil {
+	artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(checkPath, checkPath)
+	if dirtErr != nil {
+		return nil, fmt.Errorf("checking working tree: %w", dirtErr)
+	}
+	if len(userDirt) > 0 {
+		// User dirt blocks even when artifact dirt coexists — the
+		// artifact handling below must never mask user-authored changes.
+		msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
+			strings.Join(userDirt, "\n  "))
 		if wtPath == "" {
-			return nil, fmt.Errorf("%w\nhint: no active bead worktree is set. Run `mindspec next`, `cd` into the printed worktree path, then commit and rerun `mindspec complete`", err)
+			msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
 		}
-		return nil, fmt.Errorf("%w\nhint: use `mindspec complete %s \"describe what you did\"` to auto-commit", err, beadID)
+		// Spec 092 Req 8 (mindspec-tjat): worktree-context line naming
+		// where the command ran vs. the checkout this guard evaluated.
+		// Last body line — it precedes the final recovery line (Req 12
+		// ordering). Getwd failure falls back to checkPath: a degraded
+		// but truthful context line beats no line.
+		cwd, cwdErr := completeGetwdFn()
+		if cwdErr != nil || cwd == "" {
+			cwd = checkPath
+		}
+		msg += "\n" + workspace.ContextLine(cwd, checkPath)
+		if wtPath == "" {
+			return nil, guard.NewFailure(msg, "mindspec next")
+		}
+		// Existing auto-commit hint, now a Req 12 recovery line.
+		return nil, guard.NewFailure(msg,
+			fmt.Sprintf("mindspec complete %s \"describe what you did\"", beadID))
+	}
+	if len(artifactDirt) > 0 {
+		// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
+		// a pre-commit hook re-exported the JSONL during the auto-commit
+		// above) is COMMITTED, not ignored — as a follow-up commit, never
+		// an amend — so the bead→spec merge below operates on a genuinely
+		// clean tree and field workarounds (--no-verify, core.hooksPath)
+		// are never necessary. The commit stays behind the executor
+		// (ADR-0030); CommitAll re-exports the JSONL from Dolt before
+		// staging (ADR-0025 §3), so the committed bytes match Dolt.
+		if err := exec.CommitAll(checkPath, "chore: sync beads artifact"); err != nil {
+			return nil, fmt.Errorf("committing beads artifact sync: %w", err)
+		}
+		// HC-3: self-heal is silent-on-success save one structured line.
+		fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
+			strings.Join(artifactDirt, ","))
 	}
 
-	// 3.5. Spec 086 (F2) doc-sync enforcement gate. Computes the
-	// merge-base of HEAD against the spec branch so the gate sees
-	// exactly the bead's commits, then runs the doc-sync lane. The
+	// 3.5. Spec 086 (F2) doc-sync enforcement gate. The measured range
+	// is anchored to the BEAD's own work: base is the bead branch's
+	// fork point from the spec branch (merge-base(specBranch,
+	// beadHead)) and head is the bead branch tip (beadHead, resolved
+	// at step 2). It is deliberately NOT relative to the ambient HEAD
+	// of whatever checkout this process runs from — that measured
+	// main-side drift from the repo root (false blocks,
+	// mindspec-aqey) and an empty range from the spec worktree
+	// (vacuous passes, mindspec-perm). The whole-branch backstop at
+	// impl approve (internal/approve/impl.go) keeps its explicit
+	// main..specBranch refs and is unaffected. The
 	// `--allow-doc-skew "<reason>"` override allows the gate to pass
 	// without doc updates; the reason is recorded on bead metadata
 	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
-	// (see step 5.5 below). ADR divergence is a forward-compatible
-	// stub (spec 087) — it is called for AST-anchoring +
-	// future-proofing, but currently emits no failures.
-	base, mbErr := exec.MergeBase(specBranch, "HEAD")
+	// (see step 5.5 below).
+	base, mbErr := exec.MergeBase(specBranch, beadHead)
 	if mbErr != nil {
-		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
+		return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
 	}
-	docResult := validate.ValidateDocs(root, base, exec)
+	docResult := validate.ValidateDocsRange(root, base, beadHead, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run — including when
 	// HasFailures() is false and the flow proceeds normally, and on
@@ -220,8 +291,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// The gate runs EXACTLY ONCE (revision 3 — no probe-call). The
 	// findings slice is consumed by the supersede path below to seed
 	// the placeholder ADR's Domains field. The failure-decision is
-	// bypassed when either override or supersede flag is set.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID)
+	// bypassed when either override or supersede flag is set. Same
+	// bead-branch anchoring as doc-sync above: base..beadHead.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead)
 	// Same severity-generic pipe for the ADR-divergence gate: any
 	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
 	// without further wiring. No-op while the gate emits none.
@@ -286,10 +358,58 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
 	// Pass empty msg since we already handled commit+clean-tree above.
 	completeErr := exec.CompleteBead(beadID, specBranch, "")
-	if completeErr != nil {
-		fmt.Printf("Warning: bead cleanup: %v\n", completeErr)
-	} else {
+	if completeErr == nil {
 		result.WorktreeRemoved = true
+	}
+
+	// Spec 092 Req 3c (mindspec-qxsy): CompleteBead may have removed the
+	// very directory this process was invoked from — running `complete`
+	// from inside the bead worktree is supported. Move to the repo root
+	// NOW, before any bd subprocess below: advanceState swallows all bd
+	// errors and would silently degrade to ModeIdle when those
+	// subprocesses are spawned from a deleted cwd, producing a false
+	// `Mode: idle` AND skipping the mindspec_phase sync at step 6.5 —
+	// recreating the exact stale-phase condition the Req 1 reconcile
+	// exists to heal. The chdir lives INSIDE Run (not at the cmd layer)
+	// so the metadata writes and advanceState are protected for every
+	// caller.
+	if chdirErr := os.Chdir(root); chdirErr != nil {
+		fmt.Printf("Warning: could not chdir to repo root %s: %v\n", root, chdirErr)
+	}
+
+	// Spec 092 Req 14(a) incident amendment (2026-06-11 merge-driver
+	// incident): a CompleteBead failure used to be downgraded to
+	// `Warning: bead cleanup: ...` and Run continued to exit 0 —
+	// leaving a closed-but-unmerged bead the lifecycle could not see.
+	// HC-4: the bead→spec merge is part of complete's terminal
+	// mutation, so its failure must surface as a non-zero exit.
+	//
+	// ORDERING DECISION (incident amendment iii): close-before-merge is
+	// KEPT. Closing first keeps Dolt — the single state authority
+	// (ADR-0023) — ahead of the git projection, so the merge commit's
+	// re-exported issues.jsonl (ADR-0025 §3) records the bead as
+	// closed; merge-before-close would invert that and require
+	// splitting CompleteBead's merge from its cleanup. The
+	// closed-but-unmerged window this leaves is made EXPLICIT (named
+	// in the error below, never hidden behind a warning) and
+	// RECONVERGENT: the close step is idempotent (step 4 above
+	// tolerates already-closed beads), so after the operator resolves
+	// the merge, re-running `mindspec complete <bead-id>` converges —
+	// the re-attempted merge sees the bead branch as an ancestor and
+	// cleanup proceeds.
+	if completeErr != nil {
+		msg := fmt.Sprintf(
+			"bead %s is CLOSED in Dolt but completion did NOT finish — its branch may not be merged into %s (closed-but-unmerged).\n"+
+				"this state is recoverable: fix the cause below, then re-run `mindspec complete %s` — the close step is idempotent and completion converges.\n"+
+				"cause: %v",
+			beadID, specBranch, beadID, completeErr)
+		if guard.HasFinalRecoveryLine(msg) {
+			// The executor failure already carries Req 12 recovery
+			// lines (e.g. the conflict-abort failures) — keep them
+			// final instead of stacking a redundant generic one.
+			return nil, errors.New(msg)
+		}
+		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
 	}
 
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
@@ -357,7 +477,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// downstream commands like `mindspec impl approve`.
 	if nextMode != "" {
 		if eid, findErr := phase.FindEpicBySpecID(specID); findErr == nil && eid != "" {
-			_ = bead.MergeMetadata(eid, map[string]interface{}{"mindspec_phase": nextMode})
+			_ = completeMergeMetadataFn(eid, map[string]interface{}{"mindspec_phase": nextMode})
 		}
 	}
 
@@ -380,6 +500,12 @@ func FormatResult(r *Result) string {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead ready: %s\n", r.NextBead)
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", r.NextSpec)
+		// Spec 092 Req 4 (mindspec-qxsy): the implement branch carries
+		// the same cd hint as plan/review — the removed bead worktree
+		// may have been the shell's cwd.
+		if r.WorktreeRemoved && r.SpecWorktree != "" {
+			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)

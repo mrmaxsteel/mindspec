@@ -3,6 +3,7 @@ package adr
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +100,188 @@ func TestParseADR_SupersededBy(t *testing.T) {
 	}
 	if a.SupersededBy != "ADR-0005" {
 		t.Errorf("SupersededBy = %q, want ADR-0005", a.SupersededBy)
+	}
+}
+
+func TestParseADR_StatusQualifiers(t *testing.T) {
+	// Authors append provenance qualifiers to the Status line — e.g. the
+	// live ADR-0029 case "Accepted (Finalized in spec 090 Bead 1)".
+	// Status must normalize to the first token; StatusRaw must preserve
+	// the full value.
+	cases := []struct {
+		name    string
+		raw     string
+		status  string
+		rawWant string
+	}{
+		{
+			name:    "live ADR-0029 case",
+			raw:     "Accepted (Finalized in spec 090 Bead 1)",
+			status:  "Accepted",
+			rawWant: "Accepted (Finalized in spec 090 Bead 1)",
+		},
+		{
+			name:    "withdrawn with supersede note",
+			raw:     "Withdrawn (superseded by ADR-0015 — consolidated supply-chain policy)",
+			status:  "Withdrawn",
+			rawWant: "Withdrawn (superseded by ADR-0015 — consolidated supply-chain policy)",
+		},
+		{
+			name:    "bare accepted",
+			raw:     "Accepted",
+			status:  "Accepted",
+			rawWant: "Accepted",
+		},
+		{
+			name:    "bare proposed",
+			raw:     "Proposed",
+			status:  "Proposed",
+			rawWant: "Proposed",
+		},
+		{
+			name:    "qualifier attached without space",
+			raw:     "Accepted(panel round 3)",
+			status:  "Accepted",
+			rawWant: "Accepted(panel round 3)",
+		},
+		{
+			name:    "trailing punctuation",
+			raw:     "Superseded; see ADR-0010",
+			status:  "Superseded",
+			rawWant: "Superseded; see ADR-0010",
+		},
+		{
+			name:    "proposed with spec qualifier",
+			raw:     "Proposed (part of spec 091)",
+			status:  "Proposed",
+			rawWant: "Proposed (part of spec 091)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			adrDir := filepath.Join(root, "docs", "adr")
+			os.MkdirAll(adrDir, 0o755)
+			content := "# ADR-0099: Qualifier Test\n\n- **Date**: 2026-06-01\n- **Status**: " + tc.raw + "\n- **Domain(s)**: core\n\n## Decision\nX.\n"
+			path := filepath.Join(adrDir, "ADR-0099.md")
+			os.WriteFile(path, []byte(content), 0o644)
+
+			a, err := ParseADR(path)
+			if err != nil {
+				t.Fatalf("ParseADR: %v", err)
+			}
+			if a.Status != tc.status {
+				t.Errorf("Status = %q, want %q", a.Status, tc.status)
+			}
+			if a.StatusRaw != tc.rawWant {
+				t.Errorf("StatusRaw = %q, want %q", a.StatusRaw, tc.rawWant)
+			}
+		})
+	}
+}
+
+func TestParseADR_DomainsParenAware(t *testing.T) {
+	// mindspec-wgcw: the Domain(s) tokenizer must split only on commas
+	// at bracket depth 0 — parenthesized qualifiers with embedded commas
+	// (the lola spec-044 case) are single tokens.
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "lola spec-044 case",
+			raw:  "core, webapp (`app/`, react navigation native-stack), api/app/...",
+			want: []string{"core", "webapp (`app/`, react navigation native-stack)", "api/app/..."},
+		},
+		{
+			name: "simple comma list unchanged",
+			raw:  "core, context-system, workflow",
+			want: []string{"core", "context-system", "workflow"},
+		},
+		{
+			name: "nested parens",
+			raw:  "alpha (outer (inner, deep), tail), beta",
+			want: []string{"alpha (outer (inner, deep), tail)", "beta"},
+		},
+		{
+			name: "posix-class brackets and braces",
+			raw:  "regex ([[:alpha:]]{2,4}, [[:digit:]]+), core",
+			want: []string{"regex ([[:alpha:]]{2,4}, [[:digit:]]+)", "core"},
+		},
+		{
+			name: "square brackets",
+			raw:  "matrix [a, b], vector",
+			want: []string{"matrix [a, b]", "vector"},
+		},
+		{
+			name: "unbalanced open paren degrades to one token",
+			raw:  "broken (no close, here, more",
+			want: []string{"broken (no close, here, more"},
+		},
+		{
+			name: "unmatched close bracket clamps at depth 0",
+			raw:  "weird), still, splits",
+			want: []string{"weird)", "still", "splits"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			adrDir := filepath.Join(root, "docs", "adr")
+			os.MkdirAll(adrDir, 0o755)
+			content := "# ADR-0098: Domain Tokenizer Test\n\n- **Date**: 2026-06-01\n- **Status**: Accepted\n- **Domain(s)**: " + tc.raw + "\n\n## Decision\nX.\n"
+			path := filepath.Join(adrDir, "ADR-0098.md")
+			os.WriteFile(path, []byte(content), 0o644)
+
+			a, err := ParseADR(path)
+			if err != nil {
+				t.Fatalf("ParseADR: %v", err)
+			}
+			if len(a.Domains) != len(tc.want) {
+				t.Fatalf("Domains = %q (len %d), want %q (len %d)", a.Domains, len(a.Domains), tc.want, len(tc.want))
+			}
+			for i := range tc.want {
+				// ParseADR lowercases and trims each token.
+				wantNorm := strings.ToLower(strings.TrimSpace(tc.want[i]))
+				if a.Domains[i] != wantNorm {
+					t.Errorf("Domains[%d] = %q, want %q", i, a.Domains[i], wantNorm)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterADRs_QualifiedAcceptedStatus(t *testing.T) {
+	// A parsed ADR whose Status line carries a qualifier must still be
+	// treated as Accepted by FilterADRs (normalization happens at parse
+	// time, so the in-memory Status is already bare).
+	root := t.TempDir()
+	adrDir := filepath.Join(root, "docs", "adr")
+	os.MkdirAll(adrDir, 0o755)
+	content := "# ADR-0029: Supply Chain\n\n- **Date**: 2026-05-01\n- **Status**: Accepted (Finalized in spec 090 Bead 1)\n- **Domain(s)**: workflow\n\n## Decision\nY.\n"
+	os.WriteFile(filepath.Join(adrDir, "ADR-0029.md"), []byte(content), 0o644)
+
+	adrs, err := ScanADRs(root)
+	if err != nil {
+		t.Fatalf("ScanADRs: %v", err)
+	}
+	filtered := FilterADRs(adrs, []string{"workflow"})
+	if len(filtered) != 1 {
+		t.Fatalf("got %d filtered ADRs, want 1 (qualified Accepted status must count)", len(filtered))
+	}
+}
+
+func TestDisplayStatus(t *testing.T) {
+	withRaw := ADR{Status: "Accepted", StatusRaw: "Accepted (note)"}
+	if got := withRaw.DisplayStatus(); got != "Accepted (note)" {
+		t.Errorf("DisplayStatus = %q, want raw form", got)
+	}
+	bare := ADR{Status: "Proposed"}
+	if got := bare.DisplayStatus(); got != "Proposed" {
+		t.Errorf("DisplayStatus = %q, want normalized fallback", got)
 	}
 }
 

@@ -16,6 +16,9 @@ import (
 var specCmd = &cobra.Command{
 	Use:   "spec",
 	Short: "Spec lifecycle commands",
+	// Spec 092 Req 10b: typos of the deprecated `approve` verb suggest
+	// the noun-verb command families.
+	SuggestFor: []string{"approve", "aprove"},
 }
 
 var specCreateCmd = &cobra.Command{

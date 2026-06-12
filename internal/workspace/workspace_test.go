@@ -504,6 +504,51 @@ func TestDetectWorktreeContext_Bead(t *testing.T) {
 	}
 }
 
+// ContextLine (spec 092 Req 8): exact-format assertions for all three
+// worktree kinds.
+func TestContextLine(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		dir         string
+		checkedPath string
+		want        string
+	}{
+		{
+			name:        "main",
+			dir:         "/Users/dev/project",
+			checkedPath: "/Users/dev/project",
+			want:        "you are in the main worktree (/Users/dev/project); this check evaluated /Users/dev/project",
+		},
+		{
+			name:        "spec",
+			dir:         "/Users/dev/project/.worktrees/worktree-spec-058-zero-git",
+			checkedPath: "/Users/dev/project",
+			want:        "you are in the spec worktree (/Users/dev/project/.worktrees/worktree-spec-058-zero-git); this check evaluated /Users/dev/project",
+		},
+		{
+			name:        "bead",
+			dir:         "/Users/dev/project/.worktrees/worktree-mindspec-abc123",
+			checkedPath: "/Users/dev/project/.worktrees/worktree-mindspec-abc123",
+			want:        "you are in the bead worktree (/Users/dev/project/.worktrees/worktree-mindspec-abc123); this check evaluated /Users/dev/project/.worktrees/worktree-mindspec-abc123",
+		},
+		{
+			name:        "nested bead worktree resolves to innermost kind",
+			dir:         "/Users/dev/project/.worktrees/worktree-spec-092-x/.worktrees/worktree-mindspec-fwo5.1",
+			checkedPath: "/Users/dev/project",
+			want:        "you are in the bead worktree (/Users/dev/project/.worktrees/worktree-spec-092-x/.worktrees/worktree-mindspec-fwo5.1); this check evaluated /Users/dev/project",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ContextLine(tc.dir, tc.checkedPath); got != tc.want {
+				t.Errorf("ContextLine mismatch:\n got: %q\nwant: %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	root := "/project"
 	if got := CanonicalDocsDir(root); got != filepath.Join(root, ".mindspec", "docs") {
@@ -511,5 +556,51 @@ func TestCanonicalAndLegacyDocsDir(t *testing.T) {
 	}
 	if got := LegacyDocsDir(root); got != filepath.Join(root, "docs") {
 		t.Errorf("LegacyDocsDir: got %q", got)
+	}
+}
+
+func TestTreeRootForSpecDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		specDir string
+		want    string
+	}{
+		{
+			name:    "canonical layout in spec worktree",
+			specDir: "/repo/.worktrees/worktree-spec-091-x/.mindspec/docs/specs/091-x",
+			want:    "/repo/.worktrees/worktree-spec-091-x",
+		},
+		{
+			name:    "canonical layout in primary checkout",
+			specDir: "/repo/.mindspec/docs/specs/091-x",
+			want:    "/repo",
+		},
+		{
+			name:    "legacy layout",
+			specDir: "/repo/docs/specs/091-x",
+			want:    "/repo",
+		},
+		{
+			name:    "legacy layout in spec worktree",
+			specDir: "/repo/.worktrees/worktree-spec-091-x/docs/specs/091-x",
+			want:    "/repo/.worktrees/worktree-spec-091-x",
+		},
+		{
+			name:    "trailing slash cleaned",
+			specDir: "/repo/.mindspec/docs/specs/091-x/",
+			want:    "/repo",
+		},
+		{
+			name:    "unrecognized layout",
+			specDir: "/repo/somewhere/091-x",
+			want:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TreeRootForSpecDir(tc.specDir); got != tc.want {
+				t.Errorf("TreeRootForSpecDir(%q) = %q, want %q", tc.specDir, got, tc.want)
+			}
+		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
+	pluginmindspec "github.com/mrmaxsteel/mindspec/plugins/mindspec"
 )
 
 const (
@@ -509,7 +510,27 @@ func fileExists(path string) bool {
 
 // skillFiles returns the SKILL.md contents keyed by skill directory name.
 // Shared across Codex and Copilot setup (both use .agents/skills/).
+//
+// The returned map merges two sources:
+//   - The 5 lifecycle gate skills inlined below (ms-spec-create,
+//     ms-spec-approve, ms-plan-approve, ms-impl-approve, ms-spec-status).
+//   - The 11 plugin skills embedded from plugins/mindspec/skills/ via
+//     pluginmindspec.SkillFiles() (ms-bead-* and ms-panel-* and ms-spec-*).
+//
+// Lifecycle skills always win on key collision (they're the canonical
+// authority); the plugin merge is additive.
 func skillFiles() map[string]string {
+	out := pluginmindspec.SkillFiles()
+	for name, content := range lifecycleSkillFiles() {
+		out[name] = content
+	}
+	return out
+}
+
+// lifecycleSkillFiles returns the 5 spec-lifecycle gate skills as raw-string
+// literals. These are the canonical authority — they win on key collision
+// with the plugin-embedded skills in skillFiles().
+func lifecycleSkillFiles() map[string]string {
 	return map[string]string{
 		"ms-spec-create": `---
 name: ms-spec-create
@@ -532,7 +553,7 @@ description: Approve a spec and transition to Plan Mode
 # Spec Approval
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve spec <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
+2. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
 3. If approval fails, show the validation errors and help the user fix them
 4. On success: immediately begin planning (the approval is the authorization)
 `,
@@ -545,7 +566,7 @@ description: Approve a plan and transition toward Implementation Mode
 # Plan Approval
 
 1. Identify the active spec/plan via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec approve plan <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
+2. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
 3. If approval fails, show the validation errors and help the user fix them
 4. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
 `,
@@ -559,7 +580,7 @@ description: Approve implementation and close out the spec lifecycle
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
 2. If not in review mode, run ` + "`mindspec complete`" + ` first to transition
-3. Run ` + "`mindspec approve impl <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
+3. Run ` + "`mindspec impl approve <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
 4. If approval fails, show the error and help the user resolve it
 5. On success: run the session close protocol:
    - ` + "`bd sync`" + `
@@ -597,6 +618,8 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 ## Skills
 
+### Spec lifecycle gates
+
 | Skill | Purpose |
 |:------|:--------|
 | ` + "`/ms-spec-create`" + ` | Create a new specification (enters Spec Mode) |
@@ -604,6 +627,32 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
 | ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
+
+### Bead lifecycle
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-next`" + ` | Pick the next ready bead, claim it, set up the worktree |
+| ` + "`/ms-bead-prep`" + ` | Draft a pre-staged implementation prompt at ` + "`review/prep/bead<N>_impl_prompt.md`" + ` |
+| ` + "`/ms-bead-impl`" + ` | Dispatch an implementation subagent for the claimed bead |
+| ` + "`/ms-bead-merge`" + ` | Run ` + "`mindspec complete`" + ` once the panel has approved |
+
+### Review panel
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-panel-create`" + ` | Initialize the panel directory + BRIEF.md for 6 reviewers |
+| ` + "`/ms-panel-run`" + ` | Launch 3 Claude Agents + 3 Codex sessions in parallel; collect verdicts |
+| ` + "`/ms-panel-tally`" + ` | Read all 6 verdict JSONs and consolidate ` + "`concrete_changes_required`" + ` |
+| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
+
+### Orchestrators
+
+| Skill | Purpose |
+|:------|:--------|
+| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: impl → panel → fix → re-panel → merge |
+| ` + "`/ms-spec-autopilot`" + ` | Whole spec: cycle every bead until the spec is done |
+| ` + "`/ms-spec-final-review`" + ` | Final panel of the whole spec branch vs main, before ` + "`/ms-impl-approve`" + ` |
 `
 
 // claudeMDFull is written when CLAUDE.md doesn't exist.

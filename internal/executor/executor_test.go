@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -833,4 +834,176 @@ func isAncestorIn(t *testing.T, dir, anc, desc string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", anc, desc)
 	return cmd.Run() == nil
+}
+
+// --- Spec 092 Bead 4: withWorkingDir cwd safety (Req 3a, mindspec-qxsy) ---
+
+// captureStderrAround swaps os.Stderr for a pipe while fn runs and
+// returns whatever fn wrote to it.
+func captureStderrAround(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = origStderr
+	stderrBytes, _ := io.ReadAll(r)
+	return string(stderrBytes)
+}
+
+// TestWithWorkingDir_RemovedCwdRemainsAtDirSilently covers the hardened
+// restore path for the EXPECTED case (panel R2-2): fn deletes the
+// directory the process was invoked from — e.g. FinalizeEpic removing
+// the spec worktree — so the deferred restore cannot chdir back. The
+// process must remain at dir (never an undefined cwd) and stay SILENT:
+// the removal was the operation's own doing, not a failure.
+func TestWithWorkingDir_RemovedCwdRemainsAtDirSilently(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "target")
+	doomed := filepath.Join(base, "doomed")
+	for _, d := range []string{dir, doomed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(doomed); err != nil {
+		t.Fatalf("chdir doomed: %v", err)
+	}
+
+	var wwdErr error
+	stderr := captureStderrAround(t, func() {
+		wwdErr = withWorkingDir(dir, func() error {
+			// fn removes the invocation directory — the deferred restore
+			// will fail in the EXPECTED way.
+			return os.RemoveAll(doomed)
+		})
+	})
+
+	if wwdErr != nil {
+		t.Fatalf("withWorkingDir returned error: %v", wwdErr)
+	}
+
+	// The process remains at dir — never an undefined cwd.
+	wd, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("process left in unresolvable cwd: %v", wdErr)
+	}
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if realWd != realDir {
+		t.Errorf("cwd after restore failure: got %q, want dir %q", wd, dir)
+	}
+
+	// Expected removal → no cwd_restore_failed noise (it would fire on
+	// every successful impl approve run from the spec worktree).
+	if strings.Contains(stderr, "event=executor.cwd_restore_failed") {
+		t.Errorf("cwd_restore_failed emitted for an expected removal; stderr: %q", stderr)
+	}
+}
+
+// TestWithWorkingDir_GenuineRestoreFailureWarns covers the other half of
+// panel R2-2: the original cwd still EXISTS but cannot be re-entered
+// (execute permission revoked while fn ran). That is a genuine restore
+// failure — the process remains at dir and the structured
+// `event=executor.cwd_restore_failed dir=<dir>` warning is emitted.
+func TestWithWorkingDir_GenuineRestoreFailureWarns(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based chdir denial does not apply")
+	}
+
+	base := t.TempDir()
+	dir := filepath.Join(base, "target")
+	locked := filepath.Join(base, "locked")
+	for _, d := range []string{dir, locked} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	// Restore permissions so TempDir cleanup succeeds.
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(locked); err != nil {
+		t.Fatalf("chdir locked: %v", err)
+	}
+
+	var wwdErr error
+	stderr := captureStderrAround(t, func() {
+		wwdErr = withWorkingDir(dir, func() error {
+			// Revoke search permission on the original cwd: it still
+			// exists (stat succeeds) but chdir back fails with EACCES.
+			return os.Chmod(locked, 0o000)
+		})
+	})
+
+	if wwdErr != nil {
+		t.Fatalf("withWorkingDir returned error: %v", wwdErr)
+	}
+
+	// The process remains at dir — never an undefined cwd.
+	wd, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("process left in unresolvable cwd: %v", wdErr)
+	}
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if realWd != realDir {
+		t.Errorf("cwd after restore failure: got %q, want dir %q", wd, dir)
+	}
+
+	want := "event=executor.cwd_restore_failed dir=" + dir
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr should contain %q; got: %q", want, stderr)
+	}
+}
+
+// TestWithWorkingDir_RestoresOriginalCwd pins the unchanged happy path:
+// when the original cwd survives fn, it is restored and no
+// cwd_restore_failed warning is emitted.
+func TestWithWorkingDir_RestoresOriginalCwd(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "target")
+	home := filepath.Join(base, "home")
+	for _, d := range []string{dir, home} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origWd) })
+	if err := os.Chdir(home); err != nil {
+		t.Fatalf("chdir home: %v", err)
+	}
+
+	var cwdInFn string
+	if err := withWorkingDir(dir, func() error {
+		cwdInFn, _ = os.Getwd()
+		return nil
+	}); err != nil {
+		t.Fatalf("withWorkingDir: %v", err)
+	}
+
+	realInFn, _ := filepath.EvalSymlinks(cwdInFn)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if realInFn != realDir {
+		t.Errorf("cwd inside fn: got %q, want %q", cwdInFn, dir)
+	}
+
+	wd, _ := os.Getwd()
+	realWd, _ := filepath.EvalSymlinks(wd)
+	realHome, _ := filepath.EvalSymlinks(home)
+	if realWd != realHome {
+		t.Errorf("cwd after return: got %q, want restored %q", wd, home)
+	}
 }

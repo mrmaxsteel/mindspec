@@ -373,8 +373,8 @@ func detectSkipNext(events []ActionEvent) []WrongActionResult {
 }
 
 // lifecycleTurnSet returns the set of turn numbers that contain a mindspec
-// lifecycle command (spec-init, approve, complete). Commits in these turns
-// are side-effects of the lifecycle operation, not agent code.
+// lifecycle command (spec-init, spec create, approve, complete). Commits in
+// these turns are side-effects of the lifecycle operation, not agent code.
 func lifecycleTurnSet(events []ActionEvent) map[int]bool {
 	turns := make(map[int]bool)
 	lifecycleVerbs := []string{"approve", "spec-init", "complete"}
@@ -388,6 +388,12 @@ func lifecycleTurnSet(events []ActionEvent) map[int]bool {
 				turns[e.Turn] = true
 				break
 			}
+		}
+		// Spec 092 Req 17: `mindspec spec create` is a lifecycle command
+		// too — spec-phase worktree commits in its turn are side-effects,
+		// not agent implementation code.
+		if containsAll(args, "spec", "create") {
+			turns[e.Turn] = true
 		}
 	}
 	return turns
@@ -620,13 +626,22 @@ func flatArgs(args map[string]string) []string {
 	return result
 }
 
-func containsAll(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
+// containsAll reports whether every target appears (exact-token match, any
+// order) in items. With a single target it is a plain membership check.
+func containsAll(items []string, targets ...string) bool {
+	for _, target := range targets {
+		found := false
+		for _, item := range items {
+			if item == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // cmdKey returns a stable key for a command+args pair, used to detect retries.

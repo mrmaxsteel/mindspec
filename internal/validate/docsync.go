@@ -31,7 +31,22 @@ const missingSourceGlobsMsg = "source_globs not set in .mindspec/config.yaml —
 	"run 'mindspec source populate' to declare your own"
 
 // ValidateDocs checks for doc-sync compliance by comparing changed source files
-// against documentation updates in the same diff.
+// against documentation updates in the same diff. The diff is the working
+// tree vs diffRef — the historical semantics every pre-existing call site
+// (impl approve run from the spec worktree, `mindspec validate docs`)
+// relies on. As a thin wrapper over ValidateDocsRange it inherits the
+// spec 091 source_globs override semantics described there.
+func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
+	return ValidateDocsRange(root, diffRef, "", exec)
+}
+
+// ValidateDocsRange is ValidateDocs over an explicit base..head ref range.
+// When head is non-empty the diff is base..head — independent of whatever
+// checkout the process runs from. This is the per-bead gate's anchoring
+// (mindspec-aqey / mindspec-perm): complete.Run passes the bead branch's
+// fork point as base and the bead branch tip as head, so the gate measures
+// exactly the bead's work. head == "" preserves the working-tree-vs-base
+// semantics of ValidateDocs.
 //
 // Source classification honors the operator-declared `source_globs`
 // from .mindspec/config.yaml with FULL-OVERRIDE semantics (spec 091
@@ -39,14 +54,14 @@ const missingSourceGlobsMsg = "source_globs not set in .mindspec/config.yaml —
 // the built-in rule); an empty or absent list leaves the built-in
 // isSourceFile classifier running byte-identically to pre-091 (HC-7).
 // The override decision point is classifyChangesWithGlobs below.
-func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
+func ValidateDocsRange(root, base, head string, exec executor.Executor) *Result {
 	r := &Result{SubCommand: "docs"}
 
-	if diffRef == "" {
-		diffRef = "HEAD~1"
+	if base == "" {
+		base = "HEAD~1"
 	}
 
-	changed, err := getChangedFiles(exec, diffRef)
+	changed, err := getChangedFiles(exec, base, head)
 	if err != nil {
 		r.AddError("git-diff", fmt.Sprintf("cannot get changed files: %v", err))
 		return r
@@ -243,12 +258,21 @@ func checkUnclaimedSource(r *Result, root string, globs, source []string) {
 	))
 }
 
-// getChangedFiles returns the list of changed files between the working tree
-// and ref, routing through the Executor boundary instead of shelling out.
-func getChangedFiles(exec executor.Executor, ref string) ([]string, error) {
-	files, err := exec.ChangedFiles("", ref)
+// getChangedFiles returns the list of changed files for the requested
+// range, routing through the Executor boundary instead of shelling out.
+// head == "" means "working tree vs base" (the executor's empty-base
+// idiom); a non-empty head means the committed range base..head.
+func getChangedFiles(exec executor.Executor, base, head string) ([]string, error) {
+	if head == "" {
+		files, err := exec.ChangedFiles("", base)
+		if err != nil {
+			return nil, fmt.Errorf("changed files for %s: %w", base, err)
+		}
+		return files, nil
+	}
+	files, err := exec.ChangedFiles(base, head)
 	if err != nil {
-		return nil, fmt.Errorf("changed files for %s: %w", ref, err)
+		return nil, fmt.Errorf("changed files for %s..%s: %w", base, head, err)
 	}
 	return files, nil
 }

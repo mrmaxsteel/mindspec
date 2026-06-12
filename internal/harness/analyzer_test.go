@@ -326,6 +326,7 @@ func TestSkipNext_LifecycleTurnCommitExempt(t *testing.T) {
 		lcArgs []string
 	}{
 		{"spec-init", "spec-init", []string{"spec-init", "001-calc", "--title", "Calculator"}},
+		{"spec-create", "spec", []string{"spec", "create", "001-calc", "--title", "Calculator"}},
 		{"approve-spec", "approve", []string{"approve", "spec", "001-greeting"}},
 		{"approve-plan", "approve", []string{"approve", "plan", "001-greeting"}},
 		{"approve-impl", "approve", []string{"approve", "impl", "001-done"}},
@@ -347,6 +348,69 @@ func TestSkipNext_LifecycleTurnCommitExempt(t *testing.T) {
 					len(results), results)
 			}
 		})
+	}
+}
+
+// TestLifecycleTurnSet_SpecCreate pins spec 092 Req 17: `mindspec spec
+// create` turns are lifecycle turns, so spec-phase worktree commits in the
+// same turn are side-effects — not reliant solely on the surrounding
+// early-bail-out / lastApproveIdx exemptions.
+func TestLifecycleTurnSet_SpecCreate(t *testing.T) {
+	events := []ActionEvent{
+		{Turn: 3, ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"spec", "create", "001-calc", "--title", "Calculator"}},
+		// Control: a non-lifecycle mindspec command must NOT mark its turn.
+		{Turn: 5, ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"state", "show"}},
+		// Control: `spec` without `create` (e.g. spec list) is not lifecycle.
+		{Turn: 7, ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"spec", "list"}},
+	}
+	turns := lifecycleTurnSet(events)
+	if !turns[3] {
+		t.Error("lifecycleTurnSet did not match `mindspec spec create` turn")
+	}
+	if turns[5] {
+		t.Error("lifecycleTurnSet wrongly matched `mindspec state show` turn")
+	}
+	if turns[7] {
+		t.Error("lifecycleTurnSet wrongly matched `mindspec spec list` turn")
+	}
+}
+
+// TestSkipNext_SpecCreateTurnCommitExempt exercises the Req 17 matcher
+// through detectSkipNext with a prior approve, so neither the early
+// bail-out nor the before-approve exemption masks the lifecycleTurnSet
+// path: the commit sits AFTER the last approve, in the spec-create turn.
+func TestSkipNext_SpecCreateTurnCommitExempt(t *testing.T) {
+	events := []ActionEvent{
+		{Turn: 1, Phase: "plan", ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"approve", "plan", "001-old"}},
+		{Turn: 2, Phase: "spec", ActionType: "command", Command: "mindspec",
+			ArgsList: []string{"spec", "create", "002-next", "--title", "Next"}},
+		{Turn: 2, Phase: "spec", ActionType: "command", Command: "git",
+			ArgsList: []string{"commit", "-m", "spec: scaffold 002-next"}},
+	}
+	results := detectSkipNext(events)
+	if len(results) != 0 {
+		t.Errorf("expected no violation for commit in spec-create turn, got %d: %v",
+			len(results), results)
+	}
+}
+
+func TestContainsAllMultipleTargets(t *testing.T) {
+	args := []string{"spec", "create", "001-x"}
+	if !containsAll(args, "spec", "create") {
+		t.Error("containsAll should match both tokens in any position")
+	}
+	if !containsAll(args, "create", "spec") {
+		t.Error("containsAll is order-independent")
+	}
+	if containsAll(args, "spec", "approve") {
+		t.Error("containsAll must require every target")
+	}
+	if containsAll(args, "crea") {
+		t.Error("containsAll is exact-token match, not substring")
 	}
 }
 

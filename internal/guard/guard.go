@@ -124,7 +124,11 @@ func checkCWDWithCache(c *phase.Cache, root string) error {
 	// If CWD is under the main repo root (not the worktree), block.
 	rootAbs, _ := filepath.Abs(root)
 	if strings.HasPrefix(cwdAbs, rootAbs) {
-		return fmt.Errorf("mindspec: CWD is the main worktree. Switch to:\n  cd %s", gs.ActiveWorktree)
+		// Req 12 (spec 092): guard failures end with a `recovery:` line.
+		return NewFailure(
+			fmt.Sprintf("mindspec: CWD is the main worktree; the active worktree is %s", gs.ActiveWorktree),
+			"cd "+gs.ActiveWorktree,
+		)
 	}
 
 	return nil

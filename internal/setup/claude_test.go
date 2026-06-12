@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -18,9 +19,10 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should create settings.json, 5 skill files, and CLAUDE.md = 7 items
-	if len(r.Created) != 7 {
-		t.Errorf("expected 7 created items, got %d: %v", len(r.Created), r.Created)
+	// Should create settings.json, 5 lifecycle skill files, 11 plugin skill
+	// files, and CLAUDE.md = 18 items.
+	if len(r.Created) != 18 {
+		t.Errorf("expected 18 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -45,8 +47,16 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Error("PreToolUse should not be present (guard hooks removed)")
 	}
 
-	// Verify skill files exist
-	for _, name := range []string{"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve", "ms-spec-status"} {
+	// Verify skill files exist — both the 5 lifecycle gates and the 11
+	// plugin skills (embedded from plugins/mindspec/skills/).
+	for _, name := range []string{
+		// Lifecycle gates
+		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve", "ms-spec-status",
+		// Plugin skills (bead/panel/orchestrator)
+		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-bead-merge", "ms-bead-next",
+		"ms-bead-prep", "ms-panel-create", "ms-panel-run", "ms-panel-tally",
+		"ms-spec-autopilot", "ms-spec-final-review",
+	} {
 		skillPath := filepath.Join(root, ".claude", "skills", name, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 			t.Errorf("missing skill file: %s", name)
@@ -87,8 +97,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 7 {
-		t.Errorf("second run should skip 7 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 18 {
+		t.Errorf("second run should skip 18 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 
@@ -679,5 +689,51 @@ func TestRunClaude_CheckModeScansBeadsConfigWithoutMutating(t *testing.T) {
 	data, _ := os.ReadFile(cfgPath)
 	if string(data) != original {
 		t.Errorf("check mode modified config.yaml:\nwant: %q\ngot:  %q", original, string(data))
+	}
+}
+
+// deprecatedApproveOrder is the hardened Req 11 pattern from
+// internal/instruct/instruct_test.go: matches any verb-noun
+// `mindspec approve ...` plus bare `approve spec|plan|impl` so partial
+// regressions can't sneak back in; word boundaries keep canonical
+// noun-verb forms (`mindspec spec approve`) from matching.
+var deprecatedApproveOrder = regexp.MustCompile(`(?i)mindspec\s+approve\b|\bapprove\s+(spec|plan|impl)\b`)
+
+// TestLifecycleSkills_CanonicalApproveOrder pins spec 092 Req 11 on the
+// setup-generated lifecycle skills (Bead 9 verification stop-#3, Bead 8
+// panel R2 minor): the inlined ms-*-approve SKILL.md contents taught the
+// deprecated verb-noun order, were installed agent-visible into every
+// project (and harness sandbox) by setup, and seeded the deprecated
+// `approve impl` in the approval_gate_discovery scenario. Every rendered
+// lifecycle skill must be free of the deprecated order AND each approve
+// skill must teach its canonical noun-verb command.
+//
+// NOTE (boundary): this fixes the TEMPLATE only. Existing installs keep
+// their old skill files — setup's create-or-skip semantics never refresh
+// them; the provenance-gated refresh that propagates wording fixes to
+// existing installs is jkhd.3 Req 19's charter, not this test's.
+func TestLifecycleSkills_CanonicalApproveOrder(t *testing.T) {
+	skills := lifecycleSkillFiles()
+
+	for name, content := range skills {
+		if m := deprecatedApproveOrder.FindString(content); m != "" {
+			t.Errorf("lifecycle skill %s teaches deprecated approve order %q (spec 092 Req 11)\n--- content ---\n%s\n--- end ---", name, m, content)
+		}
+	}
+
+	wantCanonical := map[string]string{
+		"ms-spec-approve": "mindspec spec approve <id>",
+		"ms-plan-approve": "mindspec plan approve <id>",
+		"ms-impl-approve": "mindspec impl approve <id>",
+	}
+	for name, want := range wantCanonical {
+		content, ok := skills[name]
+		if !ok {
+			t.Errorf("lifecycle skill %s missing from lifecycleSkillFiles()", name)
+			continue
+		}
+		if !strings.Contains(content, want) {
+			t.Errorf("lifecycle skill %s must teach the canonical %q; content:\n%s", name, want, content)
+		}
 	}
 }

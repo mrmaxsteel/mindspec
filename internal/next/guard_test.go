@@ -3,7 +3,10 @@ package next
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
 // --- classifyDirty ---
@@ -274,5 +277,245 @@ func TestCheckDirtyTree_PorcelainFailurePropagates(t *testing.T) {
 	_, err := CheckDirtyTree("/repo", "/repo")
 	if err == nil {
 		t.Fatal("expected error when git status fails")
+	}
+}
+
+// --- CheckDirtyTreeDetail (spec 092 Reqs 6/7, mindspec-i4ad) ---
+
+func TestCheckDirtyTreeDetail_ResidualArtifactDirtExposed(t *testing.T) {
+	// The artifact diff survives bd export (legitimate Dolt change, or a
+	// pre-commit hook re-export). Detail exposes the residual so
+	// `mindspec complete` can fold it into a follow-up commit.
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n",
+		" M .beads/issues.jsonl\n",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(artifactDirt, []string{".beads/issues.jsonl"}) {
+		t.Errorf("artifactDirt = %v, want [.beads/issues.jsonl]", artifactDirt)
+	}
+	if len(userDirt) != 0 {
+		t.Errorf("userDirt = %v, want empty", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_NormalizedArtifactDirtIsEmpty(t *testing.T) {
+	// Stale throttled export: bd export normalizes the diff away. No
+	// residual artifact dirt — the caller has nothing to commit.
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n",
+		"",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(artifactDirt) != 0 {
+		t.Errorf("artifactDirt = %v, want empty after normalization", artifactDirt)
+	}
+	if len(userDirt) != 0 {
+		t.Errorf("userDirt = %v, want empty", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_MixedDirtReturnsBoth(t *testing.T) {
+	g := &fakeGuard{porcelainResponses: []string{
+		" M .beads/issues.jsonl\n M foo.txt\n",
+		" M .beads/issues.jsonl\n M foo.txt\n",
+	}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(artifactDirt, []string{".beads/issues.jsonl"}) {
+		t.Errorf("artifactDirt = %v", artifactDirt)
+	}
+	if !reflect.DeepEqual(userDirt, []string{"foo.txt"}) {
+		t.Errorf("userDirt = %v", userDirt)
+	}
+}
+
+func TestCheckDirtyTreeDetail_UserDirtOnly_NoArtifactNoExport(t *testing.T) {
+	g := &fakeGuard{porcelainResponses: []string{" M foo.txt\n"}}
+	g.install(t)
+
+	artifactDirt, userDirt, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(artifactDirt) != 0 {
+		t.Errorf("artifactDirt = %v, want empty", artifactDirt)
+	}
+	if !reflect.DeepEqual(userDirt, []string{"foo.txt"}) {
+		t.Errorf("userDirt = %v", userDirt)
+	}
+	if g.exportCalled {
+		t.Error("export should NOT run when no artifact path is dirty")
+	}
+}
+
+// TestCheckDirtyTreeDetail_SecondPorcelainFailurePropagates covers the
+// post-export re-snapshot error branch (the SECOND statusPorcelainFn
+// call, after `bd export` normalized the artifact) — Bead 9 punch-list
+// B11. The first snapshot succeeds with artifact dirt; the re-snapshot
+// fails and must propagate, after the export ran.
+func TestCheckDirtyTreeDetail_SecondPorcelainFailurePropagates(t *testing.T) {
+	origStatus := statusPorcelainFn
+	origExport := exportBeadsFn
+	t.Cleanup(func() {
+		statusPorcelainFn = origStatus
+		exportBeadsFn = origExport
+	})
+
+	calls := 0
+	statusPorcelainFn = func(cwd string) (string, error) {
+		calls++
+		if calls == 1 {
+			return " M .beads/issues.jsonl\n", nil
+		}
+		return "", fmt.Errorf("git status boom after export")
+	}
+	exported := false
+	exportBeadsFn = func(workdir string) error { exported = true; return nil }
+
+	_, _, err := CheckDirtyTreeDetail("/repo", "/repo")
+	if err == nil {
+		t.Fatal("expected the post-export status failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "git status boom after export") {
+		t.Errorf("error should carry the second status failure, got: %v", err)
+	}
+	if !exported {
+		t.Error("bd export must have run before the failing re-snapshot")
+	}
+	if calls != 2 {
+		t.Errorf("statusPorcelainFn calls = %d, want 2", calls)
+	}
+}
+
+// --- DirtyTreeFailure (spec 092 Reqs 8/12, mindspec-tjat) ---
+//
+// Per-site recovery-convention tests (Req 21 mirror — see
+// internal/guard/recovery_convention_test.go): every produced failure
+// satisfies guard.HasFinalRecoveryLine, carries the Req 8
+// worktree-context line as the last body line, and never advises
+// stash/restore/checkout — main's pre-seeded dirt must survive the
+// wrong_directory_guard_recovery scenario untouched.
+
+func assertDirtyTreeFailureInvariants(t *testing.T, msg string) {
+	t.Helper()
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("dirty-tree failure must end with a recovery line (Req 12/21): %q", msg)
+	}
+	if strings.Contains(msg, "Recovery steps:") {
+		t.Errorf("dirty-tree failure still contains the pre-092 \"Recovery steps:\" block: %q", msg)
+	}
+	for _, banned := range []string{"git stash", "git restore", "git checkout"} {
+		if strings.Contains(msg, banned) {
+			t.Errorf("dirty-tree failure advises %q — destructive over dirt the agent did not author: %q", banned, msg)
+		}
+	}
+	// Req 12 ordering: the context line is the last body line,
+	// immediately preceding the (single) final recovery line.
+	lines := strings.Split(msg, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("dirty-tree failure unexpectedly short: %q", msg)
+	}
+	if !strings.HasPrefix(lines[len(lines)-2], "you are in the ") {
+		t.Errorf("context line must immediately precede the final recovery line, got %q", lines[len(lines)-2])
+	}
+}
+
+func TestDirtyTreeFailure_SteersToActiveWorktree(t *testing.T) {
+	t.Parallel()
+	cwd := "/repo"
+	wt := "/repo/.worktrees/worktree-spec-001-wrongdir"
+	err := DirtyTreeFailure(cwd, []string{"notes.txt"}, wt)
+	if err == nil {
+		t.Fatal("DirtyTreeFailure returned nil")
+	}
+	msg := err.Error()
+	assertDirtyTreeFailureInvariants(t, msg)
+
+	if !strings.Contains(msg, "notes.txt") {
+		t.Errorf("failure must name the dirty path: %q", msg)
+	}
+	// tjat AC: `you are in the <kind> worktree` naming the evaluated path.
+	wantCtx := "you are in the main worktree (/repo); this check evaluated /repo"
+	if !strings.Contains(msg, wantCtx) {
+		t.Errorf("failure missing context line %q: %q", wantCtx, msg)
+	}
+	wantRecovery := "recovery: cd " + wt + " && mindspec next"
+	lines := strings.Split(msg, "\n")
+	if got := lines[len(lines)-1]; got != wantRecovery {
+		t.Errorf("final recovery line = %q, want %q", got, wantRecovery)
+	}
+}
+
+func TestDirtyTreeFailure_NoActiveWorktree_CommitAdvice(t *testing.T) {
+	t.Parallel()
+	err := DirtyTreeFailure("/repo", []string{"a.go", "b.go"}, "")
+	if err == nil {
+		t.Fatal("DirtyTreeFailure returned nil")
+	}
+	msg := err.Error()
+	assertDirtyTreeFailureInvariants(t, msg)
+	if !strings.Contains(msg, "a.go") || !strings.Contains(msg, "b.go") {
+		t.Errorf("failure must name every dirty path: %q", msg)
+	}
+	last := msg[strings.LastIndex(msg, "\n")+1:]
+	if !strings.HasPrefix(last, guard.RecoveryPrefix) || !strings.Contains(last, "mindspec next") {
+		t.Errorf("commit-advice recovery must end with a re-run of mindspec next: %q", last)
+	}
+	if !strings.Contains(last, "git add -A && git commit") {
+		t.Errorf("commit-advice recovery must offer a non-destructive commit: %q", last)
+	}
+}
+
+func TestDirtyTreeFailure_InsideActiveWorktree_CommitAdvice(t *testing.T) {
+	t.Parallel()
+	wt := "/repo/.worktrees/worktree-mindspec-abc1"
+	// cwd inside the active worktree: the dirt is the agent's own —
+	// no steer, commit advice instead.
+	err := DirtyTreeFailure(wt+"/internal", []string{"x.go"}, wt)
+	if err == nil {
+		t.Fatal("DirtyTreeFailure returned nil")
+	}
+	msg := err.Error()
+	assertDirtyTreeFailureInvariants(t, msg)
+	if strings.Contains(msg, "recovery: cd ") {
+		t.Errorf("must not steer when already inside the active worktree: %q", msg)
+	}
+	wantCtx := "you are in the bead worktree (" + wt + "/internal); this check evaluated " + wt + "/internal"
+	if !strings.Contains(msg, wantCtx) {
+		t.Errorf("failure missing bead-kind context line %q: %q", wantCtx, msg)
+	}
+}
+
+func TestPathWithin(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		dir, root string
+		want      bool
+	}{
+		{"/repo", "/repo", true},
+		{"/repo/sub", "/repo", true},
+		{"/repo", "/repo/sub", false},
+		{"/repo-sibling", "/repo", false},
+		{"/elsewhere", "/repo", false},
+	}
+	for _, tc := range cases {
+		if got := pathWithin(tc.dir, tc.root); got != tc.want {
+			t.Errorf("pathWithin(%q, %q) = %v, want %v", tc.dir, tc.root, got, tc.want)
+		}
 	}
 }

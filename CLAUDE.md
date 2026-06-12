@@ -7,6 +7,8 @@ Run `mindspec instruct` for mode-appropriate operating guidance. This is emitted
 
 ## Skills
 
+### Spec lifecycle gates
+
 | Skill | Purpose |
 |:------|:--------|
 | `/ms-spec-create` | Create a new specification (enters Spec Mode) |
@@ -14,6 +16,32 @@ Run `mindspec instruct` for mode-appropriate operating guidance. This is emitted
 | `/ms-plan-approve` | Approve plan → Implementation Mode |
 | `/ms-impl-approve` | Approve implementation → Idle |
 | `/ms-spec-status` | Check current mode and active spec/bead state |
+
+### Bead lifecycle
+
+| Skill | Purpose |
+|:------|:--------|
+| `/ms-bead-next` | Pick the next ready bead, claim it, set up the worktree |
+| `/ms-bead-prep` | Draft a pre-staged implementation prompt at `review/prep/bead<N>_impl_prompt.md` |
+| `/ms-bead-impl` | Dispatch an implementation subagent for the claimed bead |
+| `/ms-bead-merge` | Run `mindspec complete` once the panel has approved |
+
+### Review panel
+
+| Skill | Purpose |
+|:------|:--------|
+| `/ms-panel-create` | Initialise the panel directory + BRIEF.md for 6 reviewers |
+| `/ms-panel-run` | Launch 3 Claude Agents + 3 Codex sessions in parallel; collect verdicts |
+| `/ms-panel-tally` | Read all 6 verdict JSONs and consolidate `concrete_changes_required` |
+| `/ms-bead-fix` | Dispatch a fix-up subagent with the consolidated change list |
+
+### Orchestrators
+
+| Skill | Purpose |
+|:------|:--------|
+| `/ms-bead-cycle` | Single bead end-to-end: impl → panel → fix → re-panel → merge |
+| `/ms-spec-autopilot` | Whole spec: cycle every bead until the spec is done |
+| `/ms-spec-final-review` | Final panel of the whole spec branch vs main, before `/ms-impl-approve` |
 <!-- END mindspec:managed -->
 
 
