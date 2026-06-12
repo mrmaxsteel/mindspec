@@ -102,6 +102,8 @@ function Invoke-SecureRequest {
         Invoke-RestMethod -Uri $Uri -UseBasicParsing -MaximumRedirection 5
     }
 }
+
+function Get-Architecture {
     $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" { return "amd64" }
@@ -201,6 +203,24 @@ function Add-ToPath {
     return $false
 }
 
+function Get-ExpectedChecksum {
+    # Return the SHA256 hash for $ArchiveName from a checksums.txt file, matching
+    # the exact filename in field 2. An unanchored Select-String -Pattern (also a
+    # regex) matches the SBOM line ($ArchiveName.spdx.json that v0.8.0 added) too,
+    # yielding two hashes and breaking the compare. Split each line and compare the
+    # filename field for exact equality instead. Returns $null if not present.
+    # Kept as a dot-sourceable function so the pwsh regression test exercises the
+    # real extraction logic rather than a copy.
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchiveName,
+        [Parameter(Mandatory = $true)][string]$ChecksumPath
+    )
+    Get-Content $ChecksumPath | ForEach-Object {
+        $fields = $_ -split '\s+'
+        if ($fields.Count -ge 2 -and $fields[1] -eq $ArchiveName) { $fields[0] }
+    } | Select-Object -First 1
+}
+
 function Install-MindSpec {
     Initialize-Logging
     Write-Log "Installation started"
@@ -251,9 +271,9 @@ function Install-MindSpec {
         try {
             Invoke-SecureRequest -Uri $checksumUrl -OutFile $checksumPath
             
-            # Extract expected checksum for our archive
-            $checksumContent = Get-Content $checksumPath
-            $expectedChecksum = ($checksumContent | Select-String -Pattern $archiveName | ForEach-Object { $_.Line.Split()[0] })
+            # Extract expected checksum for our archive (see Get-ExpectedChecksum
+            # above for why this matches field 2 exactly rather than -Pattern).
+            $expectedChecksum = Get-ExpectedChecksum -ArchiveName $archiveName -ChecksumPath $checksumPath
             
             if (-not $expectedChecksum) {
                 Write-Warn "Checksum not found for $archiveName, skipping verification"
@@ -339,10 +359,14 @@ function Install-MindSpec {
     }
 }
 
-# Main execution
-try {
-    Install-MindSpec
-}
-catch {
-    Write-Error "Installation failed: $_"
+# Main execution — skipped when the script is dot-sourced purely to reuse its
+# functions (the pwsh regression test sets MINDSPEC_INSTALL_NO_MAIN). The normal
+# `irm ... | iex` path leaves the variable unset and runs the installer.
+if (-not $env:MINDSPEC_INSTALL_NO_MAIN) {
+    try {
+        Install-MindSpec
+    }
+    catch {
+        Write-Error "Installation failed: $_"
+    }
 }

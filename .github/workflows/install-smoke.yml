@@ -1,0 +1,62 @@
+name: Install Smoke
+
+# Regression guard for the installer checksum-extraction logic. Born from the
+# v0.8.0 install-blocker: syft SBOMs added an <archive>.spdx.json line to
+# checksums.txt, and the unanchored match grabbed both lines, joined two hashes,
+# and failed verification for every `curl | sh` / `irm | iex` user.
+#
+# Runs only when the installers or their tests change, so it stays fast and
+# never collides with release-dryrun.yml (owned by a separate branch/PR).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - install.ps1
+      - scripts/test-install-checksum.sh
+      - scripts/test-install-checksum.ps1
+      - .github/workflows/install-smoke.yml
+  pull_request:
+    paths:
+      - install.sh
+      - install.ps1
+      - scripts/test-install-checksum.sh
+      - scripts/test-install-checksum.ps1
+      - .github/workflows/install-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  install-sh:
+    name: install.sh checksum guard (sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check install.sh and the test
+        run: |
+          sh -n install.sh
+          sh -n scripts/test-install-checksum.sh
+
+      - name: shellcheck (best-effort)
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck scripts/test-install-checksum.sh
+          else
+            echo "shellcheck not available, skipping"
+          fi
+
+      - name: Run install.sh checksum regression guard
+        run: sh scripts/test-install-checksum.sh
+
+  install-ps1:
+    name: install.ps1 checksum guard (pwsh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run install.ps1 checksum regression guard
+        shell: pwsh
+        run: ./scripts/test-install-checksum.ps1

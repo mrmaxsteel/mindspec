@@ -202,6 +202,22 @@ check_existing_installation() {
     return 0
 }
 
+# Extract the expected checksum for an archive from a checksums.txt file.
+#
+# Args: $1 = exact archive filename, $2 = path to checksums.txt
+# Prints field 1 (the hash) of the line whose field 2 equals the archive
+# filename exactly, or nothing if the archive is not listed.
+#
+# Match the exact filename in field 2 — an unanchored grep "$ARCHIVE_NAME"
+# also matches the SBOM line (mindspec_..._<arch>.tar.gz.spdx.json that
+# v0.8.0 added), joining two hashes with a newline and breaking the compare.
+# awk field-2 equality avoids regex-metachar issues from the dots too.
+# Kept as a sourceable function so install_checksum_test.sh can exercise the
+# real extraction logic rather than a copy of it.
+extract_checksum() {
+    awk -v f="$1" '$2==f {print $1}' "$2"
+}
+
 main() {
     setup_logging
     log "Installation started"
@@ -238,8 +254,9 @@ main() {
     CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
     download "$CHECKSUM_URL" "$TMP_DIR/checksums.txt"
     
-    # Extract expected checksum for our archive
-    EXPECTED_CHECKSUM=$(grep "$ARCHIVE_NAME" "$TMP_DIR/checksums.txt" | awk '{print $1}')
+    # Extract expected checksum for our archive (see extract_checksum above for
+    # why this matches field 2 exactly instead of grepping the whole line).
+    EXPECTED_CHECKSUM=$(extract_checksum "$ARCHIVE_NAME" "$TMP_DIR/checksums.txt")
     if [ -z "$EXPECTED_CHECKSUM" ]; then
         warn "Checksum not found for ${ARCHIVE_NAME}, skipping verification"
     else
@@ -321,4 +338,9 @@ Got:      $ACTUAL_CHECKSUM"
     log ""
 }
 
-main
+# Run the installer, unless the script is being sourced purely to reuse its
+# functions (e.g. install_checksum_test.sh sources it to test extract_checksum).
+# The normal `curl ... | sh` path leaves MINDSPEC_INSTALL_NO_MAIN unset and runs.
+if [ -z "${MINDSPEC_INSTALL_NO_MAIN:-}" ]; then
+    main
+fi
