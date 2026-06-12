@@ -10,6 +10,9 @@ paths:
   - internal/hook/**
   - internal/setup/**
   - internal/panel/**
+  - internal/bootstrap/**
   - cmd/**
+  - plugins/mindspec/**
+  - .claude/skills/**
   - scripts/bd-jsonl-merge-driver.sh
   - .mindspec/docs/domains/workflow/OWNERSHIP.yaml
