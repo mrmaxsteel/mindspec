@@ -80,6 +80,25 @@ step 0              → pick + claim next bead, create worktree
 merge terminal      → mindspec complete <bead-id> "<summary>" (hook-gated)
 ```
 
+> **Why a second panel round instead of one-shot review.** The
+> fix commit is new, unreviewed code, written by an author (the
+> fix subagent) responding to instructions the original BRIEF
+> could not have anticipated. Round 2 reviews the *fix author*,
+> not the bead again: each reviewer re-checks only its own
+> `concrete_changes_required` (ADDRESSED / PARTIAL / MISSED /
+> NEW_ISSUE) plus the deviations the fix author explicitly
+> flagged. That structure catches the failure mode one-shot
+> review cannot: defects introduced *while addressing feedback*.
+> On lola, the Bead 2 round-2 panel caught a routing bug that the
+> round-1 panel had approved — it didn't exist in round 1; the
+> round-1 fix created it. The cost is bounded — round 2 is scoped
+> to deltas, so it runs faster than round 1, and most beads
+> converge in exactly one fix round. The corollary is the
+> artifact-gate rule: a round-2 APPROVE earned by *describing* a
+> fix (PR-body precision) instead of *making* it is the known
+> bypass (lola-f4a8, $417), which is why missing-artifact
+> findings HARD-block regardless of vote count.
+
 ## Why six reviewers, mixed families
 
 Single-LLM gating misses defects asymmetrically:
@@ -90,6 +109,38 @@ Single-LLM gating misses defects asymmetrically:
 A six-slot panel with 3+3 lets you weight convergence: if all three Claudes APPROVE and all three Codex REQUEST_CHANGES, that's a different signal from a unanimous APPROVE. The orchestrator's tally pays attention to family asymmetry.
 
 Empirically (lola, ~25 beads): unanimous APPROVE on round 1 is rare. Most beads need exactly one fix round. The reviewers that flag changes are usually one Claude and two Codex, or two Claudes and three Codex — different lenses landing on different defects.
+
+> **Why six and not four or eight.** Six is tuned, not derived —
+> the binding constraints are majority arithmetic and verdict
+> variance. With a 5-of-6 threshold, one dissent still routes to
+> merge-with-record while two dissents force a fix round; that is
+> the behavior we actually want from a panel. Shrink to four and
+> the same property needs 3-of-4, where a single noisy verdict
+> swings 25% of the panel — empirically (lola, ~25 beads) sub-5
+> panels rerouted on one-off flags far too often (~33%
+> single-flag variance, vs ~20% at six). Grow to eight and the
+> marginal reviewers mostly duplicate an existing lens while
+> adding 4–10 minutes of codex wall-clock per round and
+> proportional spend — across 25 beads we never saw an 8th lens
+> that would have changed a decision a 6-panel got wrong. Treat 6
+> (3 Claude + 3 Codex) as the sweet spot for a single-developer
+> compute budget, and scale the threshold as ceil(5N/6) if you
+> change N. This is an empirical setting, not a theorem — revisit
+> it if your defect mix differs.
+
+## Why these patterns
+
+The plugin's mechanics are an explicit composition of the Anthropic
+"Building Effective Agents" patterns — naming them is the quickest way to
+see why it works:
+
+| Pattern | Where the plugin uses it |
+|:--------|:-------------------------|
+| Parallelization | the 6-reviewer panel — independent subtasks, voting aggregator |
+| Orchestrator-workers | `/ms-spec-autopilot` + `/ms-bead-cycle` dispatching to specialist subagents |
+| Evaluator-optimizer | the impl → panel → fix → re-panel iterative loop |
+| Prompt chaining | the spec → plan → bead lifecycle |
+| Routing | **not used** — could classify bead type (migration / logic / docs) and pick different impl + panel shapes; deliberately out of scope |
 
 ## Configuration
 
