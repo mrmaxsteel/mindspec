@@ -59,6 +59,13 @@ type Enforcement struct {
 	PreCommitHook bool `yaml:"pre_commit_hook"`
 	CLIGuards     bool `yaml:"cli_guards"`
 	AgentHooks    bool `yaml:"agent_hooks"`
+	// PanelGate toggles the PreToolUse pre-complete panel gate (Spec 093
+	// Req 13c, ADR-0037). Default true; `enforcement.panel_gate: false` is
+	// the persistent opt-out, mirroring PreCommitHook. Like that field, an
+	// absent key in config.yaml retains the DefaultConfig true (yaml.v3
+	// leaves pre-populated struct fields untouched for absent keys); an
+	// explicit `false` disables it.
+	PanelGate bool `yaml:"panel_gate"`
 }
 
 // DefaultConfig returns a Config with all defaults applied.
@@ -71,6 +78,7 @@ func DefaultConfig() *Config {
 			PreCommitHook: true,
 			CLIGuards:     true,
 			AgentHooks:    true,
+			PanelGate:     true,
 		},
 		Decomposition: Decomposition{
 			MaxBeads:        6,

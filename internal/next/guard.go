@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -149,6 +150,102 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 	}
 	return guard.NewFailure(b.String(),
 		"if these changes are yours, commit them (git add -A && git commit), then re-run: mindspec next")
+}
+
+// ClaimFailure formats the claim-failure recovery recipe (spec 093
+// Req 3, replacing the bare "claiming bead: <err>" wrap and the
+// pick+claim skill prose that was folded into ms-bead-cycle and
+// ms-bead-impl per spec 093).
+//
+// The body carries the manual-claim recipe kept VERBATIM from the
+// battle-tested skill text: `bd update <id> --claim --status
+// in_progress` (--claim carries the atomic claim/assignee semantics
+// that prevent two agents on one bead) plus the interpolated
+// `git worktree add` line (workspace.BeadWorktreeName/BeadBranch/
+// SpecWorktreePath). The final `recovery:` line is the re-run —
+// `mindspec next --spec <slug>` — whose in-progress recovery path
+// recreates the worktree automatically.
+//
+// A claim-less Dolt-1105 auto-fallback is explicitly DEFERRED
+// (spec 093 Req 3, jkhd.5 validator batch); this failure message IS
+// the 1105 handling. specID may be "" when no --spec flag was given
+// and the bead title carried no spec slug; the recipe then falls back
+// to placeholders and a plain `mindspec next` re-run.
+func ClaimFailure(root string, cfg *config.Config, beadID, specID string, claimErr error) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "claiming bead %s: %v\n", beadID, claimErr)
+	b.WriteString("if this is a bd event-recording failure (e.g. Dolt Error 1105 on large\n")
+	b.WriteString("descriptions), claim manually:\n")
+	fmt.Fprintf(&b, "  bd update %s --claim --status in_progress\n", beadID)
+	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
+		specWorktreeOrPlaceholder(root, cfg, specID),
+		nestedBeadWorktreeRel(cfg, beadID),
+		workspace.BeadBranch(beadID),
+		specBranchOrPlaceholder(specID))
+	if specID == "" {
+		return guard.NewFailure(b.String(),
+			"mindspec next   (re-run to auto-recover the worktree)")
+	}
+	return guard.NewFailure(b.String(),
+		fmt.Sprintf("mindspec next --spec %s   (re-run to auto-recover the worktree)", specID))
+}
+
+// WorktreeSetupFailure formats the worktree-setup-failure recipe
+// (spec 093 Req 4, replacing the bare "Warning: worktree setup failed"
+// line that left the agent claimed-but-homeless).
+//
+// The body carries the concrete `git worktree add` recipe interpolated
+// via workspace.BeadWorktreeName/BeadBranch/SpecWorktreePath, and the
+// final `recovery:` line references the existing in-progress
+// auto-recovery path: re-running `mindspec next --spec <slug>` detects
+// the claimed bead with a missing worktree and recreates it.
+//
+// Behavior is unchanged at the call site (warn and continue): callers
+// print the formatted failure to stderr — only the message routes
+// through guard.NewFailure (HC-5).
+func WorktreeSetupFailure(root string, cfg *config.Config, beadID, specID string, wtErr error) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "worktree setup failed: %v\n", wtErr)
+	fmt.Fprintf(&b, "bead %s is claimed but has no worktree — create it manually:\n", beadID)
+	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
+		specWorktreeOrPlaceholder(root, cfg, specID),
+		nestedBeadWorktreeRel(cfg, beadID),
+		workspace.BeadBranch(beadID),
+		specBranchOrPlaceholder(specID))
+	if specID == "" {
+		return guard.NewFailure(b.String(),
+			"mindspec next   (re-run detects the in-progress bead and auto-recovers the worktree)")
+	}
+	return guard.NewFailure(b.String(),
+		fmt.Sprintf("mindspec next --spec %s   (re-run detects the in-progress bead and auto-recovers the worktree)", specID))
+}
+
+// specWorktreeOrPlaceholder interpolates the spec worktree path for the
+// Req 3/4 recipes, or a readable placeholder when the spec is unknown.
+func specWorktreeOrPlaceholder(root string, cfg *config.Config, specID string) string {
+	if specID == "" {
+		return "<spec-worktree>"
+	}
+	return workspace.SpecWorktreePath(root, cfg, specID)
+}
+
+// specBranchOrPlaceholder interpolates the spec branch name, or a
+// readable placeholder when the spec is unknown.
+func specBranchOrPlaceholder(specID string) string {
+	if specID == "" {
+		return "<spec-branch>"
+	}
+	return workspace.SpecBranch(specID)
+}
+
+// nestedBeadWorktreeRel renders the bead worktree path relative to the
+// spec worktree (the `git -C <spec-worktree>` target of the recipes),
+// honoring cfg.WorktreeRoot.
+func nestedBeadWorktreeRel(cfg *config.Config, beadID string) string {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	return filepath.Join(cfg.WorktreeRoot, workspace.BeadWorktreeName(beadID))
 }
 
 // pathWithin reports whether dir is root or a descendant of root,

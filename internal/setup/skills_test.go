@@ -1,0 +1,326 @@
+package setup
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// TestSkillInventory_Eleven pins the spec-093 skills-thin-down target: the
+// merged skill surface is exactly 11 — 4 lifecycle gates + 7 plugin skills.
+func TestSkillInventory_Eleven(t *testing.T) {
+	all := skillFiles()
+	if len(all) != 11 {
+		t.Fatalf("skillFiles() must return 11 skills (spec 093), got %d: %v", len(all), keys(all))
+	}
+	if n := len(lifecycleSkillFiles()); n != 4 {
+		t.Errorf("lifecycleSkillFiles() must return 4 lifecycle gates, got %d", n)
+	}
+
+	want := []string{
+		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve",
+		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-panel-run",
+		"ms-panel-tally", "ms-spec-autopilot", "ms-spec-final-review",
+	}
+	for _, name := range want {
+		if _, ok := all[name]; !ok {
+			t.Errorf("expected skill %q in skillFiles()", name)
+		}
+	}
+
+	// The removed/merged skills must be gone.
+	for _, gone := range removedSkills {
+		if _, ok := all[gone]; ok {
+			t.Errorf("removed skill %q must not be in skillFiles()", gone)
+		}
+	}
+}
+
+// TestSkillSurface_NoDeprecatedApproveOrder extends spec-092 Req 11's negative
+// assertion (previously over lifecycleSkillFiles() only, claude_test.go:715)
+// to the FULL plugin skill surface (skillFiles()): no shipped skill content
+// anywhere teaches the deprecated `approve <noun>` order (spec 093 Req 19a).
+func TestSkillSurface_NoDeprecatedApproveOrder(t *testing.T) {
+	for name, content := range skillFiles() {
+		if m := deprecatedApproveOrder.FindString(content); m != "" {
+			t.Errorf("skill %s teaches deprecated approve order %q (spec 093 Req 19a); canonical is `mindspec spec approve` / `plan approve` / `impl approve`", name, m)
+		}
+	}
+}
+
+// removedNameToken matches any of the five removed skill names anywhere.
+var removedNameToken = regexp.MustCompile(`ms-bead-next|ms-bead-merge|ms-bead-prep|ms-panel-create|ms-spec-status`)
+
+// provenanceLine matches the deliberately-retained "this used to be skill X"
+// fold/superseded notes (HC-2 requires recording where deleted prose went).
+// These name a removed skill but are NOT live invocation references.
+var provenanceLine = regexp.MustCompile(`(?i)previously|folded|superseded|used to carry|no longer a skill|are folded`)
+
+// TestGrepClean_NoLiveRemovedSkillReferences is the binding grep-clean
+// acceptance criterion (spec 093 Req 16): no SURVIVING skill carries a LIVE
+// reference (handoff / prerequisite / table row) to a removed skill. The
+// deliberately-retained superseded-by / fold-provenance notes (HC-2) are
+// exempt — they document the removal, they do not direct a reader to invoke a
+// skill that no longer exists.
+func TestGrepClean_NoLiveRemovedSkillReferences(t *testing.T) {
+	for name, content := range skillFiles() {
+		for i, line := range strings.Split(content, "\n") {
+			if !removedNameToken.MatchString(line) {
+				continue
+			}
+			if provenanceLine.MatchString(line) {
+				continue // documented fold/superseded mapping (HC-2)
+			}
+			t.Errorf("skill %s line %d carries a live reference to a removed skill:\n  %s", name, i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// acGrepCleanSurfaces lists the NON-skill surfaces the binding grep-clean AC
+// (spec.md:815) enumerates beyond skillFiles(): the CLAUDE/AGENTS managed-block
+// sources (setup.claudeMDManagedBlock + bootstrap.go's init templates), both
+// READMEs, and the instruct templates. Paths are repo-root-relative; the test
+// runs from internal/setup, so repo root is two levels up. A removed-skill
+// reference reintroduced into any of these would otherwise pass undetected
+// (panel R3: the stale bootstrap.go /ms-spec-status table shipped green because
+// the AC test stopped at skillFiles()).
+var acGrepCleanSurfaces = []string{
+	"internal/setup/claude.go",        // claudeMDManagedBlock generator
+	"internal/bootstrap/bootstrap.go", // mindspec init CLAUDE/AGENTS/Copilot templates
+	"plugins/mindspec/README.md",
+	"README.md",
+}
+
+// TestGrepClean_NoLiveRemovedSkillReferences_ACSurfaces extends the grep-clean
+// AC (spec 093 Req 16/18) past skillFiles() to the AC's other enumerated
+// surfaces: the managed-block sources, both READMEs, and the instruct
+// templates. The same HC-2 fold-provenance exemption applies (a line that
+// documents WHERE a removed skill's prose went is allowed; a line that directs
+// a reader to invoke the removed skill is not). This is the regression guard
+// for panel R3's demonstrated bootstrap.go /ms-spec-status leak.
+func TestGrepClean_NoLiveRemovedSkillReferences_ACSurfaces(t *testing.T) {
+	root := repoRoot(t)
+
+	files := append([]string{}, acGrepCleanSurfaces...)
+	templates, err := filepath.Glob(filepath.Join(root, "internal", "instruct", "templates", "*.md"))
+	if err != nil {
+		t.Fatalf("globbing instruct templates: %v", err)
+	}
+	for _, tmpl := range templates {
+		rel, err := filepath.Rel(root, tmpl)
+		if err != nil {
+			t.Fatalf("relativizing %s: %v", tmpl, err)
+		}
+		files = append(files, rel)
+	}
+
+	for _, rel := range files {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("reading AC surface %s: %v", rel, err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if !removedNameToken.MatchString(line) {
+				continue
+			}
+			if provenanceLine.MatchString(line) {
+				continue // documented fold/superseded mapping (HC-2)
+			}
+			t.Errorf("%s line %d carries a live reference to a removed skill:\n  %s", rel, i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// repoRoot returns the module root by walking up from the test's working
+// directory (internal/setup) until it finds go.mod. Keeps the AC-surface scan
+// robust to where `go test` is invoked from.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not locate go.mod above %s", dir)
+		}
+		dir = parent
+	}
+}
+
+// TestInstallSkills_RefreshesPreviouslyShipped covers Req 19b: a skill file
+// whose on-disk content byte-matches a PREVIOUSLY-SHIPPED version is refreshed
+// in place to the canonical content; the marker-less pre-093 lifecycle skill
+// is the canonical historical case.
+func TestInstallSkills_RefreshesPreviouslyShipped(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// Seed an existing install carrying the pre-marker (previously-shipped)
+	// ms-spec-approve content.
+	canonical := lifecycleSkillFiles()["ms-spec-approve"]
+	prior := stripManagedByMarker(canonical)
+	if prior == canonical {
+		t.Fatal("expected the canonical ms-spec-approve to carry the managed-by marker")
+	}
+	writeExisting(t, skillsDir, "ms-spec-approve", prior)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	got := readSkill(t, skillsDir, "ms-spec-approve")
+	if got != canonical {
+		t.Errorf("previously-shipped skill not refreshed to canonical content;\ngot:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-approve", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-approve; got %v", r.Refreshed)
+	}
+}
+
+// TestInstallSkills_LeavesUserModified covers HC-6: a user-modified skill file
+// (matching neither the canonical nor any shipped snapshot) is left untouched
+// with a notice.
+func TestInstallSkills_LeavesUserModified(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	userContent := "---\nname: ms-spec-approve\n---\n\n# My own version\n"
+	writeExisting(t, skillsDir, "ms-spec-approve", userContent)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	if got := readSkill(t, skillsDir, "ms-spec-approve"); got != userContent {
+		t.Errorf("user-modified skill must be left untouched; got:\n%s", got)
+	}
+	if len(r.Notices) == 0 {
+		t.Errorf("expected a notice for the user-modified skill")
+	}
+	if containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-approve", "SKILL.md")) {
+		t.Errorf("user-modified skill must NOT be refreshed")
+	}
+}
+
+// TestCleanupRemovedSkills_UnmodifiedRemoved covers Req 18: a retired skill
+// dir whose SKILL.md byte-matches a shipped snapshot is removed.
+func TestCleanupRemovedSkills_UnmodifiedRemoved(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// Seed the previously-shipped ms-spec-status (a removed skill).
+	shipped := previouslyShippedSkills()["ms-spec-status"]
+	if len(shipped) == 0 {
+		t.Fatal("expected a historical snapshot for ms-spec-status")
+	}
+	writeExisting(t, skillsDir, "ms-spec-status", shipped[0])
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	if fileExists(filepath.Join(skillsDir, "ms-spec-status", "SKILL.md")) {
+		t.Errorf("unmodified retired skill ms-spec-status must be removed")
+	}
+	if !containsPath(r.Removed, filepath.Join(".claude", "skills", "ms-spec-status")) {
+		t.Errorf("Removed should record ms-spec-status; got %v", r.Removed)
+	}
+}
+
+// TestCleanupRemovedSkills_ModifiedKept covers HC-6 for retired skills: a
+// user-modified retired skill is left in place with a notice.
+func TestCleanupRemovedSkills_ModifiedKept(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	userContent := "---\nname: ms-spec-status\n---\n\n# I rely on this\n"
+	writeExisting(t, skillsDir, "ms-spec-status", userContent)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	if !fileExists(filepath.Join(skillsDir, "ms-spec-status", "SKILL.md")) {
+		t.Errorf("user-modified retired skill must be left in place")
+	}
+	if len(r.Notices) == 0 {
+		t.Errorf("expected a notice for the user-modified retired skill")
+	}
+}
+
+// TestSetupRefresh_EndToEnd_RemovesStatusAndRefreshesApprove exercises the
+// real RunClaude path on a simulated pre-093 install.
+func TestSetupRefresh_EndToEnd_RemovesStatusAndRefreshesApprove(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// Pre-093 install: ms-spec-status present (shipped) + ms-spec-approve at
+	// the marker-less prior content.
+	writeExisting(t, skillsDir, "ms-spec-status", previouslyShippedSkills()["ms-spec-status"][0])
+	writeExisting(t, skillsDir, "ms-spec-approve", stripManagedByMarker(lifecycleSkillFiles()["ms-spec-approve"]))
+
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("RunClaude: %v", err)
+	}
+
+	if fileExists(filepath.Join(skillsDir, "ms-spec-status", "SKILL.md")) {
+		t.Errorf("ms-spec-status should have been removed by setup")
+	}
+	if got := readSkill(t, skillsDir, "ms-spec-approve"); got != lifecycleSkillFiles()["ms-spec-approve"] {
+		t.Errorf("ms-spec-approve should have been refreshed to canonical")
+	}
+	// And the new plugin skills should now exist.
+	if !fileExists(filepath.Join(skillsDir, "ms-bead-cycle", "SKILL.md")) {
+		t.Errorf("ms-bead-cycle should be installed")
+	}
+}
+
+// --- test helpers ---
+
+func writeExisting(t *testing.T, skillsDir, name, content string) {
+	t.Helper()
+	dir := filepath.Join(skillsDir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func readSkill(t *testing.T, skillsDir, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(skillsDir, name, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(data)
+}
+
+func containsPath(list []string, p string) bool {
+	for _, x := range list {
+		if x == p {
+			return true
+		}
+	}
+	return false
+}
+
+func keys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

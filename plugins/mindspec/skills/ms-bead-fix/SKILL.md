@@ -7,6 +7,8 @@ description: Dispatch a fix-up subagent for a mindspec bead with the consolidate
 
 Given a consolidated `concrete_changes_required` list from `/ms-panel-tally`, dispatch one subagent to fold the fixes into a single follow-up commit on the same bead branch.
 
+Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-subagent prompt — the fences (one commit, no `mindspec complete`, no `git push`, no scope creep, tests must PASS, report SHA + counts + deviations) live there, not here.
+
 ## Inputs
 
 - `bead-id` (required) — e.g. `lola-8gbp.2`.
@@ -24,32 +26,12 @@ Given a consolidated `concrete_changes_required` list from `/ms-panel-tally`, di
    - Shared modules and imports the fix should reuse (don't reimplement what earlier beads already provided).
    - The consolidated change list, grouped by criticality.
    - For each change, the rationale from the relevant verdict (1-2 sentence reviewer quotes are fine — they make the why crisp).
-   - **Explicit deviation policy**: if the subagent can't address an item literally (e.g. a test requires editing a different bead's data, or the requested refactor breaks a downstream contract), it should:
-     - Flag the deviation explicitly in its report
-     - Document the deviation in the commit message under `Deviations:`
-     - The next-round panel BRIEF will surface these as "Fix-author deviations (assess these)".
+   - The standard guardrails pointer (AGENTS.md § Bead-loop guardrails).
+   - **Explicit deviation policy**: if the subagent can't address an item literally (e.g. a test requires editing a different bead's data, or the requested refactor breaks a downstream contract), it should flag the deviation in its report and document it in the commit message under `Deviations:`. The next-round panel BRIEF surfaces these as "Fix-author deviations (assess these)".
 
-   **Anti-pattern: do NOT mark an artifact-gate finding as ADDRESSED via a PR-body edit alone.**
+   **Artifact-gate rule (do NOT mark a HARD-block finding ADDRESSED via a PR-body edit alone).** If a consolidated item names a measurement artifact that does not exist at its stated path, the fix subagent MUST NOT mark it ADDRESSED until the artifact actually exists — PR-body precision is necessary but not sufficient. If it can't produce the artifact in scope, it lands any body-precision improvements, returns the artifact-gate findings UNCHANGED, and flags "PARTIAL — artifact at `<path>` still missing; HARD block stands". The orchestrator then commissions the artifact run separately. See `/ms-panel-tally` § Artifact gates for the full rule and the lola-f4a8 case.
 
-   If a consolidated `concrete_changes_required` item names a measurement artifact, cost projection, drift report, or regression baseline that does not exist at the stated path on the spec branch, the fix subagent MUST refuse to mark it ADDRESSED until the artifact actually exists. PR-body precision (naming the path, naming the ops-handoff mechanism) is necessary but not sufficient.
-
-   If the fix subagent cannot produce the artifact within its scope, it should:
-   1. Land any body-precision improvements it can.
-   2. Return the artifact-gate findings UNCHANGED in its report.
-   3. Flag explicitly: "PARTIAL — body precision improved; artifact at `<path>` still missing; HARD block stands".
-
-   The orchestrator then commissions the artifact run as a separate work unit (not part of the fix-up subagent's job).
-
-   Real failure case: spec-050 R1+R3+R5 final-review flagged AC8c `cost_projection.json` missing. Fix subagent's round-2 edit named the artifact's landing path in the PR body. F5 round-2 flipped to APPROVE on body precision. PR merged. lola-f4a8 was the bill.
-
-2. **Constraints to enforce on the subagent:**
-   - **One commit.** Not three small commits; a single fold-in commit on the bead branch.
-   - **No scope creep.** Address the consolidated list; don't fix unrelated nits.
-   - **No `mindspec complete`.** The cycle owns the merge.
-   - **No `git push`.** Leave the commit local.
-   - **Tests must still pass.** Run the bead's test scope before reporting back.
-
-3. **Commit message template:**
+2. **Commit message template:**
    ```
    impl(<spec>, bead <N>): fold in panel round-<N> fixes — <2-3 word summary>
 
@@ -60,24 +42,18 @@ Given a consolidated `concrete_changes_required` list from `/ms-panel-tally`, di
    Deviations: <name + reason, or "none">
    ```
 
-4. **Dispatch.** Spawn a `general-purpose` `Agent` with the prompt. Foreground if the orchestrator is idle; background if there's other parallel work.
+3. **Dispatch.** Spawn a `general-purpose` `Agent` with the prompt. Foreground if the orchestrator is idle; background if there's other parallel work.
 
-5. **On return, capture:**
+4. **On return, capture:**
    - New commit SHA
    - Test summary (pass/fail/skip)
    - Any flagged deviations — these go into the next BRIEF's deviations section
 
-## Working around the implement-mode commit gate
+## Commit-gate coverage (C2-1)
 
-mindspec blocks direct commits to `spec/<slug>` and `bead/<id>` branches when the spec is in implement mode — this is a guardrail against accidental scope creep on the wrong branch. For panel-driven chore fixes (fix-up commits that fold consolidated reviewer asks into the bead branch), `mindspec complete` is the right path; the gate only blocks commits *outside* the bead-cycle loop.
+mindspec blocks direct commits to **protected branches** (any mode) and to `spec/<slug>` branches **during implement mode** — `bead/<id>` branches always pass, so the fix subagent's single commit on the bead branch lands without any escape hatch. The CLI's own block message carries the full when-is-it-legitimate context (point-of-use); no skill prose duplicates the workaround. For panel-driven bead fix-ups, the commit lands on the bead branch and merges through `mindspec complete` — the gate is not in your way.
 
-For final-review fix-ups that need to land on the spec branch directly (not on a fresh bead branch — e.g. PR-body precision corrections, stray-file reverts), use the escape hatch:
-
-```bash
-MINDSPEC_ALLOW_MAIN=1 git commit -m "..."
-```
-
-Surfaced by lola spec-050 final-review fix commits `1bb9751` (revert stray files + PR body precision) and `04d26f5` (lola-90pp test fix to unblock CI).
+(Final-review fix-ups that must land directly on the spec branch are a different case — see `/ms-spec-final-review`, which routes them through the documented `MINDSPEC_ALLOW_MAIN=1` escape hatch.)
 
 ## Anti-patterns
 
@@ -88,4 +64,4 @@ Surfaced by lola spec-050 final-review fix commits `1bb9751` (revert stray files
 
 ## Then
 
-Hand off back to `/ms-bead-cycle`, which dispatches `/ms-panel-create` (round-<N+1>) → `/ms-panel-run`.
+Hand off back to `/ms-bead-cycle`, which dispatches `/ms-panel-run` step 0 (round-<N+1> — re-bumps round + reviewed_head_sha).

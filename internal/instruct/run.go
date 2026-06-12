@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
@@ -13,6 +14,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+// Options tunes a Run invocation. The zero value reproduces the bare
+// `mindspec instruct` behavior; PanelState opts into the Spec 093
+// Req 14 open-panel-rounds block.
+type Options struct {
+	// PanelState, when true, gathers and renders the open-panel-rounds
+	// block (Spec 093 Req 14) for the active bead's scan roots and
+	// appends it to the output (markdown + JSON `panel_state`). This is
+	// the explicit `--panel-state` flag path; the SessionStart hook sets
+	// it conditionally for implement-mode auto-include (Req 15).
+	PanelState bool
+}
 
 // Run derives mode from beads state and writes mode-appropriate guidance.
 //
@@ -38,6 +51,12 @@ import (
 // so that lookup shares its `bd list --type=epic` with the rest of the
 // invocation.
 func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error {
+	return RunWithOptions(ctx, cwd, format, specFlag, out, Options{})
+}
+
+// RunWithOptions is Run with explicit Options (Spec 093 Req 14). Run is
+// the Options{}-zero-value wrapper; all existing callers keep working.
+func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Writer, opts Options) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -140,6 +159,20 @@ func Run(ctx context.Context, cwd, format, specFlag string, out io.Writer) error
 		}
 	}
 
+	// Spec 093 Req 14: when --panel-state is requested, gather the full
+	// Panel/Subagent State block — in-progress beads (capped git detail),
+	// open panel rounds (per-panel tally vs the complete gate, with each
+	// bead panel's live branch SHA resolved for staleness), and stale
+	// agent worktrees — from the active bead's scan roots (worktree +
+	// main root, union/deduped). All three render empty when nothing is
+	// open → Render appends nothing (zero-cost contract, Req 15). All
+	// git/bd subprocesses fire ONLY inside this branch — the Req 15
+	// stub-guard (the SessionStart hook gates entry on the fs-only
+	// HasIncompletePanel, so a panel-less session pays zero added cost).
+	if opts.PanelState {
+		bctx.PanelState = buildPanelStateBlock(cache, mainRoot, mc.ActiveWorktree, mc.ActiveBead)
+	}
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -218,6 +251,34 @@ func handleAmbiguous(cache *phase.Cache, root, format string, out io.Writer, amb
 	}
 	fmt.Fprint(out, output)
 	return nil
+}
+
+// panelScanRoots returns the deduped scan roots for --panel-state: the
+// active bead worktree (where /ms-panel-run writes review/) plus the
+// main root. panel.Scan dedupes by resolved path, so passing both even
+// when they coincide is safe. Empty entries are dropped by Scan.
+func panelScanRoots(mainRoot, activeWorktree string) []string {
+	roots := make([]string, 0, 2)
+	if activeWorktree != "" {
+		roots = append(roots, activeWorktree)
+	}
+	if mainRoot != "" {
+		roots = append(roots, mainRoot)
+	}
+	return roots
+}
+
+// liveBranchSHA resolves `git rev-parse bead/<beadID>` for the panel
+// staleness check. exists == false signals a deleted branch (the
+// rerun-after-merge Pass-through, Spec 093 Req 11) — the only git work
+// the panel-state path performs beyond the fs Scan (ADR-0030 budget).
+func liveBranchSHA(beadID string) (sha string, exists bool) {
+	branch := workspace.BeadBranch(beadID)
+	s, err := gitutil.RevParseRef("", branch)
+	if err != nil {
+		return "", false
+	}
+	return s, true
 }
 
 // resolveBeadWorktree finds the worktree path for a bead by checking

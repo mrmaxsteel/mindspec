@@ -1,11 +1,13 @@
 package next
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
@@ -517,5 +519,189 @@ func TestPathWithin(t *testing.T) {
 		if got := pathWithin(tc.dir, tc.root); got != tc.want {
 			t.Errorf("pathWithin(%q, %q) = %v, want %v", tc.dir, tc.root, got, tc.want)
 		}
+	}
+}
+
+// --- ClaimFailure / WorktreeSetupFailure (spec 093 Reqs 3-4) ---
+//
+// Per-site recovery-convention tests (092 Req 21 mirror — see
+// internal/guard/recovery_convention_test.go): every produced failure
+// satisfies guard.HasFinalRecoveryLine and emits no banned recovery
+// command. Invoking the constructors also exercises FormatFailure's
+// panic gates (banned/malformed commands panic at development time).
+
+// recoveryLines extracts every `recovery: ` command from msg.
+func recoveryLines(t *testing.T, msg string) []string {
+	t.Helper()
+	var cmds []string
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			cmds = append(cmds, strings.TrimPrefix(line, guard.RecoveryPrefix))
+		}
+	}
+	return cmds
+}
+
+func assertRecipeFailureInvariants(t *testing.T, msg string) {
+	t.Helper()
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("failure must end with a recovery line (092 Req 12/21): %q", msg)
+	}
+	for _, cmd := range recoveryLines(t, msg) {
+		if guard.IsBannedRecoveryCommand(cmd) {
+			t.Errorf("recovery line emits a banned command (092 Req 19): %q", cmd)
+		}
+	}
+}
+
+func TestClaimFailure_RecoveryRecipe(t *testing.T) {
+	t.Parallel()
+	claimErr := errors.New("claim failed (may already be claimed): Error 1105: event recording failed")
+	err := ClaimFailure("/repo", nil, "mindspec-ab12", "093-skills-thin-down", claimErr)
+	if err == nil {
+		t.Fatal("ClaimFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+
+	// The underlying bd output is preserved.
+	if !strings.Contains(msg, "claim failed (may already be claimed): Error 1105: event recording failed") {
+		t.Errorf("failure must carry the bd output: %q", msg)
+	}
+	// The Dolt-1105 manual-claim framing.
+	if !strings.Contains(msg, "Dolt Error 1105") {
+		t.Errorf("failure must name the Dolt 1105 failure class: %q", msg)
+	}
+	// Req 3 AC: the --claim recipe line VERBATIM from the skill prose
+	// (--claim carries the atomic claim/assignee semantics).
+	if !strings.Contains(msg, "bd update mindspec-ab12 --claim --status in_progress") {
+		t.Errorf("failure must carry the verbatim --claim recipe: %q", msg)
+	}
+	// Req 3 AC: the interpolated worktree line.
+	wantWt := "git -C /repo/.worktrees/worktree-spec-093-skills-thin-down worktree add .worktrees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down"
+	if !strings.Contains(msg, wantWt) {
+		t.Errorf("failure must carry the interpolated worktree recipe %q: %q", wantWt, msg)
+	}
+	// Req 3 AC: the final recovery line references `mindspec next --spec`.
+	lines := strings.Split(msg, "\n")
+	want := "recovery: mindspec next --spec 093-skills-thin-down   (re-run to auto-recover the worktree)"
+	if got := lines[len(lines)-1]; got != want {
+		t.Errorf("final recovery line = %q, want %q", got, want)
+	}
+}
+
+func TestClaimFailure_NoSpecContext_Placeholders(t *testing.T) {
+	t.Parallel()
+	err := ClaimFailure("/repo", nil, "mindspec-ab12", "", errors.New("claim failed (may already be claimed): boom"))
+	if err == nil {
+		t.Fatal("ClaimFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	// Unknown spec: readable placeholders instead of bogus interpolation,
+	// and the recovery re-run drops the --spec flag.
+	if !strings.Contains(msg, "git -C <spec-worktree> worktree add .worktrees/worktree-mindspec-ab12 -b bead/mindspec-ab12 <spec-branch>") {
+		t.Errorf("failure must fall back to placeholders when the spec is unknown: %q", msg)
+	}
+	lines := strings.Split(msg, "\n")
+	if got := lines[len(lines)-1]; got != "recovery: mindspec next   (re-run to auto-recover the worktree)" {
+		t.Errorf("final recovery line = %q, want plain `mindspec next` re-run", got)
+	}
+	if strings.Contains(msg, "--spec ") {
+		t.Errorf("no --spec flag may appear without a slug: %q", msg)
+	}
+}
+
+func TestWorktreeSetupFailure_Recipe(t *testing.T) {
+	t.Parallel()
+	err := WorktreeSetupFailure("/repo", nil, "mindspec-ab12", "093-skills-thin-down", errors.New("git worktree add: exit status 128"))
+	if err == nil {
+		t.Fatal("WorktreeSetupFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+
+	if !strings.Contains(msg, "worktree setup failed: git worktree add: exit status 128") {
+		t.Errorf("failure must carry the underlying error: %q", msg)
+	}
+	// The claimed-but-homeless framing.
+	if !strings.Contains(msg, "bead mindspec-ab12 is claimed but has no worktree") {
+		t.Errorf("failure must state the claimed-but-homeless condition: %q", msg)
+	}
+	// Req 4 AC: the interpolated `git worktree add` recipe replaces the
+	// bare warning.
+	wantWt := "git -C /repo/.worktrees/worktree-spec-093-skills-thin-down worktree add .worktrees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down"
+	if !strings.Contains(msg, wantWt) {
+		t.Errorf("failure must carry the interpolated worktree recipe %q: %q", wantWt, msg)
+	}
+	// Req 4: the recovery references the in-progress auto-recovery path.
+	lines := strings.Split(msg, "\n")
+	want := "recovery: mindspec next --spec 093-skills-thin-down   (re-run detects the in-progress bead and auto-recovers the worktree)"
+	if got := lines[len(lines)-1]; got != want {
+		t.Errorf("final recovery line = %q, want %q", got, want)
+	}
+}
+
+func TestWorktreeSetupFailure_NoSpecContext_Placeholders(t *testing.T) {
+	t.Parallel()
+	err := WorktreeSetupFailure("/repo", nil, "mindspec-ab12", "", errors.New("boom"))
+	if err == nil {
+		t.Fatal("WorktreeSetupFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	if !strings.Contains(msg, "git -C <spec-worktree> worktree add .worktrees/worktree-mindspec-ab12 -b bead/mindspec-ab12 <spec-branch>") {
+		t.Errorf("failure must fall back to placeholders when the spec is unknown: %q", msg)
+	}
+	lines := strings.Split(msg, "\n")
+	if got := lines[len(lines)-1]; got != "recovery: mindspec next   (re-run detects the in-progress bead and auto-recovers the worktree)" {
+		t.Errorf("final recovery line = %q, want plain `mindspec next` re-run", got)
+	}
+}
+
+// TestClaimFailure_HonorsCustomWorktreeRoot (spec 093 R3-3): the
+// constructor tests above pass cfg=nil (default ".worktrees"); this one
+// passes a non-default cfg.WorktreeRoot and asserts the interpolated
+// nested bead-worktree path honors it (the `git -C <spec-worktree>`
+// target is always ".worktrees" because spec worktrees live under the
+// repo's own root, but the nested bead worktree path is the configurable
+// half).
+func TestClaimFailure_HonorsCustomWorktreeRoot(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = "custom-trees"
+	err := ClaimFailure("/repo", cfg, "mindspec-ab12", "093-skills-thin-down",
+		errors.New("claim failed (may already be claimed): boom"))
+	if err == nil {
+		t.Fatal("ClaimFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	// Spec worktree path lives under the repo root's WorktreeRoot…
+	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add") {
+		t.Errorf("spec-worktree path must honor cfg.WorktreeRoot: %q", msg)
+	}
+	// …and the nested bead worktree path also honors it.
+	if !strings.Contains(msg, "worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12") {
+		t.Errorf("nested bead worktree path must honor cfg.WorktreeRoot: %q", msg)
+	}
+	if strings.Contains(msg, ".worktrees/worktree-mindspec-ab12") {
+		t.Errorf("default .worktrees path leaked despite custom WorktreeRoot: %q", msg)
+	}
+}
+
+func TestWorktreeSetupFailure_HonorsCustomWorktreeRoot(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = "custom-trees"
+	err := WorktreeSetupFailure("/repo", cfg, "mindspec-ab12", "093-skills-thin-down",
+		errors.New("exit status 128"))
+	if err == nil {
+		t.Fatal("WorktreeSetupFailure returned nil")
+	}
+	msg := err.Error()
+	assertRecipeFailureInvariants(t, msg)
+	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down") {
+		t.Errorf("recipe must honor cfg.WorktreeRoot end-to-end: %q", msg)
 	}
 }

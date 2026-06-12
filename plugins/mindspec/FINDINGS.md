@@ -16,22 +16,28 @@ Branch: `feat/mindspec-plugin-spec050-followups` — closes 4 of the 10 document
 | 14 (new) | Codex launch double-backgrounded (`&` + `run_in_background: true`) — task-notification fired on bash-exit not codex-exit | `777deff` | CLOSED |
 | 15 (new) | F5 artifact-gate findings could flip to APPROVE on PR-body-only fixes — caused lola-f4a8 ($417 prod incident) | `b232413` | CLOSED |
 
-Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `mindspec-ch8h`.
+Items 1, 2, 5-10 below remained OPEN after this PR. bd issue: `mindspec-ch8h`.
+
+**Spec 093 (skills-thin-down) update:** items 1, 2, 8, 9, 10 are now ADJUDICATED (annotated inline below), and the Part 2 `PreToolUse`-gate primitive (Part 3 follow-up 5) is ENFORCED — it ships as the panel gate on `mindspec complete`. Remaining OPEN: items 5, 6, 7 (upstream Dolt 1105, `.gitignore` OWNERSHIP, plan↔bd dep sync) — out of scope for 093, tracked separately. `mindspec-ch8h` is closed out by spec 093 Bead 7.
 
 ## Part 1 — Plugin self-review
 
 ### Gaps surfaced while writing the skills
 
-1. **`/ms-spec-autopilot` `parallel-window: true` is documented but hand-wavy.**
+1. **`/ms-spec-autopilot` `parallel-window: true` is documented but hand-wavy.** **[ADJUDICATED — spec 093, Bead 6: parallel-window deleted as YAGNI]**
    The dep-graph-aware fan-out logic in the SKILL.md says "find all beads whose blockers are now satisfied" and "pick beads in disjoint file-sets only" but doesn't define the actual algorithm. In practice on lola spec-050 the dep graph is a near-linear chain (1 → 2 → 3 → 4 → 5 → 6 → 8a → 8b, with 7 forking off 4 and 9 forking off 8a), so the parallel window is small and the serial path wins. The skill should either:
    - Remove the parallel-window option as YAGNI, or
    - Add a worked example of when fan-out actually pays off (likely specs that branch into multiple feature surfaces, not migration chains).
 
-2. **No `/ms-panel-halt-recover` for stalled cycles.**
+   **Resolution:** Removed as YAGNI in spec 093 (Bead 6) — `/ms-spec-autopilot` is now serial-by-design, no `parallel-window` reference remains. Parallel-bead scheduling is deferred to the Claude Code Dynamic Workflows port (see Part 2); a low-priority bd note tracks that future work.
+
+2. **No `/ms-panel-halt-recover` for stalled cycles.** **[ADJUDICATED — spec 093, Bead 6: halt-recovery folded into `/ms-panel-tally`]**
    `/ms-panel-tally` says "halt and ask the user" on REJECT or repeated halts, but doesn't define the resumption path. After a halt, the bead is in `in_progress`, the panel has stale verdicts, and the next session needs to either:
    - Pick up from the latest commit and re-launch the next round, or
    - Roll back to a known-good commit and start over.
    Should be a skill so the resumption path is reproducible.
+
+   **Resolution:** No separate skill — the resumption path lives in the canonical halt-recover section of `/ms-panel-tally` (the single decision authority), which now defines the resume-from-latest-commit and abandon procedures. Keeping it there avoids a 12th skill and the operational-knowledge fan-out the 093 thin-down removed (orchestration in skills, recovery recipes at point-of-use).
 
 3. **No `/ms-bead-prep` skill for drafting impl prompts.** **[CLOSED — commit `f823476`]**
    The pre-staged prompts at `<repo>/review/prep/bead<N>_impl_prompt.md` are referenced by `/ms-bead-impl` as "if absent, draft one in-conversation". In practice good prompts are the single biggest lever on impl-subagent quality — they should have their own skill that reads the plan section + spec context + prior-bead helper signatures and produces a structured prompt. The lola session benefited massively from pre-staged prompts; the plugin doesn't tell you how to write them.
@@ -56,17 +62,25 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
 7. **`bd ready` and the plan dep graph disagree.**
    Bead 5 showed in `bd ready` before Bead 4 merged because the plan dep ("Beads 1-4") wasn't reflected in bd's explicit dep edges. Fixed manually with `bd dep add lola-8gbp.5 lola-8gbp.4`. The plan-to-bd dep-graph sync should be automatic — either `mindspec plan approve` should walk the plan's `**Depends on:**` lines and call `bd dep add` for each, or `/ms-bead-next` should refuse to claim a bead whose plan deps don't match bd.
 
-8. **`mindspec instruct` (SessionStart hook) doesn't surface panel/subagent state.**
+8. **`mindspec instruct` (SessionStart hook) doesn't surface panel/subagent state.** **[ADJUDICATED — spec 093, Bead 5: `--panel-state` shipped]**
    The hook prints "Multiple Active Specs" with phases, but doesn't tell a fresh post-compaction session which beads have in-flight implementation subagents or pending panel rounds. Cost us several minutes after compaction to reconstruct state from `review/<panel>/*.json` and `git worktree list`. Should add a `--panel-state` block to `mindspec instruct` that lists:
    - In-progress beads (worktree + last commit on bead branch)
    - Open panel rounds (`review/<panel-slug>/` with mismatched verdict-file count vs expected)
    - Any locked agent worktrees (`.claude/worktrees/agent-*` still in place)
 
+   **Resolution:** Shipped in spec 093 (Bead 5, Reqs 14-15). `mindspec instruct --panel-state` renders the three-block Panel/Subagent State view (in-progress beads, open panel rounds, locked worktrees), auto-included in implement-mode SessionStart output and zero-cost when no panel dir exists. The "gate would BLOCK" line agrees with a direct `mindspec hook pre-complete` invocation (one-source-of-truth proof).
+
 ### Underdocumented decisions
 
-9. **Why 6 reviewers specifically.** The README says "mixed families catch different defects" but doesn't justify 6 vs 4 or 8. Empirically on lola: ≥5 covers comfortable majority-vote; <5 has too much variance (one reviewer flagging changes is a 33% reroute, vs 20% at 5/6). But that's an empirical claim, not a derived one. Could be documented as "tunable, 6 was the sweet spot for our compute budget".
+9. **Why 6 reviewers specifically.** **[ADJUDICATED — spec 093, Bead 7: rationale paragraph landed in README]**
+   The README says "mixed families catch different defects" but doesn't justify 6 vs 4 or 8. Empirically on lola: ≥5 covers comfortable majority-vote; <5 has too much variance (one reviewer flagging changes is a 33% reroute, vs 20% at 5/6). But that's an empirical claim, not a derived one. Could be documented as "tunable, 6 was the sweet spot for our compute budget".
 
-10. **Why round-2 panels and not just one-shot review.** The pattern "fix → re-review" is described in `/ms-bead-cycle` but the rationale isn't pinned. In practice the round-2 panel catches fix-author deviations the original BRIEF couldn't predict (the lola Bead 2 r2 panel found a routing bug the r1 panel approved). Should be a sidebar in the README.
+   **Resolution:** Landed. The "Why six and not four or eight" paragraph (majority arithmetic + verdict variance + ceil(5N/6) threshold scaling) is appended to README § "Why six reviewers, mixed families".
+
+10. **Why round-2 panels and not just one-shot review.** **[ADJUDICATED — spec 093, Bead 7: rationale sidebar landed in README]**
+    The pattern "fix → re-review" is described in `/ms-bead-cycle` but the rationale isn't pinned. In practice the round-2 panel catches fix-author deviations the original BRIEF couldn't predict (the lola Bead 2 r2 panel found a routing bug the r1 panel approved). Should be a sidebar in the README.
+
+    **Resolution:** Landed. The "Why a second panel round instead of one-shot review" sidebar (reviews the fix author, scoped to `concrete_changes_required` deltas, lola Bead 2 routing-bug example, artifact-gate HARD-block corollary) is added after README § "The autonomous loop".
 
 ### Gaps surfaced while shipping spec-050 (added during this PR)
 
@@ -124,7 +138,7 @@ Items 1, 2, 5-10 below remain OPEN and are out of scope for this PR. bd issue: `
 
 | Primitive | What it'd buy us | Priority |
 |:----------|:-----------------|:---------|
-| **`PreToolUse` hook on `mindspec complete`** | Declaratively enforce "≥5/6 APPROVE before merge"; no orchestrator skill can bypass it. | **High** — gate enforcement should be a contract, not a convention. |
+| **`PreToolUse` hook on `mindspec complete`** | Declaratively enforce "≥5/6 APPROVE before merge"; no orchestrator skill can bypass it. | **ENFORCED (spec 093)** — shipped as a `PreToolUse` Bash gate: fail-open without a panel, fail-closed with one (malformed/missing verdicts block). The gate is now an enforced contract, not a convention. |
 | **`Monitor` on codex output files** | Detect usage-limit / hang within seconds instead of after timeout; swap in claude-sub immediately. | **Medium** — saves 5-10 min per failed codex slot. |
 | **Existing `SessionStart` hook + extended `mindspec instruct`** | Surface panel/subagent state on fresh sessions; recover from compaction faster. | **Medium** — cheap, high-leverage. |
 | **`/deep-research` and `ultracode` workflows** | Port `/ms-spec-autopilot` to a durable background workflow for large specs. | **Low** — premature until a spec actually has 50+ beads. |

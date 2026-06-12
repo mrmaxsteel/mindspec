@@ -182,6 +182,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// 2.25. Panel advisory tally (Spec 093 Req 13d). Warning-only — the
+	// hard gate is the PreToolUse hook. This is the ONLY panel signal for
+	// flows that never route through Claude Code hooks (codex/raw-shell
+	// agents, externally-orchestrated panels). No registered panel → no
+	// output and no subprocess cost. The matched registration is reused
+	// below for the post-completion audit writes (Reqs 13b/13e).
+	advisoryOut := panelAdvisoryOut
+	if advisoryOut == nil {
+		advisoryOut = os.Stderr
+	}
+	panelReg := panelAdvisory(beadID, dedupeRoots(wtPath, root), advisoryOut)
+
 	// 2.5. Auto-commit if commit message provided (via Executor)
 	commitPath := wtPath
 	if commitPath == "" {
@@ -325,8 +337,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Gate-failure decision: only fatal when no override/supersede
 	// flag is set.
 	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
-		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
-			joinResultErrorMessages(adrResult))
+		return nil, adrDivergenceFailure(beadID, joinResultErrorMessages(adrResult))
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -466,6 +477,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// 5.6. Panel-gate audit writes (Spec 093 Reqs 13b/13e): record
+	// panel_gate_skipped (env hatch used against a registered panel) and/or
+	// panel_abandoned (matched panel.json marked abandoned) AFTER the
+	// terminal mutation succeeds, mirroring the doc-skew discipline above.
+	// Best-effort; reuses the panelAdvisory scan (no second fs walk).
+	if completeErr == nil {
+		writePanelAuditMetadata(beadID, panelReg, advisoryOut)
+	}
+
 	// 6. Advance state
 	nextMode, nextBead := advanceState(root, specID)
 	result.NextMode = nextMode
@@ -575,6 +595,31 @@ func buildSkewMetadata(reason, reasonKey, atKey, byKey string) map[string]interf
 		atKey:     time.Now().UTC().Format(time.RFC3339),
 		byKey:     gitUserEmailFn(),
 	}
+}
+
+// adrDivergenceFailure formats the ADR-divergence gate failure with the
+// repair-first triage ladder (spec 093 Req 2, replacing the bypass-first
+// `--override-adr`/`--supersede-adr` hint and the merge-skill prose that
+// was folded into ms-bead-cycle per spec 093). findings is
+// joinResultErrorMessages(adrResult) — it carries
+// the offending file names, so the ladder is actionable without any
+// skill. Ladder order is deliberate: repair (OWNERSHIP.yaml), then
+// revert, and only LAST the bypass flags. Per HC-5 the ladder lives in
+// the body and the final `recovery:` lines carry the re-run and bypass
+// commands (guard.NewFailure, ADR-0035 convention).
+func adrDivergenceFailure(beadID, findings string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "adr-divergence: %s\n", findings)
+	b.WriteString("triage before bypassing (repair-first):\n")
+	b.WriteString("  1. the file belongs to this bead's domain → add it to the relevant\n")
+	b.WriteString("     .mindspec/docs/domains/<name>/OWNERSHIP.yaml and re-run\n")
+	b.WriteString("  2. the file is an accidental stray edit picked up by auto-stage → revert it and re-run\n")
+	b.WriteString("  3. only after 1-2 do not apply, bypass with --override-adr \"<reason>\"\n")
+	b.WriteString("     (recorded on bead metadata) or --supersede-adr ADR-NNNN")
+	return guard.NewFailure(b.String(),
+		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", beadID),
+		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", beadID),
+		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", beadID))
 }
 
 // warnWriter is the destination for WARN lines rendered from

@@ -47,9 +47,12 @@ type Input struct {
 	Raw      map[string]any
 }
 
-// Names lists all registered hook names.
+// Names lists all registered hook names. Kept in sorted order
+// (TestNames_Sorted, hook_test.go) so --list output and the valid-hook
+// check are deterministic.
 var Names = []string{
 	"pre-commit",
+	"pre-complete",
 	"session-start",
 }
 

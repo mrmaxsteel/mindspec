@@ -82,4 +82,3 @@ func WorktreeList() ([]WorktreeListEntry, error)
 | `/ms-spec-approve` | Request Spec -> Plan transition |
 | `/ms-plan-approve` | Request Plan -> Implementation transition |
 | `/ms-impl-approve` | Request Implementation -> Done transition |
-| `/ms-spec-status` | Check current mode and state |

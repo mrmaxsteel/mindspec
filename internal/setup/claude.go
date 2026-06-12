@@ -25,6 +25,9 @@ const (
 type Result struct {
 	Created      []string
 	Skipped      []string
+	Refreshed    []string           // mindspec-owned skill files refreshed in place to canonical content (Req 19)
+	Removed      []string           // stale mindspec-owned skill dirs removed (Req 18)
+	Notices      []string           // user-modified files left in place (provenance HC-6)
 	BeadsRan     bool               // true if bd setup <agent> was run
 	BeadsMsg     string             // output/error from bd setup <agent>
 	BeadsConfig  *bead.ConfigResult // result of EnsureBeadsConfig (or ScanBeadsConfig in check mode) after chained bd setup
@@ -45,6 +48,30 @@ func (r *Result) FormatSummary() string {
 		}
 	}
 
+	if len(r.Refreshed) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Refreshed (canonical content):\n")
+		for _, p := range r.Refreshed {
+			sb.WriteString("  ~ ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Removed) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Removed (stale mindspec skill):\n")
+		for _, p := range r.Removed {
+			sb.WriteString("  x ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
 	if len(r.Skipped) > 0 {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
@@ -52,6 +79,18 @@ func (r *Result) FormatSummary() string {
 		sb.WriteString("Already present:\n")
 		for _, p := range r.Skipped {
 			sb.WriteString("  - ")
+			sb.WriteString(p)
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Notices) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Notices (user-modified, left in place):\n")
+		for _, p := range r.Notices {
+			sb.WriteString("  ! ")
 			sb.WriteString(p)
 			sb.WriteString("\n")
 		}
@@ -114,23 +153,11 @@ func RunClaude(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 2. Skills (.claude/skills/<name>/SKILL.md)
-	for name, content := range claudeSkillFiles() {
-		relPath := filepath.Join(".claude", "skills", name, "SKILL.md")
-		absPath := filepath.Join(root, relPath)
-		if fileExists(absPath) {
-			r.Skipped = append(r.Skipped, relPath)
-		} else {
-			r.Created = append(r.Created, relPath)
-			if !check {
-				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-					return nil, fmt.Errorf("creating dir for %s: %w", relPath, err)
-				}
-				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-					return nil, fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		}
+	// 2. Skills (.claude/skills/<name>/SKILL.md) — create new, refresh
+	// previously-shipped (provenance-gated), skip user-modified with a
+	// notice (Reqs 18-19, HC-6).
+	if err := installSkills(filepath.Join(root, ".claude", "skills"), filepath.Join(".claude", "skills"), claudeSkillFiles(), check, r); err != nil {
+		return nil, err
 	}
 
 	// 3. CLAUDE.md (append with marker)
@@ -183,10 +210,15 @@ func applyBeadsConfig(root string, check bool, r *Result) {
 
 // ensureSettings creates or merges .claude/settings.json with MindSpec hooks.
 func ensureSettings(root string, check bool, r *Result) error {
+	return ensureSettingsWith(root, check, r, wantedHooks())
+}
+
+// ensureSettingsWith is ensureSettings with an explicit wanted set, so tests
+// can exercise the merge machinery against hook shapes that wantedHooks()
+// does not carry yet (e.g. the PreToolUse pre-complete gate entry).
+func ensureSettingsWith(root string, check bool, r *Result, wanted map[string][]map[string]any) error {
 	relPath := filepath.Join(".claude", "settings.json")
 	absPath := filepath.Join(root, relPath)
-
-	wanted := wantedHooks()
 
 	if fileExists(absPath) {
 		// Read existing, check if hooks already present
@@ -209,20 +241,22 @@ func ensureSettings(root string, check bool, r *Result) error {
 		for event, entries := range wanted {
 			existing, _ := hooks[event].([]any)
 			for _, entry := range entries {
-				if !hookEntryExists(existing, entry) {
-					existing = append(existing, entry)
-					anyChanged = true
-				} else if hookEntryStale(existing, entry) {
-					existing = replaceHookEntry(existing, entry)
+				var changed bool
+				existing, changed = mergeWantedEntry(existing, entry)
+				if changed {
 					anyChanged = true
 				}
 			}
 			hooks[event] = existing
 		}
 
-		// Remove stale PreToolUse entries that reference mindspec commands.
-		// These guard hooks were removed in spec-072.
-		if cleaned := removeStalePreToolUse(hooks); cleaned {
+		// Remove stale mindspec-owned entries: hooks mindspec installed in
+		// the past but no longer wants (e.g. the spec-072 retired PreToolUse
+		// guard hooks, including their legacy `mindspec instruct` form).
+		// Staleness = mindspec-owned AND not in the current wanted set; the
+		// keep-list is derived from `wanted` itself, so an entry merged in
+		// above can never be stripped by this same pass.
+		if removeStaleMindspecEntries(hooks, wanted) {
 			anyChanged = true
 		}
 
@@ -279,124 +313,177 @@ func wantedHooks() map[string][]map[string]any {
 				},
 			},
 		},
+		// PreToolUse pre-complete panel gate (Spec 093 Reqs 9-13,
+		// ADR-0037). Matches Bash tool calls and self-filters to
+		// `mindspec complete` command-position invocations; every other
+		// Bash command does zero work beyond the string match (HC-3).
+		// The matcher "Bash" is shared with user lint/guard hooks — the
+		// settings-merge identity (Bead 3) keys on command CONTENT, so
+		// this entry installs alongside user PreToolUse Bash hooks rather
+		// than clobbering them (HC-6).
+		"PreToolUse": {
+			{
+				"matcher": "Bash",
+				"hooks": []map[string]any{
+					{
+						"type":          "command",
+						"command":       "mindspec hook pre-complete",
+						"statusMessage": "Checking panel verdicts...",
+					},
+				},
+			},
+		},
 	}
 }
 
-// hookEntryExists checks if a hook entry with the same matcher already exists.
-func hookEntryExists(existing []any, entry map[string]any) bool {
-	wantMatcher, _ := entry["matcher"].(string)
-	for _, e := range existing {
-		m, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		if matcher, _ := m["matcher"].(string); matcher == wantMatcher {
+// Hook-entry ownership markers. An entry is mindspec-owned iff one of its
+// hook commands prefix-matches mindspecOwnedCmdPrefix OR contains
+// mindspecLegacyCmdMarker. Ownership is decided by command CONTENT, never by
+// matcher: for shared matchers like PreToolUse "Bash", user lint/guard hooks
+// routinely collide on the matcher string, and matcher-keyed identity would
+// silently overwrite them (spec 093 Req 7, HC-6).
+//
+// The `mindspec instruct` arm is retained deliberately: the spec-072 retired
+// guard hooks include that legacy form, and instruct-form entries are never
+// in the wanted set, so wanted-set-derived staleness removes them (N1).
+const (
+	mindspecOwnedCmdPrefix  = "mindspec hook "
+	mindspecLegacyCmdMarker = "mindspec instruct"
+)
+
+// isMindspecOwned reports whether a hook entry is mindspec-owned, judged by
+// the content of its hook commands (see the ownership-marker comment above).
+func isMindspecOwned(entry map[string]any) bool {
+	for _, cmd := range entryCommands(entry) {
+		if strings.HasPrefix(cmd, mindspecOwnedCmdPrefix) || strings.Contains(cmd, mindspecLegacyCmdMarker) {
 			return true
 		}
 	}
 	return false
 }
 
-// hookEntryStale checks if an existing hook entry with the same matcher has
-// different command content than the wanted entry (i.e. needs updating).
-func hookEntryStale(existing []any, entry map[string]any) bool {
-	wantMatcher, _ := entry["matcher"].(string)
-	wantHooks, _ := entry["hooks"].([]map[string]any)
-	for _, e := range existing {
+// entryCommands extracts the ordered hook command strings from an entry.
+// Handles both the JSON-decoded shape ([]any of map[string]any) and the
+// wantedHooks() literal shape ([]map[string]any).
+func entryCommands(entry map[string]any) []string {
+	var cmds []string
+	appendCmd := func(hm map[string]any) {
+		if cmd, ok := hm["command"].(string); ok {
+			cmds = append(cmds, cmd)
+		}
+	}
+	switch hooksList := entry["hooks"].(type) {
+	case []any:
+		for _, h := range hooksList {
+			if hm, ok := h.(map[string]any); ok {
+				appendCmd(hm)
+			}
+		}
+	case []map[string]any:
+		for _, hm := range hooksList {
+			appendCmd(hm)
+		}
+	}
+	return cmds
+}
+
+// entryEqualsWanted reports whether an existing entry already carries the
+// wanted entry's identity: same matcher and the same ordered hook commands.
+func entryEqualsWanted(entry, want map[string]any) bool {
+	entryMatcher, _ := entry["matcher"].(string)
+	wantMatcher, _ := want["matcher"].(string)
+	if entryMatcher != wantMatcher {
+		return false
+	}
+	entryCmds := entryCommands(entry)
+	wantCmds := entryCommands(want)
+	if len(entryCmds) != len(wantCmds) {
+		return false
+	}
+	for i := range entryCmds {
+		if entryCmds[i] != wantCmds[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeWantedEntry merges one wanted hook entry into the existing entries
+// for its event. Only mindspec-owned entries are candidates for in-place
+// update; user entries are NEVER replaced — when a user entry shares the
+// wanted matcher, mindspec's entry is APPENDED alongside it (HC-6).
+// Returns the (possibly grown) slice and whether anything changed.
+func mergeWantedEntry(existing []any, want map[string]any) ([]any, bool) {
+	wantMatcher, _ := want["matcher"].(string)
+	for i, e := range existing {
 		m, ok := e.(map[string]any)
-		if !ok {
+		if !ok || !isMindspecOwned(m) {
 			continue
 		}
 		if matcher, _ := m["matcher"].(string); matcher != wantMatcher {
 			continue
 		}
-		// Same matcher — compare hook commands
-		existHooks, _ := m["hooks"].([]any)
-		if len(existHooks) != len(wantHooks) {
-			return true
+		// Mindspec-owned entry on the wanted matcher: update in place if
+		// its command content drifted; otherwise it is already current.
+		if entryEqualsWanted(m, want) {
+			return existing, false
 		}
-		for i, wh := range wantHooks {
-			if i >= len(existHooks) {
-				return true
-			}
-			eh, ok := existHooks[i].(map[string]any)
-			if !ok {
-				return true
-			}
-			wantCmd, _ := wh["command"].(string)
-			existCmd, _ := eh["command"].(string)
-			if wantCmd != existCmd {
-				return true
-			}
-		}
-		return false
+		existing[i] = want
+		return existing, true
 	}
-	return false // not found = not stale (it's new)
+	// No mindspec-owned entry on this matcher — append, leaving any user
+	// entries sharing the matcher untouched.
+	return append(existing, want), true
 }
 
-// replaceHookEntry replaces an existing hook entry matching the same matcher.
-func replaceHookEntry(existing []any, entry map[string]any) []any {
-	wantMatcher, _ := entry["matcher"].(string)
-	for i, e := range existing {
-		m, ok := e.(map[string]any)
-		if !ok {
+// removeStaleMindspecEntries removes mindspec-owned hook entries that are
+// not in the current wanted set. Staleness = mindspec-owned AND absent from
+// `wanted`; the keep-list is DERIVED from the wanted set passed in (the same
+// one ensureSettings just merged), never a hardcoded whitelist — so a newly
+// wanted entry can never be added and stripped in the same pass, and the
+// next new hook cannot re-create that bug. Non-mindspec (user) entries are
+// never touched. A duplicate owned copy of a wanted entry beyond the first
+// is also removed, keeping re-runs idempotent. Returns true if any entries
+// were removed.
+func removeStaleMindspecEntries(hooks map[string]any, wanted map[string][]map[string]any) bool {
+	removedAny := false
+	for event, raw := range hooks {
+		entries, ok := raw.([]any)
+		if !ok || len(entries) == 0 {
 			continue
 		}
-		if matcher, _ := m["matcher"].(string); matcher == wantMatcher {
-			existing[i] = entry
-			return existing
+		wantedForEvent := wanted[event]
+		matchedWanted := make([]bool, len(wantedForEvent))
+		var kept []any
+		for _, e := range entries {
+			m, ok := e.(map[string]any)
+			if !ok || !isMindspecOwned(m) {
+				kept = append(kept, e)
+				continue
+			}
+			keep := false
+			for i, w := range wantedForEvent {
+				if !matchedWanted[i] && entryEqualsWanted(m, w) {
+					matchedWanted[i] = true
+					keep = true
+					break
+				}
+			}
+			if keep {
+				kept = append(kept, e)
+			}
 		}
-	}
-	return append(existing, entry)
-}
-
-// removeStalePreToolUse removes PreToolUse entries that reference mindspec
-// hook commands. Returns true if any entries were removed.
-func removeStalePreToolUse(hooks map[string]any) bool {
-	preToolUse, ok := hooks["PreToolUse"].([]any)
-	if !ok || len(preToolUse) == 0 {
-		return false
-	}
-
-	var kept []any
-	for _, entry := range preToolUse {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			kept = append(kept, entry)
+		if len(kept) == len(entries) {
 			continue
 		}
-		if isMindspecHookEntry(m) {
-			continue // drop it
-		}
-		kept = append(kept, entry)
-	}
-
-	if len(kept) == len(preToolUse) {
-		return false // nothing removed
-	}
-
-	if len(kept) == 0 {
-		delete(hooks, "PreToolUse")
-	} else {
-		hooks["PreToolUse"] = kept
-	}
-	return true
-}
-
-// isMindspecHookEntry returns true if a hook entry references a mindspec command.
-func isMindspecHookEntry(entry map[string]any) bool {
-	hooksList, _ := entry["hooks"].([]any)
-	for _, h := range hooksList {
-		hm, ok := h.(map[string]any)
-		if !ok {
-			continue
-		}
-		cmd, _ := hm["command"].(string)
-		if strings.Contains(cmd, "mindspec hook") || strings.Contains(cmd, "mindspec instruct") {
-			return true
+		removedAny = true
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
 		}
 	}
-	return false
+	return removedAny
 }
 
 // ensureClaudeMD creates or appends MindSpec block to CLAUDE.md.
@@ -512,9 +599,9 @@ func fileExists(path string) bool {
 // Shared across Codex and Copilot setup (both use .agents/skills/).
 //
 // The returned map merges two sources:
-//   - The 5 lifecycle gate skills inlined below (ms-spec-create,
-//     ms-spec-approve, ms-plan-approve, ms-impl-approve, ms-spec-status).
-//   - The 11 plugin skills embedded from plugins/mindspec/skills/ via
+//   - The 4 lifecycle gate skills inlined below (ms-spec-create,
+//     ms-spec-approve, ms-plan-approve, ms-impl-approve).
+//   - The 7 plugin skills embedded from plugins/mindspec/skills/ via
 //     pluginmindspec.SkillFiles() (ms-bead-* and ms-panel-* and ms-spec-*).
 //
 // Lifecycle skills always win on key collision (they're the canonical
@@ -527,14 +614,17 @@ func skillFiles() map[string]string {
 	return out
 }
 
-// lifecycleSkillFiles returns the 5 spec-lifecycle gate skills as raw-string
+// lifecycleSkillFiles returns the 4 spec-lifecycle gate skills as raw-string
 // literals. These are the canonical authority — they win on key collision
-// with the plugin-embedded skills in skillFiles().
+// with the plugin-embedded skills in skillFiles(). Each carries the
+// `managed-by: mindspec` provenance marker so the in-place refresh
+// (refreshManagedSkill) can tell a shipped file from a user-modified one.
 func lifecycleSkillFiles() map[string]string {
 	return map[string]string{
 		"ms-spec-create": `---
 name: ms-spec-create
 description: Create a new MindSpec specification
+managed-by: mindspec
 ---
 
 # Spec Create
@@ -548,6 +638,7 @@ description: Create a new MindSpec specification
 		"ms-spec-approve": `---
 name: ms-spec-approve
 description: Approve a spec and transition to Plan Mode
+managed-by: mindspec
 ---
 
 # Spec Approval
@@ -561,6 +652,7 @@ description: Approve a spec and transition to Plan Mode
 		"ms-plan-approve": `---
 name: ms-plan-approve
 description: Approve a plan and transition toward Implementation Mode
+managed-by: mindspec
 ---
 
 # Plan Approval
@@ -574,6 +666,7 @@ description: Approve a plan and transition toward Implementation Mode
 		"ms-impl-approve": `---
 name: ms-impl-approve
 description: Approve implementation and close out the spec lifecycle
+managed-by: mindspec
 ---
 
 # Implementation Approval
@@ -588,17 +681,6 @@ description: Approve implementation and close out the spec lifecycle
    - ` + "`git commit`" + `
    - ` + "`bd sync`" + `
    - ` + "`git push`" + `
-`,
-
-		"ms-spec-status": `---
-name: ms-spec-status
-description: Check the current MindSpec mode and active specification
----
-
-# Spec Status
-
-1. Run ` + "`mindspec state show`" + ` and ` + "`mindspec instruct`" + ` in the terminal
-2. Summarize the mode, active spec/bead, and any warnings to the user
 `,
 	}
 }
@@ -626,33 +708,32 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 | ` + "`/ms-spec-approve`" + ` | Approve spec → Plan Mode |
 | ` + "`/ms-plan-approve`" + ` | Approve plan → Implementation Mode |
 | ` + "`/ms-impl-approve`" + ` | Approve implementation → Idle |
-| ` + "`/ms-spec-status`" + ` | Check current mode and active spec/bead state |
 
 ### Bead lifecycle
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-bead-next`" + ` | Pick the next ready bead, claim it, set up the worktree |
-| ` + "`/ms-bead-prep`" + ` | Draft a pre-staged implementation prompt at ` + "`review/prep/bead<N>_impl_prompt.md`" + ` |
-| ` + "`/ms-bead-impl`" + ` | Dispatch an implementation subagent for the claimed bead |
-| ` + "`/ms-bead-merge`" + ` | Run ` + "`mindspec complete`" + ` once the panel has approved |
+| ` + "`/ms-bead-impl`" + ` | Stage the impl prompt (Phase A) + dispatch the subagent (Phase B) |
+| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
 
 ### Review panel
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-panel-create`" + ` | Initialize the panel directory + BRIEF.md for 6 reviewers |
-| ` + "`/ms-panel-run`" + ` | Launch 3 Claude Agents + 3 Codex sessions in parallel; collect verdicts |
-| ` + "`/ms-panel-tally`" + ` | Read all 6 verdict JSONs and consolidate ` + "`concrete_changes_required`" + ` |
-| ` + "`/ms-bead-fix`" + ` | Dispatch a fix-up subagent with the consolidated change list |
+| ` + "`/ms-panel-run`" + ` | Step 0 writes the panel dir + BRIEF + ` + "`panel.json`" + `; then launch 6 reviewers and collect verdicts |
+| ` + "`/ms-panel-tally`" + ` | Single decision authority: decision matrix, artifact gates, consolidation, halt-recovery |
 
 ### Orchestrators
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: impl → panel → fix → re-panel → merge |
+| ` + "`/ms-bead-cycle`" + ` | Single bead end-to-end: pick+claim → impl → panel → fix → re-panel → merge |
 | ` + "`/ms-spec-autopilot`" + ` | Whole spec: cycle every bead until the spec is done |
 | ` + "`/ms-spec-final-review`" + ` | Final panel of the whole spec branch vs main, before ` + "`/ms-impl-approve`" + ` |
+
+## Bead-loop guardrails (mindspec)
+
+See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestrator rules and subagent prompt fences (only the cycle runs ` + "`mindspec complete`" + `, after the panel gate passes; never raw ` + "`git merge bead/<id>`" + `; one ` + "`git push`" + ` at end-of-spec; subagents make exactly one commit, tests must PASS). Surviving skills reference that section rather than re-stating it.
 `
 
 // claudeMDFull is written when CLAUDE.md doesn't exist.

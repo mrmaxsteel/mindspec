@@ -129,8 +129,15 @@ func runSessionStartHook(inp *hook.Input) error {
 	// boundaries (avoids leaking goroutines past the hook's 12s budget).
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
+	// Spec 093 Req 15 auto-include: surface the open-panel-rounds block at
+	// SessionStart only when a panel has an incomplete latest round, so a
+	// compacted session recovers where it stands vs the complete gate
+	// (FINDINGS item 8). The HasIncompletePanel scan is fs-only (the sole
+	// work outside the condition); the git/render cost is paid only when a
+	// panel is actually open — zero added SessionStart cost otherwise.
+	opts := instruct.Options{PanelState: instruct.HasIncompletePanel(root)}
 	done := make(chan error, 1)
-	go func() { done <- instruct.Run(ctx, root, "", "", os.Stdout) }()
+	go func() { done <- instruct.RunWithOptions(ctx, root, "", "", os.Stdout, opts) }()
 	select {
 	case err := <-done:
 		if err != nil && ctx.Err() != context.DeadlineExceeded {

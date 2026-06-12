@@ -43,6 +43,12 @@ type Context struct {
 	BeadPrimer       string     `json:"bead_primer,omitempty"`
 	BranchProtection bool       `json:"branch_protection,omitempty"`
 	Warnings         []string   `json:"warnings,omitempty"`
+	// PanelState is the rendered open-panel-rounds block (Spec 093
+	// Req 14). Empty when no panel is registered — Render appends
+	// nothing, preserving the zero-cost-when-no-panel contract (Req 15).
+	// Populated by the explicit `--panel-state` flag or the implement
+	// mode SessionStart auto-include.
+	PanelState string `json:"panel_state,omitempty"`
 }
 
 // JSONOutput is the structured output for --format=json.
@@ -53,6 +59,9 @@ type JSONOutput struct {
 	Guidance   string   `json:"guidance"`
 	Gates      []string `json:"gates"`
 	Warnings   []string `json:"warnings"`
+	// PanelState carries the rendered open-panel-rounds block (Spec 093
+	// Req 14) when requested via --panel-state; omitted otherwise.
+	PanelState string `json:"panel_state,omitempty"`
 }
 
 // BuildContext creates a rendering context from focus state and project root.
@@ -149,6 +158,12 @@ func Render(ctx *Context) (string, error) {
 		result += "\n---\n\n" + ctx.BeadPrimer
 	}
 
+	// Append panel-state block if present (Spec 093 Req 14/15). Empty
+	// when no panel is registered → nothing appended.
+	if ctx.PanelState != "" {
+		result += "\n---\n\n" + ctx.PanelState
+	}
+
 	// Append warnings if any
 	if len(ctx.Warnings) > 0 {
 		result += "\n---\n\n## Warnings\n\n"
@@ -198,6 +213,7 @@ func RenderJSON(ctx *Context) (string, error) {
 		Guidance:   guidance,
 		Gates:      gatesForMode(ctx.Mode),
 		Warnings:   ctx.Warnings,
+		PanelState: ctx.PanelState,
 	}
 
 	if out.Warnings == nil {

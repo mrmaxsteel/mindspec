@@ -1,29 +1,101 @@
 ---
 name: ms-panel-run
-description: Launch a 6-reviewer mindspec panel — 3 Claude Agents + 3 Codex CLI sessions in parallel — and wait for verdicts
+description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch 6 reviewers (3 Claude Agents + 3 Codex CLI sessions) in parallel and wait for verdicts
 ---
 
 # Run a 6-Reviewer Panel
 
-Fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
+Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the pre-complete gate and `mindspec instruct --panel-state` consume. Then fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
+
+Step 0 was previously the separate `/ms-panel-create` skill; it is folded in here so the panel directory, BRIEF, and `panel.json` are always created together — the gate's source of truth (`panel.json`) cannot be forgotten.
 
 ## Inputs
 
-- `panel-slug` (required) — e.g. `spec-050-bead2`.
-- `round` (default `1`) — round number; reviewers write to `<slot>-round-<N>.json`.
+- `panel-slug` (required) — e.g. `spec-050-bead2` (round 1) or `spec-050-bead2-r2` (round 2).
+- `target` (required) — one of `bead <bead-id>`, `pr <pr-number>`, or `commit <sha>`. For `/ms-spec-final-review`, `target` is the spec branch (`bead_id` null).
+- `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
+- `expected-reviewers` (default `6`) — the default panel size.
 
-Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>/BRIEF.md`.
+## Step 0 — create panel dir + BRIEF + panel.json
 
-## Steps
+1. **Create the panel directory.**
+   ```bash
+   mkdir -p <repo>/review/<panel-slug>
+   ```
+
+2. **Write `panel.json`** — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read. Schema:
+
+   ```json
+   {
+     "bead_id": "<bead-id>",        // null for non-bead targets (final-review / PR panels)
+     "spec": "<spec-slug>",
+     "target": "<bead/<id> | spec/<slug> | pr/<n> | <sha>>",
+     "round": 1,
+     "expected_reviewers": 6,
+     "reviewed_head_sha": "<git rev-parse of the target ref at fan-out>"
+   }
+   ```
+
+   `reviewed_head_sha` is `git rev-parse` of the target ref (`bead/<id>` for a bead panel, the spec branch tip for a final-review panel) captured NOW, at fan-out.
+
+   **On every re-panel, bump `round` AND `reviewed_head_sha` in the SAME write.** The two fields move together by construction — never write one without the other. A re-panel that bumps `round` but leaves a stale `reviewed_head_sha` (or vice versa) is exactly the stale-verdict bypass the gate exists to close (lola-f4a8 class).
+
+   Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned).
+
+3. **Compose the BRIEF.md.** Required sections:
+
+   ```markdown
+   # <panel-slug> — Round <N> Review Panel
+
+   **Worktree**: <abs-path-to-bead-worktree>
+   **Branch**: bead/<bead-id> | spec/<slug> | pr/<n>
+   **Commit under review**: <sha> — <commit subject>
+   **Prior round verdict** (round >= 2 only): X APPROVE, Y REQUEST_CHANGES; consolidated asks below.
+
+   ## What the work does
+
+   <1-paragraph plain-English summary. Don't paste the plan; summarise it.>
+
+   ## Round-<N-1> concrete_changes_required (consolidated)  [round >= 2]
+
+   1. ...
+   2. ...
+
+   ## Files in scope (final state at <sha>)
+
+   - `path/to/file.py`
+   - ...
+
+   ## Shared modules reused (unchanged)
+
+   - `app/entities/identify.py` — `IdentifyResultCase1/2/3`, `identify_via_llm`, ...
+
+   ## Fix-author deviations (assess these explicitly)  [round >= 2]
+
+   A. <deviation 1 — why the author diverged from the brief, and what they did instead>
+   B. ...
+
+   ## Your job
+
+   Verify the round-<N-1> concrete_changes_required are addressed (round >= 2), or evaluate the work cold (round 1). Each ask → ADDRESSED / PARTIAL / MISSED / NEW_ISSUE.
+
+   Verdict: APPROVE / REQUEST_CHANGES / REJECT.
+
+   Output JSON to `<repo>/review/<panel-slug>/<your-slot>-round-<N>.json` with keys:
+   `reviewer_id`, `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings` (per round-<N-1> item). An artifact-gate finding may set `"hard_block": true`.
+   ```
+
+4. **Pre-stage the codex prompts.** Codex CLI sessions cannot accept the BRIEF as a tool input the way Claude `Agent` calls can. Write `/tmp/codex_<panel-slug>_r{4,5,6}.md` files, each opening with:
+   > You are R{N} codex on the <panel-slug> round-<round> verification panel. Read `<abs-path>/BRIEF.md`.
+
+   followed by the slot-specific lens, the previous-round JSON path (round >= 2), and the concrete_changes_required items they personally raised in the previous round.
+
+## Launch the panel
 
 1. **Launch Codex first** (they run 4-10 min vs Claude 1-3 min; start the slow ones first).
 
    For each codex slot R4, R5, R6:
-   - Write `/tmp/codex_<panel-slug>_r<N>.md` containing the slot-specific prompt. Each prompt should:
-     - Tell the reviewer to read `<repo>/review/<panel-slug>/BRIEF.md`.
-     - Name the slot id (`R4 codex`, etc.) and the lens.
-     - For round >= 2, point at the previous round's JSON (`<repo>/review/<panel-slug>/codex-<slot>-round-<N-1>.json`) and list the `concrete_changes_required` the slot raised.
-     - End: "Output JSON to `<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json`. ≤200 words."
+   - The `/tmp/codex_<panel-slug>_r<N>.md` prompt (from step 0) tells the reviewer to read `<repo>/review/<panel-slug>/BRIEF.md`, names the slot id (`R4 codex`, etc.) and the lens, and for round >= 2 points at the previous round's JSON.
 
      **Prompt MUST include this terminal instruction verbatim:**
 
@@ -63,7 +135,7 @@ Prerequisite: `/ms-panel-create` has already created `<repo>/review/<panel-slug>
 
 A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order.
 
-**Pre-condition: honest task-notification timing.** This check is only reliable when the `<task-notification>` fires on *codex* exit, not on a shell-wrapper exit. That requires single-source backgrounding (see step 1 above) — drop `&` and `nohup`; use only the Bash tool's `run_in_background: true`. The earlier double-backgrounded pattern made the file-existence primary check race against still-running codex, producing false "completed in 1 sec, file empty" reports. With the timing honest, layer 1 below is reliable on first read.
+**Pre-condition: honest task-notification timing.** This check is only reliable when the `<task-notification>` fires on *codex* exit, not on a shell-wrapper exit. That requires single-source backgrounding (see launch step 1 above) — drop `&` and `nohup`; use only the Bash tool's `run_in_background: true`. The earlier double-backgrounded pattern made the file-existence primary check race against still-running codex, producing false "completed in 1 sec, file empty" reports. With the timing honest, layer 1 below is reliable on first read.
 
 ```bash
 EXPECTED_JSON="<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json"
@@ -127,7 +199,7 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 | R5 | Codex  | Schema / type correctness — Pydantic, SQLAlchemy, unions |
 | R6 | Codex  | Next-bead integration — will the next bead consume this cleanly? |
 
-For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
+Mix to taste. The point is six distinct lenses, not six clones. For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
 
 ## Anti-patterns
 
@@ -135,6 +207,7 @@ For round >= 2, each slot inherits its previous-round lens and is told to evalua
 - Don't run all six reviewers as foreground tool calls — that serialises the panel and wastes 5-10 minutes.
 - Don't reuse a codex `/tmp/codex_*.md` file across rounds — write a fresh one per round so the round number is unambiguous in the prompt.
 - Don't ask Claude reviewers to also do the codex empirical-probe lens — duplication is worse than coverage gaps; trust the family split.
+- Don't skip the `panel.json` write in step 0, or bump `round` without re-capturing `reviewed_head_sha`. The gate reads `panel.json`; a stale or missing one is a silent bypass.
 
 ## Then
 

@@ -444,7 +444,9 @@ func Done() string { return "done" }
 	}
 }
 
-// ScenarioSpecStatus tests the /ms-spec-status flow: check current mode and report.
+// ScenarioSpecStatus tests the status-check flow: check current mode and report.
+// The status command wraps `mindspec state show` + `mindspec instruct` directly
+// (spec 093 folded the former /ms-spec-status passthrough skill into that CLI pair).
 //
 // Before: implement mode, spec worktree + bead worktree exist, spec/001-status + bead/ branches,
 //
@@ -495,7 +497,7 @@ status: Approved
 		},
 		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
 
-/ms-spec-status`,
+Check the current MindSpec status: run ` + "`mindspec state show`" + ` and ` + "`mindspec instruct`" + ` in the terminal, then summarize the mode, active spec/bead, and any warnings.`,
 		Assertions: func(t *testing.T, sandbox *Sandbox, events []ActionEvent) {
 			// Command ran: agent ran state show or instruct
 			ran := false
