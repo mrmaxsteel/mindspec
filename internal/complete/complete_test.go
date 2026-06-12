@@ -1,6 +1,7 @@
 package complete
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
 // finalRecoveryCommand extracts the command of the FINAL `recovery: `
@@ -55,6 +57,27 @@ func TestCompleteGetwdFnDefaultsToOsGetwd(t *testing.T) {
 // saveAndRestore saves all function variables and returns a restore function.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
+
+	// Spec 092 Req 3c moved an unconditional os.Chdir(repoRoot) INSIDE
+	// complete.Run (complete.go) so the terminal mutation survives the
+	// bead worktree being removed out from under the process. As a
+	// side effect, every Run-calling test leaves the process cwd parked
+	// at its own setupTempRoot() temp dir; once that t.TempDir() is
+	// removed at test teardown the process cwd is a deleted directory,
+	// and the NEXT test that opens with os.Getwd() (e.g.
+	// TestPrintResultWarningsRecursStatelessly) fails `getwd: no such
+	// file or directory` under CI's serialized `-race` ordering.
+	//
+	// saveAndRestore runs first in every Run-calling test (before
+	// setupTempRoot), so this cwd-restoring cleanup is registered first
+	// and — cleanups being LIFO — runs LAST, after every t.TempDir
+	// removal, leaving the process cwd at a stable real directory for
+	// the next test in the package.
+	origWd, wdErr := os.Getwd()
+	if wdErr == nil {
+		t.Cleanup(func() { _ = os.Chdir(origWd) })
+	}
+
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
@@ -1248,14 +1271,26 @@ func TestCompleteAllowsOverride(t *testing.T) {
 
 // writeADRDivergenceFixture builds a fixture under root that trips
 // the ADR-divergence gate: a spec.md declaring "core" as an impacted
-// domain, a plan.md citing only an execution-domain ADR, and that
-// Accepted ADR on disk. Returns the spec ID.
+// domain, an OWNERSHIP.yaml claiming internal/core/** for that domain
+// (spec 091 Req 13 removed the silent loader fallback, so attribution
+// requires a real manifest — a manifest-less domain claims nothing),
+// a plan.md citing only an execution-domain ADR, and that Accepted
+// ADR on disk. Returns the spec ID.
 func writeADRDivergenceFixture(t *testing.T, root, specID string) {
 	t.Helper()
 
 	specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
+	}
+
+	coreDir := filepath.Join(root, ".mindspec", "docs", "domains", "core")
+	if err := os.MkdirAll(coreDir, 0o755); err != nil {
+		t.Fatalf("mkdir core domain dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coreDir, "OWNERSHIP.yaml"),
+		[]byte("paths:\n  - internal/core/**\n"), 0o644); err != nil {
+		t.Fatalf("write core OWNERSHIP.yaml: %v", err)
 	}
 	specMD := "# Spec " + specID + "\n\n## Impacted Domains\n\n- core\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specMD), 0o644); err != nil {
@@ -1302,7 +1337,7 @@ func TestOverrideUnblocks(t *testing.T) {
 	mock := newMockExec()
 	mock.MergeBaseResult = "merge-base-sha"
 	// Source touch that ValidateDivergence will attribute to "core"
-	// via the fallback `internal/core/**` (no OWNERSHIP.yaml present).
+	// via the fixture's OWNERSHIP.yaml (`internal/core/**`).
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
 
 	// Recorder for metadata writes.
@@ -1584,6 +1619,137 @@ func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
 		if _, ok := m["mindspec_doc_skew_reason"]; ok {
 			t.Errorf("override metadata written despite close failure: %v", m)
 		}
+	}
+}
+
+// --- Spec 091 Bead 5: warnings pipe (Req 22(a) + printing half of 22(b)) ---
+
+// captureWarnOutput swaps the package-level warnWriter seam for a
+// buffer and restores it on cleanup.
+func captureWarnOutput(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := warnWriter
+	warnWriter = &buf
+	t.Cleanup(func() { warnWriter = orig })
+	return &buf
+}
+
+// TestCompleteWarnStreamDefaultsToStderr pins the Req 22(a) stream
+// contract: in production, WARN lines go to stderr.
+func TestCompleteWarnStreamDefaultsToStderr(t *testing.T) {
+	if warnWriter != os.Stderr {
+		t.Errorf("warnWriter must default to os.Stderr, got %T", warnWriter)
+	}
+}
+
+// TestCompletePrintsDocSyncWarningAndProceeds: a diff that produces a
+// warning-severity doc-sync issue but NO errors must print
+// `WARN <name>: <message>` AND complete successfully (warnings never
+// block). Req 22(a), including the HasFailures()==false case.
+func TestCompletePrintsDocSyncWarningAndProceeds(t *testing.T) {
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "091-warn-pipe", "epic-091")
+	resolveTargetFn = func(r, flag string) (string, error) { return "091-warn-pipe", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// cmd/ source + a non-operator doc: the cmd-docs lane emits a
+	// SevWarning and no lane emits a SevError.
+	mock.ChangedFilesResult = []string{"cmd/mindspec/foo.go", "docs/notes.md"}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("warning-only doc-sync result must not block completion, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "WARN cmd-docs: cmd/ changes without operator-docs update") {
+		t.Errorf("expected `WARN cmd-docs: <message>` line, got %q", out)
+	}
+	// Exact format: line starts with `WARN <name>: ` (no decoration).
+	if !strings.HasPrefix(out, "WARN cmd-docs: ") {
+		t.Errorf("WARN line must be formatted `WARN <name>: <message>`, got %q", out)
+	}
+	// Exactly one consumer prints — no double-print.
+	if n := strings.Count(out, "WARN cmd-docs:"); n != 1 {
+		t.Errorf("expected exactly 1 WARN line per issue per run, got %d in %q", n, out)
+	}
+}
+
+// TestCompleteNoWarningsPrintsNothing: zero warning-severity issues →
+// no WARN line (companion case for Req 22(a)).
+func TestCompleteNoWarningsPrintsNothing(t *testing.T) {
+	saveAndRestore(t)
+	buf := captureWarnOutput(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "091-warn-pipe", "epic-091")
+	resolveTargetFn = func(r, flag string) (string, error) { return "091-warn-pipe", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	mock.ChangedFilesResult = nil // empty diff → no issues at all
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("clean doc-sync result must complete, got: %v", err)
+	}
+	if strings.Contains(buf.String(), "WARN") {
+		t.Errorf("no warnings in result → no WARN output, got %q", buf.String())
+	}
+}
+
+// TestPrintResultWarningsRecursStatelessly pins the HC-2 printing
+// half: rendering the SAME warning-carrying result twice prints the
+// WARN line BOTH times (no suppression, no dedup) and creates no
+// marker/state file anywhere (the rendering path does no persistence).
+// It also pins severity-genericity: ANY SevWarning renders, error
+// issues never do.
+func TestPrintResultWarningsRecursStatelessly(t *testing.T) {
+	// Run from an empty dir so any sneaky relative-path persistence
+	// would be visible.
+	dir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	r := &validate.Result{}
+	r.AddWarning("missing-source-globs", "source_globs not set in .mindspec/config.yaml")
+	r.AddError("doc-sync", "errors are not rendered by the warnings pipe")
+
+	var buf bytes.Buffer
+	printResultWarnings(&buf, r)
+	printResultWarnings(&buf, r) // recurrence: same result, second run
+
+	want := "WARN missing-source-globs: source_globs not set in .mindspec/config.yaml\n"
+	if buf.String() != want+want {
+		t.Errorf("warning must print on BOTH runs, verbatim:\nwant %q\ngot  %q", want+want, buf.String())
+	}
+	if strings.Contains(buf.String(), "doc-sync") {
+		t.Errorf("SevError issues must not render as WARN lines: %q", buf.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rendering must persist NO marker/state file (HC-2); found %v", entries)
 	}
 }
 

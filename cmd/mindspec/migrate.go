@@ -201,7 +201,33 @@ mindspec domain add <slug>
 This auto-scaffolds the domain directory (overview.md, architecture.md, interfaces.md,
 runbook.md) and updates the context map.
 
-## Phase 3 — Context Map Population
+## Phase 3 — Source-Globs Population
+
+Declare which path globs count as "source" for the doc-sync gate. Run (once,
+repo-wide):
+
+` + "```bash" + `
+mindspec source populate
+` + "```" + `
+
+This prints an agent prompt; follow it to populate the ` + "`source_globs:`" + ` field in
+` + "`.mindspec/config.yaml`" + ` from this repo's actual layout. The framework proposes no
+globs — the prompt instructs you to derive them by inspecting the tree.
+
+## Phase 4 — Ownership-Manifest Population
+
+For each domain created in Phase 2, populate the empty-stub OWNERSHIP.yaml that
+` + "`mindspec domain add`" + ` scaffolded. Run, per domain:
+
+` + "```bash" + `
+mindspec ownership populate <slug>
+` + "```" + `
+
+This prints an agent prompt; follow it to fill the domain's ` + "`paths:`" + ` list from
+this repo's actual layout. The framework proposes no paths — the prompt
+instructs you to derive them by inspecting the tree.
+
+## Phase 5 — Context Map Population
 
 After domains exist, populate ` + "`.mindspec/docs/context-map.md`" + `:
 
@@ -219,7 +245,7 @@ Use this format for each relationship:
 **Contract**: [interfaces](domains/<source>/interfaces.md)
 ` + "```" + `
 
-## Phase 4 — Domain Doc Population
+## Phase 6 — Domain Doc Population
 
 For each domain, fill in the scaffolded files with real content from the codebase:
 
@@ -231,7 +257,7 @@ For each domain, fill in the scaffolded files with real content from the codebas
 Write from the actual codebase — not placeholders. Read the source files to populate
 accurate documentation.
 
-## Phase 5 — File Classification
+## Phase 7 — File Classification
 
 Finally, classify and move any stray documentation files into canonical locations.
 
@@ -295,8 +321,8 @@ Finally, classify and move any stray documentation files into canonical location
 
 	b.WriteString(`## Instructions
 
-1. Complete Phases 1-4 first — domain discovery and population is the priority
-2. Then classify and move stray files per Phase 5
+1. Complete Phases 1-6 first — domain discovery and population is the priority
+2. Then classify and move stray files per Phase 7
 3. Do NOT delete original files until you have verified the migration is correct
 4. After migration, run ` + "`mindspec doctor`" + ` to verify the structure is valid
 `)

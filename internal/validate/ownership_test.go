@@ -47,7 +47,7 @@ func TestOwnershipMultiMatchFirstWins(t *testing.T) {
 func TestOwnershipRejectsExcludedTrees(t *testing.T) {
 	root := t.TempDir()
 	writeManifest(t, root, "naughty", "paths:\n  - viz/foo/**\n")
-	_, err := loadOwnership(root, "naughty")
+	_, err := LoadOwnership(root, "naughty")
 	if err == nil {
 		t.Fatalf("expected load error for viz/ entry; got nil")
 	}
@@ -61,57 +61,110 @@ func TestOwnershipRejectsExcludedTrees(t *testing.T) {
 	// Also reject when the violator appears in `exclude:`.
 	root2 := t.TempDir()
 	writeManifest(t, root2, "naughty2", "paths:\n  - internal/foo/**\nexclude:\n  - agentmind/inner/**\n")
-	_, err = loadOwnership(root2, "naughty2")
+	_, err = LoadOwnership(root2, "naughty2")
 	if err == nil || !strings.Contains(err.Error(), "agentmind") {
 		t.Fatalf("expected error naming agentmind exclude entry; got: %v", err)
 	}
 
 	root3 := t.TempDir()
 	writeManifest(t, root3, "naughty3", "paths:\n  - bench/v2/foo/**\n")
-	if _, err := loadOwnership(root3, "naughty3"); err == nil || !strings.Contains(err.Error(), "bench") {
+	if _, err := LoadOwnership(root3, "naughty3"); err == nil || !strings.Contains(err.Error(), "bench") {
 		t.Fatalf("expected error naming bench entry; got: %v", err)
 	}
 }
 
+// TestOwnershipFallback is the AUTHORITATIVE regression gate for the
+// spec 091 Req 13 fallback removal: a domain directory with no
+// OWNERSHIP.yaml claims NOTHING — empty Paths, empty ManifestPath,
+// Source() == "missing". The old silent "internal/<domain>/**"
+// fallback must never return.
 func TestOwnershipFallback(t *testing.T) {
 	root := t.TempDir()
 	// Domain dir exists on disk (we create it) but no OWNERSHIP.yaml
-	// is present. loadOwnership must return the fallback
-	// Ownership with empty ManifestPath.
+	// is present. LoadOwnership must return an Ownership that claims
+	// nothing.
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "domains", "freshdomain"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	o, err := loadOwnership(root, "freshdomain")
+	o, err := LoadOwnership(root, "freshdomain")
 	if err != nil {
-		t.Fatalf("loadOwnership err: %v", err)
+		t.Fatalf("LoadOwnership err: %v", err)
 	}
 	if o.ManifestPath != "" {
-		t.Fatalf("expected empty ManifestPath for fallback, got %q", o.ManifestPath)
+		t.Fatalf("expected empty ManifestPath for missing manifest, got %q", o.ManifestPath)
 	}
-	if len(o.Paths) != 1 || o.Paths[0] != "internal/freshdomain/**" {
-		t.Fatalf("expected fallback paths [internal/freshdomain/**], got %v", o.Paths)
+	if len(o.Paths) != 0 {
+		t.Fatalf("expected empty Paths (no fallback) for missing manifest, got %v", o.Paths)
+	}
+	if got := o.Source(); got != "missing" {
+		t.Fatalf("Source() = %q, want %q", got, "missing")
 	}
 
-	// attributeDomain with the fallback should still match files
-	// inside that internal/<domain>/ tree.
-	owner, o2, err := attributeDomain(root, "internal/freshdomain/sub/file.go", []string{"freshdomain"})
+	// attributeDomain must NOT attribute files under
+	// internal/<domain>/ — a manifest-less domain claims nothing.
+	owner, _, err := attributeDomain(root, "internal/freshdomain/sub/file.go", []string{"freshdomain"})
 	if err != nil {
 		t.Fatalf("attributeDomain err: %v", err)
 	}
-	if owner != "freshdomain" {
-		t.Fatalf("expected fallback to attribute to freshdomain, got %q", owner)
-	}
-	if o2.ManifestPath != "" {
-		t.Fatalf("expected fallback ownership, got manifest %q", o2.ManifestPath)
+	if owner != "" {
+		t.Fatalf("manifest-less domain must claim nothing; attributed to %q", owner)
 	}
 
-	// A file that no domain claims yields the empty result.
+	// A file under another tree is also unclaimed.
 	owner3, _, err := attributeDomain(root, "cmd/other/main.go", []string{"freshdomain"})
 	if err != nil {
 		t.Fatalf("attributeDomain err: %v", err)
 	}
 	if owner3 != "" {
 		t.Fatalf("expected no-match for cmd/, got %q", owner3)
+	}
+}
+
+// TestOwnershipSourceStates pins the spec 091 Req 13 three-state
+// table for the derived Ownership.Source() method.
+func TestOwnershipSourceStates(t *testing.T) {
+	// State 1: OWNERSHIP.yaml absent on disk → "missing".
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "domains", "nomanifest"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	o, err := LoadOwnership(root, "nomanifest")
+	if err != nil {
+		t.Fatalf("LoadOwnership err: %v", err)
+	}
+	if got := o.Source(); got != "missing" {
+		t.Errorf("absent manifest: Source() = %q, want %q", got, "missing")
+	}
+
+	// State 2: file exists with paths: [] (empty stub) → "empty-stub".
+	root2 := t.TempDir()
+	writeManifest(t, root2, "stubbed", "paths: []\n")
+	o2, err := LoadOwnership(root2, "stubbed")
+	if err != nil {
+		t.Fatalf("LoadOwnership err: %v", err)
+	}
+	if o2.ManifestPath == "" {
+		t.Error("empty stub: expected non-empty ManifestPath")
+	}
+	if len(o2.Paths) != 0 {
+		t.Errorf("empty stub: expected empty Paths, got %v", o2.Paths)
+	}
+	if got := o2.Source(); got != "empty-stub" {
+		t.Errorf("empty stub: Source() = %q, want %q", got, "empty-stub")
+	}
+
+	// State 3: file exists with non-empty paths → "manifest".
+	root3 := t.TempDir()
+	writeManifest(t, root3, "populated", "paths:\n  - internal/foo/**\n")
+	o3, err := LoadOwnership(root3, "populated")
+	if err != nil {
+		t.Fatalf("LoadOwnership err: %v", err)
+	}
+	if o3.ManifestPath == "" {
+		t.Error("populated: expected non-empty ManifestPath")
+	}
+	if got := o3.Source(); got != "manifest" {
+		t.Errorf("populated: Source() = %q, want %q", got, "manifest")
 	}
 }
 
@@ -150,9 +203,9 @@ func TestGlobMatchBasics(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := globMatch(tc.pattern, tc.path)
+			got := GlobMatch(tc.pattern, tc.path)
 			if got != tc.want {
-				t.Fatalf("globMatch(%q, %q) = %v; want %v", tc.pattern, tc.path, got, tc.want)
+				t.Fatalf("GlobMatch(%q, %q) = %v; want %v", tc.pattern, tc.path, got, tc.want)
 			}
 		})
 	}
