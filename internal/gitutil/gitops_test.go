@@ -727,3 +727,68 @@ func TestConflictedFiles_GitFailureReturnsNil(t *testing.T) {
 		t.Errorf("ConflictedFiles on git failure = %v, want nil (best-effort)", got)
 	}
 }
+
+// TestRevParseRef exercises the real git-resolution glue behind
+// liveBranchSHA (Spec 093 panel-state R2 coverage): an existing ref
+// peels to a SHA; a deleted/absent ref returns a non-nil error so the
+// caller can map it to the missing-ref pass-through (Req 11).
+func TestRevParseRef(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	run("branch", "bead/x.1")
+
+	// Existing ref → 40-char SHA, no error.
+	sha, err := RevParseRef(dir, "bead/x.1")
+	if err != nil {
+		t.Fatalf("RevParseRef on existing branch: %v", err)
+	}
+	if len(sha) != 40 {
+		t.Errorf("expected a 40-char SHA, got %q (len %d)", sha, len(sha))
+	}
+	// Same commit as HEAD (the branch was forked at HEAD).
+	head, err := RevParseHEAD(dir)
+	if err != nil {
+		t.Fatalf("RevParseHEAD: %v", err)
+	}
+	if sha != head {
+		t.Errorf("RevParseRef(bead/x.1)=%s, want HEAD %s", sha, head)
+	}
+
+	// Absent ref → non-nil error (the branch-gone signal liveBranchSHA
+	// maps to exists=false). --verify --quiet keeps stderr clean.
+	if _, err := RevParseRef(dir, "bead/does-not-exist"); err == nil {
+		t.Error("RevParseRef on a missing ref should error (branch-gone signal)")
+	}
+}
+
+// TestLogOneline exercises the in-progress-beads last-commit glue
+// (Spec 093 Req 14): a live ref yields a "<short-sha> <subject>" line;
+// a deleted ref errors so the caller renders no detail.
+func TestLogOneline(t *testing.T) {
+	dir := initGitRepo(t)
+
+	line, err := LogOneline(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("LogOneline(HEAD): %v", err)
+	}
+	if !strings.Contains(line, "initial") {
+		t.Errorf("expected the commit subject in the oneline, got %q", line)
+	}
+	if strings.Contains(line, "\n") {
+		t.Errorf("LogOneline must be a single trimmed line, got %q", line)
+	}
+
+	if _, err := LogOneline(dir, "bead/does-not-exist"); err == nil {
+		t.Error("LogOneline on a missing ref should error")
+	}
+}

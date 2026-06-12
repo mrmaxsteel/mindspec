@@ -20,16 +20,20 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
 		specFlag, _ := cmd.Flags().GetString("spec")
+		panelState, _ := cmd.Flags().GetBool("panel-state")
 
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("getting working directory: %w", err)
 		}
-		return instruct.Run(context.Background(), cwd, format, specFlag, os.Stdout)
+		return instruct.RunWithOptions(context.Background(), cwd, format, specFlag, os.Stdout, instruct.Options{
+			PanelState: panelState,
+		})
 	},
 }
 
 func init() {
 	instructCmd.Flags().String("format", "", "Output format: markdown (default) or json")
 	instructCmd.Flags().String("spec", "", "Target spec ID (auto-detected if exactly one active spec)")
+	instructCmd.Flags().Bool("panel-state", false, "Append the open-panel-rounds block: per-panel tally, N-1 threshold, and reviewed-HEAD freshness vs the mindspec complete gate")
 }
