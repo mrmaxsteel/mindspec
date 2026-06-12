@@ -102,6 +102,8 @@ function Invoke-SecureRequest {
         Invoke-RestMethod -Uri $Uri -UseBasicParsing -MaximumRedirection 5
     }
 }
+
+function Get-Architecture {
     $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" { return "amd64" }
