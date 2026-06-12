@@ -1077,3 +1077,42 @@ failure; anything beyond `git revert` reversibility. On completion, write a
 morning summary listing every panel-substituted decision (each with its revert
 path) for the owner to ratify — and never mark anything "ratified" yourself;
 only the human ratifies.
+
+### Staying alive: the autonomous wake loop (across compaction, session windows, and usage-limit resets)
+
+Autonomous/overnight operation only works if the orchestrator keeps re-waking
+itself with zero lost work across context compaction, session-limit windows, and
+usage-limit resets. The machinery that achieved this over a multi-hour run:
+
+1. **Completion-notification-driven cadence is PRIMARY.** Background subagent /
+   task completions re-invoke you automatically — they are the real wake signal.
+   Act on them; do NOT busy-poll. Polling harness-tracked work is wasted: it
+   already notifies you when it finishes.
+2. **`ScheduleWakeup` dynamic loop = the fallback heartbeat.** Each turn while
+   work is in flight, re-arm ONE `ScheduleWakeup` passing the loop sentinel as
+   `prompt`, so the loop survives a missed notification. Pick `delaySeconds` by
+   prompt-cache window, not round numbers: under ~270s keeps the cache warm (use
+   only when actively polling external state the harness can't notify on, e.g. a
+   CI run); 1200–1800s for idle ticks (don't burn cache 12×/hr for nothing).
+   Never 300s (worst-of-both — pays the cache miss without amortizing it). Omit
+   the call to end the loop.
+3. **A heartbeat CRON survives a usage-limit RESET.** A single `ScheduleWakeup`
+   can't span a full usage-limit eviction; a recurring `CronCreate` heartbeat
+   that fires the autonomous-loop prompt re-invokes the orchestrator after the
+   reset. Run both (cron as the reset-proof backstop, ScheduleWakeup as the
+   in-window heartbeat). `CronDelete` it when the mission completes.
+4. **Durable EXTERNAL log + resume-from-transcript.** Keep the decision/gate log
+   OUTSIDE the repo (a staging dir) so a freshly restarted or compacted process
+   resumes with zero lost work from the log + the conversation transcript. The
+   summary that compaction hands forward is enough to continue — don't wrap up
+   early.
+5. **Probe one casualty to detect a reset before cascading resumes.** On a wake
+   that might follow a reset/outage, check ONE in-flight item's ground truth
+   (`ps` for the process, the verdict JSON on disk, the bead's real status, the
+   worktree's last commit) to confirm what actually died before re-dispatching —
+   a "failed" agent may have committed before dying; a notification may be
+   mislabeled; a completer may have looked in the wrong directory. Verify, then
+   resume only what truly died.
+6. **Wind down cleanly.** When all roadmap steps are closed AND verified pushed:
+   write the final summary to the durable log, `CronDelete` the heartbeat, and
+   stop re-arming `ScheduleWakeup` (omit it) so the loop ends instead of idling.
