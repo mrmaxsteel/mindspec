@@ -253,7 +253,14 @@ function Install-MindSpec {
             
             # Extract expected checksum for our archive
             $checksumContent = Get-Content $checksumPath
-            $expectedChecksum = ($checksumContent | Select-String -Pattern $archiveName | ForEach-Object { $_.Line.Split()[0] })
+            # Match the exact filename in field 2 — an unanchored -Pattern match
+            # (also a regex) matches the SBOM line ($archiveName.spdx.json) too,
+            # yielding two hashes and breaking the compare. Split each line and
+            # compare the filename field for exact equality instead.
+            $expectedChecksum = ($checksumContent | ForEach-Object {
+                $fields = $_ -split '\s+'
+                if ($fields.Count -ge 2 -and $fields[1] -eq $archiveName) { $fields[0] }
+            } | Select-Object -First 1)
             
             if (-not $expectedChecksum) {
                 Write-Warn "Checksum not found for $archiveName, skipping verification"

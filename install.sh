@@ -239,7 +239,10 @@ main() {
     download "$CHECKSUM_URL" "$TMP_DIR/checksums.txt"
     
     # Extract expected checksum for our archive
-    EXPECTED_CHECKSUM=$(grep "$ARCHIVE_NAME" "$TMP_DIR/checksums.txt" | awk '{print $1}')
+    # Match the exact filename in field 2 — an unanchored grep also matches the
+    # SBOM line (mindspec_..._<arch>.tar.gz.spdx.json), joining two hashes and
+    # breaking the compare. awk field-2 equality avoids regex-metachar issues too.
+    EXPECTED_CHECKSUM=$(awk -v f="$ARCHIVE_NAME" '$2==f {print $1}' "$TMP_DIR/checksums.txt")
     if [ -z "$EXPECTED_CHECKSUM" ]; then
         warn "Checksum not found for ${ARCHIVE_NAME}, skipping verification"
     else
