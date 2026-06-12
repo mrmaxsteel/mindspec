@@ -40,7 +40,18 @@ const builtinSourceDefaultDisclosure = "doc-sync is classifying source with the 
 // required (spec 091 V2-2): the typed config.Load cannot distinguish
 // an absent source_globs: key from an explicit `source_globs: []` —
 // both unmarshal to an empty slice.
-var sourceGlobsKeyRE = regexp.MustCompile(`(?m)^source_globs:`)
+//
+// The optional [ \t]* before the colon is load-bearing: YAML permits
+// whitespace before a mapping-key colon (`source_globs : []`,
+// `source_globs\t: []`), normalizing all of them to the key
+// `source_globs`. A raw-byte regex that demanded an immediately-adjacent
+// colon would classify such a hand-edited key as ABSENT and append a
+// duplicate `source_globs:` block — turning a loadable config into an
+// unparseable one ("mapping key already defined") on `doctor --fix`.
+// The (?m)^ multiline anchor is also load-bearing: it keeps commented
+// (`# source_globs:`), indented (`  source_globs:`), and suffixed
+// (`extra_source_globs:`) keys correctly classified as NON-matches.
+var sourceGlobsKeyRE = regexp.MustCompile(`(?m)^source_globs[ \t]*:`)
 
 // checkSourceGlobs emits the missing-source-globs Warn (spec 091
 // Req 18) when .mindspec/config.yaml is absent, lacks the

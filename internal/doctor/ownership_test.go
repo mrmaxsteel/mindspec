@@ -112,16 +112,112 @@ func TestDeadManifest(t *testing.T) {
 
 	t.Run("V2-6: glob matching ONLY an excluded-tree file still fires", func(t *testing.T) {
 		root := t.TempDir()
-		writeManifest(t, root, "foo", "paths:\n  - internal/foo/**\n")
+		// Leading-** so the glob WOULD match the .worktrees-nested copy if
+		// the walk descended into it — this genuinely exercises the
+		// exclusion (an anchored internal/foo/** glob never matches a
+		// nested path and would pass regardless of the exclusion). The
+		// glob segment (zfoo) deliberately differs from the domain name
+		// (bar) so the glob does NOT self-match the domain's own
+		// .mindspec/docs/domains/bar/ dir.
+		writeManifest(t, root, "bar", "paths:\n  - '**/zfoo/**'\n")
 		// The only matching file lives under an excluded tree.
-		touchFile(t, root, ".worktrees/wt1/internal/foo/bar.go")
+		touchFile(t, root, ".worktrees/wt1/internal/zfoo/bar.go")
 
 		r := &Report{}
 		checkOwnershipManifests(r, root)
 
-		c := manifestWarn(r, "foo")
+		c := manifestWarn(r, "bar")
 		if c == nil {
 			t.Fatal("expected dead-manifest Warn — excluded-tree match must not mask a dead manifest")
+		}
+	})
+
+	// MUT-D regression: pin the .worktrees walk exclusion directly at the
+	// manifestResolvesAny level. The glob MUST be one that WOULD match a
+	// .worktrees-nested copy if the walk descended into it — a leading-**
+	// glob like **/foo/** matches `.worktrees/wt1/.../foo/x.go`, whereas
+	// an anchored glob (internal/foo/**) never matches a nested copy and
+	// so would not exercise the exclusion. With the exclusion in place the
+	// manifest is dead; this test FAILS if ".worktrees" is removed from
+	// walkExclusions (the walk then finds the nested file → reports live).
+	t.Run("V2-6: manifestResolvesAny false when leading-** glob matches only inside .worktrees", func(t *testing.T) {
+		root := t.TempDir()
+		touchFile(t, root, ".worktrees/wt1/internal/zfoo/bar.go")
+		touchFile(t, root, ".git/objects/zfoo/leak.go")
+		touchFile(t, root, ".beads/cache/zfoo/leak.go")
+
+		glob := []string{"**/zfoo/**"}
+		if manifestResolvesAny(root, glob) {
+			t.Fatal("manifestResolvesAny must be false when leading-** matches live only under .worktrees/.git/.beads (exclusion masks them)")
+		}
+
+		// Control: a live file OUTSIDE the excluded trees flips it true,
+		// proving the glob/walk actually find matches (non-vacuous) and
+		// that the exclusion — not the glob — is what suppressed the above.
+		touchFile(t, root, "src/zfoo/live.go")
+		if !manifestResolvesAny(root, glob) {
+			t.Fatal("manifestResolvesAny must be true once a live file matches outside the excluded trees")
+		}
+	})
+}
+
+// TestIsStrictSubpath is the MUT-A regression: the redundant-subpath
+// boundary must use a true path-segment boundary, not a bare string
+// prefix. `internal/foo` is NOT a parent of `internal/foobar`; it IS a
+// parent of `internal/foo/bar`. This test FAILS if isStrictSubpath drops
+// the trailing-slash from its prefix check (HasPrefix(np, wp+"/") ->
+// HasPrefix(np, wp)).
+func TestIsStrictSubpath(t *testing.T) {
+	cases := []struct {
+		name         string
+		narrow, wide string
+		want         bool
+	}{
+		{"shared-prefix non-boundary is NOT a subpath", "internal/foobar/**", "internal/foo/**", false},
+		{"true segment subpath IS a subpath", "internal/foo/bar/**", "internal/foo/**", true},
+		{"direct child IS a subpath", "internal/foo/x/**", "internal/foo/**", true},
+		{"equality is NOT a strict subpath", "internal/foo/**", "internal/foo/**", false},
+		{"unrelated path is NOT a subpath", "internal/bar/**", "internal/foo/**", false},
+		{"wider-as-narrow is NOT a subpath", "internal/foo/**", "internal/foo/bar/**", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isStrictSubpath(tc.narrow, tc.wide); got != tc.want {
+				t.Errorf("isStrictSubpath(%q, %q) = %v, want %v", tc.narrow, tc.wide, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedundantSubpath_FooFoobarBoundary pins the MUT-A boundary at the
+// check level: foo-vs-foobar must NOT be flagged redundant, while
+// foo-vs-foo/bar MUST be.
+func TestRedundantSubpath_FooFoobarBoundary(t *testing.T) {
+	t.Run("foobar is NOT redundant with foo", func(t *testing.T) {
+		root := t.TempDir()
+		writeManifest(t, root, "a", "paths:\n  - internal/foo/**\n  - internal/foobar/**\n")
+
+		r := &Report{}
+		checkOwnershipManifests(r, root)
+
+		if c := findCheckContaining(r, "redundant-subpath"); c != nil {
+			t.Errorf("internal/foobar must NOT be flagged redundant with internal/foo, got %q", c.Message)
+		}
+	})
+
+	t.Run("foo/bar IS redundant with foo", func(t *testing.T) {
+		root := t.TempDir()
+		writeManifest(t, root, "a", "paths:\n  - internal/foo/**\n  - internal/foo/bar/**\n")
+
+		r := &Report{}
+		checkOwnershipManifests(r, root)
+
+		c := findCheckContaining(r, "redundant-subpath")
+		if c == nil {
+			t.Fatal("internal/foo/bar must be flagged redundant with internal/foo")
+		}
+		if !strings.Contains(c.Message, "internal/foo/bar/**") || !strings.Contains(c.Message, "internal/foo/**") {
+			t.Errorf("redundant-subpath must name both entries, got %q", c.Message)
 		}
 	})
 }

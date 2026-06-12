@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -217,6 +218,104 @@ func TestSourceGlobsFixWiring(t *testing.T) {
 	if string(got) != sourceGlobsBlock {
 		t.Errorf("fixer must write the documented block verbatim, got:\n%s", got)
 	}
+}
+
+// TestScaffoldSourceGlobs_WhitespaceBeforeColon is the panel R3
+// regression (BLOCKER + MUT-G). YAML permits whitespace before a
+// mapping-key colon, so `source_globs : []`, `source_globs\t: []`, and
+// `source_globs  :  []` all normalize to the key `source_globs` and
+// config.Load succeeds with an empty slice. The raw-byte key detector
+// MUST agree: it must treat these as PRESENT (State 3 no-op), never
+// append a duplicate block. Appending a duplicate top-level
+// `source_globs:` key makes config.Load fail "mapping key already
+// defined" — corrupting a loadable config via --fix.
+//
+// This test fails against the 74943ab regex `(?m)^source_globs:` (which
+// requires an immediately-adjacent colon) and passes after the
+// `(?m)^source_globs[ \t]*:` fix. It also pins the (?m)^ anchor: the
+// commented control case must STILL be classified absent (fixer appends)
+// AND the result must config.Load cleanly with exactly one live key.
+func TestScaffoldSourceGlobs_WhitespaceBeforeColon(t *testing.T) {
+	// Whitespace-before-colon variants: each is a PRESENT key, so the
+	// fixer must be a strict byte-identical no-op and config.Load must
+	// stay clean (no duplicate key introduced).
+	presentVariants := []struct {
+		name  string
+		prior string
+	}{
+		{"space before colon", "source_globs : []\n"},
+		{"tab before colon", "source_globs\t: []\n"},
+		{"two spaces around colon", "source_globs  :  []\n"},
+		{"space before colon after other content", "merge_strategy: auto\nsource_globs : []\n"},
+		{"populated with space before colon", "source_globs :\n  - cmd/**\n"},
+	}
+	for _, tc := range presentVariants {
+		t.Run("present/"+tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeConfig(t, root, tc.prior)
+			config.ResetCache()
+			configPath := filepath.Join(root, ".mindspec", "config.yaml")
+
+			// config.Load must succeed BEFORE the fix (a loadable config).
+			if _, err := config.Load(root); err != nil {
+				t.Fatalf("precondition: config.Load must succeed before fix, got %v", err)
+			}
+			config.ResetCache()
+
+			before, _ := os.ReadFile(configPath)
+			if err := scaffoldSourceGlobs(configPath); err != nil {
+				t.Fatalf("scaffoldSourceGlobs: %v", err)
+			}
+			after, _ := os.ReadFile(configPath)
+
+			// State-3 no-op: bytes identical, no duplicate key appended.
+			if string(before) != string(after) {
+				t.Errorf("whitespace-before-colon key must be treated as PRESENT (byte-identical no-op).\nbefore=%q\nafter=%q", before, after)
+			}
+			if n := strings.Count(string(after), "source_globs"); n != 1 {
+				t.Errorf("expected exactly one source_globs key, got %d occurrences:\n%s", n, after)
+			}
+
+			// config.Load must STILL succeed after the fix (not corrupted).
+			config.ResetCache()
+			if _, err := config.Load(root); err != nil {
+				t.Errorf("config.Load must succeed after --fix; --fix corrupted a loadable config: %v", err)
+			}
+			config.ResetCache()
+		})
+	}
+
+	// Control: a COMMENTED key is functionally absent (the (?m)^ anchor
+	// must NON-match it), so the fixer APPENDS — and the result must
+	// config.Load cleanly with exactly one LIVE source_globs key.
+	t.Run("absent/commented key gets appended and loads clean", func(t *testing.T) {
+		root := t.TempDir()
+		writeConfig(t, root, "# source_globs: []\nmerge_strategy: auto\n")
+		config.ResetCache()
+		configPath := filepath.Join(root, ".mindspec", "config.yaml")
+
+		if err := scaffoldSourceGlobs(configPath); err != nil {
+			t.Fatalf("scaffoldSourceGlobs: %v", err)
+		}
+		got, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Pin the (?m)^ anchor independently of the production regex: a
+		// line-leading uncommented `source_globs:` key MUST have been
+		// appended (the commented key must NOT have suppressed the
+		// append). If the ^ anchor is dropped from sourceGlobsKeyRE, the
+		// commented line matches → no append → this count is 0 → RED.
+		liveKeyRE := regexp.MustCompile(`(?m)^source_globs[ \t]*:`)
+		if liveKeys := liveKeyRE.FindAllString(string(got), -1); len(liveKeys) != 1 {
+			t.Errorf("expected exactly one LIVE (line-leading) source_globs key after append, got %d:\n%s", len(liveKeys), got)
+		}
+		config.ResetCache()
+		if _, err := config.Load(root); err != nil {
+			t.Errorf("config.Load must succeed after appending to a commented-key file: %v", err)
+		}
+		config.ResetCache()
+	})
 }
 
 func writeConfig(t *testing.T, root, content string) {
