@@ -56,6 +56,8 @@ surface; this spec pays down the highest-cost ones.
 
 - **workflow**: `internal/validate` (doc-sync + ADR-divergence ownership attribution gates),
   `internal/complete` + `internal/approve` (thread the diffed ref into the gates) — Bead 1.
+- **execution**: `internal/executor` (the `FileAtRefOrAbsent` / `TreeDirsAtRef` ref-read methods
+  the gates resolve OWNERSHIP manifests through) — Bead 1.
 - **core**: `internal/phase` (lifecycle phase derivation) — Bead 2.
 
 ## ADR Touchpoints
