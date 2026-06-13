@@ -1,4 +1,4 @@
-package speclist
+package spec
 
 import (
 	"os"

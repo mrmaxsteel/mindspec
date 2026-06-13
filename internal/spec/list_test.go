@@ -1,4 +1,4 @@
-package speclist
+package spec
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestList_ScansSpecDirs(t *testing.T) {
-	root := setupTestRoot(t,
+	root := setupSpecListTestRoot(t,
 		specDir("001-alpha", "Draft"),
 		specDir("002-beta", "Approved"),
 	)
@@ -52,7 +52,7 @@ func TestList_ScansSpecDirs(t *testing.T) {
 }
 
 func TestList_SortsBySpecID(t *testing.T) {
-	root := setupTestRoot(t,
+	root := setupSpecListTestRoot(t,
 		specDir("010-zulu", "Draft"),
 		specDir("003-alpha", "Draft"),
 		specDir("007-mike", "Approved"),
@@ -115,7 +115,7 @@ func specDir(id, status string) specDirOpt {
 	return specDirOpt{id: id, status: status}
 }
 
-func setupTestRoot(t *testing.T, specs ...specDirOpt) string {
+func setupSpecListTestRoot(t *testing.T, specs ...specDirOpt) string {
 	t.Helper()
 	root := t.TempDir()
 	specsDir := filepath.Join(root, ".mindspec", "docs", "specs")

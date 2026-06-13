@@ -6,7 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/mrmaxsteel/mindspec/internal/speclist"
+	"github.com/mrmaxsteel/mindspec/internal/spec"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +19,7 @@ var specListCmd = &cobra.Command{
 			return err
 		}
 
-		specs, err := speclist.List(root)
+		specs, err := spec.List(root)
 		if err != nil {
 			return fmt.Errorf("listing specs: %w", err)
 		}
