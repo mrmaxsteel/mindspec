@@ -238,6 +238,11 @@ func init() {
 	rootCmd.AddCommand(otelCmd)
 	rootCmd.AddCommand(recordCmd)
 
+	// Spec 094 Bead 3 (Req 4 / Req 5): the owner-invoked report loop —
+	// `mindspec report` consolidates the friction journal into the local,
+	// non-synced report store; `report list` is the triage view.
+	rootCmd.AddCommand(reportCmd)
+
 	// Spec 084 Bead 3: register one-shot deprecation stubs for removed
 	// top-level commands (HC #7). Each stub is hidden and exits 2 with
 	// exactly one stderr line. See cmd/mindspec/deprecated_commands.go.

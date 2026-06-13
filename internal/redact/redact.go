@@ -82,6 +82,8 @@ var CommandTokens = map[string]struct{}{
 	"plan":      {},
 	"record":    {},
 	"repair":    {},
+	"report":    {}, // spec 094 Bead 3: the owner-invoked friction report loop
+
 	"setup":     {},
 	"source":    {},
 	"spec":      {},
