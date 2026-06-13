@@ -109,13 +109,14 @@ func TestBuildDesignField_CitesADRsByID(t *testing.T) {
 	const n = 8
 	specDir, decisionMarker := writeLargeADRFixtures(t, n)
 
-	var touchpoints []string
+	// Spec 097 R2: the ADR list is built from the plan's structured
+	// `adr_citations` IDs (passed in directly), not a spec-prose scrape.
+	var adrCitationIDs []string
 	for i := 1; i <= n; i++ {
-		touchpoints = append(touchpoints, fmt.Sprintf("- [ADR-%04d](../../adr/ADR-%04d.md)", i, i))
+		adrCitationIDs = append(adrCitationIDs, fmt.Sprintf("ADR-%04d", i))
 	}
-	specContent := "# Spec\n\n## ADR Touchpoints\n" + strings.Join(touchpoints, "\n") + "\n\n## Requirements\n1. Frob the widget\n"
 
-	design := buildDesignField(specDir, specContent, "1. Frob the widget")
+	design := buildDesignField(specDir, "1. Frob the widget", adrCitationIDs)
 
 	// By-ID citations with the ADR's title, one per cited ADR.
 	for i := 1; i <= n; i++ {
