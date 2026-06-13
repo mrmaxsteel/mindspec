@@ -179,6 +179,32 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		)
 	}
 
+	// Spec 095 (mindspec-ry73): the phase gate now passes via `review`
+	// even when a non-lifecycle follow-up child (e.g. a bug filed after the
+	// last `complete`) is still open — the lifecycle-only derivation ignores
+	// it. Emit an ADVISORY guard hint (ADR-0035 recovery-line convention)
+	// naming any such open follow-up child so the operator can re-file or
+	// detach it if they disagree. The hint NEVER blocks — the gate has
+	// already passed. The recovery line deliberately does NOT bare-recommend
+	// `bd update <id> --parent ""`: that detach is buggy (mindspec-bk5t — it
+	// is not reflected in `bd list --parent`), so re-filing as standalone
+	// backlog (or leaving the child attached) is recommended instead.
+	if epicID != "" {
+		if open := phase.OpenNonLifecycleChildrenForEpic(epicID); len(open) > 0 {
+			names := make([]string, 0, len(open))
+			for _, c := range open {
+				if c.Title != "" {
+					names = append(names, fmt.Sprintf("%s (%s)", c.ID, c.Title))
+				} else {
+					names = append(names, c.ID)
+				}
+			}
+			fmt.Fprintf(os.Stderr,
+				"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent', mindspec-bk5t)\n",
+				specID, strings.Join(names, ", "))
+		}
+	}
+
 	// Derive spec branch from convention.
 	specBranch := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
@@ -216,7 +242,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if mbErr != nil {
 		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
 	}
-	docResult := validate.ValidateDocs(root, base, exec)
+	// Spec 095: the whole-branch doc-sync gate diffs the explicit
+	// base..specBranch RANGE (NOT working-tree-vs-base) and reads
+	// OWNERSHIP attribution from the spec-branch tip — both the diff
+	// head and the ownership ref are the spec-branch tip — so an
+	// OWNERSHIP claim committed anywhere on the spec branch satisfies
+	// the backstop with no override (mindspec-vvs9). The prior
+	// ValidateDocs(root, base, exec) read the working tree on both
+	// counts.
+	docResult := validate.ValidateDocsRange(root, base, specBranch, specBranch, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run — including when
 	// HasFailures() is false and the flow proceeds normally, and on
@@ -238,7 +272,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// Domains field structurally (revision 2 — no string parsing).
 	// headRef "" + beadID "" → the lane derives the spec branch tip
 	// itself; the measured refs stay main-merge-base..spec-branch-tip.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "", "")
+	// Ownership ref = spec-branch tip (specBranch), independent of the
+	// derived diff head (spec 095 / mindspec-vvs9).
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "", "", specBranch)
 	// Same severity-generic pipe for the ADR-divergence backstop: any
 	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
 	// without further wiring. No-op while the gate emits none.

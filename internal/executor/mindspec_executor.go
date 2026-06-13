@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -476,6 +477,80 @@ func (g *MindspecExecutor) FileAtRef(ref, path string) ([]byte, error) {
 		return nil, fmt.Errorf("git show %s:%s: %w", ref, path, err)
 	}
 	return out, nil
+}
+
+// FileAtRefOrAbsent returns the bytes of path at ref, distinguishing a
+// path absent from ref's (valid) tree from an operational git failure.
+// It first probes existence with `git ls-tree <ref> -- <path>`: that
+// command exits 0 with EMPTY output when ref is a valid tree-ish that
+// does not contain path (→ present == false, nil error), exits 0 with a
+// non-empty line when the path IS present, and FAILS only on an invalid
+// ref / git error (→ non-nil error). `git show <ref>:<path>` alone
+// cannot make this distinction — it returns a generic error for BOTH
+// missing-path and bad-ref — which is exactly why the ref-anchored
+// OWNERSHIP loader must not treat all show failures as "absent" (that
+// would silently un-gate doc-drift on a git glitch; spec 095 / vvs9 +
+// ADR-0036 amend).
+func (g *MindspecExecutor) FileAtRefOrAbsent(ref, path string) ([]byte, bool, error) {
+	present, err := g.pathExistsAtRef(ref, path)
+	if err != nil {
+		return nil, false, err
+	}
+	if !present {
+		return nil, false, nil
+	}
+	data, err := g.FileAtRef(ref, path)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+// pathExistsAtRef reports whether path is a tracked entry in ref's tree.
+// `git ls-tree <ref> -- <path>` emits one line when the path exists,
+// empty output (exit 0) when ref is valid but the path is absent, and
+// fails on an invalid ref — the signal that separates an absent path
+// (claims-nothing) from an operational error.
+func (g *MindspecExecutor) pathExistsAtRef(ref, path string) (bool, error) {
+	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, "--", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git ls-tree %s -- %s: %w", ref, path, err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+// TreeDirsAtRef returns the basenames of sub-directory (tree) entries
+// directly under dirPath in ref's tree, via `git ls-tree <ref>
+// <dirPath>/`. An absent dirPath at a valid ref yields an empty slice
+// (no error — like listDomainDirs over a missing directory); an invalid
+// ref / git failure returns a non-nil error. Mirrors listDomainDirs
+// over a git ref so a branch-only domain directory is enumerable from
+// the diffed ref (spec 095 / vvs9). The output is NOT sorted here; the
+// caller (listDomainDirsAtRef) sorts to match listDomainDirs.
+func (g *MindspecExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
+	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, dirPath+"/")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree %s %s/: %w", ref, dirPath, err)
+	}
+	var dirs []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		// Format: "<mode> <type> <object>\t<path>"; keep only trees.
+		tab := strings.IndexByte(line, '\t')
+		if tab < 0 {
+			continue
+		}
+		meta := strings.Fields(line[:tab])
+		if len(meta) < 2 || meta[1] != "tree" {
+			continue
+		}
+		dirs = append(dirs, path.Base(line[tab+1:]))
+	}
+	return dirs, nil
 }
 
 // MergeBase returns the merge-base SHA of refs a and b. Wraps

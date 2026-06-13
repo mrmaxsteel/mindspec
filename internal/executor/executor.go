@@ -71,6 +71,25 @@ type Executor interface {
 	// `git show <ref>:<path>`). Empty ref is undefined.
 	FileAtRef(ref, path string) ([]byte, error)
 
+	// FileAtRefOrAbsent returns the bytes of path at ref, DISTINGUISHING
+	// a path absent from ref's (valid) tree from an operational git
+	// failure. present is false with a nil error ONLY when ref is a
+	// valid tree-ish that does not contain path; an invalid ref / git
+	// failure returns a non-nil error. This is the seam the ref-anchored
+	// OWNERSHIP loader (spec 095 / mindspec-vvs9) uses to keep
+	// absent-→claims-nothing (ADR-0036) distinct from an operational
+	// error, which must hard-fail rather than silently un-gate doc-drift.
+	FileAtRefOrAbsent(ref, path string) (data []byte, present bool, err error)
+
+	// TreeDirsAtRef returns the names of sub-directory (tree) entries
+	// directly under dirPath in ref's tree (wraps `git ls-tree`). An
+	// absent dirPath at a VALID ref yields an empty slice with a nil
+	// error (mirroring listDomainDirs on a missing directory); an
+	// invalid ref / git failure returns a non-nil error. The ref-aware
+	// domain enumeration (spec 095) consumes this so a branch-only
+	// domain directory is discovered from the diffed ref.
+	TreeDirsAtRef(ref, dirPath string) ([]string, error)
+
 	// MergeBase returns the merge-base SHA of refs a and b (wraps
 	// `git merge-base <a> <b>`).
 	MergeBase(a, b string) (string, error)

@@ -32,12 +32,19 @@ const missingSourceGlobsMsg = "source_globs not set in .mindspec/config.yaml —
 
 // ValidateDocs checks for doc-sync compliance by comparing changed source files
 // against documentation updates in the same diff. The diff is the working
-// tree vs diffRef — the historical semantics every pre-existing call site
-// (impl approve run from the spec worktree, `mindspec validate docs`)
-// relies on. As a thin wrapper over ValidateDocsRange it inherits the
-// spec 091 source_globs override semantics described there.
+// tree vs diffRef — the historical semantics the surviving call site
+// (`mindspec validate docs`) relies on. As a thin wrapper over
+// ValidateDocsRange it inherits the spec 091 source_globs override
+// semantics described there.
+//
+// The OWNERSHIP attribution input (manifests + domain enumeration) is
+// read from the working tree (ownerRef ""), matching the working-tree
+// diff semantics. The per-bead and impl-approve gates do NOT route
+// through this wrapper: they call ValidateDocsRange directly with an
+// explicit ownerRef so attribution follows the diffed ref (spec 095 /
+// mindspec-vvs9).
 func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
-	return ValidateDocsRange(root, diffRef, "", exec)
+	return ValidateDocsRange(root, diffRef, "", "", exec)
 }
 
 // ValidateDocsRange is ValidateDocs over an explicit base..head ref range.
@@ -54,7 +61,16 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 // the built-in rule); an empty or absent list leaves the built-in
 // isSourceFile classifier running byte-identically to pre-091 (HC-7).
 // The override decision point is classifyChangesWithGlobs below.
-func ValidateDocsRange(root, base, head string, exec executor.Executor) *Result {
+//
+// ownerRef selects the tree the OWNERSHIP attribution input (per-domain
+// manifests AND the domain-directory enumeration) is read from, and is
+// INDEPENDENT of base/head — the diff range and the attribution tree
+// are separate inputs (spec 095 / mindspec-vvs9). A non-empty ownerRef
+// reads attribution from that git ref via the executor (the per-bead
+// gate passes beadHead; impl approve passes the spec-branch tip); ""
+// preserves the on-disk working-tree read (the `mindspec validate docs`
+// CLI). source_globs is deliberately NOT ref-anchored — see sourceGlobs.
+func ValidateDocsRange(root, base, head, ownerRef string, exec executor.Executor) *Result {
 	r := &Result{SubCommand: "docs"}
 
 	if base == "" {
@@ -101,8 +117,10 @@ func ValidateDocsRange(root, base, head string, exec executor.Executor) *Result 
 		r.AddError("doc-sync", "source files changed but no documentation files updated")
 	}
 
-	// Check specific mapping heuristics
-	checkInternalPackages(r, root, sourceChanges, docChanges)
+	// Check specific mapping heuristics. Attribution (manifests + domain
+	// enumeration) follows ownerRef so the blocking lane reads the same
+	// tree the gate diffs (spec 095 / mindspec-vvs9).
+	checkInternalPackages(r, exec, root, ownerRef, sourceChanges, docChanges)
 	checkCmdChanges(r, sourceChanges, docChanges)
 
 	// Advisory continuous-accuracy lane (spec 091 Req 16): runs only
@@ -110,15 +128,22 @@ func ValidateDocsRange(root, base, head string, exec executor.Executor) *Result 
 	// populated globs meet zero domain directories this deliberately
 	// double-reports alongside the zero-domains blocking branch above
 	// (a specified double-report, not a bug; do not suppress either
-	// side).
-	checkUnclaimedSource(r, root, globs, sourceChanges)
+	// side). The advisory WARN lane reads attribution from the SAME
+	// ownerRef tree as the blocking lane (spec 095) so the two never
+	// disagree within a run.
+	checkUnclaimedSource(r, exec, root, ownerRef, globs, sourceChanges)
 
 	return r
 }
 
 // sourceGlobs returns the operator-declared source_globs from
 // .mindspec/config.yaml under root (spec 091 Req 11) and whether the
-// config was readable. On a config load error it returns (nil, false):
+// config was readable. This is INTENTIONALLY read from the on-disk
+// working tree (root), NOT ref-anchored like the OWNERSHIP attribution
+// input: source_globs is operator configuration, not a per-bead gate
+// input that a branch commits to satisfy its own gate (spec 095 scope
+// decision; the ref-anchoring of mindspec-vvs9 covers manifests + domain
+// enumeration only). On a config load error it returns (nil, false):
 // the built-in classifier stays active as the disclosed fallback, and
 // the Req 22(b) nudge is suppressed — we cannot honestly claim the
 // field is "not set" when the config is unreadable (config errors
@@ -175,12 +200,12 @@ func classifyChangesWithGlobs(files, globs []string) (source, docs []string) {
 // widen-an-existing-manifest or `mindspec domain add` — never commands
 // that would do nothing. Advisory only: never blocks the gate. The
 // Warn is disabled while source_globs is empty/absent.
-func checkUnclaimedSource(r *Result, root string, globs, source []string) {
+func checkUnclaimedSource(r *Result, exec executor.Executor, root, ownerRef string, globs, source []string) {
 	if len(globs) == 0 || len(source) == 0 {
 		return
 	}
 
-	domains, err := listDomainDirs(root)
+	domains, err := resolveDomains(exec, root, ownerRef)
 	if err != nil {
 		// checkInternalPackages already reported the enumeration
 		// failure as a blocking error; the advisory lane stays quiet.
@@ -193,7 +218,7 @@ func checkUnclaimedSource(r *Result, root string, globs, source []string) {
 	}
 	states := make([]domainState, 0, len(domains))
 	for _, d := range domains {
-		o, derr := LoadOwnership(root, d)
+		o, derr := loadOwnershipForRef(exec, root, ownerRef, d)
 		if derr != nil {
 			// Schema violations already surface as blocking errors via
 			// the attribution lane; the advisory lane stays quiet
@@ -353,8 +378,8 @@ func listDomainDirs(root string) ([]string, error) {
 // ownership so the operator knows which OWNERSHIP.yaml to edit. The
 // only surviving fallback is the zero-domains disclosed default
 // below, which applies when no domain directories exist at all.
-func checkInternalPackages(r *Result, root string, source, docs []string) {
-	domains, err := listDomainDirs(root)
+func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef string, source, docs []string) {
+	domains, err := resolveDomains(exec, root, ownerRef)
 	if err != nil {
 		r.AddError("internal-docs", fmt.Sprintf("cannot enumerate domain dirs: %v", err))
 		return
@@ -423,7 +448,7 @@ func checkInternalPackages(r *Result, root string, source, docs []string) {
 		// domain. attributeDomain returns "" when nothing matches —
 		// in that case the file is silently skipped (it is not the
 		// internal-docs lane's job to police unmapped trees).
-		domain, o, derr := attributeDomain(root, f, domains)
+		domain, o, derr := attributeDomain(exec, root, ownerRef, f, domains)
 		if derr != nil {
 			r.AddError("internal-docs", fmt.Sprintf("attributing %s: %v", f, derr))
 			continue

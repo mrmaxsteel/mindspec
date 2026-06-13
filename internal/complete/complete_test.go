@@ -139,6 +139,44 @@ func newMockExec() *executor.MockExecutor {
 	return &executor.MockExecutor{}
 }
 
+// serveRefFromDisk wires a MockExecutor's ref-read seams
+// (FileAtRefOrAbsent + TreeDirsAtRef) to resolve against the on-disk
+// tree at root, simulating "the diffed ref's tree == this fixture".
+// Spec 095 moved the per-bead gates' OWNERSHIP attribution (manifests +
+// domain enumeration) onto beadHead; these mock-backed tests build their
+// OWNERSHIP fixture on disk, so this makes the ref read resolve to the
+// same files. Absent paths classify as claims-nothing (present false,
+// nil error) — never an operational error — mirroring the real
+// MindspecExecutor.FileAtRefOrAbsent contract.
+func serveRefFromDisk(mock *executor.MockExecutor, root string) {
+	mock.FileAtRefOrAbsentFn = func(_ref, rel string) ([]byte, bool, error) {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		return data, true, nil
+	}
+	mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		return dirs, nil
+	}
+}
+
 // setupTempRoot creates a temp dir with .mindspec/.
 func setupTempRoot(t *testing.T) string {
 	t.Helper()
@@ -775,6 +813,58 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	}
 	if result.NextMode != state.ModeReview {
 		t.Fatalf("expected review mode, got %s", result.NextMode)
+	}
+}
+
+// TestRun_LastLifecycleBeadWithOpenBugChildAdvancesToReview is the spec
+// 095 ry73 e2e guarantee at the `complete` end: closing the LAST lifecycle
+// (task) bead while a non-lifecycle bug child is ALREADY open must derive
+// `review` (the open bug is ignored) and persist mindspec_phase=="review"
+// via the step-6.5 sync. RED-on-revert: counting the open bug would derive
+// `implement`, leaving the spec unable to reach `impl approve` without a
+// manual detach + repair.
+func TestRun_LastLifecycleBeadWithOpenBugChildAdvancesToReview(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+
+	// Last task bead closed + an open bug child filed earlier as an epic
+	// child. Lifecycle-only derivation → review.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done", IssueType: "task"}},
+		"open":   {{ID: "bug-7", Title: "follow-up", IssueType: "bug"}},
+	})
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	// Capture the step-6.5 mindspec_phase sync write.
+	var syncedPhase string
+	origMerge := completeMergeMetadataFn
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if p, ok := updates["mindspec_phase"].(string); ok {
+			syncedPhase = p
+		}
+		return nil
+	}
+	t.Cleanup(func() { completeMergeMetadataFn = origMerge })
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NextMode != state.ModeReview {
+		t.Fatalf("expected review mode (open bug must not block), got %s", result.NextMode)
+	}
+	if syncedPhase != state.ModeReview {
+		t.Errorf("step-6.5 sync wrote mindspec_phase=%q, want %q", syncedPhase, state.ModeReview)
 	}
 }
 
@@ -1431,6 +1521,10 @@ func TestSupersedeUnblocks(t *testing.T) {
 	mock := newMockExec()
 	mock.MergeBaseResult = "merge-base-sha"
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
+	// Spec 095: the per-bead gates read OWNERSHIP from beadHead; serve
+	// that ref tree from the on-disk fixture so internal/core/foo.go
+	// attributes to "core" (→ an uncovered finding seeds the placeholder).
+	serveRefFromDisk(mock, root)
 
 	var metaCalls []map[string]interface{}
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
@@ -2032,6 +2126,88 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 // mindspec-aqey — hit live twice on 2026-06-11 at spec-092 Bead 9);
 // from the spec worktree the range was empty (vacuous passes,
 // mindspec-perm — every spec-092 bead passed this way).
+
+// TestPerBeadGatesAnchorOwnershipRefAndRangeToBeadHead is the spec 095
+// regression lock: the per-bead gates anchor BOTH the diff range AND the
+// OWNERSHIP-attribution ref to the bead fork/tip — never the ambient
+// HEAD. It asserts every ChangedFiles call is fork-sha..bead/bead-1 AND
+// every ref read (FileAtRefOrAbsent / TreeDirsAtRef) uses ref
+// bead/bead-1. RED-on-revert: anchoring the range OR the ownership ref
+// back to ambient HEAD changes a recorded arg and trips the assertion.
+func TestPerBeadGatesAnchorOwnershipRefAndRangeToBeadHead(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	writeADRDivergenceFixture(t, root, "086-doc-sync") // core domain + spec/plan/ADR on disk
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "fork-sha"
+	// A source touch in the BEAD diff so attribution (the ref reads)
+	// actually runs; any other range is main-side drift.
+	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
+		if base == "fork-sha" && head == "bead/bead-1" {
+			return []string{"internal/core/foo.go"}, nil
+		}
+		return []string{"internal/contextpack/drift.go"}, nil
+	}
+	// Record the ref each ref-read seam is called with, then resolve
+	// against the on-disk fixture.
+	var refReads []string
+	mock.FileAtRefOrAbsentFn = func(ref, rel string) ([]byte, bool, error) {
+		refReads = append(refReads, ref)
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		return data, true, nil
+	}
+	mock.TreeDirsAtRefFn = func(ref, dir string) ([]string, error) {
+		refReads = append(refReads, ref)
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+		if err != nil {
+			return nil, nil
+		}
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		return dirs, nil
+	}
+
+	// AllowDocSkew lets doc-sync fall through so the ADR-divergence lane
+	// also runs its ref reads; the run may still block on uncovered core
+	// (the fixture's ADR covers execution, not core) — that does not
+	// matter here. We assert ONLY the anchoring of the recorded args.
+	_, _ = Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "anchor probe"})
+
+	cfCalls := mock.CallsTo("ChangedFiles")
+	if len(cfCalls) == 0 {
+		t.Fatal("expected ChangedFiles calls from the gates")
+	}
+	for _, c := range cfCalls {
+		if c.Args[0] != "fork-sha" || c.Args[1] != "bead/bead-1" {
+			t.Errorf("ChangedFiles(%v, %v): per-bead range must be fork-sha..bead/bead-1, never ambient HEAD", c.Args[0], c.Args[1])
+		}
+	}
+	if len(refReads) == 0 {
+		t.Fatal("expected OWNERSHIP ref reads (FileAtRefOrAbsent / TreeDirsAtRef) from the gates")
+	}
+	for _, ref := range refReads {
+		if ref != "bead/bead-1" {
+			t.Errorf("OWNERSHIP ref read used %q; must anchor to bead/bead-1 (spec 095), never ambient HEAD", ref)
+		}
+	}
+}
 
 // TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock pins the
 // mindspec-aqey false-block case: the bead's own diff is clean, but

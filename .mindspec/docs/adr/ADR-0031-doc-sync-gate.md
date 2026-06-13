@@ -21,6 +21,36 @@
 > manifest schema and the warning-to-error promotion recorded here
 > remain authoritative.
 
+> **Amended by spec 095 (mindspec-vvs9) — attribution reads the diffed
+> ref, not the ambient working tree.** Decision 2 records OWNERSHIP
+> resolution but left the TREE it reads from implicit; in practice both
+> the per-domain manifest load (`LoadOwnership(root, domain)`) and the
+> domain-directory enumeration (`listDomainDirs(root)`) did `os.ReadFile`
+> / `os.ReadDir` on the ambient working tree at `root`. Run from the
+> main checkout, the gate then evaluated a changed file against *main's*
+> OWNERSHIP, which lacks any claim the branch added — so an OWNERSHIP
+> claim committed on a bead/spec branch could not satisfy its own gate,
+> forcing an `--override-adr` on every on-branch claim. The gates now
+> resolve attribution input — BOTH the manifests AND the domain
+> enumeration — from the SAME git ref they diff, via the executor
+> (`Executor.FileAtRefOrAbsent` / `Executor.TreeDirsAtRef`, wrapping
+> `git ls-tree`/`git show`): `beadHead` for the per-bead gates in
+> `complete`, the spec-branch tip for the whole-branch backstop in
+> `impl approve`. The ownership ref is threaded as an explicit parameter
+> INDEPENDENT of the diff range. This is a FIDELITY REFINEMENT of the
+> same attribution decision (no new ADR; spec 095 plan DQ2). The on-disk
+> `LoadOwnership`/`listDomainDirs` remain for the working-tree consumers
+> (`mindspec validate docs`, doctor, `ownership populate`) and for the
+> `ownerRef == ""` (working-tree) call sites; `source_globs` stays a
+> working-tree read (operator config, not a per-bead gate input). The
+> absent-manifest-claims-nothing semantics (ADR-0036) and the HC-5
+> excluded-first-segment rejection are preserved under the ref read.
+> **Example (placeholder):** a bead branch that commits
+> `.mindspec/docs/domains/widget/OWNERSHIP.yaml` claiming
+> `internal/widget/**` together with `internal/widget/foo.go` passes its
+> own doc-sync + ADR-divergence gates at `mindspec complete` run from the
+> main root with no override.
+
 ## Status
 
 Stub created during spec 086-doc-sync drafting. Finalized in spec 086 Bead N
