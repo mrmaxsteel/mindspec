@@ -264,13 +264,20 @@ func TestJournalPerms0600(t *testing.T) {
 func TestJournalDir_NotUnderProjectTree(t *testing.T) {
 	dir := stateDir(t)
 	// The seam dir is a fresh t.TempDir with no .git / .beads — prove the
-	// journal lands there and not in any committable tree.
+	// journal lands there and not in any committable tree. Dir() now returns
+	// the CANONICAL (symlink-resolved) override (the HC-3 symlink-into-repo
+	// hardening), so compare against the resolved temp dir: on macOS t.TempDir
+	// is itself under a /var -> /private/var symlink.
+	wantDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(state dir): %v", err)
+	}
 	p, err := Path()
 	if err != nil {
 		t.Fatalf("Path: %v", err)
 	}
-	if filepath.Dir(p) != dir {
-		t.Errorf("journal not under the state dir: %q not in %q", p, dir)
+	if filepath.Dir(p) != wantDir {
+		t.Errorf("journal not under the (canonical) state dir: %q not in %q", p, wantDir)
 	}
 	if strings.Contains(p, ".beads") {
 		t.Errorf("journal path is under the beads tracker: %q", p)
@@ -320,6 +327,93 @@ func TestStateDirEnv_GitTreeRejectFailsClosed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(guarded, journalFileName)); !os.IsNotExist(err) {
 		t.Errorf("fail-closed violated: journal.jsonl was written under the guarded git tree")
+	}
+}
+
+// TestStateDirEnv_SymlinkIntoRepoFailsClosed asserts the symlink-into-repo
+// HC-3 bypass is closed: a MINDSPEC_STATE_DIR that is an out-of-tree SYMLINK
+// whose TARGET is inside a git work tree (repo/.beads/friction-state) is
+// REJECTED and the write FAILS CLOSED — NOTHING is written at the LINK path
+// OR the TARGET. Without canonicalization the guard walks only the innocent
+// symlink path and the journal lands in the repo through the link (the codex
+// re-check bypass).
+func TestStateDirEnv_SymlinkIntoRepoFailsClosed(t *testing.T) {
+	// A fake repo with a committable target dir the symlink points into.
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(repo, ".beads", "friction-state")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// An out-of-tree symlink (in a SEPARATE temp dir, no enclosing .git) whose
+	// target is the in-repo dir. The link PATH is innocent; only the TARGET is
+	// committable.
+	outside := t.TempDir()
+	link := filepath.Join(outside, "statelink")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported in this environment: %v", err)
+	}
+
+	t.Setenv(StateDirEnv, link)
+	resetSession(t)
+
+	// Dir() must reject the override: canonicalization resolves the link to the
+	// in-repo target, which the git-tree guard then rejects.
+	if d, err := Dir(); err == nil {
+		t.Fatalf("Dir() accepted a symlink-into-repo MINDSPEC_STATE_DIR (HC-3 bypass), got %q", d)
+	}
+
+	// AppendSuccessEvent must fail closed: an error AND no journal anywhere —
+	// not at the link, not at the resolved target.
+	if err := AppendSuccessEvent(goodEvent()); err == nil {
+		t.Errorf("AppendSuccessEvent accepted a symlinked-into-repo override (want fail-closed error)")
+	}
+	if _, err := os.Stat(filepath.Join(link, journalFileName)); !os.IsNotExist(err) {
+		t.Errorf("fail-closed violated: journal.jsonl written via the symlink path")
+	}
+	if _, err := os.Stat(filepath.Join(target, journalFileName)); !os.IsNotExist(err) {
+		t.Errorf("fail-closed violated: journal.jsonl written into the repo through the symlink target")
+	}
+}
+
+// TestStateDirEnv_SymlinkedParentIntoRepoFailsClosed asserts the
+// nearest-existing-ancestor resolution catches a symlinked PARENT even when
+// the leaf does not exist yet: an out-of-tree symlink to repo/.beads, with a
+// not-yet-created "friction-state" leaf under it, still resolves into the repo
+// and fails closed. This proves CanonicalPath walks up to the existing
+// ancestor rather than giving up on a missing leaf.
+func TestStateDirEnv_SymlinkedParentIntoRepoFailsClosed(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beads := filepath.Join(repo, ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := t.TempDir()
+	link := filepath.Join(outside, "beadslink") // -> repo/.beads (exists)
+	if err := os.Symlink(beads, link); err != nil {
+		t.Skipf("symlinks unsupported in this environment: %v", err)
+	}
+	// The override targets a NOT-yet-created leaf under the symlinked parent.
+	override := filepath.Join(link, "friction-state")
+
+	t.Setenv(StateDirEnv, override)
+	resetSession(t)
+
+	if d, err := Dir(); err == nil {
+		t.Fatalf("Dir() accepted a symlinked-parent-into-repo override (HC-3 bypass), got %q", d)
+	}
+	if err := AppendSuccessEvent(goodEvent()); err == nil {
+		t.Errorf("AppendSuccessEvent accepted a symlinked-parent override (want fail-closed error)")
+	}
+	if _, err := os.Stat(filepath.Join(beads, "friction-state", journalFileName)); !os.IsNotExist(err) {
+		t.Errorf("fail-closed violated: journal written into the repo via a symlinked parent")
 	}
 }
 

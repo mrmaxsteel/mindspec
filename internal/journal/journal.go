@@ -157,12 +157,23 @@ var nowRFC3339 = func() string { return time.Now().UTC().Format(time.RFC3339) }
 func Dir() (string, error) {
 	if d := os.Getenv(StateDirEnv); d != "" {
 		// HC-3: the override must never resolve inside a git/project work
-		// tree, where journal.jsonl could be tracked/committed/pushed. Apply
-		// the SAME guard config.GlobalConfigDir() uses, and FAIL CLOSED.
-		if root := config.EnclosingGitTree(d); root != "" {
-			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q: it resolves inside the git work tree at %q (HC-3: the friction store must never be under a committable tree)", d, root)
+		// tree, where journal.jsonl could be tracked/committed/pushed. The
+		// guard walks a LITERAL path, so an out-of-tree SYMLINK whose TARGET
+		// is inside the repo (e.g. /tmp/link -> repo/.beads/friction-state)
+		// would slip past a check on the symlink path. CANONICALIZE first
+		// (Abs + EvalSymlinks, nearest-existing-ancestor for a not-yet-created
+		// leaf) so the guard — AND the subsequent write — operate on the REAL
+		// target. Resolution failure FAILS CLOSED (nothing written).
+		resolved, err := config.CanonicalPath(d)
+		if err != nil {
+			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q: cannot canonicalize it for the HC-3 git-tree guard (fail closed): %w", d, err)
 		}
-		return d, nil
+		if root := config.EnclosingGitTree(resolved); root != "" {
+			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q (resolves to %q): it is inside the git work tree at %q (HC-3: the friction store must never be under a committable tree)", d, resolved, root)
+		}
+		// Return the RESOLVED path so the journal write lands at the real,
+		// guard-checked target rather than re-traversing the symlink.
+		return resolved, nil
 	}
 	return config.GlobalConfigDir()
 }

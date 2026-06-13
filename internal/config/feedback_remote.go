@@ -108,7 +108,21 @@ func GlobalConfigDir() (string, error) {
 	// XDG_CONFIG_HOME/HOME are operator-owned, but an operator who points them
 	// at a repo would otherwise let project-tracked files masquerade as the
 	// global config. Refuse such a resolution rather than silently honoring it.
-	if root := enclosingGitTree(candidate); root != "" {
+	//
+	// Run the guard against the CANONICAL (symlink-resolved) candidate so a
+	// HOME/XDG_CONFIG_HOME that is itself a symlink into a repo cannot slip a
+	// committable target past the literal-path walk — the same symlink-into-
+	// repo bypass closed for the MINDSPEC_STATE_DIR override. The RETURNED
+	// value stays the un-resolved candidate (so existing callers/tests that
+	// reason about the path relative to HOME are unaffected); only the guard
+	// looks through the symlink. If canonicalization fails closed, refuse.
+	guardTarget := candidate
+	if resolved, err := CanonicalPath(candidate); err == nil {
+		guardTarget = resolved
+	} else {
+		return "", fmt.Errorf("refusing global config dir %q: cannot canonicalize it for the HC-3 git-tree guard (fail closed): %w", candidate, err)
+	}
+	if root := enclosingGitTree(guardTarget); root != "" {
 		return "", fmt.Errorf("refusing global config dir %q: it resolves inside the git work tree at %q (HC-3: the global store must never be under a committable tree); unset or repoint XDG_CONFIG_HOME/HOME", candidate, root)
 	}
 	return candidate, nil
@@ -137,8 +151,62 @@ func userHomeDir() string {
 // internal/journal to apply the SAME guard GlobalConfigDir() uses to the
 // MINDSPEC_STATE_DIR override, so the friction store can never land inside a
 // project/.beads/committable tree even via the explicit override seam.
+//
+// NOTE: this walks dir as a LITERAL path. Callers that accept an
+// operator-supplied path which may be (or contain) a symlink MUST first run
+// it through CanonicalPath, otherwise a symlink whose PATH is outside any git
+// tree but whose TARGET is inside the repo slips past this string-only walk
+// (the HC-3 symlink-into-repo bypass). See journal.Dir.
 func EnclosingGitTree(dir string) string {
 	return enclosingGitTree(dir)
+}
+
+// CanonicalPath resolves dir to an absolute, symlink-free path so the HC-3
+// git-tree guard (EnclosingGitTree) checks the REAL on-disk location rather
+// than a symlink whose path is innocent but whose target is inside the repo.
+//
+// It applies filepath.Abs then filepath.EvalSymlinks. Because the
+// MINDSPEC_STATE_DIR override (and the lazily-created global config dir) need
+// not exist yet, a leaf that does not exist is handled by resolving the
+// NEAREST EXISTING ANCESTOR (the same lazily-created-dir tolerance
+// enclosingGitTree already grants) and re-appending the non-existent tail —
+// so a symlinked PARENT is still caught even when the leaf is absent.
+//
+// It FAILS CLOSED: if Abs fails, or symlink resolution of every ancestor up to
+// the filesystem root fails (a genuinely broken/ambiguous path), it returns an
+// error so the caller writes nothing rather than guessing.
+func CanonicalPath(dir string) (string, error) {
+	if dir == "" {
+		return "", fmt.Errorf("canonicalize path: empty path")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize path %q: %w", dir, err)
+	}
+	// Fast path: the whole path exists → resolve it directly.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	// The leaf (or some suffix) does not exist yet. Walk up to the nearest
+	// EXISTING ancestor, resolve THAT (so a symlinked parent is still caught),
+	// then re-append the non-existent tail. This mirrors how enclosingGitTree
+	// tolerates a lazily-created dir.
+	cur := filepath.Clean(abs)
+	var tail []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			parts := append([]string{resolved}, tail...)
+			return filepath.Join(parts...), nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached the filesystem root without any existing ancestor that
+			// resolved — fail closed rather than guess.
+			return "", fmt.Errorf("canonicalize path %q: no resolvable ancestor", dir)
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = parent
+	}
 }
 
 // enclosingGitTree walks up from dir (and its existing ancestors) looking for a
