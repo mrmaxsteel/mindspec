@@ -39,8 +39,14 @@ var passFixtures = map[string]struct {
 	in     string
 	unique string
 }{
-	"secret-pem":         {"-----BEGIN RSA PRIVATE KEY-----\nMIIabcdefghij\n-----END RSA PRIVATE KEY-----", "PRIVATE KEY"},
-	"secret-auth-header": {"Authorization: Basic dXNlcjpwYXNz extra", "dXNlcjpwYXNz"},
+	// secret-pem fixture exercises the HARDENED malformed-envelope branch
+	// (repanel-codex): an OPENSSH BEGIN line with NO trailing dashes and NO
+	// END marker. Neutering the pass must bring back the base64 body.
+	"secret-pem": {"-----BEGIN OPENSSH PRIVATE KEY\nQUJDREVGR0hJSktMTU5PUA==", "QUJDREVGR0hJSktMTU5PUA=="},
+	// secret-auth-header fixture exercises the HARDENED whitespace-before-
+	// colon + Proxy- variant (repanel-codex). `\S+` stops at the space
+	// before "extra"; neutering the pass brings back the credential body.
+	"secret-auth-header": {"Proxy-Authorization : Basic dXNlcjpwYXNz extra", "dXNlcjpwYXNz"},
 	"secret-ghp":         {"x ghp_ABCDEFGHIJKLMNOPq y", "ghp_ABCDEFGHIJKLMNOPq"},
 	"secret-github-pat":  {"x github_pat_11ABCDEFG0123 y", "github_pat_11ABCDEFG0123"},
 	"secret-gitlab-pat":  {"x glpat-AbCdEfGhIjKlMnOp y", "glpat-AbCdEfGhIjKlMnOp"},

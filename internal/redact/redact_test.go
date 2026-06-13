@@ -80,6 +80,46 @@ func TestRedactEvent_VersionValidated(t *testing.T) {
 	}
 }
 
+// TestRedactEvent_VersionCanonicalDropsSuffix is the repanel-leak fix:
+// `version.Parse` validates ONLY the core x.y.z and DISCARDS the
+// prerelease/build suffix UNVALIDATED, so a secret/path/email smuggled
+// after a '-'/'+' would survive verbatim if RedactEvent stored the raw
+// input. RedactEvent MUST store the CANONICAL reconstructed core semver
+// instead, so the tainted suffix is gone — exactly, byte-for-byte.
+func TestRedactEvent_VersionCanonicalDropsSuffix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string // tainted Version input (otherwise enum-valid event)
+		want string // exact stored Version after canonicalization
+		gone string // the tainted suffix payload that MUST NOT survive
+	}{
+		{"1.2.3-ghp_0123456789abcdefghijABCDEFGHIJ012345", "1.2.3", "ghp_0123456789abcdefghijABCDEFGHIJ012345"},
+		{"v0.0.0+/Users/victim/.ssh/id_rsa", "0.0.0", "/Users/victim/.ssh/id_rsa"},
+		{"1.0.0-secret@victim.com", "1.0.0", "secret@victim.com"},
+		{"1.2.3+AKIAIOSFODNN7EXAMPLE", "1.2.3", "AKIAIOSFODNN7EXAMPLE"},
+		{"1.2.3+meta./Users/max/.aws/credentials", "1.2.3", "/Users/max/.aws/credentials"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			re, ok := RedactEvent(Event{Version: c.in, Command: "next"})
+			if !ok {
+				// A drop is also leak-free and acceptable, but with a valid
+				// core semver we expect canonical-store, not drop.
+				t.Fatalf("Version %q dropped; want canonical-stored %q", c.in, c.want)
+			}
+			if re.Version != c.want {
+				t.Errorf("Version %q → stored %q, want canonical %q", c.in, re.Version, c.want)
+			}
+			if strings.Contains(re.Version, c.gone) {
+				t.Errorf("tainted suffix %q survived in stored Version %q", c.gone, re.Version)
+			}
+			if re.Version == c.in {
+				t.Errorf("stored Version is the raw tainted input %q (must be canonical)", c.in)
+			}
+		})
+	}
+}
+
 // TestRedactEvent_EnumClosedSets is the A2 enum-masquerade fix
 // (codex-leak/codex-completeness): Command/Subcommand/OS are validated
 // against closed sets; a non-enum token (even one that would pass Scrub)
@@ -293,6 +333,50 @@ func TestScrub_Categories(t *testing.T) {
 			in:      "Authorization: Basic dXNlcjpwYXNz",
 			absent:  []string{"dXNlcjpwYXNz"},
 			present: []string{"Basic <secret>"},
+		},
+		// --- repanel-codex r2: auth-header whitespace-before-colon variants ---
+		{
+			name:    "authorization space before colon",
+			in:      "Authorization : Basic Zm9vOmJhcg==",
+			absent:  []string{"Zm9vOmJhcg"},
+			present: []string{"Basic <secret>"},
+		},
+		{
+			name:    "lowercase authorization space-colon",
+			in:      "authorization  :  Basic dXNlcjpwYXNz",
+			absent:  []string{"dXNlcjpwYXNz"},
+			present: []string{"Basic <secret>"},
+		},
+		{
+			name:    "proxy-authorization space-colon bearer",
+			in:      "Proxy-Authorization : Bearer abc.def.ghi-secret-tok",
+			absent:  []string{"abc.def.ghi-secret-tok"},
+			present: []string{"Bearer <secret>"},
+		},
+		// --- repanel-codex r2: malformed/partial PEM (no trailing dashes) ---
+		{
+			name:    "openssh private key no trailing dashes",
+			in:      "-----BEGIN OPENSSH PRIVATE KEY\nQUJDREVGR0hJSktMTU5PUA==\n-----END OPENSSH PRIVATE KEY",
+			absent:  []string{"QUJDREVGR0hJSktMTU5PUA", "OPENSSH"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "ec private key no trailing dashes",
+			in:      "-----BEGIN EC PRIVATE KEY\nMHcCAQEEIabcdefghij\n-----END EC PRIVATE KEY",
+			absent:  []string{"MHcCAQEEIabcdefghij", "BEGIN EC"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "encrypted private key no trailing dashes",
+			in:      "-----BEGIN ENCRYPTED PRIVATE KEY\nMIIFDjBABgkqhkiG9w0\n-----END ENCRYPTED PRIVATE KEY",
+			absent:  []string{"MIIFDjBABgkqhkiG9w0", "ENCRYPTED"},
+			present: []string{"<secret>"},
+		},
+		{
+			name:    "truncated private key no end marker",
+			in:      "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtruncatedbody",
+			absent:  []string{"MIIEpAIBAAKCAQEAtruncatedbody", "BEGIN RSA"},
+			present: []string{"<secret>"},
 		},
 		{
 			name:    "unc path",

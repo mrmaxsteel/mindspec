@@ -89,6 +89,12 @@ var CommandTokens = map[string]struct{}{
 	"state":     {},
 	"trace":     {},
 	"validate":  {},
+	// cobra-generated built-ins (always registered, not disabled): the
+	// `help` and `completion` top-level commands are dispatchable, so a
+	// success/friction event can carry them — keep them allowlisted or
+	// RedactEvent would silently DROP those events (drift-guard caught).
+	"completion": {},
+	"help":       {},
 	// Deprecated top-level shims (still dispatchable, so still emittable).
 	"agentmind": {},
 	"viz":       {},
@@ -106,6 +112,8 @@ var SubcommandTokens = map[string]struct{}{
 	"add":              {},
 	"adr":              {},
 	"approve":          {},
+	"bash":             {}, // completion bash (cobra built-in)
+	"bead":             {}, // context bead
 	"claude":           {},
 	"cleanup":          {},
 	"codex":            {},
@@ -115,11 +123,15 @@ var SubcommandTokens = map[string]struct{}{
 	"create":           {},
 	"create-from-plan": {},
 	"docs":             {},
+	"fish":             {}, // completion fish (cobra built-in)
+	"help":             {}, // cobra `help` subcommand under any parent
 	"hygiene":          {},
+	"impl":             {}, // approve impl (Bead 2's PRIMARY override-on-impl capture)
 	"list":             {},
 	"phase":            {},
 	"plan":             {},
 	"populate":         {},
+	"powershell":       {}, // completion powershell (cobra built-in)
 	"record":           {},
 	"repair":           {},
 	"replay":           {}, // agentmind replay shim
@@ -128,12 +140,14 @@ var SubcommandTokens = map[string]struct{}{
 	"setup":            {},
 	"show":             {},
 	"source":           {},
+	"spec":             {}, // approve spec / bead spec / validate spec
 	"start":            {},
 	"status":           {},
 	"summary":          {},
 	"validate":         {},
 	"worktree":         {},
 	"write-session":    {},
+	"zsh":              {}, // completion zsh (cobra built-in)
 }
 
 // osTokens is the closed-set enum of OS values — exactly the runtime.GOOS
@@ -147,17 +161,32 @@ var osTokens = map[string]struct{}{
 	"": {}, // OS may legitimately be unset.
 }
 
-// validVersion reports whether v is an acceptable bare version token:
-// the empty string, "dev", or a parseable bare semver (A1). ANYTHING
-// else — a decorated cobra string, a path, a secret smuggled into the
-// field — is rejected so RedactEvent can drop/blank it fail-closed. This
-// closes the demonstrated `Version:"ghp_… /Users/victim/key …"` leak.
-func validVersion(v string) bool {
+// canonicalVersion reports whether v is an acceptable version token and,
+// if so, returns the CANONICAL value to STORE (A1). The empty string and
+// "dev" map to themselves. A parseable version maps to its reconstructed
+// core "Major.Minor.Patch" — NEVER the raw input — so any prerelease
+// ("-…") or build ("+…") suffix is structurally discarded, tainted or
+// not (repanel-leak: `version.Parse` validates only the core x.y.z and
+// discards the suffix UNVALIDATED, so a secret/path/email smuggled after
+// a '-'/'+' — e.g. "1.2.3-ghp_…", "v0.0.0+/Users/victim/.ssh/id_rsa",
+// "1.0.0-secret@victim.com" — would otherwise survive verbatim in an
+// ok=true event). ANYTHING else — a decorated cobra string, a path, a
+// bare secret — is rejected (ok=false) so RedactEvent drops the event
+// fail-closed. This closes the demonstrated `Version:"ghp_… /key …"`
+// leak AND its prerelease/build-suffix resurrection.
+func canonicalVersion(v string) (canon string, ok bool) {
 	if v == "" || v == "dev" {
-		return true
+		return v, true
 	}
-	_, ok := version.Parse(v)
-	return ok
+	sv, parsed := version.Parse(v)
+	if !parsed {
+		return "", false
+	}
+	// Re-emit the parsed core ONLY; the raw input (and any tainted
+	// prerelease/build suffix) is never stored. The suffix is never needed
+	// downstream — resolved_in_vX compares core semver (Compare ignores the
+	// suffix too).
+	return itoa(sv.Major) + "." + itoa(sv.Minor) + "." + itoa(sv.Patch), true
 }
 
 // init guards against drift: runtime.GOOS must be in the OS allowlist on
@@ -188,16 +217,31 @@ type pass struct {
 }
 
 var scrubPasses = []pass{
-	// PEM private-key blocks FIRST — a multi-line "-----BEGIN ... PRIVATE
-	// KEY-----...-----END...-----" envelope. Matched before anything can
-	// fragment the body on whitespace/newlines (R3, codex-leak). (?s) so
-	// `.` spans the newline-broken base64 body.
-	{"secret-pem", regexp.MustCompile(`(?is)-----BEGIN[ A-Z0-9]*PRIVATE KEY-----.*?-----END[ A-Z0-9]*PRIVATE KEY-----`), "<secret>"},
+	// PEM private-key blocks FIRST — a multi-line "BEGIN ... PRIVATE KEY"
+	// envelope (RSA/EC/OPENSSH/ENCRYPTED/generic). Matched before anything
+	// can fragment the body on whitespace/newlines (R3, codex-leak). (?s)
+	// so `.` spans the newline-broken base64 body.
+	//
+	// HARDENED (repanel-codex): a MALFORMED/PARTIAL envelope — e.g. a
+	// "-----BEGIN OPENSSH PRIVATE KEY" line MISSING its trailing dashes, or
+	// a truncated block with no END marker at all — leaked its body under
+	// the old pass (which required the literal `PRIVATE KEY-----`). We now
+	// (a) allow the trailing dashes after the marker to be ABSENT, and
+	// (b) scrub from the BEGIN marker through the matching END marker OR,
+	// if there is no END, to END-OF-STRING. Over-scrubbing a partial key
+	// envelope is safe (HC-7: prefer DROP/over-scrub on uncertainty), and a
+	// private-key body is never legitimately needed downstream.
+	{"secret-pem", regexp.MustCompile(`(?is)-----BEGIN[ A-Z0-9]*PRIVATE KEY(?:-+)?.*?(?:-----END[ A-Z0-9]*PRIVATE KEY(?:-+)?|$)`), "<secret>"},
 	// Authorization headers — Basic AND Bearer (R3, codex-leak: short
 	// Basic credentials sit under the entropy backstop). Matched before
 	// the entropy passes; the credential body is dropped regardless of
 	// length. The scheme word is kept for context, the secret replaced.
-	{"secret-auth-header", regexp.MustCompile(`(?i)\bAuthorization:\s*(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+`), "Authorization: $1 <secret>"},
+	// Tolerate optional whitespace BEFORE and after the colon
+	// (`Authorization : Basic …` bypassed the old `Authorization:` token —
+	// repanel-codex), case-insensitive, and the Proxy-Authorization
+	// variant. The header name is normalized to a canonical "<Name>: " in
+	// the replacement so the residual gate's scheme check still matches.
+	{"secret-auth-header", regexp.MustCompile(`(?i)\b(Proxy-Authorization|Authorization)\s*:\s*(Basic|Bearer)\s+\S+`), "$1: $2 <secret>"},
 	// Secrets — provider-prefixed tokens and KEY/TOKEN/PASSWORD assignments.
 	{"secret-ghp", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{16,}\b`), "<secret>"},
 	{"secret-github-pat", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`), "<secret>"},
@@ -281,25 +325,25 @@ var scrubPasses = []pass{
 // the golden corpus asserts ZERO of, so this gate is the in-library
 // mirror of the CI gate.
 var residualLeakPasses = []*regexp.Regexp{
-	regexp.MustCompile(`[\w.@-]/[\w.@-]`),                                          // any slash path token
-	regexp.MustCompile(`[A-Za-z]:\\`),                                              // windows abs path
-	regexp.MustCompile(`\\\\[^\\\s]`),                                              // UNC path (\\server\…)
-	regexp.MustCompile(`[^\s<>]\\[^\s<>\\]`),                                       // any residual backslash path segment
-	regexp.MustCompile(`\bmindspec-[a-z0-9]`),                                      // bead id
-	regexp.MustCompile(`\b\d{3}-[a-z0-9]+-[a-z0-9]`),                               // spec slug
-	regexp.MustCompile(`\bADR-\d{3,}`),                                             // adr id
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]`),                                  // gh secret
-	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]`),                                // github fine-grained pat
-	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]`),                                    // gitlab pat
-	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]`),                                // slack token
-	regexp.MustCompile(`\bAKIA[0-9A-Z]`),                                           // aws key
-	regexp.MustCompile(`\bsk-[A-Za-z0-9]`),                                         // openai key
-	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.`),                                 // jwt
-	regexp.MustCompile(`(?i)\bPRIVATE KEY-----`),                                   // residual PEM envelope
-	regexp.MustCompile(`(?i)Authorization:\s*(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]`), // residual auth-header credential (Authorization-scoped to avoid flagging the English word "Basic"; the emitted "<secret>" placeholder lacks the trailing credential char so it is not re-flagged)
-	regexp.MustCompile(`\b[0-9a-fA-F]{15,}\b`),                                     // entropy hex (tightened)
-	regexp.MustCompile(`[A-Za-z0-9+/_-]{23,}={0,2}`),                               // entropy b64 (tightened)
-	regexp.MustCompile(`@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`),                            // email
+	regexp.MustCompile(`[\w.@-]/[\w.@-]`),                                               // any slash path token
+	regexp.MustCompile(`[A-Za-z]:\\`),                                                   // windows abs path
+	regexp.MustCompile(`\\\\[^\\\s]`),                                                   // UNC path (\\server\…)
+	regexp.MustCompile(`[^\s<>]\\[^\s<>\\]`),                                            // any residual backslash path segment
+	regexp.MustCompile(`\bmindspec-[a-z0-9]`),                                           // bead id
+	regexp.MustCompile(`\b\d{3}-[a-z0-9]+-[a-z0-9]`),                                    // spec slug
+	regexp.MustCompile(`\bADR-\d{3,}`),                                                  // adr id
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]`),                                       // gh secret
+	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]`),                                     // github fine-grained pat
+	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]`),                                         // gitlab pat
+	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]`),                                     // slack token
+	regexp.MustCompile(`\bAKIA[0-9A-Z]`),                                                // aws key
+	regexp.MustCompile(`\bsk-[A-Za-z0-9]`),                                              // openai key
+	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.`),                                      // jwt
+	regexp.MustCompile(`(?i)BEGIN[ A-Z0-9]*PRIVATE KEY`),                                // residual PEM envelope — flags a surviving BEGIN…PRIVATE KEY marker even when the trailing dashes are absent (repanel-codex: malformed/partial envelope)
+	regexp.MustCompile(`(?i)\bAuthorization\s*:\s*(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]`), // residual auth-header credential (Authorization-scoped — also matches the Proxy-Authorization suffix; tolerates whitespace before/after the colon; avoids flagging the English word "Basic"; the emitted "<secret>" placeholder lacks the trailing credential char so it is not re-flagged)
+	regexp.MustCompile(`\b[0-9a-fA-F]{15,}\b`),                                          // entropy hex (tightened)
+	regexp.MustCompile(`[A-Za-z0-9+/_-]{23,}={0,2}`),                                    // entropy b64 (tightened)
+	regexp.MustCompile(`@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`),                                 // email
 }
 
 // Scrub is the full tainted-string scrub (Req 1). It runs the
@@ -470,8 +514,12 @@ func RedactEvent(ev Event) (RedactedEvent, bool) {
 		return RedactedEvent{}, false
 	}
 	// A1: Version must be a bare semver or "dev"/""; a decorated or
-	// tainted version string DROPS the event fail-closed.
-	if !validVersion(ev.Version) {
+	// tainted version string DROPS the event fail-closed. The STORED value
+	// is the CANONICAL core "Major.Minor.Patch" reconstructed from the
+	// parse — never the raw input — so any prerelease/build suffix
+	// (tainted or not) is discarded (repanel-leak).
+	canonVersion, okVersion := canonicalVersion(ev.Version)
+	if !okVersion {
 		return RedactedEvent{}, false
 	}
 
@@ -489,7 +537,7 @@ func RedactEvent(ev Event) (RedactedEvent, bool) {
 		Command:     ev.Command,
 		EscapeHatch: ev.EscapeHatch,
 		Subcommand:  ev.Subcommand,
-		Version:     ev.Version,
+		Version:     canonVersion,
 		OS:          ev.OS,
 		Identity:    id,
 		Fingerprint: Fingerprint(id),
