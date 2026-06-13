@@ -318,19 +318,10 @@ func ListReports() ([]Record, error) {
 	return ReadEvents()
 }
 
-// MarkResolved is the §API Contract Bead-3 SEAM (resolve a friction report
-// by fingerprint + resolved-in version). It operates on Bead 3's REPORTS
-// layer (reports.jsonl), NOT by mutating the append-only journal.jsonl —
-// the journal is immutable history. In Bead 2 this is a minimal stub that
-// Bead 3 completes once reports.jsonl exists; it is wired here so Bead 3
-// integrates against a settled signature.
-func MarkResolved(fp string, ver string) error {
-	// Bead 3 implements the reports.jsonl resolve. The journal itself is
-	// append-only and never mutated here. Intentionally a no-op stub.
-	_ = fp
-	_ = ver
-	return nil
-}
+// MarkResolved (the §API Contract Bead-3 resolve SEAM) is implemented in
+// reports.go: it stamps resolved_in_version on the consolidated reports.jsonl
+// layer and NEVER mutates the append-only journal.jsonl (Bead 2 shipped a
+// no-op stub here; Bead 3 completed it over the reports layer).
 
 // readRecords parses every JSONL line of path into a Record slice. A
 // missing file is the empty-journal case (no error). Malformed lines are

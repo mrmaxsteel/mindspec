@@ -475,15 +475,21 @@ func TestReadRecords_SkipsMalformedLine(t *testing.T) {
 
 // TestMarkResolved_DoesNotMutateJournal asserts the Bead-3 MarkResolved
 // seam never touches the append-only journal (the journal is immutable
-// history; resolution lives on Bead 3's reports layer).
+// history; resolution lives on Bead 3's reports layer). Bead 3 made the
+// stub real (over reports.jsonl); the immutability invariant is unchanged.
 func TestMarkResolved_DoesNotMutateJournal(t *testing.T) {
 	stateDir(t)
 	if err := AppendSuccessEvent(goodEvent()); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := ListReports()
-	if err := MarkResolved("somefp", "2.0.0"); err != nil {
-		t.Fatalf("MarkResolved stub returned an error: %v", err)
+	// Resolve a REAL fingerprint (consolidate first to learn it).
+	reports, err := Consolidate()
+	if err != nil || len(reports) != 1 {
+		t.Fatalf("Consolidate: want 1 report, got %d (err=%v)", len(reports), err)
+	}
+	if err := MarkResolved(reports[0].Fingerprint, "2.0.0"); err != nil {
+		t.Fatalf("MarkResolved returned an error: %v", err)
 	}
 	after, _ := ListReports()
 	if len(before) != len(after) {
