@@ -28,8 +28,10 @@ var adrIDPattern = regexp.MustCompile(`^ADR-[0-9]{4,}(?:-[a-z0-9]+(?:-[a-z0-9]+)
 // The explicit segment form forbids leading hyphens and empty segments.
 var beadIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-[a-z0-9]{4,}$`)
 
-// domainNamePattern: kebab-case, starts with letter.
-var domainNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+// domainNamePattern: kebab-case, starts with a letter. The explicit
+// segment form forbids trailing hyphens (e.g. "cli-") and consecutive
+// hyphens (e.g. "a--b") while still accepting valid kebab names.
+var domainNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
 // SpecID validates that id is a well-formed spec identifier (e.g. "033-security-hardening").
 // Returns an error if the ID is empty, contains path separators, or doesn't match the expected format.
@@ -38,13 +40,13 @@ func SpecID(id string) error {
 		return fmt.Errorf("invalid spec ID: empty")
 	}
 	if id == "." || id == ".." {
-		return fmt.Errorf("invalid spec ID %q: must match NNN-slug format", id)
+		return fmt.Errorf("invalid spec ID %q: must match <NNN>-<slug> format", id)
 	}
 	if strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("invalid spec ID %q: contains path separator", id)
 	}
 	if !specIDPattern.MatchString(id) {
-		return fmt.Errorf("invalid spec ID %q: must match NNN-slug format", id)
+		return fmt.Errorf("invalid spec ID %q: must match <NNN>-<slug> format", id)
 	}
 	return nil
 }
@@ -57,7 +59,7 @@ func ADRID(id string) error {
 		return fmt.Errorf("invalid ADR ID: empty")
 	}
 	if id == "." || id == ".." {
-		return fmt.Errorf("invalid ADR ID %q: must match ADR-NNNN[-slug] format", id)
+		return fmt.Errorf("invalid ADR ID %q: must match ADR-<NNNN>[-<slug>] format", id)
 	}
 	if strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("invalid ADR ID %q: contains path separator", id)
@@ -70,12 +72,21 @@ func ADRID(id string) error {
 		return fmt.Errorf("invalid ADR ID %q: contains glob metacharacter", id)
 	}
 	if !adrIDPattern.MatchString(id) {
-		return fmt.Errorf("invalid ADR ID %q: must match ADR-NNNN[-slug] format", id)
+		return fmt.Errorf("invalid ADR ID %q: must match ADR-<NNNN>[-<slug>] format", id)
 	}
 	return nil
 }
 
 // BeadID validates a bead identifier (e.g. "mindspec-x1qr").
+//
+// Format assumption: beadIDPattern treats a bead ID as a flat
+// <project-slug>-<4+alnum> identifier — one or more hyphen-separated
+// leading segments forming the project slug, followed by a final
+// 4-or-more-character alphanumeric suffix (e.g. "mindspec-x1qr",
+// "a-b-c-d-1234"). The leading segments must be non-empty, so leading,
+// trailing, and consecutive hyphens are all rejected. This mirrors the bd
+// CLI's flat bead ID scheme; it intentionally does NOT model any nested or
+// hierarchical ID format.
 //
 // Note: as of SEC-1 (bead mindspec-x1qr) implementation, no production code
 // passes bead IDs into filepath.Join. This validator is preventative — it
@@ -106,13 +117,13 @@ func DomainName(name string) error {
 		return fmt.Errorf("invalid domain name: empty")
 	}
 	if name == "." || name == ".." {
-		return fmt.Errorf("invalid domain name %q: must match [a-z][a-z0-9-]*", name)
+		return fmt.Errorf("invalid domain name %q: must match <kebab-case> format", name)
 	}
 	if strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("invalid domain name %q: contains path separator", name)
 	}
 	if !domainNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid domain name %q: must match [a-z][a-z0-9-]*", name)
+		return fmt.Errorf("invalid domain name %q: must match <kebab-case> format", name)
 	}
 	return nil
 }
