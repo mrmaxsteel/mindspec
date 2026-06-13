@@ -1387,6 +1387,65 @@ func TestApproveImpl_StalePhaseReconcilesForward(t *testing.T) {
 	}
 }
 
+// TestApproveImpl_OpenBugChildReachesReview is the spec 095 ry73 e2e
+// guarantee: stored mindspec_phase=="implement" (a bug was filed as a
+// child of the spec epic AFTER the last `complete`, so the cached phase
+// is stale) while every LIFECYCLE (task) child is closed. The child-
+// derived phase is `review` (the open bug is non-lifecycle and ignored),
+// so ApproveImpl must proceed via the spec-092 derived-branch reconcile
+// with NO manual `repair phase`, AND emit the advisory guard hint naming
+// the open bug — without bare-recommending the bk5t-buggy `--parent ""`.
+// RED-on-revert: if DerivePhaseFromChildren counted the open bug, the
+// derived phase would be `implement`, both phases would fail the gate,
+// and ApproveImpl would error out (no reconcile, no hint).
+func TestApproveImpl_OpenBugChildReachesReview(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	// Stored cache says implement; children = all task closed + open bug.
+	stubPhaseStoredChildren(t, "implement", []phase.ChildInfo{
+		{ID: "bead-1", Status: "closed", IssueType: "task"},
+		{ID: "bug-9", Title: "follow-up crash", Status: "open", IssueType: "bug"},
+	})
+
+	reconciled := false
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		if p, ok := updates["mindspec_phase"]; ok && p == "review" {
+			reconciled = true
+		}
+		return nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	var err error
+	stderr := captureStderr(t, func() {
+		_, err = ApproveImpl(tmp, "010-test", mock)
+	})
+	if err != nil {
+		t.Fatalf("open bug child must not strand the spec short of review; got: %v", err)
+	}
+	if !reconciled {
+		t.Errorf("expected a forward reconcile write to review (stored was stale 'implement')")
+	}
+	// Guard hint names the offending bug child.
+	if !strings.Contains(stderr, "bug-9") {
+		t.Errorf("guard hint must name the open non-lifecycle child bug-9; stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "hint:") {
+		t.Errorf("expected an advisory hint line; stderr=%q", stderr)
+	}
+	// Recovery line must NOT bare-recommend the bk5t-buggy detach.
+	if strings.Contains(stderr, `--parent ""`) && !strings.Contains(stderr, "do NOT use") {
+		t.Errorf("guard hint must not bare-recommend 'bd update <id> --parent \"\"'; stderr=%q", stderr)
+	}
+}
+
 // TestApproveImpl_StoredFreshSkipsReconcile kills panel-R3 mutant M2a:
 // when the STORED phase already satisfies the gate (review) while the
 // child-derived phase disagrees (implement — e.g. a bead got reopened
