@@ -5,3 +5,6 @@ paths:
   - internal/spec/**
   - internal/phase/**
   - internal/recording/**
+  - internal/redact/**
+  - internal/version/**
+  - .mindspec/docs/domains/core/OWNERSHIP.yaml

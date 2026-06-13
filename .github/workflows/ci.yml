@@ -23,6 +23,24 @@ permissions:
 # See ADR-0027 for the architectural rationale.
 
 jobs:
+  # HC-1 keystone (spec 094): the adversarial redaction golden-corpus gate
+  # runs as its OWN dedicated, always-run job — not merely a step inside
+  # `test` — so a redaction leak is a distinct, required, non-skippable
+  # status that can never be masked by an unrelated matrix entry
+  # (codex-completeness). It has no `if:` guard and no continue-on-error,
+  # and runs `-race` over the whole redact + version surface including the
+  # per-pass mutation gate and the subprocess falsifiability proof.
+  redaction-gate:
+    name: Redaction gate (spec 094 HC-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Redaction + version privacy gate
+        run: go test -race ./internal/redact/... ./internal/version/...
+
   test:
     name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
@@ -35,6 +53,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+
+      # HC-1 keystone (spec 094): the adversarial redaction golden-corpus
+      # gate, ALSO run inline here (in addition to the dedicated
+      # redaction-gate job above and `./...` below) so a redaction leak
+      # fails the build loudly and visibly, never as an advisory.
+      - name: Redaction golden-corpus gate (spec 094 HC-1)
+        run: go test ./internal/redact/...
 
       - name: Run tests
         run: go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
