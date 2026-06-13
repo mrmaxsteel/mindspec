@@ -242,10 +242,26 @@ func NextID(root string) (string, error) {
 	maxNum := 0
 	for _, path := range matches {
 		base := filepath.Base(path)
-		// Extract number from ADR-NNNN.md
+		// Extract the leading numeric run after the "ADR-" prefix.
+		// Both the legacy bare "ADR-NNNN.md" and the slugged
+		// "ADR-NNNN-slug.md" forms carry their numeric ID as the run
+		// of digits immediately following "ADR-". Atoi-ing the whole
+		// "NNNN-slug" suffix (the prior behavior) failed for every
+		// slugged filename, skipping it and leaving maxNum too low —
+		// so a directory of only slugged ADRs produced a COLLIDING
+		// low NextID. Reading just the leading digit run counts both
+		// forms; a non-numeric head (e.g. "ADR-foo.md") yields an
+		// empty run and is skipped safely.
 		name := strings.TrimSuffix(base, ".md")
-		numStr := strings.TrimPrefix(name, "ADR-")
-		n, err := strconv.Atoi(numStr)
+		rest := strings.TrimPrefix(name, "ADR-")
+		end := 0
+		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			continue
+		}
+		n, err := strconv.Atoi(rest[:end])
 		if err != nil {
 			continue
 		}

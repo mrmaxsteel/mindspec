@@ -378,3 +378,95 @@ func TestNextID_Empty(t *testing.T) {
 		t.Errorf("NextID = %q, want 0001", id)
 	}
 }
+
+// setupNextIDFixture writes empty ADR files with the given base names into a
+// fresh root's ADR dir and returns the root. NextID only reads filenames, so
+// the contents are irrelevant.
+func setupNextIDFixture(t *testing.T, names ...string) string {
+	t.Helper()
+	root := t.TempDir()
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(adrDir, name), []byte("# stub\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	return root
+}
+
+// TestNextID_SluggedOnly is the RED-on-revert guard for bn3u: a dir whose ADRs
+// are ALL slugged (ADR-NNNN-slug.md) must count toward maxNum. The old
+// whole-suffix strconv.Atoi("0034-some-slug") fails for every file, leaving
+// maxNum at 0 and NextID returning a colliding 0001.
+func TestNextID_SluggedOnly(t *testing.T) {
+	root := setupNextIDFixture(t,
+		"ADR-0025-jsonl-as-build-artifact.md",
+		"ADR-0034-some-slug.md",
+	)
+
+	id, err := NextID(root)
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != "0035" {
+		t.Errorf("NextID = %q, want 0035 (slugged ADRs must count)", id)
+	}
+}
+
+func TestNextID_BareSlugged(t *testing.T) {
+	root := setupNextIDFixture(t, "ADR-0034.md")
+
+	id, err := NextID(root)
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != "0035" {
+		t.Errorf("NextID = %q, want 0035", id)
+	}
+}
+
+func TestNextID_SingleDigit(t *testing.T) {
+	root := setupNextIDFixture(t, "ADR-1.md")
+
+	id, err := NextID(root)
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != "0002" {
+		t.Errorf("NextID = %q, want 0002", id)
+	}
+}
+
+func TestNextID_MixedBareAndSlugged(t *testing.T) {
+	root := setupNextIDFixture(t,
+		"ADR-0007.md",
+		"ADR-0025-jsonl-as-build-artifact.md",
+		"ADR-0035-agent-error-contract.md",
+	)
+
+	id, err := NextID(root)
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != "0036" {
+		t.Errorf("NextID = %q, want 0036 (max leading-integer + 1)", id)
+	}
+}
+
+func TestNextID_MalformedSkipped(t *testing.T) {
+	root := setupNextIDFixture(t,
+		"ADR-foo.md",
+		"ADR-0009-real.md",
+	)
+
+	id, err := NextID(root)
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != "0010" {
+		t.Errorf("NextID = %q, want 0010 (malformed ADR-foo.md skipped)", id)
+	}
+}
