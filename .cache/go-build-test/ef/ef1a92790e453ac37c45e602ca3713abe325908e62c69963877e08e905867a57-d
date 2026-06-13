@@ -1,0 +1,5 @@
+./redact.go
+./falsifiability_test.go
+./golden_corpus_test.go
+./mutation_test.go
+./redact_test.go

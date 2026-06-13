@@ -1,0 +1,8 @@
+./beads.go
+./config.go
+./docs.go
+./doctor.go
+./git.go
+./hooks.go
+./migration.go
+./ownership.go

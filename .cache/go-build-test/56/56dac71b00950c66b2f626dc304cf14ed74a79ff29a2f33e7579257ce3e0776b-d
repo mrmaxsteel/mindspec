@@ -1,0 +1,14 @@
+# test log
+getenv PATH
+stat /opt/homebrew/Cellar/go/1.26.1/libexec/bin/go
+getenv GOTMPDIR
+getenv TMPDIR
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestFalsifiability_LeakyCorpusExitsNonZero1091344358/001/go.mod
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestFalsifiability_LeakyCorpusExitsNonZero1091344358/001/leaky.go
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestFalsifiability_LeakyCorpusExitsNonZero1091344358/001/leaky_test.go
+getenv PATH
+stat /opt/homebrew/Cellar/go/1.26.1/libexec/bin/go
+open /dev/null
+open /opt/homebrew/Cellar/go/1.26.1/libexec/bin/go
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestFalsifiability_LeakyCorpusExitsNonZero1091344358/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T

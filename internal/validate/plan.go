@@ -27,6 +27,23 @@ type PlanFrontmatter struct {
 	ApprovedBy   string        `yaml:"approved_by"`
 	BeadIDs      []string      `yaml:"bead_ids"`
 	ADRCitations []ADRCitation `yaml:"adr_citations"`
+	WorkChunks   []WorkChunk   `yaml:"work_chunks"`
+}
+
+// WorkChunk is one structured implementation chunk declared in plan
+// frontmatter. The chunk `id` is 1-based and matches the Nth `## Bead N`
+// section in declaration order, so chunk `id N` maps positionally to
+// `bead_ids[N-1]`. `depends_on` lists the chunk ids this chunk depends on;
+// a `depends_on: [M]` entry makes `bead_ids[N-1]` depend on `bead_ids[M-1]`
+// (spec 097 R3). `key_file_paths` is the per-bead, declared source for that
+// bead's `## Key File Paths` context surface (spec 097 R4) — it replaces the
+// retired prose prefix-scan, so chunk `id N`'s paths feed bead_ids[N-1]'s
+// `metadata.file_paths`. Non-strict yaml.Unmarshal harmlessly ignores any extra
+// human-readable keys (title/scope/verify) the templates also carry.
+type WorkChunk struct {
+	ID           int      `yaml:"id"`
+	DependsOn    []int    `yaml:"depends_on"`
+	KeyFilePaths []string `yaml:"key_file_paths"`
 }
 
 // ADRCitation represents an ADR citation in plan frontmatter.
@@ -178,7 +195,7 @@ func ValidatePlan(root, specID string) *Result {
 		if err != nil {
 			cfg = config.DefaultConfig()
 		}
-		checkDecompositionQuality(r, beadSections, cfg.Decomposition)
+		checkDecompositionQuality(r, beadSections, fm.WorkChunks, cfg.Decomposition)
 	}
 
 	return r
@@ -265,6 +282,15 @@ func parsePlanFrontmatter(content string) (*PlanFrontmatter, error) {
 	}
 
 	return &fm, nil
+}
+
+// ParsePlanFrontmatter extracts and parses the YAML frontmatter from plan
+// content. It exposes the parsed PlanFrontmatter (including the validated
+// ADRCitations) to other packages: the approve flow consumes the structured
+// adr_citations for each bead's --design field instead of regex-scraping the
+// spec's `## ADR Touchpoints` prose (spec 097 R2).
+func ParsePlanFrontmatter(content string) (*PlanFrontmatter, error) {
+	return parsePlanFrontmatter(content)
 }
 
 // checkFrontmatterFields verifies required fields are present.
@@ -815,15 +841,130 @@ func ExtractPathRefs(text string) []string {
 	return result
 }
 
-// beadDepRe matches "Bead N" references in dependency text.
-var beadDepRe = regexp.MustCompile(`(?i)bead\s+(\d+)`)
+// ValidateWorkChunkAlignment verifies that the structured `work_chunks` ids
+// align positionally with the plan's `## Bead N` sections before any
+// consumer wires `bead_ids[N-1]` from them (spec 097 R3). It requires the
+// chunk ids to be exactly the contiguous set 1..numSections (no gaps, no
+// duplicates, no count mismatch) and every `depends_on` target to be an
+// in-range, non-self chunk id. A misaligned or out-of-range id set returns a
+// descriptive error so callers reject it rather than panic or mis-wire.
+//
+// An empty `chunks` slice aligns trivially (returns nil): a plan that
+// declares no structured deps simply wires nothing.
+func ValidateWorkChunkAlignment(chunks []WorkChunk, numSections int) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if len(chunks) != numSections {
+		return fmt.Errorf("work_chunks count (%d) does not match the number of ## Bead sections (%d); each chunk id must map to exactly one bead section", len(chunks), numSections)
+	}
+	seen := make(map[int]bool, len(chunks))
+	for _, c := range chunks {
+		if c.ID < 1 || c.ID > numSections {
+			return fmt.Errorf("work_chunk id %d is out of range; ids must be the contiguous set 1..%d", c.ID, numSections)
+		}
+		if seen[c.ID] {
+			return fmt.Errorf("work_chunk id %d is declared more than once; ids must be the contiguous set 1..%d", c.ID, numSections)
+		}
+		seen[c.ID] = true
+	}
+	// With the count matched and every id in 1..numSections unique, the set
+	// is necessarily contiguous 1..numSections. Bounds-check depends_on.
+	for _, c := range chunks {
+		for _, dep := range c.DependsOn {
+			if dep < 1 || dep > numSections {
+				return fmt.Errorf("work_chunk id %d declares depends_on id %d which is out of range 1..%d", c.ID, dep, numSections)
+			}
+			if dep == c.ID {
+				return fmt.Errorf("work_chunk id %d declares a self-dependency", c.ID)
+			}
+		}
+	}
+	// Detect a dependency CYCLE in the work_chunks graph. A cyclic plan
+	// (e.g. 1 depends_on [2], 2 depends_on [1]) passes the range/contiguity/
+	// self-dep checks above, but the validate-side longest-path walk
+	// (computeChainDepth) would otherwise recurse forever and stack-overflow.
+	// Reject it here so the approve-side guard fails cleanly BEFORE any
+	// `bd dep add` wires a cyclic graph. Edges follow depends_on: chunk c with
+	// depends_on [d] is an edge c -> d; a back-edge to a node still on the
+	// current DFS stack is a cycle.
+	if cyc := findWorkChunkCycle(chunks); cyc != nil {
+		parts := make([]string, len(cyc))
+		for i, id := range cyc {
+			parts[i] = fmt.Sprintf("%d", id)
+		}
+		return fmt.Errorf("work_chunks dependency cycle detected: %s", strings.Join(parts, " -> "))
+	}
+	return nil
+}
+
+// findWorkChunkCycle returns a chunk-id path describing a dependency cycle in
+// the work_chunks graph (following depends_on edges), or nil if the graph is
+// acyclic. The returned path closes the loop (e.g. [1, 2, 1]). It uses a
+// three-color DFS: a back-edge to a node still on the current stack (gray)
+// closes a cycle.
+func findWorkChunkCycle(chunks []WorkChunk) []int {
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	deps := make(map[int][]int, len(chunks))
+	for _, c := range chunks {
+		deps[c.ID] = c.DependsOn
+	}
+	color := make(map[int]int, len(chunks))
+	var stack []int
+	var visit func(id int) []int
+	visit = func(id int) []int {
+		color[id] = gray
+		stack = append(stack, id)
+		for _, dep := range deps[id] {
+			switch color[dep] {
+			case gray:
+				// Back-edge: build the cycle from dep's first occurrence on
+				// the current stack to id, then close back to dep.
+				start := 0
+				for i, n := range stack {
+					if n == dep {
+						start = i
+						break
+					}
+				}
+				cyc := append([]int{}, stack[start:]...)
+				return append(cyc, dep)
+			case white:
+				if c := visit(dep); c != nil {
+					return c
+				}
+			}
+		}
+		stack = stack[:len(stack)-1]
+		color[id] = black
+		return nil
+	}
+	for _, c := range chunks {
+		if color[c.ID] == white {
+			if cyc := visit(c.ID); cyc != nil {
+				return cyc
+			}
+		}
+	}
+	return nil
+}
 
 // checkDecompositionQuality computes cross-bead metrics and emits warnings
 // when the plan structure correlates with known degradation patterns. All
 // emitted issues are advisory (AddWarning, never AddError) and never gate
 // approval. Thresholds are configurable via `.mindspec/config.yaml` under
 // the top-level `decomposition:` block (see config.Decomposition).
-func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Decomposition) {
+//
+// The dependency graph is built from the structured `work_chunks` deps
+// (spec 097 R3): chunk `id N` maps positionally to the Nth section, and a
+// `depends_on: [M]` entry is an edge `section[M-1] → section[N-1]`. When the
+// chunk ids do not align with the sections (advisory path — never gating) the
+// out-of-range entries are skipped, mirroring the bounds guard used here.
+func checkDecompositionQuality(r *Result, sections []BeadSection, chunks []WorkChunk, cfg config.Decomposition) {
 	if len(sections) == 0 {
 		return
 	}
@@ -882,26 +1023,23 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Dec
 	}
 
 	// 3. Dependency chain depth and parallelism ratio
-	// Build adjacency list from DependsOn text
+	// Build adjacency list from the structured work_chunks deps (spec 097
+	// R3): chunk `id N` is the Nth section, and `depends_on: [M]` is the
+	// edge section[M-1] → section[N-1]. Every index is bounds-checked so a
+	// misaligned id set degrades gracefully on this advisory path.
 	inDegree := make(map[int]int, len(sections))
 	adj := make(map[int][]int, len(sections))
 	for i := range sections {
 		inDegree[i] = 0
 	}
 
-	for i, bs := range sections {
-		if bs.DependsOn == "" {
+	for _, chunk := range chunks {
+		i := chunk.ID - 1 // chunk ids are 1-indexed
+		if i < 0 || i >= len(sections) {
 			continue
 		}
-		lower := strings.ToLower(bs.DependsOn)
-		if lower == "none" || lower == "nothing" || lower == "n/a" {
-			continue
-		}
-		matches := beadDepRe.FindAllStringSubmatch(bs.DependsOn, -1)
-		for _, m := range matches {
-			depNum := 0
-			fmt.Sscanf(m[1], "%d", &depNum)
-			depIdx := depNum - 1 // beads are 1-indexed
+		for _, dep := range chunk.DependsOn {
+			depIdx := dep - 1
 			if depIdx >= 0 && depIdx < len(sections) && depIdx != i {
 				adj[depIdx] = append(adj[depIdx], i)
 				inDegree[i]++
@@ -909,8 +1047,16 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Dec
 		}
 	}
 
-	// Compute longest path (chain depth) via BFS/topological order
-	chainDepth := computeChainDepth(adj, len(sections))
+	// Compute longest path (chain depth). computeChainDepth is cycle-SAFE: a
+	// malformed (cyclic) work_chunks graph must never stack-overflow
+	// `mindspec validate plan`. When a cycle is present it returns hasCycle so
+	// we emit a clean advisory finding instead of crashing or reporting a
+	// meaningless depth.
+	chainDepth, hasCycle := computeChainDepth(adj, len(sections))
+	if hasCycle {
+		r.AddWarning("decomposition-dep-cycle",
+			"work_chunks dependency graph contains a cycle — the chain-depth/parallelism metrics are unreliable; remove the circular depends_on (a valid plan's deps must form a DAG)")
+	}
 	if chainDepth > cfg.MaxChainDepth {
 		r.AddWarning("decomposition-chain-depth",
 			fmt.Sprintf("dependency chain depth %d exceeds threshold %d — deep serial chain, coordination overhead grows super-linearly", chainDepth, cfg.MaxChainDepth))
@@ -930,21 +1076,39 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Dec
 	}
 }
 
-// computeChainDepth returns the longest path length in the DAG.
-func computeChainDepth(adj map[int][]int, n int) int {
-	// Use DFS with memoization
+// computeChainDepth returns the longest path length in the dependency graph
+// and whether the graph contains a cycle. It is cycle-SAFE: a back-edge to a
+// node still on the current DFS stack is detected via in-progress (gray)
+// tracking, so a malformed cyclic graph returns gracefully (hasCycle == true)
+// instead of recursing forever and stack-overflowing. A well-formed plan is a
+// DAG and reports hasCycle == false.
+func computeChainDepth(adj map[int][]int, n int) (depth int, hasCycle bool) {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // on the current DFS stack (in progress)
+		black = 2 // fully explored
+	)
+	color := make(map[int]int, n)
 	memo := make(map[int]int, n)
 	var dfs func(node int) int
 	dfs = func(node int) int {
-		if v, ok := memo[node]; ok {
-			return v
+		if color[node] == black {
+			return memo[node]
 		}
+		color[node] = gray
 		maxChild := 0
 		for _, next := range adj[node] {
+			if color[next] == gray {
+				// Back-edge: a cycle. Stop descending this edge so the
+				// recursion terminates rather than looping forever.
+				hasCycle = true
+				continue
+			}
 			if d := dfs(next); d > maxChild {
 				maxChild = d
 			}
 		}
+		color[node] = black
 		memo[node] = maxChild + 1
 		return maxChild + 1
 	}
@@ -955,5 +1119,5 @@ func computeChainDepth(adj map[int][]int, n int) int {
 			maxDepth = d
 		}
 	}
-	return maxDepth
+	return maxDepth, hasCycle
 }

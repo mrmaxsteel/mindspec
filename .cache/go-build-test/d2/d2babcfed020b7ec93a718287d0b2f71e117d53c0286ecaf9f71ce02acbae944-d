@@ -1,0 +1,4 @@
+./config.go
+./env.go
+./setup.go
+./status.go

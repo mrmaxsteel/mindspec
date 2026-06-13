@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -130,10 +131,21 @@ work_chunks:
 
 func TestCreateImplementationBeads_CreatesAndWiresDeps(t *testing.T) {
 	tmp := t.TempDir()
+	// Dependencies are declared in structured `work_chunks` frontmatter (spec
+	// 097 R3): chunk id N maps to bead_ids[N-1]; depends_on [M] wires
+	// bead_ids[N-1] → bead_ids[M-1]. The prose "Depends on" lines below are
+	// human-readable only and MUST NOT drive wiring.
 	planContent := `---
 status: Approved
 spec_id: "042-test"
 version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+  - id: 2
+    depends_on: [1]
+  - id: 3
+    depends_on: [1, 2]
 ---
 
 # Plan
@@ -198,6 +210,12 @@ Bead 1, Bead 2
 		}
 		return nil, fmt.Errorf("unexpected bd call: %v", args)
 	}
+	// Stub the child-bead lookup so handleExistingBeads (called first inside
+	// createImplementationBeads) never reaches the real bd CLI — keeps this
+	// test hermetic and non-hanging. No existing children → first approval.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
 	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err != nil {
@@ -225,6 +243,154 @@ Bead 1, Bead 2
 	}
 	if depCalls[2] != "dep add test-bead-3 test-bead-2" {
 		t.Errorf("dep call 2: expected 'dep add test-bead-3 test-bead-2', got %q", depCalls[2])
+	}
+}
+
+// TestCreateImplementationBeads_ProseDepsWireNothing proves the prose
+// `bead\s+(\d+)` scrape is gone (spec 097 R3): a plan with prose "Depends on
+// Bead 1" lines but NO `work_chunks` frontmatter wires ZERO dependencies.
+// RED on revert: the retired prose path would emit `bd dep add` calls.
+func TestCreateImplementationBeads_ProseDepsWireNothing(t *testing.T) {
+	tmp := t.TempDir()
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+None
+
+## Bead 2: Second thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+Bead 1
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var callCount atomic.Int32
+	var depCalls []string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			n := callCount.Add(1)
+			return []byte(fmt.Sprintf(`{"id":"test-bead-%d"}`, n)), nil
+		}
+		if len(args) > 0 && args[0] == "dep" {
+			depCalls = append(depCalls, strings.Join(args, " "))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unexpected bd call: %v", args)
+	}
+	// Stub the child-bead lookup so handleExistingBeads (called first inside
+	// createImplementationBeads) never reaches the real bd CLI — keeps this
+	// test hermetic and non-hanging. No existing children → first approval.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(beadIDs) != 2 {
+		t.Fatalf("expected 2 bead IDs, got %d: %v", len(beadIDs), beadIDs)
+	}
+	if len(depCalls) != 0 {
+		t.Errorf("expected ZERO dep calls from prose-only deps, got %d: %v", len(depCalls), depCalls)
+	}
+}
+
+// TestCreateImplementationBeads_MisalignedWorkChunks proves the spec 097 R3
+// alignment guard rejects a work_chunks id set that does not map 1:1 onto the
+// `## Bead N` sections, returning a clear error instead of mis-wiring or
+// panicking. Here 3 chunks are declared against 2 bead sections.
+func TestCreateImplementationBeads_MisalignedWorkChunks(t *testing.T) {
+	tmp := t.TempDir()
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+  - id: 2
+    depends_on: [1]
+  - id: 3
+    depends_on: [2]
+---
+
+# Plan
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+None
+
+## Bead 2: Second thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+Bead 1
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("bd must not be called when work_chunks are misaligned: %v", args)
+	}
+	// Stub the child-bead lookup so handleExistingBeads (called before the
+	// alignment guard inside createImplementationBeads) never reaches the real
+	// bd CLI — keeps this test hermetic and non-hanging. No existing children.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+	_, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	if err == nil {
+		t.Fatal("expected an alignment error for 3 work_chunks against 2 bead sections, got nil")
+	}
+	if !strings.Contains(err.Error(), "misaligned") {
+		t.Errorf("expected a 'misaligned' alignment error, got: %v", err)
 	}
 }
 
@@ -375,10 +541,20 @@ None applicable.
 `
 	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(specContent), 0644)
 
+	// `key_file_paths` is declared per-bead in structured frontmatter (spec
+	// 097 R4): `internal/widget/declared.go` is the DECLARED path that must
+	// reach the bead's `metadata.file_paths`. `internal/widget/frob.go` is
+	// mentioned ONLY in the work-chunk PROSE and must NOT be scraped (RED on
+	// revert to ExtractFilePathsFromText's prefix scan).
 	planContent := `---
 status: Approved
 spec_id: "042-test"
 version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - internal/widget/declared.go
 ---
 
 # Plan
@@ -465,7 +641,11 @@ None
 		}
 	}
 
-	// Verify --metadata contains spec_id and file_paths
+	// Verify --metadata contains spec_id and the DECLARED key_file_paths only.
+	// The declared `internal/widget/declared.go` must be present; the
+	// prose-only `internal/widget/frob.go` (mentioned in the work chunk but
+	// NOT in key_file_paths) must NOT be scraped in (spec 097 R4 — RED on
+	// revert to ExtractFilePathsFromText's prefix scan).
 	meta := findFlag("--metadata")
 	if meta == "" {
 		t.Error("--metadata flag not passed")
@@ -473,9 +653,108 @@ None
 		if !strings.Contains(meta, `"spec_id":"042-test"`) {
 			t.Errorf("metadata should contain spec_id, got: %s", meta)
 		}
-		if !strings.Contains(meta, "internal/widget/frob.go") {
-			t.Errorf("metadata should contain file_paths, got: %s", meta)
+		if !strings.Contains(meta, "internal/widget/declared.go") {
+			t.Errorf("metadata should contain the declared key_file_paths, got: %s", meta)
 		}
+		if strings.Contains(meta, "internal/widget/frob.go") {
+			t.Errorf("metadata must NOT scrape prose-only paths; got: %s", meta)
+		}
+	}
+}
+
+// TestCreateImplementationBeads_KeyFilePathsReachSurface proves the spec 097 R4
+// chain END-TO-END through the rendered `## Key File Paths` surface: a
+// work-chunk's declared `key_file_paths` flows approve-side into the bead's
+// `metadata.file_paths` (captured here) and reaches the rendered surface via
+// contextpack.RenderBeadContext, while a path mentioned ONLY in the work-chunk
+// prose is NOT scraped. RED on revert to ExtractFilePathsFromText's prefix scan.
+func TestCreateImplementationBeads_KeyFilePathsReachSurface(t *testing.T) {
+	tmp := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(`---
+status: Approved
+---
+# Spec 042-test
+
+## Requirements
+1. Widget must frob
+
+## Acceptance Criteria
+- [ ] Widget frobs correctly
+`), 0644)
+
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - internal/widget/declared.go
+---
+
+# Plan
+
+## Bead 1: Implement widget frobbing
+
+**Steps**
+1. Create ` + "`internal/widget/prose_only.go`" + `
+
+**Depends on**
+None
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var capturedMetadata string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		for i, a := range args {
+			if a == "--metadata" && i+1 < len(args) {
+				capturedMetadata = args[i+1]
+			}
+		}
+		return []byte(`{"id":"test-bead-1"}`), nil
+	}
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+	if _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedMetadata == "" {
+		t.Fatal("no --metadata captured")
+	}
+
+	// Feed the approve-produced metadata into the rendered surface.
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedMetadata), &meta); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+	restore := contextpack.SetBeadShowForTest(func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]interface{}{{
+			"id":       "test-bead-1",
+			"title":    "[042-test] Bead 1",
+			"metadata": meta,
+		}})
+	})
+	defer restore()
+
+	rendered, err := contextpack.RenderBeadContext("test-bead-1")
+	if err != nil {
+		t.Fatalf("RenderBeadContext: %v", err)
+	}
+	if !strings.Contains(rendered, "## Key File Paths") {
+		t.Fatalf("rendered surface missing `## Key File Paths`:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "internal/widget/declared.go") {
+		t.Errorf("declared key_file_paths should reach the rendered surface:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "internal/widget/prose_only.go") {
+		t.Errorf("prose-only path must NOT reach the rendered surface:\n%s", rendered)
 	}
 }
 
@@ -716,31 +995,6 @@ Some provenance table.
 	bead2 := result["Bead 2: Second"]
 	if !strings.Contains(bead2, "Do other thing") {
 		t.Error("bead 2 content should include steps")
-	}
-}
-
-func TestParseADRIDs(t *testing.T) {
-	touchpoints := `- [ADR-0023](../../adr/ADR-0023.md): Extends beads as state store
-- [ADR-0012](../../adr/ADR-0012.md): Compose with external CLIs
-`
-	ids := parseADRIDs(touchpoints)
-	if len(ids) != 2 {
-		t.Fatalf("expected 2 ADR IDs, got %d: %v", len(ids), ids)
-	}
-	if ids[0] != "ADR-0023" || ids[1] != "ADR-0012" {
-		t.Errorf("unexpected ADR IDs: %v", ids)
-	}
-
-	// Dedup
-	ids2 := parseADRIDs("ADR-0001 and ADR-0001 again")
-	if len(ids2) != 1 {
-		t.Errorf("expected dedup to 1, got %d", len(ids2))
-	}
-
-	// None
-	ids3 := parseADRIDs("None applicable.")
-	if len(ids3) != 0 {
-		t.Errorf("expected 0 for 'None', got %d", len(ids3))
 	}
 }
 

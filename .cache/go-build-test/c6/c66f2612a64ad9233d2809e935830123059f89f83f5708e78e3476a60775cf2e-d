@@ -1,0 +1,6 @@
+./beads.go
+./guard.go
+./mode.go
+./select.go
+./guard_test.go
+./next_test.go

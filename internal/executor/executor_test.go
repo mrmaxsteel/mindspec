@@ -800,6 +800,134 @@ func TestMergeBase_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+// --- SEC-5 option-injection guard at the executor's direct git-exec sites ---
+//
+// internal/complete overwrites beadHead with the branch reported by
+// `bd worktree list` (a name it trusts) and that ref flows into the
+// executor's OWN direct git exec — MergeBase / FileAtRef / pathExistsAtRef /
+// TreeDirsAtRef / ChangedFiles — which bypass internal/gitutil's boundary
+// guard. A ref literally named `-x` / `--upload-pack=…` would be reparsed by
+// git as an option (verified: `git update-ref refs/heads/-x HEAD` succeeds,
+// `git merge-base main -x` reparses `-x`). These tests pin that each site
+// REJECTS a `-`-prefixed operand with the SEC-5 guard error BEFORE git is
+// invoked. They are RED-on-revert: removing a gitutil.RejectOptionLike call
+// hands `-x` to git, which fails with a *git* error (no "SEC-5" sentinel) —
+// or, for ls-tree against a valid ref, may not fail at all.
+//
+// The guard error carries the distinctive "SEC-5" / "looks like an option"
+// sentinel that no git failure produces, so asserting on it proves the guard
+// (not git) produced the rejection — i.e. the operand never reached exec.
+
+// assertSEC5 fails unless err is the boundary guard's option-injection
+// rejection (and therefore was produced before any git exec).
+func assertSEC5(t *testing.T, err error, site string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected SEC-5 rejection for a '-'-prefixed ref, got nil error", site)
+	}
+	if !strings.Contains(err.Error(), "SEC-5") || !strings.Contains(err.Error(), "looks like an option") {
+		t.Fatalf("%s: error = %q, want the SEC-5 guard rejection (proves git was never invoked)", site, err.Error())
+	}
+}
+
+func TestExecutorRefSites_RejectOptionLikeRef(t *testing.T) {
+	g, _, _ := newRepoExecutor(t)
+
+	const hostile = "-x"
+
+	t.Run("MergeBase/firstRef", func(t *testing.T) {
+		_, err := g.MergeBase(hostile, "main")
+		assertSEC5(t, err, "MergeBase(a)")
+	})
+	t.Run("MergeBase/secondRef", func(t *testing.T) {
+		_, err := g.MergeBase("main", hostile)
+		assertSEC5(t, err, "MergeBase(b)")
+	})
+	t.Run("FileAtRef", func(t *testing.T) {
+		_, err := g.FileAtRef(hostile, "README.md")
+		assertSEC5(t, err, "FileAtRef")
+	})
+	t.Run("FileAtRefOrAbsent", func(t *testing.T) {
+		// Flows through pathExistsAtRef first.
+		_, _, err := g.FileAtRefOrAbsent(hostile, "README.md")
+		assertSEC5(t, err, "FileAtRefOrAbsent->pathExistsAtRef")
+	})
+	t.Run("pathExistsAtRef", func(t *testing.T) {
+		_, err := g.pathExistsAtRef(hostile, "README.md")
+		assertSEC5(t, err, "pathExistsAtRef")
+	})
+	t.Run("TreeDirsAtRef", func(t *testing.T) {
+		_, err := g.TreeDirsAtRef(hostile, "docs")
+		assertSEC5(t, err, "TreeDirsAtRef")
+	})
+	t.Run("ChangedFiles/base", func(t *testing.T) {
+		_, err := g.ChangedFiles(hostile, "main")
+		assertSEC5(t, err, "ChangedFiles(base)")
+	})
+	t.Run("ChangedFiles/head", func(t *testing.T) {
+		_, err := g.ChangedFiles("main", hostile)
+		assertSEC5(t, err, "ChangedFiles(head)")
+	})
+	t.Run("UploadPackVector", func(t *testing.T) {
+		// The canonical RCE-shaped operand from the finding.
+		_, err := g.MergeBase("--upload-pack=touch /tmp/pwned", "main")
+		assertSEC5(t, err, "MergeBase(--upload-pack)")
+	})
+}
+
+// TestExecutorRefSites_ControlledRefsStillWork confirms the guard does not
+// regress legitimate refs (main, spec/<id>, bead/<id>, HEAD) at the four
+// ls-tree/show/merge-base sites.
+func TestExecutorRefSites_ControlledRefsStillWork(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// Seed a tracked file and a sub-directory so the ls-tree sites have
+	// something to enumerate, plus branches named like real mindspec refs.
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "x.md"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "top.txt"), []byte("t"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, dir, "add", ".")
+	runGitIn(t, dir, "commit", "-m", "seed docs and top")
+	runGitIn(t, dir, "branch", "spec/077-x")
+	runGitIn(t, dir, "branch", "bead/mindspec-x.1")
+
+	for _, ref := range []string{"main", "HEAD", "spec/077-x", "bead/mindspec-x.1"} {
+		if _, err := g.FileAtRef(ref, "top.txt"); err != nil {
+			t.Errorf("FileAtRef(%q): %v", ref, err)
+		}
+		present, err := g.pathExistsAtRef(ref, "top.txt")
+		if err != nil || !present {
+			t.Errorf("pathExistsAtRef(%q) = (%v, %v), want (true, nil)", ref, present, err)
+		}
+		dirs, err := g.TreeDirsAtRef(ref, ".")
+		if err != nil {
+			t.Errorf("TreeDirsAtRef(%q): %v", ref, err)
+		}
+		foundDocs := false
+		for _, d := range dirs {
+			if d == "docs" {
+				foundDocs = true
+			}
+		}
+		if !foundDocs {
+			t.Errorf("TreeDirsAtRef(%q) = %v, want to include docs", ref, dirs)
+		}
+		if _, err := g.MergeBase(ref, "main"); err != nil {
+			t.Errorf("MergeBase(%q, main): %v", ref, err)
+		}
+	}
+	// ChangedFiles between two controlled refs.
+	if _, err := g.ChangedFiles("main", "spec/077-x"); err != nil {
+		t.Errorf("ChangedFiles(main, spec/077-x): %v", err)
+	}
+}
+
 // --- Real-git helpers ---
 
 func runGitIn(t *testing.T, dir string, args ...string) {

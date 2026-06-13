@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -269,9 +267,6 @@ func updatePlanApproval(planPath, approvedBy string) error {
 	return os.WriteFile(planPath, []byte(output), 0644)
 }
 
-// beadNumRe matches "Bead N" where N is the bead number in the heading.
-var beadNumRe = regexp.MustCompile(`^Bead\s+(\d+)`)
-
 // createImplementationBeads parses plan.md for ## Bead sections, creates child
 // beads under the lifecycle epic, and wires inter-bead dependencies.
 // Each bead is populated with description, acceptance criteria, design, and metadata
@@ -301,15 +296,53 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	requirements := contextpack.ExtractSection(specContent, "Requirements")
 	acceptanceCriteria := contextpack.ExtractSection(specContent, "Acceptance Criteria")
 
-	// Build design field: spec requirements + ADR decision snapshots
-	design := buildDesignField(specDir, specContent, requirements)
+	// Parse the plan's structured frontmatter once: it is the validated
+	// source of truth for both the bead `--design` ADR list (spec 097 R2)
+	// and the inter-bead dependency wiring (spec 097 R3). A parse failure is
+	// non-fatal for the ADR list (plan validation already gates the
+	// frontmatter), so the design field simply omits ADR citations on a
+	// malformed plan; the dep-wiring path below treats a parse failure as
+	// "no structured deps" and wires nothing.
+	var adrCitationIDs []string
+	var workChunks []validate.WorkChunk
+	if fm, err := validate.ParsePlanFrontmatter(planContent); err == nil {
+		for _, c := range fm.ADRCitations {
+			if c.ID != "" {
+				adrCitationIDs = append(adrCitationIDs, c.ID)
+			}
+		}
+		workChunks = fm.WorkChunks
+	}
+
+	// Alignment guard (spec 097 R3): the positional `bead_ids[N-1]` wiring
+	// below requires every `work_chunks` id to map to exactly one `## Bead N`
+	// section. Validate contiguity (1..K), the count match, and every
+	// depends_on target BEFORE creating any beads, so a misaligned plan is
+	// rejected up front rather than mis-wired or panicking mid-create.
+	if err := validate.ValidateWorkChunkAlignment(workChunks, len(sections)); err != nil {
+		return nil, fmt.Errorf("plan work_chunks misaligned with bead sections: %w", err)
+	}
+
+	// Build design field: spec requirements + ADR citations (by ID).
+	design := buildDesignField(specDir, requirements, adrCitationIDs)
 
 	// --- Extract raw bead section content from plan.md ---
 	sectionContent := extractBeadSectionContents(planContent)
 
-	// Map from bead number (from heading) to created bead ID for dependency wiring.
-	numToID := make(map[int]string)
+	// Beads are appended in `## Bead` section declaration order, so
+	// beadIDs[N-1] is deterministically the Nth section — which the
+	// alignment guard above ties to work_chunk id N for both the
+	// dependency wiring and the per-bead key-file-paths source.
 	var beadIDs []string
+
+	// Index work chunks by their 1-based id so the Nth `## Bead` section can
+	// source its declared `key_file_paths` (spec 097 R4) and dependencies
+	// (spec 097 R3). The alignment guard above proved the ids are the
+	// contiguous set 1..len(sections), so byID[n] is the Nth section's chunk.
+	byID := make(map[int]validate.WorkChunk, len(workChunks))
+	for _, c := range workChunks {
+		byID[c.ID] = c
+	}
 
 	// Build a map from heading to parsed bead section for per-bead AC lookup.
 	sectionByHeading := make(map[string]validate.BeadSection, len(sections))
@@ -317,14 +350,18 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		sectionByHeading[sec.Heading] = sec
 	}
 
-	for _, sec := range sections {
+	for i, sec := range sections {
 		title := fmt.Sprintf("[%s] %s", specID, sec.Heading)
 
 		// Get the raw work chunk for this bead
 		workChunk := sectionContent[sec.Heading]
 
-		// Extract file paths from the work chunk
-		filePaths := contextpack.ExtractFilePathsFromText(workChunk)
+		// Source this bead's key file paths from the declared, per-bead
+		// `work_chunks[N-1].key_file_paths` (spec 097 R4) — the Nth section
+		// (i is 0-based) maps to chunk id N=i+1. This replaces the retired
+		// prose prefix-scan; when a chunk declares no paths the surface is
+		// empty (acceptable — non-gating context enrichment).
+		filePaths := byID[i+1].KeyFilePaths
 
 		// Build metadata JSON
 		metadataJSON := buildBeadMetadata(specID, filePaths)
@@ -360,38 +397,23 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		}
 
 		beadIDs = append(beadIDs, created.ID)
-
-		// Extract bead number from heading for dependency resolution.
-		if m := beadNumRe.FindStringSubmatch(sec.Heading); len(m) > 1 {
-			if n, err := strconv.Atoi(m[1]); err == nil {
-				numToID[n] = created.ID
-			}
-		}
 	}
 
-	// Wire dependencies: parse "Depends on" text for "Bead N" references.
-	depRe := regexp.MustCompile(`(?i)bead\s+(\d+)`)
-	for i, sec := range sections {
-		if sec.DependsOn == "" {
+	// Wire dependencies from the structured `work_chunks` frontmatter (spec
+	// 097 R3 — the prose `bead\s+(\d+)` scrape is retired). Mapping: chunk
+	// `id N` → bead_ids[N-1]; a `depends_on: [M]` entry makes bead_ids[N-1]
+	// depend on bead_ids[M-1]. Iterate by ascending chunk id (the alignment
+	// guard proved the ids are the contiguous set 1..len(beadIDs)) so the
+	// `bd dep add` order is deterministic regardless of YAML ordering.
+	// `byID` was built above (it also feeds the per-bead key-file-paths source).
+	for n := 1; n <= len(beadIDs); n++ {
+		chunk, ok := byID[n]
+		if !ok {
 			continue
 		}
-		depText := strings.ToLower(sec.DependsOn)
-		if depText == "none" || depText == "nothing" || depText == "n/a" {
-			continue
-		}
-
-		matches := depRe.FindAllStringSubmatch(sec.DependsOn, -1)
-		for _, m := range matches {
-			depNum, err := strconv.Atoi(m[1])
-			if err != nil {
-				continue
-			}
-			depID, ok := numToID[depNum]
-			if !ok {
-				continue
-			}
-			// Wire: beadIDs[i] depends on depID
-			if _, err := planRunBDFn("dep", "add", beadIDs[i], depID); err != nil {
+		for _, dep := range chunk.DependsOn {
+			// Bounds were validated by ValidateWorkChunkAlignment above.
+			if _, err := planRunBDFn("dep", "add", beadIDs[n-1], beadIDs[dep-1]); err != nil {
 				// Best-effort: don't fail the whole operation for a dep wiring issue
 				continue
 			}
@@ -560,24 +582,33 @@ func extractPlanVersion(content string) string {
 // invented, because the ceiling is a Dolt server behavior, not a
 // mindspec contract. The full text stays available under
 // `.mindspec/docs/adr/`.
-func buildDesignField(specDir, specContent, requirements string) string {
+//
+// Spec 097 R2 (mindspec-4axk): the ADR list is built from the plan's
+// structured `adr_citations` frontmatter (each ADRCitation.ID — the
+// validated source of truth) passed in as adrCitationIDs, NOT from a regex
+// scrape of the spec's `## ADR Touchpoints` PROSE. This is forward-only:
+// ADR IDs present only in prose but absent from declared `adr_citations`
+// are no longer harvested. The frontmatter is the contract that the
+// plan-validation gate already enforces.
+func buildDesignField(specDir, requirements string, adrCitationIDs []string) string {
 	var parts []string
 
 	if requirements != "" {
 		parts = append(parts, "## Requirements\n\n"+requirements)
 	}
 
-	// Parse ADR IDs from the spec's ADR Touchpoints section
-	touchpoints := contextpack.ExtractSection(specContent, "ADR Touchpoints")
-	adrIDs := parseADRIDs(touchpoints)
-
-	if len(adrIDs) > 0 {
+	if len(adrCitationIDs) > 0 {
 		// specDir is e.g. .mindspec/docs/specs/074-slug; root is 3 levels up
 		root := filepath.Join(specDir, "..", "..", "..")
 		store := adr.NewFileStore(root)
 
+		seen := make(map[string]bool)
 		var citations []string
-		for _, id := range adrIDs {
+		for _, id := range adrCitationIDs {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
 			a, err := store.Get(id)
 			if err != nil {
 				continue
@@ -590,23 +621,6 @@ func buildDesignField(specDir, specContent, requirements string) string {
 	}
 
 	return strings.Join(parts, "\n\n")
-}
-
-// adrIDRe matches ADR IDs like "ADR-0023" in markdown links or plain text.
-var adrIDRe = regexp.MustCompile(`ADR-(\d{4})`)
-
-// parseADRIDs extracts ADR IDs (e.g., "ADR-0023") from the ADR Touchpoints section text.
-func parseADRIDs(touchpoints string) []string {
-	matches := adrIDRe.FindAllString(touchpoints, -1)
-	seen := make(map[string]bool)
-	var ids []string
-	for _, id := range matches {
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 // extractBeadSectionContents extracts the raw markdown content for each ## Bead section.

@@ -1,0 +1,19 @@
+# test log
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_RoundTrip1029793447/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_RoundTrip1029793447/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_RoundTrip1029793447/001/.mindspec/session.json
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_RoundTrip1029793447/001/.mindspec/session.json
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T
+getenv GOTMPDIR
+getenv TMPDIR
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_MissingReturnsZero3993762243/001/.mindspec/session.json
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_OmitsEmptyFields1234587995/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_OmitsEmptyFields1234587995/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_OmitsEmptyFields1234587995/001/.mindspec/session.json
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestSessionFile_OmitsEmptyFields1234587995/001/.mindspec/session.json
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T

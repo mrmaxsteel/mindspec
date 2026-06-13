@@ -1,0 +1,4 @@
+./bdcli.go
+./config.go
+./hygiene.go
+./identity.go

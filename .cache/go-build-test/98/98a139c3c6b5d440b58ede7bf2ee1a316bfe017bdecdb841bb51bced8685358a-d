@@ -1,0 +1,6 @@
+./list.go
+./scaffold.go
+./show.go
+./list_test.go
+./scaffold_test.go
+./show_test.go

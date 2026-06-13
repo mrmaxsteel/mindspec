@@ -3,6 +3,8 @@ paths:
   - internal/config/**
   - internal/workspace/**
   - internal/spec/**
+  - internal/idvalidate/**
+  - internal/speclist/**
   - internal/phase/**
   - internal/recording/**
   - internal/redact/**

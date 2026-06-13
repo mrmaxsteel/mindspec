@@ -1,0 +1,8 @@
+./config.go
+./env.go
+./setup.go
+./status.go
+./config_test.go
+./env_test.go
+./setup_test.go
+./status_test.go

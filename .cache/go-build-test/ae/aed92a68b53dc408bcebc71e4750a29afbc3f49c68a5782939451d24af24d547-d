@@ -1,0 +1,14 @@
+./beads.go
+./config.go
+./docs.go
+./doctor.go
+./git.go
+./hooks.go
+./migration.go
+./ownership.go
+./beads_test.go
+./config_test.go
+./docs_test.go
+./doctor_test.go
+./dry_run_migration_test.go
+./ownership_test.go

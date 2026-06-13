@@ -1,0 +1,14 @@
+./adr.go
+./beadctx.go
+./budgeter.go
+./builder.go
+./contextmap.go
+./domaindoc.go
+./spec.go
+./adr_test.go
+./beadctx_test.go
+./budgeter_test.go
+./builder_test.go
+./contextmap_test.go
+./domaindoc_test.go
+./spec_test.go

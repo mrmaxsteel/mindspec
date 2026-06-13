@@ -1,6 +1,9 @@
 package idvalidate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSpecID(t *testing.T) {
 	valid := []string{
@@ -121,6 +124,7 @@ func TestDomainName(t *testing.T) {
 	valid := []string{
 		"security",
 		"cli-handlers",
+		"context-system", // existing domain dir, must stay valid
 		"a",
 		"a-b-c",
 		"foo123",
@@ -135,17 +139,37 @@ func TestDomainName(t *testing.T) {
 		"",
 		".",
 		"..",
-		"Security",   // uppercase
-		"1security",  // digit start
-		"security/",  // path sep
-		"security\\", // backslash
-		"../etc",     // traversal
-		"security_x", // underscore
-		"-leading",   // leading hyphen
+		"Security",     // uppercase
+		"1security",    // digit start
+		"security/",    // path sep
+		"security\\",   // backslash (POSIX glob escape / Windows path sep) pin
+		"sec\\urity",   // embedded backslash pin
+		"sec*urity",    // glob metacharacter pin
+		"../etc",       // traversal
+		"security_x",   // underscore
+		"-leading",     // leading hyphen
+		"cli-",         // R6: trailing hyphen
+		"x-",           // R6: trailing hyphen
+		"a--b",         // R6: consecutive hyphens
+		"context--sys", // R6: consecutive hyphens
 	}
 	for _, name := range invalid {
 		if err := DomainName(name); err == nil {
 			t.Errorf("DomainName(%q) expected error, got nil", name)
+		}
+	}
+}
+
+// TestDomainNameErrorNoRawRegex pins R7: the unified DomainName error message
+// must be plain-English and must NOT leak the raw regex (no "[a-z]" substring).
+func TestDomainNameErrorNoRawRegex(t *testing.T) {
+	for _, name := range []string{"Bad", "cli-", "a--b", "."} {
+		err := DomainName(name)
+		if err == nil {
+			t.Fatalf("DomainName(%q) expected error, got nil", name)
+		}
+		if strings.Contains(err.Error(), "[a-z]") {
+			t.Errorf("DomainName(%q) error leaks raw regex: %q", name, err.Error())
 		}
 	}
 }
