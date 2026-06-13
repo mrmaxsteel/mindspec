@@ -35,11 +35,15 @@ type PlanFrontmatter struct {
 // section in declaration order, so chunk `id N` maps positionally to
 // `bead_ids[N-1]`. `depends_on` lists the chunk ids this chunk depends on;
 // a `depends_on: [M]` entry makes `bead_ids[N-1]` depend on `bead_ids[M-1]`
-// (spec 097 R3). Non-strict yaml.Unmarshal harmlessly ignores any extra
+// (spec 097 R3). `key_file_paths` is the per-bead, declared source for that
+// bead's `## Key File Paths` context surface (spec 097 R4) — it replaces the
+// retired prose prefix-scan, so chunk `id N`'s paths feed bead_ids[N-1]'s
+// `metadata.file_paths`. Non-strict yaml.Unmarshal harmlessly ignores any extra
 // human-readable keys (title/scope/verify) the templates also carry.
 type WorkChunk struct {
-	ID        int   `yaml:"id"`
-	DependsOn []int `yaml:"depends_on"`
+	ID           int      `yaml:"id"`
+	DependsOn    []int    `yaml:"depends_on"`
+	KeyFilePaths []string `yaml:"key_file_paths"`
 }
 
 // ADRCitation represents an ADR citation in plan frontmatter.

@@ -331,8 +331,18 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 
 	// Beads are appended in `## Bead` section declaration order, so
 	// beadIDs[N-1] is deterministically the Nth section — which the
-	// alignment guard above ties to work_chunk id N for dependency wiring.
+	// alignment guard above ties to work_chunk id N for both the
+	// dependency wiring and the per-bead key-file-paths source.
 	var beadIDs []string
+
+	// Index work chunks by their 1-based id so the Nth `## Bead` section can
+	// source its declared `key_file_paths` (spec 097 R4) and dependencies
+	// (spec 097 R3). The alignment guard above proved the ids are the
+	// contiguous set 1..len(sections), so byID[n] is the Nth section's chunk.
+	byID := make(map[int]validate.WorkChunk, len(workChunks))
+	for _, c := range workChunks {
+		byID[c.ID] = c
+	}
 
 	// Build a map from heading to parsed bead section for per-bead AC lookup.
 	sectionByHeading := make(map[string]validate.BeadSection, len(sections))
@@ -340,14 +350,18 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		sectionByHeading[sec.Heading] = sec
 	}
 
-	for _, sec := range sections {
+	for i, sec := range sections {
 		title := fmt.Sprintf("[%s] %s", specID, sec.Heading)
 
 		// Get the raw work chunk for this bead
 		workChunk := sectionContent[sec.Heading]
 
-		// Extract file paths from the work chunk
-		filePaths := contextpack.ExtractFilePathsFromText(workChunk)
+		// Source this bead's key file paths from the declared, per-bead
+		// `work_chunks[N-1].key_file_paths` (spec 097 R4) — the Nth section
+		// (i is 0-based) maps to chunk id N=i+1. This replaces the retired
+		// prose prefix-scan; when a chunk declares no paths the surface is
+		// empty (acceptable — non-gating context enrichment).
+		filePaths := byID[i+1].KeyFilePaths
 
 		// Build metadata JSON
 		metadataJSON := buildBeadMetadata(specID, filePaths)
@@ -391,10 +405,7 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	// depend on bead_ids[M-1]. Iterate by ascending chunk id (the alignment
 	// guard proved the ids are the contiguous set 1..len(beadIDs)) so the
 	// `bd dep add` order is deterministic regardless of YAML ordering.
-	byID := make(map[int]validate.WorkChunk, len(workChunks))
-	for _, c := range workChunks {
-		byID[c.ID] = c
-	}
+	// `byID` was built above (it also feeds the per-bead key-file-paths source).
 	for n := 1; n <= len(beadIDs); n++ {
 		chunk, ok := byID[n]
 		if !ok {
