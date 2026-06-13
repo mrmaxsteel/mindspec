@@ -215,16 +215,21 @@ bead-time guesswork (codex-completeness/r6). These are PINNED now:
   per-project — friction signals are owner-local and span repos. Filenames
   are fixed: the journal is one appended file `journal.jsonl`; the
   consolidated reports are `reports.jsonl`. Both created `0600` (HC-8).
-- **Reuse the existing 0600 append sink**: `internal/ndjson`
-  (`writer.go` — `O_APPEND`, `FileMode: 0o600`, a `sync.Mutex`, used by
-  `internal/recording/markers.go`) already provides the
-  append+mutex+0600 primitive. Bead 2 REUSES it rather than re-deriving
-  concurrency. For **cross-process** concurrent append (two `mindspec`
-  processes both reaching `PersistentPostRunE`), append is line-atomic
-  via `O_APPEND` single `write(2)` of one redacted JSONL record below
-  `PIPE_BUF`; consolidation (`report`) tolerates interleaved/duplicate
-  lines by collapsing on the normalized event identity + fingerprint, so
-  a lost-count race is at worst an undercount, never corruption.
+- **0600 append sink (the `internal/ndjson` primitive)**: the
+  append+0600 primitive `internal/ndjson` (`writer.go` — `O_APPEND`,
+  `FileMode: 0o600`, used by `internal/recording/markers.go`) exemplifies is
+  what Bead 2 uses: a SINGLE `O_APPEND` `write(2)` of one redacted JSONL
+  record per event (the journal opens `O_CREATE|O_WRONLY|O_APPEND` 0600,
+  re-asserts the mode via the fd, writes one line, closes — it does NOT
+  re-derive a mutex-guarded read-modify-rewrite). An in-process `sync.Mutex`
+  serializes only to keep two goroutines' lines from interleaving and to
+  make the per-session storm counter race-free. For **cross-process**
+  concurrent append (two `mindspec` processes both reaching
+  `PersistentPostRunE`), the append is line-atomic via the `O_APPEND` single
+  `write(2)` of one redacted JSONL record below `PIPE_BUF`, so there is NO
+  cross-process lost-update and NO file lock is needed; consolidation
+  (`report`, Bead 3) tolerates interleaved/duplicate lines by collapsing on
+  the normalized event identity + fingerprint.
 - **Journal record schema** (`journal.jsonl`, enum-only — no free text):
   `{ "v": <schema-int>, "ts": <rfc3339>, "argv0": "<basename>",
   "command": "<leaf command path token>",
@@ -279,11 +284,22 @@ fail-closed return — are binding:
   implementing the DQ4 `dev`→unbounded-newest policy.
 - **`internal/journal` (Bead 2; read API consumed by Bead 3)**:
   - `func AppendSuccessEvent(ev Event) error` — scrubs at WRITE time via
-    `redact`, collapses by identity+fingerprint with per-session count +
-    cap, stamps the bare version; **fail-closed** (a non-classifiable
-    field is dropped, never written raw).
-  - `func ListReports() ([]Report, error)` and `func MarkResolved(fp
-    string, ver string) error` — Bead 3's `report list` / resolve surface.
+    `redact`, stamps the bare version + an rfc3339 `ts`, and APPENDS exactly
+    ONE redacted event line to the APPEND-ONLY `journal.jsonl` in a single
+    atomic `O_APPEND` write (no in-file collapse, no read-modify-rewrite —
+    each line preserves its own version so Bead 3 can derive
+    first/last-seen). The per-fingerprint-PER-SESSION storm cap (Req 8) is
+    enforced IN PROCESS (drop appends past the cap for a fingerprint within
+    one invocation), not by a stored count. **Fail-closed** (a
+    non-classifiable field — or a `MINDSPEC_STATE_DIR` that resolves inside
+    a git/project tree — is dropped, never written raw).
+  - `func ListReports() ([]Record, error)` (alias `ReadEvents`) returns the
+    raw append-only journal event Records Bead 3 collapses into
+    `reports.jsonl`; `func MarkResolved(fp string, ver string) error` is the
+    Bead-3 resolve SEAM — it operates on the reports layer, NEVER mutating
+    the append-only journal (a minimal stub here Bead 3 completes).
+    The COUNT-collapse + first/last/`resolved_in_version` live on Bead 3's
+    `reports.jsonl`, per the §Storage Contract's 2-file design.
 - **Best-effort / non-fatal contract**: `PersistentPostRunE` journaling
   is **BEST-EFFORT and NON-FATAL to command success** — an
   `AppendSuccessEvent` error (or a redaction drop) is swallowed (logged

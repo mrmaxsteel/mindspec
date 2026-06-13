@@ -151,6 +151,41 @@ func TestPostRun_SuccessPathOverride_AppendsOneEntry(t *testing.T) {
 	}
 }
 
+// TestPostRun_OverrideReasonNeverJournaled is the R3 privacy keystone:
+// drive a REAL success-path `complete --override-adr "<secret reason>"`
+// end-to-end through the production PostRunE and assert NONE of the reason
+// (a path, a secret token, an email) survives in the on-disk journal — only
+// the enum tokens. The capture path reads Changed() (a bool), never the
+// flag VALUE, so the reason is structurally excluded.
+func TestPostRun_OverrideReasonNeverJournaled(t *testing.T) {
+	dir := hermeticStateDir(t)
+
+	root := newTestRoot()
+	complete := &cobra.Command{
+		Use:  "complete",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil }, // SUCCESS
+	}
+	complete.Flags().String("override-adr", "", "")
+	root.AddCommand(complete)
+
+	const reason = "rotate /Users/victim/.ssh/id_rsa ghp_SECRETTOKEN because max@victim.com asked"
+	root.SetArgs([]string{"complete", "--override-adr", reason})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	raw := journalBytes(t, dir)
+	for _, needle := range []string{"ghp_SECRETTOKEN", "victim", ".ssh", "/Users", "@victim.com", "rotate", "because"} {
+		if strings.Contains(raw, needle) {
+			t.Errorf("override reason leaked into the journal (needle %q):\n%s", needle, raw)
+		}
+	}
+	// And exactly one enum-only entry was still produced.
+	if recs := journalRecords(t); len(recs) != 1 || recs[0].EscapeHatch != "override-adr" {
+		t.Errorf("want exactly one override-adr entry, got %+v", recs)
+	}
+}
+
 // TestPostRun_CleanSuccess_AppendsNothing is the LOAD-BEARING negative case
 // (A1): PersistentPostRunE runs on EVERY success, so a clean command with
 // NO bound escape-hatch / repair-phase MUST append ZERO entries — this

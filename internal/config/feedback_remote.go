@@ -131,6 +131,16 @@ func userHomeDir() string {
 	return ""
 }
 
+// EnclosingGitTree is the exported HC-3 isolation guard: it reports the
+// nearest enclosing git work tree of dir (the directory containing a ".git"
+// entry), or "" if dir resolves outside any git tree. It is reused by
+// internal/journal to apply the SAME guard GlobalConfigDir() uses to the
+// MINDSPEC_STATE_DIR override, so the friction store can never land inside a
+// project/.beads/committable tree even via the explicit override seam.
+func EnclosingGitTree(dir string) string {
+	return enclosingGitTree(dir)
+}
+
 // enclosingGitTree walks up from dir (and its existing ancestors) looking for a
 // ".git" entry (dir or gitfile). It returns the directory that contains the
 // ".git" entry, or "" if none is found. dir itself need not exist yet — the
