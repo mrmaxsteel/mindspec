@@ -21,6 +21,44 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
+// serveRefFromDisk wires a MockExecutor's ref-read seams
+// (FileAtRefOrAbsent + TreeDirsAtRef) to resolve against the on-disk
+// tree at root, simulating "the diffed ref's tree == this fixture".
+// Spec 095 moved the gate's OWNERSHIP attribution (manifests + domain
+// enumeration) onto the diffed ref; these mock-backed unit tests build
+// their OWNERSHIP fixture on disk, so this makes the ref read resolve to
+// the same files. Absent paths classify as claims-nothing (present
+// false, nil error) — never an operational error — mirroring the real
+// MindspecExecutor.FileAtRefOrAbsent contract.
+func serveRefFromDisk(mock *executor.MockExecutor, root string) {
+	mock.FileAtRefOrAbsentFn = func(_ref, rel string) ([]byte, bool, error) {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		return data, true, nil
+	}
+	mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		return dirs, nil
+	}
+}
+
 func writeSpecDir(t *testing.T, root, specID string) {
 	t.Helper()
 	specDir := filepath.Join(root, "docs", "specs", specID)
@@ -691,8 +729,10 @@ func TestApproveImplCallOrder(t *testing.T) {
 			id, ok := c.Fun.(*ast.Ident)
 			return ok && id.Name == "readBeadStatus"
 		}},
-		{label: "validate.ValidateDocs", match: func(c *ast.CallExpr) bool {
-			return isSelectorCall(c.Fun, "validate", "ValidateDocs")
+		{label: "validate.ValidateDocsRange", match: func(c *ast.CallExpr) bool {
+			// Spec 095: impl-approve's doc-sync is now the explicit
+			// base..specBranch RANGE form (was ValidateDocs working-tree).
+			return isSelectorCall(c.Fun, "validate", "ValidateDocsRange")
 		}},
 		{label: "validate.CheckADRDivergence", match: func(c *ast.CallExpr) bool {
 			return isSelectorCall(c.Fun, "validate", "CheckADRDivergence")
@@ -897,6 +937,157 @@ func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
 	}
 }
 
+// writeWidgetAcceptedFixture builds an approve-side fixture under the
+// canonical .mindspec/docs tree: spec.md declares "widget" impacted,
+// plan.md cites Accepted ADR-0195, and ADR-0195 is on disk Accepted for
+// widget. The widget OWNERSHIP manifest is deliberately NOT written —
+// callers decide whether it lives at the diffed ref (served via the
+// mock) or on disk, to exercise the spec-095 ref-anchored read.
+func writeWidgetAcceptedFixture(t *testing.T, root, specID string) {
+	t.Helper()
+	docsRoot := filepath.Join(root, ".mindspec", "docs")
+	specDir := filepath.Join(docsRoot, "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"),
+		[]byte("# Spec "+specID+"\n\n## Impacted Domains\n\n- widget\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"),
+		[]byte("---\nspec_id: "+specID+"\nstatus: Approved\nbead_ids:\n  - bead-1\nadr_citations:\n  - id: ADR-0195\n---\n\n# Plan\n"), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+	adrDir := filepath.Join(docsRoot, "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("mkdir adr dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-0195.md"),
+		[]byte("# ADR-0195: Widget\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Domain(s)**: widget\n- **Supersedes**: n/a\n- **Superseded-by**: n/a\n\n## Decision\nTest fixture.\n"), 0o644); err != nil {
+		t.Fatalf("write ADR-0195.md: %v", err)
+	}
+}
+
+// TestApproveImpl_WholeBranchOwnershipFromRef pins spec 095 for the
+// impl-approve whole-branch backstop: its OWNERSHIP attribution is read
+// from the spec-branch tip, not the ambient working tree. A claim
+// committed on the branch satisfies the gate; a claim that exists ONLY
+// on disk (absent at the ref) does NOT spuriously satisfy it.
+func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
+	const specID = "010-test"
+	changed := []string{
+		"internal/widget/foo.go",
+		".mindspec/docs/domains/widget/OWNERSHIP.yaml",
+	}
+
+	t.Run("branch-tip claim passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeWidgetAcceptedFixture(t, tmp, specID)
+		os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+		saveAndRestore(t)
+		implRunBDFn = func(args ...string) ([]byte, error) {
+			return json.Marshal([]map[string]string{{"status": "closed"}})
+		}
+		mock := &executor.MockExecutor{
+			CommitCountResult:  5,
+			FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			MergeBaseResult:    "merge-base-sha",
+			ChangedFilesResult: changed,
+			// Claim lives only at the diffed ref (spec-branch tip).
+			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/widget/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - internal/widget/**\n"), true, nil
+				}
+				return nil, false, nil
+			},
+			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
+				if dir == ".mindspec/docs/domains" {
+					return []string{"widget"}, nil
+				}
+				return nil, nil
+			},
+		}
+		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
+			t.Fatalf("a branch-tip OWNERSHIP claim must satisfy the whole-branch gate with no override; got: %v", err)
+		}
+		if len(mock.CallsTo("FinalizeEpic")) != 1 {
+			t.Error("expected FinalizeEpic to run when the gates pass")
+		}
+	})
+
+	t.Run("root-only claim absent at ref does NOT spuriously pass", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeWidgetAcceptedFixture(t, tmp, specID)
+		// Claim present ON DISK only — absent at the ref (mock returns
+		// absent by default).
+		if err := os.MkdirAll(filepath.Join(tmp, ".mindspec", "docs", "domains", "widget"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, ".mindspec", "docs", "domains", "widget", "OWNERSHIP.yaml"),
+			[]byte("paths:\n  - internal/widget/**\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		saveAndRestore(t)
+		implRunBDFn = func(args ...string) ([]byte, error) {
+			return json.Marshal([]map[string]string{{"status": "closed"}})
+		}
+		mock := &executor.MockExecutor{
+			CommitCountResult:  5,
+			FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			MergeBaseResult:    "merge-base-sha",
+			ChangedFilesResult: changed,
+			// ref reads: absent everywhere (default zero values).
+		}
+		_, err := ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "isolate the ADR lane"})
+		if err == nil {
+			t.Fatal("a claim absent at the diffed ref must NOT satisfy the gate (read follows the ref)")
+		}
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
+		}
+		if len(mock.CallsTo("FinalizeEpic")) != 0 {
+			t.Error("FinalizeEpic must not run when the gate blocks")
+		}
+	})
+}
+
+// TestApproveImpl_DocSyncUsesBaseToSpecBranchRange pins the spec 095
+// correction: impl-approve's doc-sync diffs the explicit base..specBranch
+// RANGE, not working-tree-vs-base. Every ChangedFiles call the gates
+// make must be (merge-base, spec/<id>); none may use the working-tree
+// idiom ChangedFiles("", base). RED-on-revert: restoring
+// ValidateDocs(root, base, exec) reintroduces a ChangedFiles("", base)
+// call and trips the assertion.
+func TestApproveImpl_DocSyncUsesBaseToSpecBranchRange(t *testing.T) {
+	const specID = "010-test"
+	tmp := t.TempDir()
+	writeWidgetAcceptedFixture(t, tmp, specID)
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+	saveAndRestore(t)
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]string{{"status": "closed"}})
+	}
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		MergeBaseResult:    "merge-base-sha",
+		// Empty diff → both gate lanes no-op; we only assert the RANGE.
+		ChangedFilesFn: func(base, head string) ([]string, error) { return nil, nil },
+	}
+	if _, err := ApproveImpl(tmp, specID, mock); err != nil {
+		t.Fatalf("empty-diff approve should succeed, got: %v", err)
+	}
+	calls := mock.CallsTo("ChangedFiles")
+	if len(calls) < 1 {
+		t.Fatal("expected at least one ChangedFiles call from the gates")
+	}
+	for _, c := range calls {
+		if c.Args[0] != "merge-base-sha" || c.Args[1] != "spec/"+specID {
+			t.Errorf("ChangedFiles(%v, %v): impl-approve gates must diff merge-base..spec/%s, never the working-tree idiom", c.Args[0], c.Args[1], specID)
+		}
+	}
+}
+
 // writeProposedADRFixtureImpl builds an approve-side fixture where the
 // only coverage for the touched domain rests on a cited PROPOSED ADR:
 // spec.md declares "core" impacted, plan.md cites ADR-9002, and
@@ -977,9 +1168,12 @@ func TestApproveImplProposedCoverageBlocks(t *testing.T) {
 		CommitCountResult:  5,
 		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
 		MergeBaseResult:    "merge-base-sha",
-		// Source touch attributed to "core" via the fallback path.
+		// Source touch attributed to "core" via the OWNERSHIP manifest.
 		ChangedFilesResult: []string{"internal/core/foo.go"},
 	}
+	// Spec 095: impl-approve reads OWNERSHIP from the spec-branch ref;
+	// serve that ref tree from the on-disk fixture.
+	serveRefFromDisk(mock, tmp)
 
 	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{
 		AllowDocSkew: "test setup",

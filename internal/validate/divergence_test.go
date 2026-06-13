@@ -109,7 +109,7 @@ func TestCompleteRejectsUndeclaredDomainTouch(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-zy4u.2", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-zy4u.2", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -157,7 +157,7 @@ func TestVizAgentmindBenchFiltered(t *testing.T) {
 		},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -190,7 +190,7 @@ func TestUnownedFileRejected(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -236,7 +236,7 @@ func TestValidateDivergenceCoveredDomainPasses(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -271,7 +271,7 @@ func TestValidateDivergenceSpecBranchADRVisible(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -311,7 +311,7 @@ func proposedCoverageFixture(t *testing.T) (root, specDir string, mock *executor
 func TestValidateDivergenceProposedCitedWarnsAtBeadComplete(t *testing.T) {
 	root, specDir, mock := proposedCoverageFixture(t)
 
-	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-bead.1", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-bead.1", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -348,7 +348,7 @@ func TestValidateDivergenceProposedCitedWarnsAtBeadComplete(t *testing.T) {
 func TestValidateDivergenceProposedCitedErrorsAtImplApprove(t *testing.T) {
 	root, specDir, mock := proposedCoverageFixture(t)
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", true)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", true)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -383,12 +383,12 @@ func TestValidateDivergenceProposedCitedErrorsAtImplApprove(t *testing.T) {
 func TestCheckADRDivergenceLaneSelection(t *testing.T) {
 	root, specDir, mock := proposedCoverageFixture(t)
 
-	rImpl, _ := CheckADRDivergence(root, "BASE", mock, specDir, "", "")
+	rImpl, _ := CheckADRDivergence(root, "BASE", mock, specDir, "", "", "")
 	if !rImpl.HasFailures() {
 		t.Errorf("beadID==\"\" (impl backstop) should fail on Proposed-only coverage, got %+v", rImpl.Issues)
 	}
 
-	rBead, _ := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "")
+	rBead, _ := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "", "")
 	if rBead.HasFailures() {
 		t.Errorf("non-empty beadID (bead-complete) should not fail on Proposed-only coverage, got %+v", rBead.Issues)
 	}
@@ -409,7 +409,7 @@ func TestValidateDivergenceDiffErrorSurfaces(t *testing.T) {
 		ChangedFilesErr: fmt.Errorf("boom"),
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -456,7 +456,7 @@ func TestProcessArtifactsFiltered(t *testing.T) {
 			"internal/payments/charge.go"), // control: still unowned
 	}
 
-	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", false)
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
 	if r == nil {
 		t.Fatal("nil result")
 	}

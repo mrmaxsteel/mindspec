@@ -13,6 +13,34 @@
 
 ---
 
+> **Amended by spec 095 (mindspec-vvs9) — the absent-→claims-nothing
+> rule is preserved under a ref read, and an OPERATIONAL error is NOT
+> "absent".** Decision (c) defines `Source() == "missing"` for an absent
+> manifest, established for the on-disk `os.ReadFile` loader where
+> `os.IsNotExist` cleanly separates "not there" from a real I/O error.
+> Spec 095 added a ref-anchored sibling loader (`LoadOwnershipAtRef`)
+> that reads the manifest from the diffed git ref (see the ADR-0031
+> amend note). At the git boundary that separation is NOT free: `git
+> show <ref>:<path>` returns a GENERIC error for both a path absent in a
+> valid tree AND an invalid ref / git failure. Collapsing both to
+> "absent → claims nothing" would let a transient git glitch silently
+> un-attribute a changed file and un-gate doc-drift — the inverse of
+> this ADR's no-silent-guessing stance. The boundary therefore makes the
+> distinction explicit: `Executor.FileAtRefOrAbsent` probes existence
+> with `git ls-tree` (empty output at a VALID ref ⇒ absent → present
+> false, nil error; a failed ref ⇒ a hard error), and
+> `LoadOwnershipAtRef` maps **path-absent-at-ref → claims-nothing
+> Ownership (`Source() == "missing"`), NO error** — identical to
+> absent-on-disk — while an **operational git/executor failure
+> propagates as a HARD error, never claims-nothing.** The same
+> existence-probe split backs the ref-aware domain enumeration
+> (`Executor.TreeDirsAtRef`). The on-disk loader and its
+> `os.IsNotExist` semantics are unchanged. **Example (placeholder):**
+> reading `widget`'s OWNERSHIP at `bead/x` when the manifest was never
+> committed there → claims nothing (gate proceeds); reading it at a
+> non-existent ref → a hard error that blocks the gate rather than
+> silently passing.
+
 ## Status
 
 Created in spec 091 Bead 1 alongside the fallback removal, the

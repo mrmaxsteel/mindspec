@@ -76,10 +76,18 @@ type DivergenceFinding struct {
 //     Proposed-only coverage does NOT produce a finding: the findings
 //     slice seeds supersede placeholders for genuinely uncovered
 //     domains, and a Proposed-covered domain already has its ADR.
+//
+// ownerRef (spec 095 / mindspec-vvs9) selects the tree the OWNERSHIP
+// attribution input — both the per-domain manifests and the
+// empty-impacted-domains directory enumeration — is read from. It is
+// INDEPENDENT of base/head: the diff range and the attribution tree are
+// separate inputs. A non-empty ownerRef reads attribution from that git
+// ref (the per-bead lane passes beadHead; impl approve passes the
+// spec-branch tip); "" preserves the on-disk working-tree read.
 func ValidateDivergence(
 	exec executor.Executor,
 	root, specDir, beadID string,
-	base, head string,
+	base, head, ownerRef string,
 	implApprove bool,
 ) (*Result, []DivergenceFinding) {
 	targetID := beadID
@@ -133,7 +141,9 @@ func ValidateDivergence(
 	// owned-but-uncovered rather than misclassified as unowned.
 	candidateDomains := append([]string(nil), meta.Domains...)
 	if len(candidateDomains) == 0 {
-		disc, derr := listDomainDirs(root)
+		// Ref-anchored enumeration (spec 095): a branch-only domain dir
+		// must be discovered from the diffed ref, not the ambient root.
+		disc, derr := resolveDomains(exec, root, ownerRef)
 		if derr != nil {
 			r.AddError("adr-divergence-load", fmt.Sprintf("cannot list domains: %v", derr))
 			return r, nil
@@ -174,7 +184,7 @@ func ValidateDivergence(
 			continue
 		}
 
-		domain, own, attrErr := attributeDomain(root, path, candidateDomains)
+		domain, own, attrErr := attributeDomain(exec, root, ownerRef, path, candidateDomains)
 		if attrErr != nil {
 			r.AddError("adr-divergence-attribute",
 				fmt.Sprintf("attributing %s: %v", path, attrErr))
