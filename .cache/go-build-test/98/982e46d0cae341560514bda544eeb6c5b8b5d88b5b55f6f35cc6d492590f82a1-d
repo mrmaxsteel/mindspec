@@ -1,0 +1,11 @@
+./adr_divergence.go
+./beads.go
+./divergence.go
+./docsync.go
+./frontmatter.go
+./ownership.go
+./plan.go
+./spec.go
+./specid.go
+./state.go
+./validate.go

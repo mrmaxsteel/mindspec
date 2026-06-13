@@ -1,0 +1,8 @@
+./instruct.go
+./panelstate.go
+./run.go
+./worktree.go
+./instruct_test.go
+./panelstate_test.go
+./run_test.go
+./worktree_test.go

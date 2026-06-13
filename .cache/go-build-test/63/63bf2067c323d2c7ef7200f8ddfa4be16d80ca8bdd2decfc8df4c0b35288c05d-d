@@ -1,0 +1,7 @@
+# test log
+open /nonexistent/path/should/not/exist.md
+getenv GOTMPDIR
+getenv TMPDIR
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestStatusFromPath_Roundtrip772937072/001/plan.md
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestStatusFromPath_Roundtrip772937072/001/plan.md
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T

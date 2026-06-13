@@ -1,0 +1,5 @@
+# test log
+getenv GOTMPDIR
+getenv TMPDIR
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestInitAndClose276391159/001/trace.jsonl
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T

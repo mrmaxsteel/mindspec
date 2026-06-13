@@ -1,0 +1,7 @@
+./adr.go
+./beadctx.go
+./budgeter.go
+./builder.go
+./contextmap.go
+./domaindoc.go
+./spec.go

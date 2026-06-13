@@ -1,0 +1,5 @@
+./bootstrap.go
+./mergedriver.go
+./bootstrap_test.go
+./mergedriver_test.go
+./symlink_refusal_test.go

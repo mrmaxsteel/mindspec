@@ -1,0 +1,7 @@
+./bdcli.go
+./config.go
+./hygiene.go
+./identity.go
+./bdcli_test.go
+./config_test.go
+./hygiene_test.go

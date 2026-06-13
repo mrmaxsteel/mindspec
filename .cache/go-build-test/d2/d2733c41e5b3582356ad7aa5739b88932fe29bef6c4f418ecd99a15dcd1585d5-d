@@ -1,0 +1,21 @@
+# test log
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_ForceRemovesWorktreeAndBranch976497598/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_ForceRemovesWorktreeAndBranch976497598/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_RefusesActiveSpec3243881690/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_RefusesActiveSpec3243881690/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_ForceBypassesActiveCheck131812579/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_ForceBypassesActiveCheck131812579/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T
+getenv GOTMPDIR
+getenv TMPDIR
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_DifferentSpecAllowed3271010041/001/.mindspec
+stat /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T/TestCleanup_DifferentSpecAllowed3271010041/001
+open /var/folders/cw/tdy8s59d077dyky0b0qk9pxc0000gq/T

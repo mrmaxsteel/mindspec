@@ -1,0 +1,5 @@
+./resolve.go
+./target.go
+./integration_test.go
+./resolve_test.go
+./target_test.go

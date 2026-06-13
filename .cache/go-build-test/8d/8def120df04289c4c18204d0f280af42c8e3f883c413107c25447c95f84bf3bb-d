@@ -1,0 +1,9 @@
+./claude.go
+./codex.go
+./copilot.go
+./skills.go
+./claude_test.go
+./codex_test.go
+./copilot_test.go
+./skills_test.go
+./symlink_refusal_test.go

@@ -1,0 +1,3 @@
+./safeopen.go
+./safeopen_unix.go
+./safeopen_test.go
