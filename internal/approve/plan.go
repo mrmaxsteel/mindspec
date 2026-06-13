@@ -301,8 +301,22 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	requirements := contextpack.ExtractSection(specContent, "Requirements")
 	acceptanceCriteria := contextpack.ExtractSection(specContent, "Acceptance Criteria")
 
-	// Build design field: spec requirements + ADR decision snapshots
-	design := buildDesignField(specDir, specContent, requirements)
+	// ADR citations come from the PLAN's structured `adr_citations`
+	// frontmatter (the validated source of truth) — not a regex scrape of
+	// the spec's `## ADR Touchpoints` prose (spec 097 R2). A parse failure
+	// is non-fatal here: plan validation already gates the frontmatter, so
+	// the design field simply omits ADR citations on a malformed plan.
+	var adrCitationIDs []string
+	if fm, err := validate.ParsePlanFrontmatter(planContent); err == nil {
+		for _, c := range fm.ADRCitations {
+			if c.ID != "" {
+				adrCitationIDs = append(adrCitationIDs, c.ID)
+			}
+		}
+	}
+
+	// Build design field: spec requirements + ADR citations (by ID).
+	design := buildDesignField(specDir, requirements, adrCitationIDs)
 
 	// --- Extract raw bead section content from plan.md ---
 	sectionContent := extractBeadSectionContents(planContent)
@@ -560,24 +574,33 @@ func extractPlanVersion(content string) string {
 // invented, because the ceiling is a Dolt server behavior, not a
 // mindspec contract. The full text stays available under
 // `.mindspec/docs/adr/`.
-func buildDesignField(specDir, specContent, requirements string) string {
+//
+// Spec 097 R2 (mindspec-4axk): the ADR list is built from the plan's
+// structured `adr_citations` frontmatter (each ADRCitation.ID — the
+// validated source of truth) passed in as adrCitationIDs, NOT from a regex
+// scrape of the spec's `## ADR Touchpoints` PROSE. This is forward-only:
+// ADR IDs present only in prose but absent from declared `adr_citations`
+// are no longer harvested. The frontmatter is the contract that the
+// plan-validation gate already enforces.
+func buildDesignField(specDir, requirements string, adrCitationIDs []string) string {
 	var parts []string
 
 	if requirements != "" {
 		parts = append(parts, "## Requirements\n\n"+requirements)
 	}
 
-	// Parse ADR IDs from the spec's ADR Touchpoints section
-	touchpoints := contextpack.ExtractSection(specContent, "ADR Touchpoints")
-	adrIDs := parseADRIDs(touchpoints)
-
-	if len(adrIDs) > 0 {
+	if len(adrCitationIDs) > 0 {
 		// specDir is e.g. .mindspec/docs/specs/074-slug; root is 3 levels up
 		root := filepath.Join(specDir, "..", "..", "..")
 		store := adr.NewFileStore(root)
 
+		seen := make(map[string]bool)
 		var citations []string
-		for _, id := range adrIDs {
+		for _, id := range adrCitationIDs {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
 			a, err := store.Get(id)
 			if err != nil {
 				continue
@@ -590,23 +613,6 @@ func buildDesignField(specDir, specContent, requirements string) string {
 	}
 
 	return strings.Join(parts, "\n\n")
-}
-
-// adrIDRe matches ADR IDs like "ADR-0023" in markdown links or plain text.
-var adrIDRe = regexp.MustCompile(`ADR-(\d{4})`)
-
-// parseADRIDs extracts ADR IDs (e.g., "ADR-0023") from the ADR Touchpoints section text.
-func parseADRIDs(touchpoints string) []string {
-	matches := adrIDRe.FindAllString(touchpoints, -1)
-	seen := make(map[string]bool)
-	var ids []string
-	for _, id := range matches {
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 // extractBeadSectionContents extracts the raw markdown content for each ## Bead section.

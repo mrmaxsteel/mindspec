@@ -267,6 +267,15 @@ func parsePlanFrontmatter(content string) (*PlanFrontmatter, error) {
 	return &fm, nil
 }
 
+// ParsePlanFrontmatter extracts and parses the YAML frontmatter from plan
+// content. It exposes the parsed PlanFrontmatter (including the validated
+// ADRCitations) to other packages: the approve flow consumes the structured
+// adr_citations for each bead's --design field instead of regex-scraping the
+// spec's `## ADR Touchpoints` prose (spec 097 R2).
+func ParsePlanFrontmatter(content string) (*PlanFrontmatter, error) {
+	return parsePlanFrontmatter(content)
+}
+
 // checkFrontmatterFields verifies required fields are present.
 func checkFrontmatterFields(r *Result, fm *PlanFrontmatter) {
 	if fm.Status == "" {

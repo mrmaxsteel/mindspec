@@ -719,31 +719,6 @@ Some provenance table.
 	}
 }
 
-func TestParseADRIDs(t *testing.T) {
-	touchpoints := `- [ADR-0023](../../adr/ADR-0023.md): Extends beads as state store
-- [ADR-0012](../../adr/ADR-0012.md): Compose with external CLIs
-`
-	ids := parseADRIDs(touchpoints)
-	if len(ids) != 2 {
-		t.Fatalf("expected 2 ADR IDs, got %d: %v", len(ids), ids)
-	}
-	if ids[0] != "ADR-0023" || ids[1] != "ADR-0012" {
-		t.Errorf("unexpected ADR IDs: %v", ids)
-	}
-
-	// Dedup
-	ids2 := parseADRIDs("ADR-0001 and ADR-0001 again")
-	if len(ids2) != 1 {
-		t.Errorf("expected dedup to 1, got %d", len(ids2))
-	}
-
-	// None
-	ids3 := parseADRIDs("None applicable.")
-	if len(ids3) != 0 {
-		t.Errorf("expected 0 for 'None', got %d", len(ids3))
-	}
-}
-
 func TestBuildBeadMetadata(t *testing.T) {
 	meta := buildBeadMetadata("074-test", []string{"internal/foo.go", "cmd/bar.go"})
 	if !strings.Contains(meta, `"spec_id":"074-test"`) {
