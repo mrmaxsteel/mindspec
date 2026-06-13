@@ -876,6 +876,76 @@ func ValidateWorkChunkAlignment(chunks []WorkChunk, numSections int) error {
 			}
 		}
 	}
+	// Detect a dependency CYCLE in the work_chunks graph. A cyclic plan
+	// (e.g. 1 depends_on [2], 2 depends_on [1]) passes the range/contiguity/
+	// self-dep checks above, but the validate-side longest-path walk
+	// (computeChainDepth) would otherwise recurse forever and stack-overflow.
+	// Reject it here so the approve-side guard fails cleanly BEFORE any
+	// `bd dep add` wires a cyclic graph. Edges follow depends_on: chunk c with
+	// depends_on [d] is an edge c -> d; a back-edge to a node still on the
+	// current DFS stack is a cycle.
+	if cyc := findWorkChunkCycle(chunks); cyc != nil {
+		parts := make([]string, len(cyc))
+		for i, id := range cyc {
+			parts[i] = fmt.Sprintf("%d", id)
+		}
+		return fmt.Errorf("work_chunks dependency cycle detected: %s", strings.Join(parts, " -> "))
+	}
+	return nil
+}
+
+// findWorkChunkCycle returns a chunk-id path describing a dependency cycle in
+// the work_chunks graph (following depends_on edges), or nil if the graph is
+// acyclic. The returned path closes the loop (e.g. [1, 2, 1]). It uses a
+// three-color DFS: a back-edge to a node still on the current stack (gray)
+// closes a cycle.
+func findWorkChunkCycle(chunks []WorkChunk) []int {
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	deps := make(map[int][]int, len(chunks))
+	for _, c := range chunks {
+		deps[c.ID] = c.DependsOn
+	}
+	color := make(map[int]int, len(chunks))
+	var stack []int
+	var visit func(id int) []int
+	visit = func(id int) []int {
+		color[id] = gray
+		stack = append(stack, id)
+		for _, dep := range deps[id] {
+			switch color[dep] {
+			case gray:
+				// Back-edge: build the cycle from dep's first occurrence on
+				// the current stack to id, then close back to dep.
+				start := 0
+				for i, n := range stack {
+					if n == dep {
+						start = i
+						break
+					}
+				}
+				cyc := append([]int{}, stack[start:]...)
+				return append(cyc, dep)
+			case white:
+				if c := visit(dep); c != nil {
+					return c
+				}
+			}
+		}
+		stack = stack[:len(stack)-1]
+		color[id] = black
+		return nil
+	}
+	for _, c := range chunks {
+		if color[c.ID] == white {
+			if cyc := visit(c.ID); cyc != nil {
+				return cyc
+			}
+		}
+	}
 	return nil
 }
 
@@ -973,8 +1043,16 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, chunks []WorkC
 		}
 	}
 
-	// Compute longest path (chain depth) via BFS/topological order
-	chainDepth := computeChainDepth(adj, len(sections))
+	// Compute longest path (chain depth). computeChainDepth is cycle-SAFE: a
+	// malformed (cyclic) work_chunks graph must never stack-overflow
+	// `mindspec validate plan`. When a cycle is present it returns hasCycle so
+	// we emit a clean advisory finding instead of crashing or reporting a
+	// meaningless depth.
+	chainDepth, hasCycle := computeChainDepth(adj, len(sections))
+	if hasCycle {
+		r.AddWarning("decomposition-dep-cycle",
+			"work_chunks dependency graph contains a cycle — the chain-depth/parallelism metrics are unreliable; remove the circular depends_on (a valid plan's deps must form a DAG)")
+	}
 	if chainDepth > cfg.MaxChainDepth {
 		r.AddWarning("decomposition-chain-depth",
 			fmt.Sprintf("dependency chain depth %d exceeds threshold %d — deep serial chain, coordination overhead grows super-linearly", chainDepth, cfg.MaxChainDepth))
@@ -994,21 +1072,39 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, chunks []WorkC
 	}
 }
 
-// computeChainDepth returns the longest path length in the DAG.
-func computeChainDepth(adj map[int][]int, n int) int {
-	// Use DFS with memoization
+// computeChainDepth returns the longest path length in the dependency graph
+// and whether the graph contains a cycle. It is cycle-SAFE: a back-edge to a
+// node still on the current DFS stack is detected via in-progress (gray)
+// tracking, so a malformed cyclic graph returns gracefully (hasCycle == true)
+// instead of recursing forever and stack-overflowing. A well-formed plan is a
+// DAG and reports hasCycle == false.
+func computeChainDepth(adj map[int][]int, n int) (depth int, hasCycle bool) {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // on the current DFS stack (in progress)
+		black = 2 // fully explored
+	)
+	color := make(map[int]int, n)
 	memo := make(map[int]int, n)
 	var dfs func(node int) int
 	dfs = func(node int) int {
-		if v, ok := memo[node]; ok {
-			return v
+		if color[node] == black {
+			return memo[node]
 		}
+		color[node] = gray
 		maxChild := 0
 		for _, next := range adj[node] {
+			if color[next] == gray {
+				// Back-edge: a cycle. Stop descending this edge so the
+				// recursion terminates rather than looping forever.
+				hasCycle = true
+				continue
+			}
 			if d := dfs(next); d > maxChild {
 				maxChild = d
 			}
 		}
+		color[node] = black
 		memo[node] = maxChild + 1
 		return maxChild + 1
 	}
@@ -1019,5 +1115,5 @@ func computeChainDepth(adj map[int][]int, n int) int {
 			maxDepth = d
 		}
 	}
-	return maxDepth
+	return maxDepth, hasCycle
 }

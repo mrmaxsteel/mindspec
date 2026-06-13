@@ -209,6 +209,12 @@ Bead 1, Bead 2
 		}
 		return nil, fmt.Errorf("unexpected bd call: %v", args)
 	}
+	// Stub the child-bead lookup so handleExistingBeads (called first inside
+	// createImplementationBeads) never reaches the real bd CLI — keeps this
+	// test hermetic and non-hanging. No existing children → first approval.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
 	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err != nil {
@@ -297,6 +303,12 @@ Bead 1
 		}
 		return nil, fmt.Errorf("unexpected bd call: %v", args)
 	}
+	// Stub the child-bead lookup so handleExistingBeads (called first inside
+	// createImplementationBeads) never reaches the real bd CLI — keeps this
+	// test hermetic and non-hanging. No existing children → first approval.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
 	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err != nil {
@@ -365,6 +377,12 @@ Bead 1
 	planRunBDFn = func(args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("bd must not be called when work_chunks are misaligned: %v", args)
 	}
+	// Stub the child-bead lookup so handleExistingBeads (called before the
+	// alignment guard inside createImplementationBeads) never reaches the real
+	// bd CLI — keeps this test hermetic and non-hanging. No existing children.
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
 	_, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err == nil {

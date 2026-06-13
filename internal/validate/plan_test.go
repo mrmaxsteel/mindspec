@@ -1224,6 +1224,8 @@ func TestValidateWorkChunkAlignment(t *testing.T) {
 		{"id out of range", []WorkChunk{{ID: 0}, {ID: 1}, {ID: 2}}, 3, true},
 		{"depends_on out of range", []WorkChunk{{ID: 1}, {ID: 2, DependsOn: []int{9}}, {ID: 3}}, 3, true},
 		{"self dependency", []WorkChunk{{ID: 1}, {ID: 2, DependsOn: []int{2}}, {ID: 3}}, 3, true},
+		{"two-node cycle", []WorkChunk{{ID: 1, DependsOn: []int{2}}, {ID: 2, DependsOn: []int{1}}}, 2, true},
+		{"three-node cycle", []WorkChunk{{ID: 1, DependsOn: []int{3}}, {ID: 2, DependsOn: []int{1}}, {ID: 3, DependsOn: []int{2}}}, 3, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1232,6 +1234,85 @@ func TestValidateWorkChunkAlignment(t *testing.T) {
 				t.Fatalf("ValidateWorkChunkAlignment() err = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestValidateWorkChunkAlignment_CycleMessage proves the approve-side guard
+// rejects a cyclic work_chunks graph with a clear, path-bearing error so a
+// cyclic plan is caught BEFORE any `bd dep add` wires it (spec 097 R3,
+// bc5-edge). 1 depends_on [2], 2 depends_on [1] is the canonical 2-cycle.
+func TestValidateWorkChunkAlignment_CycleMessage(t *testing.T) {
+	chunks := []WorkChunk{
+		{ID: 1, DependsOn: []int{2}},
+		{ID: 2, DependsOn: []int{1}},
+	}
+	err := ValidateWorkChunkAlignment(chunks, 2)
+	if err == nil {
+		t.Fatal("expected a cycle error for 1<->2, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("expected a 'cycle' error, got: %v", err)
+	}
+	// The message renders the closed loop, e.g. "1 -> 2 -> 1".
+	if !strings.Contains(err.Error(), "->") {
+		t.Errorf("expected the cycle path to render with '->', got: %v", err)
+	}
+}
+
+// TestCheckDecompositionQuality_CyclicGraphNoStackOverflow proves the
+// validate-side path is cycle-SAFE (spec 097 R3, bc5-edge): a cyclic
+// work_chunks graph reaches checkDecompositionQuality (which does NOT call
+// ValidateWorkChunkAlignment first), and the longest-path walk must return
+// gracefully — emitting a clean advisory finding — instead of recursing
+// forever and stack-overflowing. The recover() guard fails loudly if the
+// walk ever panics.
+func TestCheckDecompositionQuality_CyclicGraphNoStackOverflow(t *testing.T) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			t.Fatalf("checkDecompositionQuality panicked on a cyclic graph: %v", rec)
+		}
+	}()
+
+	sections := []BeadSection{
+		{StepLines: []string{"do a"}, VerifyLines: []string{"check a"}},
+		{StepLines: []string{"do b"}, VerifyLines: []string{"check b"}},
+		{StepLines: []string{"do c"}, VerifyLines: []string{"check c"}},
+	}
+	// 1 -> 2 -> 3 -> 1 : a 3-cycle that would stack-overflow an unguarded
+	// recursive longest-path walk.
+	chunks := []WorkChunk{
+		{ID: 1, DependsOn: []int{3}},
+		{ID: 2, DependsOn: []int{1}},
+		{ID: 3, DependsOn: []int{2}},
+	}
+
+	r := &Result{}
+	checkDecompositionQuality(r, sections, chunks, config.DefaultConfig().Decomposition)
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-dep-cycle" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'decomposition-dep-cycle' advisory finding, got issues: %v", r.Issues)
+	}
+}
+
+// TestComputeChainDepth_CycleSafe is a direct, bounded unit test on the
+// recursion itself: a back-edge must be detected (hasCycle == true) and the
+// call must return rather than overflow the stack.
+func TestComputeChainDepth_CycleSafe(t *testing.T) {
+	// 0 -> 1 -> 2 -> 0 (a 3-cycle in 0-indexed adjacency form).
+	adj := map[int][]int{
+		0: {1},
+		1: {2},
+		2: {0},
+	}
+	depth, hasCycle := computeChainDepth(adj, 3)
+	if !hasCycle {
+		t.Errorf("expected hasCycle = true for a cyclic graph, got false (depth=%d)", depth)
 	}
 }
 
