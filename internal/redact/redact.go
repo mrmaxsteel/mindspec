@@ -91,6 +91,7 @@ var CommandTokens = map[string]struct{}{
 	"state":     {},
 	"trace":     {},
 	"validate":  {},
+	"version":   {}, // spec 096 Req 5: `version` subcommand == `--version`
 	// cobra-generated built-ins (always registered, not disabled): the
 	// `help` and `completion` top-level commands are dispatchable, so a
 	// success/friction event can carry them — keep them allowlisted or
