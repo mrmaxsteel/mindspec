@@ -816,6 +816,58 @@ func TestRun_AdvancesToReviewWhenNoMoreBeads(t *testing.T) {
 	}
 }
 
+// TestRun_LastLifecycleBeadWithOpenBugChildAdvancesToReview is the spec
+// 095 ry73 e2e guarantee at the `complete` end: closing the LAST lifecycle
+// (task) bead while a non-lifecycle bug child is ALREADY open must derive
+// `review` (the open bug is ignored) and persist mindspec_phase=="review"
+// via the step-6.5 sync. RED-on-revert: counting the open bug would derive
+// `implement`, leaving the spec unable to reach `impl approve` without a
+// manual detach + repair.
+func TestRun_LastLifecycleBeadWithOpenBugChildAdvancesToReview(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closeBeadFn = func(ids ...string) error { return nil }
+
+	// Last task bead closed + an open bug child filed earlier as an epic
+	// child. Lifecycle-only derivation → review.
+	stubChildrenByStatus(map[string][]bead.BeadInfo{
+		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done", IssueType: "task"}},
+		"open":   {{ID: "bug-7", Title: "follow-up", IssueType: "bug"}},
+	})
+
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	// Capture the step-6.5 mindspec_phase sync write.
+	var syncedPhase string
+	origMerge := completeMergeMetadataFn
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if p, ok := updates["mindspec_phase"].(string); ok {
+			syncedPhase = p
+		}
+		return nil
+	}
+	t.Cleanup(func() { completeMergeMetadataFn = origMerge })
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NextMode != state.ModeReview {
+		t.Fatalf("expected review mode (open bug must not block), got %s", result.NextMode)
+	}
+	if syncedPhase != state.ModeReview {
+		t.Errorf("step-6.5 sync wrote mindspec_phase=%q, want %q", syncedPhase, state.ModeReview)
+	}
+}
+
 func TestFormatResult_Implement(t *testing.T) {
 	r := &Result{
 		BeadID:          "bead-1",

@@ -179,6 +179,32 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		)
 	}
 
+	// Spec 095 (mindspec-ry73): the phase gate now passes via `review`
+	// even when a non-lifecycle follow-up child (e.g. a bug filed after the
+	// last `complete`) is still open — the lifecycle-only derivation ignores
+	// it. Emit an ADVISORY guard hint (ADR-0035 recovery-line convention)
+	// naming any such open follow-up child so the operator can re-file or
+	// detach it if they disagree. The hint NEVER blocks — the gate has
+	// already passed. The recovery line deliberately does NOT bare-recommend
+	// `bd update <id> --parent ""`: that detach is buggy (mindspec-bk5t — it
+	// is not reflected in `bd list --parent`), so re-filing as standalone
+	// backlog (or leaving the child attached) is recommended instead.
+	if epicID != "" {
+		if open := phase.OpenNonLifecycleChildrenForEpic(epicID); len(open) > 0 {
+			names := make([]string, 0, len(open))
+			for _, c := range open {
+				if c.Title != "" {
+					names = append(names, fmt.Sprintf("%s (%s)", c.ID, c.Title))
+				} else {
+					names = append(names, c.ID)
+				}
+			}
+			fmt.Fprintf(os.Stderr,
+				"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent', mindspec-bk5t)\n",
+				specID, strings.Join(names, ", "))
+		}
+	}
+
 	// Derive spec branch from convention.
 	specBranch := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch

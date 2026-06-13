@@ -100,6 +100,70 @@ func TestDerivePhaseFromChildren(t *testing.T) {
 			},
 			want: state.ModeReview,
 		},
+		// --- Spec 095 (mindspec-ry73): lifecycle-only review derivation ---
+		{
+			// RED-on-revert: counting all children would see the open bug
+			// and derive `implement`, stranding the spec short of `review`.
+			name: "all task children closed + open bug child → review (ry73)",
+			children: []ChildInfo{
+				{ID: "b1", Status: "closed", IssueType: "task"},
+				{ID: "b2", Status: "closed", IssueType: "task"},
+				{ID: "bug1", Status: "open", IssueType: "bug"},
+			},
+			want: state.ModeReview,
+		},
+		{
+			// The vacuous-review guard: an empty lifecycle set must NEVER
+			// derive `review` off a non-lifecycle child. RED-on-revert: a
+			// naive "all non-in_progress, some/zero closed" rule, or counting
+			// the bug as lifecycle, would mis-derive review/implement.
+			name: "zero task children + open bug child → plan, NOT review (vacuous-review guard)",
+			children: []ChildInfo{
+				{ID: "bug1", Status: "open", IssueType: "bug"},
+			},
+			want: state.ModePlan,
+		},
+		{
+			name: "zero task children + closed bug child → plan, NOT review (vacuous-review guard)",
+			children: []ChildInfo{
+				{ID: "bug1", Status: "closed", IssueType: "bug"},
+			},
+			want: state.ModePlan,
+		},
+		{
+			name: "open task + closed bug → implement (between beads; bug ignored)",
+			children: []ChildInfo{
+				{ID: "b1", Status: "closed", IssueType: "task"},
+				{ID: "b2", Status: "open", IssueType: "task"},
+				{ID: "bug1", Status: "closed", IssueType: "bug"},
+			},
+			want: state.ModeImplement,
+		},
+		{
+			name: "in_progress task + open bug → implement (bug never forces nor blocks)",
+			children: []ChildInfo{
+				{ID: "b1", Status: "in_progress", IssueType: "task"},
+				{ID: "bug1", Status: "open", IssueType: "bug"},
+			},
+			want: state.ModeImplement,
+		},
+		{
+			name: "all task open + open bug → plan",
+			children: []ChildInfo{
+				{ID: "b1", Status: "open", IssueType: "task"},
+				{ID: "bug1", Status: "open", IssueType: "bug"},
+			},
+			want: state.ModePlan,
+		},
+		{
+			// Structural epic children are ignored entirely; with no
+			// lifecycle children the set is empty → plan.
+			name: "only an epic child → plan (epic ignored, empty lifecycle set)",
+			children: []ChildInfo{
+				{ID: "sub-epic", Status: "open", IssueType: "epic"},
+			},
+			want: state.ModePlan,
+		},
 	}
 
 	for _, tt := range tests {
@@ -109,6 +173,90 @@ func TestDerivePhaseFromChildren(t *testing.T) {
 				t.Errorf("DerivePhaseFromChildren() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDerivePhaseFromChildren_CacheAwarePath_LifecycleOnly proves the
+// cache-aware derivation path (deriveFromChildrenOrStatusWithCache, reached
+// via DerivePhaseDetail / DerivePhaseWithStatus) honours the same
+// lifecycle-only review rule and empty-lifecycle-set guard — none of the
+// ~9 callers of DerivePhaseFromChildren can bypass it (spec 095). RED on
+// revert: if the cache path counted all children, case (a) would derive
+// `implement` and case (b) would derive `review`.
+func TestDerivePhaseFromChildren_CacheAwarePath_LifecycleOnly(t *testing.T) {
+	cases := []struct {
+		name     string
+		children string // JSON for the --parent list query
+		want     string
+	}{
+		{
+			name:     "all task closed + open bug → review",
+			children: `[{"id":"b1","title":"t","status":"closed","issue_type":"task"},{"id":"bug1","title":"b","status":"open","issue_type":"bug"}]`,
+			want:     state.ModeReview,
+		},
+		{
+			name:     "zero task + open bug → plan (vacuous-review guard)",
+			children: `[{"id":"bug1","title":"b","status":"open","issue_type":"bug"}]`,
+			want:     state.ModePlan,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+				if contains(args, "--parent") {
+					return []byte(tc.children), nil
+				}
+				return []byte("[]"), nil
+			})
+			defer restoreList()
+			restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) > 0 && args[0] == "show" {
+					// Epic open, no stored phase → falls back to children.
+					return []byte(`[{"id":"epic-1","title":"test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}}]`), nil
+				}
+				return []byte("[]"), nil
+			})
+			defer restore()
+
+			detail, err := DerivePhaseDetail("epic-1")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if detail.Derived != tc.want {
+				t.Errorf("DerivePhaseDetail().Derived = %q, want %q", detail.Derived, tc.want)
+			}
+		})
+	}
+}
+
+// contains is a small arg-matching helper local to this test file.
+func contains(args []string, s string) bool {
+	for _, a := range args {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
+
+// TestOpenNonLifecycleChildren proves the helper that feeds the impl-approve
+// guard hint returns only open, non-lifecycle (bug/other) children — never a
+// task, an epic, or a closed follow-up (spec 095).
+func TestOpenNonLifecycleChildren(t *testing.T) {
+	children := []ChildInfo{
+		{ID: "b1", Status: "closed", IssueType: "task"},
+		{ID: "bug1", Status: "open", IssueType: "bug"},
+		{ID: "bug2", Status: "closed", IssueType: "bug"}, // closed → excluded
+		{ID: "sub-epic", Status: "open", IssueType: "epic"},
+		{ID: "chore1", Status: "open", IssueType: "chore"}, // non-task, non-epic → included
+	}
+	got := OpenNonLifecycleChildren(children)
+	if len(got) != 2 {
+		t.Fatalf("OpenNonLifecycleChildren returned %d children, want 2: %+v", len(got), got)
+	}
+	ids := map[string]bool{got[0].ID: true, got[1].ID: true}
+	if !ids["bug1"] || !ids["chore1"] {
+		t.Errorf("expected bug1 + chore1, got %+v", got)
 	}
 }
 
