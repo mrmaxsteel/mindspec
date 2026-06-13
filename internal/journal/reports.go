@@ -544,7 +544,7 @@ func writeReportsLocked(reports []Report) error {
 // error and never written to reports.jsonl, so a live executable user string
 // can never reach the copy-pasteable resolve-echo or the RESOLVED-IN render
 // column. This closes the slot at the SOURCE rather than relying on the render
-// scrub alone (the render scrub does not neutralise shell metacharacters).
+// scrub alone (the render scrub does not neutralize shell metacharacters).
 func MarkResolved(fp string, ver string) error {
 	if fp == "" {
 		return fmt.Errorf("journal: MarkResolved requires a fingerprint")
@@ -594,7 +594,7 @@ func MarkResolved(fp string, ver string) error {
 //     "dev" default) → kept verbatim as the DQ4 unbounded-newest sentinel.
 //
 // Everything else — empty, a non-semver string, or a shell-metachar payload —
-// is rejected (ok=false). This is the SOURCE-side neutralisation of the one
+// is rejected (ok=false). This is the SOURCE-side neutralization of the one
 // user-controlled free-text slot in v1 (the --version flag).
 func normalizeResolveVersion(ver string) (string, bool) {
 	ver = strings.TrimSpace(ver)

@@ -41,6 +41,8 @@ const FeedbackRemoteEnvURL = "MINDSPEC_FEEDBACK_REMOTE_URL"
 // is enforced at the WRITE DESTINATION, not at the CLI (you cannot hide a
 // subcommand per-user in a shared binary). It is read from the environment
 // only — never from any committed file.
+//
+//nolint:gosec // G101 false positive: this is the env-var NAME the credential is read FROM, not a hardcoded credential value.
 const FeedbackRemoteEnvCredential = "MINDSPEC_FEEDBACK_REMOTE_CREDENTIAL"
 
 // FeedbackRemote holds the global/user-scoped feedback-remote settings parsed

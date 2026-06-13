@@ -219,13 +219,13 @@ func TestReportList_StoreIsolation_EgressProof(t *testing.T) {
 
 // TestRenderField_UntrustedCorpus is the Req 7 / HC-4 render backstop: a
 // planted injection / auto-link / shell-metachar payload is scrubbed,
-// link-neutralised, control-stripped, and length-capped by the render path.
+// link-neutralized, control-stripped, and length-capped by the render path.
 func TestRenderField_UntrustedCorpus(t *testing.T) {
 	cases := []struct {
 		name    string
 		in      string
 		absent  []string // substrings that must NOT survive
-		present []string // markers that MUST be present (neutralisation)
+		present []string // markers that MUST be present (neutralization)
 	}{
 		{
 			name:   "markdown auto-link injection",
@@ -272,7 +272,7 @@ func TestRenderField_LengthCap(t *testing.T) {
 // through a rendered field (the resolve confirmation echoes the version) and
 // asserts the render path scrubs it. The store is enum-only, so we exercise
 // the render surface directly with a tainted resolve-version that the scrub
-// must neutralise rather than echo verbatim.
+// must neutralize rather than echo verbatim.
 func TestReportListRender_ScrubsPlantedSecret(t *testing.T) {
 	planted := "/Users/victim/.ssh/id_rsa"
 	got := renderField(planted)

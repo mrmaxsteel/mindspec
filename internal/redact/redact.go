@@ -39,7 +39,7 @@ const maxScrubInput = 16 << 10 // 16 KiB
 const maxCleanLen = 512
 
 // EscapeHatchTokens is the closed-set enum of escape-hatch signals the
-// allowlist recognises (plan §Storage Contract). Anything else in an
+// allowlist recognizes (plan §Storage Contract). Anything else in an
 // Event's EscapeHatch field is TAINTED and drops the entry (M4).
 var EscapeHatchTokens = map[string]struct{}{
 	"":               {}, // no escape hatch (the common, non-friction case)
@@ -275,7 +275,7 @@ var scrubPasses = []pass{
 	{"dsn-credentials", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+:[^\s:@/]+@[A-Za-z0-9.-]+(?::\d+)?(?:/[^\s]*)?`), "<dsn>"},
 	// Emails before IPs/paths (the @ and dots are distinctive).
 	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`), "<email>"},
-	// URLs (also neutralises markdown auto-link bait).
+	// URLs (also neutralizes markdown auto-link bait).
 	{"url", regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s)\]]+`), "<url>"},
 	// IPv4.
 	{"ipv4", regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`), "<ip>"},
@@ -419,7 +419,7 @@ func Scrub(s string) (clean string, ok bool) {
 	return out, true
 }
 
-// errClassRe recognises a sentinel error class/code at the head of a
+// errClassRe recognizes a sentinel error class/code at the head of a
 // chain (e.g. "Dolt Error 1105", "Error 1105", "Error Code 23505").
 var errClassRe = regexp.MustCompile(`(?i)\b((?:[a-z]+ )?error(?: code)? \d+)\b`)
 
@@ -451,7 +451,7 @@ func ScrubError(err error) (clean string, ok bool) {
 	}
 	text := err.Error()
 	if m := errClassRe.FindString(text); m != "" {
-		// Keep ONLY the recognised code token; every wrapper (leading and
+		// Keep ONLY the recognized code token; every wrapper (leading and
 		// trailing) is discarded. Scrub the token itself defensively.
 		return Scrub(m)
 	}

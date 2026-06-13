@@ -257,7 +257,7 @@ const maxRenderField = 120
 //     never the raw value — HC-7);
 //   - strip control/newline characters so no injected `recovery:` line can be
 //     reconstituted and auto-executed by a downstream agent;
-//   - neutralise markdown auto-linking by inserting a zero-width-safe break in
+//   - neutralize markdown auto-linking by inserting a zero-width-safe break in
 //     a `](` / `://` sequence so a pasted body cannot become a live link;
 //   - length-cap.
 func renderField(s string) string {

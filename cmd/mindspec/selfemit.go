@@ -51,7 +51,7 @@ var escapeHatchFlags = map[string]string{
 // detectFriction inspects a SUCCEEDING leaf command and returns the bound
 // escape-hatch enum token (and true) if it is a v1 friction signal, else
 // ("", false). It reads leaf-local override flags via cmd.Flags().Changed
-// and recognises a completed `repair phase` by command path.
+// and recognizes a completed `repair phase` by command path.
 //
 // Only the FIRST bound escape-hatch flag (in a deterministic order) is
 // reported — the fingerprint is keyed on a single which-escape-hatch
