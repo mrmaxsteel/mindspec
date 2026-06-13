@@ -283,7 +283,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if mbErr != nil {
 		return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
 	}
-	docResult := validate.ValidateDocsRange(root, base, beadHead, exec)
+	// OWNERSHIP attribution (manifests + domain enumeration) is read
+	// from beadHead — the SAME ref the gate diffs — so an OWNERSHIP
+	// claim committed on the bead branch satisfies its own gate with no
+	// override (spec 095 / mindspec-vvs9).
+	docResult := validate.ValidateDocsRange(root, base, beadHead, beadHead, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run — including when
 	// HasFailures() is false and the flow proceeds normally, and on
@@ -305,7 +309,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// the placeholder ADR's Domains field. The failure-decision is
 	// bypassed when either override or supersede flag is set. Same
 	// bead-branch anchoring as doc-sync above: base..beadHead.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead)
+	// Ownership ref = beadHead, same as doc-sync above (spec 095).
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, beadHead)
 	// Same severity-generic pipe for the ADR-divergence gate: any
 	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
 	// without further wiring. No-op while the gate emits none.

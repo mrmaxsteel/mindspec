@@ -29,7 +29,7 @@ func TestOwnershipMultiMatchFirstWins(t *testing.T) {
 	writeManifest(t, root, "beta", "paths:\n  - internal/foo/**\n")
 
 	domains := []string{"alpha", "beta"} // already sorted
-	owner, o, err := attributeDomain(root, "internal/foo/bar.go", domains)
+	owner, o, err := attributeDomain(nil, root, "", "internal/foo/bar.go", domains)
 	if err != nil {
 		t.Fatalf("attributeDomain err: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestOwnershipFallback(t *testing.T) {
 
 	// attributeDomain must NOT attribute files under
 	// internal/<domain>/ — a manifest-less domain claims nothing.
-	owner, _, err := attributeDomain(root, "internal/freshdomain/sub/file.go", []string{"freshdomain"})
+	owner, _, err := attributeDomain(nil, root, "", "internal/freshdomain/sub/file.go", []string{"freshdomain"})
 	if err != nil {
 		t.Fatalf("attributeDomain err: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestOwnershipFallback(t *testing.T) {
 	}
 
 	// A file under another tree is also unclaimed.
-	owner3, _, err := attributeDomain(root, "cmd/other/main.go", []string{"freshdomain"})
+	owner3, _, err := attributeDomain(nil, root, "", "cmd/other/main.go", []string{"freshdomain"})
 	if err != nil {
 		t.Fatalf("attributeDomain err: %v", err)
 	}

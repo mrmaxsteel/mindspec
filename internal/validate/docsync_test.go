@@ -119,7 +119,7 @@ func TestCheckInternalPackages_WithDomainDocs(t *testing.T) {
 	source := []string{"internal/validate/spec.go"}
 	docs := []string{".mindspec/docs/domains/workflow/interfaces.md"}
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 	if r.HasFailures() {
 		t.Errorf("expected no failures when domain docs updated, got %+v", r.Issues)
 	}
@@ -136,7 +136,7 @@ func TestCheckInternalPackages_WithoutDomainDocs(t *testing.T) {
 	source := []string{"internal/validate/spec.go"}
 	docs := []string{"CLAUDE.md"}
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 	found := false
 	for _, issue := range r.Issues {
 		if issue.Name == "internal-docs" {
@@ -162,7 +162,7 @@ func TestValidateDocsErrorsOnInternalDocSkew(t *testing.T) {
 	source := []string{"internal/validate/spec.go"}
 	docs := []string{"CLAUDE.md"} // not a domain doc
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 
 	var issue *Issue
 	for i := range r.Issues {
@@ -203,7 +203,7 @@ func TestValidateDocsErrorsOnInternalDocSkew_Fallback(t *testing.T) {
 	source := []string{"internal/workflow/run.go"}
 	docs := []string{"CLAUDE.md"}
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 
 	for _, issue := range r.Issues {
 		if issue.Name == "internal-docs" {
@@ -229,7 +229,7 @@ func TestCheckInternalPackages_ZeroDomainsDisclosedDefault(t *testing.T) {
 	source := []string{"internal/foo/bar.go"}
 	docs := []string{"CLAUDE.md"} // not a domain doc
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 
 	var issue *Issue
 	for i := range r.Issues {
@@ -267,7 +267,7 @@ func TestPerDomainMarkerNamesManifest(t *testing.T) {
 	source := []string{"internal/validate/spec.go"}
 	docs := []string{"CLAUDE.md"} // not a domain doc
 
-	checkInternalPackages(r, root, source, docs)
+	checkInternalPackages(r, nil, root, "", source, docs)
 
 	var issue *Issue
 	for i := range r.Issues {
@@ -438,7 +438,7 @@ func TestPromotedLaneSeverities(t *testing.T) {
 	writeOwnershipFixture(t, root, "workflow", []string{"internal/validate/**"})
 
 	r := &Result{SubCommand: "docs"}
-	checkInternalPackages(r, root, []string{"internal/validate/spec.go"}, nil)
+	checkInternalPackages(r, nil, root, "", []string{"internal/validate/spec.go"}, nil)
 	for _, issue := range r.Issues {
 		if issue.Name == "internal-docs" && issue.Severity != SevError {
 			t.Errorf("internal-docs severity = %v, want %v", issue.Severity, SevError)
@@ -1049,13 +1049,13 @@ func TestValidateDocsWorkingTreeIdiom(t *testing.T) {
 
 	t.Run("ValidateDocsRange with empty head keeps the working-tree idiom", func(t *testing.T) {
 		mock := &executor.MockExecutor{}
-		ValidateDocsRange(t.TempDir(), "BASE", "", mock)
+		ValidateDocsRange(t.TempDir(), "BASE", "", "", mock)
 		assertSingleDiff(t, mock, "", "BASE")
 	})
 
 	t.Run("ValidateDocsRange with explicit head diffs the committed range", func(t *testing.T) {
 		mock := &executor.MockExecutor{}
-		ValidateDocsRange(t.TempDir(), "FORK", "bead/x-1", mock)
+		ValidateDocsRange(t.TempDir(), "FORK", "bead/x-1", "", mock)
 		assertSingleDiff(t, mock, "FORK", "bead/x-1")
 	})
 }

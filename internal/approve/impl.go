@@ -216,7 +216,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if mbErr != nil {
 		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
 	}
-	docResult := validate.ValidateDocs(root, base, exec)
+	// Spec 095: the whole-branch doc-sync gate diffs the explicit
+	// base..specBranch RANGE (NOT working-tree-vs-base) and reads
+	// OWNERSHIP attribution from the spec-branch tip — both the diff
+	// head and the ownership ref are the spec-branch tip — so an
+	// OWNERSHIP claim committed anywhere on the spec branch satisfies
+	// the backstop with no override (mindspec-vvs9). The prior
+	// ValidateDocs(root, base, exec) read the working tree on both
+	// counts.
+	docResult := validate.ValidateDocsRange(root, base, specBranch, specBranch, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run — including when
 	// HasFailures() is false and the flow proceeds normally, and on
@@ -238,7 +246,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// Domains field structurally (revision 2 — no string parsing).
 	// headRef "" + beadID "" → the lane derives the spec branch tip
 	// itself; the measured refs stay main-merge-base..spec-branch-tip.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "", "")
+	// Ownership ref = spec-branch tip (specBranch), independent of the
+	// derived diff head (spec 095 / mindspec-vvs9).
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, "", "", specBranch)
 	// Same severity-generic pipe for the ADR-divergence backstop: any
 	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
 	// without further wiring. No-op while the gate emits none.

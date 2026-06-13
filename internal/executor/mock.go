@@ -33,8 +33,23 @@ type MockExecutor struct {
 	ChangedFilesFn  func(base, head string) ([]string, error)
 	FileAtRefResult []byte
 	FileAtRefErr    error
-	MergeBaseResult string
-	MergeBaseErr    error
+	// FileAtRefOrAbsentFn, when non-nil, fully drives FileAtRefOrAbsent
+	// so tests can return ref- and path-dependent presence/absence and
+	// operational errors (the ref-anchored OWNERSHIP loader's three-way
+	// classification: present / absent / operational error). When nil,
+	// the simple result fields below are returned.
+	FileAtRefOrAbsentFn      func(ref, path string) ([]byte, bool, error)
+	FileAtRefOrAbsentData    []byte
+	FileAtRefOrAbsentPresent bool
+	FileAtRefOrAbsentErr     error
+	// TreeDirsAtRefFn, when non-nil, fully drives TreeDirsAtRef so tests
+	// can return ref-dependent domain-directory enumerations. When nil,
+	// the simple result fields below are returned.
+	TreeDirsAtRefFn     func(ref, dirPath string) ([]string, error)
+	TreeDirsAtRefResult []string
+	TreeDirsAtRefErr    error
+	MergeBaseResult     string
+	MergeBaseErr        error
 }
 
 // MockCall records a single method invocation.
@@ -123,6 +138,22 @@ func (m *MockExecutor) ChangedFiles(base, head string) ([]string, error) {
 func (m *MockExecutor) FileAtRef(ref, path string) ([]byte, error) {
 	m.record("FileAtRef", ref, path)
 	return m.FileAtRefResult, m.FileAtRefErr
+}
+
+func (m *MockExecutor) FileAtRefOrAbsent(ref, path string) ([]byte, bool, error) {
+	m.record("FileAtRefOrAbsent", ref, path)
+	if m.FileAtRefOrAbsentFn != nil {
+		return m.FileAtRefOrAbsentFn(ref, path)
+	}
+	return m.FileAtRefOrAbsentData, m.FileAtRefOrAbsentPresent, m.FileAtRefOrAbsentErr
+}
+
+func (m *MockExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
+	m.record("TreeDirsAtRef", ref, dirPath)
+	if m.TreeDirsAtRefFn != nil {
+		return m.TreeDirsAtRefFn(ref, dirPath)
+	}
+	return m.TreeDirsAtRefResult, m.TreeDirsAtRefErr
 }
 
 func (m *MockExecutor) MergeBase(a, b string) (string, error) {

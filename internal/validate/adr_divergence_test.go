@@ -13,7 +13,7 @@ import (
 // SubCommand label is preserved across the transition from the spec-086
 // stub (HC-3 traceability).
 func TestCheckADRDivergenceEmptySpecDir(t *testing.T) {
-	r, findings := CheckADRDivergence("/tmp/root", "HEAD~1", &executor.MockExecutor{}, "", "", "")
+	r, findings := CheckADRDivergence("/tmp/root", "HEAD~1", &executor.MockExecutor{}, "", "", "", "")
 	if r == nil {
 		t.Fatal("CheckADRDivergence returned nil *Result")
 	}
@@ -52,7 +52,7 @@ func TestCheckADRDivergenceReturnsPopulated(t *testing.T) {
 		ChangedFilesResult: []string{"internal/payments/charge.go"},
 	}
 
-	r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-zy4u.2", "")
+	r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-zy4u.2", "", "")
 	if r == nil {
 		t.Fatal("nil result")
 	}
@@ -114,21 +114,21 @@ func TestCheckADRDivergenceHeadRefResolution(t *testing.T) {
 	t.Run("per-bead default is the canonical bead branch", func(t *testing.T) {
 		root, specDir := newFixture(t)
 		mock := &executor.MockExecutor{}
-		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "")
+		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "", "")
 		assertDiffRange(t, mock, "BASE", "bead/mindspec-bead.1")
 	})
 
 	t.Run("impl-approve default derives the spec branch", func(t *testing.T) {
 		root, specDir := newFixture(t)
 		mock := &executor.MockExecutor{}
-		CheckADRDivergence(root, "BASE", mock, specDir, "", "")
+		CheckADRDivergence(root, "BASE", mock, specDir, "", "", "")
 		assertDiffRange(t, mock, "BASE", "spec/107-headref")
 	})
 
 	t.Run("explicit headRef wins over both defaults", func(t *testing.T) {
 		root, specDir := newFixture(t)
 		mock := &executor.MockExecutor{}
-		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "bead/explicit-tip")
+		CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-bead.1", "bead/explicit-tip", "")
 		assertDiffRange(t, mock, "BASE", "bead/explicit-tip")
 	})
 }
