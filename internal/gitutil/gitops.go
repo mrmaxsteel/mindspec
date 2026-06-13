@@ -21,7 +21,7 @@ var ErrRefNotFound = errors.New("ref not found")
 // Package-level function variables for testability.
 var execCommand = exec.Command
 
-// rejectOptionLike is the package-boundary argument-safety guard
+// RejectOptionLike is the package-boundary argument-safety guard
 // (SEC-5 / spec 097 R1, finding obxo). git parses a positional argv slot
 // that begins with `-` as an OPTION rather than a ref/branch/refspec/range
 // operand — a ref literally named `-x` or `--upload-pack=…` would be
@@ -33,12 +33,22 @@ var execCommand = exec.Command
 // defense-in-depth: the only behavior change is that a `-`-prefixed operand
 // now errors instead of being handed to git.
 //
+// It is EXPORTED so sibling boundary packages that run their OWN direct
+// git exec (notably internal/executor's ref-bearing MergeBase / FileAtRef /
+// pathExistsAtRef / TreeDirsAtRef / ChangedFiles, which do not route through
+// this package) can apply the identical guard before reaching git argv —
+// closing the option-injection path a panel reviewer traced through
+// internal/complete overwriting beadHead with a `bd worktree list` name
+// (spec 097 R1, executor gap). gitutil is the canonical home: it already
+// depends only on internal/guard (a leaf), so executor→gitutil stays the
+// normal, cycle-free import direction.
+//
 // It is applied PER-OPERAND at each ref-bearing entry point rather than
 // inside the shared gitArgs builder, because gitArgs cannot distinguish a
 // ref from a legitimate option-flag (e.g. `--no-ff`, `--stat`) or a
 // pathspec. The empty string is allowed (`workdir==""` and empty
 // pathspec lists are valid and never reach this guard as operands).
-func rejectOptionLike(operand string) error {
+func RejectOptionLike(operand string) error {
 	if strings.HasPrefix(operand, "-") {
 		return guard.NewFailure(
 			fmt.Sprintf("blocked: git operand %q looks like an option (begins with %q); refusing to pass a hostile ref/branch/refspec to git (SEC-5)", operand, "-"),
@@ -47,6 +57,10 @@ func rejectOptionLike(operand string) error {
 	}
 	return nil
 }
+
+// rejectOptionLike is the unexported alias retained for the existing
+// in-package call sites; it delegates to the exported RejectOptionLike.
+func rejectOptionLike(operand string) error { return RejectOptionLike(operand) }
 
 // CurrentBranch returns the name of the current git branch.
 func CurrentBranch() (string, error) {

@@ -831,6 +831,35 @@ func TestRejectOptionLike_Predicate(t *testing.T) {
 	}
 }
 
+// TestRejectOptionLike_ExportedMatchesUnexported pins the exported
+// RejectOptionLike (consumed by sibling boundary packages such as
+// internal/executor, spec 097 R1 executor gap) as behaviorally identical to
+// the in-package alias: same rejection on hostile operands, same pass on
+// controlled refs, with the ADR-0035 SEC-5 sentinel + recovery line.
+func TestRejectOptionLike_ExportedMatchesUnexported(t *testing.T) {
+	for _, hostile := range []string{"-x", "--upload-pack=/evil", "-"} {
+		exp := RejectOptionLike(hostile)
+		if exp == nil {
+			t.Errorf("RejectOptionLike(%q) = nil, want rejection", hostile)
+			continue
+		}
+		if !strings.Contains(exp.Error(), "SEC-5") {
+			t.Errorf("RejectOptionLike(%q) error %q lacks SEC-5 sentinel", hostile, exp.Error())
+		}
+		if !guard.HasFinalRecoveryLine(exp.Error()) {
+			t.Errorf("RejectOptionLike(%q) error must end with an ADR-0035 recovery line, got: %q", hostile, exp.Error())
+		}
+		if (rejectOptionLike(hostile) == nil) != (exp == nil) {
+			t.Errorf("RejectOptionLike/rejectOptionLike disagree on %q", hostile)
+		}
+	}
+	for _, ok := range []string{"main", "spec/097-x", "HEAD", ""} {
+		if err := RejectOptionLike(ok); err != nil {
+			t.Errorf("RejectOptionLike(%q) = %v, want nil", ok, err)
+		}
+	}
+}
+
 // TestSEC5_SingleRefSites_RejectHostileOperand covers a single-ref-class
 // entry point: a hostile `-`-prefixed ref errors with a recovery line and
 // NEVER reaches git (no exec call captured).

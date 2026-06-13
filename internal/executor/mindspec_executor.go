@@ -454,6 +454,16 @@ func (g *MindspecExecutor) ChangedFiles(base, head string) ([]string, error) {
 	if base == "" {
 		return gitutil.DiffNameOnlyRef("", head)
 	}
+	// SEC-5 (spec 097 R1, executor gap): guard both range operands before
+	// they reach git argv — a `-`-prefixed ref would otherwise be reparsed
+	// as an option at this direct exec site that does not route through
+	// internal/gitutil.
+	if err := gitutil.RejectOptionLike(base); err != nil {
+		return nil, err
+	}
+	if err := gitutil.RejectOptionLike(head); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("git", "-C", g.Root, "diff", "--name-only", base+".."+head)
 	out, err := cmd.Output()
 	if err != nil {
@@ -471,6 +481,10 @@ func (g *MindspecExecutor) ChangedFiles(base, head string) ([]string, error) {
 // FileAtRef returns the byte contents of path at git ref. Wraps
 // `git show <ref>:<path>`.
 func (g *MindspecExecutor) FileAtRef(ref, path string) ([]byte, error) {
+	// SEC-5: guard the ref operand before it reaches git argv.
+	if err := gitutil.RejectOptionLike(ref); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("git", "-C", g.Root, "show", ref+":"+path)
 	out, err := cmd.Output()
 	if err != nil {
@@ -512,6 +526,10 @@ func (g *MindspecExecutor) FileAtRefOrAbsent(ref, path string) ([]byte, bool, er
 // fails on an invalid ref — the signal that separates an absent path
 // (claims-nothing) from an operational error.
 func (g *MindspecExecutor) pathExistsAtRef(ref, path string) (bool, error) {
+	// SEC-5: guard the ref operand before it reaches git argv.
+	if err := gitutil.RejectOptionLike(ref); err != nil {
+		return false, err
+	}
 	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, "--", path)
 	out, err := cmd.Output()
 	if err != nil {
@@ -529,6 +547,10 @@ func (g *MindspecExecutor) pathExistsAtRef(ref, path string) (bool, error) {
 // the diffed ref (spec 095 / vvs9). The output is NOT sorted here; the
 // caller (listDomainDirsAtRef) sorts to match listDomainDirs.
 func (g *MindspecExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
+	// SEC-5: guard the ref operand before it reaches git argv.
+	if err := gitutil.RejectOptionLike(ref); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, dirPath+"/")
 	out, err := cmd.Output()
 	if err != nil {
@@ -556,6 +578,13 @@ func (g *MindspecExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) 
 // MergeBase returns the merge-base SHA of refs a and b. Wraps
 // `git merge-base <a> <b>`.
 func (g *MindspecExecutor) MergeBase(a, b string) (string, error) {
+	// SEC-5: guard both ref operands before they reach git argv.
+	if err := gitutil.RejectOptionLike(a); err != nil {
+		return "", err
+	}
+	if err := gitutil.RejectOptionLike(b); err != nil {
+		return "", err
+	}
 	cmd := exec.Command("git", "-C", g.Root, "merge-base", a, b)
 	out, err := cmd.Output()
 	if err != nil {
