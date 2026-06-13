@@ -323,6 +323,13 @@ func checkBdVersionFloor(r *Report, root string) {
 // bd 1.0.x (incident 2026-06-11, mindspec-oe0u).
 const beadsMergeDriverScript = "scripts/bd-jsonl-merge-driver.sh"
 
+// beadsMergeAttrPattern is the exact .gitattributes pattern field that maps
+// the beads jsonl to the merge=beads driver. Detection requires fields[0] to
+// equal this so a corrupted/concatenated line (e.g. a newline-unsafe append
+// producing `*.png binary.beads/issues.jsonl merge=beads`) is NOT falsely
+// reported as a valid mapping (mindspec-oe0u).
+const beadsMergeAttrPattern = ".beads/issues.jsonl"
+
 // recoveryLine formats the agent-contract failure footer: a final line of
 // the form `recovery: <command>` naming the exact command to run. Matches
 // the convention used by scripts/bd-jsonl-merge-driver.sh; hand-rolled here
@@ -345,8 +352,15 @@ func recoveryLine(command string) string {
 //     falls back to a plain TEXT merge of the jsonl. The more dangerous
 //     sibling: silent semantic corruption instead of a loud failure. This
 //     one is fixable: --fix writes the config pointing at the tracked
-//     wrapper script (absolute path), when that script exists in the repo;
-//     when it doesn't, the check stays ERROR with the manual command.
+//     wrapper script via a PORTABLE repo-relative path (mindspec-oe0u),
+//     when that script exists in the repo; when it doesn't, the check stays
+//     ERROR with the manual command.
+//
+// GitHub-PR-merge residual: PR merges performed on GitHub's servers never
+// run a local merge driver, so a both-sides-changed .beads/issues.jsonl can
+// still land text-merged after a web merge. That is compensated by the
+// post-merge beads-sync pattern (regenerate-from-DB on pull), not by this
+// check — documented here, not fixed (mindspec-oe0u, ADR-0025).
 //
 // The inverse hole is flagged too: a configured driver with NO merge=beads
 // attribute in .gitattributes — git text-merges the jsonl despite the
@@ -356,12 +370,17 @@ func checkBeadsMergeDriver(r *Report, root string) {
 	hasAttr := gitattributesHasBeadsMerge(root)
 	driver, configured := readGitConfig(root, "merge.beads.driver")
 
-	scriptAbs, scriptExists := mergeDriverScriptPath(root)
-	// Single-quote the script path: git runs merge drivers via `sh -c`, so
-	// an unquoted absolute path word-splits when the repo lives under a
-	// directory with spaces. driverTokens parses the quotes back out, so
-	// the written value re-validates cleanly.
-	wantDriver := "'" + scriptAbs + "' %A %O %B"
+	_, scriptExists := mergeDriverScriptPath(root)
+	// Write a PORTABLE repo-relative driver value (mindspec-oe0u), NOT a
+	// machine-specific absolute path: resolveDriverCommand resolves a
+	// relative path containing '/' against the worktree top-level, and git
+	// runs merge drivers from the worktree root, so this single shared
+	// .git/config value is valid from every linked worktree AND every fresh
+	// clone. --fix therefore CONVERGES an existing absolute value to the
+	// portable form instead of re-baking an absolute one. Single-quoted so
+	// the value round-trips through driverTokens and survives a repo path
+	// that contains spaces.
+	wantDriver := "'" + beadsMergeDriverScript + "' %A %O %B"
 
 	if !configured || strings.TrimSpace(driver) == "" {
 		if !hasAttr {
@@ -472,7 +491,7 @@ func gitattributesHasBeadsMerge(root string) bool {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 2 || fields[0] != beadsMergeAttrPattern {
 			continue
 		}
 		for _, attr := range fields[1:] {
