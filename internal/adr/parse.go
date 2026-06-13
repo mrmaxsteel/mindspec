@@ -226,26 +226,69 @@ func FilterADRs(adrs []ADR, domains []string) []ADR {
 	return result
 }
 
-// NextID scans existing ADRs and returns the next available ID (zero-padded to 4 digits).
+// NextID scans existing ADRs under root and returns the next available ID
+// (zero-padded to 4 digits).
 func NextID(root string) (string, error) {
+	maxNum, err := maxADRNum(root)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%04d", maxNum+1), nil
+}
+
+// NextIDAcross scans ADRs under EVERY supplied root and returns the next
+// available ID over their UNION (the max leading-integer across all roots,
+// +1). It exists so `adr create` from a bead/spec worktree — whose WRITE
+// target is the worktree-local root but whose READS/validation union the
+// worktree branch ADRs with the main-checkout ADRs — allocates an ID that
+// cannot collide with a main-only ADR added after the branch diverged
+// (mindspec-8lzq). With a single root it is identical to NextID.
+func NextIDAcross(roots ...string) (string, error) {
+	maxNum := 0
+	for _, root := range roots {
+		n, err := maxADRNum(root)
+		if err != nil {
+			return "", err
+		}
+		if n > maxNum {
+			maxNum = n
+		}
+	}
+	return fmt.Sprintf("%04d", maxNum+1), nil
+}
+
+// maxADRNum returns the highest ADR number found under root (0 when none).
+func maxADRNum(root string) (int, error) {
 	adrDir := workspace.ADRDir(root)
 	pattern := filepath.Join(adrDir, "ADR-*.md")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return "", fmt.Errorf("globbing ADRs: %w", err)
-	}
-
-	if len(matches) == 0 {
-		return "0001", nil
+		return 0, fmt.Errorf("globbing ADRs: %w", err)
 	}
 
 	maxNum := 0
 	for _, path := range matches {
 		base := filepath.Base(path)
-		// Extract number from ADR-NNNN.md
+		// Extract the leading numeric run after the "ADR-" prefix.
+		// Both the legacy bare "ADR-NNNN.md" and the slugged
+		// "ADR-NNNN-slug.md" forms carry their numeric ID as the run
+		// of digits immediately following "ADR-". Atoi-ing the whole
+		// "NNNN-slug" suffix (the prior behavior) failed for every
+		// slugged filename, skipping it and leaving maxNum too low —
+		// so a directory of only slugged ADRs produced a COLLIDING
+		// low NextID. Reading just the leading digit run counts both
+		// forms; a non-numeric head (e.g. "ADR-foo.md") yields an
+		// empty run and is skipped safely.
 		name := strings.TrimSuffix(base, ".md")
-		numStr := strings.TrimPrefix(name, "ADR-")
-		n, err := strconv.Atoi(numStr)
+		rest := strings.TrimPrefix(name, "ADR-")
+		end := 0
+		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			continue
+		}
+		n, err := strconv.Atoi(rest[:end])
 		if err != nil {
 			continue
 		}
@@ -254,5 +297,5 @@ func NextID(root string) (string, error) {
 		}
 	}
 
-	return fmt.Sprintf("%04d", maxNum+1), nil
+	return maxNum, nil
 }

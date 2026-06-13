@@ -235,6 +235,7 @@ func init() {
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(validateCmd)
+	rootCmd.AddCommand(versionCmd) // spec 096 Req 5: `version` == `--version`
 	rootCmd.AddCommand(otelCmd)
 	rootCmd.AddCommand(recordCmd)
 
