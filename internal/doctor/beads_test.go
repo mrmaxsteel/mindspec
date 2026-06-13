@@ -622,8 +622,14 @@ func TestCheckBeadsMergeDriver_FixWritesConfigAndRecheckPasses(t *testing.T) {
 
 	got := gitConfigGet(t, root, "merge.beads.driver")
 	toks := driverTokens(got)
-	if len(toks) == 0 || !filepath.IsAbs(toks[0]) {
-		t.Errorf("fix should write an absolute script path; got %q (tokens %v)", got, toks)
+	// mindspec-oe0u: --fix writes a PORTABLE repo-relative path, not a
+	// machine-specific absolute one, so the shared .git/config value is valid
+	// from every linked worktree and every fresh clone.
+	if len(toks) == 0 || toks[0] != "scripts/bd-jsonl-merge-driver.sh" {
+		t.Errorf("fix should write the portable relative script path; got %q (tokens %v)", got, toks)
+	}
+	if filepath.IsAbs(toks[0]) {
+		t.Errorf("fix must NOT bake an absolute path; got %q", toks[0])
 	}
 	if !strings.HasSuffix(got, " %A %O %B") {
 		t.Errorf("fix should pass %%A %%O %%B; got %q", got)
@@ -684,11 +690,14 @@ func TestCheckBeadsMergeDriver_FixSurvivesPathWithSpaces(t *testing.T) {
 		t.Fatalf("fix: %v", err)
 	}
 
-	// Written value must round-trip through driverTokens to the script path.
+	// Written value must round-trip through driverTokens to the portable
+	// relative script path. A relative path containing '/' is resolved by git
+	// against the worktree root, so it survives a repo dir with spaces (and is
+	// cross-worktree/cross-clone portable) — mindspec-oe0u.
 	got := gitConfigGet(t, root, "merge.beads.driver")
 	toks := driverTokens(got)
-	if len(toks) == 0 || toks[0] != script {
-		t.Fatalf("written config %q does not round-trip through driverTokens to %q (tokens %v)", got, script, toks)
+	if len(toks) == 0 || toks[0] != "scripts/bd-jsonl-merge-driver.sh" {
+		t.Fatalf("written config %q does not round-trip through driverTokens to the portable relative path (tokens %v)", got, toks)
 	}
 
 	// Re-validation must pass despite the space in the path.
@@ -762,6 +771,12 @@ func TestGitattributesHasBeadsMerge(t *testing.T) {
 		// D2 mutation coverage: merge=beads must be found beyond fields[1].
 		{name: "multi-attribute line", write: true, content: ".beads/issues.jsonl -text merge=beads\n", want: true},
 		{name: "tab separated", write: true, content: ".beads/issues.jsonl\tmerge=beads\n", want: true},
+		// mindspec-oe0u: a newline-unsafe append corrupts the pattern field;
+		// merge=beads is present as a token but NOT mapped to the exact
+		// .beads/issues.jsonl pattern, so detection must report false.
+		{name: "corrupted concatenated pattern", write: true, content: "*.png binary.beads/issues.jsonl merge=beads\n", want: false},
+		// A merge=beads attribute on a DIFFERENT pattern is not our mapping.
+		{name: "merge=beads on other pattern", write: true, content: "other.jsonl merge=beads\n", want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

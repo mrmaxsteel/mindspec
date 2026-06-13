@@ -197,6 +197,13 @@ func Run(root string, dryRun bool) (*Result, error) {
 		}
 	}
 
+	// Provision the beads jsonl merge driver so a fresh repo merges
+	// both-sides-changed .beads/issues.jsonl cleanly from commit 0
+	// (mindspec-oe0u, ADR-0025). Wired AFTER the manifest write loop.
+	if err := provisionBeadsMergeDriver(r, root, dryRun); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 
