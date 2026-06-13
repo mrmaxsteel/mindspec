@@ -16,7 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/redact"
 )
@@ -188,6 +190,18 @@ func TestResolveHelperProcess(t *testing.T) {
 	}
 	fp := os.Getenv("MINDSPEC_TEST_RESOLVE_FP")
 	ver := os.Getenv("MINDSPEC_TEST_RESOLVE_VER")
+	// When MINDSPEC_TEST_RESOLVE_PAUSE_MS is set, this helper PAUSES inside the
+	// reports.jsonl read-modify-write window (after the on-disk re-read, before
+	// the rename) via the writeRereadHook seam, so a concurrent second-process
+	// resolve is given the chance to interleave. This deterministically widens
+	// the cross-process lost-update window so the OS lock is what makes the
+	// outcome correct, not timing luck.
+	if ms := os.Getenv("MINDSPEC_TEST_RESOLVE_PAUSE_MS"); ms != "" {
+		if d, err := time.ParseDuration(ms + "ms"); err == nil {
+			var once sync.Once
+			writeRereadHook = func() { once.Do(func() { time.Sleep(d) }) }
+		}
+	}
 	if err := MarkResolved(fp, ver); err != nil {
 		t.Fatalf("helper MarkResolved: %v", err)
 	}

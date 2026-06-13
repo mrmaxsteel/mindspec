@@ -30,9 +30,12 @@ package journal
 // is >= X via version.Compare) is a REGRESSION; one at < X is stale
 // (suppressed); a dev/unparseable running version is treated as
 // unbounded-newest → REGRESSION (fail toward surfacing, never suppress). The
-// classification is computed at report-list time by Classify(), keyed by the
-// normalized identity + fingerprint (NOT the opaque hash alone — collision
-// safety, DQ5).
+// classification is computed at report-list time by Classify(), keyed by
+// fingerprint ALONE — collision-safe BECAUSE fingerprint = H(identity)
+// (redact.Fingerprint is the SHA-256 over the NUL-framed identity tuple, so
+// distinct identities yield distinct fingerprints by construction; it is NOT an
+// opaque/arbitrary hash that could alias two events). The identity tuple is
+// persisted on the record for display/audit only, not as a second key (DQ5).
 
 import (
 	"encoding/json"
@@ -51,6 +54,14 @@ const reportSchemaVersion = 1
 
 // reportsFileName is the fixed consolidated-reports filename under Dir().
 const reportsFileName = "reports.jsonl"
+
+// writeRereadHook is a test-only seam (nil in production, mirroring the
+// nowRFC3339 seam) invoked inside writeReportsLocked AFTER the on-disk re-read
+// and BEFORE the temp+rename. A concurrency test sets it to widen that window
+// so two in-process writers deterministically interleave, proving the OS lock
+// (not timing luck) serializes the read-modify-write. It is NEVER set in
+// non-test code.
+var writeRereadHook func()
 
 // Status is the derived triage status of a consolidated friction report
 // (Req 5). It is computed by Classify() from the report's resolved_in
@@ -277,44 +288,75 @@ func readReportsRaw(path string) ([]Report, error) {
 // WriteReports atomically replaces reports.jsonl with the given reports (one
 // JSONL line each), created 0600 under the isolated store dir (HC-8). Unlike
 // the append-only journal, reports.jsonl is the CONSOLIDATED VIEW and IS
-// rewritten wholesale (the §Storage Contract's 2-file design). The write is
-// guarded by mu so a concurrent consolidate/resolve cannot interleave, and is
-// done write-to-temp + rename for crash-atomicity.
+// rewritten wholesale (the §Storage Contract's 2-file design), done
+// write-to-temp + rename for crash-atomicity.
 //
-// Cross-process lost-update protection (codex-consolidation #2): the in-process
-// mu does NOT span processes, so a stale consolidator (`report`:
-// Consolidate→WriteReports) could clobber a concurrent `report list --resolve`
-// from another process and ERASE its resolved_in_version. To prevent that,
-// IMMEDIATELY before the temp+rename we RE-READ the current reports.jsonl under
-// the lock and MERGE its resolved-state into the slice about to be written: for
-// any fingerprint, a NON-EMPTY existing resolved_in_version on disk WINS over
-// an empty one in the slice we are writing (a concurrent resolve is never
-// erased). This is a compare-and-merge under the existing atomic temp+rename.
+// Cross-process safety (codex-consolidation #1/#2): the in-process mu does NOT
+// span processes, so a stale writer (`report`: Consolidate→WriteReports) could
+// clobber a concurrent `report list --resolve` from ANOTHER process and erase
+// its resolved_in_version, or DROP an on-disk-only row added after its snapshot.
+// The whole read-modify-write is therefore serialized by an OS-VISIBLE advisory
+// lock (withReportsLock → flock on unix, an O_EXCL lockfile on windows) held
+// across the on-disk re-read + union-merge + temp+rename. Under the lock we
+// UNION the fresh on-disk view with the incoming slice (writeReportsLocked):
+//
+//   - a NON-EMPTY resolved_in_version on disk wins over an empty incoming slot
+//     (a concurrent resolve is never erased); and
+//   - any fingerprint present ON DISK but ABSENT from the incoming slice is
+//     CARRIED FORWARD (a stale snapshot can never DELETE a row another process
+//     wrote — e.g. a newly-resolved fingerprint added after this writer's read).
+//
+// No stale snapshot can lose another process's update.
 func WriteReports(reports []Report) error {
+	return withReportsLock(func() error {
+		return writeReportsLocked(reports)
+	})
+}
+
+// writeReportsLocked is the read-modify-write body that MUST run while holding
+// withReportsLock (the OS-visible cross-process lock). It re-reads the fresh
+// on-disk reports, unions them with the incoming slice (carrying forward both
+// resolved-state AND on-disk-only rows), then atomically temp+renames the
+// merged view into place. Callers already inside withReportsLock (MarkResolved's
+// consolidate→resolve→write) call this directly so the entire sequence is one
+// critical section. The whole re-read+union+rename runs while the OS lock is
+// held, so no other process can interleave between the re-read and the rename.
+func writeReportsLocked(reports []Report) error {
 	path, err := ReportsPath()
 	if err != nil {
 		return err
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Re-read the on-disk view under the lock and union newer resolved-state in
-	// (a concurrent cross-process resolve must survive this rewrite). A
-	// non-empty existing resolved_in_version wins over an empty slot.
+	// Re-read the fresh on-disk view under the lock and UNION it with the
+	// incoming slice. Two merges, neither of which can lose another writer's
+	// update:
+	//   (1) carry forward a non-empty on-disk resolved_in_version onto an
+	//       incoming row whose slot is empty (a concurrent resolve survives);
+	//   (2) APPEND any on-disk fingerprint not present in the incoming slice
+	//       (a stale snapshot never deletes a row another process added).
 	if onDisk, rerr := readReportsRaw(path); rerr == nil {
-		existingResolved := map[string]string{}
-		for _, r := range onDisk {
-			if r.ResolvedInVersion != "" {
-				existingResolved[r.Fingerprint] = r.ResolvedInVersion
-			}
+		// Test seam (nil in production, mirrors nowRFC3339): widen the
+		// re-read→rename window so a concurrency test can deterministically
+		// interleave two writers and prove the OS lock — not luck — serializes
+		// the read-modify-write. Never set outside tests.
+		if writeRereadHook != nil {
+			writeRereadHook()
 		}
+		present := map[string]int{} // fingerprint → index in reports
 		for i := range reports {
-			if reports[i].ResolvedInVersion == "" {
-				if v := existingResolved[reports[i].Fingerprint]; v != "" {
-					reports[i].ResolvedInVersion = v
+			present[reports[i].Fingerprint] = i
+		}
+		for _, d := range onDisk {
+			if idx, ok := present[d.Fingerprint]; ok {
+				// (1) on-disk resolution wins over an empty incoming slot.
+				if reports[idx].ResolvedInVersion == "" && d.ResolvedInVersion != "" {
+					reports[idx].ResolvedInVersion = d.ResolvedInVersion
 				}
+				continue
 			}
+			// (2) on-disk-only fingerprint: carry the whole row forward.
+			reports = append(reports, d)
+			present[d.Fingerprint] = len(reports) - 1
 		}
 	}
 
@@ -370,10 +412,20 @@ func WriteReports(reports []Report) error {
 // mutated).
 //
 // It first CONSOLIDATES (so the report exists even if `report` was never run),
-// then sets the resolution keyed by fingerprint (the normalized identity is
-// persisted alongside, so a hash collision cannot silently resolve two
-// distinct events — DQ5), then rewrites reports.jsonl. An unknown fingerprint
-// is an error (you cannot resolve a report that was never observed).
+// then sets the resolution keyed by fingerprint ALONE. This is collision-safe
+// BECAUSE fingerprint = H(identity) (the SHA-256 over the NUL-framed identity
+// tuple), so distinct identities cannot share a fingerprint and a resolve can
+// never silently apply to two distinct events — DQ5. The identity is persisted
+// alongside for display/audit only, not as a second key. Then it rewrites
+// reports.jsonl. An unknown fingerprint is an error (you cannot resolve a
+// report that was never observed).
+//
+// The ENTIRE consolidate→resolve→write runs inside ONE withReportsLock critical
+// section (codex-consolidation #1/#2): the consolidation reads the FRESH journal
+// + reports.jsonl and the write unions on-disk-only rows back, so two processes
+// resolving DIFFERENT fingerprints concurrently both survive (neither can read a
+// stale snapshot and clobber the other's resolve), and a resolve never deletes a
+// row another process added.
 //
 // The resolve VERSION is NORMALIZED at the source (R1 / Req 7 / HC-4): only a
 // concrete semver (canonicalized to bare `major.minor.patch`) or the explicit
@@ -394,22 +446,26 @@ func MarkResolved(fp string, ver string) error {
 		// either (R1). The error names the CONTRACT, not the offending input.
 		return fmt.Errorf("journal: MarkResolved: invalid resolve version — pass a concrete semver (e.g. 1.4.2) or %q", version.Current())
 	}
-	reports, err := Consolidate()
-	if err != nil {
-		return err
-	}
-	found := false
-	for i := range reports {
-		if reports[i].Fingerprint == fp {
-			reports[i].ResolvedInVersion = norm
-			found = true
-			break
+	// Consolidate→resolve→write under ONE cross-process lock so a concurrent
+	// resolve in another process cannot be lost (codex-consolidation #1/#2).
+	return withReportsLock(func() error {
+		reports, err := Consolidate()
+		if err != nil {
+			return err
 		}
-	}
-	if !found {
-		return fmt.Errorf("journal: no friction report with fingerprint %q to resolve (run `mindspec report` first, then `mindspec report list`)", fp)
-	}
-	return WriteReports(reports)
+		found := false
+		for i := range reports {
+			if reports[i].Fingerprint == fp {
+				reports[i].ResolvedInVersion = norm
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("journal: no friction report with fingerprint %q to resolve (run `mindspec report` first, then `mindspec report list`)", fp)
+		}
+		return writeReportsLocked(reports)
+	})
 }
 
 // normalizeResolveVersion validates + canonicalizes a resolve-in version so
