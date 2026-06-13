@@ -54,9 +54,9 @@ surface; this spec pays down the highest-cost ones.
 
 ## Impacted Domains
 
-- **core**: `internal/validate` (doc-sync + ADR-divergence ownership attribution),
-  `internal/phase` (lifecycle phase derivation), `internal/complete` + `internal/approve`
-  (thread the diffed ref into the gates).
+- **workflow**: `internal/validate` (doc-sync + ADR-divergence ownership attribution gates),
+  `internal/complete` + `internal/approve` (thread the diffed ref into the gates) — Bead 1.
+- **core**: `internal/phase` (lifecycle phase derivation) — Bead 2.
 
 ## ADR Touchpoints
 
@@ -66,7 +66,12 @@ surface; this spec pays down the highest-cost ones.
   the manifest is read from (ambient working tree → diffed ref).
 - [ADR-0036](../../adr/ADR-0036.md): OWNERSHIP loader (spec 091 Req 13, no silent fallback) —
   Req 1 preserves the absent-manifest-claims-nothing semantics under a ref read.
-- A new ADR may be warranted for the ref-anchored gate-input read (decided at planning).
+- [ADR-0035](../../adr/ADR-0035-agent-error-contract.md): agent error/recovery contract
+  (Accepted; Domain(s): workflow, execution, core — covers BOTH impacted domains). Req 2's
+  phase-gate guard hint follows its recovery-line convention; the ADR-divergence/doc-sync gate
+  failures Req 1 governs are emitted via this contract.
+- Decision (resolved at planning, was a deferred question): the ref-anchored gate-input read is
+  a fidelity refinement of ADR-0031's attribution decision — **amend ADR-0031**, no new ADR.
 
 ## Requirements
 
@@ -112,7 +117,10 @@ surface; this spec pays down the highest-cost ones.
 
 ### Out of Scope
 - The per-bead diff RANGE computation (already fork-anchored — Req 3 only pins it with tests).
-- The `impl approve` whole-branch backstop refs (already `main..specBranch`).
+- (CORRECTION per plan review: `impl approve`'s doc-sync is NOT already `main..specBranch` —
+  it is working-tree-vs-base (`ValidateDocs(root, base, exec)`). Ref-anchoring BOTH its diff
+  head and its ownership read to the spec-branch tip IS in scope for Bead 1; only the
+  ADR-divergence committed-range refs, which are already `base..specBranchTip`, stay out.)
 
 ## Non-Goals
 
