@@ -27,6 +27,19 @@ type PlanFrontmatter struct {
 	ApprovedBy   string        `yaml:"approved_by"`
 	BeadIDs      []string      `yaml:"bead_ids"`
 	ADRCitations []ADRCitation `yaml:"adr_citations"`
+	WorkChunks   []WorkChunk   `yaml:"work_chunks"`
+}
+
+// WorkChunk is one structured implementation chunk declared in plan
+// frontmatter. The chunk `id` is 1-based and matches the Nth `## Bead N`
+// section in declaration order, so chunk `id N` maps positionally to
+// `bead_ids[N-1]`. `depends_on` lists the chunk ids this chunk depends on;
+// a `depends_on: [M]` entry makes `bead_ids[N-1]` depend on `bead_ids[M-1]`
+// (spec 097 R3). Non-strict yaml.Unmarshal harmlessly ignores any extra
+// human-readable keys (title/scope/verify) the templates also carry.
+type WorkChunk struct {
+	ID        int   `yaml:"id"`
+	DependsOn []int `yaml:"depends_on"`
 }
 
 // ADRCitation represents an ADR citation in plan frontmatter.
@@ -178,7 +191,7 @@ func ValidatePlan(root, specID string) *Result {
 		if err != nil {
 			cfg = config.DefaultConfig()
 		}
-		checkDecompositionQuality(r, beadSections, cfg.Decomposition)
+		checkDecompositionQuality(r, beadSections, fm.WorkChunks, cfg.Decomposition)
 	}
 
 	return r
@@ -824,15 +837,60 @@ func ExtractPathRefs(text string) []string {
 	return result
 }
 
-// beadDepRe matches "Bead N" references in dependency text.
-var beadDepRe = regexp.MustCompile(`(?i)bead\s+(\d+)`)
+// ValidateWorkChunkAlignment verifies that the structured `work_chunks` ids
+// align positionally with the plan's `## Bead N` sections before any
+// consumer wires `bead_ids[N-1]` from them (spec 097 R3). It requires the
+// chunk ids to be exactly the contiguous set 1..numSections (no gaps, no
+// duplicates, no count mismatch) and every `depends_on` target to be an
+// in-range, non-self chunk id. A misaligned or out-of-range id set returns a
+// descriptive error so callers reject it rather than panic or mis-wire.
+//
+// An empty `chunks` slice aligns trivially (returns nil): a plan that
+// declares no structured deps simply wires nothing.
+func ValidateWorkChunkAlignment(chunks []WorkChunk, numSections int) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if len(chunks) != numSections {
+		return fmt.Errorf("work_chunks count (%d) does not match the number of ## Bead sections (%d); each chunk id must map to exactly one bead section", len(chunks), numSections)
+	}
+	seen := make(map[int]bool, len(chunks))
+	for _, c := range chunks {
+		if c.ID < 1 || c.ID > numSections {
+			return fmt.Errorf("work_chunk id %d is out of range; ids must be the contiguous set 1..%d", c.ID, numSections)
+		}
+		if seen[c.ID] {
+			return fmt.Errorf("work_chunk id %d is declared more than once; ids must be the contiguous set 1..%d", c.ID, numSections)
+		}
+		seen[c.ID] = true
+	}
+	// With the count matched and every id in 1..numSections unique, the set
+	// is necessarily contiguous 1..numSections. Bounds-check depends_on.
+	for _, c := range chunks {
+		for _, dep := range c.DependsOn {
+			if dep < 1 || dep > numSections {
+				return fmt.Errorf("work_chunk id %d declares depends_on id %d which is out of range 1..%d", c.ID, dep, numSections)
+			}
+			if dep == c.ID {
+				return fmt.Errorf("work_chunk id %d declares a self-dependency", c.ID)
+			}
+		}
+	}
+	return nil
+}
 
 // checkDecompositionQuality computes cross-bead metrics and emits warnings
 // when the plan structure correlates with known degradation patterns. All
 // emitted issues are advisory (AddWarning, never AddError) and never gate
 // approval. Thresholds are configurable via `.mindspec/config.yaml` under
 // the top-level `decomposition:` block (see config.Decomposition).
-func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Decomposition) {
+//
+// The dependency graph is built from the structured `work_chunks` deps
+// (spec 097 R3): chunk `id N` maps positionally to the Nth section, and a
+// `depends_on: [M]` entry is an edge `section[M-1] → section[N-1]`. When the
+// chunk ids do not align with the sections (advisory path — never gating) the
+// out-of-range entries are skipped, mirroring the bounds guard used here.
+func checkDecompositionQuality(r *Result, sections []BeadSection, chunks []WorkChunk, cfg config.Decomposition) {
 	if len(sections) == 0 {
 		return
 	}
@@ -891,26 +949,23 @@ func checkDecompositionQuality(r *Result, sections []BeadSection, cfg config.Dec
 	}
 
 	// 3. Dependency chain depth and parallelism ratio
-	// Build adjacency list from DependsOn text
+	// Build adjacency list from the structured work_chunks deps (spec 097
+	// R3): chunk `id N` is the Nth section, and `depends_on: [M]` is the
+	// edge section[M-1] → section[N-1]. Every index is bounds-checked so a
+	// misaligned id set degrades gracefully on this advisory path.
 	inDegree := make(map[int]int, len(sections))
 	adj := make(map[int][]int, len(sections))
 	for i := range sections {
 		inDegree[i] = 0
 	}
 
-	for i, bs := range sections {
-		if bs.DependsOn == "" {
+	for _, chunk := range chunks {
+		i := chunk.ID - 1 // chunk ids are 1-indexed
+		if i < 0 || i >= len(sections) {
 			continue
 		}
-		lower := strings.ToLower(bs.DependsOn)
-		if lower == "none" || lower == "nothing" || lower == "n/a" {
-			continue
-		}
-		matches := beadDepRe.FindAllStringSubmatch(bs.DependsOn, -1)
-		for _, m := range matches {
-			depNum := 0
-			fmt.Sscanf(m[1], "%d", &depNum)
-			depIdx := depNum - 1 // beads are 1-indexed
+		for _, dep := range chunk.DependsOn {
+			depIdx := dep - 1
 			if depIdx >= 0 && depIdx < len(sections) && depIdx != i {
 				adj[depIdx] = append(adj[depIdx], i)
 				inDegree[i]++

@@ -130,10 +130,21 @@ work_chunks:
 
 func TestCreateImplementationBeads_CreatesAndWiresDeps(t *testing.T) {
 	tmp := t.TempDir()
+	// Dependencies are declared in structured `work_chunks` frontmatter (spec
+	// 097 R3): chunk id N maps to bead_ids[N-1]; depends_on [M] wires
+	// bead_ids[N-1] → bead_ids[M-1]. The prose "Depends on" lines below are
+	// human-readable only and MUST NOT drive wiring.
 	planContent := `---
 status: Approved
 spec_id: "042-test"
 version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+  - id: 2
+    depends_on: [1]
+  - id: 3
+    depends_on: [1, 2]
 ---
 
 # Plan
@@ -225,6 +236,142 @@ Bead 1, Bead 2
 	}
 	if depCalls[2] != "dep add test-bead-3 test-bead-2" {
 		t.Errorf("dep call 2: expected 'dep add test-bead-3 test-bead-2', got %q", depCalls[2])
+	}
+}
+
+// TestCreateImplementationBeads_ProseDepsWireNothing proves the prose
+// `bead\s+(\d+)` scrape is gone (spec 097 R3): a plan with prose "Depends on
+// Bead 1" lines but NO `work_chunks` frontmatter wires ZERO dependencies.
+// RED on revert: the retired prose path would emit `bd dep add` calls.
+func TestCreateImplementationBeads_ProseDepsWireNothing(t *testing.T) {
+	tmp := t.TempDir()
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+None
+
+## Bead 2: Second thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+Bead 1
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var callCount atomic.Int32
+	var depCalls []string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			n := callCount.Add(1)
+			return []byte(fmt.Sprintf(`{"id":"test-bead-%d"}`, n)), nil
+		}
+		if len(args) > 0 && args[0] == "dep" {
+			depCalls = append(depCalls, strings.Join(args, " "))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unexpected bd call: %v", args)
+	}
+
+	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(beadIDs) != 2 {
+		t.Fatalf("expected 2 bead IDs, got %d: %v", len(beadIDs), beadIDs)
+	}
+	if len(depCalls) != 0 {
+		t.Errorf("expected ZERO dep calls from prose-only deps, got %d: %v", len(depCalls), depCalls)
+	}
+}
+
+// TestCreateImplementationBeads_MisalignedWorkChunks proves the spec 097 R3
+// alignment guard rejects a work_chunks id set that does not map 1:1 onto the
+// `## Bead N` sections, returning a clear error instead of mis-wiring or
+// panicking. Here 3 chunks are declared against 2 bead sections.
+func TestCreateImplementationBeads_MisalignedWorkChunks(t *testing.T) {
+	tmp := t.TempDir()
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+  - id: 2
+    depends_on: [1]
+  - id: 3
+    depends_on: [2]
+---
+
+# Plan
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+None
+
+## Bead 2: Second thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Depends on**
+Bead 1
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("bd must not be called when work_chunks are misaligned: %v", args)
+	}
+
+	_, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	if err == nil {
+		t.Fatal("expected an alignment error for 3 work_chunks against 2 bead sections, got nil")
+	}
+	if !strings.Contains(err.Error(), "misaligned") {
+		t.Errorf("expected a 'misaligned' alignment error, got: %v", err)
 	}
 }
 

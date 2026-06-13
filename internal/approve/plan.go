@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -269,9 +267,6 @@ func updatePlanApproval(planPath, approvedBy string) error {
 	return os.WriteFile(planPath, []byte(output), 0644)
 }
 
-// beadNumRe matches "Bead N" where N is the bead number in the heading.
-var beadNumRe = regexp.MustCompile(`^Bead\s+(\d+)`)
-
 // createImplementationBeads parses plan.md for ## Bead sections, creates child
 // beads under the lifecycle epic, and wires inter-bead dependencies.
 // Each bead is populated with description, acceptance criteria, design, and metadata
@@ -301,18 +296,31 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	requirements := contextpack.ExtractSection(specContent, "Requirements")
 	acceptanceCriteria := contextpack.ExtractSection(specContent, "Acceptance Criteria")
 
-	// ADR citations come from the PLAN's structured `adr_citations`
-	// frontmatter (the validated source of truth) — not a regex scrape of
-	// the spec's `## ADR Touchpoints` prose (spec 097 R2). A parse failure
-	// is non-fatal here: plan validation already gates the frontmatter, so
-	// the design field simply omits ADR citations on a malformed plan.
+	// Parse the plan's structured frontmatter once: it is the validated
+	// source of truth for both the bead `--design` ADR list (spec 097 R2)
+	// and the inter-bead dependency wiring (spec 097 R3). A parse failure is
+	// non-fatal for the ADR list (plan validation already gates the
+	// frontmatter), so the design field simply omits ADR citations on a
+	// malformed plan; the dep-wiring path below treats a parse failure as
+	// "no structured deps" and wires nothing.
 	var adrCitationIDs []string
+	var workChunks []validate.WorkChunk
 	if fm, err := validate.ParsePlanFrontmatter(planContent); err == nil {
 		for _, c := range fm.ADRCitations {
 			if c.ID != "" {
 				adrCitationIDs = append(adrCitationIDs, c.ID)
 			}
 		}
+		workChunks = fm.WorkChunks
+	}
+
+	// Alignment guard (spec 097 R3): the positional `bead_ids[N-1]` wiring
+	// below requires every `work_chunks` id to map to exactly one `## Bead N`
+	// section. Validate contiguity (1..K), the count match, and every
+	// depends_on target BEFORE creating any beads, so a misaligned plan is
+	// rejected up front rather than mis-wired or panicking mid-create.
+	if err := validate.ValidateWorkChunkAlignment(workChunks, len(sections)); err != nil {
+		return nil, fmt.Errorf("plan work_chunks misaligned with bead sections: %w", err)
 	}
 
 	// Build design field: spec requirements + ADR citations (by ID).
@@ -321,8 +329,9 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 	// --- Extract raw bead section content from plan.md ---
 	sectionContent := extractBeadSectionContents(planContent)
 
-	// Map from bead number (from heading) to created bead ID for dependency wiring.
-	numToID := make(map[int]string)
+	// Beads are appended in `## Bead` section declaration order, so
+	// beadIDs[N-1] is deterministically the Nth section — which the
+	// alignment guard above ties to work_chunk id N for dependency wiring.
 	var beadIDs []string
 
 	// Build a map from heading to parsed bead section for per-bead AC lookup.
@@ -374,38 +383,26 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, err
 		}
 
 		beadIDs = append(beadIDs, created.ID)
-
-		// Extract bead number from heading for dependency resolution.
-		if m := beadNumRe.FindStringSubmatch(sec.Heading); len(m) > 1 {
-			if n, err := strconv.Atoi(m[1]); err == nil {
-				numToID[n] = created.ID
-			}
-		}
 	}
 
-	// Wire dependencies: parse "Depends on" text for "Bead N" references.
-	depRe := regexp.MustCompile(`(?i)bead\s+(\d+)`)
-	for i, sec := range sections {
-		if sec.DependsOn == "" {
+	// Wire dependencies from the structured `work_chunks` frontmatter (spec
+	// 097 R3 — the prose `bead\s+(\d+)` scrape is retired). Mapping: chunk
+	// `id N` → bead_ids[N-1]; a `depends_on: [M]` entry makes bead_ids[N-1]
+	// depend on bead_ids[M-1]. Iterate by ascending chunk id (the alignment
+	// guard proved the ids are the contiguous set 1..len(beadIDs)) so the
+	// `bd dep add` order is deterministic regardless of YAML ordering.
+	byID := make(map[int]validate.WorkChunk, len(workChunks))
+	for _, c := range workChunks {
+		byID[c.ID] = c
+	}
+	for n := 1; n <= len(beadIDs); n++ {
+		chunk, ok := byID[n]
+		if !ok {
 			continue
 		}
-		depText := strings.ToLower(sec.DependsOn)
-		if depText == "none" || depText == "nothing" || depText == "n/a" {
-			continue
-		}
-
-		matches := depRe.FindAllStringSubmatch(sec.DependsOn, -1)
-		for _, m := range matches {
-			depNum, err := strconv.Atoi(m[1])
-			if err != nil {
-				continue
-			}
-			depID, ok := numToID[depNum]
-			if !ok {
-				continue
-			}
-			// Wire: beadIDs[i] depends on depID
-			if _, err := planRunBDFn("dep", "add", beadIDs[i], depID); err != nil {
+		for _, dep := range chunk.DependsOn {
+			// Bounds were validated by ValidateWorkChunkAlignment above.
+			if _, err := planRunBDFn("dep", "add", beadIDs[n-1], beadIDs[dep-1]); err != nil {
 				// Best-effort: don't fail the whole operation for a dep wiring issue
 				continue
 			}

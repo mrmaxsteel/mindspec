@@ -935,7 +935,7 @@ func TestDecompositionQuality_HighBeadCount(t *testing.T) {
 			DependsOn:    "None",
 		}
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	checkDecompositionQuality(r, sections, nil, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -971,7 +971,7 @@ func TestDecompositionQuality_HighScopeRedundancy(t *testing.T) {
 			DependsOn:    "None",
 		},
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	checkDecompositionQuality(r, sections, nil, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1007,7 +1007,7 @@ func TestDecompositionQuality_LowScopeRedundancy(t *testing.T) {
 			DependsOn:    "None",
 		},
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	checkDecompositionQuality(r, sections, nil, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1029,7 +1029,13 @@ func TestDecompositionQuality_DeepChain(t *testing.T) {
 		{Heading: "Bead 3: C", HasDependsOn: true, DependsOn: "Bead 2"},
 		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 3"},
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	chunks := []WorkChunk{
+		{ID: 1},
+		{ID: 2, DependsOn: []int{1}},
+		{ID: 3, DependsOn: []int{2}},
+		{ID: 4, DependsOn: []int{3}},
+	}
+	checkDecompositionQuality(r, sections, chunks, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1054,7 +1060,14 @@ func TestDecompositionQuality_LowParallelism(t *testing.T) {
 		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 2"},
 		{Heading: "Bead 5: E", HasDependsOn: true, DependsOn: "Bead 3"},
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	chunks := []WorkChunk{
+		{ID: 1},
+		{ID: 2, DependsOn: []int{1}},
+		{ID: 3, DependsOn: []int{1}},
+		{ID: 4, DependsOn: []int{2}},
+		{ID: 5, DependsOn: []int{3}},
+	}
+	checkDecompositionQuality(r, sections, chunks, config.DefaultConfig().Decomposition)
 
 	found := false
 	for _, issue := range r.Issues {
@@ -1090,7 +1103,12 @@ func TestDecompositionQuality_NoWarnings(t *testing.T) {
 			DependsOn:    "Bead 1",
 		},
 	}
-	checkDecompositionQuality(r, sections, config.DefaultConfig().Decomposition)
+	chunks := []WorkChunk{
+		{ID: 1},
+		{ID: 2},
+		{ID: 3, DependsOn: []int{1}},
+	}
+	checkDecompositionQuality(r, sections, chunks, config.DefaultConfig().Decomposition)
 
 	decompositionChecks := []string{
 		"decomposition-bead-count",
@@ -1124,7 +1142,7 @@ func TestDecompositionQuality_ConfigOverride(t *testing.T) {
 		}
 		cfg := config.DefaultConfig().Decomposition
 		cfg.MaxBeads = 100
-		checkDecompositionQuality(r, sections, cfg)
+		checkDecompositionQuality(r, sections, nil, cfg)
 
 		for _, issue := range r.Issues {
 			if issue.Name == "decomposition-bead-count" {
@@ -1141,9 +1159,13 @@ func TestDecompositionQuality_ConfigOverride(t *testing.T) {
 			{Heading: "Bead 1: A", HasDependsOn: true, DependsOn: "None"},
 			{Heading: "Bead 2: B", HasDependsOn: true, DependsOn: "Bead 1"},
 		}
+		chunks := []WorkChunk{
+			{ID: 1},
+			{ID: 2, DependsOn: []int{1}},
+		}
 		cfg := config.DefaultConfig().Decomposition
 		cfg.MaxChainDepth = 1
-		checkDecompositionQuality(r, sections, cfg)
+		checkDecompositionQuality(r, sections, chunks, cfg)
 
 		found := false
 		for _, issue := range r.Issues {
@@ -1158,6 +1180,59 @@ func TestDecompositionQuality_ConfigOverride(t *testing.T) {
 			t.Error("expected decomposition-chain-depth warning with MaxChainDepth=1")
 		}
 	})
+}
+
+// TestDecompositionQuality_ConsumesWorkChunks proves the dependency graph is
+// built from the structured `work_chunks` deps, not the prose "Depends on Bead
+// N" text (spec 097 R3). The sections declare a deep prose chain (Bead 1 → 2 →
+// 3 → 4) but NO work_chunks are passed, so the chain-depth warning must NOT
+// fire. RED on revert: the retired `beadDepRe` prose scrape would read the
+// prose chain and warn at depth 4.
+func TestDecompositionQuality_ConsumesWorkChunks(t *testing.T) {
+	r := &Result{}
+	sections := []BeadSection{
+		{Heading: "Bead 1: A", HasDependsOn: true, DependsOn: "None"},
+		{Heading: "Bead 2: B", HasDependsOn: true, DependsOn: "Bead 1"},
+		{Heading: "Bead 3: C", HasDependsOn: true, DependsOn: "Bead 2"},
+		{Heading: "Bead 4: D", HasDependsOn: true, DependsOn: "Bead 3"},
+	}
+	// No structured work_chunks → no dependency edges → no deep chain.
+	checkDecompositionQuality(r, sections, nil, config.DefaultConfig().Decomposition)
+
+	for _, issue := range r.Issues {
+		if issue.Name == "decomposition-chain-depth" {
+			t.Errorf("chain-depth warning fired from prose deps; the check must consume work_chunks only: %s", issue.Message)
+		}
+	}
+}
+
+// TestValidateWorkChunkAlignment exercises the spec 097 R3 alignment guard that
+// protects the positional bead_ids[N-1] wiring from misaligned/out-of-range
+// chunk ids.
+func TestValidateWorkChunkAlignment(t *testing.T) {
+	tests := []struct {
+		name        string
+		chunks      []WorkChunk
+		numSections int
+		wantErr     bool
+	}{
+		{"empty is trivially aligned", nil, 3, false},
+		{"contiguous aligned", []WorkChunk{{ID: 1}, {ID: 2, DependsOn: []int{1}}, {ID: 3, DependsOn: []int{1, 2}}}, 3, false},
+		{"count mismatch", []WorkChunk{{ID: 1}, {ID: 2}}, 3, true},
+		{"non-contiguous gap", []WorkChunk{{ID: 1}, {ID: 3}, {ID: 4}}, 3, true},
+		{"duplicate id", []WorkChunk{{ID: 1}, {ID: 1}, {ID: 3}}, 3, true},
+		{"id out of range", []WorkChunk{{ID: 0}, {ID: 1}, {ID: 2}}, 3, true},
+		{"depends_on out of range", []WorkChunk{{ID: 1}, {ID: 2, DependsOn: []int{9}}, {ID: 3}}, 3, true},
+		{"self dependency", []WorkChunk{{ID: 1}, {ID: 2, DependsOn: []int{2}}, {ID: 3}}, 3, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateWorkChunkAlignment(tt.chunks, tt.numSections)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateWorkChunkAlignment() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 // --- Spec 087 Bead 1: ADR semantic gates ---
