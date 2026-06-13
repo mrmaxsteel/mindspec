@@ -52,6 +52,29 @@ var (
 	adrCreateWithIDFn = adr.CreateWithID
 )
 
+// Spec 096 final-review (mindspec-2u0u, persona-closeverify): the
+// post-close status re-read is RETRIED a small bounded number of times
+// before any decision. A genuine silent close-loss can correlate with a
+// TRANSIENT Dolt read failure (lock contention) — without a retry, that
+// correlated case would slip through the old "tolerate + proceed to
+// merge" branch and complete an UNVERIFIED close. The retry lets a
+// transient lock clear so the re-read converges to a definitive
+// closed/open status; only a PERSISTENT read failure across all attempts
+// triggers the recoverable soft-block. Both seams are package vars so
+// tests can shrink the count and no-op the backoff (no real sleeps).
+var (
+	// postCloseReadAttempts bounds the post-close re-read. Default 3:
+	// one immediate read plus two retries — enough for a transient Dolt
+	// lock to clear without materially slowing a healthy complete.
+	postCloseReadAttempts = 3
+	// postCloseReadBackoff sleeps between failed re-read attempts. The
+	// argument is the zero-based attempt index just completed. Injectable
+	// so tests run instantly.
+	postCloseReadBackoff = func(attempt int) {
+		time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+	}
+)
+
 // CompleteOpts holds options for bead completion.
 //
 // Spec 086 Bead 3: `AllowDocSkew` activates the doc-sync override gate.
@@ -364,19 +387,48 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// persisted status and decide across THREE cases, mirroring the
 		// already-closed branch above and reusing its exact predicate
 		// (strings.EqualFold(strings.TrimSpace(status), "closed")).
-		info, fetchErr := fetchBeadByIDFn(beadID)
+		//
+		// Final-review (persona-closeverify): the re-read is RETRIED a
+		// bounded number of times (postCloseReadAttempts) before any
+		// decision. A genuine close-loss can correlate with a TRANSIENT
+		// Dolt read error (lock contention); the retry lets that lock
+		// clear so the re-read converges to a DEFINITIVE closed/open
+		// status instead of slipping through a "tolerate + proceed"
+		// branch on an unverified close. Only a PERSISTENT read failure
+		// across every attempt reaches case (c).
+		var info next.BeadInfo
+		var fetchErr error
+		for attempt := 0; attempt < postCloseReadAttempts; attempt++ {
+			info, fetchErr = fetchBeadByIDFn(beadID)
+			if fetchErr == nil {
+				break
+			}
+			if attempt < postCloseReadAttempts-1 {
+				postCloseReadBackoff(attempt)
+			}
+		}
 		switch {
 		case fetchErr != nil:
-			// (c) The re-read itself ERRORED after a nil close. The close
-			// DID succeed (closeBeadFn returned nil); a transient /
-			// eventually-consistent fetch failure (Dolt hiccup, race)
-			// must NEVER be promoted to a NEW non-zero exit — that would
-			// be the OPPOSITE "exit codes lie" inversion, blocking a
-			// legitimate complete on lifecycle-terminal code. TOLERATE:
-			// warn and proceed (BeadClosed stays true below).
-			fmt.Fprintf(warnWriter,
-				"WARN complete: bead %s close returned success but the post-close status re-read failed (%v) — proceeding (the close itself succeeded).\n",
-				beadID, fetchErr)
+			// (c) The re-read STILL errors after every bounded retry — the
+			// close could NOT be VERIFIED. The OLD behavior tolerated this
+			// (warn + proceed to merge + worktree removal), but a genuine
+			// silent close-loss can surface as exactly this persistent read
+			// error (closeBeadFn returns nil + the re-read errors), so
+			// proceeding would complete an UNVERIFIED close — exit 0 with
+			// the bead still in_progress, re-exposing the silent close-loss
+			// class spec 096 exists to kill. Mirror case (b)'s PRE-MERGE
+			// return instead: a RECOVERABLE soft-block (ADR-0035 recovery
+			// line) that KEEPS the worktree and does NOT set BeadClosed.
+			// Safe to re-run once bd/Dolt is reachable (the close step is
+			// idempotent). A transient error that RESOLVES on retry never
+			// reaches here — it converges to case (a)/(b) above — so a
+			// legitimately-closed complete whose Dolt was briefly slow is
+			// NOT false-blocked.
+			msg := fmt.Sprintf(
+				"bead %s close returned success but the post-close status re-read could not be VERIFIED after %d attempts (last error: %v) — the close was NOT confirmed to persist.\n"+
+					"this state is recoverable: the worktree is kept and the close step is idempotent — re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
+				beadID, postCloseReadAttempts, fetchErr, beadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
 		case strings.EqualFold(strings.TrimSpace(info.Status), "closed"):
 			// (a) Re-read AFFIRMS closed — the close persisted. Proceed.
 		default:
