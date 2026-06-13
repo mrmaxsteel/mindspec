@@ -13,7 +13,7 @@ package main
 //     it is a no-op beyond the journal (HC-6).
 //   - `mindspec report list`   — a triage view over reports.jsonl (NOT bd):
 //     fingerprint, command, escape-hatch, count, version range, and the
-//     derived regression/stale/resolved/open status (Req 5 / Req 3). With
+//     derived open/regression/stale status (Req 5 / Req 3). With
 //     --resolve <fingerprint> [--version vX] it marks a report resolved.
 //
 // # Untrusted-corpus render (Req 7 / HC-4)
@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -91,9 +92,10 @@ func newReportListCmd() *cobra.Command {
 		Long: `List the consolidated friction reports (read from the local report store,
 NOT the beads tracker), showing each report's fingerprint, command,
 escape-hatch, occurrence count, version range, and triage status
-(open / regression / stale / resolved).
+(open / regression / stale).
 
-Mark a report resolved with:
+The FINGERPRINT column prints the FULL fingerprint — copy it verbatim into
+--resolve. Mark a report resolved with:
   mindspec report list --resolve <fingerprint> [--version <vX>]
 
 A report resolved at version X that recurs at a running version >= X is a
@@ -103,7 +105,7 @@ version is treated as unbounded-newest (fails toward surfacing a regression).`,
 		RunE: runReportList,
 	}
 	c.Flags().String("resolve", "", "Mark the report with this fingerprint resolved")
-	c.Flags().String("version", "", "The resolved-in version for --resolve (defaults to the current build version)")
+	c.Flags().String("version", "", "The resolved-in version for --resolve — a concrete semver or the current build version (defaults to the current build version; any other value is rejected)")
 	return c
 }
 
@@ -189,7 +191,9 @@ func runReportList(cmd *cobra.Command, _ []string) error {
 	// contract even though it is enum-only, so fence it so no consumer
 	// auto-links or auto-executes a rendered line.
 	fmt.Fprintln(out, "```")
-	fmt.Fprintf(out, "%-16s  %-10s  %-14s  %-12s  %5s  %-16s  %s\n",
+	// The FINGERPRINT column is full-width (64 hex) so the printed identifier IS
+	// the one `--resolve` accepts (codex-completeness #3) — no truncated prefix.
+	fmt.Fprintf(out, "%-64s  %-10s  %-14s  %-12s  %5s  %-16s  %s\n",
 		"FINGERPRINT", "COMMAND", "ESCAPE-HATCH", "STATUS", "COUNT", "VERSION-RANGE", "RESOLVED-IN")
 	for _, r := range reports {
 		status := r.Classify()
@@ -201,7 +205,7 @@ func runReportList(cmd *cobra.Command, _ []string) error {
 		if r.ResolvedInVersion != "" {
 			resolved = renderField(r.ResolvedInVersion)
 		}
-		fmt.Fprintf(out, "%-16s  %-10s  %-14s  %-12s  %5d  %-16s  %s\n",
+		fmt.Fprintf(out, "%-64s  %-10s  %-14s  %-12s  %5d  %-16s  %s\n",
 			renderFingerprint(r.Fingerprint),
 			renderField(r.Command),
 			renderField(r.EscapeHatch),
@@ -250,22 +254,68 @@ func renderField(s string) string {
 	return clean
 }
 
-// renderFingerprint shows a stable short prefix of the hex fingerprint (the
-// full hash is long and not needed for triage at a glance). The full
-// fingerprint is what --resolve takes; report list also prints it in full via
-// the resolve hint. The prefix is hex from redact.Fingerprint, so it carries
-// no user value, but it still passes through renderField for uniformity.
+// fingerprintHexLen is the expected length of a real redact.Fingerprint value
+// (a SHA-256 hex digest). The displayed identifier must be exactly this so a
+// user can copy it straight into --resolve.
+const fingerprintHexLen = 64
+
+// renderFingerprint renders the FULL fingerprint identifier shown in the
+// `report list` view (codex-completeness #3 — the shown identifier is the one
+// `--resolve` accepts, no truncated prefix). A real fingerprint is the
+// lowercase-hex SHA-256 of the normalized identity; it carries NO user value.
+//
+// The render surface is untrusted by contract (Req 7 / HC-4): a HAND-CRAFTED
+// reports.jsonl can plant an oversized / non-hex / control-laden `fingerprint`
+// value (codex-render-leak #1). The fix is SCRUB-FULL-THEN-DISPLAY with a
+// fail-closed allowlist on the shape:
+//
+//   - if the FULL value is a well-formed fingerprint (exactly 64 lowercase-hex
+//     chars), it is rendered verbatim — it is a self-generated safe hash, so
+//     it bypasses the entropy catch-all (which would otherwise replace the
+//     high-entropy hex with `<token>` and make it unresolvable) while still
+//     being provably value-free;
+//   - ANYTHING else (oversized, non-hex, a planted prefix like
+//     `LEAKPREFIX123456`, control chars) is NOT a real fingerprint → it is run
+//     through the full renderField scrub, which fails closed to `<redacted>`
+//     for an unclassifiable/oversized value and NEVER emits a raw prefix.
 func renderFingerprint(fp string) string {
-	if len(fp) > 16 {
-		fp = fp[:16]
+	if isFingerprintHex(fp) {
+		return fp // a real, value-free hash — show it in full for --resolve
 	}
+	// Not a well-formed fingerprint: treat as untrusted, scrub + fail-closed.
 	return renderField(fp)
 }
 
-// stripControl removes control characters (including newlines, CR, tabs, and
-// other C0/C1 controls) so a multi-line injection payload cannot reconstitute
-// a `recovery:`-style line a downstream automation would auto-execute (Req 7 /
-// HC-4 / P3). Printable runes survive.
+// isFingerprintHex reports whether s is exactly a redact.Fingerprint digest:
+// fingerprintHexLen lowercase hex chars. This is the allowlist that lets the
+// self-generated safe hash render verbatim while a planted value falls through
+// to the fail-closed scrub.
+func isFingerprintHex(s string) bool {
+	if len(s) != fingerprintHexLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// stripControl removes ALL Unicode control characters so a multi-line or
+// terminal-escape injection payload cannot reconstitute a `recovery:`-style
+// line a downstream automation would auto-execute, nor smuggle a raw terminal
+// escape to the user's terminal (Req 7 / HC-4 / P3). \n \r \t collapse to a
+// single space; every OTHER control rune is DROPPED. This covers:
+//
+//   - C0 controls (U+0000–001F) and DEL (U+007F);
+//   - C1 controls (U+0080–009F) — including CSI U+009B (``), the
+//     single-byte control-sequence introducer that a naive C0-only strip let
+//     reach the terminal as the raw bytes `c2 9b …` (codex-render-leak #2).
+//
+// unicode.IsControl(r) is true for exactly the C0+C1+DEL range, so it is the
+// faithful "all control runes" predicate (printable Unicode survives).
 func stripControl(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -274,8 +324,8 @@ func stripControl(s string) string {
 			b.WriteByte(' ')
 			continue
 		}
-		if r < 0x20 || r == 0x7f {
-			continue // drop other C0 / DEL controls
+		if unicode.IsControl(r) {
+			continue // drop every other C0 / C1 / DEL control rune
 		}
 		b.WriteRune(r)
 	}

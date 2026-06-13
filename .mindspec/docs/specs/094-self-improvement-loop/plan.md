@@ -245,11 +245,17 @@ bead-time guesswork (codex-completeness/r6). These are PINNED now:
   escape_hatch, subcommand}, "command": "<token>", "escape_hatch":
   "<enum>", "count": <int>, "first_version": "<semver|dev>",
   "last_version": "<semver|dev>", "resolved_in_version":
-  "<semver|empty>", "status": "open|resolved|regression|stale" }`.
-  `mindspec report` derives `first_version`/`last_version` by min/max
-  (via the §API Contract version helper) over the version-stamped journal
-  entries of that identity; `resolved_in_version` is keyed by the
-  normalized event identity + fingerprint, NOT the opaque hash alone.
+  "<semver|empty>", "status": "open|regression|stale" }`.
+  `mindspec report` derives `first_version`/`last_version` by OCCURRENCE
+  ORDER (earliest/latest event by `ts`, append-order tiebreak), NOT by
+  semver min/max, so an out-of-order/downgrade stream reports the true
+  first/last seen with paired timestamps. The status model is
+  `{open, regression, stale}` (a resolved-with-no-recurrence report is
+  `stale`; there is no separate `resolved` token). `resolved_in_version`
+  is keyed by fingerprint, which is `H(identity)` — a strong hash over the
+  FULL normalized identity, so fingerprint-keying IS identity-keying by
+  construction (DQ5 collision-safe); the `identity` tuple is persisted as
+  a display/audit field.
 - **Retention**: NONE in v1 — DECIDED, not deferred-by-omission. The
   append-only `0600` journal grows unbounded across sessions (Req 8's cap
   is per-fingerprint-PER-SESSION); a redacted + fail-closed + `0600`

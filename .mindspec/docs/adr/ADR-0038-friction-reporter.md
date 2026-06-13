@@ -169,10 +169,17 @@ The §Storage Contract pins two files in the isolated store:
   ```
 
   `count` and `first/last_version` are DERIVED over the version-stamped
-  journal lines (`first_version` from the earliest event); the
-  triage `status` (open/resolved/regression/stale) is ALWAYS re-derived
-  at list time from `resolved_in_version` vs `last_version`, never
-  persisted as ground truth, so a stored status can never lie.
+  journal lines by OCCURRENCE ORDER, NOT by semver extrema:
+  `first_version`/`first_seen_ts` come from the chronologically-EARLIEST
+  event (the earliest `ts`, tie-broken by append order) and
+  `last_version`/`last_seen_ts` from the LATEST — each version moves
+  together with its paired timestamp. (Deriving by semver min/max would
+  report the wrong first/last for an out-of-order or downgrade stream;
+  the spec says "first/last version SEEN" and this ADR says "the earliest
+  EVENT", so occurrence order is authoritative.) The triage `status` is
+  one of `{open, regression, stale}` (see §7) and is ALWAYS re-derived at
+  list time from `resolved_in_version` vs `last_version`, never persisted
+  as ground truth, so a stored status can never lie.
 
 ### 6. Concurrency / locking model
 
@@ -186,16 +193,36 @@ The §Storage Contract pins two files in the isolated store:
 - **`reports.jsonl`** is the one mutable file: it is rewritten WHOLESALE
   (write-temp + `rename`, `0600`) under the same mutex — a
   consolidate/resolve never half-writes the view.
+- **Cross-process resolve preservation**: the in-process mutex does NOT
+  span processes, so a stale consolidator (`report`:
+  Consolidate→WriteReports) could otherwise clobber a concurrent
+  `report list --resolve` running in another process and erase its
+  `resolved_in_version`. `WriteReports` therefore performs a
+  COMPARE-AND-MERGE under the lock IMMEDIATELY before the temp+rename: it
+  re-reads the current `reports.jsonl` and, for every fingerprint, a
+  NON-EMPTY on-disk `resolved_in_version` WINS over an empty slot in the
+  slice being written. A concurrent resolve is never lost.
 
 ### 7. Fingerprint + version loop — hash + normalized identity + `dev` policy
 
-- **Fingerprint** = a deterministic hash over the normalized
-  `Identity` tuple ONLY (`command + which-escape-hatch [+ subcommand]`)
-  — reason-INVARIANT (no override reason, no user value, no error-class)
-  and DISTINCT when any structured input differs (a length-prefix + NUL
-  delimiter prevents cross-field aliasing). BOTH the hash AND the
-  `Identity` tuple are persisted, so a hash collision cannot silently
-  alias two distinct events or poison dedup/`resolved_in_version` (DQ5).
+- **Fingerprint** = a deterministic SHA-256 hash over the FULL normalized
+  `Identity` tuple (`command + which-escape-hatch [+ subcommand]`),
+  length-prefixed and NUL-framed per field — reason-INVARIANT (no
+  override reason, no user value, no error-class) and DISTINCT when any
+  structured input differs (the length-prefix + NUL delimiter prevents
+  cross-field aliasing, so `{complete, override-adr, ""}` and
+  `{complete-, override, -adr, ""}` cannot collide).
+- **Fingerprint = H(identity) → fingerprint-keying IS identity-keying by
+  construction (DQ5 collision safety)**: because the fingerprint is a
+  strong hash of the COMPLETE normalized identity, two DISTINCT identities
+  yield DISTINCT fingerprints (modulo a cryptographic SHA-256 collision,
+  treated as impossible). Consolidation and `MarkResolved` therefore key
+  by fingerprint ALONE and are still collision-safe — keying by
+  fingerprint is exactly keying by `H(identity)`. The `identity` tuple is
+  ALSO persisted on each record, but as a DISPLAY/audit field, not as part
+  of the dedup/resolve key; it does not need to be re-checked at
+  dedup/resolve time. A regression test asserts two distinct identities
+  produce distinct fingerprints, pinning this invariant.
 - **Version** = the BARE `version` package var (`version.Current()`),
   NOT the decorated cobra `--version` string (whose commit hash the
   entropy scrub eats). Non-release/local/test builds report `dev`.
@@ -211,19 +238,48 @@ The §Storage Contract pins two files in the isolated store:
   is a REGRESSION (the `==X` boundary is regression — a re-occurrence at
   the resolving version is the loop not closing); `< X` is stale
   (suppressed, kept for the record).
+- **The status model is exactly `{open, regression, stale}`** — the
+  faithful realization of spec Req-3's two-way resolved split plus the
+  unresolved case: `open` (no `resolved_in_version`), `regression`
+  (resolved at X, last `>= X`, or a dev/unparseable operand), `stale`
+  (resolved at X, last `< X`). There is NO separate `resolved` status —
+  a resolved report with no later recurrence is already `stale` (resolved
+  at X with `last_version < X`). An earlier draft advertised a fourth
+  `resolved` token that `Classify` never returned (it was dead); the
+  language across code, help text, and this ADR is reconciled to the
+  3-state model so code, docs, and spec agree.
+- **Resolve-version normalization (source-side slot neutralisation,
+  Req 7 / HC-4)**: `MarkResolved` NORMALIZES the resolve `--version` at
+  the SOURCE — only a concrete semver (canonicalized to bare
+  `major.minor.patch`) or the explicit dev/current policy token is ever
+  PERSISTED as `resolved_in_version`. Anything else (a non-semver string,
+  or a shell-metacharacter payload like `1.0.0; rm -rf /`) is REJECTED
+  with an error and never written, so a live executable user string can
+  never reach the copy-pasteable resolve-echo or the RESOLVED-IN render
+  column. This closes the one user-controlled free-text slot in v1 at the
+  source rather than relying on the render scrub (which does not
+  neutralise shell metacharacters).
 
 ### 8. Untrusted-corpus render stance (Req 7 / HC-4)
 
 The store is enum-only, so most fields are structurally safe. But the
 RENDER surfaces — the `mindspec report` body and `report list` terminal
-output — treat every printed field as UNTRUSTED defense-in-depth: each
-field is re-scrubbed via `redact.Scrub` (a residual-leak value renders
-as a placeholder, never raw — fail-closed), control/newline characters
-are stripped (so no injected `recovery:` line can be reconstituted and
-auto-executed), markdown auto-linking and bare URL schemes are
-neutralised, the output is code-fenced, and every field is length-
-capped. This is the explicit backstop the spec asks for, so a future
-free-text field cannot regress the render contract.
+output — treat every printed field as UNTRUSTED defense-in-depth:
+
+- Each field is re-scrubbed via `redact.Scrub`; a residual-leak or
+  otherwise-unclassifiable value renders as the `<redacted>` placeholder,
+  NEVER raw (fail-closed). The fingerprint is **scrubbed at FULL length
+  BEFORE any display truncation** — an oversized/unclassifiable
+  fingerprint renders `<redacted>`, never a raw prefix.
+- ALL Unicode control runes are stripped — C0 (U+0000–001F), DEL, AND C1
+  (U+0080–009F, including CSI U+009B); `\n`/`\r`/`\t` collapse to a
+  space. So neither an injected `recovery:` line nor a raw terminal
+  escape can reach a downstream agent or the user's terminal.
+- Markdown auto-linking and bare URL schemes are neutralised, the output
+  is code-fenced, and every field is length-capped.
+
+This is the explicit backstop the spec asks for, so a future free-text
+field cannot regress the render contract.
 
 ### 9. Capability-based, fail-closed identity; owner-local v1 scope
 
@@ -260,6 +316,10 @@ out-of-band home for install-failure friction is the **installer side**
 (an installer-emitted failure signal) and a **manual GitHub issue** —
 explicitly OUTSIDE this in-tool loop. A future enabler may wire the
 installer path; it does not change any decision here.
+
+A standalone user-facing note restates this boundary outside the ADR:
+[friction-bootstrap-paradox.md](../user/guides/friction-bootstrap-paradox.md)
+(placeholder-only, cross-linked back to this section).
 
 ## Consequences
 
