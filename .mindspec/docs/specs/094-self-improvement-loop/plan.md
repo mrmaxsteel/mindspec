@@ -123,10 +123,13 @@ the spec's stated draft positions:
 
 1. **Journal/store format + retention (DQ1)**: adopt the draft
    position — append-only JSONL under the dedicated `0600` non-synced
-   state dir (HC-8); the journal is one appended file (not per-session)
-   with within-session fingerprint collapse (Req 8); a retention/
-   rotation cap is DEFERRED to the follow-on (a stale redacted `0600`
-   entry is low risk given fail-closed redaction). Encoded in Bead 2.
+   state dir (HC-8); the journal is one appended file (not per-session),
+   APPEND-ONLY with NO in-file collapse and NO count field — the
+   per-fingerprint-per-session storm cap (Req 8) is enforced by DROPPING
+   excess appends, and the occurrence count is DERIVED only at
+   `reports.jsonl` consolidation; a retention/rotation cap is DEFERRED to
+   the follow-on (a stale redacted `0600` entry is low risk given
+   fail-closed redaction). Encoded in Bead 2.
 2. **Exact success-path event enum (DQ2)**: adopt the draft position,
    CORRECTED against real code (r2/r6/codex-feasibility). The override
    flags `--override-adr`/`--allow-doc-skew`/`--supersede-adr` are NOT
@@ -235,27 +238,33 @@ bead-time guesswork (codex-completeness/r6). These are PINNED now:
   cross-process lost-update and NO file lock is needed; consolidation
   (`report`, Bead 3) tolerates interleaved/duplicate lines by collapsing on
   the normalized event identity + fingerprint.
-- **Journal record schema** (`journal.jsonl`, enum-only — no free text):
-  `{ "v": <schema-int>, "ts": <rfc3339>, "argv0": "<basename>",
-  "command": "<leaf command path token>",
+- **Journal record schema** (`journal.jsonl`, append-only, enum-only — no
+  free text, NO count field): `{ "v": <schema-int>, "ts": <rfc3339>,
+  "argv0": "<basename>", "command": "<leaf command path token>",
   "escape_hatch": "<closed-set enum: override-adr|allow-doc-skew|
   supersede-adr|repair-phase>", "subcommand": "<optional enum token>",
   "fingerprint": "<hash>", "identity": {command, escape_hatch,
-  subcommand}, "count": <int>, "version": "<bare semver or 'dev'>" }`.
-  NEVER a raw command string, NEVER `argv[0]`'s full path, NEVER a flag
-  VALUE (M3/M4).
+  subcommand}, "version": "<bare semver or 'dev'>" }`. One REDACTED event
+  per line; each line carries its OWN version so Bead 3 derives first/last
+  seen. There is NO `count` field on a journal record — count is DERIVED at
+  `reports.jsonl` consolidation. NEVER a raw command string, NEVER
+  `argv[0]`'s full path, NEVER a flag VALUE (M3/M4).
 - **Friction-report record schema** (`reports.jsonl`): `{ "v":
   <schema-int>, "fingerprint": "<hash>", "identity": {command,
   escape_hatch, subcommand}, "command": "<token>", "escape_hatch":
-  "<enum>", "count": <int>, "first_version": "<semver|dev>",
-  "last_version": "<semver|dev>", "resolved_in_version":
-  "<semver|empty>", "status": "open|regression|stale" }`.
-  `mindspec report` derives `first_version`/`last_version` by OCCURRENCE
-  ORDER (earliest/latest event by `ts`, append-order tiebreak), NOT by
-  semver min/max, so an out-of-order/downgrade stream reports the true
-  first/last seen with paired timestamps. The status model is
-  `{open, regression, stale}` (a resolved-with-no-recurrence report is
-  `stale`; there is no separate `resolved` token). `resolved_in_version`
+  "<enum>", "subcommand": "<enum>", "count": <int>,
+  "first_version": "<semver|dev>", "first_seen_ts": "<rfc3339>",
+  "last_version": "<semver|dev>", "last_seen_ts": "<rfc3339>",
+  "resolved_in_version": "<semver|dev|empty>" }`. The triage `status` is
+  NOT persisted — it is ALWAYS DERIVED at `report list` time from
+  `resolved_in_version` vs `last_version` (via `Classify`), so a stored
+  status can never go stale (ADR-0038 §5). `mindspec report` derives
+  `first_version`/`last_version` by OCCURRENCE ORDER (earliest/latest event
+  by `ts`, append-order tiebreak), NOT by semver min/max, so an
+  out-of-order/downgrade stream reports the true first/last seen with
+  paired timestamps. The derived status model is `{open, regression,
+  stale}` (a resolved-with-no-recurrence report is `stale`; there is no
+  separate `resolved` token). `resolved_in_version`
   is keyed by fingerprint, which is `H(identity)` — a strong hash over the
   FULL normalized identity, so fingerprint-keying IS identity-keying by
   construction (DQ5 collision-safe); the `identity` tuple is persisted as
@@ -370,8 +379,9 @@ fail-closed return — are binding:
   event; the SAME override flag with two different reason VALUES yields
   the SAME fingerprint (Bead 1), AND the fingerprint DIFFERS when any
   structured input differs (Bead 1). A storm of `L+1` same-fingerprint
-  fires yields ONE entry whose `count` caps at the named
-  `journalStormCapL` (`count==L`, per-fingerprint-per-session; Bead 2). A
+  fires yields exactly `L` append-only journal lines (the excess append
+  DROPPED at the named `journalStormCapL`, per-fingerprint-per-session;
+  Bead 2 — no count field on a journal record). A
   report marked `resolved_in_v2` then re-reported classifies REGRESSION
   at version == v2 (the `≥` boundary) and > v2, stale at < v2, and
   REGRESSION for a `dev`/unparseable version (unbounded-newest; Bead 3).
@@ -619,14 +629,16 @@ to command success (§API Contract). The opt-in `--trace`/
    semver** (NOT the decorated `--version` string, whose commit hash the
    entropy scrub would eat — V1) — NEVER a raw command string, NEVER
    `argv[0]`'s full invocation path, NEVER a flag VALUE (M3/M4).
-4. Implement the **friction-storm cap (Req 8)**: collapse by the
-   normalized identity + fingerprint into ONE entry carrying an
-   occurrence `count`, with a **named per-fingerprint-per-session cap
-   `journalStormCapL` (= 50)** so a runaway loop cannot bloat the
-   journal — firing `M < L` times yields one entry with `count == M`;
-   firing `L+1` times yields one entry whose `count` stops growing past
-   `L` (`count == L`, not `L+1`). The cap is a named constant a
-   deterministic test can assert against.
+4. Implement the **friction-storm cap (Req 8)**: the APPEND-ONLY journal
+   has NO in-file collapse and NO count field; the
+   per-fingerprint-per-session cap is enforced by DROPPING excess appends,
+   with a **named per-fingerprint-per-session cap `journalStormCapL`
+   (= 50)** so a runaway loop cannot bloat the journal — firing `M < L`
+   times yields `M` journal LINES; firing `L+1` times yields exactly `L`
+   lines on disk (the `L+1`-th append is DROPPED, not folded into a count).
+   The occurrence `count` is DERIVED only later at `reports.jsonl`
+   consolidation (Bead 3), never stored on a journal record. The cap is a
+   named constant a deterministic test can assert against.
 5. Wire the self-emit into `PersistentPostRunE` (`:67`): on a SUCCESS
    whose LEAF command (`cmd.Name()`/`CommandPath()`) used a bound
    escape-hatch flag or is a completed `repair phase`, append exactly one
@@ -646,8 +658,9 @@ to command success (§API Contract). The opt-in `--trace`/
    flag-value; the HC-7 drop test; the best-effort test (a forced journal
    error leaves the parent command's exit code unchanged); the
    `0600`/non-committed perms test; the storm-cap boundary test (`L+1`
-   fires → `count == L`); a version-stamp test asserting the bare semver
-   (not the decorated `--version`) is recorded.
+   fires → exactly `L` journal lines on disk, the excess append dropped); a
+   version-stamp test asserting the bare semver (not the decorated
+   `--version`) is recorded.
 
 **Verification**
 - [ ] `go build ./... && go test -short ./...` green (HC-5)
@@ -686,10 +699,12 @@ to command success (§API Contract). The opt-in `--trace`/
 - [ ] Spec AC "At-rest (HC-8)": journal/store files `0600` under a
       non-project, non-`bd`/`dolt` dir (`os.UserConfigDir()/mindspec/`);
       planted-path grep absent
-- [ ] Spec AC "storm" (Req 8): firing the same fingerprint `M < L` times
-      → ONE entry with `count == M`; firing `L+1` times → ONE entry whose
-      `count` caps at the named `journalStormCapL` (`count == L`, not
-      `L+1`), per-fingerprint-per-session
+- [ ] Spec AC "storm" (Req 8): the append-only journal — firing the same
+      fingerprint `M < L` times → `M` journal LINES; firing `L+1` times →
+      exactly `L` lines on disk (the excess append DROPPED, not folded into
+      a count), capped at the named `journalStormCapL`,
+      per-fingerprint-per-session; `count` is derived later at
+      `reports.jsonl` consolidation
 - [ ] Spec AC "trace + always-on" (split, falsifiable): (a) ALWAYS-ON —
       with `MINDSPEC_TRACE` unset a success-path friction event still
       appends exactly one entry, and toggling `--trace` changes neither
@@ -919,7 +934,7 @@ Spec acceptance criterion → owning bead + verification:
 | Entry holds enum-only, no raw/flag-value (M3/M4) | Bead 2 | on-disk grep for planted path/secret/reason |
 | Fail-closed drop + best-effort non-fatal (HC-7) | Bead 2 | redaction-failure fixture → no entry; forced append error doesn't fail parent |
 | `0600` + non-committed path (HC-8) | Bead 2 | perms assertion + `os.UserConfigDir()/mindspec/` location test |
-| Friction-storm cap (Req 8) | Bead 2 | `L+1`-fire → one entry `count==L` (named `journalStormCapL`) |
+| Friction-storm cap (Req 8) | Bead 2 | `L+1`-fire → exactly `L` append-only journal lines (excess append dropped; named `journalStormCapL`) |
 | Trace always-on + friction-gated (split) | Bead 2 | trace-state-independent single entry + no-friction-success zero entries |
 | Version stamping — bare semver (Req 3) | Bead 2 | per-entry bare-`version.Current()` assertion |
 | Consolidated redacted report + first/last version (Req 4) | Bead 3 | `report` body redaction + bare-version/fingerprint stamp + OCCURRENCE-ORDER first/last derive (earliest/latest event by `ts`, paired `*_seen_ts`; NOT semver min/max) |

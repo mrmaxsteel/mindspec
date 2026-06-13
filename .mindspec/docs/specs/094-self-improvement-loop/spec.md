@@ -56,9 +56,14 @@ Three load-bearing design choices, each adopted directly from the panel:
    BEFORE the hook runs, so it can capture neither a failure nor an exit
    code. v1 therefore captures the **success-path admission** that the
    tool forced the wrong action: an escape-hatch / override flag that was
-   USED on a command that nonetheless SUCCEEDED (read via
-   `cmd.Flags().Changed`), an override env var (`os.Getenv`), or a
-   completed `mindspec repair`. This is NOT a PostToolUse hook (fragile
+   USED on a leaf command that nonetheless SUCCEEDED (read via
+   `cmd.Flags().Changed` — `--override-adr` / `--allow-doc-skew` /
+   `--supersede-adr`), or a completed `repair phase`. (The
+   `MINDSPEC_ALLOW_MAIN` env var is DELIBERATELY NOT a v1 captured signal —
+   it is a raw-git bypass consumed in the hook-dispatch path that never runs
+   a capturable leaf, and an ambient `os.Getenv` check would fire a FALSE
+   friction event on every command in any shell that exported it; see Req 2
+   and ADR-0038 §2.) This is NOT a PostToolUse hook (fragile
    in compound commands, leaks the raw command/`file_path`) and NOT the
    OTEL emitter (opt-in / noop by default per ADR-0027) — see r3
    `capture_path`. Capturing FAILED / gate-blocked runs is a different
@@ -163,10 +168,12 @@ cross-install push.
   (r2 medium-severity fixes — no unredacted command, no home-dir invocation
   path, and no user-supplied override reason ever persisted to disk).
 - **`cmd/mindspec/root.go` (execution)** — `PersistentPostRunE` (`:67`)
-  gains the self-emit call on the SUCCESS path only: when a command that
-  SUCCEEDED used an escape-hatch/override flag (`cmd.Flags().Changed`),
-  an override env var (`os.Getenv`), or is a completed `mindspec repair`,
-  it appends a redacted journal entry (Req 2). Failed/gate-blocked runs
+  gains the self-emit call on the SUCCESS path only: when a leaf command
+  that SUCCEEDED used an escape-hatch/override flag (`cmd.Flags().Changed`
+  — `--override-adr`/`--allow-doc-skew`/`--supersede-adr`) or is a
+  completed `repair phase`, it appends a redacted journal entry (Req 2).
+  (`MINDSPEC_ALLOW_MAIN` is NOT bound — see Req 2 / ADR-0038 §2.)
+  Failed/gate-blocked runs
   `os.Exit` before this hook and are out of scope. The opt-in
   `--trace`/`MINDSPEC_TRACE` path (`:53-56`) is untouched — the journal
   is a separate, always-on, redacted sink (ADR-0027).
@@ -197,8 +204,10 @@ cross-install push.
   capture decision** — capture in `PersistentPostRunE` on the SUCCESS
   path (it runs only when `RunE` returns nil and sees no exit code;
   failed/gate-blocked commands `os.Exit` before it), reading escape-hatch
-  flags via `cmd.Flags().Changed` + override env via `os.Getenv` + a
-  completed `repair`; NOT a PostToolUse hook (fragile/leaky) and NOT OTEL
+  flags via `cmd.Flags().Changed`
+  (`--override-adr`/`--allow-doc-skew`/`--supersede-adr`) + a completed
+  `repair phase` (`MINDSPEC_ALLOW_MAIN` is NOT bound — ADR-0038 §2); NOT a
+  PostToolUse hook (fragile/leaky) and NOT OTEL
   (opt-in/noop, ADR-0027); capturing FAILED runs is deferred to a
   different mechanism (§Non-Goals); (c) the
   **escape-hatch-centered signal taxonomy** — overrides/`repair` are the
@@ -362,24 +371,28 @@ cross-install push.
    exit code, and gate-blocked / failed commands `os.Exit(1)` inside
    `RunE` (`internal/complete/complete.go:58`/`:117` and ~12 other cmd
    files) BEFORE the hook runs — so it can observe neither a failure nor
-   "the exit code." v1 therefore captures SUCCESS-PATH events ONLY:
-   - an **escape-hatch / override flag** that was set on a command that
+   "the exit code." v1 therefore captures SUCCESS-PATH events ONLY. The
+   plan-phase audit (DQ2/DQ6) resolved the exact bound set to the
+   leaf-local override flags + a completed `repair phase`:
+   - an **escape-hatch / override flag** that was set on a LEAF command that
      SUCCEEDED — detected via `cmd.Flags().Changed("override-adr")` /
-     `Changed("allow-doc-skew")` / `Changed("supersede-adr")` (and any
-     other override flag the plan-phase audit confirms is leaf-readable in
-     the hook);
-   - an **override env var** detected via `os.Getenv("MINDSPEC_ALLOW_MAIN")`
-     (and any sibling confirmed by the audit);
-   - a completed **`mindspec repair`** invocation (a command that itself
+     `Changed("allow-doc-skew")` / `Changed("supersede-adr")` (these are
+     leaf-local flags on `complete` / `impl approve` / the hidden
+     `approve impl`, NOT root persistent flags);
+   - a completed **`repair phase`** invocation (a command that itself
      SUCCEEDED).
-   Capture is **centered on these escape-hatch / override / `repair`
-   admissions** — the literal "the tool forced the wrong action" signals —
-   NOT every non-zero exit (most non-zero exits are the tool correctly
-   BLOCKING = noise; r3 `over_built_areas`). The event enum is constrained
-   to events OBSERVABLE on the success path (a `Changed`-flag, an env
-   getenv, a nil-returning `RunE`); the precise binding set is a
-   plan-phase audit of root.go's persistent flags + env (§Design
-   Questions). Capturing FAILED / gate-blocked commands (which `os.Exit`
+   **`MINDSPEC_ALLOW_MAIN` is DELIBERATELY EXCLUDED from v1 capture
+   (DQ6 / ADR-0038 §2):** it is a raw-git bypass consumed in the
+   hook-dispatch path (`internal/hook/dispatch.go`) that never runs a
+   capturable leaf, and an ambient `os.Getenv` check would fire a FALSE
+   friction event on every command in any shell that exported it. v1 binds
+   NO override env var.
+   Capture is **centered on these escape-hatch / `repair` admissions** —
+   the literal "the tool forced the wrong action" signals — NOT every
+   non-zero exit (most non-zero exits are the tool correctly BLOCKING =
+   noise; r3 `over_built_areas`). The event enum is constrained to events
+   OBSERVABLE on the success path (a `Changed`-flag, a nil-returning
+   `RunE`). Capturing FAILED / gate-blocked commands (which `os.Exit`
    before the hook) needs a DIFFERENT mechanism — a wrapped `RunE` or
    routing the `os.Exit` paths through a deferred emitter — and is OUT of
    v1 scope (§Non-Goals; a future enabler). This is NOT a PostToolUse hook
@@ -404,8 +417,9 @@ cross-install push.
    success-capture path (Req 2) sees no error at all, so error-class would
    be empty/vestigial. The fingerprint also NEVER includes the override
    REASON or any user-supplied flag value (that is tainted user data; M4).
-   The fingerprint is the single dedup key (within-session collapse +
-   future cross-install matching). When a friction report is resolved it
+   The fingerprint is the single dedup key (the `reports.jsonl`
+   consolidation collapse + future cross-install matching). When a friction
+   report is resolved it
    records `resolved_in_vX`; an incoming report with the same fingerprint
    and version ≥ X is a REGRESSION (high-signal, reopen), version < X is
    stale (suppress). This is the mechanism that makes "fewer reports over
@@ -469,10 +483,15 @@ cross-install push.
    the corpus as untrusted input (r2 `injection`).
 
 8. **Friction-storm cap.** One broken state firing N times must not
-   produce N entries. The journal collapses by fingerprint with an
-   occurrence COUNT (report once with `count=N`), and applies a
-   per-fingerprint-per-session cap so a runaway loop cannot bloat the
-   journal or the consolidated friction report (r1 edge: friction storm).
+   bloat the store. The journal is APPEND-ONLY (one redacted event per
+   line, NO count field, NO within-session collapse-to-one-entry); the
+   per-fingerprint-per-session cap is enforced by DROPPING excess appends
+   (within one process invocation, at most the named cap of lines are
+   appended for a given fingerprint, further appends dropped) so a runaway
+   loop cannot bloat the journal. The occurrence COUNT is DERIVED only at
+   consolidation, on the `reports.jsonl` view (`count` = number of journal
+   lines for that fingerprint) — it lives on the consolidated report, never
+   on a journal record (ADR-0038 §5; r1 edge: friction storm).
 
 9. **Bootstrap-paradox documentation.** Install-failure friction (the
    motivating evidence's biggest class — `install.sh` / `install.ps1`
@@ -576,12 +595,14 @@ cross-install push.
   any leakage (HC-1).
 
 ### Self-emit + journal (Req 2 / Req 8 / HC-7 / HC-8)
-- [ ] A SUCCESS-path override/escape-hatch event (a command that returned
-  nil `RunE` with `--override-adr` set / `MINDSPEC_ALLOW_MAIN` set / a
-  completed `mindspec repair`) appends exactly one redacted journal entry
-  from `PersistentPostRunE`; a plain non-zero exit / gate-blocked run that
-  `os.Exit`es appends NONE (it is structurally uncapturable, not merely
-  filtered).
+- [ ] A SUCCESS-path override/escape-hatch event (a LEAF command that
+  returned nil `RunE` with `--override-adr` / `--allow-doc-skew` /
+  `--supersede-adr` set, or a completed `repair phase`) appends exactly one
+  redacted journal entry from `PersistentPostRunE`; a plain non-zero exit /
+  gate-blocked run that `os.Exit`es appends NONE (it is structurally
+  uncapturable, not merely filtered). `MINDSPEC_ALLOW_MAIN` is NOT a v1
+  captured signal (DQ6 / ADR-0038 §2), so an `MINDSPEC_ALLOW_MAIN`-set
+  command appends nothing on that basis alone.
 - [ ] The persisted journal entry contains `basename(argv[0])` + the
   escape-hatch enum token(s) + fingerprint + count + version, and NO raw
   command string, NO `file_path`, NO `argv[0]` full path, and NO flag
@@ -595,9 +616,12 @@ cross-install push.
   created `0600` (a perms assertion) under a non-project, non-`bd`/`dolt`
   state dir; a grep of the on-disk file for a planted absolute home-dir
   path returns absent.
-- [ ] A storm (same fingerprint fired N times in a session) yields ONE
-  entry with `count=N`, capped at the per-fingerprint-per-session limit
-  (Req 8).
+- [ ] A storm (same fingerprint fired N times in a session) appends
+  append-only journal lines capped at the per-fingerprint-per-session limit
+  L (firing L+1 times → exactly L lines on disk; excess appends DROPPED,
+  not collapsed into a count field on a record). The occurrence `count` is
+  DERIVED later at `reports.jsonl` consolidation, not stored on the journal
+  (Req 8 / ADR-0038 §5).
 - [ ] The opt-in `--trace`/`MINDSPEC_TRACE` path is unaffected; the
   journal is written regardless of trace state (always-on) but only on a
   success-path friction event.
@@ -664,8 +688,8 @@ cross-install push.
 - `go test ./internal/redact/...` — the adversarial golden-corpus gate;
   zero leakage on the real-string fixtures.
 - `go test ./internal/journal/...` — write-time redaction, fail-closed
-  drop (HC-7), `0600` perms + non-committed path (HC-8), storm-cap
-  collapse, fingerprint determinism.
+  drop (HC-7), `0600` perms + non-committed path (HC-8), the append-only
+  storm cap (excess appends dropped), fingerprint determinism.
 - `go test ./cmd/mindspec/...` — `report` / `report list` behavior, the
   CI no-op (HC-6), the store-isolation egress proof (no friction report in
   the beads DB / `bd dolt push` payload), and the fail-closed/config-scope
@@ -711,7 +735,11 @@ are intentionally NOT relitigated here.
    `RunE`). Draft position: start from the Req 2 candidate set
    (`--override-adr`, `--allow-doc-skew`, `--supersede-adr`,
    `MINDSPEC_ALLOW_MAIN`, completed `repair`) and bind only those the
-   audit confirms are leaf-readable in the hook.
+   audit confirms are leaf-readable in the hook. **RESOLVED (DQ6 /
+   ADR-0038 §2):** the audit bound exactly the three leaf-local override
+   flags + a completed `repair phase`; `MINDSPEC_ALLOW_MAIN` was EXCLUDED
+   (a raw-git bypass that never runs a capturable leaf; an ambient getenv
+   would mis-fire on every command).
 3. **Friction-report write ceremony.** Whether `mindspec report` writes
    the report to the dedicated non-synced store silently or stages a draft
    the human confirms. Note the store NEVER leaves the machine and never
@@ -739,7 +767,7 @@ The intended bead order (matching the panel's `mvp_sequencing` /
 | Bead | Title | Depends on | Notes |
 |:-----|:------|:-----------|:------|
 | 1 | Redaction library + adversarial golden corpus (Req 1, HC-1/HC-2): `internal/redact` structured-enum allowlist + tainted scrub passes (rel paths, slugs, bead ids, branch names, domain names, file names) + entropy catch-all + `%w`-chain rule + canonical fingerprint helper + the real-string golden corpus CI gate | — | **Lands FIRST.** Privacy is the gating requirement; nothing that emits collected data merges before this passes CI. De-risks the privacy core before any sink exists (r3 `mvp_sequencing`). |
-| 2 | Self-emit capture + session journal (Req 2 SUCCESS-path capture, Req 3 fingerprint/version, Req 8 storm cap, HC-1/HC-6/HC-7/HC-8): `internal/journal` write-time-redacted, `0600`, non-synced store + `PersistentPostRunE` self-emit on the SUCCESS path centered on escape-hatch/override/`repair` events (`cmd.Flags().Changed` + `os.Getenv` + completed `repair`); `hash(command + which-escape-hatch [+ subcommand])` fingerprint (no error-class) + version stamping; per-fingerprint count + cap; fail-closed redaction | 1 | Capture in mindspec, not a hook; not OTEL (ADR-0027). Stores `basename(argv[0])` + escape-hatch enum only — no error-class, no raw command, no `argv[0]` path, no flag value. Failed/`os.Exit` runs are out of scope. |
+| 2 | Self-emit capture + session journal (Req 2 SUCCESS-path capture, Req 3 fingerprint/version, Req 8 storm cap, HC-1/HC-6/HC-7/HC-8): `internal/journal` write-time-redacted, `0600`, non-synced store + `PersistentPostRunE` self-emit on the SUCCESS path centered on escape-hatch/override/`repair` events (`cmd.Flags().Changed` on `--override-adr`/`--allow-doc-skew`/`--supersede-adr` + completed `repair phase`; `MINDSPEC_ALLOW_MAIN` NOT bound, DQ6); `hash(command + which-escape-hatch [+ subcommand])` fingerprint (no error-class) + version stamping; append-only journal with a per-fingerprint-per-session storm cap (excess appends dropped, no record count field); fail-closed redaction | 1 | Capture in mindspec, not a hook; not OTEL (ADR-0027). Stores `basename(argv[0])` + escape-hatch enum only — no error-class, no raw command, no `argv[0]` path, no flag value. Failed/`os.Exit` runs are out of scope. |
 | 3 | `mindspec report` → redacted friction report in a DEDICATED, NON-SYNCED store (NOT a bead) + `report list` triage + `resolved_in_vX` + bootstrap-paradox doc/ADR closeout (Req 4, Req 5, Req 6 fail-closed/config-scope, Req 7 untrusted-corpus + slot-escaping, Req 9 bootstrap doc, regression/stale of Req 3, HC-3/HC-4/HC-6/HC-7/HC-8) | 1, 2 | Closes the minimum loop: consolidate journal → friction report in the non-synced store → triage. The store is isolated from the beads DB + `bd dolt push` (no egress). v1 local-only; the feedback-remote config contract is fail-closed + global-scoped. Folds in Req 9's bootstrap-paradox ADR/spec note (P1). |
 
 ### Sequencing risks

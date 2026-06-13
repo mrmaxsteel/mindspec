@@ -44,7 +44,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/redact"
 	"github.com/mrmaxsteel/mindspec/internal/version"
 )
 
@@ -158,6 +160,21 @@ func ReportsPath() (string, error) {
 // the old reports file but absent from the journal are retained (the journal
 // is the live history; a resolved report whose lines were pruned should not
 // vanish), but in v1 the journal is never pruned so this is defensive.
+//
+// READ-SIDE re-validation (privacy defense-in-depth): journal.jsonl is treated
+// as UNTRUSTED input on READ — a legitimately-written line was enum-validated
+// + redacted at write time (AppendSuccessEvent → redact.RedactEvent), but a
+// HAND-PLANTED / tampered / corrupt journal line could carry raw paths,
+// secrets, emails, IPs, or shell metachars in any field. Each parsed Record is
+// re-run through the SAME validation AppendSuccessEvent applies at WRITE
+// (validRecord → redact.RedactEvent over the persisted enum/version/fingerprint
+// shape); a record that FAILS is DROPPED (skipped). A legitimately-written
+// record ALWAYS passes (it was enum-validated at write), so only tampered/
+// corrupt records are dropped — fail-closed. This extends the existing
+// malformed-line tolerance (unparseable JSON skipped in readRecords) to
+// "parseable but non-conforming", so reports.jsonl can NEVER persist a
+// non-enum / non-64hex-fingerprint / non-canonical-semver value copied from a
+// hostile journal.
 func Consolidate() ([]Report, error) {
 	events, err := ReadEvents()
 	if err != nil {
@@ -186,7 +203,16 @@ func Consolidate() ([]Report, error) {
 
 	byFP := map[string]*Report{}
 	var order []string
-	for _, ev := range ordered {
+	for _, raw := range ordered {
+		// READ-SIDE re-validation: drop any journal record that does not pass
+		// the SAME enum/version/fingerprint validation applied at write time.
+		// A hand-planted/tampered/corrupt line (raw path/secret/email/IP/
+		// metachar in any field) fails and is skipped; only conforming,
+		// write-validated values survive into reports.jsonl (fail-closed).
+		ev, ok := validRecord(raw)
+		if !ok {
+			continue
+		}
 		fp := ev.Fingerprint
 		r, ok := byFP[fp]
 		if !ok {
@@ -220,6 +246,90 @@ func Consolidate() ([]Report, error) {
 		reports = append(reports, *byFP[fp])
 	}
 	return reports, nil
+}
+
+// validRecord re-validates ONE parsed journal Record on READ with the SAME
+// enum/shape validation AppendSuccessEvent applies at WRITE time, returning a
+// SANITIZED Record (canonical values) + ok. It treats journal.jsonl as
+// untrusted input (privacy defense-in-depth): a hand-planted / tampered /
+// corrupt line that carries a raw path, secret, email, IP, or shell-metachar
+// in ANY field is REJECTED (ok=false) so Consolidate drops it before any field
+// can be copied into reports.jsonl. A legitimately-written record always
+// passes, because it was produced by RedactEvent at write time.
+//
+// The check reconstructs the redact.Event from the record's persisted enum
+// fields + argv0 + version (OS is not persisted on the journal record, so it
+// is left "" — a member of the OS allowlist) and runs redact.RedactEvent,
+// which:
+//   - validates Command/EscapeHatch/Subcommand against their closed-set
+//     allowlists (a non-enum token DROPS);
+//   - canonicalizes Version to a bare semver / "dev"/"" (a decorated or
+//     metachar-bearing version DROPS);
+//   - reduces argv0 to a scrubbed basename (a non-classifiable argv0 DROPS);
+//   - recomputes the Fingerprint over the normalized identity.
+//
+// On top of RedactEvent the record is additionally rejected unless:
+//   - its persisted fingerprint EXACTLY equals the recomputed H(identity)
+//     (a planted/forged fingerprint that does not match the identity is not a
+//     real fingerprint — drop, so the render-layer 64-hex check is never the
+//     only line);
+//   - its persisted identity tuple equals the (already enum-validated)
+//     top-level command/escape_hatch/subcommand tokens (a record whose
+//     identity disagrees with its display tokens is malformed — drop).
+//
+// The returned sanitized Record carries ONLY the canonical, re-derived values,
+// so even a record that "passes" can never leak a raw stored value.
+func validRecord(r Record) (Record, bool) {
+	red, ok := redact.RedactEvent(redact.Event{
+		Argv0:       r.Argv0,
+		Command:     r.Command,
+		EscapeHatch: r.EscapeHatch,
+		Subcommand:  r.Subcommand,
+		Version:     r.Version,
+		OS:          "", // OS is not persisted on the journal record.
+	})
+	if !ok {
+		return Record{}, false
+	}
+	// The persisted identity tuple must agree with the (enum-validated)
+	// top-level tokens, and the persisted fingerprint must be exactly the
+	// recomputed H(identity) — a forged/mismatched fingerprint or identity is
+	// not a legitimately-written record.
+	if r.Identity.Command != r.Command ||
+		r.Identity.EscapeHatch != r.EscapeHatch ||
+		r.Identity.Subcommand != r.Subcommand {
+		return Record{}, false
+	}
+	if r.Fingerprint != red.Fingerprint {
+		return Record{}, false
+	}
+	// The timestamp is copied into reports.jsonl (first/last_seen_ts) and is
+	// the one record field NOT covered by RedactEvent, so a planted `ts`
+	// carrying a path/secret/metachar would otherwise ride through. Require it
+	// to parse as RFC3339 (its only legitimate shape, written by nowRFC3339);
+	// anything else is not a real timestamp → drop the record. Re-emit the
+	// canonical RFC3339 form so only that exact shape is persisted.
+	ts, err := time.Parse(time.RFC3339, r.TS)
+	if err != nil {
+		return Record{}, false
+	}
+	canonTS := ts.UTC().Format(time.RFC3339)
+	// Rebuild from canonical values only — never the raw stored fields.
+	return Record{
+		V:           r.V,
+		TS:          canonTS,
+		Argv0:       red.Argv0,
+		Command:     red.Command,
+		EscapeHatch: red.EscapeHatch,
+		Subcommand:  red.Subcommand,
+		Fingerprint: red.Fingerprint,
+		Identity: Identity{
+			Command:     red.Identity.Command,
+			EscapeHatch: red.Identity.EscapeHatch,
+			Subcommand:  red.Identity.Subcommand,
+		},
+		Version: red.Version,
+	}, true
 }
 
 // Classify derives the triage Status of a report from its resolved_in_version
@@ -462,7 +572,13 @@ func MarkResolved(fp string, ver string) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("journal: no friction report with fingerprint %q to resolve (run `mindspec report` first, then `mindspec report list`)", fp)
+			// Do NOT echo the raw user-supplied fingerprint back: like the
+			// sibling invalid-version error above (R1), a path/secret/
+			// shell-metachar payload smuggled into the --resolve argument must
+			// never reach the (copy-pasteable) error surface. Name the CONTRACT,
+			// not the offending input — a non-64-hex value is not a real
+			// fingerprint anyway, so there is nothing legitimate to echo.
+			return fmt.Errorf("journal: no friction report matches the given fingerprint to resolve (run `mindspec report` first, then `mindspec report list` to see the fingerprints)")
 		}
 		return writeReportsLocked(reports)
 	})
