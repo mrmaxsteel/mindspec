@@ -258,13 +258,36 @@ var scrubPasses = []pass{
 	// credential is caught by the entropy backstop.
 	{"secret-jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b`), "<secret>"},
 	{"secret-assign", regexp.MustCompile(`(?i)\b([A-Z0-9_]*(?:TOKEN|KEY|PASSWORD|SECRET))=\S+`), "${1}=<secret>"},
+	// DSN / connection-string credential authority BEFORE email (the email
+	// pass would otherwise eat only the `pass@host` half and leak the
+	// username — confirm-codex-leak). Matches the `user:pass@host[:port][/db]`
+	// authority in BOTH `scheme://user:pass@host…` (the URL pass below would
+	// catch the rest, but the credentials must die first) AND bare
+	// `user:pass@host…` forms (postgres/mysql/redis/mongodb URIs and the bare
+	// `svc:pass@db` shape). The WHOLE authority — username, password, host,
+	// optional port and database path — collapses to <dsn>, so no identifier
+	// survives. The password run forbids ` :@/` so a non-credential email
+	// ("max@cloudlete.ai", no `user:pass@`) does NOT match and falls through
+	// to the email pass. (HC-7: over-scrub the whole authority on a DSN-shaped
+	// match rather than risk a username/host leak.)
+	{"dsn-credentials", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+:[^\s:@/]+@[A-Za-z0-9.-]+(?::\d+)?(?:/[^\s]*)?`), "<dsn>"},
 	// Emails before IPs/paths (the @ and dots are distinctive).
 	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`), "<email>"},
 	// URLs (also neutralises markdown auto-link bait).
 	{"url", regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s)\]]+`), "<url>"},
-	// IPv4 / IPv6.
+	// IPv4.
 	{"ipv4", regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`), "<ip>"},
-	{"ipv6", regexp.MustCompile(`\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b`), "<ip>"},
+	// IPv6 — full, compressed (`::`), and zone-scoped (`%en0`/`%eth0`) forms
+	// (confirm-codex-leak: the old pass only matched fully-expanded colon
+	// groups, so `fe80::1%en0`, `2001:db8::dead:beef`, and `::1` survived).
+	//   - full:        (hex:){2,7}hex          e.g. fe80:0:0:0:1:2:3:4
+	//   - compressed:  <left>?::<right>?        a LITERAL `::` is required, so
+	//                  a lone `host:5432`, `a:b`, or `C:\…` cannot match (only
+	//                  the timestamp shape `12:34:56` — already scrubbed by
+	//                  the old full-form pass — and real `::` addresses do).
+	//   - optional zone id `%iface` on either form.
+	// No `\b` anchors: `::` legitimately abuts non-word chars at the edges.
+	{"ipv6", regexp.MustCompile(`(?:(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?)(?:%[A-Za-z0-9._-]+)?`), "<ip>"},
 	// Branch names BEFORE the path passes (so bead/<id> and spec/<slug>
 	// become <branch>, not <path>).
 	{"branch", regexp.MustCompile(`\b(?:bead|spec)/[A-Za-z0-9._/-]+`), "<branch>"},
@@ -344,6 +367,15 @@ var residualLeakPasses = []*regexp.Regexp{
 	regexp.MustCompile(`\b[0-9a-fA-F]{15,}\b`),                                          // entropy hex (tightened)
 	regexp.MustCompile(`[A-Za-z0-9+/_-]{23,}={0,2}`),                                    // entropy b64 (tightened)
 	regexp.MustCompile(`@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`),                                 // email
+	// Residual DSN credential authority — a surviving `user:pass@host` (the
+	// confirm-codex-leak class where the email pass left the username). The
+	// scrubbed placeholder `<dsn>` has no `:pass@` so it is not re-flagged.
+	regexp.MustCompile(`[A-Za-z0-9._%+-]+:[^\s:@/]+@[A-Za-z0-9.-]`),
+	// Residual IPv6 — full, compressed (`::`) and zone-scoped forms. Mirrors
+	// the ipv6 scrub pass so a surviving compressed/zoned address (the
+	// confirm-codex-leak class) DROPS the field. The `<ip>` placeholder
+	// contains no colon-hex run, so it is never self-flagged.
+	regexp.MustCompile(`(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?`),
 }
 
 // Scrub is the full tainted-string scrub (Req 1). It runs the

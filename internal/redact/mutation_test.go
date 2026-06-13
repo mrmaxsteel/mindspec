@@ -56,10 +56,19 @@ var passFixtures = map[string]struct {
 	"secret-bearer":      {"got Bearer shorttok99 here", "Bearer shorttok99"},
 	"secret-jwt":         {"x eyJabcdef.eyJghijkl.SflKxwRk y", "eyJabcdef.eyJghijkl.SflKxwRk"},
 	"secret-assign":      {"API_KEY=shortval here", "API_KEY=shortval"},
-	"email":              {"contact max@cloudlete.io now", "max@cloudlete.io"},
-	"url":                {"see https://host.example/p here", "host.example/p"},
-	"ipv4":               {"dialed 10.0.0.7 ok", "10.0.0.7"},
-	"ipv6":               {"addr fe80:0:0:0:1:2:3:4 up", "fe80:0:0:0:1:2:3:4"},
+	// dsn-credentials fixture exercises the bare `user:pass@host` authority
+	// (confirm-codex-leak): the unique signal is the service-account USERNAME
+	// `svc_payroll`, which only this pass removes (the email pass would leave
+	// it intact, leaking the identifier). Neutering the pass brings it back.
+	"dsn-credentials": {"db postgres svc_payroll:SuperSecretPass@db.internal:5432 up", "svc_payroll"},
+	"email":           {"contact max@cloudlete.io now", "max@cloudlete.io"},
+	"url":             {"see https://host.example/p here", "host.example/p"},
+	"ipv4":            {"dialed 10.0.0.7 ok", "10.0.0.7"},
+	// ipv6 fixture exercises the HARDENED compressed + zone-id branch
+	// (confirm-codex-leak): a zone-scoped link-local `fe80::1%en0` that the
+	// old full-form-only pass missed. Neutering the pass brings the address
+	// (incl. the `::` and `%en0` zone) back.
+	"ipv6": {"addr fe80::1%en0 up", "fe80::1%en0"},
 	// branch: only the `bead/` prefix render is unique to this pass;
 	// bead-id would still turn the id into <bead>, so the unique signal is
 	// the literal `bead/` (the branch pass renders the whole thing <branch>).

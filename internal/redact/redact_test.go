@@ -426,6 +426,70 @@ func TestScrub_Categories(t *testing.T) {
 			absent:  []string{"xoxb-12345678-abcdefghij"},
 			present: []string{"<secret>"},
 		},
+		// --- confirm-codex-leak r3: DSN / connection-string credentials ---
+		{
+			name:    "bare postgres dsn user:pass@host:port",
+			in:      "postgres svc_payroll:SuperSecretPass@db.internal:5432",
+			absent:  []string{"svc_payroll", "SuperSecretPass", "db.internal"},
+			present: []string{"<dsn>"},
+		},
+		{
+			name:    "bare dsn user:pass@host:port/db",
+			in:      "customerdb_admin:hunter2@db.internal:5432/main",
+			absent:  []string{"customerdb_admin", "hunter2", "db.internal", "main"},
+			present: []string{"<dsn>"},
+		},
+		{
+			name:    "bare mysql dsn report_user",
+			in:      "mysql report_user:PW@db01.prod.corp:3306",
+			absent:  []string{"report_user", "db01.prod.corp"},
+			present: []string{"<dsn>"},
+		},
+		{
+			// scheme://user:pass@host: credentials killed by the dsn pass, then
+			// the residue normalised to <url> by the URL pass.
+			name:    "postgres uri scheme credentials",
+			in:      "postgres://svc_payroll:SuperSecretPass@db.internal:5432/main",
+			absent:  []string{"svc_payroll", "SuperSecretPass", "db.internal"},
+			present: []string{"<url>"},
+		},
+		{
+			name:    "redis uri scheme credentials",
+			in:      "redis://admin:s3cr3t@cache.host:6379",
+			absent:  []string{"admin", "s3cr3t", "cache.host"},
+			present: []string{"<url>"},
+		},
+		{
+			name:    "mongodb uri scheme credentials",
+			in:      "mongodb://dbuser:dbpass@cluster0.example.net/test",
+			absent:  []string{"dbuser", "dbpass", "cluster0.example.net"},
+			present: []string{"<url>"},
+		},
+		// --- confirm-codex-leak r3: compressed + zone-id IPv6 ---
+		{
+			name:    "zone-scoped link-local ipv6",
+			in:      "dial fe80::1%en0 now",
+			absent:  []string{"fe80::1", "%en0"},
+			present: []string{"<ip>"},
+		},
+		{
+			name:    "compressed ipv6",
+			in:      "dial 2001:db8::dead:beef now",
+			absent:  []string{"2001:db8::dead:beef"},
+			present: []string{"<ip>"},
+		},
+		{
+			name:    "loopback ipv6 ::1",
+			in:      "addr ::1 here",
+			absent:  []string{"::1"},
+			present: []string{"<ip>"},
+		},
+		{
+			name:    "zone-scoped compressed ipv6 eth0",
+			in:      "iface 2001:db8::1%eth0 up",
+			absent:  []string{"2001:db8::1", "%eth0"},
+			present: []string{"<ip>"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -445,6 +509,132 @@ func TestScrub_Categories(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestScrub_DSNCredentials is the confirm-codex-leak r3 fix: the bare and
+// scheme-prefixed `user:pass@host[:port][/db]` credential authority must
+// collapse to <dsn> with the username, password AND host all gone — the
+// old email pass left the username (`svc_payroll`) intact.
+func TestScrub_DSNCredentials(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in      string
+		absent  []string
+		present string
+	}{
+		{"postgres svc_payroll:SuperSecretPass@db.internal:5432",
+			[]string{"svc_payroll", "SuperSecretPass", "db.internal"}, "<dsn>"},
+		{"customerdb_admin:hunter2@db.internal:5432/main",
+			[]string{"customerdb_admin", "hunter2", "db.internal"}, "<dsn>"},
+		{"report_user:PW@db01.prod.corp:3306",
+			[]string{"report_user", "db01.prod.corp"}, "<dsn>"},
+		// scheme://user:pass@host forms: the credential authority is killed by
+		// the dsn pass, then the surviving `scheme://<dsn>` is normalised to
+		// the broader <url> placeholder by the URL pass. Either way the
+		// username/password/host are gone — assert <dsn> OR <url>.
+		{"postgres://svc_payroll:SuperSecretPass@db.internal:5432/main",
+			[]string{"svc_payroll", "SuperSecretPass", "db.internal"}, ""},
+		{"mysql://root:toor@127.0.0.1:3306/app",
+			[]string{"root:toor", "toor@"}, ""},
+		{"redis://admin:s3cr3t@cache.host:6379",
+			[]string{"admin", "s3cr3t", "cache.host"}, ""},
+		{"mongodb://dbuser:dbpass@cluster0.example.net/test",
+			[]string{"dbuser", "dbpass", "cluster0.example.net"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			clean, ok := Scrub(c.in)
+			if !ok {
+				return // a drop is also leak-free
+			}
+			for _, a := range c.absent {
+				if strings.Contains(clean, a) {
+					t.Errorf("DSN credential %q survived: Scrub(%q)=%q", a, c.in, clean)
+				}
+			}
+			switch c.present {
+			case "<dsn>":
+				if !strings.Contains(clean, "<dsn>") {
+					t.Errorf("Scrub(%q)=%q missing <dsn>", c.in, clean)
+				}
+			case "": // scheme form — <dsn> or <url> both acceptable
+				if !strings.Contains(clean, "<dsn>") && !strings.Contains(clean, "<url>") {
+					t.Errorf("Scrub(%q)=%q missing <dsn>/<url>", c.in, clean)
+				}
+			}
+		})
+	}
+	// A plain email (no user:pass@ authority) must NOT be mis-scrubbed as a
+	// DSN — it still becomes <email>, never <dsn>.
+	if clean, ok := Scrub("contact max@cloudlete.ai now"); !ok ||
+		!strings.Contains(clean, "<email>") || strings.Contains(clean, "<dsn>") {
+		t.Errorf("plain email mis-handled by DSN pass: %q ok=%v", clean, ok)
+	}
+}
+
+// TestScrub_IPv6Forms is the confirm-codex-leak r3 fix: compressed (`::`)
+// and zone-scoped (`%en0`/`%eth0`) IPv6 — which the old full-form-only
+// pass missed — now scrub to <ip>, while colon-y NON-IPv6 text (versions,
+// error codes, host:port) is NOT over-scrubbed.
+func TestScrub_IPv6Forms(t *testing.T) {
+	t.Parallel()
+	// Scrubbed IPv6 (compressed / zoned / full).
+	scrubbed := []struct{ in, gone string }{
+		{"dial fe80::1%en0 now", "fe80::1%en0"},
+		{"dial 2001:db8::dead:beef now", "2001:db8::dead:beef"},
+		{"addr ::1 here", "::1"},
+		{"iface 2001:db8::1%eth0 up", "2001:db8::1%eth0"},
+		{"full fe80:0:0:0:1:2:3:4 up", "fe80:0:0:0:1:2:3:4"},
+	}
+	for _, c := range scrubbed {
+		clean, ok := Scrub(c.in)
+		if !ok {
+			continue // a drop is also leak-free
+		}
+		if strings.Contains(clean, c.gone) {
+			t.Errorf("IPv6 %q survived: Scrub(%q)=%q", c.gone, c.in, clean)
+		}
+		if !strings.Contains(clean, "<ip>") {
+			t.Errorf("Scrub(%q)=%q missing <ip>", c.in, clean)
+		}
+	}
+	// Over-scrub guard: colon-y non-IPv6 text MUST survive verbatim and
+	// classify (ok=true) — no <ip> placeholder, not dropped.
+	keep := []string{
+		"version 1.2.3 here",
+		"Dolt Error 1105",
+		"listening on host:5432 now",
+		"see semver 1.2 ok",
+		"map a:b lookup",
+	}
+	for _, in := range keep {
+		clean, ok := Scrub(in)
+		if !ok {
+			t.Errorf("non-IPv6 text over-scrubbed to a drop: Scrub(%q) ok=false", in)
+			continue
+		}
+		if strings.Contains(clean, "<ip>") {
+			t.Errorf("non-IPv6 text over-scrubbed: Scrub(%q)=%q contains <ip>", in, clean)
+		}
+	}
+}
+
+// TestRedactEvent_Argv0IPv6ThroughScrub is the confirm-codex-leak r3
+// argv0 defense: a crafted Argv0 carrying IPv6 data must NOT survive
+// verbatim — it is basenamed AND run through Scrub, so the address is
+// scrubbed to <ip> (data gone) or the event drops fail-closed.
+func TestRedactEvent_Argv0IPv6ThroughScrub(t *testing.T) {
+	t.Parallel()
+	for _, argv0 := range []string{"fe80::1%en0", "2001:db8::dead:beef", "::1"} {
+		re, ok := RedactEvent(Event{Argv0: argv0, Command: "next", Version: "dev", OS: "darwin"})
+		if ok {
+			if strings.Contains(re.Argv0, argv0) || strings.Contains(re.Argv0, "::") ||
+				strings.Contains(re.Argv0, "%en0") {
+				t.Errorf("crafted Argv0 %q survived in event: Argv0=%q", argv0, re.Argv0)
+			}
+		}
+		// ok==false (drop) is equally acceptable — fail-closed, no leak.
 	}
 }
 
