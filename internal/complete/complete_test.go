@@ -934,6 +934,112 @@ func TestRun_CloseFailsNonIdempotent(t *testing.T) {
 	}
 }
 
+// --- Spec 096 Bead 2 (mindspec-2u0u): close-leg persistence verification ---
+//
+// After closeBeadFn returns nil, complete.Run re-reads the bead status
+// and decides across three cases:
+//   (a) re-read affirms closed       → proceed, BeadClosed: true
+//   (b) re-read affirms open/in_prog → HARD error (silent close-loss)
+//   (c) re-read itself errors         → tolerate, warn, proceed
+
+// (b) The headline RED proof: closeBeadFn returns nil but the re-read
+// AFFIRMS the bead is still in_progress (fetchErr == nil). This is the
+// real silent close-loss bug — complete MUST return a non-zero error and
+// MUST NOT report BeadClosed: true. RED if reverted to the unconditional
+// BeadClosed: true.
+func TestRun_CloseReturnsNilButReReadShowsInProgress(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "096-lifecycle", "epic-096")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "096-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	// Close "succeeds" but never persisted.
+	closeBeadFn = func(ids ...string) error { return nil }
+	// Re-read SUCCEEDS (fetchErr == nil) and shows the bead still open.
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "in_progress"}, nil
+	}
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a non-zero error when close returned nil but the re-read affirms the bead is still in_progress (silent close-loss)")
+	}
+	if !strings.Contains(err.Error(), "did NOT persist") {
+		t.Errorf("error should name the silent close-loss, got: %v", err)
+	}
+	if result != nil && result.BeadClosed {
+		t.Errorf("BeadClosed must NOT be true on an unpersisted close, got result=%+v", result)
+	}
+}
+
+// (c) The false-hard-error guard: closeBeadFn returns nil, the re-read
+// FETCH itself errors. The close DID succeed; a transient/eventually-
+// consistent fetch failure must NOT be promoted to a new non-zero exit.
+// complete MUST tolerate, warn, and proceed. RED if the impl hard-blocks
+// on a fetch error.
+func TestRun_CloseReturnsNilButReReadFetchErrors(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "096-lifecycle", "epic-096")
+	buf := captureWarnOutput(t)
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "096-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	closeBeadFn = func(ids ...string) error { return nil }
+	// Re-read ERRORS (transient Dolt hiccup) after a good close.
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{}, fmt.Errorf("dolt: transient read timeout")
+	}
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("a transient re-read fetch error after a good close must NOT fail completion, got: %v", err)
+	}
+	if result == nil || !result.BeadClosed {
+		t.Errorf("BeadClosed must be true when the close succeeded and only the re-read errored, got result=%+v", result)
+	}
+	if !strings.Contains(buf.String(), "WARN complete:") {
+		t.Errorf("expected a WARN line about the failed post-close re-read, got %q", buf.String())
+	}
+}
+
+// (a) No-regression: closeBeadFn returns nil AND the re-read affirms
+// closed → completion proceeds normally with BeadClosed: true.
+func TestRun_CloseReturnsNilAndReReadConfirmsClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "096-lifecycle", "epic-096")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "096-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	closeBeadFn = func(ids ...string) error { return nil }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		// Mixed-case + whitespace to pin the EqualFold/TrimSpace predicate.
+		return next.BeadInfo{ID: id, Status: " Closed "}, nil
+	}
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("a confirmed-closed re-read must complete, got: %v", err)
+	}
+	if result == nil || !result.BeadClosed {
+		t.Errorf("BeadClosed must be true on a confirmed-closed re-read, got result=%+v", result)
+	}
+}
+
 func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 	saveAndRestore(t)
 
@@ -1788,6 +1894,13 @@ func TestCompleteNoWarningsPrintsNothing(t *testing.T) {
 	resolveTargetFn = func(r, flag string) (string, error) { return "091-warn-pipe", nil }
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	closeBeadFn = func(ids ...string) error { return nil }
+	// Spec 096 Req 2: the post-close re-read must AFFIRM closed (case a)
+	// so the close-verification step emits no WARN of its own — this test
+	// pins that an empty doc-sync result prints nothing, so the re-read
+	// has to land on the silent (confirmed-closed) path.
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "closed"}, nil
+	}
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
 	mock := newMockExec()
