@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -540,10 +541,20 @@ None applicable.
 `
 	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(specContent), 0644)
 
+	// `key_file_paths` is declared per-bead in structured frontmatter (spec
+	// 097 R4): `internal/widget/declared.go` is the DECLARED path that must
+	// reach the bead's `metadata.file_paths`. `internal/widget/frob.go` is
+	// mentioned ONLY in the work-chunk PROSE and must NOT be scraped (RED on
+	// revert to ExtractFilePathsFromText's prefix scan).
 	planContent := `---
 status: Approved
 spec_id: "042-test"
 version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - internal/widget/declared.go
 ---
 
 # Plan
@@ -630,7 +641,11 @@ None
 		}
 	}
 
-	// Verify --metadata contains spec_id and file_paths
+	// Verify --metadata contains spec_id and the DECLARED key_file_paths only.
+	// The declared `internal/widget/declared.go` must be present; the
+	// prose-only `internal/widget/frob.go` (mentioned in the work chunk but
+	// NOT in key_file_paths) must NOT be scraped in (spec 097 R4 — RED on
+	// revert to ExtractFilePathsFromText's prefix scan).
 	meta := findFlag("--metadata")
 	if meta == "" {
 		t.Error("--metadata flag not passed")
@@ -638,9 +653,108 @@ None
 		if !strings.Contains(meta, `"spec_id":"042-test"`) {
 			t.Errorf("metadata should contain spec_id, got: %s", meta)
 		}
-		if !strings.Contains(meta, "internal/widget/frob.go") {
-			t.Errorf("metadata should contain file_paths, got: %s", meta)
+		if !strings.Contains(meta, "internal/widget/declared.go") {
+			t.Errorf("metadata should contain the declared key_file_paths, got: %s", meta)
 		}
+		if strings.Contains(meta, "internal/widget/frob.go") {
+			t.Errorf("metadata must NOT scrape prose-only paths; got: %s", meta)
+		}
+	}
+}
+
+// TestCreateImplementationBeads_KeyFilePathsReachSurface proves the spec 097 R4
+// chain END-TO-END through the rendered `## Key File Paths` surface: a
+// work-chunk's declared `key_file_paths` flows approve-side into the bead's
+// `metadata.file_paths` (captured here) and reaches the rendered surface via
+// contextpack.RenderBeadContext, while a path mentioned ONLY in the work-chunk
+// prose is NOT scraped. RED on revert to ExtractFilePathsFromText's prefix scan.
+func TestCreateImplementationBeads_KeyFilePathsReachSurface(t *testing.T) {
+	tmp := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(`---
+status: Approved
+---
+# Spec 042-test
+
+## Requirements
+1. Widget must frob
+
+## Acceptance Criteria
+- [ ] Widget frobs correctly
+`), 0644)
+
+	planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - internal/widget/declared.go
+---
+
+# Plan
+
+## Bead 1: Implement widget frobbing
+
+**Steps**
+1. Create ` + "`internal/widget/prose_only.go`" + `
+
+**Depends on**
+None
+`
+	planPath := filepath.Join(tmp, "plan.md")
+	os.WriteFile(planPath, []byte(planContent), 0644)
+
+	var capturedMetadata string
+	orig := planRunBDFn
+	defer func() { planRunBDFn = orig }()
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		for i, a := range args {
+			if a == "--metadata" && i+1 < len(args) {
+				capturedMetadata = args[i+1]
+			}
+		}
+		return []byte(`{"id":"test-bead-1"}`), nil
+	}
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+	if _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedMetadata == "" {
+		t.Fatal("no --metadata captured")
+	}
+
+	// Feed the approve-produced metadata into the rendered surface.
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedMetadata), &meta); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+	restore := contextpack.SetBeadShowForTest(func(args ...string) ([]byte, error) {
+		return json.Marshal([]map[string]interface{}{{
+			"id":       "test-bead-1",
+			"title":    "[042-test] Bead 1",
+			"metadata": meta,
+		}})
+	})
+	defer restore()
+
+	rendered, err := contextpack.RenderBeadContext("test-bead-1")
+	if err != nil {
+		t.Fatalf("RenderBeadContext: %v", err)
+	}
+	if !strings.Contains(rendered, "## Key File Paths") {
+		t.Fatalf("rendered surface missing `## Key File Paths`:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "internal/widget/declared.go") {
+		t.Errorf("declared key_file_paths should reach the rendered surface:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "internal/widget/prose_only.go") {
+		t.Errorf("prose-only path must NOT reach the rendered surface:\n%s", rendered)
 	}
 }
 

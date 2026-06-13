@@ -98,10 +98,16 @@ entry PER `## Bead <N>` section, in declaration order:
 work_chunks:
   - id: 1            # maps to the 1st `## Bead 1` section → bead_ids[0]
     depends_on: []
+    key_file_paths:  # declared source for this bead's `## Key File Paths` surface
+      - internal/foo/foo.go
   - id: 2            # maps to the 2nd `## Bead 2` section → bead_ids[1]
     depends_on: [1]  # bead_ids[1] depends on bead_ids[0]
+    key_file_paths:
+      - internal/bar/bar.go
+      - cmd/mindspec/bar.go
   - id: 3            # maps to the 3rd `## Bead 3` section → bead_ids[2]
     depends_on: [1, 2]
+    key_file_paths: []
 ```
 
 Mapping rule: chunk `id N` (1-based, declaration order) → `bead_ids[N-1]` (the
@@ -110,6 +116,11 @@ Nth `## Bead` section); `depends_on: [M]` makes `bead_ids[N-1]` depend on
 number of `## Bead` sections — a gap, duplicate, count mismatch, or out-of-range
 `depends_on` target is rejected at `mindspec plan approve`. `approve` wires
 `bd dep add` from these declared deps.
+
+`key_file_paths` is the DECLARED source for each bead's `## Key File Paths`
+context surface (no prose scraping): chunk `id N`'s paths feed `bead_ids[N-1]`'s
+`metadata.file_paths`. List the files that bead will primarily touch; omit or use
+`[]` when none — the surface is then simply empty (non-gating enrichment).
 
 Required plan sections:
 - `## ADR Fitness` — evaluate whether each relevant ADR remains the best choice; if no ADRs are relevant, explain why (this section is **required** even when no ADRs apply)
