@@ -103,6 +103,11 @@ is recorded inline.
   * `internal/complete/**` — verify the close-leg persisted (Req 2).
   * `cmd/**` — worktree-aware `adr create` root (Req 4) and the new `version` subcommand
     (Req 5).
+- **core**: the redaction allowlist owned by the core domain
+  (`.mindspec/docs/domains/core/OWNERSHIP.yaml`):
+  * `internal/redact/**` — Bead 5 registering the `version` subcommand forced adding
+    `version` to the `CommandTokens` allowlist in `internal/redact/redact.go` to satisfy the
+    redaction drift-guard (`TestRedactEnum_NoCobraDrift`).
 
 `internal/adr/parse.go` (Req 3) is NOT YET claimed by any domain `OWNERSHIP.yaml`. Because the
 `adr-divergence-unowned` gate (`internal/validate/divergence.go:194-203`) raises a HARD ERROR for
