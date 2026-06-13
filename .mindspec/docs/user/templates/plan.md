@@ -12,6 +12,13 @@ last_updated: YYYY-MM-DD
 # adr_citations:
 #   - id: ADR-NNNN
 #     sections: ["<relevant sections>"]
+# Structured inter-bead dependencies (consumed at `plan approve`).
+# Declare ONE entry per `## Bead <N>` section below, in declaration order.
+# Mapping: chunk `id N` (1-based) → bead_ids[N-1] (the Nth `## Bead` section);
+# `depends_on: [M]` makes bead_ids[N-1] depend on bead_ids[M-1]. The ids MUST be
+# the contiguous set 1..K where K = the number of `## Bead` sections (a gap,
+# duplicate, count mismatch, or out-of-range depends_on target is rejected).
+# title/scope/verify are human-readable only — the parser reads id + depends_on.
 work_chunks:
   - id: 1
     title: "<Short title for first chunk>"
@@ -35,7 +42,9 @@ work_chunks:
 
 ---
 
-## Bead <NNN>-A: <Short title>
+## Bead 1: <Short title>
+
+> Section #1 → `work_chunks` id 1 → bead_ids[0].
 
 **Scope**: <What this bead delivers — one slice of value>
 
@@ -52,7 +61,9 @@ work_chunks:
 
 ---
 
-## Bead <NNN>-B: <Short title>
+## Bead 2: <Short title>
+
+> Section #2 → `work_chunks` id 2 → bead_ids[1]; `depends_on: [1]` above.
 
 **Scope**: <What this bead delivers>
 
@@ -65,13 +76,13 @@ work_chunks:
 - [ ] <Specific, testable criterion>
 - [ ] <Specific, testable criterion>
 
-**Depends on**: <NNN>-A
+**Depends on**: Bead 1
 
 ---
 
 ## Dependency Graph
 
 ```
-<NNN>-A (<short description>)
-  └── <NNN>-B (<short description>)
+Bead 1 (<short description>)
+  └── Bead 2 (<short description>)
 ```
