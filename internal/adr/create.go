@@ -62,9 +62,26 @@ type CreateOpts struct {
 	Supersedes string
 }
 
-// Create generates a new ADR file from the template.
-// Returns the path to the created file.
+// Create generates a new ADR file from the template under root, numbering
+// the new ADR against root's own ADRs. Returns the path to the created file.
 func Create(root, title string, opts CreateOpts) (string, error) {
+	return create(root, []string{root}, title, opts)
+}
+
+// CreateUnion writes the new ADR into writeRoot but allocates its ID over the
+// UNION of writeRoot and numberingRoots (e.g. the main checkout), so a new ADR
+// authored from a bead/spec worktree cannot collide with a main-only ADR added
+// after the branch diverged. The WRITE target (and any --supersedes resolution)
+// is writeRoot alone; only the NextID allocation consults the union. With an
+// empty numberingRoots this is identical to Create (mindspec-8lzq).
+func CreateUnion(writeRoot string, numberingRoots []string, title string, opts CreateOpts) (string, error) {
+	roots := append([]string{writeRoot}, numberingRoots...)
+	return create(writeRoot, roots, title, opts)
+}
+
+// create is the shared ADR-creation body. It writes into root but allocates
+// the new ID over numberingRoots (the union of roots to number against).
+func create(root string, numberingRoots []string, title string, opts CreateOpts) (string, error) {
 	if strings.TrimSpace(title) == "" {
 		return "", fmt.Errorf("title must not be empty")
 	}
@@ -96,7 +113,7 @@ func Create(root, title string, opts CreateOpts) (string, error) {
 		}
 	}
 
-	id, err := NextID(root)
+	id, err := NextIDAcross(numberingRoots...)
 	if err != nil {
 		return "", fmt.Errorf("generating next ID: %w", err)
 	}

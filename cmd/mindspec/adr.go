@@ -25,9 +25,25 @@ var adrCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		root, err := workspace.FindRoot(cwd)
+		// WRITE target is the worktree-LOCAL root (FindLocalRoot does NOT
+		// resolve a worktree back to main, unlike FindRoot), so a new ADR
+		// authored from a bead/spec worktree lands in THAT worktree's
+		// .mindspec/docs/adr/, not the main checkout (mindspec-8lzq).
+		root, err := workspace.FindLocalRoot(cwd)
 		if err != nil {
 			return err
+		}
+		// Number the new ADR over the BRANCH+MAIN union: the write store is
+		// worktree-local, but reads/validation union the worktree branch ADRs
+		// with the main-checkout ADRs (OverlayStore). Allocating NextID over
+		// only the local root could collide with a main-only ADR added after
+		// the branch diverged, so we also number against the main root. In the
+		// main checkout FindRoot == FindLocalRoot and this is a no-op. FindRoot
+		// is best-effort: if it can't resolve, number against the local root
+		// alone.
+		var numberingRoots []string
+		if mainRoot, mErr := workspace.FindRoot(cwd); mErr == nil && mainRoot != root {
+			numberingRoots = append(numberingRoots, mainRoot)
 		}
 
 		domain, _ := cmd.Flags().GetString("domain")
@@ -52,8 +68,7 @@ var adrCreateCmd = &cobra.Command{
 			}
 		}
 
-		store := adr.NewFileStore(root)
-		path, err := store.Create(args[0], adr.CreateOpts{
+		path, err := adr.CreateUnion(root, numberingRoots, args[0], adr.CreateOpts{
 			Domains:    domains,
 			Supersedes: supersedes,
 		})
