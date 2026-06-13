@@ -354,6 +354,43 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		} else {
 			return nil, fmt.Errorf("closing bead: %w", err)
 		}
+	} else {
+		// Spec 096 Req 2 (mindspec-2u0u): closeBeadFn returned nil, but a
+		// nil return does NOT prove the close PERSISTED. A lost/raced
+		// Dolt close can return success while `bd show` still reports
+		// `in_progress` with `closed_at None` (the spec-092 Bead 7
+		// symptom: prints `closed`, exits 0, yet the bead stays open —
+		// violating the "exit codes never lie" invariant). Re-read the
+		// persisted status and decide across THREE cases, mirroring the
+		// already-closed branch above and reusing its exact predicate
+		// (strings.EqualFold(strings.TrimSpace(status), "closed")).
+		info, fetchErr := fetchBeadByIDFn(beadID)
+		switch {
+		case fetchErr != nil:
+			// (c) The re-read itself ERRORED after a nil close. The close
+			// DID succeed (closeBeadFn returned nil); a transient /
+			// eventually-consistent fetch failure (Dolt hiccup, race)
+			// must NEVER be promoted to a NEW non-zero exit — that would
+			// be the OPPOSITE "exit codes lie" inversion, blocking a
+			// legitimate complete on lifecycle-terminal code. TOLERATE:
+			// warn and proceed (BeadClosed stays true below).
+			fmt.Fprintf(warnWriter,
+				"WARN complete: bead %s close returned success but the post-close status re-read failed (%v) — proceeding (the close itself succeeded).\n",
+				beadID, fetchErr)
+		case strings.EqualFold(strings.TrimSpace(info.Status), "closed"):
+			// (a) Re-read AFFIRMS closed — the close persisted. Proceed.
+		default:
+			// (b) Re-read AFFIRMS open/in_progress: the REAL silent
+			// close-loss bug (mindspec-2u0u). closeBeadFn returned nil but
+			// the close did NOT persist. Surface a HARD error + non-zero
+			// exit so `complete` NEVER prints `closed` + exit 0 on an
+			// unpersisted close (ADR-0035 recovery line).
+			msg := fmt.Sprintf(
+				"bead %s close returned success but a re-read shows it is still %q (not closed) — the close did NOT persist (silent close-loss).\n"+
+					"this state is recoverable: re-run `mindspec complete %s` — the close step is idempotent and converges once the close persists.",
+				beadID, strings.TrimSpace(info.Status), beadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+		}
 	}
 
 	// 4.5. Emit recording bead marker (best-effort)
