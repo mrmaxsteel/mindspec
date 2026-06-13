@@ -13,6 +13,7 @@ paths:
   - internal/setup/**
   - internal/panel/**
   - internal/bootstrap/**
+  - internal/adr/**
   - cmd/**
   - plugins/mindspec/**
   - .claude/skills/**
