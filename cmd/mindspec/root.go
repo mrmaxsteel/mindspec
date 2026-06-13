@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
+	versionpkg "github.com/mrmaxsteel/mindspec/internal/version"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -36,6 +37,16 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
+
+// currentVersion returns the bare semver stamped on every journal entry
+// (spec 094 Req 3). It reads the internal/version single source of truth
+// (version.Current()), which Bead 1 documents as the value Set() from
+// main's ldflags-injected `version` var at startup (init below) — NOT the
+// decorated cobra --version string (whose commit hash the entropy scrub
+// would eat). A non-release/local/test build returns "dev".
+func currentVersion() string {
+	return versionpkg.Current()
+}
 
 var cmdStartTime time.Time
 
@@ -70,6 +81,20 @@ var rootCmd = &cobra.Command{
 			WithData(map[string]any{
 				"command": cmd.Name(),
 			}))
+
+		// Spec 094 Bead 2 (Req 2): success-path self-emit. cobra runs
+		// PersistentPostRunE ONLY on RunE success, so reaching here means the
+		// leaf command SUCCEEDED. emitFriction appends exactly one redacted,
+		// isolated journal entry IFF the leaf used a bound escape-hatch flag
+		// or is a completed `repair phase`; a clean success appends nothing
+		// (the always-on privacy boundary, A1). It is BEST-EFFORT / NON-FATAL
+		// — any journal error or redaction drop is swallowed inside
+		// emitFriction and never returned, so a successful side-effecting
+		// command (complete, impl approve) never becomes a post-mutation
+		// failure. The opt-in --trace/MINDSPEC_TRACE path is untouched
+		// (ADR-0027); journaling is always-on and independent of it.
+		emitFriction(cmd)
+
 		return trace.Close()
 	},
 	// Spec 092 Req 10b: Args+RunE replace cobra's legacyArgs
@@ -164,6 +189,15 @@ func findLocalRoot() (string, error) {
 }
 
 func init() {
+	// Spec 094 Bead 2 (Req 3): wire the build's bare semver (the
+	// ldflags-injected `version` var, root.go:35 default "dev") into the
+	// internal/version single source of truth so version.Current() — stamped
+	// on every friction journal entry — is the build's real semver in
+	// release builds, not "dev". Set ignores a blank arg and is idempotent;
+	// the decorated cobra --version string (version+commit+date) is NOT used
+	// (its commit hash is exactly what the redaction entropy scrub eats).
+	versionpkg.Set(version)
+
 	rootCmd.PersistentFlags().String("trace", "", "Write trace events to file (use - for stderr)")
 
 	// Spec 092 Req 10a: root help gains an "Approval Gates" section

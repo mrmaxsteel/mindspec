@@ -7,4 +7,5 @@ paths:
   - internal/recording/**
   - internal/redact/**
   - internal/version/**
+  - internal/journal/**
   - .mindspec/docs/domains/core/OWNERSHIP.yaml
