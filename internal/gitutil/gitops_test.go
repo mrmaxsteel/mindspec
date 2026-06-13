@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
 // TestRevParseRef_DistinguishesAbsentFromTransient pins the round-2 hardening
@@ -502,7 +504,7 @@ func TestDiffNameOnlyRef_NoWorkdir(t *testing.T) {
 	if len(files) != 1 || files[0] != "x.go" {
 		t.Errorf("unexpected files: %v", files)
 	}
-	assertArgs(t, (*calls)[0].args, "diff", "--name-only", "HEAD~1")
+	assertArgs(t, (*calls)[0].args, "diff", "--name-only", "HEAD~1", "--")
 }
 
 func TestDiffPathspec_InsertsSeparator(t *testing.T) {
@@ -600,7 +602,7 @@ func TestCheckoutNewBranch(t *testing.T) {
 	if err := CheckoutNewBranch("/wt", "feature"); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "-b", "feature")
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "-b", "feature", "--")
 }
 
 // --- Integration tests against a real git repo ---
@@ -790,5 +792,202 @@ func TestLogOneline(t *testing.T) {
 
 	if _, err := LogOneline(dir, "bead/does-not-exist"); err == nil {
 		t.Error("LogOneline on a missing ref should error")
+	}
+}
+
+// --- SEC-5 / spec 097 R1 (finding obxo): option-injection guard ---
+
+// assertOptionLikeRejected verifies an error is an ADR-0035-shaped
+// rejection of a `-`-prefixed operand: non-nil, naming the operand, and
+// ending with a final `recovery:` line (guard.HasFinalRecoveryLine).
+func assertOptionLikeRejected(t *testing.T, err error, operand string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a rejection error for hostile operand %q, got nil", operand)
+	}
+	if !strings.Contains(err.Error(), operand) {
+		t.Errorf("error should name the hostile operand %q, got: %v", operand, err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("error must end with an ADR-0035 recovery line, got: %q", err.Error())
+	}
+}
+
+// TestRejectOptionLike_Predicate pins the boundary guard itself: any
+// `-`-prefixed operand is rejected with a final recovery line; controlled
+// refs and the empty string pass.
+func TestRejectOptionLike_Predicate(t *testing.T) {
+	for _, hostile := range []string{"-x", "--upload-pack=/evil", "-", "--no-ff"} {
+		if err := rejectOptionLike(hostile); err == nil {
+			t.Errorf("rejectOptionLike(%q) = nil, want rejection", hostile)
+		} else {
+			assertOptionLikeRejected(t, err, hostile)
+		}
+	}
+	for _, ok := range []string{"main", "spec/097-x", "bead/mindspec-r04i.2", "HEAD", "HEAD~1", ""} {
+		if err := rejectOptionLike(ok); err != nil {
+			t.Errorf("rejectOptionLike(%q) = %v, want nil (controlled ref)", ok, err)
+		}
+	}
+}
+
+// TestSEC5_SingleRefSites_RejectHostileOperand covers a single-ref-class
+// entry point: a hostile `-`-prefixed ref errors with a recovery line and
+// NEVER reaches git (no exec call captured).
+func TestSEC5_SingleRefSites_RejectHostileOperand(t *testing.T) {
+	calls := swapExec(t, "", 0)
+
+	// CreateBranch (branch -- name from): both operands guarded.
+	assertOptionLikeRejected(t, CreateBranch("-x", "main"), "-x")
+	assertOptionLikeRejected(t, CreateBranch("feature", "--upload-pack=x"), "--upload-pack=x")
+
+	// MergeBranch (checkout -- target; merge ... -- source).
+	assertOptionLikeRejected(t, MergeBranch("/wt", "-x", "main"), "-x")
+	assertOptionLikeRejected(t, MergeBranch("/wt", "feature", "-x"), "-x")
+
+	// MergeInto (merge ... -- source).
+	assertOptionLikeRejected(t, MergeInto("/wt", "--upload-pack=x"), "--upload-pack=x")
+
+	// DeleteBranch (branch -D -- name).
+	assertOptionLikeRejected(t, DeleteBranch("-x"), "-x")
+
+	// CheckoutNewBranch (checkout -b branch --).
+	assertOptionLikeRejected(t, CheckoutNewBranch("/wt", "-x"), "-x")
+
+	// LogOneline / DiffNameOnlyRef (trailing-`--` single-ref).
+	_, err := LogOneline("/wt", "-x")
+	assertOptionLikeRejected(t, err, "-x")
+	_, err = DiffNameOnlyRef("/wt", "--upload-pack=x")
+	assertOptionLikeRejected(t, err, "--upload-pack=x")
+
+	if len(*calls) != 0 {
+		t.Errorf("hostile operands must be rejected BEFORE git is invoked, got %d exec calls: %v", len(*calls), *calls)
+	}
+}
+
+// TestSEC5_RefOnlySites_RejectHostileOperand covers the ref-only class
+// (no `--`): a hostile operand errors (or, for BranchExists which returns
+// bool, reports false) and never reaches git.
+func TestSEC5_RefOnlySites_RejectHostileOperand(t *testing.T) {
+	calls := swapExec(t, "", 0)
+
+	assertOptionLikeRejected(t, PushBranch("-x"), "-x")
+	_, err := IsAncestor("/wt", "-x", "main")
+	assertOptionLikeRejected(t, err, "-x")
+	_, err = IsAncestor("/wt", "main", "--upload-pack=x")
+	assertOptionLikeRejected(t, err, "--upload-pack=x")
+	_, err = RevParseRef("/wt", "-x")
+	assertOptionLikeRejected(t, err, "-x")
+	assertOptionLikeRejected(t, WorktreeAddDetach("/wt", "/p", "-x"), "-x")
+	assertOptionLikeRejected(t, WorktreeAdd("/wt", "/p", "--upload-pack=x"), "--upload-pack=x")
+
+	if BranchExists("-x") {
+		t.Error("BranchExists(\"-x\") = true, want false (option-like name rejected)")
+	}
+
+	if len(*calls) != 0 {
+		t.Errorf("hostile ref-only operands must be rejected BEFORE git is invoked, got %d exec calls: %v", len(*calls), *calls)
+	}
+}
+
+// TestSEC5_RangeSites_RejectHostileOperand covers the revision-range class:
+// a hostile base OR head errors with a recovery line and never reaches git.
+func TestSEC5_RangeSites_RejectHostileOperand(t *testing.T) {
+	calls := swapExec(t, "", 0)
+
+	_, err := DiffStat("/wt", "-x", "main")
+	assertOptionLikeRejected(t, err, "-x")
+	_, err = DiffStat("/wt", "main", "--upload-pack=x")
+	assertOptionLikeRejected(t, err, "--upload-pack=x")
+
+	_, err = CommitCount("/wt", "-x", "main")
+	assertOptionLikeRejected(t, err, "-x")
+
+	_, err = DiffNameOnly("/wt", "main", "-x")
+	assertOptionLikeRejected(t, err, "-x")
+
+	// DiffPathspec guards base/head too (pathspecs sit safely after `--`).
+	_, err = DiffPathspec("/wt", "-x", "main", []string{"a.go"})
+	assertOptionLikeRejected(t, err, "-x")
+
+	if len(*calls) != 0 {
+		t.Errorf("hostile range operands must be rejected BEFORE git is invoked, got %d exec calls: %v", len(*calls), *calls)
+	}
+}
+
+// TestSEC5_RangeSites_NoSeparator pins that the range operands DO NOT get
+// a `--` separator (a `--` would reinterpret `base..head` as a pathspec).
+// RED if a `--` is wrongly inserted into a range argv.
+func TestSEC5_RangeSites_NoSeparator(t *testing.T) {
+	calls := swapExec(t, "1\n", 0)
+	if _, err := DiffStat("/wt", "main", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "diff", "--stat", "main..feature")
+
+	calls = swapExec(t, "3\n", 0)
+	if _, err := CommitCount("/wt", "main", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "rev-list", "--count", "main..feature")
+
+	calls = swapExec(t, "a.go\n", 0)
+	if _, err := DiffNameOnly("/wt", "main", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "diff", "--name-only", "main..feature")
+}
+
+// TestSEC5_SingleRefSites_InsertSeparator pins the `--` separators on the
+// single-ref subcommands. RED if a separator is dropped.
+func TestSEC5_SingleRefSites_InsertSeparator(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := CreateBranch("feature", "main"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "branch", "--", "feature", "main")
+
+	calls = swapExec(t, "", 0)
+	if err := DeleteBranch("feature"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "branch", "-D", "--", "feature")
+
+	calls = swapExec(t, "", 0)
+	if err := MergeBranch("/wt", "feature", "main"); err != nil {
+		t.Fatal(err)
+	}
+	// Two calls: checkout target (trailing `--`), then merge with `-m ... -- source`.
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "main", "--")
+	assertArgs(t, (*calls)[1].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature into main", "--", "feature")
+
+	calls = swapExec(t, "", 0)
+	if err := MergeInto("/wt", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature", "--", "feature")
+
+	calls = swapExec(t, "", 0)
+	if _, err := LogOneline("/wt", "main"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "log", "-1", "--oneline", "main", "--")
+}
+
+// TestSEC5_ControlledRefs_StillSucceed proves every classified ref shape
+// (`main`, `spec/<id>`, `bead/<id>`) still flows through to git unchanged.
+func TestSEC5_ControlledRefs_StillSucceed(t *testing.T) {
+	for _, ref := range []string{"main", "spec/097-code-review-cleanup", "bead/mindspec-r04i.2"} {
+		calls := swapExec(t, "", 0)
+		if err := PushBranch(ref); err != nil {
+			t.Errorf("PushBranch(%q) rejected a controlled ref: %v", ref, err)
+		}
+		assertArgs(t, (*calls)[0].args, "push", "-u", "origin", ref)
+
+		calls = swapExec(t, "", 0)
+		if err := CheckoutNewBranch("/wt", ref); err != nil {
+			t.Errorf("CheckoutNewBranch(%q) rejected a controlled ref: %v", ref, err)
+		}
+		assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "-b", ref, "--")
 	}
 }
