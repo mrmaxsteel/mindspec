@@ -336,8 +336,9 @@ func TestApprovePlan_SinglePassAggregatedValidationError(t *testing.T) {
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// Plan with multiple distinct violations: missing version (frontmatter),
-	// a bead missing steps + verification + acceptance criteria.
+	// Plan with multiple distinct violations: a bead missing steps +
+	// verification + acceptance criteria. (version is intentionally absent but
+	// no longer a violation — it auto-fills to "1" per 098 R3/e6qq.)
 	planContent := `---
 status: Draft
 spec_id: "042-test"
@@ -395,7 +396,6 @@ None
 
 	// All distinct violations are present in the ONE error.
 	for _, want := range []string{
-		"[frontmatter-version]",
 		"[bead-steps]",
 		"[bead-verification]",
 		"[bead-acceptance-criteria]",
