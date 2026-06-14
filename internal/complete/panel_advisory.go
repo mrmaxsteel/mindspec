@@ -6,15 +6,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/hook"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 // defaultPanelSkipEnv reports whether the env-only panel-skip hatch is set
-// for this process. Single-sourced on hook.SkipPanelEnv so the audit write
-// and the gate read the same variable name.
+// for this process. Single-sourced on panel.SkipPanelEnv (Spec 099) so the
+// audit write and the gate read the same variable name.
 func defaultPanelSkipEnv() bool {
-	return os.Getenv(hook.SkipPanelEnv) == "1"
+	return os.Getenv(panel.SkipPanelEnv) == "1"
 }
 
 // Panel-gate seams for the complete-side advisory (Spec 093 Req 13d) and
