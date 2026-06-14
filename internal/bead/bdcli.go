@@ -127,6 +127,31 @@ func Close(ids ...string) error {
 	return nil
 }
 
+// DoltCommit forces a Dolt commit of any uncommitted changes in the working
+// set via `bd dolt commit` — the strongest available bd durability primitive
+// ("Create a Dolt commit from any uncommitted changes in the working set …").
+// Spec 098 Req 2 (mindspec-9n2h) calls this after `bd close` to force the
+// close to durable Dolt state before completion proceeds.
+//
+// IDEMPOTENT: a clean working set is SUCCESS, not a failure. `bd dolt commit`
+// on a clean set prints "Nothing to commit." and exits 0 (verified: in
+// embedded auto-commit mode every write — including `bd close` — auto-commits,
+// so the post-close commit is a clean-set no-op). To stay robust against bd
+// builds that exit non-zero on a clean set, a "nothing to commit" message is
+// ALSO treated as success — only a genuine commit error surfaces as a Go error
+// (non-zero exit per ADR-0012).
+func DoltCommit() error {
+	out, err := tracedCombined("dolt-commit", []string{"dolt", "commit"})
+	if err == nil {
+		return nil
+	}
+	// Clean working set: nothing to commit is a no-op success, not a failure.
+	if strings.Contains(strings.ToLower(string(out)), "nothing to commit") {
+		return nil
+	}
+	return fmt.Errorf("bd dolt commit failed: %s", strings.TrimSpace(string(out)))
+}
+
 // --- Worktree wrappers (genuine multi-step helpers per ADR-0012) ---
 
 // WorktreeListEntry represents a worktree from `bd worktree list --json`.

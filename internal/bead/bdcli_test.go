@@ -177,6 +177,76 @@ func TestClose_NoIDs(t *testing.T) {
 	}
 }
 
+// --- DoltCommit tests (spec 098 Req 2, mindspec-9n2h) ---
+
+// TestDoltCommit_ArgsConstruction pins the `bd dolt commit` arg construction
+// via the execCommand seam (precedent: TestClose_ArgsConstruction).
+func TestDoltCommit_ArgsConstruction(t *testing.T) {
+	var capturedArgs []string
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string{name}, args...)
+		return exec.Command("echo", "committed")
+	}
+
+	if err := DoltCommit(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := []string{"bd", "dolt", "commit"}
+	if len(capturedArgs) != len(expected) {
+		t.Fatalf("args: got %v, want %v", capturedArgs, expected)
+	}
+	for i, arg := range expected {
+		if capturedArgs[i] != arg {
+			t.Errorf("arg[%d]: got %q, want %q", i, capturedArgs[i], arg)
+		}
+	}
+}
+
+// TestDoltCommit_CleanWorkingSetIsSuccess pins idempotency: `bd dolt commit`
+// on a clean working set prints "Nothing to commit." — in bd's embedded
+// auto-commit mode every write (including `bd close`) auto-commits, so the
+// post-close commit is routinely a clean-set no-op. DoltCommit MUST treat that
+// as SUCCESS even when the underlying command exits non-zero.
+func TestDoltCommit_CleanWorkingSetIsSuccess(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	// `false` exits non-zero; the "nothing to commit" stdout makes it a
+	// no-op success. Emit the message and then fail to simulate a bd build
+	// that exits non-zero on a clean set.
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "echo 'Nothing to commit.'; exit 1")
+	}
+
+	if err := DoltCommit(); err != nil {
+		t.Fatalf("a clean working set ('Nothing to commit.') must be a no-op success, got error: %v", err)
+	}
+}
+
+// TestDoltCommit_GenuineFailureErrors: a non-zero exit WITHOUT a
+// "nothing to commit" message is a real durability failure and MUST surface as
+// a Go error (ADR-0012: non-zero exit as error).
+func TestDoltCommit_GenuineFailureErrors(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "echo 'dolt: write lock contention' >&2; exit 1")
+	}
+
+	err := DoltCommit()
+	if err == nil {
+		t.Fatal("a genuine commit failure (non-zero exit, no 'nothing to commit') must error")
+	}
+	if !strings.Contains(err.Error(), "bd dolt commit failed") {
+		t.Errorf("error should name the failed bd dolt commit, got: %v", err)
+	}
+}
+
 // --- WorktreeCreate tests ---
 
 func TestWorktreeCreate_ArgsConstruction(t *testing.T) {
