@@ -251,17 +251,37 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 2.25. Panel advisory tally (Spec 093 Req 13d). Warning-only — the
-	// hard gate is the PreToolUse hook. This is the ONLY panel signal for
-	// flows that never route through Claude Code hooks (codex/raw-shell
-	// agents, externally-orchestrated panels). No registered panel → no
-	// output and no subprocess cost. The matched registration is reused
-	// below for the post-completion audit writes (Reqs 13b/13e).
+	// 2.25. AUTHORITATIVE panel gate (Spec 099 Bead 2, R1+R2+R5; ADR-0037).
+	// This is the in-binary enforcement point — it runs over the DECLARED
+	// beadID (no shell parsing; ADR-0036) and BEFORE step-2.5 exec.CommitAll,
+	// bd close (step 4), and the bead→spec merge (step 5). The ordering is
+	// load-bearing: CommitAll advances the bead/<id> tip PAST
+	// reviewed_head_sha (false-firing §4 staleness) and clears user dirt
+	// (false-clearing §5), so the gate measures the PRE-CommitAll beadHead
+	// tip. It calls the SAME panel.PanelGateDecision over panel.GateFacts
+	// from the SAME panel.ResolveGateFacts the PreToolUse hook uses — the
+	// hook is now a defense-in-depth backstop, and the two cannot disagree.
+	//
+	// On a Block it returns a guard.NewFailure (fence in the body + a genuine
+	// recovery line) exiting non-zero having mutated nothing (HC-4). §6
+	// fail-open (no panel.json → completes) and the §7 hatches
+	// (MINDSPEC_SKIP_PANEL never named in a block — HC-7; enforcement.panel_gate)
+	// are honored. The matched registration is reused below for the
+	// post-completion audit writes (Reqs 13b/13e).
 	advisoryOut := panelAdvisoryOut
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
 	}
-	panelReg := panelAdvisory(beadID, dedupeRoots(wtPath, root), advisoryOut)
+	// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
+	// copy here for the enforcement.panel_gate toggle (default true).
+	panelGateEnabled := true
+	if gateCfg, gateCfgErr := config.Load(root); gateCfgErr == nil {
+		panelGateEnabled = gateCfg.Enforcement.PanelGate
+	}
+	panelReg, panelGateErr := panelGate(beadID, dedupeRoots(wtPath, root), wtPath, panelGateEnabled, advisoryOut)
+	if panelGateErr != nil {
+		return nil, panelGateErr
+	}
 
 	// 2.5. Auto-commit if commit message provided (via Executor)
 	commitPath := wtPath

@@ -1,0 +1,38 @@
+{
+  "lens": "ac-conformance",
+  "decision": "APPROVE",
+  "ac_findings": [
+    {
+      "req": "R1",
+      "met": true,
+      "evidence": "internal/complete/complete.go:254-284 (step-2.25 gate site, runs panelGate BEFORE CommitAll at :286-296, bd close, and MergeBase/merge at :371); internal/complete/panel_advisory.go:137-212 (panelGate); decision matrix internal/panel/gate.go:138-270",
+      "note": "Authoritative in-binary gate runs at step 2.25, strictly before exec.CommitAll, bd close, and the bead→spec merge. Applies the full ADR-0037 §§2-6 matrix (threshold/staleness/round/dirty/incomplete/reject) plus §7 hatches. On Block it returns guard.NewFailure with the fence in the body + genuine recovery line, mutating nothing. Bead ID comes from the declared cobra arg (beadID at complete.go:187), never a shell string — ADR-0036 ZFC satisfied. Staleness rev-parse target is the bead/<id> ref resolved inside panel.ResolveGateFacts (gate.go:379), the IDENTICAL source the hook uses, evaluated on the pre-CommitAll tip."
+    },
+    {
+      "req": "R2",
+      "met": true,
+      "evidence": "internal/complete/panel_advisory.go:149-153 (no registration → return nil,nil — fail-open); internal/panel/gate.go:148-150 (Reg==nil → Allow); test internal/complete/panel_gate_e2e_test.go:105-124 (TestPanelGate_FailOpen_ActuallyCompletes)",
+      "note": "Fail-open-without-a-panel preserved verbatim. The pinning test asserts ACTUAL completion (ex.completeCalled true AND res.BeadClosed true), not merely 'not blocked' — exactly what the AC demands to defeat a silent no-op."
+    },
+    {
+      "req": "R3",
+      "met": true,
+      "evidence": "internal/panel/gate.go:138 (sole PanelGateDecision), :356 (ResolveGateFacts), :77-112 (GateFacts), :328-347 (GateIO injected seam); hook delegates at internal/hook/precomplete.go:506-507 + resolvePanelFacts:546-549 → panel.ResolveGateFacts/panel.PanelGateDecision; complete delegates at panel_advisory.go:179-189; go list -deps ./internal/panel shows NO internal edge (leaf preserved)",
+      "note": "Decision matrix + facts + fact-gathering relocated to the internal/panel LEAF (mechanism (a)). Grep confirms exactly ONE PanelGateDecision in the tree; the hook keeps only a thin resolvePanelFacts wrapper that calls the leaf. Git I/O injected via GateIO closures so panel imports no internal package (verified leaf). Decision table test TestPanelGateDecision + EveryBlockEndsWithFence moved to internal/panel/panel_decision_test.go with the new 5b transient-gitErr row. Shared-decision pin (panel_gate_e2e_test.go:312-347) proves both call sites reach the same decision over the same facts."
+    },
+    {
+      "req": "R4",
+      "met": true,
+      "evidence": "matcher intact: internal/hook/precomplete.go:40 matchMindspecComplete, :108 segmentInvokesComplete, :125 strippedCompleteFields, :267 completeBeadID, :333 cdPrefixPath; matcher tests internal/hook/precomplete_match_test.go present; amendment note internal/panel/gate.go:10-23 + complete.go:254-263; follow-up bead mindspec-wpf0 (OPEN) records matcher retirement (item d)",
+      "note": "Hook + heuristic matcher left in place and behaviorally unchanged (now calls the extracted decision). All internal/hook tests green. Amendment note recording in-binary-authoritative / hook-backstop present in gate.go and complete.go. Retirement is tracked by the still-open feature bead mindspec-wpf0 (part d: 'RETIRE/shrink segmentInvokesComplete/strippedCompleteFields/completeBeadID'), satisfying the 'recorded follow-up' requirement."
+    },
+    {
+      "req": "R5",
+      "met": true,
+      "evidence": "internal/panel/gate.go:58-63 RawMergeFence appended to every Block; :157-269 messages name panel/round, present/missing verdicts, stale SHA pair; complete-side guard.NewFailure adds recovery line at panel_advisory.go:198-200; tests panel_gate_e2e_test.go:150-159 (HasFinalRecoveryLine AND fence AND APPROVE tally), :228 (stale SHA message)",
+      "note": "Block parity: the relocated messages carry the same fence-bearing, panel/round/SHA-naming bodies the hook emits; the in-binary path wraps them with guard.NewFailure(message, genuine recovery command) so the error passes guard.HasFinalRecoveryLine with the fence in the body before the recovery line. HC-7 enforced: block never names MINDSPEC_SKIP_PANEL (gate.go skipHumanHint/Block paths; pinned by TestPanelGate_BlockNeverNamesSkipVar)."
+    }
+  ],
+  "blocking": [],
+  "summary": "All five requirements' acceptance criteria are genuinely satisfied by the code, not superficially. The authoritative gate runs in complete.Run at step 2.25 strictly before CommitAll/bd-close/merge (complete.go:254-296), reads the bead ID from the declared cobra arg (no shell parsing), and applies the full ADR-0037 matrix via the single PanelGateDecision that now lives in the internal/panel leaf (verified: exactly one definition, leaf invariant holds via go list -deps and the GateIO injection seam). Fail-open is preserved AND its test pins ACTUAL completion (closed+merged+exit 0), not a no-op. The hook is rewired to the same extracted decision/facts (single source — no second matrix copy, so no drift by construction), keeps its matcher unchanged, and the matcher-retirement follow-up is tracked by open bead mindspec-wpf0. Block parity (fence + recovery line + panel/round/SHA naming, HC-7 skip-var suppression) holds. go build clean; go test ./internal/{panel,hook,complete}/... all green; mindspec validate spec 099 passes from the worktree. Every AC maps to concrete satisfying code + a pinning test."
+}

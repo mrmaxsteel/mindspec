@@ -16,6 +16,10 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
+// ptr is a tiny helper for *string panel fields (was in the relocated
+// decision test; kept here for the run-test fixtures, Spec 099).
+func ptr(s string) *string { return &s }
+
 // writePanelFixture writes review/<slug>/panel.json + verdict files under
 // root. panelJSON is the marshaled Panel; verdicts maps filename → verdict
 // string.
