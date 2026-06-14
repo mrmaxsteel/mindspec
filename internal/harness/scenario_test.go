@@ -593,7 +593,7 @@ func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected violation on merge-to-main (impl approve no longer merges)")
 		}
-		if !strings.Contains(err.Error(), "merge-to-main occurred before approve impl") {
+		if !strings.Contains(err.Error(), "non-canonical merge of") {
 			t.Fatalf("expected merge violation error, got: %v", err)
 		}
 	})
@@ -623,13 +623,13 @@ func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 		}
 	})
 
-	t.Run("fails on non-canonical pre-approve merge-to-main", func(t *testing.T) {
+	t.Run("fails on non-canonical pre-approve merge of a non-main ref", func(t *testing.T) {
 		events := []ActionEvent{
 			{
 				ActionType: "command",
 				Command:    "git",
 				ExitCode:   0,
-				ArgsList:   []string{"merge", "main"},
+				ArgsList:   []string{"merge", "spec/001-test", "main"},
 			},
 			{
 				ActionType: "command",
@@ -641,10 +641,31 @@ func TestAssertNoPreApproveImplMainMergeOrPR(t *testing.T) {
 
 		err := preApproveImplMainMergeOrPRViolation(events)
 		if err == nil {
-			t.Fatal("expected violation on merge-to-main before approve impl")
+			t.Fatal("expected violation on non-canonical merge before approve impl")
 		}
-		if !strings.Contains(err.Error(), "merge-to-main occurred before approve impl") {
+		if !strings.Contains(err.Error(), "non-canonical merge of") {
 			t.Fatalf("expected merge violation error, got: %v", err)
+		}
+	})
+
+	t.Run("allows safe git merge main into a feature branch", func(t *testing.T) {
+		events := []ActionEvent{
+			{
+				ActionType: "command",
+				Command:    "git",
+				ExitCode:   0,
+				ArgsList:   []string{"-C", "/tmp/repo", "merge", "main"},
+			},
+			{
+				ActionType: "command",
+				Command:    "mindspec",
+				ExitCode:   0,
+				ArgsList:   []string{"approve", "impl", "001-test"},
+			},
+		}
+
+		if err := preApproveImplMainMergeOrPRViolation(events); err != nil {
+			t.Fatalf("expected no violation for safe pull-main-in, got: %v", err)
 		}
 	})
 }
