@@ -58,9 +58,29 @@ by writing panel.json. Legacy review dirs (BRIEF.md, no panel.json)
 and solo/harness/CI flows with no panel at all are structurally
 unaffected — see the fail-open rule below. Externally-orchestrated
 flows that never route through Claude Code hooks (codex sessions,
-raw-shell agents) get the advisory tally inside `mindspec complete`
-only; hard enforcement exists at the hook layer alone. This is an
-honest limitation, not an oversight.
+raw-shell agents) are now covered by the **authoritative** in-binary
+gate inside `mindspec complete`: because that gate reads the
+**declared** bead-ID argument rather than a shell command string,
+every invocation form is covered regardless of how completion was
+spawned. The PreToolUse hook is retained as a non-authoritative
+defense-in-depth backstop for the Claude-Code-routed common case; its
+heuristic command-string matcher is likewise non-authoritative, with
+retirement deferred to a follow-up bead. See the amendment below.
+
+> **Amendment (2026-06-14, spec 099):** Hard enforcement was
+> **relocated from the PreToolUse hook into `mindspec complete`** and
+> is now the authoritative gate. The bead ID arrives as a declared
+> argument to the command, so the in-binary gate covers exactly the
+> externally-orchestrated codex/raw-shell flows this section once
+> named as an honest limitation — they are no longer a gap. The
+> PreToolUse hook becomes a non-authoritative defense-in-depth backstop
+> for the Claude-Code-routed path; the heuristic command-string matcher
+> it uses is retained but non-authoritative, its retirement deferred to
+> a follow-up bead. The shared decision logic lives in the
+> `internal/panel` leaf, so the hook and the in-binary gate call one
+> `Tally` and cannot drift. Contract semantics (thresholds §3,
+> staleness §4, §6 fail-open/fail-closed, §7 hatches) are unchanged;
+> only the location of authoritative enforcement moved.
 
 ### 2. Round derivation: filenames over panel.json
 
