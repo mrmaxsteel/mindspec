@@ -1894,3 +1894,132 @@ func TestApproveImplPrintResultWarningsRecursStatelessly(t *testing.T) {
 		t.Errorf("rendering must persist NO marker/state file (HC-2); found %v", entries)
 	}
 }
+
+// writeScenarioImplApproveFixture builds the on-disk shape of the harness
+// ScenarioImplApprove fixture (internal/harness/scenario_spec_lifecycle.go):
+// a committed `done.go` source at the repo root plus a spec/plan, WITHOUT
+// the ADR-divergence coverage triple. The plan cites no ADR. The OWNERSHIP
+// + ADR-0001 + plan adr_citations triple is layered on top per arm via the
+// ref-read seams / plan rewrite so the test can flip CheckADRDivergence
+// between block (unowned) and pass.
+func writeScenarioImplApproveFixture(t *testing.T, root, specID string, withADRCitation bool) {
+	t.Helper()
+	docsRoot := filepath.Join(root, ".mindspec", "docs")
+	specDir := filepath.Join(docsRoot, "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"),
+		[]byte("# Spec "+specID+"\n\n## Impacted Domains\n\n- sandbox\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	citation := ""
+	if withADRCitation {
+		citation = "adr_citations:\n  - id: ADR-0001\n"
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"),
+		[]byte("---\nspec_id: "+specID+"\nstatus: Approved\nbead_ids:\n  - bead-1\n"+citation+"---\n\n# Plan\n## Bead 1: Implement feature\nCreate done.go.\n"), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+}
+
+// TestApproveImpl_ScenarioImplApproveCoverageTriple is the HERMETIC,
+// CI-runnable RED pin for 098 Bead 1 (R1 / myn3): it proves that the
+// ownership + Accepted-ADR-0001 + plan-`adr_citations` coverage triple is
+// exactly what flips the impl-approve CheckADRDivergence gate from an
+// `adr-divergence-unowned` block (the pre-fix RED state, where a clean
+// impl-approve exits 1) to PASS (FinalizeEpic runs once). It mirrors the
+// on-disk shape of the harness ScenarioImplApprove fixture (a committed
+// `done.go` at the repo root + a spec/plan) but runs without any agent
+// login or the skipUnlessClaudeCode gate, so it is the RED-on-revert pin
+// that the login-gated LLM ScenarioImplApprove run cannot carry.
+//
+// RED-on-revert: removing the triple from the WITH arm (dropping the
+// OWNERSHIP/ADR-0001 ref reads or the plan adr_citations) reproduces the
+// WITHOUT arm's `adr-divergence-unowned` block.
+func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
+	// specID 010-test matches the hardwired phase stub in saveAndRestore
+	// (stubPhaseForReview, title "[SPEC 010-test]"); the divergence gate
+	// keys off the changed file (done.go) + its OWNERSHIP claim, not the ID.
+	const specID = "010-test"
+	// done.go lands at the repo root on main after the spec-branch merge —
+	// exactly the changed-file shape the harness fixture commits.
+	changed := []string{"done.go"}
+
+	t.Run("WITHOUT the coverage triple -> adr-divergence-unowned, no FinalizeEpic", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeScenarioImplApproveFixture(t, tmp, specID, false)
+		os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+		saveAndRestore(t)
+		implRunBDFn = func(args ...string) ([]byte, error) {
+			return json.Marshal([]map[string]string{{"status": "closed"}})
+		}
+		mock := &executor.MockExecutor{
+			CommitCountResult:  5,
+			FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			MergeBaseResult:    "merge-base-sha",
+			ChangedFilesResult: changed,
+			// No OWNERSHIP claim at the ref (default absent) -> done.go is
+			// unowned -> the gate blocks.
+		}
+		_, err := ApproveImpl(tmp, specID, mock)
+		if err == nil {
+			t.Fatal("a committed root source with no ownership coverage must trip adr-divergence-unowned (the RED state)")
+		}
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
+		}
+		if len(mock.CallsTo("FinalizeEpic")) != 0 {
+			t.Error("FinalizeEpic must not run when the divergence gate blocks")
+		}
+	})
+
+	t.Run("WITH the coverage triple -> passes, FinalizeEpic runs once", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeScenarioImplApproveFixture(t, tmp, specID, true) // plan cites ADR-0001
+		os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755)
+		// Accepted ADR-0001 (sandbox domain) on disk — the ADR store reads
+		// from the checkout (adrStoreForSpec overlays the spec dir), so the
+		// cited covering ADR must be resolvable here. This is the same ADR
+		// file writeSandboxDomainCoverage commits in the harness fixture.
+		adrDir := filepath.Join(tmp, ".mindspec", "docs", "adr")
+		if err := os.MkdirAll(adrDir, 0o755); err != nil {
+			t.Fatalf("mkdir adr dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(adrDir, "ADR-0001-sandbox-domain.md"),
+			[]byte("# ADR-0001: Sandbox Domain\n\n- **Date**: 2026-06-11\n- **Status**: Accepted\n- **Domain(s)**: sandbox\n\n## Decision\nFixture.\n"), 0o644); err != nil {
+			t.Fatalf("write ADR-0001: %v", err)
+		}
+		saveAndRestore(t)
+		implRunBDFn = func(args ...string) ([]byte, error) {
+			return json.Marshal([]map[string]string{{"status": "closed"}})
+		}
+		mock := &executor.MockExecutor{
+			CommitCountResult:  5,
+			FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			MergeBaseResult:    "merge-base-sha",
+			ChangedFilesResult: changed,
+			// The OWNERSHIP.yaml claim (claiming done.go for the sandbox
+			// domain) is present at the diffed ref — the manifest half of
+			// the triple committed pre-fork in the harness.
+			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/sandbox/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - done.go\n"), true, nil
+				}
+				return nil, false, nil
+			},
+			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
+				if dir == ".mindspec/docs/domains" {
+					return []string{"sandbox"}, nil
+				}
+				return nil, nil
+			},
+		}
+		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
+			t.Fatalf("the ownership + Accepted-ADR-0001 + plan adr_citations triple must satisfy the gate with no override; got: %v", err)
+		}
+		if len(mock.CallsTo("FinalizeEpic")) != 1 {
+			t.Errorf("expected FinalizeEpic to run exactly once when the triple closes the gate; got %d", len(mock.CallsTo("FinalizeEpic")))
+		}
+	})
+}
