@@ -93,6 +93,25 @@ type Executor interface {
 	// MergeBase returns the merge-base SHA of refs a and b (wraps
 	// `git merge-base <a> <b>`).
 	MergeBase(a, b string) (string, error)
+
+	// RevParseRef resolves ref to its commit SHA in workdir (wraps
+	// `git rev-parse --verify <ref>^{commit}`). A genuinely-absent ref
+	// returns an error satisfying IsRefNotFound; any other failure (not-a-
+	// repo / lock contention) returns a non-ref-not-found error. This is the
+	// git-I/O seam the in-binary panel gate (spec 099) uses for the bead/<id>
+	// staleness rev-parse, keeping internal/complete off gitutil (ADR-0030).
+	RevParseRef(workdir, ref string) (string, error)
+
+	// Status returns `git status --porcelain` for workdir (the worktree
+	// dirty-check seam for the panel gate). Empty output means a clean tree.
+	Status(workdir string) (string, error)
+
+	// IsRefNotFound reports whether err is the genuine "ref absent" case
+	// (branch already deleted) from RevParseRef vs a transient/structural git
+	// failure — the panel gate's missing-ref pass-through distinction. Routing
+	// it through the executor keeps the gitutil.ErrRefNotFound sentinel out of
+	// the enforcement packages (ADR-0030).
+	IsRefNotFound(err error) bool
 }
 
 // WorkspaceInfo describes a created workspace.

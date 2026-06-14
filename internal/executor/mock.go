@@ -50,6 +50,17 @@ type MockExecutor struct {
 	TreeDirsAtRefErr    error
 	MergeBaseResult     string
 	MergeBaseErr        error
+	// Panel-gate git seams (spec 099). RevParseRefFn / StatusFn / IsRefNotFoundFn,
+	// when non-nil, fully drive the corresponding method so tests can inject
+	// staleness / dirty-tree / ref-not-found facts; otherwise the simple result
+	// fields are returned.
+	RevParseRefFn     func(workdir, ref string) (string, error)
+	RevParseRefResult string
+	RevParseRefErr    error
+	StatusFn          func(workdir string) (string, error)
+	StatusResult      string
+	StatusErr         error
+	IsRefNotFoundFn   func(error) bool
 }
 
 // MockCall records a single method invocation.
@@ -159,6 +170,30 @@ func (m *MockExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
 func (m *MockExecutor) MergeBase(a, b string) (string, error) {
 	m.record("MergeBase", a, b)
 	return m.MergeBaseResult, m.MergeBaseErr
+}
+
+func (m *MockExecutor) RevParseRef(workdir, ref string) (string, error) {
+	m.record("RevParseRef", workdir, ref)
+	if m.RevParseRefFn != nil {
+		return m.RevParseRefFn(workdir, ref)
+	}
+	return m.RevParseRefResult, m.RevParseRefErr
+}
+
+func (m *MockExecutor) Status(workdir string) (string, error) {
+	m.record("Status", workdir)
+	if m.StatusFn != nil {
+		return m.StatusFn(workdir)
+	}
+	return m.StatusResult, m.StatusErr
+}
+
+func (m *MockExecutor) IsRefNotFound(err error) bool {
+	m.record("IsRefNotFound", err)
+	if m.IsRefNotFoundFn != nil {
+		return m.IsRefNotFoundFn(err)
+	}
+	return false
 }
 
 // Compile-time interface check.

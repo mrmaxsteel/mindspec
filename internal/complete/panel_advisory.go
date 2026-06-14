@@ -1,13 +1,12 @@
 package complete
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
@@ -81,9 +80,20 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 // seams — so the two call sites reach the IDENTICAL panel.PanelGateDecision
 // over IDENTICAL panel.GateFacts (the anti-drift guarantee). Tests swap them
 // to drive staleness / dirty-tree facts without a real repo.
+//
+// ADR-0030 boundary: internal/complete is an ENFORCEMENT package and must NOT
+// import internal/gitutil directly. The seams therefore route the git I/O
+// through the EXECUTOR (the git-I/O boundary, internal/executor) rather than
+// gitutil. The default seams use a stateless MindspecExecutor — RevParseRef /
+// Status / IsRefNotFound take their workdir as an argument and ignore the
+// executor's Root, so a zero-value executor is a sufficient, thin, byte-
+// identical pass-through to gitutil.RevParseRef / gitutil.Status /
+// errors.Is(e, gitutil.ErrRefNotFound).
 var (
-	gateRevParseFn = gitutil.RevParseRef
-	gateStatusFn   = gitutil.Status
+	gateExecutor        executor.Executor = &executor.MindspecExecutor{}
+	gateRevParseFn                        = gateExecutor.RevParseRef
+	gateStatusFn                          = gateExecutor.Status
+	gateIsRefNotFoundFn                   = gateExecutor.IsRefNotFound
 )
 
 // panelGate is the AUTHORITATIVE in-binary panel gate (Spec 099 Bead 2,
@@ -169,7 +179,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		facts := panel.ResolveGateFacts(regs[i], beadID, scanRoot, panel.GateIO{
 			RevParse:      gateRevParseFn,
 			Status:        gateStatusFn,
-			IsRefNotFound: func(e error) bool { return errors.Is(e, gitutil.ErrRefNotFound) },
+			IsRefNotFound: gateIsRefNotFoundFn,
 			// Lazy worktree resolver: only invoked on the dirty-check path so
 			// the abandoned / mismatch / missing-ref / transient-gitErr short
 			// circuits pay no extra cost. complete.Run already resolved the
