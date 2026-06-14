@@ -91,6 +91,8 @@ func saveAndRestore(t *testing.T) {
 	origGetwd := completeGetwdFn
 	origPostCloseAttempts := postCloseReadAttempts
 	origPostCloseBackoff := postCloseReadBackoff
+	origDoltCommit := doltCommitFn
+	origVerifyCommitted := verifyCommittedFn
 
 	t.Cleanup(func() {
 		closeBeadFn = origClose
@@ -106,6 +108,8 @@ func saveAndRestore(t *testing.T) {
 		completeGetwdFn = origGetwd
 		postCloseReadAttempts = origPostCloseAttempts
 		postCloseReadBackoff = origPostCloseBackoff
+		doltCommitFn = origDoltCommit
+		verifyCommittedFn = origVerifyCommitted
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -148,6 +152,13 @@ func saveAndRestore(t *testing.T) {
 	// set postCloseReadAttempts explicitly; the default count is left
 	// intact here so existing single-read tests behave unchanged.
 	postCloseReadBackoff = func(attempt int) {}
+	// Spec 098 Req 2 (mindspec-9n2h): default the post-close durability
+	// seams to SUCCESS so happy-path tests get a verified, durable close
+	// (forced `bd dolt commit` no-op success; committed-state verify
+	// confirms closed). The close-verify tests override these to drive the
+	// commit-failure / committed-mismatch RED paths.
+	doltCommitFn = func() error { return nil }
+	verifyCommittedFn = func(beadID string) error { return nil }
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
@@ -1148,6 +1159,171 @@ func TestRun_CloseReturnsNilAndReReadConfirmsClosed(t *testing.T) {
 	}
 	if result == nil || !result.BeadClosed {
 		t.Errorf("BeadClosed must be true on a confirmed-closed re-read, got result=%+v", result)
+	}
+}
+
+// --- Spec 098 Bead 2 (mindspec-9n2h): forced `bd dolt commit` + committed-
+// state verify after the session re-read affirms closed (the 2u0u recurrence)
+// ---
+//
+// Even when closeBeadFn returns nil AND the session re-read says "closed"
+// (case (a)), that session read does NOT prove the close PERSISTED. complete
+// MUST force `bd dolt commit` (durability) and then a committed-state verify
+// before proceeding to merge. On a doltCommit failure OR a committed-mismatch,
+// it returns a recoverable ADR-0035 error, keeps the worktree (CompleteBead
+// 0×), and leaves BeadClosed unset — never `closed` + exit 0.
+
+// TestRun_VerifyCommittedNotClosedBlocks is the headline RED-on-revert proof:
+// closeBeadFn→nil, the session re-read fetchBeadByIDFn→"closed" (the case-(a)
+// affirm path), doltCommitFn→ok, but verifyCommittedFn→not-closed. Reverting
+// the new forced-commit + committed-verify step makes this case (a) proceed
+// (err==nil, CompleteBead called) — the unverified close slips through. With
+// the step present it MUST hard-fail recoverably.
+func TestRun_VerifyCommittedNotClosedBlocks(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "098-lifecycle", "epic-098")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "098-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	closeBeadFn = func(ids ...string) error { return nil }
+	// Session re-read AFFIRMS closed (case (a)).
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "closed"}, nil
+	}
+	// Forced commit succeeds, but the committed-state verify shows NOT closed.
+	doltCommitFn = func() error { return nil }
+	verifyCommittedFn = func(beadID string) error {
+		return fmt.Errorf("committed-state re-read shows status %q (not closed)", "in_progress")
+	}
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("a session re-read of closed that fails committed-state verification must NOT proceed — expected a recoverable error (the 2u0u recurrence)")
+	}
+	if !strings.Contains(err.Error(), "did NOT confirm the close persisted") {
+		t.Errorf("error should name the unverified committed close, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery: ") {
+		t.Errorf("error must carry a recovery line (recoverable soft-block), got: %v", err)
+	}
+	if got := finalRecoveryCommand(t, err.Error()); got != "mindspec complete bead-1" {
+		t.Errorf("recovery command: got %q, want %q", got, "mindspec complete bead-1")
+	}
+	if result != nil && result.BeadClosed {
+		t.Errorf("BeadClosed must NOT be set on an unverified close, got result=%+v", result)
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("CompleteBead (merge + worktree removal) must NOT run on an unverified close, got %d calls", len(calls))
+	}
+}
+
+// TestRun_DoltCommitFailureBlocks: closeBeadFn→nil, session re-read→"closed",
+// but the forced `bd dolt commit` (durability step) ERRORS. complete MUST
+// hard-fail recoverably, keep the worktree, and leave BeadClosed unset — never
+// proceed to merge on a close whose durability could not be forced.
+func TestRun_DoltCommitFailureBlocks(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "098-lifecycle", "epic-098")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "098-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	closeBeadFn = func(ids ...string) error { return nil }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "closed"}, nil
+	}
+	doltCommitFn = func() error { return fmt.Errorf("bd dolt commit failed: dolt: write lock contention") }
+	// verifyCommittedFn must NOT even be reached when the commit fails.
+	var verifyCalled bool
+	verifyCommittedFn = func(beadID string) error { verifyCalled = true; return nil }
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("a forced `bd dolt commit` failure after close must NOT proceed — expected a recoverable error")
+	}
+	if !strings.Contains(err.Error(), "force") && !strings.Contains(err.Error(), "DURABLE") {
+		t.Errorf("error should name the failed durability commit, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery: ") {
+		t.Errorf("error must carry a recovery line, got: %v", err)
+	}
+	if verifyCalled {
+		t.Error("verifyCommittedFn must NOT run when the forced commit fails")
+	}
+	if result != nil && result.BeadClosed {
+		t.Errorf("BeadClosed must NOT be set when the forced commit fails, got result=%+v", result)
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("CompleteBead must NOT run when the forced commit fails, got %d calls", len(calls))
+	}
+}
+
+// TestRun_DoltCommitAndVerifyHappyPath: closeBeadFn→nil, session re-read→
+// "closed", doltCommitFn→ok, verifyCommittedFn→ok ⇒ completion proceeds with
+// BeadClosed: true and the merge runs (CompleteBead called). Confirms the new
+// durability gate does not false-block a genuinely-durable close, and pins the
+// ordering (commit BEFORE verify).
+func TestRun_DoltCommitAndVerifyHappyPath(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "098-lifecycle", "epic-098")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "098-lifecycle", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	closeBeadFn = func(ids ...string) error { return nil }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "closed"}, nil
+	}
+	var commitCalled, verifyCalled bool
+	doltCommitFn = func() error { commitCalled = true; return nil }
+	verifyCommittedFn = func(beadID string) error {
+		if !commitCalled {
+			t.Error("verifyCommittedFn must run AFTER the forced `bd dolt commit`")
+		}
+		verifyCalled = true
+		return nil
+	}
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("a durable, committed-verified close must complete, got: %v", err)
+	}
+	if result == nil || !result.BeadClosed {
+		t.Errorf("BeadClosed must be true on a durable, verified close, got result=%+v", result)
+	}
+	if !commitCalled || !verifyCalled {
+		t.Errorf("both the forced commit and the committed verify must run (commit=%v verify=%v)", commitCalled, verifyCalled)
+	}
+}
+
+// TestDoltCommitFnDefaultsToBeadDoltCommit pins the production binding of the
+// spec 098 Req 2 durability seam to bead.DoltCommit — every test swaps the
+// seam in saveAndRestore, so a severed default would go undetected without
+// this identity pin (pattern: TestCheckDirtyTreeFnDefaultsToNextCheckDirtyTreeDetail).
+func TestDoltCommitFnDefaultsToBeadDoltCommit(t *testing.T) {
+	if reflect.ValueOf(doltCommitFn).Pointer() != reflect.ValueOf(bead.DoltCommit).Pointer() {
+		t.Fatal("doltCommitFn must default to bead.DoltCommit (spec 098 Req 2, mindspec-9n2h)")
+	}
+}
+
+// TestVerifyCommittedFnDefaultsToDefault pins the production binding of the
+// committed-state verifier seam.
+func TestVerifyCommittedFnDefaultsToDefault(t *testing.T) {
+	if reflect.ValueOf(verifyCommittedFn).Pointer() != reflect.ValueOf(defaultVerifyCommitted).Pointer() {
+		t.Fatal("verifyCommittedFn must default to defaultVerifyCommitted (spec 098 Req 2, mindspec-9n2h)")
 	}
 }
 

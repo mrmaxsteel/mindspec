@@ -50,7 +50,53 @@ var (
 	// behavior, though the default is the real implementation since
 	// TestSupersedeUnblocks asserts on-disk presence.
 	adrCreateWithIDFn = adr.CreateWithID
+	// Spec 098 Req 2 (mindspec-9n2h): after a successful `bd close`, force
+	// durability with `bd dolt commit` and then re-verify the bead is
+	// closed before accepting case (a) ("re-read affirms closed → proceed").
+	// A nil return from closeBeadFn + a session re-read of "closed" does NOT
+	// prove the close PERSISTED to committed Dolt state (the 2u0u
+	// recurrence: a non-persisting close still reads back "closed" and slips
+	// through to merge + worktree removal on exit 0).
+	//
+	// doltCommitFn forces the strongest available bd durability primitive
+	// (idempotent: a clean working set is a no-op success — see
+	// bead.DoltCommit). verifyCommittedFn performs the post-commit
+	// verification re-read.
+	//
+	// HONESTY-CLAUSE (spec 098 Req 2, step 6): the verify-first probe found
+	// that `bd` runs in EMBEDDED auto-commit mode — every write (including
+	// `bd close`) auto-commits, `bd dolt commit` after a close is a
+	// clean-working-set no-op ("Nothing to commit"), and `bd` exposes NO
+	// committed-state read distinct from `bd show` (`bd dolt status` reports
+	// the Dolt ENGINE status, not a working-set diff). So verifyCommittedFn
+	// is scoped to detection-via-the-same-read (it reuses fetchBeadByIDFn,
+	// the `bd show --json` path): the FORCED `bd dolt commit` makes the close
+	// durable, and on a doltCommit FAILURE or a committed-read that shows
+	// not-closed/errors, complete errors recoverably and never proceeds. The
+	// residual durability-read gap is tracked upstream as
+	// mindspec-098-bd-committed-read.
+	doltCommitFn      = bead.DoltCommit
+	verifyCommittedFn = defaultVerifyCommitted
 )
+
+// defaultVerifyCommitted is the production committed-state verifier for the
+// spec 098 Req 2 post-close durability gate. Per the honesty-clause (no
+// committed-state read distinct from `bd show` exists in bd's embedded
+// auto-commit mode), it re-reads the bead via fetchBeadByIDFn (the
+// `bd show --json` path) AFTER the forced `bd dolt commit` and returns an
+// error unless the bead reads back closed. A read error or a not-closed
+// status both surface as an error so the caller keeps the worktree and never
+// proceeds on an unverified close.
+func defaultVerifyCommitted(beadID string) error {
+	info, err := fetchBeadByIDFn(beadID)
+	if err != nil {
+		return fmt.Errorf("committed-state re-read failed: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(info.Status), "closed") {
+		return fmt.Errorf("committed-state re-read shows status %q (not closed)", strings.TrimSpace(info.Status))
+	}
+	return nil
+}
 
 // Spec 096 final-review (mindspec-2u0u, persona-closeverify): the
 // post-close status re-read is RETRIED a small bounded number of times
@@ -430,7 +476,36 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				beadID, postCloseReadAttempts, fetchErr, beadID)
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
 		case strings.EqualFold(strings.TrimSpace(info.Status), "closed"):
-			// (a) Re-read AFFIRMS closed — the close persisted. Proceed.
+			// (a) Re-read AFFIRMS closed — but a SESSION re-read of "closed"
+			// does NOT prove the close PERSISTED to committed Dolt state
+			// (spec 098 Req 2, mindspec-9n2h: the 2u0u recurrence — a
+			// non-persisting close still reads back "closed" via the same
+			// bd/Dolt path the close wrote through, and the old case (a)
+			// proceeded to merge + worktree removal on exit 0). Before
+			// accepting case (a), FORCE durability with `bd dolt commit`
+			// (idempotent: a clean working set is a no-op success) and then
+			// VERIFY via a committed-state re-read. On a commit FAILURE or a
+			// committed read that shows not-closed/errors, return a
+			// recoverable ADR-0035 soft-block that KEEPS the worktree, does
+			// NOT set BeadClosed, and is safe to re-run (both the close and
+			// `bd dolt commit` are idempotent) — mirroring case (b)'s
+			// PRE-MERGE return. complete must NEVER print `closed` + exit 0
+			// on an unverified/uncommitted close.
+			if commitErr := doltCommitFn(); commitErr != nil {
+				msg := fmt.Sprintf(
+					"bead %s close returned success and re-read as closed, but the forced `bd dolt commit` to make the close DURABLE failed (%v) — the close was NOT confirmed to persist.\n"+
+						"this state is recoverable: the worktree is kept and both the close and `bd dolt commit` are idempotent — re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
+					beadID, commitErr, beadID)
+				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+			}
+			if verifyErr := verifyCommittedFn(beadID); verifyErr != nil {
+				msg := fmt.Sprintf(
+					"bead %s close returned success but the post-commit committed-state verification did NOT confirm the close persisted (%v) — the close was NOT confirmed to persist.\n"+
+						"this state is recoverable: the worktree is kept and the close step is idempotent — re-run `mindspec complete %s` and it converges once the close persists.",
+					beadID, verifyErr, beadID)
+				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+			}
+			// Forced commit + committed-state verify both passed — proceed.
 		default:
 			// (b) Re-read AFFIRMS open/in_progress: the REAL silent
 			// close-loss bug (mindspec-2u0u). closeBeadFn returned nil but
