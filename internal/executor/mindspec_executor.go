@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -591,6 +592,30 @@ func (g *MindspecExecutor) MergeBase(a, b string) (string, error) {
 		return "", fmt.Errorf("git merge-base %s %s: %w", a, b, err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// RevParseRef resolves ref to its commit SHA in workdir. Thin pass-through to
+// gitutil.RevParseRef so the in-binary panel gate (spec 099) reaches the
+// byte-identical bead/<id> staleness rev-parse the hook uses, while keeping
+// internal/gitutil imported ONLY here in the executor (ADR-0030 git-I/O
+// boundary) and out of the enforcement package internal/complete.
+func (g *MindspecExecutor) RevParseRef(workdir, ref string) (string, error) {
+	return gitutil.RevParseRef(workdir, ref)
+}
+
+// Status returns `git status --porcelain` for workdir. Thin pass-through to
+// gitutil.Status — the panel gate's worktree dirty-check seam routed through
+// the executor (ADR-0030).
+func (g *MindspecExecutor) Status(workdir string) (string, error) {
+	return gitutil.Status(workdir)
+}
+
+// IsRefNotFound reports whether err is gitutil.ErrRefNotFound (the genuine
+// branch-deleted case). Exposing the sentinel test through the executor keeps
+// the gitutil.ErrRefNotFound errors.Is check out of internal/complete
+// (ADR-0030); behavior is byte-identical to errors.Is(err, ErrRefNotFound).
+func (g *MindspecExecutor) IsRefNotFound(err error) bool {
+	return errors.Is(err, gitutil.ErrRefNotFound)
 }
 
 // commitWithExport runs the pre-stage beads export, then delegates to the

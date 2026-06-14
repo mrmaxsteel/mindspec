@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -70,6 +72,143 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 	}
 	fmt.Fprintf(w, "panel advisory: %s %s — gate %s\n", reg.Slug(), summary, label)
 	return &reg
+}
+
+// Panel-gate I/O seams (Spec 099 Bead 2). The AUTHORITATIVE in-binary gate
+// (panelGate below) injects these into panel.ResolveGateFacts — the SAME
+// rev-parse / porcelain / ref-not-found wiring the hook injects via its own
+// seams — so the two call sites reach the IDENTICAL panel.PanelGateDecision
+// over IDENTICAL panel.GateFacts (the anti-drift guarantee). Tests swap them
+// to drive staleness / dirty-tree facts without a real repo.
+//
+// ADR-0030 boundary: internal/complete is an ENFORCEMENT package and must NOT
+// import internal/gitutil directly. The seams therefore route the git I/O
+// through the EXECUTOR (the git-I/O boundary, internal/executor) rather than
+// gitutil. The default seams use a stateless MindspecExecutor — RevParseRef /
+// Status / IsRefNotFound take their workdir as an argument and ignore the
+// executor's Root, so a zero-value executor is a sufficient, thin, byte-
+// identical pass-through to gitutil.RevParseRef / gitutil.Status /
+// errors.Is(e, gitutil.ErrRefNotFound).
+var (
+	gateExecutor        executor.Executor = &executor.MindspecExecutor{}
+	gateRevParseFn                        = gateExecutor.RevParseRef
+	gateStatusFn                          = gateExecutor.Status
+	gateIsRefNotFoundFn                   = gateExecutor.IsRefNotFound
+)
+
+// panelGate is the AUTHORITATIVE in-binary panel gate (Spec 099 Bead 2,
+// R1+R5; ADR-0037). It runs in complete.Run at the step-2.25 site — BEFORE
+// exec.CommitAll, bd close, and the bead→spec merge — over the DECLARED
+// beadID (no shell parsing; ADR-0036 Zero Framework Cognition). It invokes
+// the SAME extracted panel.PanelGateDecision over panel.GateFacts produced by
+// the SAME panel.ResolveGateFacts the PreToolUse hook uses (the hook is now a
+// defense-in-depth backstop), so the two cannot disagree by construction.
+//
+// Ordering is load-bearing: the gate measures the bead/<id> tip as it stands
+// BEFORE CommitAll. CommitAll would advance the tip past reviewed_head_sha
+// (false-firing the §4 staleness clause) and clear user dirt (false-clearing
+// the §5 dirty-tree clause), so the gate must run first (RED-on-revert if
+// moved after CommitAll).
+//
+// Hatches (§7): the env-only skip (panel.SkipPanelEnv) and the
+// enforcement.panel_gate config toggle short-circuit to a silent pass; the
+// skip variable is NEVER named in any Block message (HC-7). Fail-open (§6):
+// no panel.json registering the bead → no registration → pass silently, so
+// the bead ACTUALLY completes (R2 dogfooding safety).
+//
+// On a Block from any matched panel it returns a guard.NewFailure whose body
+// is the decision message (which already carries the raw-`git merge` fence,
+// R5) and whose FINAL line is a genuine recovery command (re-panel +
+// re-complete) — so the error passes guard.HasFinalRecoveryLine (ADR-0035)
+// while keeping the fence in the body. The caller returns it BEFORE any
+// mutation, exiting non-zero having mutated nothing (HC-4). A Warn (audited
+// abandonment / missing-ref / transient git error) is printed to warnOut and
+// the gate proceeds, parity with the hook's Warn path.
+//
+// The staleness HEAD source is the bead/<id> ref that panel.ResolveGateFacts
+// rev-parses internally (in the panel's scanRoot) — the IDENTICAL source the
+// hook uses. complete.Run resolves beadHead at step 2 for the per-bead
+// doc-sync / adr gates; the panel gate does NOT re-derive it, it leans on the
+// shared fact-gatherer's bead/<id> rev-parse so the two call sites cannot
+// diverge.
+//
+// It returns the matched registration (for the post-completion audit writes,
+// reusing this scan) and an error (non-nil only on a Block).
+func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer) (*panel.Registration, error) {
+	if beadID == "" {
+		return nil, nil
+	}
+
+	// (0) escape hatch — env-only, audited. The decision's Warn path keeps
+	// the hatch-name out of any Block; passing SkipEnv true here also means a
+	// skipped gate never blocks.
+	skipEnv := panelSkipEnvFn()
+
+	// (1) config toggle (§7): enforcement.panel_gate: false → skip the gate.
+	// We still scan so the matched registration flows to the audit writes.
+	regs := panel.ForBead(panelScanFn(roots...), beadID)
+	if len(regs) == 0 {
+		// Fail-open (§6): no registered panel → no gate, the bead completes.
+		return nil, nil
+	}
+
+	var matched *panel.Registration
+	var firstWarn string
+	for i := range regs {
+		if matched == nil {
+			r := regs[i]
+			matched = &r
+		}
+		// Honor the hatches with parity to the hook: a set skip env or a
+		// disabled gate yields a Warn/Allow decision that never blocks. We
+		// pass these through panel.GateFacts so the decision (not this
+		// caller) owns the messaging, and the skip variable is never named.
+		if skipEnv {
+			d := panel.PanelGateDecision(panel.GateFacts{BeadID: beadID, SkipEnv: true})
+			if d.Action == panel.Warn && firstWarn == "" {
+				firstWarn = d.Message
+			}
+			continue
+		}
+		if !panelGateEnabled {
+			// Config-disabled gate: do not evaluate facts, do not block.
+			continue
+		}
+
+		scanRoot := panel.PanelDirScanRoot(regs[i].Dir)
+		facts := panel.ResolveGateFacts(regs[i], beadID, scanRoot, panel.GateIO{
+			RevParse:      gateRevParseFn,
+			Status:        gateStatusFn,
+			IsRefNotFound: gateIsRefNotFoundFn,
+			// Lazy worktree resolver: only invoked on the dirty-check path so
+			// the abandoned / mismatch / missing-ref / transient-gitErr short
+			// circuits pay no extra cost. complete.Run already resolved the
+			// bead worktree (wtPath); "" means absent → dirty check skipped.
+			Worktree: func() string { return wtPath },
+		})
+		d := panel.PanelGateDecision(facts)
+		switch d.Action {
+		case panel.Block:
+			// A Block from any matched panel wins (R5). The decision.Message
+			// already ends with the raw-`git merge` fence in its BODY; append
+			// a GENUINE recovery line (re-panel + re-complete) via the guard
+			// arg so the message passes guard.HasFinalRecoveryLine (ADR-0035)
+			// with the fence still in the body BEFORE the recovery line. A
+			// zero-command guard.NewFailure would PANIC — always pass one.
+			return matched, guard.NewFailure(d.Message, fmt.Sprintf(
+				"re-run the panel (/ms-panel-run step 0 for %s), then `mindspec complete %s`",
+				beadID, beadID))
+		case panel.Warn:
+			if firstWarn == "" {
+				firstWarn = d.Message
+			}
+		}
+	}
+
+	if firstWarn != "" && warnOut != nil {
+		fmt.Fprintf(warnOut, "panel gate: %s\n", firstWarn)
+	}
+	return matched, nil
 }
 
 // dedupeRoots returns the non-empty, distinct roots in order — the scan-root
