@@ -28,6 +28,27 @@ func TestMatchMindspecComplete(t *testing.T) {
 		{"newline-separated", "echo a\nmindspec complete X", true},
 		{"command-subst-dollar", "echo $(mindspec complete X)", true},
 
+		// --- unquoted wrapper prefixes around complete (R4/7eup: MUST match) ---
+		{"env-bare-wrapper", "env mindspec complete 001", true},
+		{"env-assign-wrapper", "env FOO=bar mindspec complete 001", true},
+		{"env-i-flag-wrapper", "env -i mindspec complete 001", true},
+		{"env-u-flag-wrapper", "env -u PATH mindspec complete 001", true},
+		{"timeout-wrapper", "timeout 30 mindspec complete 001", true},
+		{"timeout-kill-after-wrapper", "timeout -k 5 30 mindspec complete 001", true},
+		{"timeout-signal-wrapper", "timeout -s KILL 30 mindspec complete X", true},
+		{"timeout-extra-operand-no-overskip", "timeout 30 mindspec complete X", true},
+		{"command-wrapper", "command mindspec complete 001", true},
+		{"command-p-flag-wrapper", "command -p mindspec complete 001", true},
+		{"xargs-wrapper", "xargs mindspec complete", true},
+		{"xargs-I-attached-wrapper", "xargs -I{} mindspec complete", true},
+		{"xargs-n-value-wrapper", "xargs -n 1 mindspec complete X", true},
+
+		// --- wrapper prefixes around a NON-complete command (MUST NOT match) ---
+		{"timeout-go-test", "timeout 30 go test ./...", false},
+		{"env-mindspec-next", "env FOO=bar mindspec next", false},
+		{"command-ls", "command ls", false},
+		{"bare-mindspec-next", "mindspec next", false},
+
 		// --- quoted / non-command-position mentions (MUST NOT match) ---
 		{"commit-msg-double-quote", `git commit -m "panel approved; mindspec complete next"`, false},
 		{"grep-single-quote", `grep 'mindspec complete' SKILL.md`, false},
