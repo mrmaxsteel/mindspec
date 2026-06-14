@@ -2,10 +2,8 @@ package hook
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -17,276 +15,13 @@ import (
 )
 
 // SkipPanelEnv is the env-only escape hatch for the pre-complete gate
-// (Spec 093 Req 13a, ADR-0037 §7). It is read via os.Getenv ONLY — the
-// command string is NEVER consulted, because a PreToolUse hook inherits
-// Claude Code's process environment (which the agent cannot alter) while
-// the command line is the agent-writable channel. The variable name is
-// documented for HUMANS in /ms-panel-tally § Escape hatch; it is NEVER
-// printed in a Block message (HC-7) — see decision tests.
-const SkipPanelEnv = "MINDSPEC_SKIP_PANEL"
-
-// rawMergeFence is appended to every Block message (Spec 093 Req 12 / G3-1,
-// ADR-0037 §8). Once the gate blocks `mindspec complete`, a raw
-// `git merge bead/<id>` on the spec branch is the obvious workaround; the
-// matcher only fires on `mindspec complete` and mindspec installs no
-// pre-merge-commit git hook, so the fence is prose by necessity.
-func rawMergeFence(beadID string) string {
-	return fmt.Sprintf(
-		"\nDo NOT bypass with raw `git merge bead/%s` — it skips bd closure, "+
-			"worktree cleanup, and this gate; only `mindspec complete` merges bead branches.",
-		beadID)
-}
-
-// skipHumanHint is the Block-message tail that tells the agent the hatch is
-// human-only (Spec 093 Req 13a, HC-7). It deliberately does NOT print the
-// MINDSPEC_SKIP_PANEL variable — a blocked LLM's highest-probability next
-// action is pasting a suggested prefix.
-const skipHumanHint = "\nSkipping the panel requires a human: a user must set the skip variable in " +
-	"their own environment before launching the session — see /ms-panel-tally § Escape hatch"
-
-// gateFacts is the fully-resolved, I/O-free input to panelGateDecision.
-// Every field is gathered by runPreComplete's I/O layer (env, fs scan,
-// git) so the decision itself is a pure function of these facts — the one
-// testable home of the allow/block logic (Spec 093 Req 12).
-type gateFacts struct {
-	// beadID is the bead the matched `mindspec complete` targets.
-	beadID string
-
-	// skipEnv reports whether MINDSPEC_SKIP_PANEL == "1" (Req 13a).
-	skipEnv bool
-
-	// reg is the registration that named this bead, with its tally. nil
-	// means no panel.json referenced the bead — fail-open (HC-4).
-	reg *panel.Registration
-	res *panel.Result
-
-	// headSHA is the current `git rev-parse bead/<id>` in the scan root.
-	// missingRef true means the branch GENUINELY no longer exists (exit-1 /
-	// ErrRefNotFound) — the rerun-after-merge pass-through (Req 11). When
-	// missingRef is true headSHA is "".
-	headSHA    string
-	missingRef bool
-
-	// gitErr true means the rev-parse failed with a TRANSIENT or structural
-	// error (not a clean "ref absent"): exit 128, git missing, lock
-	// contention. It is deliberately NOT folded into missingRef so a transient
-	// failure is not silently treated as a confirmed branch deletion (the
-	// false-clear noted by the round-2 panel). Still fail-open per the spec's
-	// deliberate posture (Req 11/12, advisory-backstopped), but surfaced
-	// HONESTLY as a distinct Warn rather than a "merge already landed" note.
-	gitErr error
-
-	// worktreeAbsent reports that the bead worktree could not be found, so
-	// the porcelain dirty check was skipped (Req 11 missing-worktree
-	// pass-through). userDirt lists user-authored uncommitted paths
-	// (artifact paths already filtered out) in the resolved worktree.
-	worktreeAbsent bool
-	worktreePath   string
-	userDirt       []string
-}
-
-// panelGateDecision renders the pass/block decision for a single matched
-// panel from fully-resolved facts (Spec 093 Req 12, ADR-0037 §§3-6). It is
-// pure: no env, no fs, no git. The short-circuit ORDER is load-bearing and
-// pinned by gate finding T3-1 —
-//
-//	(0) escape hatch  → Pass + Warn (audited at complete time)
-//	(1) no panel      → Pass (fail-open, HC-4)
-//	(2) malformed reg → Block (a registered-but-unparseable panel is NOT
-//	                    "no panel"; it must not tip fail-open)
-//	(3) abandoned     → Pass + Warn  (BEFORE staleness — an abandoned
-//	                    panel whose branch gained commits must never be
-//	                    false-Blocked by the stale-SHA rule)
-//	(4) round mismatch→ Block
-//	(5) missing ref   → Pass + Warn  (rerun-after-merge)
-//	(6) stale SHA     → Block  (the lola-f4a8 pin)
-//	(7) dirty tree    → Block  (CommitAll bypass; skipped when worktree absent)
-//	(8) incomplete    → Block  (verdicts < expected_reviewers)
-//	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
-//	(10) threshold    → Pass iff APPROVE ≥ N−1, else Block
-//
-// false POSITIVES (a wrongful Block) are the pinned bug class (Req 9); the
-// missing-ref and missing-worktree pass-throughs exist to keep the
-// documented partial-failure recovery rerun unblocked.
-func panelGateDecision(f gateFacts) Result {
-	// (0) Escape hatch — env-only, audited. Never names the variable in a
-	// Block (this is a Warn/Pass path, so HC-7 is moot here, but we still
-	// keep the message hatch-name-free except for this legitimate audit).
-	if f.skipEnv {
-		return Result{Action: Warn, Message: fmt.Sprintf(
-			"panel gate skipped via %s for %s", SkipPanelEnv, f.beadID)}
-	}
-
-	// (1) Fail-open: no registered panel for the bead.
-	if f.reg == nil || f.res == nil {
-		return Result{Action: Pass}
-	}
-
-	slug := f.reg.Slug()
-
-	// (2) A panel.json exists but could not be parsed — registered but
-	// malformed. It must NOT read as "no panel".
-	if f.res.PanelErr != nil || f.res.Panel == nil {
-		return Result{Action: Block, Message: fmt.Sprintf(
-			"panel %s registration (panel.json) is unreadable — fix or remove it before completing%s",
-			slug, rawMergeFence(f.beadID))}
-	}
-	p := f.res.Panel
-	round := f.res.LatestRound
-	if round == 0 {
-		round = p.Round
-	}
-
-	// (3) Abandoned — legitimate exit, audited on bead metadata at complete
-	// time (Req 13e). Checked BEFORE staleness (T3-1) so an abandoned panel
-	// whose branch advanced is never false-Blocked.
-	if p.Abandoned {
-		reason := strings.TrimSpace(p.AbandonReason)
-		if reason == "" {
-			reason = "(no reason recorded — abandon_reason is required; /ms-panel-tally abandon procedure)"
-		}
-		return Result{Action: Warn, Message: fmt.Sprintf(
-			"panel %s round %d abandoned: %s — completing per the recorded abandonment", slug, round, reason)}
-	}
-
-	// (4) Round mismatch — panel.json.round disagrees with the
-	// filename-derived latest round in either direction (Req 11).
-	if f.res.RoundMismatch {
-		return Result{Action: Block, Message: fmt.Sprintf(
-			"panel %s: panel.json round (%d) out of date vs verdict files (round %d) — re-run /ms-panel-run step 0%s",
-			slug, p.Round, f.res.LatestRound, rawMergeFence(f.beadID))}
-	}
-
-	// (5) Missing ref — the bead branch GENUINELY no longer exists (exit-1
-	// ErrRefNotFound). The merge already landed (completion deletes the
-	// branch); pass through to complete.Run's idempotent handling rather than
-	// false-block the recovery rerun (Req 11).
-	if f.missingRef {
-		return Result{Action: Warn, Message: fmt.Sprintf(
-			"panel for %s references branch %s, which no longer exists — assuming the merge already landed; "+
-				"deferring to mindspec complete's own handling", f.beadID, workspace.BeadBranch(f.beadID))}
-	}
-
-	// (5b) Transient/structural git error — the staleness rev-parse could not
-	// run (not a clean "ref absent"). The spec's posture is deliberately
-	// fail-open (Req 11/12, advisory-backstopped), so we still Pass+Warn; but
-	// — unlike (5) — we do NOT claim the merge landed, because a transient
-	// error is NOT evidence the branch was deleted. Surfacing it honestly
-	// closes the round-2 false-clear (a transient error conflated with a
-	// genuine deletion) without false-blocking a legitimate completion.
-	if f.gitErr != nil {
-		return Result{Action: Warn, Message: fmt.Sprintf(
-			"panel for %s: could not verify branch %s (transient git error: %v) — staleness check skipped; "+
-				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
-			f.beadID, workspace.BeadBranch(f.beadID), f.gitErr)}
-	}
-
-	// (6) Stale SHA — verdicts reviewed a different commit. BLOCK, never
-	// Warn (a Warn here is the same prose-under-pressure failure the gate
-	// exists to close — the lola-f4a8 bypass class, Req 11).
-	if p.ReviewedHeadSHA != "" && f.headSHA != "" && !shaEqual(p.ReviewedHeadSHA, f.headSHA) {
-		return Result{Action: Block, Message: fmt.Sprintf(
-			"panel round %d reviewed %s, branch now at %s — commits landed after review; "+
-				"bump round and re-panel (/ms-panel-run step 0)%s",
-			round, short(p.ReviewedHeadSHA), short(f.headSHA), rawMergeFence(f.beadID))}
-	}
-
-	// (7) Dirty tree — uncommitted USER edits would be auto-committed past
-	// review by CommitAll (Req 11). Artifact dirt is already filtered out by
-	// the caller. Skipped entirely when the worktree is absent (the
-	// missing-worktree partial-failure rerun window).
-	if !f.worktreeAbsent && len(f.userDirt) > 0 {
-		var b strings.Builder
-		fmt.Fprintf(&b, "uncommitted changes in %s — `mindspec complete` would auto-commit them past review (CommitAll); commit and re-panel, or revert:",
-			f.worktreePath)
-		for _, d := range f.userDirt {
-			fmt.Fprintf(&b, "\n  %s", d)
-		}
-		b.WriteString(rawMergeFence(f.beadID))
-		return Result{Action: Block, Message: b.String()}
-	}
-
-	// (8) Incomplete — fewer valid verdicts than expected reviewers. Name
-	// the PRESENT verdict files; the missing-slot NAMES are not derivable
-	// from the Req 6 schema (it carries only an expected_reviewers int —
-	// gate finding T3-2).
-	n := p.ExpectedReviewers
-	if !f.res.Complete() {
-		present := presentVerdictFiles(f.res)
-		return Result{Action: Block, Message: fmt.Sprintf(
-			"panel %s round %d incomplete: %d/%d verdicts present (%s) — finish /ms-panel-run or tally first%s",
-			slug, round, len(f.res.Verdicts), n, present, rawMergeFence(f.beadID))}
-	}
-
-	// (9) REJECT or hard_block — halt path; no vote count overrides an
-	// evidence-bearing gate (the lola-f4a8 artifact-gate rule, mechanized).
-	if f.res.Rejects > 0 || len(f.res.HardBlocks) > 0 {
-		detail := fmt.Sprintf("%d/%d APPROVE", f.res.Approves, n)
-		if len(f.res.HardBlocks) > 0 {
-			detail += fmt.Sprintf(", hard_block from %s", strings.Join(f.res.HardBlocks, ", "))
-		}
-		return Result{Action: Block, Message: fmt.Sprintf(
-			"panel %s round %d: %s — HARD block / REJECT recorded — halt path, see /ms-panel-tally%s",
-			slug, round, detail, rawMergeFence(f.beadID))}
-	}
-
-	// (10) Threshold — N−1 (Req 12, single home in panel.ApproveThreshold).
-	threshold := p.ApproveThreshold()
-	if f.res.Approves >= threshold && threshold > 0 {
-		return Result{Action: Pass}
-	}
-	return Result{Action: Block, Message: fmt.Sprintf(
-		"panel %s round %d: %d/%d APPROVE — threshold is %d/%d. Run /ms-bead-fix with %s, then re-panel%s",
-		slug, round, f.res.Approves, n, threshold, n, panel.ConsolidatedName(round), rawMergeFence(f.beadID))}
-}
-
-// presentVerdictFiles renders the present-verdict-file list for the
-// incomplete Block. Missing-slot names are not derivable from the schema,
-// so the contract is to enumerate what IS present (T3-2). Malformed files
-// (counted as missing) are named separately so the agent can fix them.
-func presentVerdictFiles(res *panel.Result) string {
-	var files []string
-	for _, v := range res.Verdicts {
-		files = append(files, v.File)
-	}
-	sort.Strings(files)
-	out := "present: "
-	if len(files) == 0 {
-		out += "none"
-	} else {
-		out += strings.Join(files, ", ")
-	}
-	if len(res.Malformed) > 0 {
-		out += "; malformed (count as missing): " + strings.Join(res.Malformed, ", ")
-	}
-	return out
-}
-
-// shaEqual compares two git SHAs allowing one to be an abbreviation of the
-// other (panel.json may record a short reviewed_head_sha; rev-parse yields
-// the full 40-char form).
-func shaEqual(a, b string) bool {
-	a = strings.ToLower(strings.TrimSpace(a))
-	b = strings.ToLower(strings.TrimSpace(b))
-	if a == "" || b == "" {
-		return false
-	}
-	if len(a) == len(b) {
-		return a == b
-	}
-	if len(a) < len(b) {
-		return strings.HasPrefix(b, a)
-	}
-	return strings.HasPrefix(a, b)
-}
-
-func short(sha string) string {
-	sha = strings.TrimSpace(sha)
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
+// (Spec 093 Req 13a, ADR-0037 §7). It re-exports panel.SkipPanelEnv (the
+// single home of the variable name, Spec 099) so existing callers and tests
+// that read hook.SkipPanelEnv keep working. It is read via os.Getenv ONLY —
+// the command string is NEVER consulted, because a PreToolUse hook inherits
+// Claude Code's process environment (which the agent cannot alter) while the
+// command line is the agent-writable channel.
+const SkipPanelEnv = panel.SkipPanelEnv
 
 // --- command matching (Spec 093 Req 9, S3-6) --------------------------------
 
@@ -645,8 +380,11 @@ func leadingCdPath(seg string) string {
 // --- orchestration (the I/O layer; Spec 093 Reqs 9-13) ----------------------
 
 // Seams for testing the scan-root resolution and git work without a real
-// repo/bd. The decision itself (panelGateDecision) is pure and tested
-// directly; these cover runPreComplete's wiring.
+// repo/bd. The decision itself (panel.PanelGateDecision) is pure and tested
+// directly in internal/panel; these cover runPreComplete's wiring. The
+// rev-parse / porcelain seams are injected into panel.ResolveGateFacts via
+// hookGateIO, so the GREEN-parity run tests that stub these vars drive the
+// rewired path unchanged.
 var (
 	preCompleteFindRootFn   = workspace.FindLocalRoot
 	preCompleteConfigLoadFn = config.Load
@@ -667,9 +405,37 @@ var (
 	worktreeListFn = bead.WorktreeList
 )
 
+// hookGateIO is the GateIO seam the hook injects into
+// panel.ResolveGateFacts: the real git rev-parse / porcelain / ref-not-found
+// wiring plus the lazy bead-worktree resolver. It reads the unexported seam
+// vars (preCompleteRevParseFn / preCompleteStatusFn / worktreeListFn, via
+// resolveBeadWorktree) so the GREEN-parity run tests that stub those vars keep
+// driving the rewired path unchanged.
+func hookGateIO(scanRoot, beadID string, cfg *config.Config) panel.GateIO {
+	return panel.GateIO{
+		RevParse:      preCompleteRevParseFn,
+		Status:        preCompleteStatusFn,
+		IsRefNotFound: func(e error) bool { return errors.Is(e, gitutil.ErrRefNotFound) },
+		// Lazy: only invoked on the dirty-check path (after a successful
+		// rev-parse), so the worktree-list fallback subprocess is NOT paid on
+		// the abandoned / mismatch / missing-ref / transient-gitErr short
+		// circuits — preserving the original two-subprocess budget.
+		Worktree: func() string { return resolveBeadWorktree(scanRoot, cfg, beadID) },
+	}
+}
+
+// ADR-0037 AMENDMENT NOTE (Spec 099 R4): the panel-gate DECISION + the
+// fact-gathering now live in the internal/panel leaf
+// (panel.PanelGateDecision / panel.ResolveGateFacts). `mindspec complete`'s
+// in-binary gate (Spec 099 Bead 2) is the AUTHORITATIVE enforcement point;
+// this PreToolUse hook is a defense-in-depth BACKSTOP that invokes the
+// IDENTICAL decision over IDENTICAL facts, so the two cannot disagree. The
+// matcher below is LEFT IN PLACE, behaviorally unchanged; the hook +
+// heuristic-matcher RETIREMENT is a deferred follow-up bead (filed at merge).
+
 // runPreComplete is the pre-complete hook's I/O layer (Spec 093 Req 9 short-
-// circuit order). It does the minimum work to reach panelGateDecision, and
-// — critically — does ZERO config/git/fs/state work on a non-matching Bash
+// circuit order). It does the minimum work to reach panel.PanelGateDecision,
+// and — critically — does ZERO config/git/fs/state work on a non-matching Bash
 // command (HC-3): steps (1)-(2) below exit first.
 //
 // Scan-root resolution (Req 10) covers three roots, unioned and deduped:
@@ -704,7 +470,7 @@ func runPreComplete(inp *Input) Result {
 	// config/git/fs work so a human-set skip pays nothing.
 	skipEnv := os.Getenv(SkipPanelEnv) == "1"
 	if skipEnv {
-		return panelGateDecision(gateFacts{beadID: beadID, skipEnv: true})
+		return toResult(panel.PanelGateDecision(panel.GateFacts{BeadID: beadID, SkipEnv: true}))
 	}
 
 	// (4) root + config — config toggle short-circuit (Req 13c).
@@ -738,7 +504,7 @@ func runPreComplete(inp *Input) Result {
 	var firstWarn *Result
 	for i := range regs {
 		f := resolvePanelFacts(regs[i], beadID, cfg)
-		res := panelGateDecision(f)
+		res := toResult(panel.PanelGateDecision(f))
 		switch res.Action {
 		case Block:
 			return res
@@ -755,68 +521,32 @@ func runPreComplete(inp *Input) Result {
 	return Result{Action: Pass}
 }
 
+// toResult maps the extracted panel.Decision back to the hook's Result
+// (panel.GateAction Allow/Block/Warn → hook.Action Pass/Block/Warn), copying
+// the message verbatim so the hook's exit-2 emission stays byte-identical.
+func toResult(d panel.Decision) Result {
+	var a Action
+	switch d.Action {
+	case panel.Block:
+		a = Block
+	case panel.Warn:
+		a = Warn
+	default: // panel.Allow
+		a = Pass
+	}
+	return Result{Action: a, Message: d.Message}
+}
+
 // resolvePanelFacts gathers the git facts (Req 11) for one matched
-// registration and returns the I/O-free gateFacts for panelGateDecision.
-// Matched-path git budget: at most TWO subprocesses (rev-parse + porcelain).
-func resolvePanelFacts(reg panel.Registration, beadID string, cfg *config.Config) gateFacts {
-	f := gateFacts{beadID: beadID, reg: &reg}
-
-	res, err := panel.Tally(reg.Dir)
-	if err != nil {
-		// Directory unreadable — treat as malformed registration (Block),
-		// not "no panel": surface a non-nil Result with PanelErr so the
-		// decision blocks rather than fails open.
-		f.res = &panel.Result{Dir: reg.Dir, PanelErr: err}
-		return f
-	}
-	f.res = res
-
-	// Abandoned and round-mismatch decisions need no git. To honor T3-1
-	// (abandoned checked before staleness) AND keep the git budget low, we
-	// still resolve git facts here, but panelGateDecision orders abandoned
-	// FIRST so an abandoned panel is never false-Blocked. We can cheaply
-	// skip git entirely on the abandoned/round-mismatch paths.
-	if res.Panel != nil && (res.Panel.Abandoned || res.RoundMismatch) {
-		return f
-	}
-
+// registration and returns the I/O-free panel.GateFacts for
+// panel.PanelGateDecision. The hook resolves the scan root + bead worktree
+// path and injects the git I/O via the GateIO seam (so internal/panel stays a
+// leaf). Matched-path git budget: at most TWO subprocesses (rev-parse +
+// porcelain).
+func resolvePanelFacts(reg panel.Registration, beadID string, cfg *config.Config) panel.GateFacts {
 	// The scan root that owns this panel dir is review/<slug>'s grandparent.
-	scanRoot := filepath.Dir(filepath.Dir(reg.Dir))
-
-	// (7) staleness — one `git rev-parse bead/<id>` in the scan root.
-	sha, rerr := preCompleteRevParseFn(scanRoot, workspace.BeadBranch(beadID))
-	if rerr != nil {
-		// Distinguish a GENUINE missing ref (branch deleted — the merge
-		// landed) from a transient/structural git error. Only the former is
-		// the rerun-after-merge pass-through (Req 11); a transient error is
-		// surfaced as a distinct Warn so it is not mistaken for a confirmed
-		// deletion (round-2 false-clear).
-		if errors.Is(rerr, gitutil.ErrRefNotFound) {
-			f.missingRef = true
-		} else {
-			f.gitErr = rerr
-		}
-		return f
-	}
-	f.headSHA = sha
-
-	// (8) dirty tree — one `git status --porcelain` in the resolved bead
-	// worktree (Req 11). Runs only on the panel-matched path.
-	wt := resolveBeadWorktree(scanRoot, cfg, beadID)
-	if wt == "" {
-		f.worktreeAbsent = true
-		return f
-	}
-	f.worktreePath = wt
-	out, serr := preCompleteStatusFn(wt)
-	if serr != nil {
-		// Porcelain failed (missing worktree raced in) → skip the dirty
-		// check, mirroring the missing-worktree pass-through (Req 11).
-		f.worktreeAbsent = true
-		return f
-	}
-	f.userDirt = userDirtPaths(out)
-	return f
+	scanRoot := panel.PanelDirScanRoot(reg.Dir)
+	return panel.ResolveGateFacts(reg, beadID, scanRoot, hookGateIO(scanRoot, beadID, cfg))
 }
 
 // resolveScanRoots builds the union of scan roots (Req 10), deduped.
@@ -881,43 +611,7 @@ func resolveBeadWorktree(scanRoot string, cfg *config.Config, beadID string) str
 	return ""
 }
 
-// userDirtPaths parses `git status --porcelain` output and returns the
-// user-authored dirty paths, filtering out ADR-0025 artifact paths
-// (.beads/issues.jsonl) which are designed-for and never block (Req 11).
-// Pure path filtering — no bd-export normalization call (matched-path git
-// budget stays at two subprocesses).
-func userDirtPaths(porcelain string) []string {
-	var out []string
-	for _, line := range strings.Split(porcelain, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		path := strings.TrimSpace(line[3:])
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = strings.TrimSpace(path[idx+4:])
-		}
-		if path == "" || isArtifactPath(path) {
-			continue
-		}
-		out = append(out, path)
-	}
-	return out
-}
-
-// artifactPaths mirrors internal/next's ADR-0025 classification
-// (.beads/issues.jsonl). Kept as a local copy rather than importing
-// internal/next to avoid a hook→next dependency edge; the list is one
-// entry today and any addition is a one-line append in both places.
-var artifactPaths = []string{
-	".beads/issues.jsonl",
-}
-
-func isArtifactPath(p string) bool {
-	for _, a := range artifactPaths {
-		if p == a {
-			return true
-		}
-	}
-	return false
-}
+// NOTE (Spec 099): userDirtPaths / artifactPaths / isArtifactPath (the
+// ADR-0025 porcelain filtering) moved to internal/panel (panel.userDirtPaths)
+// alongside the relocated decision, so both the hook and the in-binary gate
+// share the one filter. They are invoked from panel.ResolveGateFacts.
