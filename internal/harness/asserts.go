@@ -197,18 +197,64 @@ func preApproveImplMainMergeOrPRViolation(events []ActionEvent) error {
 		// Canonical internal merge pattern (from approve impl) is allowed:
 		//   git ... merge --no-ff spec/<id> -m "Merge spec/<id> into main"
 		if e.Command == "git" && e.ExitCode == 0 && containsAll(args, "merge") && containsAll(args, "main") {
+			refs := mergeSourceRefs(args)
+			// `git merge main` (only main as a source ref) merges main INTO
+			// the current branch — a safe pull-main-in update, not a
+			// merge-to-main. Allow it.
+			allMain := len(refs) > 0
+			for _, ref := range refs {
+				if ref != "main" {
+					allMain = false
+					break
+				}
+			}
+			if allMain {
+				continue
+			}
+
 			isCanonicalInternal := containsAll(args, "--no-ff") &&
 				containsAll(args, "spec/") &&
 				containsAll(args, "-m") &&
 				containsAll(args, "Merge spec/") &&
 				containsAll(args, "into main")
 			if !isCanonicalInternal {
-				return fmt.Errorf("merge-to-main occurred before approve impl: %v", args)
+				return fmt.Errorf("non-canonical merge of %v before approve impl (may land onto main): %v", refs, args)
 			}
 		}
 	}
 
 	return nil
+}
+
+// mergeSourceRefs returns the positional ref operands that follow the `merge`
+// token in a `git merge ...` invocation, skipping flags and their values. It is
+// used to distinguish a safe pull-main-in (`git merge main`) from a merge whose
+// result could land onto main.
+func mergeSourceRefs(args []string) []string {
+	var refs []string
+	seenMerge := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !seenMerge {
+			if arg == "merge" {
+				seenMerge = true
+			}
+			continue
+		}
+		switch {
+		case arg == "--":
+			// Separator; remaining args are operands.
+			continue
+		case arg == "-m" || arg == "-C" || arg == "-s" || arg == "-X":
+			// Flag with a following value; skip both.
+			i++
+		case strings.HasPrefix(arg, "-"):
+			// Any other flag; skip it.
+		default:
+			refs = append(refs, arg)
+		}
+	}
+	return refs
 }
 
 func assertBranchIs(t *testing.T, sandbox *Sandbox, expected string) {
