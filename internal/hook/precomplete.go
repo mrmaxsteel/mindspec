@@ -361,9 +361,33 @@ func commandSegments(command string) []string {
 }
 
 // segmentInvokesComplete reports whether a single command-position segment,
-// after stripping leading env assignments and `cd …`/`pushd …` prefixes,
-// begins with `mindspec complete` (optionally a `<path>/mindspec`).
+// after stripping leading env assignments, `cd …`/`pushd …`, and the catchable
+// unquoted wrapper prefixes (`env`/`timeout`/`command`/`xargs`), begins with
+// `mindspec complete` (optionally a `<path>/mindspec`).
+//
+// ADR-0037 residual: the QUOTED wrapper forms — `sh -c '… complete'`,
+// `eval '… complete'` — are an explicitly-accepted residual. A non-executing
+// tokenizer structurally cannot reach the wrapped command inside the quoted
+// string (it is a single argument token, not a command-position segment), so we
+// deliberately do NOT attempt to match them here.
 func segmentInvokesComplete(seg string) bool {
+	_, ok := strippedCompleteFields(seg)
+	return ok
+}
+
+// strippedCompleteFields strips a single command-position segment's leading env
+// assignments, `cd …`/`pushd …`, and the catchable unquoted wrapper prefixes
+// (`env`/`timeout`/`command`/`xargs`), then reports whether the remainder is a
+// `mindspec complete …` invocation. On a match it returns the remaining fields
+// starting at the `mindspec` binary token (fields[0] is the binary, fields[1]
+// is "complete", fields[2:] are the complete args) and ok=true; otherwise it
+// returns nil, false.
+//
+// This is the SINGLE source of wrapper-stripping shared by both
+// segmentInvokesComplete (the match guard) and segmentCompleteBeadID (the
+// bead-id extractor) so the two can never diverge — a divergence is exactly
+// how a wrapped complete could be recognized-but-fail-open.
+func strippedCompleteFields(seg string) ([]string, bool) {
 	fields := strings.Fields(seg)
 	for len(fields) > 0 {
 		head := fields[0]
@@ -381,16 +405,97 @@ func segmentInvokesComplete(seg string) bool {
 				fields = fields[1:]
 			}
 			continue
+		case head == "env":
+			// `env [-i] [-u VAR] [VAR=val …] command …`. Drop the bare `env`
+			// keyword; the `-i`/`-u` flags and the `VAR=val` assignments that
+			// may follow are consumed below (the assignments via the loop's
+			// existing isEnvAssignment case, -u's operand here).
+			fields = fields[1:]
+			for len(fields) > 0 {
+				switch {
+				case fields[0] == "-i" || fields[0] == "-":
+					fields = fields[1:]
+				case fields[0] == "-u":
+					// -u takes a VAR operand.
+					if len(fields) >= 2 {
+						fields = fields[2:]
+					} else {
+						fields = fields[1:]
+					}
+				default:
+					goto envDone
+				}
+			}
+		envDone:
+			continue
+		case head == "timeout":
+			// `timeout [FLAGS] DURATION command …`. Drop `timeout`, its flags,
+			// then EXACTLY ONE non-flag operand (the mandatory DURATION) so the
+			// loop returns to the wrapped command — never over-skipping onto it.
+			fields = fields[1:]
+			for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+				switch fields[0] {
+				case "-s", "-k":
+					// Value-taking short flags (signal / kill-after) whose
+					// value is a separate token.
+					if len(fields) >= 2 {
+						fields = fields[2:]
+					} else {
+						fields = fields[1:]
+					}
+				default:
+					// --signal=SIG / --kill-after=DUR (value attached) and
+					// the valueless --preserve-status / --foreground.
+					fields = fields[1:]
+				}
+			}
+			if len(fields) > 0 {
+				// Skip exactly the one DURATION operand.
+				fields = fields[1:]
+			}
+			continue
+		case head == "command":
+			// `command [-p] [-v] [-V] command …`. Drop `command` and its flags.
+			fields = fields[1:]
+			for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+				fields = fields[1:]
+			}
+			continue
+		case head == "xargs":
+			// `xargs [FLAGS] command …`. Drop `xargs`, its flags (some take a
+			// value operand), then continue at the wrapped command. xargs does
+			// NOT take a positional operand before the command, so no extra
+			// non-flag skip — the first non-flag token IS the command.
+			fields = fields[1:]
+			for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+				switch fields[0] {
+				case "-I", "-n", "-P", "-d", "-E", "-s", "-L", "-a":
+					// Value-taking flags whose value is a separate token.
+					if len(fields) >= 2 {
+						fields = fields[2:]
+					} else {
+						fields = fields[1:]
+					}
+				default:
+					// Valueless flags (-0/-r/-t/-p/-x) and any --long=val /
+					// attached-value short flag (e.g. -I{}, -n1).
+					fields = fields[1:]
+				}
+			}
+			continue
 		}
 		break
 	}
 	if len(fields) < 2 {
-		return false
+		return nil, false
 	}
 	if !isMindspecBinary(fields[0]) {
-		return false
+		return nil, false
 	}
-	return fields[1] == "complete"
+	if fields[1] != "complete" {
+		return nil, false
+	}
+	return fields, true
 }
 
 // isEnvAssignment reports whether a token is a leading shell env assignment
@@ -434,24 +539,12 @@ func completeBeadID(command string) string {
 }
 
 func segmentCompleteBeadID(seg string) string {
-	fields := strings.Fields(seg)
-	for len(fields) > 0 {
-		head := fields[0]
-		switch {
-		case isEnvAssignment(head):
-			fields = fields[1:]
-			continue
-		case head == "cd" || head == "pushd":
-			if len(fields) >= 2 {
-				fields = fields[2:]
-			} else {
-				fields = fields[1:]
-			}
-			continue
-		}
-		break
-	}
-	if len(fields) < 2 || !isMindspecBinary(fields[0]) || fields[1] != "complete" {
+	// Share the SAME wrapper-stripping as segmentInvokesComplete (the match
+	// guard) so a wrapped complete the gate RECOGNIZES also has its bead-id
+	// EXTRACTED — otherwise the gate fails open on env/timeout/xargs/command
+	// forms (recognized-but-unenforced).
+	fields, ok := strippedCompleteFields(seg)
+	if !ok {
 		return ""
 	}
 	args := fields[2:]

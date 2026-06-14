@@ -372,6 +372,19 @@ func ScenarioImplApprove() Scenario {
 			sandbox.ClaimBead(beadID)
 			sandbox.runBDMust("close", beadID)
 
+			// ADR-divergence coverage triple (098 Bead 1 / R1 / myn3):
+			// done.go lands at the main root after the spec-branch merge,
+			// so the impl-approve CheckADRDivergence gate (unconditional)
+			// would flag it as `adr-divergence-unowned` and exit 1 on a gate
+			// unrelated to this scenario's pin. Commit the OWNERSHIP.yaml
+			// (claiming done.go) + Accepted ADR-0001 at the sandbox ROOT
+			// BEFORE the worktree fork so both main and the spec branch carry
+			// it (modeled on ScenarioStalePhaseImplApprove). The plan's
+			// adr_citations below cites ADR-0001 so the gate passes on the
+			// merits (closing both the unowned and uncovered branches).
+			writeSandboxDomainCoverage(sandbox, "done.go")
+			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
+
 			// Create spec branch + worktree via shared helper (review = spec worktree only)
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 
@@ -388,6 +401,8 @@ status: Approved
 spec_id: %s
 bead_ids:
 - %s
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Implement feature

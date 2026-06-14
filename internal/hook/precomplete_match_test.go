@@ -28,6 +28,27 @@ func TestMatchMindspecComplete(t *testing.T) {
 		{"newline-separated", "echo a\nmindspec complete X", true},
 		{"command-subst-dollar", "echo $(mindspec complete X)", true},
 
+		// --- unquoted wrapper prefixes around complete (R4/7eup: MUST match) ---
+		{"env-bare-wrapper", "env mindspec complete 001", true},
+		{"env-assign-wrapper", "env FOO=bar mindspec complete 001", true},
+		{"env-i-flag-wrapper", "env -i mindspec complete 001", true},
+		{"env-u-flag-wrapper", "env -u PATH mindspec complete 001", true},
+		{"timeout-wrapper", "timeout 30 mindspec complete 001", true},
+		{"timeout-kill-after-wrapper", "timeout -k 5 30 mindspec complete 001", true},
+		{"timeout-signal-wrapper", "timeout -s KILL 30 mindspec complete X", true},
+		{"timeout-extra-operand-no-overskip", "timeout 30 mindspec complete X", true},
+		{"command-wrapper", "command mindspec complete 001", true},
+		{"command-p-flag-wrapper", "command -p mindspec complete 001", true},
+		{"xargs-wrapper", "xargs mindspec complete", true},
+		{"xargs-I-attached-wrapper", "xargs -I{} mindspec complete", true},
+		{"xargs-n-value-wrapper", "xargs -n 1 mindspec complete X", true},
+
+		// --- wrapper prefixes around a NON-complete command (MUST NOT match) ---
+		{"timeout-go-test", "timeout 30 go test ./...", false},
+		{"env-mindspec-next", "env FOO=bar mindspec next", false},
+		{"command-ls", "command ls", false},
+		{"bare-mindspec-next", "mindspec next", false},
+
 		// --- quoted / non-command-position mentions (MUST NOT match) ---
 		{"commit-msg-double-quote", `git commit -m "panel approved; mindspec complete next"`, false},
 		{"grep-single-quote", `grep 'mindspec complete' SKILL.md`, false},
@@ -69,6 +90,22 @@ func TestCompleteBeadID(t *testing.T) {
 		{"mindspec complete --override-adr x mindspec-bd01", "mindspec-bd01"},
 		{"mindspec complete --supersede-adr 0001 mindspec-bd01", "mindspec-bd01"},
 		{"FOO=1 mindspec complete X", "X"},
+		// --- unquoted wrapper prefixes (R4/7eup): completeBeadID MUST share the
+		// wrapper-stripping with the match guard so the gate can ENFORCE on
+		// these (was recognized-but-fail-open: ID extracted as "" → bare pass).
+		{"env mindspec complete X", "X"},
+		{"env FOO=bar mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"env -i mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"env -u PATH mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"timeout 30 mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"timeout -k 5 30 mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"timeout -s KILL 30 mindspec complete X", "X"},
+		{"command mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"command -p mindspec complete mindspec-bd01", "mindspec-bd01"},
+		{"xargs -n 1 mindspec complete X", "X"},
+		// wrapper around a NON-complete command yields no id.
+		{"timeout 30 go test ./...", ""},
+		{"env FOO=bar mindspec next", ""},
 		{"mindspec complete", ""},
 		{"mindspec complete --dry-run", ""},
 		{"echo 'mindspec complete X'", ""},

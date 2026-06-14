@@ -186,6 +186,44 @@ func TestRunPreComplete_IncompletePanel_Block(t *testing.T) {
 	}
 }
 
+// TestRunPreComplete_WrappedComplete_Block (R4/7eup): a wrapper-prefixed
+// complete (`timeout 30 mindspec complete <id>`) with an incomplete panel must
+// BLOCK, not fail open. matchMindspecComplete recognizes the wrapped form, and
+// completeBeadID — now sharing the wrapper-stripping — extracts the bead id so
+// the panel-state gate can look it up and ENFORCE. RED-on-revert: if
+// completeBeadID does NOT strip the wrapper, the id resolves to "" → the gate
+// treats it as a bare complete and PASSES (recognized-but-fail-open).
+func TestRunPreComplete_WrappedComplete_Block(t *testing.T) {
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	for _, cmd := range []string{
+		"timeout 30 mindspec complete mindspec-bd01",
+		"env FOO=bar mindspec complete mindspec-bd01",
+		"command -p mindspec complete mindspec-bd01",
+		"xargs -n 1 mindspec complete mindspec-bd01",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			root := t.TempDir()
+			restore := stubScanRoots(t, root, sha, nil, "", nil)
+			defer restore()
+			writePanelFixture(t, root, "093-bd01", panel.Panel{
+				BeadID: ptr("mindspec-bd01"), Spec: "093", Round: 1,
+				ExpectedReviewers: 6, ReviewedHeadSHA: sha,
+			}, map[string]string{
+				"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE",
+				"c-round-1.json": "APPROVE", "d-round-1.json": "APPROVE",
+			})
+
+			r := runPreComplete(&Input{Command: cmd})
+			if r.Action != Block {
+				t.Fatalf("wrapped complete %q: expected Block (gate must extract id + enforce), got %v (%s)", cmd, r.Action, r.Message)
+			}
+			if !strings.Contains(r.Message, "incomplete") || !strings.Contains(r.Message, "4/6") {
+				t.Errorf("block should cite incompleteness 4/6: %s", r.Message)
+			}
+		})
+	}
+}
+
 // TestRunPreComplete_CwdIndependence_CdPrefix: panel.json lives in a "spec
 // worktree" reached only via the command's `cd <worktree>` prefix; the
 // session cwd (root) has no panel. cd-prefix scan root (a) must find it →
