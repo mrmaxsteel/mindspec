@@ -68,7 +68,7 @@ func TestValidatePlan_MissingRequiredFields(t *testing.T) {
 
 	r := ValidatePlan(tmp, "999-test")
 	if !r.HasFailures() {
-		t.Error("expected failure for missing spec_id and version")
+		t.Error("expected failure for missing spec_id")
 	}
 
 	foundSpecID := false
@@ -84,8 +84,49 @@ func TestValidatePlan_MissingRequiredFields(t *testing.T) {
 	if !foundSpecID {
 		t.Error("expected frontmatter-spec-id error")
 	}
-	if !foundVersion {
-		t.Error("expected frontmatter-version error")
+	// version is auto-filled to "1" when absent (098 R3/e6qq), so a missing
+	// version must NOT raise a frontmatter-version error.
+	if foundVersion {
+		t.Error("did not expect frontmatter-version error: version auto-fills to \"1\" when absent")
+	}
+}
+
+// TestParsePlanFrontmatter_VersionDefaultsToOne pins that a plan frontmatter
+// with NO version field defaults Version to exactly "1" after
+// checkFrontmatterFields runs, and ValidatePlan on a plan missing only version
+// produces NO frontmatter-version error (098 R3/e6qq). RED-on-revert:
+// restoring r.AddError("frontmatter-version", …) breaks the no-error assertion.
+func TestParsePlanFrontmatter_VersionDefaultsToOne(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "998-test")
+	os.MkdirAll(specDir, 0755)
+
+	// A plan with all required frontmatter EXCEPT version, and otherwise
+	// complete so no unrelated gate fires.
+	plan := "---\nstatus: Draft\nspec_id: \"998-test\"\n---\n\n# Plan\n\n## ADR Fitness\n\nNo relevant ADRs.\n\n## Testing Strategy\n\nUnit tests.\n\n## Provenance\n\nN/A.\n\n## Bead 998-A: Test\n\n**Steps**:\n1. Step one\n2. Step two\n3. Step three\n\n**Verification**:\n- [ ] `go test ./...` passes\n\n**Acceptance Criteria**:\n- [ ] It works\n\n**Depends on**: nothing\n"
+	os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(plan), 0644)
+
+	// (a) parsing + defaulting: checkFrontmatterFields auto-fills Version to "1".
+	fm, err := ParsePlanFrontmatter(plan)
+	if err != nil {
+		t.Fatalf("ParsePlanFrontmatter: %v", err)
+	}
+	if fm.Version != "" {
+		t.Errorf("pre-default: expected empty Version, got %q", fm.Version)
+	}
+	r := &Result{}
+	checkFrontmatterFields(r, fm)
+	if fm.Version != "1" {
+		t.Errorf("expected Version auto-filled to exactly \"1\", got %q", fm.Version)
+	}
+
+	// (b) full ValidatePlan: no frontmatter-version error for a plan missing
+	// only version.
+	vr := ValidatePlan(tmp, "998-test")
+	for _, issue := range vr.Issues {
+		if issue.Name == "frontmatter-version" {
+			t.Errorf("did not expect frontmatter-version error; got issue %+v", issue)
+		}
 	}
 }
 

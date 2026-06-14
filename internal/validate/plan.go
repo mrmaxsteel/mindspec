@@ -301,8 +301,15 @@ func checkFrontmatterFields(r *Result, fm *PlanFrontmatter) {
 	if fm.SpecID == "" {
 		r.AddError("frontmatter-spec-id", "missing required field: spec_id")
 	}
+	// version is no longer hard-required: when absent it auto-fills to the
+	// canonical default "1" (mutating the parsed *PlanFrontmatter) rather than
+	// hard-erroring. Nothing downstream reads PlanFrontmatter.Version
+	// semantically (approve/divergence consume ADRCitations/WorkChunks only),
+	// so any well-defined default is safe. This mirrors the relaxation of the
+	// sibling StepsCount<3 and empty adr_citations checks (098 R3/e6qq).
+	// status/spec_id remain hard-required above.
 	if fm.Version == "" {
-		r.AddError("frontmatter-version", "missing required field: version")
+		fm.Version = "1"
 	}
 }
 
