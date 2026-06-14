@@ -371,6 +371,23 @@ func commandSegments(command string) []string {
 // string (it is a single argument token, not a command-position segment), so we
 // deliberately do NOT attempt to match them here.
 func segmentInvokesComplete(seg string) bool {
+	_, ok := strippedCompleteFields(seg)
+	return ok
+}
+
+// strippedCompleteFields strips a single command-position segment's leading env
+// assignments, `cd …`/`pushd …`, and the catchable unquoted wrapper prefixes
+// (`env`/`timeout`/`command`/`xargs`), then reports whether the remainder is a
+// `mindspec complete …` invocation. On a match it returns the remaining fields
+// starting at the `mindspec` binary token (fields[0] is the binary, fields[1]
+// is "complete", fields[2:] are the complete args) and ok=true; otherwise it
+// returns nil, false.
+//
+// This is the SINGLE source of wrapper-stripping shared by both
+// segmentInvokesComplete (the match guard) and segmentCompleteBeadID (the
+// bead-id extractor) so the two can never diverge — a divergence is exactly
+// how a wrapped complete could be recognized-but-fail-open.
+func strippedCompleteFields(seg string) ([]string, bool) {
 	fields := strings.Fields(seg)
 	for len(fields) > 0 {
 		head := fields[0]
@@ -470,12 +487,15 @@ func segmentInvokesComplete(seg string) bool {
 		break
 	}
 	if len(fields) < 2 {
-		return false
+		return nil, false
 	}
 	if !isMindspecBinary(fields[0]) {
-		return false
+		return nil, false
 	}
-	return fields[1] == "complete"
+	if fields[1] != "complete" {
+		return nil, false
+	}
+	return fields, true
 }
 
 // isEnvAssignment reports whether a token is a leading shell env assignment
@@ -519,24 +539,12 @@ func completeBeadID(command string) string {
 }
 
 func segmentCompleteBeadID(seg string) string {
-	fields := strings.Fields(seg)
-	for len(fields) > 0 {
-		head := fields[0]
-		switch {
-		case isEnvAssignment(head):
-			fields = fields[1:]
-			continue
-		case head == "cd" || head == "pushd":
-			if len(fields) >= 2 {
-				fields = fields[2:]
-			} else {
-				fields = fields[1:]
-			}
-			continue
-		}
-		break
-	}
-	if len(fields) < 2 || !isMindspecBinary(fields[0]) || fields[1] != "complete" {
+	// Share the SAME wrapper-stripping as segmentInvokesComplete (the match
+	// guard) so a wrapped complete the gate RECOGNIZES also has its bead-id
+	// EXTRACTED — otherwise the gate fails open on env/timeout/xargs/command
+	// forms (recognized-but-unenforced).
+	fields, ok := strippedCompleteFields(seg)
+	if !ok {
 		return ""
 	}
 	args := fields[2:]
