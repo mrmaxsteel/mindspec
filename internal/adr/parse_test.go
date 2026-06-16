@@ -470,3 +470,52 @@ func TestNextID_MalformedSkipped(t *testing.T) {
 		t.Errorf("NextID = %q, want 0010 (malformed ADR-foo.md skipped)", id)
 	}
 }
+
+// TestParseADR_NonListDomainLine is a REGRESSION LOCK (not a RED pin): the
+// parser at parse.go ~L74 keys off strings.Contains(trimmed, "**Domain(s)**:"),
+// so it already accepts BOTH the markdown-list form ("- **Domain(s)**: ...")
+// and the bare non-list form ("**Domain(s)**: ..."). This test pins that the
+// non-list form keeps parsing to the same Domains slice, so a future "tighten
+// to list-only" refactor of parse.go can't silently drop the bare form.
+func TestParseADR_NonListDomainLine(t *testing.T) {
+	cases := []struct {
+		name        string
+		domainLine  string
+		wantDomains []string
+	}{
+		{
+			name:        "non-list form (no leading dash)",
+			domainLine:  "**Domain(s)**: foo, bar",
+			wantDomains: []string{"foo", "bar"},
+		},
+		{
+			name:        "list form (leading dash)",
+			domainLine:  "- **Domain(s)**: foo, bar",
+			wantDomains: []string{"foo", "bar"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			adrDir := filepath.Join(root, "docs", "adr")
+			os.MkdirAll(adrDir, 0o755)
+			content := "# ADR-0099: Domain Line Form\n\n- **Date**: 2026-06-01\n- **Status**: Accepted\n" + tc.domainLine + "\n\n## Decision\nX.\n"
+			path := filepath.Join(adrDir, "ADR-0099.md")
+			os.WriteFile(path, []byte(content), 0o644)
+
+			a, err := ParseADR(path)
+			if err != nil {
+				t.Fatalf("ParseADR: %v", err)
+			}
+			if len(a.Domains) != len(tc.wantDomains) {
+				t.Fatalf("Domains = %v, want %v", a.Domains, tc.wantDomains)
+			}
+			for i, want := range tc.wantDomains {
+				if a.Domains[i] != want {
+					t.Errorf("Domains[%d] = %q, want %q (full %v)", i, a.Domains[i], want, a.Domains)
+				}
+			}
+		})
+	}
+}
