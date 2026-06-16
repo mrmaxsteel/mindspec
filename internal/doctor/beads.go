@@ -329,7 +329,7 @@ var bdSchemaDriftRE = regexp.MustCompile(`(?i)(column|table)\s+"?[\w.]+"?\s+coul
 // recognizable schema-error class, warns that the bd binary's schema
 // expectation has drifted from the DB. This complements checkBdVersionFloor,
 // which only compares `bd --version` against a floor and never executes a
-// schema-touching query. Behaviour:
+// schema-touching query. Behavior:
 //   - probe succeeds                → OK (schema healthy)
 //   - probe fails with a drift sig  → Warn (surface bd's real output)
 //   - probe missing / fails without
@@ -385,7 +385,7 @@ func checkBdSchemaDrift(r *Report, root string) {
 // build even though `brew upgrade` had run. One bd → OK; zero → skip. Each PATH
 // entry is counted once (duplicate dirs collapse) so a doubled PATH doesn't
 // false-warn.
-func checkMultipleBdOnPath(r *Report, root string) {
+func checkMultipleBdOnPath(r *Report, _ string) {
 	pathEnv := os.Getenv("PATH")
 	var found []string
 	seenDir := map[string]bool{}
