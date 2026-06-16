@@ -1020,3 +1020,125 @@ func TestSEC5_ControlledRefs_StillSucceed(t *testing.T) {
 		assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "-b", ref, "--")
 	}
 }
+
+// --- Spec 101 Bead 4 (R4, k9a8/#76): fetch + default-branch detect ----------
+
+// swapExecFunc is a per-command-aware variant of swapExec: the supplied
+// reply function inspects the (name, args) of each invocation and returns the
+// stdout + exit code that stub should emit. This is required for the
+// symbolic-ref → `git remote show origin` fall-through, where ONE git
+// subprocess must succeed-but-empty (or garbage) while the NEXT must return a
+// parseable "HEAD branch" — swapExec's single stdout/exitCode for all commands
+// cannot express that.
+func swapExecFunc(t *testing.T, reply func(name string, args []string) (stdout string, exitCode int)) *[]capturedCall {
+	t.Helper()
+	calls := &[]capturedCall{}
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...)})
+		stdout, exitCode := reply(name, append([]string(nil), args...))
+		shArg := "printf %s " + shellQuote(stdout)
+		if exitCode != 0 {
+			shArg += "; exit " + itoa(exitCode)
+		}
+		return exec.Command("/bin/sh", "-c", shArg)
+	}
+	return calls
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFetchRemote_RunsFetch asserts FetchRemote shells out to `git fetch
+// <remote>` and surfaces a non-zero exit as an error (the offline / auth
+// failure case the executor funnels into its WARN fallback).
+func TestFetchRemote_RunsFetch(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := FetchRemote("origin"); err != nil {
+		t.Fatalf("FetchRemote: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "fetch", "origin")
+
+	// Non-zero exit (offline / auth failure) must surface as an error.
+	swapExec(t, "fatal: could not read from remote", 1)
+	if err := FetchRemote("origin"); err == nil {
+		t.Fatal("FetchRemote: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestDefaultBranch_DetectedFromSymbolicRef proves the default branch is
+// DETECTED from `git symbolic-ref refs/remotes/origin/HEAD` — and is NOT
+// hardcoded `main`: a NON-main remote HEAD (develop) is returned verbatim.
+func TestDefaultBranch_DetectedFromSymbolicRef(t *testing.T) {
+	calls := swapExec(t, "refs/remotes/origin/develop\n", 0)
+	got, err := DetectDefaultBranch("origin")
+	if err != nil {
+		t.Fatalf("DetectDefaultBranch: unexpected error: %v", err)
+	}
+	if got != "develop" {
+		t.Fatalf("default branch = %q, want %q (detected, not hardcoded main)", got, "develop")
+	}
+	// Only the cheap symbolic-ref call should run on the happy path; no
+	// fall-through to `git remote show`.
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call (symbolic-ref only), got %d: %v", len(*calls), *calls)
+	}
+	assertArgs(t, (*calls)[0].args, "symbolic-ref", "refs/remotes/origin/HEAD")
+}
+
+// TestDefaultBranch_EmptyOrGarbageSymbolicRefFallsThrough proves an empty or
+// unparseable symbolic-ref output is treated as a MISS and falls THROUGH to
+// `git remote show origin` (parsing the "HEAD branch:" line). Uses the
+// per-command stub so symbolic-ref and remote-show can answer differently.
+func TestDefaultBranch_EmptyOrGarbageSymbolicRefFallsThrough(t *testing.T) {
+	for _, symRefOut := range []string{"", "totally-not-a-ref\n", "refs/heads/oops\n"} {
+		calls := swapExecFunc(t, func(name string, args []string) (string, int) {
+			switch {
+			case hasArg(args, "symbolic-ref"):
+				// Empty/garbage cached ref: not a valid refs/remotes/origin/<name>.
+				return symRefOut, 0
+			case hasArg(args, "show"): // `git remote show origin`
+				return "* remote origin\n  Fetch URL: x\n  HEAD branch: develop\n  Remote branches:\n", 0
+			default:
+				return "", 0
+			}
+		})
+		got, err := DetectDefaultBranch("origin")
+		if err != nil {
+			t.Fatalf("symRef=%q: DetectDefaultBranch fell through but errored: %v", symRefOut, err)
+		}
+		if got != "develop" {
+			t.Fatalf("symRef=%q: default = %q, want develop (from remote show fall-through)", symRefOut, got)
+		}
+		if len(*calls) != 2 {
+			t.Fatalf("symRef=%q: expected 2 calls (symbolic-ref then remote show), got %d: %v", symRefOut, len(*calls), *calls)
+		}
+		assertArgs(t, (*calls)[0].args, "symbolic-ref", "refs/remotes/origin/HEAD")
+		assertArgs(t, (*calls)[1].args, "remote", "show", "origin")
+	}
+}
+
+// TestDefaultBranch_BothSourcesFail returns an error when neither the cached
+// symbolic-ref nor `git remote show` yields a default (the detect-failure case
+// the executor funnels into its WARN fallback, never a hard failure).
+func TestDefaultBranch_BothSourcesFail(t *testing.T) {
+	swapExecFunc(t, func(name string, args []string) (string, int) {
+		if hasArg(args, "symbolic-ref") {
+			return "", 1 // no cached ref
+		}
+		return "fatal: could not read from remote", 1 // remote show fails (offline)
+	})
+	if _, err := DetectDefaultBranch("origin"); err == nil {
+		t.Fatal("DetectDefaultBranch: expected error when both detection sources fail, got nil")
+	}
+}
