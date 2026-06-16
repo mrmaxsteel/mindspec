@@ -138,9 +138,9 @@ func ValidatePlan(root, specID string) *Result {
 		if isApproved {
 			// skip Spec 039 carve-out for approved plans
 		} else if hasADRFitness {
-			r.AddWarning("adr-citations", "no ADR citations in frontmatter (ADR Fitness section explains why)")
+			r.AddWarning("adr-citations", "no entries in the `adr_citations` frontmatter key (ADR Fitness section explains why)")
 		} else {
-			r.AddError("adr-citations", "no ADR citations in frontmatter and no ## ADR Fitness section — plan shows no evidence of architectural evaluation")
+			r.AddError("adr-citations", "no entries in the `adr_citations` frontmatter key and no ## ADR Fitness section — plan shows no evidence of architectural evaluation")
 		}
 	} else {
 		checkADRCitations(r, store, fm.ADRCitations, impacted)
