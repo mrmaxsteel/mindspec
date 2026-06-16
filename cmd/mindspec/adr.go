@@ -86,6 +86,30 @@ var adrCreateCmd = &cobra.Command{
 	},
 }
 
+// adrReadStore builds the worktree-aware ADR read store for show/list, so an
+// ADR present only in the ACTIVE bead/spec worktree is visible. workspace.
+// FindRoot resolves a worktree back to the MAIN checkout (where a
+// worktree-local ADR is absent), so reading through a plain FileStore(FindRoot)
+// misses it (mindspec-3cfr). Instead it overlays the worktree-LOCAL ADR dir
+// (FindLocalRoot, the same root `adr create` writes into) over the main
+// checkout's — mirroring the validator's adrStoreForSpec read semantics: branch
+// ADRs win on ID conflicts, main-only ADRs stay visible. In a plain checkout
+// FindLocalRoot == FindRoot, so the overlay collapses to the prior single
+// FileStore behavior.
+func adrReadStore(cwd string) (adr.Store, error) {
+	localRoot, err := workspace.FindLocalRoot(cwd)
+	if err != nil {
+		return nil, err
+	}
+	// Best-effort main root: when distinct from localRoot we're in a
+	// worktree and overlay branch-over-main; otherwise (main checkout, or
+	// FindRoot can't resolve) read the local root alone.
+	if mainRoot, mErr := workspace.FindRoot(cwd); mErr == nil && mainRoot != localRoot {
+		return adr.NewOverlayStore(adr.NewFileStore(localRoot), adr.NewFileStore(mainRoot)), nil
+	}
+	return adr.NewFileStore(localRoot), nil
+}
+
 var adrListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List ADRs with optional filters",
@@ -94,7 +118,7 @@ var adrListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		root, err := workspace.FindRoot(cwd)
+		store, err := adrReadStore(cwd)
 		if err != nil {
 			return err
 		}
@@ -102,7 +126,6 @@ var adrListCmd = &cobra.Command{
 		status, _ := cmd.Flags().GetString("status")
 		domain, _ := cmd.Flags().GetString("domain")
 
-		store := adr.NewFileStore(root)
 		adrs, err := store.List(adr.ListOpts{
 			Status: status,
 			Domain: domain,
@@ -135,14 +158,13 @@ var adrShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		root, err := workspace.FindRoot(cwd)
+		store, err := adrReadStore(cwd)
 		if err != nil {
 			return err
 		}
 
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 
-		store := adr.NewFileStore(root)
 		a, err := store.Get(args[0])
 		if err != nil {
 			return err

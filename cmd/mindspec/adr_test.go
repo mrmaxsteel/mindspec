@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +20,19 @@ func writeADR(t *testing.T, root, name string) {
 		t.Fatalf("mkdir adr dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("# "+name+"\n"), 0o644); err != nil {
+		t.Fatalf("write adr %s: %v", name, err)
+	}
+}
+
+// writeADRWithBody writes an ADR file with the given full body under root's
+// ADR directory (so show/list can render its Status/Domain(s)).
+func writeADRWithBody(t *testing.T, root, name, body string) {
+	t.Helper()
+	dir := adrDirFor(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir adr dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatalf("write adr %s: %v", name, err)
 	}
 }
@@ -148,4 +162,124 @@ func TestADRCreate_MainCheckout(t *testing.T) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// adrWithDomains returns a minimal ADR body carrying a Status + Domain(s)
+// line so show/list rendering can be asserted.
+func adrWithDomains(id, title, domains string) string {
+	return "# " + id + ": " + title + "\n\n" +
+		"- **Date**: 2026-06-01\n" +
+		"- **Status**: Accepted\n" +
+		"- **Domain(s)**: " + domains + "\n" +
+		"- **Supersedes**: n/a\n" +
+		"- **Superseded-by**: n/a\n\n" +
+		"## Decision\nX.\n"
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what
+// fn printed. The adr show/list commands write via fmt.Print* to os.Stdout.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	runErr := fn()
+	_ = w.Close()
+	os.Stdout = orig
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return buf.String(), runErr
+}
+
+// TestAdrShowWorktree_FindsWorktreeLocalADR pins R3 AC1: an ADR that exists
+// ONLY in the worktree-local .mindspec/docs/adr/ is found and rendered with
+// its Domain(s) by `adr show` run from inside the worktree. RED on the
+// pre-fix FindRoot path (which resolves the worktree back to main, where the
+// ADR is absent → store.Get errors "not found"). (mindspec-3cfr / R3)
+func TestAdrShowWorktree_FindsWorktreeLocalADR(t *testing.T) {
+	_, wtRoot := setupWorktreePair(t)
+	writeADRWithBody(t, wtRoot, "ADR-0042-worktree-only.md",
+		adrWithDomains("ADR-0042", "Worktree Only Decision", "workflow, validation"))
+	chdir(t, wtRoot)
+
+	out, err := captureStdout(t, func() error {
+		return adrShowCmd.RunE(adrShowCmd, []string{"ADR-0042"})
+	})
+	if err != nil {
+		t.Fatalf("adr show ADR-0042 (worktree-local): %v", err)
+	}
+	if !bytes.Contains([]byte(out), []byte("workflow")) {
+		t.Fatalf("adr show output missing Domain(s) 'workflow'; got:\n%s", out)
+	}
+}
+
+// TestAdrListWorktree_ListsWorktreeLocalADR pins R3 AC1 for `adr list`: a
+// worktree-local-only ADR appears in the list run from inside the worktree.
+// RED on the pre-fix FindRoot path (resolves to main; ADR absent → "No ADRs
+// found."). (mindspec-3cfr / R3)
+func TestAdrListWorktree_ListsWorktreeLocalADR(t *testing.T) {
+	_, wtRoot := setupWorktreePair(t)
+	writeADRWithBody(t, wtRoot, "ADR-0042-worktree-only.md",
+		adrWithDomains("ADR-0042", "Worktree Only Decision", "workflow"))
+	chdir(t, wtRoot)
+
+	out, err := captureStdout(t, func() error {
+		return adrListCmd.RunE(adrListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("adr list (worktree-local): %v", err)
+	}
+	if !bytes.Contains([]byte(out), []byte("ADR-0042")) {
+		t.Fatalf("adr list output missing worktree-local ADR-0042; got:\n%s", out)
+	}
+}
+
+// TestAdrShowWorktree_StillFindsMainOnlyADR pins that the overlay keeps
+// main-only ADRs visible from the worktree (branch unioned over main): an ADR
+// present only in the MAIN checkout is still found by `adr show` run from the
+// worktree. (mindspec-3cfr / R3 — no regression for main-only ADRs)
+func TestAdrShowWorktree_StillFindsMainOnlyADR(t *testing.T) {
+	mainRoot, wtRoot := setupWorktreePair(t)
+	writeADRWithBody(t, mainRoot, "ADR-0010-main-only.md",
+		adrWithDomains("ADR-0010", "Main Only Decision", "core"))
+	chdir(t, wtRoot)
+
+	out, err := captureStdout(t, func() error {
+		return adrShowCmd.RunE(adrShowCmd, []string{"ADR-0010"})
+	})
+	if err != nil {
+		t.Fatalf("adr show ADR-0010 (main-only, from worktree): %v", err)
+	}
+	if !bytes.Contains([]byte(out), []byte("core")) {
+		t.Fatalf("adr show output missing main-only ADR Domain(s) 'core'; got:\n%s", out)
+	}
+}
+
+// TestAdrShowMainCheckout_StillWorks pins that show from a plain (non-worktree)
+// checkout is unchanged: FindLocalRoot == FindRoot there, so the overlay is a
+// no-op over the same root and the ADR is found. (mindspec-3cfr / R3 — main
+// behavior preserved)
+func TestAdrShowMainCheckout_StillWorks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeADRWithBody(t, root, "ADR-0005-plain.md",
+		adrWithDomains("ADR-0005", "Plain Checkout Decision", "core"))
+	chdir(t, root)
+
+	out, err := captureStdout(t, func() error {
+		return adrShowCmd.RunE(adrShowCmd, []string{"ADR-0005"})
+	})
+	if err != nil {
+		t.Fatalf("adr show ADR-0005 (plain checkout): %v", err)
+	}
+	if !bytes.Contains([]byte(out), []byte("core")) {
+		t.Fatalf("adr show output missing Domain(s) 'core'; got:\n%s", out)
+	}
 }
