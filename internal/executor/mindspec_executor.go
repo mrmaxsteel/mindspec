@@ -61,6 +61,36 @@ func NewMindspecExecutor(root string) *MindspecExecutor {
 	}
 }
 
+// RemoveBeadWorktreeAndRestore removes the bead worktree and then chdirs the
+// process to the resolved repo root (g.Root), in that order. It is the
+// cwd-safety-critical unit `mindspec release` uses (Spec 101 R2): the bead
+// worktree is removed FIRST (before any bd/state mutation), and the process is
+// moved to the repo root IMMEDIATELY after so no subsequent bd/git subprocess
+// runs from a possibly-deleted cwd (the spec-092 Req 3c / mindspec-qxsy
+// cwd-deletion bug class — mirrors complete.go's os.Chdir(root) after worktree
+// removal). `release` is expected to be invoked from INSIDE the very worktree
+// being removed, so coupling the removal and the chdir in one method keeps the
+// remove-first / chdir-immediately invariant provable.
+//
+// Removal routes through the WorktreeOps seam (ADR-0030: never a raw
+// `git worktree remove`). The chdir target is g.Root (the resolved main repo
+// root), NEVER the bead worktree path, which may now be deleted. A removal
+// error is returned to the caller (the caller decides recovery); a chdir error
+// surfaces as a warning but is non-fatal — the bd subprocesses that follow
+// would otherwise silently degrade from a deleted cwd, so the warning is the
+// honest signal rather than a hard failure.
+func (g *MindspecExecutor) RemoveBeadWorktreeAndRestore(beadID string) error {
+	wtName := workspace.BeadWorktreeName(beadID)
+	removeErr := g.WorktreeOps.Remove(wtName)
+	// Chdir to root IMMEDIATELY after removal, regardless of removeErr: the
+	// process may already be sitting in the (now partially/fully) removed
+	// worktree, and every later bd subprocess must run from a live cwd.
+	if chdirErr := os.Chdir(g.Root); chdirErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not chdir to repo root %s: %v\n", g.Root, chdirErr)
+	}
+	return removeErr
+}
+
 // InitSpecWorkspace creates a workspace for spec authoring.
 // Mirrors the logic in internal/spec/create.go (Phase 1).
 func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {

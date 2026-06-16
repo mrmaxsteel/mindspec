@@ -227,6 +227,7 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(releaseCmd) // Spec 101 R2: reverse a claim
 	rootCmd.AddCommand(repairCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(specCmd)
