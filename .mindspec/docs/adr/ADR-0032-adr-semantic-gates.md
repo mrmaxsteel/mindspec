@@ -2,7 +2,7 @@
 
 - **Date**: 2026-05-20
 - **Status**: Accepted
-- **Domain(s)**: validation, adr, lifecycle
+- **Domain(s)**: validation, adr, lifecycle, workflow
 - **Deciders**: Max
 - **Supersedes**: n/a
 - **Superseded-by**: n/a
@@ -127,6 +127,41 @@ uncited Proposed ADRs never satisfy coverage. Implementation:
 `internal/validate/plan.go::coverageOf` (plan lane) and
 `internal/validate/divergence.go::ValidateDivergence` (bead-complete
 and impl-approve lanes, selected by the `implApprove` parameter).
+
+## Amendment — Impacted-Domains normalization (2026-06-16, spec 100)
+
+Spec 100 (`ownership-gate-resolution`, bead `mindspec-4ft2`, GH #147 +
+#145.1) amends **sub-decision 1**. Sub-decision 1 originally REJECTED
+path-like identifiers as ambiguous (`internal/foo` vs `foo`), so a
+spec whose `## Impacted Domains` entries are FILE PATHS (e.g.
+`internal/genevieve/review.py`) — the genevieve-style real-world case —
+failed every gate as `adr-divergence-unowned` / `adr-coverage-missing` /
+`adr-cite-irrelevant`, forcing `--override-adr` on every bead.
+
+The canonical `OWNERSHIP.yaml` directory NAME remains the identifier the
+gates compare. What changes is how an author's path-like entry reaches
+it: instead of being rejected outright, a path-like Impacted-Domains
+entry is **NORMALIZED to its owning-domain dir-name** when exactly one
+domain's `OWNERSHIP.yaml` `paths:` glob claims it. A single shared
+helper (`internal/validate/ownership_resolve.go::normalizeImpactedDomains`)
+resolves each raw entry — an entry that already names a domain dir is
+kept verbatim; a path-like entry is glob-matched against every domain's
+EXPLICIT `paths:` manifest and replaced with the owning domain's name —
+and the bead-time divergence gate AND both plan-time gates
+(`checkADRCoverage`, `checkADRCitations`) consume the normalized set.
+
+Resolution is total and unambiguous: an entry owned by **zero** domains,
+or by **more than one** domain, is a hard `impacted-domains-resolve`
+ERROR naming the entry (and, for the ambiguous case, the conflicting
+owners). No domain is ever synthesized — this is the ZFC-clean reading of
+[ADR-0036](ADR-0036-ownership-discovery.md): it consumes declared data
+and explicit globs, with no path-PREFIX inference (which would
+re-introduce the synthesized-fallback ZFC violation ADR-0036 removed).
+The per-file attribution and blast-radius guard of sub-decision 3 are
+PRESERVED unchanged — the candidate set stays the resolved DECLARED
+domains, so a changed file owned by an undeclared domain still fails.
+`workflow` is added to this ADR's `Domain(s)` line because spec 100's
+workflow source implements the gate mechanism this ADR governs.
 
 ## Rollback
 
