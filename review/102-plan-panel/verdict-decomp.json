@@ -1,0 +1,9 @@
+{
+  "lens": "decomposition",
+  "decision": "APPROVE",
+  "independence_ok": true,
+  "harness_overlap": "merge-order",
+  "right_sized": true,
+  "blocking": [],
+  "summary": "Two genuinely independent ZFC retirements: R1 (retire PreToolUse hook matcher) and R2 (retire extractMentionedPaths). Verified empty depends_on is correct -- neither consumes the other's output. Confirmed internal/complete does NOT import internal/hook, so R1's hook removal cannot affect the authoritative in-binary gate (its coverage is pinned hermetically by TestPanelGate_* in internal/complete). Deleted hook symbols have no live consumer outside precomplete.go + dispatch.go (which B1 edits) + its own tests. SkipPanelEnv canonical home is panel.SkipPanelEnv, so the hook re-export is safe dead weight. The internal/harness overlap is a real merge-ORDER preference, not a depends_on edge: B1 touches scenario_panel_gate*.go (deleted) + scenario.go L64; B2 touches analyzer.go + analyzer_test.go -- DISJOINT files, zero symbol coupling either direction, no possible hunk collision. 'B1 first' is a sensible sequencing preference (B1 is the structural delete) but strictly optional. 2 beads is below the 3-5 band but correctly right-sized: fusing spans two subsystems for no merge benefit; splitting yields sub-beads with no independent verifiable AC. Serial chain = 1, fully parallel."
+}

@@ -1,0 +1,8 @@
+{
+  "lens": "ac-coverage",
+  "decision": "APPROVE",
+  "all_mapped": true,
+  "unmapped": [],
+  "blocking": [],
+  "summary": "All 12 spec ACs (L251-262) map to exactly one bead with a specific, AC-exercising verification step. R1 ACs (L251-258) -> Bead 1 (lfi3); R2 ACs (L259-260) -> Bead 2 (qcjf); spec-level L261/L262 -> both beads (correct joint coverage, not a double-map: each bead must independently keep build green and add no new heuristic). The 4 added R1 ACs all present and exercised: Names/TestNames_Sorted (L253, grep + go test -run TestNames_Sorted), scenario_panel_gate deletion + grep-clean (L254, grep + go build && go vet, NEVER go test harness), TestPanelGate(8) still passes (L255, go test -run TestPanelGate ./internal/complete/ -- confirmed exactly 8 TestPanelGate_* funcs exist), ADR-0037 amended (L258, grep retire). R2: path term gone AS A UNIT verified by grep extractMentionedPaths|expectedPaths|touchedPaths on analyzer.go (all 3 confirmed present pre-change at the cited line numbers); TestAnalyzer_PlanFidelity reworked to separate commands-only (L260, filtered). Each verification actually exercises its AC (greps target the named symbols/files; test -run filters target the named tests). No bead does work no AC asked for -- every changed file traces to R1 or R2. Plan's factual claims (line numbers, symbol locations, 8-test count, Names contents, matcher symbols confined to the 3 deleted hook files) independently verified against the tree."
+}
