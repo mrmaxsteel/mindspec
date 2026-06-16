@@ -1,0 +1,32 @@
+{
+  "lens": "requirements",
+  "decision": "APPROVE",
+  "bug_reverify": [
+    {
+      "req": "R1",
+      "bug_present": true,
+      "evidence": "internal/validate/divergence.go:142 candidateDomains := append([]string(nil), meta.Domains...) — attribution is scoped to the spec's Impacted-Domains NAMES; the enumerate-all-domains fallback only fires when len(candidateDomains)==0 (L143). internal/contextpack/spec.go:62-85 stores each bullet as a bare lowercased name (text before colon). internal/validate/ownership.go:78-80 LoadOwnership builds .mindspec/docs/domains/<name>/OWNERSHIP.yaml (dir-name lookup). A file-path Impacted Domain (e.g. genevieve/review.py) therefore resolves to a nonexistent dir, attributeDomain returns \"\", and divergence.go:194-197 emits adr-divergence-unowned even when a real domain's paths: glob owns the file.",
+      "req_fixes_it": true
+    },
+    {
+      "req": "R2",
+      "bug_present": true,
+      "evidence": "internal/validate/plan.go:529 — adr-coverage-missing message is hardcoded 'run: mindspec adr create --domain %s' with no mention of adding a Domain(s) entry to an existing cited Accepted ADR. Create-only hint confirmed.",
+      "req_fixes_it": true
+    },
+    {
+      "req": "R3",
+      "bug_present": true,
+      "evidence": "cmd/mindspec/adr.go:97 (adr list) and :138 (adr show) use workspace.FindRoot (walks worktree back to main), while adr create :32 uses workspace.FindLocalRoot (worktree-local). Split confirmed. internal/adr/parse.go:74 uses strings.Contains(trimmed, '**Domain(s)**:') which ALREADY matches both '**Domain(s)**:' and '- **Domain(s)**:' — so R3 is correctly test-only for the parser.",
+      "req_fixes_it": true
+    },
+    {
+      "req": "R4",
+      "bug_present": true,
+      "evidence": "internal/approve/spec.go:230-232 scaffoldPlan frontmatter emits status/spec_id/version but NO adr_citations key. internal/validate/plan.go:141 WARN text 'no ADR citations in frontmatter (ADR Fitness section explains why)' never names the adr_citations key.",
+      "req_fixes_it": true
+    }
+  ],
+  "blocking": [],
+  "summary": "All 4 defects independently re-verified as genuinely present in the current worktree at the exact lines the spec cites, and none are pre-fixed. R1 root cause is precisely candidateDomains := meta.Domains at divergence.go:142 with the all-domains enumeration gated behind len==0; the ParseSpec bare-name storage + dir-name LoadOwnership lookup chain makes file-path Impacted Domains unresolvable, matching the spec's Background. R2 (plan.go:529 create-only), R3 (FindRoot vs FindLocalRoot split + parse.go:74 already accepts both Domain(s) forms, correctly making R3 test-only), and R4 (no adr_citations in scaffold + unnamed key in WARN) all hold. The ACs pin the fixes: R1 ACs cover the positive (file-path/omitted resolves), the named-domain regression (no new false positives), and the genuinely-unowned negative (gate not globally disabled). R2/R3/R4 ACs are message-text/output/parse assertions that lock the exact behavior. The R1 design decision (glob-match-across-all-domains, reject prefix-normalization) is the ZFC-clean reading of ADR-0036 and is correctly recorded. No over-claims. Minor non-blocking note: R2's two ACs both exercise the single notCovered branch (cited-but-uncovered AND no-citation), so one combined message naming both remedies satisfies both — pinnable, but the impl can't textually distinguish the two cases without added branching; AC wording tolerates a single combined message."
+}

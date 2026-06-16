@@ -1,0 +1,39 @@
+{
+  "lens": "testability",
+  "round": 2,
+  "decision": "APPROVE",
+  "per_new_ac": [
+    {
+      "ac": "a",
+      "hermetic": true,
+      "genuine": true,
+      "note": "Unchanged in spirit from R1. Pinnable via writeSpecAndPlan (file-path bullet) + writeManifest (glob covering the file) + writeADR(Accepted) + MockExecutor.ChangedFilesResult, asserting ValidateDivergence returns zero adr-divergence-unowned. Mirrors existing TestValidateDivergenceCoveredDomainPasses."
+    },
+    {
+      "ac": "b",
+      "hermetic": true,
+      "genuine": true,
+      "note": "NEW. checkADRCoverage (plan.go L516) + checkADRCitations (L465) are exercised through ValidatePlan(tmp,'999-test') over a temp repo. Fixture machinery present: writeTestSpec (writes '- <entry>: ...' bullets, accepts a file-path entry verbatim), writeTestADRWithDomains, makePlanWithCitations, writeManifest. Existing TestPlanRejectsIrrelevantADRCitation / TestPlanRejectsUncoveredDomain are the inverse of this AC, so the asserting-NO-spurious-finding variant is trivially constructible. Both gates consume loadImpactedDomains (L124), the single normalization point, so one fixture proves cross-gate consistency."
+    },
+    {
+      "ac": "c",
+      "hermetic": true,
+      "genuine": true,
+      "note": "TestCompleteRejectsUndeclaredDomainTouch exists at divergence_test.go L97 and already asserts adr-divergence-uncovered on an undeclared payments touch; the AC asserts it still passes (blast-radius guard intact). Named-domain-unchanged half is hermetic via the same writeSpecAndPlan/writeManifest/writeADR machinery (a by-name domain bullet). Not vacuous: it locks the original uncovered intent against silent loosening."
+    },
+    {
+      "ac": "d",
+      "hermetic": true,
+      "genuine": true,
+      "note": "Unchanged in spirit. TestUnownedFileRejected already exists (divergence_test.go L177) and asserts adr-divergence-unowned for a genuinely unowned changed file; the AC asserts the gate is not globally disabled. Fully hermetic."
+    },
+    {
+      "ac": "e",
+      "hermetic": true,
+      "genuine": true,
+      "note": "NEW. The 0-owner and >1-owner normalization errors are testable as a direct unit test on the new pure helper over loaded manifests. >1-owner case is trivially constructible: writeManifest(root,'alpha',overlapglob)+writeManifest(root,'beta',overlapglob) already exists verbatim at ownership_test.go L28-29 (TestOwnershipMultiMatchFirstWins). 0-owner = a file-path entry no manifest claims. listDomainDirs/resolveDomains/GlobMatch primitives all exist. No harness, no MockExecutor needed for the helper-direct test."
+    }
+  ],
+  "blocking": [],
+  "summary": "APPROVE. All five rewritten R1 ACs are pinnable by hermetic, CI-runnable Go tests over temp-repo fixtures; none needs the slow harness, none is vacuous. The plan-time fixture machinery the new AC(b) depends on (writeTestSpec/writeTestADRWithDomains/makePlanWithCitations/ValidatePlan over t.TempDir) is present in internal/validate/plan_test.go and already drives the inverse positive-finding tests. AC(e)'s >1-owner overlapping-glob fixture exists verbatim in ownership_test.go. AC(c) anchors on the real TestCompleteRejectsUndeclaredDomainTouch (divergence_test.go L97) and AC(d) on TestUnownedFileRejected (L177). Validation-Proofs -run filters are real prefixes: TestValidateDivergence*/TestCompleteRejectsUndeclaredDomainTouch/TestUnownedFileRejected exist in internal/validate; TestPlanRejects*/TestValidatePlan* exist in internal/validate; TestParseADR exists in internal/adr/parse_test.go; the new TestNormalizeImpactedDomains*/TestPlanCoverage*/TestCheckADRCitations*/TestAdrShowWorktree* are new but land in packages that already exist (internal/validate, internal/adr, cmd/mindspec — the latter has adr_test.go with the exact mainRepo+worktree+os.Chdir FindLocalRoot-vs-FindRoot pattern AC-R3 needs). All cited package paths resolve."
+}
