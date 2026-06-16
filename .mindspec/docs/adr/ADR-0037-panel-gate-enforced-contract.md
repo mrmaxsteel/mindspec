@@ -82,6 +82,26 @@ retirement deferred to a follow-up bead. See the amendment below.
 > staleness §4, §6 fail-open/fail-closed, §7 hatches) are unchanged;
 > only the location of authoritative enforcement moved.
 
+> **Amendment (2026-06-17, spec 102):** The retirement deferred by the
+> 2026-06-14 amendment has **landed**. The PreToolUse `pre-complete`
+> hook gate and its heuristic command-string matcher (the tokenizer that
+> string-scanned a free-form shell command to guess whether it invoked
+> `mindspec complete` and to extract a bead ID — the ADR-0036
+> Zero-Framework-Cognition anti-pattern) are **removed**: `internal/hook`
+> no longer carries `runPreComplete` / `matchMindspecComplete` and no
+> longer registers a `pre-complete` hook, `mindspec setup claude` no
+> longer installs the PreToolUse entry (and removes a pre-existing one
+> by omission), and the LLM-harness `panel_gate_blocks_premature_complete`
+> scenario is deleted. The in-binary `mindspec complete` gate over the
+> shared `internal/panel` decision (`PanelGateDecision` / `ResolveGateFacts`
+> / `gate.go`) is now the **single authoritative enforcement point** — it
+> reads the declared bead-ID argument, so it already covered every
+> invocation form the retired backstop did, hermetically pinned by the
+> spec-099 `TestPanelGate_*` suite in `internal/complete`. Contract
+> semantics (thresholds §3, staleness §4, §6 fail-open/fail-closed, §7
+> hatches) are unchanged; only the now-redundant non-authoritative
+> backstop was removed.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —
@@ -268,5 +288,8 @@ the gate exists for — the stale APPROVE honored at merge time.
 3. Bead 4 ships the hook gate (decision matrix, staleness,
    dirty-tree, hatches + audits) with table-driven `hook.Run` tests
    and one LLM-harness scenario (`panel_gate_blocks_premature_complete`).
+   *(Retired 2026-06-17, spec 102: the hook gate and this scenario were
+   removed; the in-binary `mindspec complete` gate is now authoritative —
+   see the 2026-06-17 amendment above.)*
 4. Beads 5-6 wire `--panel-state` and the panel.json writer
    (/ms-panel-run step 0) so every surface speaks this convention.
