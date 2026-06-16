@@ -1,0 +1,44 @@
+{
+  "lens": "testability",
+  "decision": "APPROVE",
+  "per_ac": [
+    {
+      "req": "R1",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "SelectWork is a pure func with existing unit tests (internal/next/next_test.go TestSelectWork_*); a named-bead variant asserting not-in-ready-set→error vs items[0] drops straight in. The named-bead claim path is injectable via runBDFn/runBDCombFn package vars (already swapped in TestQueryReady/TestClaimBead). The cmd-level rootCmd.SetArgs+Execute claim-path assertion is the only soft spot: cmd/mindspec next has no in-process fake-bd harness today (next_dirty_test.go drives the REAL built binary as a subprocess, hitting bd-on-PATH). But the AC offers it as ONE of two pins and the binding assertion (named-but-unready→error) lives in internal/next where the seam exists, so R1 is hermetically pinnable as written."
+    },
+    {
+      "req": "R1-help",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "help_golden_test.go already builds the binary and greps `--help` output (buildMindspecBinary + containsToken). A `next --help` assertion that the long help no longer says 'accepted generally' and names when the positional is honored is the same proven pattern. Builds-the-binary (go build), not the slow LLM harness."
+    },
+    {
+      "req": "R2",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "Hardest AC but machinery exists. fakeWorktreeOps (executor_test.go) records Remove calls and serves canned errors; newRepoExecutor wires a MindspecExecutor over a real temp `git init` repo (no bd needed). Dirty-vs-clean is simulatable via IsTreeClean/Status (real temp repo with uncommitted file, OR injected). The bead→open+assignee-cleared assertion routes through runBDCombFn (injectable bd fake — no real bd/dolt). CAVEAT (non-blocking, plan-level): the AC says 'injected executor with a fake WorktreeOps', but WorktreeOps lives only on the concrete MindspecExecutor, NOT on the Executor interface or MockExecutor — so a `release` command that takes an Executor interface cannot reach Remove through the mock. The implementer must either (a) drive release against a *MindspecExecutor{WorktreeOps:fake} (concrete, as executor_test.go already does) or (b) add a worktree-removal method to the Executor interface+MockExecutor. Either is a normal impl choice; both yield a hermetic test. The AC is achievable; only the wiring detail needs resolving in the plan."
+    },
+    {
+      "req": "R3-stderr",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "ClaimBead already injects bd via runBDCombFn (TestClaimBead_PropagatesError swaps it). A fake returning ([]byte('column \"depends_on_id\" could not be found'), err) and asserting the returned error contains that text and NOT just 'may already be claimed' is a 10-line unit test on the existing seam. No real bd."
+    },
+    {
+      "req": "R3-doctor",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "internal/doctor/beads_test.go already has stubBd(t, output) (writes a fake `bd` shell script to a temp dir + prepends to PATH via t.Setenv) and findCheck(r, name) asserting Warn/OK. Schema-drift: stub bd to emit a mismatch line and assert Warn. Multiple-bd-on-PATH: write `bd` into TWO temp dirs, set PATH to both, assert Warn; single bd → OK/skip (no false-warn). Fully hermetic, no real bd."
+    },
+    {
+      "req": "R4",
+      "hermetic": true,
+      "machinery_exists": true,
+      "note": "gitutil has `var execCommand = exec.Command` and swapExec(t, stdout, exitCode) which replaces it, captures all git invocations, and returns canned stdout/exit — the ideal seam. Default-branch DETECTION (not hardcoded main) is proven by stubbing `git symbolic-ref refs/remotes/origin/HEAD` → a NON-main branch and asserting the resulting `git branch` arg references origin/<that-branch>. Offline/no-origin fallback: stub exitCode!=0 (or no remote) and assert branch-from-HEAD + WARN. One nuance: swapExec returns the same stdout for every call, so a single multi-step flow can't vary per-command output — but the AC explicitly permits testing 'the new gitutil helper' independently (DetectDefaultBranch / Fetch / BranchFromRemote each get their own swapExec stub), and the executor-level offline path is directly testable against newRepoExecutor (a real temp repo with no origin). Hermetic; no real remote/network."
+    }
+  ],
+  "blocking": [],
+  "summary": "APPROVE. Every AC is hermetically pinnable with CI-runnable Go tests on machinery that ALREADY EXISTS in the tree, and none needs the slow internal/harness, a real bd binary, or real network/remote. R1: SelectWork is a pure-func unit test + runBDFn/runBDCombFn bd-injection vars; help is the proven buildMindspecBinary+grep pattern. R3 is the cleanest — ClaimBead stderr rides the existing runBDCombFn seam, and doctor's stubBd helper already fabricates a fake bd on PATH (schema-drift output and a two-bd PATH are trivial extensions). R4 rides gitutil's execCommand/swapExec seam: default-branch detection vs hardcoded-main and the offline WARN fallback are both stubbable without a remote. R2 is the hardest and the only one carrying a plan-level caveat: fakeWorktreeOps + newRepoExecutor make the dirty-refuse/--force and bead→open/Remove-called assertions hermetic, but WorktreeOps is NOT on the Executor interface/MockExecutor, so 'an injected executor with a fake WorktreeOps' must be realized as either a concrete *MindspecExecutor{WorktreeOps:fake} (as executor_test.go already does) or by extending the interface. That is an implementation wiring choice, not an untestable AC — so it is a note for the plan, not a blocker. No AC secretly requires a real bd/remote/harness."
+}
