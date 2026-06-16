@@ -474,3 +474,136 @@ func TestProcessArtifactsFiltered(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateDivergenceFilePathImpactedDomainResolves — spec 100 R1 AC1:
+// a spec whose `## Impacted Domains` entry is a FILE PATH (not the
+// domain dir name) is normalized to its owning domain, so the changed
+// file resolves to that domain and the gate reports ZERO
+// adr-divergence-unowned (coveredAccepted → silent pass).
+func TestValidateDivergenceFilePathImpactedDomainResolves(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "107-filepath")
+	writeSpecAndPlan(t, root, specDir, "107-filepath",
+		[]string{"internal/genevieve/review.py"},
+		[]string{"ADR-0099"},
+	)
+	writeManifest(t, root, "genevieve", "paths:\n  - internal/genevieve/**\n")
+	writeADR(t, root, "ADR-0099", "Accepted", []string{"genevieve"})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/genevieve/review.py"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Fatalf("expected no failures (file-path entry should resolve to genevieve), got %+v", r.Issues)
+	}
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			t.Errorf("unexpected adr-divergence-unowned: %+v", i)
+		}
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
+// TestValidateDivergenceNamedDomainUnchanged — spec 100 R1 AC3: the
+// named-domain (099-style) path is unchanged — declaring the owning
+// domain BY NAME with the same manifest and citation still resolves and
+// still passes, no new false positives.
+func TestValidateDivergenceNamedDomainUnchanged(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "108-named")
+	writeSpecAndPlan(t, root, specDir, "108-named",
+		[]string{"genevieve"},
+		[]string{"ADR-0099"},
+	)
+	writeManifest(t, root, "genevieve", "paths:\n  - internal/genevieve/**\n")
+	writeADR(t, root, "ADR-0099", "Accepted", []string{"genevieve"})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/genevieve/review.py"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Fatalf("expected no failures for named-domain path, got %+v", r.Issues)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
+// TestValidateDivergenceGenuinelyUnownedStillFails — spec 100 R1 AC4: a
+// genuinely-unowned changed file (no domain manifest paths: matches it)
+// still reports adr-divergence-unowned — the gate is correctly scoped,
+// not globally disabled. The Impacted-Domains entry here is a valid
+// owning path so normalization succeeds; the CHANGED file is the one
+// that no manifest claims.
+func TestValidateDivergenceGenuinelyUnownedStillFails(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "109-genuine")
+	writeSpecAndPlan(t, root, specDir, "109-genuine",
+		[]string{"internal/genevieve/review.py"},
+		[]string{"ADR-0099"},
+	)
+	writeManifest(t, root, "genevieve", "paths:\n  - internal/genevieve/**\n")
+	writeADR(t, root, "ADR-0099", "Accepted", []string{"genevieve"})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/genevieve/review.py", "internal/payments/charge.go"},
+	}
+
+	r, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	var hasUnowned bool
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" &&
+			strings.Contains(i.Message, "internal/payments/charge.go") {
+			hasUnowned = true
+		}
+	}
+	if !hasUnowned {
+		t.Errorf("expected adr-divergence-unowned for the unowned file, got %+v", r.Issues)
+	}
+}
+
+// TestValidateDivergenceZeroOwnerEntryErrors — spec 100 R1 AC5: an
+// Impacted-Domains FILE-PATH entry owned by NO domain surfaces the
+// clear normalization ERROR naming the entry.
+func TestValidateDivergenceZeroOwnerEntryErrors(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "110-zero")
+	writeSpecAndPlan(t, root, specDir, "110-zero",
+		[]string{"internal/nope/x.go"},
+		[]string{},
+	)
+	writeManifest(t, root, "genevieve", "paths:\n  - internal/genevieve/**\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/genevieve/review.py"},
+	}
+
+	r, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	var found bool
+	for _, i := range r.Issues {
+		if i.Name == "impacted-domains-resolve" && strings.Contains(i.Message, "internal/nope/x.go") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected impacted-domains-resolve error naming the zero-owner entry, got %+v", r.Issues)
+	}
+}

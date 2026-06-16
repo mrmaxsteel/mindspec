@@ -1817,3 +1817,172 @@ func TestSupersedeChainTooLong(t *testing.T) {
 		t.Errorf("expected error to mention adr-supersede-chain-too-long, got: %v", err)
 	}
 }
+
+// TestPlanCoverageFilePathImpactedResolves — spec 100 R1 AC2: a spec
+// whose `## Impacted Domains` entry is a FILE PATH normalizes to its
+// owning domain, so checkADRCoverage (via ValidatePlan) emits NO
+// spurious adr-coverage-missing when an Accepted ADR declaring that
+// domain is cited.
+func TestPlanCoverageFilePathImpactedResolves(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"internal/genevieve/review.py"})
+	writeManifest(t, tmp, "genevieve", "paths:\n  - internal/genevieve/**\n")
+	// The manifest materializes .mindspec/docs, so the ADR must live in
+	// the canonical adr dir to be visible to the store (see helper).
+	writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "genevieve")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			t.Errorf("unexpected adr-coverage-missing for resolved file-path impacted domain: %s", issue.Message)
+		}
+		if issue.Name == "impacted-domains-resolve" {
+			t.Errorf("unexpected impacted-domains-resolve error: %s", issue.Message)
+		}
+	}
+}
+
+// TestCheckADRCitationsFilePathImpactedResolves — spec 100 R1 AC2: the
+// same file-path-Impacted-Domains spec passes checkADRCitations — the
+// cited ADR declaring the resolved domain is NOT flagged
+// adr-cite-irrelevant.
+func TestCheckADRCitationsFilePathImpactedResolves(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"internal/genevieve/review.py"})
+	writeManifest(t, tmp, "genevieve", "paths:\n  - internal/genevieve/**\n")
+	// Canonical adr dir (the manifest materializes .mindspec/docs).
+	writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "genevieve")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-cite-irrelevant" {
+			t.Errorf("unexpected adr-cite-irrelevant for resolved file-path impacted domain: %s", issue.Message)
+		}
+	}
+}
+
+// TestNormalizeZeroAndAmbiguousAtPlanGate — spec 100 R1 AC5: zero-owner
+// and ambiguous (multi-owner) Impacted-Domains entries surface the clear
+// impacted-domains-resolve ERROR at the plan gate.
+func TestNormalizeZeroAndAmbiguousAtPlanGate(t *testing.T) {
+	t.Run("zero-owner", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"internal/nope/x.go"})
+		writeManifest(t, tmp, "genevieve", "paths:\n  - internal/genevieve/**\n")
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name == "impacted-domains-resolve" && strings.Contains(issue.Message, "internal/nope/x.go") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected impacted-domains-resolve error naming the zero-owner entry, got: %v", r.Issues)
+		}
+	})
+
+	t.Run("ambiguous-owner", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"internal/foo/x.go"})
+		writeManifest(t, tmp, "alpha", "paths:\n  - internal/foo/**\n")
+		writeManifest(t, tmp, "beta", "paths:\n  - internal/foo/**\n")
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name == "impacted-domains-resolve" &&
+				strings.Contains(issue.Message, "internal/foo/x.go") &&
+				strings.Contains(issue.Message, "alpha") &&
+				strings.Contains(issue.Message, "beta") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected impacted-domains-resolve ambiguity error naming both owners, got: %v", r.Issues)
+		}
+	})
+}
+
+// TestPlanCoverageHintMentionsExistingADR — spec 100 R2 AC1: when an
+// impacted domain is uncovered but the plan DOES cite an Accepted ADR,
+// the adr-coverage-missing message presents the add-Domain-to-existing-
+// ADR remedy (not only `adr create`).
+func TestPlanCoverageHintMentionsExistingADR(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	// Cited ADR is Accepted but covers a DIFFERENT domain, so payments
+	// is uncovered while a cited Accepted ADR exists.
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "search", "")
+	makePlanWithCitations(t, tmp, "  - id: ADR-0001\n    sections: [\"CLI\"]\n", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			found = true
+			low := strings.ToLower(issue.Message)
+			if !strings.Contains(low, "existing") {
+				t.Errorf("expected message to mention adding the domain to an existing cited ADR, got: %q", issue.Message)
+			}
+			if !strings.Contains(low, "domain") {
+				t.Errorf("expected message to mention the Domain(s) field remedy, got: %q", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-coverage-missing error, got: %v", r.Issues)
+	}
+}
+
+// TestPlanCoverageHintCreateWhenNoCitation — spec 100 R2 AC2: when NO
+// ADR is cited, the adr-coverage-missing message still surfaces the
+// `adr create` remedy (the create path is not lost).
+func TestPlanCoverageHintCreateWhenNoCitation(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestSpec(t, tmp, []string{"payments"})
+	makePlanWithCitations(t, tmp, "", true)
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-coverage-missing" {
+			found = true
+			if !strings.Contains(issue.Message, "mindspec adr create --domain payments") {
+				t.Errorf("expected create remedy when no ADR cited, got: %q", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected adr-coverage-missing error, got: %v", r.Issues)
+	}
+}
+
+// writeCanonicalADRWithDomains writes an ADR under the CANONICAL
+// .mindspec/docs/adr tree (not the legacy docs/adr that
+// writeTestADRWithDomains uses). Spec 100 plan-gate tests write an
+// OWNERSHIP manifest via writeManifest, which materializes
+// .mindspec/docs — so workspace.DocsDir/ADRDir then prefer the canonical
+// tree and a legacy docs/adr ADR would be invisible. This helper keeps
+// the ADR co-located with the manifest the test also writes.
+func writeCanonicalADRWithDomains(t *testing.T, root, id, status, domains string) {
+	t.Helper()
+	adrDir := filepath.Join(root, ".mindspec", "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatalf("mkdir canonical adr dir: %v", err)
+	}
+	content := "# " + id + ": Test\n\n- **Status**: " + status + "\n- **Domain(s)**: " + domains + "\n- **Supersedes**: n/a\n- **Superseded-by**: n/a\n\n## Decision\nSome decision.\n"
+	if err := os.WriteFile(filepath.Join(adrDir, id+".md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write canonical adr: %v", err)
+	}
+}

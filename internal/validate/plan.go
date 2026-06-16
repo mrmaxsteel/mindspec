@@ -126,6 +126,24 @@ func ValidatePlan(root, specID string) *Result {
 		r.AddError("impacted-domains-load", impErr.Error())
 	}
 
+	// Spec 100 R1 (mindspec-4ft2): normalize the raw Impacted-Domains
+	// entries to their owning-domain NAMES at this single source, so BOTH
+	// plan-time gates downstream (checkADRCitations and checkADRCoverage)
+	// consume the normalized set — a file-path Impacted-Domains entry no
+	// longer yields a spurious adr-cite-irrelevant / adr-coverage-missing.
+	// The plan path has no executor (ValidatePlan builds none) and reads
+	// the on-disk working tree, so ownerRef == "" and exec == nil: the
+	// helper takes the LoadOwnership / listDomainDirs branch. A
+	// zero/multi-owner entry surfaces as impacted-domains-resolve and the
+	// uncertain entry is dropped from the set the gates consume (the
+	// error is the actionable signal; the gates must not also fire on a
+	// path string the author has been told to fix).
+	normalized, normErrs := normalizeImpactedDomains(nil, root, "", impacted)
+	for _, e := range normErrs {
+		r.AddError("impacted-domains-resolve", e)
+	}
+	impacted = normalized
+
 	// Build the ADR store ONCE for both the citation and coverage
 	// lanes. mindspec-ew79: the store overlays the tree SpecDir
 	// actually resolved into (which may be a spec worktree carrying
@@ -526,11 +544,40 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 		cov, proposedID := coverageOf(r, store, citations, d)
 		switch cov {
 		case notCovered:
-			r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
+			// Spec 100 R2 (mindspec-3d84): when the plan already cites
+			// at least one Accepted ADR, adding the uncovered domain to
+			// an EXISTING cited Accepted ADR's `Domain(s)` line is a
+			// legitimate (often the correct) remedy — not only creating a
+			// new ADR. Present both. When NO ADR is cited, the only
+			// remedy is `adr create`, so keep that hint alone.
+			if hasAcceptedCitation(store, citations) {
+				r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; either add %q to the `Domain(s)` line of an existing cited Accepted ADR, or run: mindspec adr create --domain %s", d, d, d))
+			} else {
+				r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
+			}
 		case coveredProposedOnly:
 			r.AddWarning("adr-coverage-proposed", fmt.Sprintf("impacted domain %q is covered only by Proposed ADR %s — flip it to Accepted after the implementation ships", d, proposedID))
 		}
 	}
+}
+
+// hasAcceptedCitation reports whether the plan cites at least one ADR
+// whose status is Accepted (spec 100 R2). Used by checkADRCoverage to
+// decide whether the "add the domain to an existing cited Accepted ADR"
+// remedy is offerable: that remedy is only meaningful when such an ADR
+// exists to amend. A citation whose ADR is missing or non-Accepted does
+// not qualify.
+func hasAcceptedCitation(store adr.Store, citations []ADRCitation) bool {
+	for _, cite := range citations {
+		a, err := store.Get(cite.ID)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(a.Status, "Accepted") {
+			return true
+		}
+	}
+	return false
 }
 
 // domainCoverage is the tri-state result of the coverage probe
