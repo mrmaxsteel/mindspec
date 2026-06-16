@@ -1,9 +1,0 @@
-{
-  "lens": "testability",
-  "round": 2,
-  "decision": "APPROVE",
-  "cwd_ac_hermetic": true,
-  "machinery_exists": true,
-  "blocking": [],
-  "summary": "All R2 revision ACs are hermetically realizable with existing machinery. (1) cwd-safety AC: newRepoExecutor (executor_test.go L112) wires *MindspecExecutor against a REAL `git init -b main` temp repo (newTempRepo L71) with a recording fake WorktreeOps; the file already proves the exact pattern the AC needs — TestWithWorkingDir_RemovedCwdRemainsAtDirSilently (L994) chdirs into a real dir, runs an op that os.RemoveAll's it, and asserts os.Getwd() recovers to root with no harness/bd/network. A real-removal release test can mirror complete.go's os.Chdir(root)-after-removal pattern (complete.go L76-78), and the post-removal bd state read rides the injectable runBDCombFn package var (beads.go L28, already swapped in next_test.go L390-394). (2) remove-first/set-open-last + dirty-refuse/--force ACs: fully hermetic via &MindspecExecutor{WorktreeOps: fake} (recorded createCalls/removeCalls + onRemove cwd-capture hook L33/L55), and the dirty check via CheckDirtyTree(repoRoot, cwd) (guard.go L110) against a real temp repo — ordering/refusal/force-proceed all assertable on a real-or-fake repo with no live bd. (3) No AC requires anything the machinery can't provide: the only non-fake dependency (real worktree removal for the cwd footgun) is exactly what newRepoExecutor + newTempRepo deliver, and the spec itself correctly notes the fake-WorktreeOps AC structurally cannot catch the cwd-deletion bug (fake never removes the dir), justifying the real-repo AC. Read-only verification; no edits/commits/beads/harness."
-}

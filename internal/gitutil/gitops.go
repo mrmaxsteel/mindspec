@@ -231,6 +231,65 @@ func HasRemote() bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
+// FetchRemote runs `git fetch <remote>` from the current working directory so
+// the remote-tracking refs (origin/*) are current before a branch is created
+// from them (Spec 101 R4). A non-zero exit (offline, auth failure, missing
+// remote) surfaces as an error; callers treat that as the signal to fall back
+// to a local base rather than hard-failing.
+func FetchRemote(remote string) error {
+	if err := rejectOptionLike(remote); err != nil {
+		return err
+	}
+	cmd := execCommand("git", "fetch", remote)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("fetching %s: %s", remote, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// DetectDefaultBranch returns the default branch name of remote (e.g. "main",
+// "develop") WITHOUT hardcoding (Spec 101 R4). It tries the cheap cached
+// `git symbolic-ref refs/remotes/<remote>/HEAD` first; if that output is empty
+// or not a valid `refs/remotes/<remote>/<name>` (the cached ref is not always
+// populated, so an unparseable result is a MISS, not a default) it falls
+// THROUGH to `git remote show <remote>` and parses its "HEAD branch:" line.
+// An error is returned only when BOTH sources fail to yield a branch name —
+// the executor funnels that into its local-HEAD + WARN fallback.
+func DetectDefaultBranch(remote string) (string, error) {
+	if err := rejectOptionLike(remote); err != nil {
+		return "", err
+	}
+
+	// 1) Cached symbolic-ref (cheap, offline-friendly).
+	symRefPrefix := "refs/remotes/" + remote + "/"
+	out, err := execCommand("git", "symbolic-ref", symRefPrefix+"HEAD").Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(out))
+		// Only accept a well-formed refs/remotes/<remote>/<name>; anything
+		// else (empty, refs/heads/*, garbage) is treated as a miss.
+		if name := strings.TrimPrefix(ref, symRefPrefix); name != "" && name != ref && !strings.Contains(name, "/") {
+			return name, nil
+		}
+	}
+
+	// 2) Fall through to `git remote show <remote>` ("HEAD branch: <name>").
+	out, err = execCommand("git", "remote", "show", remote).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("detecting default branch of %s: %s", remote, strings.TrimSpace(string(out)))
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if name := strings.TrimPrefix(line, "HEAD branch:"); name != line {
+			name = strings.TrimSpace(name)
+			if name != "" && name != "(unknown)" {
+				return name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("detecting default branch of %s: no HEAD branch in `git remote show`", remote)
+}
+
 // PushBranch pushes a branch to origin.
 func PushBranch(branch string) error {
 	if err := rejectOptionLike(branch); err != nil {
