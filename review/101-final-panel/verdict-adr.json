@@ -1,0 +1,23 @@
+{
+  "lens": "adr-conformance",
+  "decision": "APPROVE",
+  "adr_findings": [
+    {
+      "adr": "0030",
+      "conformant": true,
+      "evidence": "R2 routes worktree removal through the executor: MindspecExecutor.RemoveBeadWorktreeAndRestore calls g.WorktreeOps.Remove (no raw `git worktree remove`); cmd/mindspec/release.go wires removeWorktree to exec.RemoveBeadWorktreeAndRestore on the concrete *MindspecExecutor. R4's fetch/branch-from-origin lives in internal/gitutil (FetchRemote, DetectDefaultBranch, reusing HasRemote/rejectOptionLike/execCommand); InitSpecWorkspace consumes them via the gitutil seam (specBranchBase) — no exec.Command in cmd/. None of the changed code files are enforcement packages (internal/{validate,approve,complete,state,phase}); internal/executor and internal/gitutil ARE the boundary, so their git imports are correct. internal/doctor (already an exec user for checkBdVersionFloor) and cmd/ are outside the boundary. TestEnforcementHasNoGitLeaks PASS; internal/lint boundary suite PASS; go build ./... clean."
+    },
+    {
+      "adr": "0035",
+      "conformant": true,
+      "evidence": "R3 ClaimBead drops the misleading 'may already be claimed' prefix and surfaces bd's captured CombinedOutput verbatim under a legible 'claim failed:' prefix — a paste-safe, non-destructive diagnostic (it is a wrapped command error, not a guard-failure constructor, so the internal/guard convention test does not apply and none is needed). R2 release errors (dirty-refuse, removal failure, set-open failure) all route through guard.NewFailure with a final recovery line; recovery commands are paste-safe (`git add -A && git commit ... mindspec release`, `mindspec release <id>`, `mindspec release <id> --force`) — none carry replace/destructive semantics. The Step-5 mutation uses `bd update <id> --status=open --assignee=` (status/assignee, not the banned `--metadata` replace) and phase-cache sync uses bead.MergeMetadata (merge semantics). guard.FormatFailure would panic on any banned command, so the HasFinalRecoveryLine / no-`bd update --metadata` convention holds. internal/guard convention tests PASS."
+    },
+    {
+      "adr": "0034",
+      "conformant": true,
+      "evidence": "R2's Step 6 cursor handling is consistent with ADR-0034/ADR-0023: the cursor is DERIVED from bd's single in_progress child, so Step 5's set-open self-rewinds the derived cursor; release only merge-writes the mindspec_phase metadata CACHE (via bead.MergeMetadata, forward from phase.DerivePhase) when the released bead was the active one, and leaves a non-active release's cursor untouched. This reverses the claim/cursor advance ADR-0034 describes and respects the cache-not-authority rule from the 2026-06-11 amendment. No raw metadata-replace is emitted."
+    }
+  ],
+  "blocking": [],
+  "summary": "Spec 101 conforms to all three cited ADRs and amends none — correctly, since none needs amending. ADR-0030: worktree removal (R2) and fetch/default-branch detection (R4) route through executor -> gitutil; no raw git in cmd/; TestEnforcementHasNoGitLeaks and the boundary lint pass; no enforcement package (validate/approve/complete/state/phase) gained a git or exec import (the changed files are cmd/, executor, gitutil, next, doctor, redact — all outside the boundary or the boundary itself). ADR-0035: R3 surfaces bd's real stderr as a legible non-destructive diagnostic; R2's guard.NewFailure errors carry paste-safe final recovery lines and emit no banned `bd update --metadata`. ADR-0034: R2 reverses the claim/cursor via bd-derived self-rewind + merge-write of the mindspec_phase cache, consistent with the cache-not-authority amendment. No change contradicts a cited ADR."
+}

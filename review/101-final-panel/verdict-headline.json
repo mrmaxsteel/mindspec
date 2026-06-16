@@ -1,0 +1,12 @@
+{
+  "lens": "headline-value",
+  "decision": "APPROVE",
+  "each_issue_resolved": {
+    "146.1": true,
+    "146.2": true,
+    "146.3": true,
+    "76": true
+  },
+  "blocking": [],
+  "summary": "All four originating defects are genuinely resolved end-to-end. #146.1: `mindspec next <id>` now routes a positional through next.SelectWorkByName, which resolves to THAT exact bead from the already-fetched ready set or returns a clear 'not in the ready set' error — it never falls through to items[0]/'Defaulting to first'. The positional and --pick are mutually exclusive (rejected up front). #146.2: the new `mindspec release <bead>` verb is registered (root.go), discoverable in `mindspec --help` and `release --help`, and runs the spec-mandated 6-step reversal: dirty-check (refuse w/o --force), remove-worktree-FIRST via the executor + chdir-to-root (cwd-safety), set-open + clear-assignee LAST, derived-cursor rewind. Remove-first/set-open-last leaves a recoverable 'still-claimed, worktree-gone' state on partial failure. No raw bd/git required. #146.3: ClaimBead dropped the misleading 'may already be claimed' prefix and now surfaces bd's real combined stderr verbatim ('claim failed: <real cause>'), so a `depends_on_id`-style schema error is legible; doctor adds checkBdSchemaDrift (read-probe + drift regex) and checkMultipleBdOnPath (stale-shadowing root cause), both wired into RunWithOptions. #76: InitSpecWorkspace branches from specBranchBase(), which fetches origin then branches from origin/<DetectDefaultBranch> (no hardcoded main), falling back to local HEAD + WARN on no-remote/offline/auth/detect failure — never a hard failure. The release verb closes the next-claims-wrong-bead loop cleanly: claim wrong -> release (worktree gone, bead back to open, assignee cleared, cursor rewound) -> re-claim correctly with `mindspec next <correct-id>` now that the positional is honored. Build is green; cmd/mindspec, next, doctor, gitutil, executor tests all pass. No rough edges that undercut the value: --emit-only's positional path (fetch-by-id, no ready-set gate) is intentional and orthogonal to the claim-path footgun #146.1 addresses."
+}
