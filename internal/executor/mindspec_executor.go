@@ -61,6 +61,36 @@ func NewMindspecExecutor(root string) *MindspecExecutor {
 	}
 }
 
+// RemoveBeadWorktreeAndRestore removes the bead worktree and then chdirs the
+// process to the resolved repo root (g.Root), in that order. It is the
+// cwd-safety-critical unit `mindspec release` uses (Spec 101 R2): the bead
+// worktree is removed FIRST (before any bd/state mutation), and the process is
+// moved to the repo root IMMEDIATELY after so no subsequent bd/git subprocess
+// runs from a possibly-deleted cwd (the spec-092 Req 3c / mindspec-qxsy
+// cwd-deletion bug class — mirrors complete.go's os.Chdir(root) after worktree
+// removal). `release` is expected to be invoked from INSIDE the very worktree
+// being removed, so coupling the removal and the chdir in one method keeps the
+// remove-first / chdir-immediately invariant provable.
+//
+// Removal routes through the WorktreeOps seam (ADR-0030: never a raw
+// `git worktree remove`). The chdir target is g.Root (the resolved main repo
+// root), NEVER the bead worktree path, which may now be deleted. A removal
+// error is returned to the caller (the caller decides recovery); a chdir error
+// surfaces as a warning but is non-fatal — the bd subprocesses that follow
+// would otherwise silently degrade from a deleted cwd, so the warning is the
+// honest signal rather than a hard failure.
+func (g *MindspecExecutor) RemoveBeadWorktreeAndRestore(beadID string) error {
+	wtName := workspace.BeadWorktreeName(beadID)
+	removeErr := g.WorktreeOps.Remove(wtName)
+	// Chdir to root IMMEDIATELY after removal, regardless of removeErr: the
+	// process may already be sitting in the (now partially/fully) removed
+	// worktree, and every later bd subprocess must run from a live cwd.
+	if chdirErr := os.Chdir(g.Root); chdirErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not chdir to repo root %s: %v\n", g.Root, chdirErr)
+	}
+	return removeErr
+}
+
 // InitSpecWorkspace creates a workspace for spec authoring.
 // Mirrors the logic in internal/spec/create.go (Phase 1).
 func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, error) {
@@ -81,9 +111,13 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
 	}
 
-	// Create spec branch from HEAD if it doesn't exist.
+	// Create spec branch if it doesn't exist. Prefer branching from
+	// origin/<detected-default> after a fetch so specs never start from a
+	// stale local base (Spec 101 R4); fall back to local HEAD with a WARN on
+	// any offline/auth/no-remote/detect failure — never a hard failure.
 	if !gitutil.BranchExists(specBranch) {
-		if err := gitutil.CreateBranch(specBranch, "HEAD"); err != nil {
+		base := specBranchBase()
+		if err := gitutil.CreateBranch(specBranch, base); err != nil {
 			return WorkspaceInfo{}, fmt.Errorf("creating branch %s: %w", specBranch, err)
 		}
 	}
@@ -95,6 +129,40 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 	}
 
 	return WorkspaceInfo{Path: wtPath, Branch: specBranch}, nil
+}
+
+// specBranchBase resolves the base ref a new spec branch should be created
+// from (Spec 101 R4). When a remote exists, it fetches and returns
+// `origin/<detected-default-branch>` so the spec starts from the up-to-date
+// upstream tip. On ANY failure (no remote, offline, auth failure, or a
+// default-branch detection miss) it falls back to local "HEAD" and emits a
+// WARN naming the stale-base risk — a fetch/detect error is NEVER a hard
+// `spec create` failure. All git I/O routes through the gitutil seam
+// (ADR-0030); command code never shells out raw.
+func specBranchBase() string {
+	const remote = "origin"
+	if !gitutil.HasRemote() {
+		warnStaleBase("no git remote configured")
+		return "HEAD"
+	}
+	if err := gitutil.FetchRemote(remote); err != nil {
+		warnStaleBase(fmt.Sprintf("could not fetch %s (%v)", remote, err))
+		return "HEAD"
+	}
+	def, err := gitutil.DetectDefaultBranch(remote)
+	if err != nil {
+		warnStaleBase(fmt.Sprintf("could not detect default branch of %s (%v)", remote, err))
+		return "HEAD"
+	}
+	return remote + "/" + def
+}
+
+// warnStaleBase emits the stale-base WARN shared by every specBranchBase
+// fallback path.
+func warnStaleBase(reason string) {
+	fmt.Fprintf(os.Stderr,
+		"WARN: %s; creating the spec branch from local HEAD, which may be a stale base (push/pull the default branch to avoid branching from out-of-date work)\n",
+		reason)
 }
 
 // HandoffEpic is a no-op for MindspecExecutor. Beads are already created by the

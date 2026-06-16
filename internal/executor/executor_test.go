@@ -191,6 +191,106 @@ func TestInitSpecWorkspace_SkipsBranchIfExists(t *testing.T) {
 	}
 }
 
+// --- InitSpecWorkspace branch base (Spec 101 Bead 4, R4 k9a8/#76) ---
+
+// TestInitSpecWorkspace_BranchesFromOriginDetectedDefault proves that when a
+// remote exists the spec branch is created from `origin/<detected-default>`
+// AFTER a fetch — and that the default branch is DETECTED, not hardcoded
+// `main`: the origin's default branch is `develop`, and a commit that lives
+// ONLY on origin/develop (never on the local HEAD) must be the spec branch's
+// base. This is the structural proof of "from origin, not from local HEAD".
+func TestInitSpecWorkspace_BranchesFromOriginDetectedDefault(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// Build a bare "origin" whose default branch is develop, with a commit
+	// that the local clone does NOT yet have.
+	origin := t.TempDir()
+	runGitIn(t, origin, "init", "--bare", "-b", "develop")
+	// Seed origin/develop via a scratch working clone.
+	seed := t.TempDir()
+	runGitIn(t, seed, "clone", origin, ".")
+	runGitIn(t, seed, "config", "user.email", "test@example.com")
+	runGitIn(t, seed, "config", "user.name", "test")
+	runGitIn(t, seed, "commit", "--allow-empty", "-m", "origin develop tip")
+	runGitIn(t, seed, "push", "origin", "develop")
+	originDevelopSHA := refHash(t, seed, "develop")
+
+	// Wire origin onto the local repo. Do NOT fetch yet — InitSpecWorkspace
+	// must perform the fetch itself.
+	runGitIn(t, dir, "remote", "add", "origin", origin)
+
+	if _, err := g.InitSpecWorkspace("077-my-feature"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !branchExistsIn(t, dir, "spec/077-my-feature") {
+		t.Fatalf("spec branch should exist")
+	}
+	got := refHash(t, dir, "spec/077-my-feature")
+	if got != originDevelopSHA {
+		t.Errorf("spec branch base = %s, want origin/develop tip %s\n"+
+			"(branch must be created from origin/<detected-default> after a fetch, not local HEAD)",
+			got, originDevelopSHA)
+	}
+	// Defense against a hardcoded-main coincidence: local HEAD (main) differs
+	// from origin/develop, so equality above can only hold via real detection.
+	if got == refHash(t, dir, "main") {
+		t.Errorf("spec branch base equals local main HEAD — detection/fetch did not take effect")
+	}
+}
+
+// TestInitSpecWorkspace_NoRemoteFallsBackToHEADWithWarn proves that with NO
+// remote configured (HasRemote == false) the branch is created from local
+// HEAD and a WARN naming the stale-base risk is emitted — never a hard
+// failure.
+func TestInitSpecWorkspace_NoRemoteFallsBackToHEADWithWarn(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	var stderr string
+	captured := captureStderrAround(t, func() {
+		if _, err := g.InitSpecWorkspace("077-my-feature"); err != nil {
+			t.Fatalf("offline/no-remote must NOT hard-fail: %v", err)
+		}
+	})
+	stderr = captured
+
+	if !branchExistsIn(t, dir, "spec/077-my-feature") {
+		t.Fatalf("spec branch should exist")
+	}
+	if refHash(t, dir, "spec/077-my-feature") != refHash(t, dir, "main") {
+		t.Errorf("with no remote the spec branch must fall back to local HEAD (main)")
+	}
+	if !strings.Contains(strings.ToUpper(stderr), "WARN") {
+		t.Errorf("expected a WARN on the no-remote fallback, stderr = %q", stderr)
+	}
+}
+
+// TestInitSpecWorkspace_FetchErrorFallsBackToHEADWithWarn proves a remote that
+// exists but is unreachable (bad URL → fetch fails) funnels to the local-HEAD
+// + WARN fallback, never a hard `spec create` failure.
+func TestInitSpecWorkspace_FetchErrorFallsBackToHEADWithWarn(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// A remote pointing at a non-existent path makes `git fetch` fail.
+	runGitIn(t, dir, "remote", "add", "origin", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	stderr := captureStderrAround(t, func() {
+		if _, err := g.InitSpecWorkspace("077-my-feature"); err != nil {
+			t.Fatalf("unreachable remote must NOT hard-fail: %v", err)
+		}
+	})
+
+	if !branchExistsIn(t, dir, "spec/077-my-feature") {
+		t.Fatalf("spec branch should exist")
+	}
+	if refHash(t, dir, "spec/077-my-feature") != refHash(t, dir, "main") {
+		t.Errorf("on fetch failure the spec branch must fall back to local HEAD (main)")
+	}
+	if !strings.Contains(strings.ToUpper(stderr), "WARN") {
+		t.Errorf("expected a WARN on the fetch-failure fallback, stderr = %q", stderr)
+	}
+}
+
 // --- HandoffEpic ---
 
 func TestHandoffEpic_IsNoOp(t *testing.T) {

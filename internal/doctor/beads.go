@@ -316,6 +316,129 @@ func checkBdVersionFloor(r *Report, root string) {
 	})
 }
 
+// bdSchemaDriftRE matches the schema-error class a stale bd binary emits when
+// its compiled-in schema expectation diverges from the on-disk DB — e.g.
+// `column "depends_on_id" could not be found`. The version-floor check
+// (checkBdVersionFloor) cannot catch this: a binary can report a fresh
+// `--version` yet still query columns the live DB lacks (or vice versa).
+// Anchored on the `could not be found` phrasing for a missing column/table so
+// unrelated runtime failures don't masquerade as drift.
+var bdSchemaDriftRE = regexp.MustCompile(`(?i)(column|table)\s+"?[\w.]+"?\s+could not be found`)
+
+// checkBdSchemaDrift runs a cheap read-only bd probe and, when it fails with a
+// recognizable schema-error class, warns that the bd binary's schema
+// expectation has drifted from the DB. This complements checkBdVersionFloor,
+// which only compares `bd --version` against a floor and never executes a
+// schema-touching query. Behavior:
+//   - probe succeeds                → OK (schema healthy)
+//   - probe fails with a drift sig  → Warn (surface bd's real output)
+//   - probe missing / fails without
+//     a drift signature             → OK/skip (never false-warn)
+func checkBdSchemaDrift(r *Report, root string) {
+	if _, err := exec.LookPath("bd"); err != nil {
+		r.Checks = append(r.Checks, Check{
+			Name:    "bd schema drift",
+			Status:  OK,
+			Message: "skipped — bd not found on PATH",
+		})
+		return
+	}
+
+	// `bd list --json` reads issues (touching the schema) without mutating
+	// anything; it's the same path bead.ListJSON relies on.
+	cmd := exec.Command("bd", "list", "--json")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		r.Checks = append(r.Checks, Check{
+			Name:    "bd schema drift",
+			Status:  OK,
+			Message: "bd schema matches the DB (read probe succeeded)",
+		})
+		return
+	}
+
+	combined := strings.TrimSpace(string(out))
+	if !bdSchemaDriftRE.MatchString(combined) {
+		// A failure with no recognizable schema signature is not drift —
+		// skip rather than false-warn on an unrelated transient error.
+		r.Checks = append(r.Checks, Check{
+			Name:    "bd schema drift",
+			Status:  OK,
+			Message: "skipped — bd read probe failed without a schema-drift signature",
+		})
+		return
+	}
+
+	r.Checks = append(r.Checks, Check{
+		Name:   "bd schema drift",
+		Status: Warn,
+		Message: fmt.Sprintf("the `bd` binary's schema expectation has drifted from the DB: %s — "+
+			"the version floor check cannot catch this; upgrade/reinstall bd so its schema matches "+
+			"(e.g. `brew upgrade beads`) and check for a stale shadowing binary", combined),
+	})
+}
+
+// checkMultipleBdOnPath warns when more than one `bd` executable is reachable
+// on PATH. The 2026 incident root cause was a stale `~/.local/bin/bd`
+// shadowing the Homebrew binary, so the resolved `bd` was an old schema-drifted
+// build even though `brew upgrade` had run. One bd → OK; zero → skip. Each PATH
+// entry is counted once (duplicate dirs collapse) so a doubled PATH doesn't
+// false-warn.
+func checkMultipleBdOnPath(r *Report, _ string) {
+	pathEnv := os.Getenv("PATH")
+	var found []string
+	seenDir := map[string]bool{}
+	seenResolved := map[string]bool{}
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if dir == "" {
+			dir = "."
+		}
+		if seenDir[dir] {
+			continue
+		}
+		seenDir[dir] = true
+
+		cand := filepath.Join(dir, "bd")
+		info, err := os.Stat(cand)
+		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		// Collapse symlinks/hardlinks pointing at the same real file so a
+		// single binary reachable via two PATH entries isn't double-counted.
+		resolved := cand
+		if rp, err := filepath.EvalSymlinks(cand); err == nil {
+			resolved = rp
+		}
+		if seenResolved[resolved] {
+			continue
+		}
+		seenResolved[resolved] = true
+		found = append(found, cand)
+	}
+
+	if len(found) <= 1 {
+		msg := "exactly one `bd` on PATH"
+		if len(found) == 0 {
+			msg = "skipped — no `bd` found on PATH"
+		}
+		r.Checks = append(r.Checks, Check{
+			Name:    "bd on PATH",
+			Status:  OK,
+			Message: msg,
+		})
+		return
+	}
+
+	r.Checks = append(r.Checks, Check{
+		Name:   "bd on PATH",
+		Status: Warn,
+		Message: fmt.Sprintf("%d `bd` binaries on PATH (%s) — the first shadows the rest, so an upgrade of a "+
+			"later one is silently ignored (the stale-shadowing root cause); remove the stale binary so a single "+
+			"`bd` resolves", len(found), strings.Join(found, ", ")),
+	})
+}
+
 // beadsMergeDriverScript is the repo-relative path of the tracked wrapper
 // that regenerates .beads/issues.jsonl from the Dolt DB on merge (ADR-0025:
 // the jsonl is a deterministic projection, so regenerate-from-DB is the

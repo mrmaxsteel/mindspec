@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
@@ -157,6 +158,40 @@ func TestSelectWork_EmptyList(t *testing.T) {
 	_, err := SelectWork([]BeadInfo{}, 0)
 	if err == nil {
 		t.Fatal("expected error for empty list")
+	}
+}
+
+// --- SelectWorkByName tests (spec 101 R1 / mindspec-3cj0.1) ---
+
+// A named bead that IS in the ready set selects exactly that bead, even when
+// it is not items[0]. The pre-R1 code ignored the name and returned items[0].
+func TestSelectWorkByName_NamedInSetNotFirst(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "a", Title: "First"},
+		{ID: "b", Title: "Second"},
+		{ID: "c", Title: "Third"},
+	}
+	result, err := SelectWorkByName(items, "b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ID != "b" {
+		t.Errorf("expected named bead b, got %s", result.ID)
+	}
+}
+
+// A named bead NOT in the ready set returns a clear error — never items[0].
+func TestSelectWorkByName_NamedNotInSet(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "a", Title: "First"},
+		{ID: "b", Title: "Second"},
+	}
+	result, err := SelectWorkByName(items, "zzz")
+	if err == nil {
+		t.Fatalf("expected error for bead not in ready set, got %v", result)
+	}
+	if result.ID == "a" {
+		t.Errorf("must not fall through to items[0]; got %s", result.ID)
 	}
 }
 
@@ -416,6 +451,34 @@ func TestClaimBead_PropagatesError(t *testing.T) {
 	err := ClaimBead("bead-abc")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// TestClaimBead_SurfacesRealStderr pins the R3 fix: a schema-drift failure
+// from a stale bd binary must reach the caller verbatim, NOT flattened to the
+// misleading "may already be claimed" prefix. The contains-stderr assertion is
+// vacuous on the pre-fix code (it already embedded string(out)); the
+// load-bearing RED assertion is the NOT-contains-"may already be claimed" one,
+// which only passes once the misleading prefix is removed.
+func TestClaimBead_SurfacesRealStderr(t *testing.T) {
+	origRunBDComb := runBDCombFn
+	defer func() { runBDCombFn = origRunBDComb }()
+
+	const schemaErr = `column "depends_on_id" could not be found`
+	runBDCombFn = func(args ...string) ([]byte, error) {
+		return []byte(schemaErr), fmt.Errorf("exit status 1")
+	}
+
+	err := ClaimBead("bead-abc")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depends_on_id") {
+		t.Errorf("error should surface bd's real stderr; got %q", msg)
+	}
+	if strings.Contains(msg, "may already be claimed") {
+		t.Errorf("error must NOT be flattened to the misleading prefix; got %q", msg)
 	}
 }
 

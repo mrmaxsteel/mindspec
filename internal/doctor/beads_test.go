@@ -859,3 +859,113 @@ func TestCheckBdVersionFloor_UnknownFormatSkips(t *testing.T) {
 		t.Errorf("message should say skipped; got %q", c.Message)
 	}
 }
+
+// ─── checkBdSchemaDrift (R3) ──────────────────────────────────────────────
+
+// stubBdFail writes a fake bd that emits the given text and exits non-zero,
+// modelling a stale binary that fails a probe with a schema-error class. The
+// text goes to stderr (where bd writes the error) and the script exits 1.
+func stubBdFail(t *testing.T, stderr string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho " + shellQuote(stderr) + " 1>&2\nexit 1\n"
+	path := filepath.Join(dir, "bd")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
+func TestCheckBdSchemaDrift_Mismatch(t *testing.T) {
+	path := stubBdFail(t, `Error: column "depends_on_id" could not be found`)
+	t.Setenv("PATH", path)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkBdSchemaDrift(r, root)
+
+	c := findCheck(r, "bd schema drift")
+	if c == nil || c.Status != Warn {
+		t.Fatalf("got %+v, want Warn", c)
+	}
+	if !strings.Contains(c.Message, "depends_on_id") {
+		t.Errorf("message should surface the real schema error; got %q", c.Message)
+	}
+}
+
+func TestCheckBdSchemaDrift_Healthy(t *testing.T) {
+	// A bd that succeeds (exit 0) is schema-healthy → OK, no false warn.
+	path := stubBd(t, "[]")
+	t.Setenv("PATH", path)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkBdSchemaDrift(r, root)
+
+	c := findCheck(r, "bd schema drift")
+	if c == nil || c.Status != OK {
+		t.Fatalf("got %+v, want OK", c)
+	}
+}
+
+func TestCheckBdSchemaDrift_UnrelatedFailureSkips(t *testing.T) {
+	// A bd that fails but with no schema-error signature must NOT false-warn;
+	// it is skipped (OK) so unrelated transient failures don't masquerade as
+	// schema drift.
+	path := stubBdFail(t, "Error: some unrelated runtime failure")
+	t.Setenv("PATH", path)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkBdSchemaDrift(r, root)
+
+	c := findCheck(r, "bd schema drift")
+	if c == nil || c.Status != OK {
+		t.Fatalf("got %+v, want OK (skipped)", c)
+	}
+}
+
+// ─── checkMultipleBdOnPath (R3) ───────────────────────────────────────────
+
+// fakeBdDir creates a temp dir containing an executable named "bd" and
+// returns the dir path.
+func fakeBdDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCheckMultipleBdOnPath_TwoBinaries(t *testing.T) {
+	d1 := fakeBdDir(t)
+	d2 := fakeBdDir(t)
+	t.Setenv("PATH", d1+string(os.PathListSeparator)+d2)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkMultipleBdOnPath(r, root)
+
+	c := findCheck(r, "bd on PATH")
+	if c == nil || c.Status != Warn {
+		t.Fatalf("got %+v, want Warn", c)
+	}
+	if !strings.Contains(c.Message, d1) || !strings.Contains(c.Message, d2) {
+		t.Errorf("message should name both bd paths; got %q", c.Message)
+	}
+}
+
+func TestCheckMultipleBdOnPath_SingleBinary(t *testing.T) {
+	d1 := fakeBdDir(t)
+	t.Setenv("PATH", d1)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkMultipleBdOnPath(r, root)
+
+	c := findCheck(r, "bd on PATH")
+	if c == nil || c.Status != OK {
+		t.Fatalf("got %+v, want OK", c)
+	}
+}
