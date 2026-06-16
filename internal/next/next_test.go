@@ -161,6 +161,40 @@ func TestSelectWork_EmptyList(t *testing.T) {
 	}
 }
 
+// --- SelectWorkByName tests (spec 101 R1 / mindspec-3cj0.1) ---
+
+// A named bead that IS in the ready set selects exactly that bead, even when
+// it is not items[0]. The pre-R1 code ignored the name and returned items[0].
+func TestSelectWorkByName_NamedInSetNotFirst(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "a", Title: "First"},
+		{ID: "b", Title: "Second"},
+		{ID: "c", Title: "Third"},
+	}
+	result, err := SelectWorkByName(items, "b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ID != "b" {
+		t.Errorf("expected named bead b, got %s", result.ID)
+	}
+}
+
+// A named bead NOT in the ready set returns a clear error — never items[0].
+func TestSelectWorkByName_NamedNotInSet(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "a", Title: "First"},
+		{ID: "b", Title: "Second"},
+	}
+	result, err := SelectWorkByName(items, "zzz")
+	if err == nil {
+		t.Fatalf("expected error for bead not in ready set, got %v", result)
+	}
+	if result.ID == "a" {
+		t.Errorf("must not fall through to items[0]; got %s", result.ID)
+	}
+}
+
 func TestFormatWorkList(t *testing.T) {
 	items := []BeadInfo{
 		{ID: "abc", Title: "Do something", Priority: 2, IssueType: "task"},
