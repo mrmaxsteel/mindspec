@@ -1,0 +1,9 @@
+{
+  "lens": "decomposition",
+  "decision": "APPROVE",
+  "r1r2_fusion_justified": true,
+  "plan_go_collision": "none",
+  "independence_ok": true,
+  "blocking": [],
+  "summary": "R1+R2 fusion is correct: both edit checkADRCoverage (verified L516-534; R2 is the one-line adr-coverage-missing message in the notCovered case at L529 that R1 already wires) — merge-signal + trivial-work both justify folding. plan.go has NO hunk collision: Bead 1 touches the L124 loadImpactedDomains feed, checkADRCoverage (L516) and checkADRCitations (L465); Bead 3/R4 touches the empty-citations WARN/ERROR branch at L137-144. Both Bead 1 and Bead 3 edit ValidatePlan but at non-adjacent hunks ~13 lines apart (L124 vs L137-144), not the same statement — correctly captured as a merge-order preference (R1 first), not a hard depends_on. Bead 2 (cmd/mindspec/adr.go FindRoot->worktree-aware at L97/L138 + parse_test) is fully disjoint. Empty depends_on arrays correct: no bead consumes another's runtime output (R3/R4 do not read R1's normalize helper). Serial chain = 1 (<=3). 3 beads in the 3-5 band; Bead 1 is the substantive one (new helper + 2 gate wirings + R2 + ADR-0032 amendment) but is one cohesive change centered on a single helper consumed within one package — appropriate for one agent-cycle, not over-large. No mis-decomposition found."
+}
