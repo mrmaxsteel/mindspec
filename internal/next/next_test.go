@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
@@ -416,6 +417,34 @@ func TestClaimBead_PropagatesError(t *testing.T) {
 	err := ClaimBead("bead-abc")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// TestClaimBead_SurfacesRealStderr pins the R3 fix: a schema-drift failure
+// from a stale bd binary must reach the caller verbatim, NOT flattened to the
+// misleading "may already be claimed" prefix. The contains-stderr assertion is
+// vacuous on the pre-fix code (it already embedded string(out)); the
+// load-bearing RED assertion is the NOT-contains-"may already be claimed" one,
+// which only passes once the misleading prefix is removed.
+func TestClaimBead_SurfacesRealStderr(t *testing.T) {
+	origRunBDComb := runBDCombFn
+	defer func() { runBDCombFn = origRunBDComb }()
+
+	const schemaErr = `column "depends_on_id" could not be found`
+	runBDCombFn = func(args ...string) ([]byte, error) {
+		return []byte(schemaErr), fmt.Errorf("exit status 1")
+	}
+
+	err := ClaimBead("bead-abc")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depends_on_id") {
+		t.Errorf("error should surface bd's real stderr; got %q", msg)
+	}
+	if strings.Contains(msg, "may already be claimed") {
+		t.Errorf("error must NOT be flattened to the misleading prefix; got %q", msg)
 	}
 }
 

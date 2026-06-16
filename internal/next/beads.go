@@ -159,10 +159,17 @@ func ResolveActiveBead(root, specID string) (string, error) {
 // ClaimBead atomically claims a bead via bd update --claim.
 // Fails if the bead was already claimed by another agent, preventing
 // two concurrent agents from working on the same bead.
+//
+// On failure, bd's real captured output is surfaced verbatim (R3, ADR-0035
+// paste-safe). The earlier "may already be claimed" prefix is deliberately
+// gone: it masked non-contention causes — e.g. a stale bd binary emitting
+// `column "depends_on_id" could not be found` read as a benign "already
+// claimed". The "claim failed:" prefix keeps just enough context to know a
+// claim was what failed while letting the true cause through.
 func ClaimBead(id string) error {
 	out, err := runBDCombFn("update", id, "--claim")
 	if err != nil {
-		return fmt.Errorf("claim failed (may already be claimed): %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("claim failed: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
 }

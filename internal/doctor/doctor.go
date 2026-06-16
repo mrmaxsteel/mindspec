@@ -97,6 +97,8 @@ func RunWithOptions(root string, opts Options) *Report {
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)
 	checkBdVersionFloor(r, root)
+	checkBdSchemaDrift(r, root)
+	checkMultipleBdOnPath(r, root)
 	checkBeadsMergeDriver(r, root)
 	checkGit(r, root)
 	checkHooks(r, root)
