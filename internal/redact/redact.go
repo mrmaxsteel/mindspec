@@ -81,6 +81,7 @@ var CommandTokens = map[string]struct{}{
 	"ownership": {},
 	"plan":      {},
 	"record":    {},
+	"release":   {}, // spec 101 bead 3cj0.2: `mindspec release <bead-id>` verb
 	"repair":    {},
 	"report":    {}, // spec 094 Bead 3: the owner-invoked friction report loop
 
