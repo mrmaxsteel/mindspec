@@ -1,0 +1,16 @@
+{
+  "lens": "ac-coverage",
+  "decision": "APPROVE",
+  "all_mapped": true,
+  "unmapped": [],
+  "weak_mappings": [
+    {
+      "ac": "R2 ordering (remove-worktree-FIRST, set-open-LAST)",
+      "bead": "Bead 2 (mfe0->hrmw)",
+      "test": "TestRelease* (fake WorktreeOps, recording)",
+      "note": "The remove-first/set-open-last ordering is a hard R2 mandate (spec L116-136, L194-205), but the AC checkbox text (spec L294-300; plan L237) only asserts 'Remove called' + 'bead open' + 'cursor rewound', not the temporal order explicitly. The recording fake makes call-order assertable and the RED step is titled 'RED (ordering ...)', so the mapping is real — but the AC wording should explicitly assert Remove-before-set-open so a passing test cannot satisfy the AC while reversing the order. Non-blocking; impl/test should assert order."
+    }
+  ],
+  "blocking": [],
+  "summary": "All spec ACs map cleanly to exactly one bead and a specifically-named test, and every test seam/source anchor cited by the plan was verified to exist in the tree. Enumeration: R1a (positional claims that bead + named-not-ready->error not items[0]) -> Bead 1, TestSelectWork* + TestNext*; R1b (long help no longer 'accepted generally') -> Bead 1, TestNext* help/golden via buildMindspecBinary (confirmed: next.go:37 currently says 'Accepts an optional positional bead ID'); R2a (open+clear assignee, WorktreeOps.Remove, cursor rewound, executor-only) -> Bead 2, TestRelease* (fake WorktreeOps); R2b (dirty refuses w/o --force, proceeds with --force; mindspec-level pre-gate) -> Bead 2, TestRelease* (dirty) (confirmed bead.WorktreeRemove L203 hardcodes --force, validating the pre-gate design); R2c cwd-safety (real executor, cwd recovers post-removal, post-removal bd read succeeds) -> Bead 2, TestRelease*Cwd* via newRepoExecutor (confirmed L112) mirroring TestWithWorkingDir_RemovedCwdRemainsAtDirSilently (L994) and complete.go's os.Chdir(root)-after-remove (L78); R3a (ClaimBead surfaces real stderr depends_on_id, not flattened) -> Bead 3, TestClaimBead* via runBDCombFn (confirmed L165 current generic prefix + L28 seam); R3b (schema-drift->Warn, two-bd-on-PATH->Warn, happy->OK/skip) -> Bead 3, TestCheckBd* via findCheck + t.Setenv(PATH); R4a (branch from origin/<DETECTED-default> after fetch, not hardcoded main) -> Bead 4, TestInitSpecWorkspace*/gitutil swapExec (confirmed current InitSpecWorkspace L86 hardcodes CreateBranch(specBranch,'HEAD')); R4b (offline/no-origin -> local HEAD + WARN, never hard fail) -> Bead 4, same. No AC is double-mapped; no bead does work that no AC/requirement asked for (the four beads = the four requirements 1:1, file overlaps are recorded as advisory merge-order not extra scope). The R4 detection AC explicitly asserts a NON-main detected branch (stub refs/remotes/origin/develop -> assert origin/develop), so it genuinely exercises detection rather than a main-coincidence; the empty/garbage symbolic-ref fall-through to git remote show origin is also separately covered. The only finding is one weak mapping: R2's ordering mandate is implied by the recording fake but the AC text does not explicitly require asserting Remove-before-set-open. Non-blocking -> APPROVE."
+}
