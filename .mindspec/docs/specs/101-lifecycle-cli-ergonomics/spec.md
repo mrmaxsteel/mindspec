@@ -73,8 +73,13 @@ Verified in the current tree:
   removal routes through the executor's `WorktreeOps`, and R4's branch-base
   change lands in `internal/executor/mindspec_executor.go` +
   `internal/gitutil/gitops.go` (new fetch / default-branch / remote-ref helpers).
+- core: owns `internal/redact/**` (per
+  `.mindspec/docs/domains/core/OWNERSHIP.yaml`); carries the spec-094
+  redaction-allowlist registration of the new `release` command
+  (`internal/redact/redact.go` — `redact.CommandTokens`), so the release verb's
+  success/friction telemetry events are not silently dropped.
 
-Every source file this spec changes is owned by one of these two declared
+Every source file this spec changes is owned by one of these three declared
 domains.
 
 ## ADR Touchpoints
@@ -89,7 +94,8 @@ domains.
 - [ADR-0035](../../adr/ADR-0035-agent-error-contract.md) (Accepted; Domain(s):
   workflow, execution, core): the agent error contract — guard/lifecycle
   failures must tell the agent what to RUN, and emitted output must be legible
-  and safe to paste. **Covers the workflow domain.** Binds R3 (a claim failure
+  and safe to paste. **Covers the workflow and core domains** (the core domain's
+  spec-094 release telemetry registration is in scope of this contract). Binds R3 (a claim failure
   must surface bd's real stderr instead of a misleading generic prefix so the
   agent can act on the true cause) and R2 (the `release` failure/usage messages
   follow the recovery-line convention; the emitted recovery is never a raw
@@ -100,8 +106,9 @@ domains.
   what R2's `release` must reverse. Supporting, not a per-domain coverage
   requirement.
 
-Both Impacted Domains (workflow, execution) are covered by a cited Accepted
-ADR (workflow → ADR-0035; execution → ADR-0030). No coverage gap.
+All three Impacted Domains (workflow, execution, core) are covered by a cited
+Accepted ADR (workflow → ADR-0035; execution → ADR-0030; core → ADR-0035,
+whose Domain(s) include core). No coverage gap.
 
 ## Requirements
 
@@ -330,7 +337,7 @@ slow LLM harness (`internal/harness`).
 
 - `mindspec validate spec 101-lifecycle-cli-ergonomics`: 0 errors (a
   lifecycle-binding WARN before spec approve is acceptable). Confirms ParseSpec
-  extracts the declared domains `[workflow execution]` (not `[]`).
+  extracts the declared domains `[workflow execution core]` (not `[]`).
 - `go build ./...`: succeeds.
 - `go test -run TestNext -timeout 120s ./cmd/mindspec/...`,
   `go test -run TestSelectWork -timeout 120s ./internal/next/...`,
