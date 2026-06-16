@@ -230,6 +230,11 @@ func scaffoldPlan(specID string) string {
 status: Draft
 spec_id: %s
 version: "1"
+# adr_citations: cite the Accepted ADRs whose Domain(s) cover this plan's
+# impacted domains (drop the leading "# " and list them); leave empty only when
+# the ## ADR Fitness section explains why no ADR applies.
+# adr_citations:
+#   - ADR-XXXX
 ---
 # Plan: %s
 

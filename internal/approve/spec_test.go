@@ -151,3 +151,30 @@ Extra stuff here.
 		t.Error("expected APPROVED in output")
 	}
 }
+
+// TestScaffoldPlanEmitsADRCitations (Spec 100 R4 AC1): the generated plan.md
+// skeleton names the exact `adr_citations` frontmatter key the gate reads, so
+// the author sees it up front. The key must appear inside the YAML frontmatter
+// region (between the opening and closing `---`).
+func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
+	out := scaffoldPlan("100-x")
+
+	if !strings.Contains(out, "adr_citations") {
+		t.Errorf("expected scaffoldPlan output to contain the literal adr_citations key, got:\n%s", out)
+	}
+
+	// Confirm the key lands inside the frontmatter region, not the body.
+	const fence = "---"
+	first := strings.Index(out, fence)
+	if first < 0 {
+		t.Fatalf("expected opening frontmatter fence, got:\n%s", out)
+	}
+	second := strings.Index(out[first+len(fence):], fence)
+	if second < 0 {
+		t.Fatalf("expected closing frontmatter fence, got:\n%s", out)
+	}
+	frontmatter := out[first : first+len(fence)+second]
+	if !strings.Contains(frontmatter, "adr_citations") {
+		t.Errorf("expected adr_citations within the frontmatter region, got frontmatter:\n%s", frontmatter)
+	}
+}

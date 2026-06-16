@@ -625,6 +625,31 @@ func TestValidatePlan_EmptyCitations_WithoutFitness_IsError(t *testing.T) {
 	}
 }
 
+// TestValidatePlanCitationsWarnNamesKey (Spec 100 R4 AC2): the adr-citations
+// diagnostic emitted by ValidatePlan when citations are empty must name the
+// exact `adr_citations` frontmatter key, so the remedy is unambiguous. Reach
+// the empty-citations WARN branch via an empty-citations plan that still has an
+// ## ADR Fitness section.
+func TestValidatePlanCitationsWarnNamesKey(t *testing.T) {
+	tmp := t.TempDir()
+	makePlanWithSections(t, tmp, "", true, true, true, "", "")
+
+	r := ValidatePlan(tmp, "999-test")
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "adr-citations" {
+			found = true
+			if !strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected adr-citations message to name the adr_citations key, got: %q", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected an adr-citations diagnostic in the empty-citations branch")
+	}
+}
+
 // --- Spec 039: Testing Strategy section ---
 
 func TestValidatePlan_TestingStrategyMissing_IsError(t *testing.T) {
