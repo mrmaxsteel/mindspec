@@ -1,0 +1,9 @@
+{
+  "lens": "r1-retirement-safety",
+  "decision": "APPROVE",
+  "coverage_equivalent": true,
+  "migration_addressed": true,
+  "no_gap_reopened": true,
+  "blocking": [],
+  "summary": "R1 retires the PreToolUse precomplete hook entirely with NO enforcement gap reopened. (1) Coverage: the in-binary gate panelGate() in internal/complete/panel_advisory.go runs at complete.go:281, strictly BEFORE the first irreversible step (exec.CommitAll at :293, bd close at step 4, bead->spec merge at ~:616). It reads the DECLARED beadID argument so it covers EVERY invocation form (Claude-routed, codex, raw-shell), whereas the retired hook only fired on Claude-Code-routed Bash calls over a heuristically-guessed bead ID -- a strict subset. No scenario the hook caught is missed. (2) Hatches unchanged: panelGate honors panelSkipEnvFn (panel.SkipPanelEnv / MINDSPEC_SKIP_PANEL) and panelGateEnabled (enforcement.panel_gate); R1 touches neither. (3) Migration addressed: Scope (spec lines 156-158) + AC (line 191) explicitly require setup to idempotently REMOVE a pre-existing 'mindspec hook pre-complete' entry. The mechanism already exists -- removeStaleMindspecEntries derives its keep-list from wantedHooks(), so deleting the PreToolUse entry from wantedHooks() makes the stale entry removed-by-omission on next `mindspec setup`, mirroring the spec-072 retired-PreToolUse precedent in claude.go. This closes the stale-hook-fires-deleted-arm footgun. (4) Block parity intact: internal/complete does NOT import internal/hook (verified), and the shared internal/panel leaf decision is RETAINED untouched -- removing hook code cannot affect the authoritative path by construction. APPROVE."
+}

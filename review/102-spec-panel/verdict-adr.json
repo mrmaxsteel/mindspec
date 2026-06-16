@@ -1,0 +1,11 @@
+{
+  "lens": "adr-domains",
+  "decision": "APPROVE",
+  "domains_accurate": true,
+  "setup_domain": "workflow",
+  "all_files_owned": true,
+  "coverage_ok": true,
+  "amend_0036_recommended": false,
+  "blocking": [],
+  "summary": "Impacted Domains are accurate. CRITICAL setup check: internal/setup/** is owned by workflow (workflow/OWNERSHIP.yaml:13), NOT core or a third domain — the spec-101 internal/redact=core trap does NOT recur here. All R1 paths (internal/hook/**, internal/setup/**, cmd/**, internal/adr/**) are workflow-owned; R2's internal/harness/** is execution-owned (execution/OWNERSHIP.yaml:6). Verified no overlapping/conflicting ownership. The amended ADR-0037 markdown is a .mindspec/docs/** process artifact, skipped from divergence attribution (isProcessArtifact), so it does not trip an unowned/uncovered finding. ADR coverage: confirmed via the gate's real predicate coverageOf/IsDomainCovered in internal/validate/plan.go — a domain is coveredAccepted iff a cited Accepted ADR's Domains set contains it. ADR-0036 (Accepted; domains workflow,validation,doc-sync,ownership) covers workflow but NOT execution. ADR-0037 (Accepted; domains workflow,execution) covers BOTH. So execution is covered by ADR-0037 — citing ADR-0037 for the qcjf/harness change is a genuine domain-set match that satisfies the gate; coverage_ok. Amending ADR-0036 to add execution is NOT required: the gate only checks domain-set membership, not topical relevance, and ADR-0037 already provides Accepted execution coverage. It would be a nice honesty touch (0036 is the topical ZFC governor of the harness change) but is optional and out-of-scope; recommend NOT blocking on it. ADR-0037 amendment accuracy: current text (lines 65-68, 77-78) states the matcher is 'retained but non-authoritative, its retirement deferred to a follow-up bead' — R1's planned dated amendment recording that the retirement has now landed is the accurate, honest next entry. Self-consistency: every in-scope source file maps to exactly one declared domain; no self-block at complete. APPROVE."
+}
