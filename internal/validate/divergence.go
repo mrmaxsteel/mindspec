@@ -139,7 +139,24 @@ func ValidateDivergence(
 	// every domain directory under .mindspec/docs/domains/ so a file
 	// that lives outside the spec's stated scope is still surfaced as
 	// owned-but-uncovered rather than misclassified as unowned.
-	candidateDomains := append([]string(nil), meta.Domains...)
+	//
+	// Spec 100 R1 (mindspec-4ft2): normalize each declared
+	// Impacted-Domains entry to its owning-domain NAME at the SHARED
+	// helper before it becomes the candidate set. A file-path entry
+	// (e.g. internal/genevieve/review.py) is resolved to its owner via
+	// the per-domain OWNERSHIP paths: globs; a zero/multi-owner entry is
+	// a hard error. The candidate set stays the resolved DECLARED
+	// domains, so the per-file attributeDomain loop + blast-radius guard
+	// below are UNCHANGED: a changed file owned by a domain NOT in the
+	// resolved declared set still fails.
+	normalized, normErrs := normalizeImpactedDomains(exec, root, ownerRef, meta.Domains)
+	if len(normErrs) > 0 {
+		for _, e := range normErrs {
+			r.AddError("impacted-domains-resolve", e)
+		}
+		return r, nil
+	}
+	candidateDomains := normalized
 	if len(candidateDomains) == 0 {
 		// Ref-anchored enumeration (spec 095): a branch-only domain dir
 		// must be discovered from the diffed ref, not the ambient root.
