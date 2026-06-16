@@ -313,26 +313,12 @@ func wantedHooks() map[string][]map[string]any {
 				},
 			},
 		},
-		// PreToolUse pre-complete panel gate (Spec 093 Reqs 9-13,
-		// ADR-0037). Matches Bash tool calls and self-filters to
-		// `mindspec complete` command-position invocations; every other
-		// Bash command does zero work beyond the string match (HC-3).
-		// The matcher "Bash" is shared with user lint/guard hooks — the
-		// settings-merge identity (Bead 3) keys on command CONTENT, so
-		// this entry installs alongside user PreToolUse Bash hooks rather
-		// than clobbering them (HC-6).
-		"PreToolUse": {
-			{
-				"matcher": "Bash",
-				"hooks": []map[string]any{
-					{
-						"type":          "command",
-						"command":       "mindspec hook pre-complete",
-						"statusMessage": "Checking panel verdicts...",
-					},
-				},
-			},
-		},
+		// The PreToolUse `mindspec hook pre-complete` panel-gate entry was
+		// RETIRED (Spec 102 R1): the heuristic command-string matcher is gone
+		// and the in-binary `mindspec complete` gate (Spec 099) is the single
+		// authoritative enforcement point. Omitting it from the wanted set
+		// removes it from existing installs via removeStaleMindspecEntries
+		// (the spec-072 retired-hook precedent).
 	}
 }
 

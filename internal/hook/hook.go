@@ -52,7 +52,6 @@ type Input struct {
 // check are deterministic.
 var Names = []string{
 	"pre-commit",
-	"pre-complete",
 	"session-start",
 }
 
