@@ -32,14 +32,29 @@ to "here's your bead, here's the mode, here are your rules" in one step.
 Use --spec to filter ready work to a specific spec. If multiple active specs
 exist and no --spec is given, the command fails with a list of candidates.
 
+An optional positional bead ID is honored on BOTH paths:
+  - claim path (default): claim that bead — or error clearly if it is not
+    found / not in the ready set — instead of defaulting to the first ready item.
+  - --emit-only: build the primer for that bead without claiming.
+A positional bead ID and --pick are mutually exclusive selectors; supplying
+both is an error.
+
 Use --emit-only to build and emit a bead primer without claiming the bead,
 creating a worktree, or updating state. Ideal for multi-agent mode where a
-team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`,
+team lead spawns fresh agents per bead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pick, _ := cmd.Flags().GetInt("pick")
 		specFlag, _ := cmd.Flags().GetString("spec")
 		force, _ := cmd.Flags().GetBool("force")
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
+
+		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
+		// mutually exclusive selectors — the positional names a specific bead,
+		// --pick is an index into the ready set, and they may disagree. Reject
+		// the conflict up front (pure arg validation), before any gate or claim.
+		if len(args) > 0 && pick > 0 {
+			return fmt.Errorf("supply exactly one selector: a positional bead ID OR --pick, not both")
+		}
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -200,17 +215,29 @@ team lead spawns fresh agents per bead. Accepts an optional positional bead ID.`
 			return nil
 		}
 
-		// Step 4: Display and select
+		// Step 4: Display and select. Spec 101 R1 (mindspec-mfe0): when a
+		// positional bead ID is given it names the SPECIFIC bead the caller
+		// intends — resolve it from the already-fetched ready set (claim that
+		// bead or error), never fall through to items[0]/"Defaulting to first".
+		named := ""
+		if len(args) > 0 {
+			named = args[0]
+		}
 		if len(items) > 1 {
 			fmt.Printf("Ready work (%d items):\n", len(items))
 			fmt.Print(next.FormatWorkList(items))
 			fmt.Println()
-			if pick == 0 {
+			if pick == 0 && named == "" {
 				fmt.Println("Defaulting to first item. Use --pick=N to select a specific item.")
 			}
 		}
 
-		selected, err := next.SelectWork(items, pick)
+		var selected next.BeadInfo
+		if named != "" {
+			selected, err = next.SelectWorkByName(items, named)
+		} else {
+			selected, err = next.SelectWork(items, pick)
+		}
 		if err != nil {
 			return fmt.Errorf("selecting work: %w", err)
 		}

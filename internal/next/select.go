@@ -27,6 +27,21 @@ func SelectWork(items []BeadInfo, pick int) (BeadInfo, error) {
 	return items[0], nil
 }
 
+// SelectWorkByName selects the bead named by `name` from the already-fetched
+// ready `items` slice. It is the claim-path counterpart to SelectWork for when
+// the caller supplied a positional bead ID: the positional names a SPECIFIC
+// bead the caller intends, so it must resolve to exactly that bead or fail —
+// it MUST NOT fall through to items[0] (spec 101 R1 / mindspec-mfe0). A name
+// that is not in the ready set (not ready, or not found) returns a clear error.
+func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
+	for _, item := range items {
+		if item.ID == name {
+			return item, nil
+		}
+	}
+	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); it cannot be claimed via `mindspec next %s`", name, name)
+}
+
 // FormatWorkList returns a formatted numbered list of work items for display.
 func FormatWorkList(items []BeadInfo) string {
 	var result string
