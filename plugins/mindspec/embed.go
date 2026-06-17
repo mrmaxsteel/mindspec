@@ -1,4 +1,4 @@
-// Package pluginmindspec embeds the SKILL.md contents of the plugin's 7
+// Package pluginmindspec embeds the SKILL.md contents of the plugin's 8
 // skills so they can be shipped by `mindspec setup <agent>` alongside the
 // core lifecycle skills (defined in internal/setup/claude.go::skillFiles).
 //
@@ -60,7 +60,7 @@ func SkillNames() []string {
 }
 
 // sortStrings is a tiny stand-in for sort.Strings to avoid pulling sort into
-// this single-call surface. Insertion sort on N=7 is fine.
+// this single-call surface. Insertion sort on N=8 is fine.
 func sortStrings(a []string) {
 	for i := 1; i < len(a); i++ {
 		for j := i; j > 0 && a[j-1] > a[j]; j-- {

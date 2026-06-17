@@ -587,7 +587,7 @@ func fileExists(path string) bool {
 // The returned map merges two sources:
 //   - The 4 lifecycle gate skills inlined below (ms-spec-create,
 //     ms-spec-approve, ms-plan-approve, ms-impl-approve).
-//   - The 7 plugin skills embedded from plugins/mindspec/skills/ via
+//   - The 8 plugin skills embedded from plugins/mindspec/skills/ via
 //     pluginmindspec.SkillFiles() (ms-bead-* and ms-panel-* and ms-spec-*).
 //
 // Lifecycle skills always win on key collision (they're the canonical
@@ -619,6 +619,9 @@ managed-by: mindspec
 2. Run ` + "`mindspec spec create <id>`" + ` in the terminal (optionally with ` + "`--title \"...\"`" + `)
 3. If it fails, show the error and help the user fix it
 4. On success: begin drafting the spec (the init output includes guidance)
+5. As soon as the spec is scaffolded, automatically run the ms-spec-grill skill
+   to grill the author — this auto-invoke is the DEFAULT and fires unless the
+   author explicitly opts out. Do NOT merely reference ms-spec-grill; invoke it.
 `,
 
 		"ms-spec-approve": `---

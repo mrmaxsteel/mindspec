@@ -8,12 +8,13 @@ import (
 	"testing"
 )
 
-// TestSkillInventory_Eleven pins the spec-093 skills-thin-down target: the
-// merged skill surface is exactly 11 — 4 lifecycle gates + 7 plugin skills.
+// TestSkillInventory_Eleven pins the merged skill surface count: exactly 12 —
+// 4 lifecycle gates + 8 plugin skills (the spec-093 thin-down baseline of 7
+// plugin skills plus ms-spec-grill).
 func TestSkillInventory_Eleven(t *testing.T) {
 	all := skillFiles()
-	if len(all) != 11 {
-		t.Fatalf("skillFiles() must return 11 skills (spec 093), got %d: %v", len(all), keys(all))
+	if len(all) != 12 {
+		t.Fatalf("skillFiles() must return 12 skills (4 lifecycle + 8 plugin), got %d: %v", len(all), keys(all))
 	}
 	if n := len(lifecycleSkillFiles()); n != 4 {
 		t.Errorf("lifecycleSkillFiles() must return 4 lifecycle gates, got %d", n)
@@ -23,6 +24,7 @@ func TestSkillInventory_Eleven(t *testing.T) {
 		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve",
 		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-panel-run",
 		"ms-panel-tally", "ms-spec-autopilot", "ms-spec-final-review",
+		"ms-spec-grill",
 	}
 	for _, name := range want {
 		if _, ok := all[name]; !ok {
@@ -182,6 +184,49 @@ func TestInstallSkills_RefreshesPreviouslyShipped(t *testing.T) {
 	}
 	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-approve", "SKILL.md")) {
 		t.Errorf("Refreshed should record ms-spec-approve; got %v", r.Refreshed)
+	}
+}
+
+// TestInstallSkills_RefreshesPriorSpecCreateSnapshot covers the grill
+// auto-chain propagation (spec 105): an existing install carries the PRIOR
+// canonical ms-spec-create body — with the `managed-by: mindspec` marker but
+// WITHOUT the step-5 ms-spec-grill auto-invoke — recorded byte-exact in
+// historical_skills/ms-spec-create.md. installSkills must recognize it as a
+// shipped snapshot and refresh it in place to the new canonical (which invokes
+// ms-spec-grill), NOT leave it as user-modified.
+func TestInstallSkills_RefreshesPriorSpecCreateSnapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// The prior shipped body lives in historical_skills/ms-spec-create.md.
+	priorVariants := previouslyShippedSkills()["ms-spec-create"]
+	var prior string
+	for _, v := range priorVariants {
+		if strings.Contains(v, "managed-by: mindspec") && !strings.Contains(v, "ms-spec-grill") {
+			prior = v
+			break
+		}
+	}
+	if prior == "" {
+		t.Fatal("expected a historical ms-spec-create snapshot carrying the managed-by marker without the step-5 ms-spec-grill auto-invoke")
+	}
+	writeExisting(t, skillsDir, "ms-spec-create", prior)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := lifecycleSkillFiles()["ms-spec-create"]
+	got := readSkill(t, skillsDir, "ms-spec-create")
+	if got != canonical {
+		t.Errorf("prior ms-spec-create snapshot not refreshed to canonical content;\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "ms-spec-grill") {
+		t.Errorf("refreshed ms-spec-create must carry the step-5 ms-spec-grill auto-invoke; got:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-create", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-create; got %v", r.Refreshed)
 	}
 }
 
