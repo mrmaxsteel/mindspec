@@ -587,7 +587,7 @@ func fileExists(path string) bool {
 // The returned map merges two sources:
 //   - The 4 lifecycle gate skills inlined below (ms-spec-create,
 //     ms-spec-approve, ms-plan-approve, ms-impl-approve).
-//   - The 7 plugin skills embedded from plugins/mindspec/skills/ via
+//   - The 8 plugin skills embedded from plugins/mindspec/skills/ via
 //     pluginmindspec.SkillFiles() (ms-bead-* and ms-panel-* and ms-spec-*).
 //
 // Lifecycle skills always win on key collision (they're the canonical

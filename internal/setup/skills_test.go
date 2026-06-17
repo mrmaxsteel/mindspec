@@ -8,12 +8,13 @@ import (
 	"testing"
 )
 
-// TestSkillInventory_Eleven pins the spec-093 skills-thin-down target: the
-// merged skill surface is exactly 11 — 4 lifecycle gates + 7 plugin skills.
+// TestSkillInventory_Eleven pins the merged skill surface count: exactly 12 —
+// 4 lifecycle gates + 8 plugin skills (the spec-093 thin-down baseline of 7
+// plugin skills plus ms-spec-grill).
 func TestSkillInventory_Eleven(t *testing.T) {
 	all := skillFiles()
-	if len(all) != 11 {
-		t.Fatalf("skillFiles() must return 11 skills (spec 093), got %d: %v", len(all), keys(all))
+	if len(all) != 12 {
+		t.Fatalf("skillFiles() must return 12 skills (4 lifecycle + 8 plugin), got %d: %v", len(all), keys(all))
 	}
 	if n := len(lifecycleSkillFiles()); n != 4 {
 		t.Errorf("lifecycleSkillFiles() must return 4 lifecycle gates, got %d", n)
@@ -23,6 +24,7 @@ func TestSkillInventory_Eleven(t *testing.T) {
 		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve",
 		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-panel-run",
 		"ms-panel-tally", "ms-spec-autopilot", "ms-spec-final-review",
+		"ms-spec-grill",
 	}
 	for _, name := range want {
 		if _, ok := all[name]; !ok {
