@@ -1,9 +1,0 @@
-{
-  "lens": "scope",
-  "decision": "APPROVE",
-  "scope_clean": true,
-  "four_independent_beads": true,
-  "no_file_overlap": true,
-  "blocking": [],
-  "summary": "4 requirements map 1:1 to 4 already-filed P3 beads (R1=o7tp/gitutil, R2=vn4n/doctor, R3=y4l9/next, R4=7rih/phase), each a small independent fix in a different package touching a different file with ZERO overlap (gitops.go / beads.go / select.go / cache.go) and zero cross-imports. All four beads are status=open, priority=3, with empty depends_on and blocked_by - no false coupling. R3 and R4 are 'lifecycle-adjacent' only by theme, not by code path: select.go (next claim-by-name) and cache.go (phase derivation) share no symbol, file, or import, so they are cleanly separable. The 'follow-up polish batch' shape is sensible and right-sized: 4 verifiable-via-existing-seam one-package fixes deferred from specs 101/095, none changing a public contract or happy path; no requirement is large enough to warrant a split, and none should merge (different subsystems). Exclusions correctly honored: the adwu golangci-in-gates process change is a Non-Goal ('separate spec'); the gitutil exec.CommandContext wall-clock timeout is explicitly OUT (R1 design decision, may be filed as follow-up); the In-Scope file list matches exactly with no creep. One non-blocking observation: cache.go:182 fetchAllEpics carries the same narrow open,in_progress,closed status set as the fetchChildren bug, but it feeds epic enumeration, not DerivePhaseFromChildren, so it is a distinct concern correctly left out of R4's child-count-drift scope (R4 is scoped to fetchChildren + a blocked-child test, matching bead 7rih). Recommend noting fetchAllEpics breadth as a potential future follow-up, but it is not a gap in this spec's stated goal."
-}
