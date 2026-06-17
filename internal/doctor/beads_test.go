@@ -928,6 +928,7 @@ func TestCheckBdSchemaDrift_RegexBroadenedPhrasings(t *testing.T) {
 		{"unknown-table", `unknown table "issues"`, true},
 		{"mysql-error-1054", `Error 1054: Unknown column 'depends_on_id' in 'field list'`, true},
 		// Benign / unrelated failures → must NOT match (no false-warn).
+		{"error-1054-substring", "Error 10548: transient", false},
 		{"unrelated-transient", "Error: some unrelated runtime failure", false},
 		{"connection-refused", "Error: connection refused", false},
 		{"db-locked", "Error: database is locked", false},

@@ -334,7 +334,7 @@ func checkBdVersionFloor(r *Report, root string) {
 // benign transient error (connection refused, db locked, deadline exceeded,
 // "some unrelated runtime failure") still does NOT match and the probe stays
 // OK/skip rather than false-warning.
-var bdSchemaDriftRE = regexp.MustCompile(`(?i)((column|table)\s+"?[\w.]+"?\s+could not be found|no such (column|table)|unknown (column|table)|error 1054)`)
+var bdSchemaDriftRE = regexp.MustCompile(`(?i)((column|table)\s+"?[\w.]+"?\s+could not be found|no such (column|table)|unknown (column|table)|error 1054\b)`)
 
 // checkBdSchemaDrift runs a cheap read-only bd probe and, when it fails with a
 // recognizable schema-error class, warns that the bd binary's schema
