@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -77,6 +78,12 @@ var (
 	// mindspec-098-bd-committed-read.
 	doltCommitFn      = bead.DoltCommit
 	verifyCommittedFn = defaultVerifyCommitted
+	// findOrphanedClosedBeadsFn detects sibling lifecycle beads closed via a
+	// bare `bd close` (without `mindspec complete`) — their bead/<id> branch
+	// exists and is NOT merged into the spec branch (bead mindspec-4gsz). The
+	// shared predicate is reused by `mindspec next` and `mindspec doctor`.
+	// Tests swap this to drive the chicken-and-egg guard without a real repo.
+	findOrphanedClosedBeadsFn = lifecycle.FindOrphanedClosedBeads
 )
 
 // defaultVerifyCommitted is the production committed-state verifier for the
@@ -228,6 +235,22 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// Derive spec branch from conventions
 	specBranch := workspace.SpecBranch(specID)
+
+	// 1.6. bd_close lifecycle-bypass guard (bead mindspec-4gsz). Before ANY
+	// mutation, block if some OTHER sibling bead under this epic was closed
+	// without `mindspec complete` — its bead/<id> branch exists and is NOT an
+	// ancestor of the spec branch, so its work is unmerged and ungated. The
+	// shared predicate (also used by `mindspec next` and `mindspec doctor`)
+	// applies the IsAncestor confirmation so a benign merged-but-undeleted
+	// branch is not flagged. excludeBeadID = beadID avoids the chicken-and-egg
+	// of blocking on the very bead being completed (it may itself be an
+	// orphaned-yet-being-recovered branch — that is exactly what this run
+	// converges).
+	if orphans := findOrphanedClosedBeadsFn(specID, root, beadID); len(orphans) > 0 {
+		o := orphans[0]
+		return nil, fmt.Errorf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s (closed-but-unmerged).\nRun `mindspec complete %s` to recover, then re-run `mindspec complete %s`.",
+			o.BeadID, o.BeadBranch, o.SpecBranch, o.BeadID, beadID)
+	}
 
 	// 2. Find worktree matching bead (needed for commit/clean-tree paths).
 	// The same resolution also pins beadHead — the ref the per-bead

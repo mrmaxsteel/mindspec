@@ -93,6 +93,7 @@ func RunWithOptions(root string, opts Options) *Report {
 	checkOwnershipManifests(r, root)
 	checkSourceGlobs(r, root)
 	checkBeads(r, root)
+	checkOrphanedBeads(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)
