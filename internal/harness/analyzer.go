@@ -541,32 +541,14 @@ func PlanFidelity(planPath string, events []ActionEvent) (float64, error) {
 	}
 
 	content := string(data)
-	expectedPaths := extractMentionedPaths(content)
 	expectedCommands := extractMentionedCommands(content)
 
-	if len(expectedPaths)+len(expectedCommands) == 0 {
+	if len(expectedCommands) == 0 {
 		return 1.0, nil // no expectations means perfect fidelity
 	}
 
-	total := len(expectedPaths) + len(expectedCommands)
+	total := len(expectedCommands)
 	matched := 0
-
-	// Check which expected paths were touched
-	touchedPaths := make(map[string]bool)
-	for _, e := range events {
-		if e.ToolName == "Write" || e.ToolName == "Edit" || e.ToolName == "Read" {
-			if path, ok := e.Args["file_path"]; ok {
-				touchedPaths[path] = true
-				// Also match by basename
-				touchedPaths[filepath.Base(path)] = true
-			}
-		}
-	}
-	for _, p := range expectedPaths {
-		if touchedPaths[p] || touchedPaths[filepath.Base(p)] {
-			matched++
-		}
-	}
 
 	// Check which expected commands were run
 	ranCommands := make(map[string]bool)
@@ -689,30 +671,6 @@ func isInfrastructureCmd(e ActionEvent) bool {
 func containsCWDMain(cwd string) bool {
 	// Heuristic: if CWD does NOT contain ".worktrees/" it's likely the main repo
 	return cwd != "" && !strings.Contains(cwd, ".worktrees/")
-}
-
-func extractMentionedPaths(content string) []string {
-	var paths []string
-	seen := make(map[string]bool)
-
-	for _, line := range strings.Split(content, "\n") {
-		// Look for file-like references (containing / and a file extension)
-		words := strings.Fields(line)
-		for _, w := range words {
-			w = strings.Trim(w, "`\"'(),[]")
-			if strings.Contains(w, "/") && (strings.Contains(w, ".go") ||
-				strings.Contains(w, ".ts") || strings.Contains(w, ".js") ||
-				strings.Contains(w, ".py") || strings.Contains(w, ".yaml") ||
-				strings.Contains(w, ".yml") || strings.Contains(w, ".md") ||
-				strings.Contains(w, ".json")) {
-				if !seen[w] {
-					paths = append(paths, w)
-					seen[w] = true
-				}
-			}
-		}
-	}
-	return paths
 }
 
 func extractMentionedCommands(content string) []string {
