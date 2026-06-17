@@ -17,5 +17,6 @@ paths:
   - cmd/**
   - plugins/mindspec/**
   - .claude/skills/**
+  - .agents/skills/**
   - scripts/bd-jsonl-merge-driver.sh
   - .mindspec/docs/domains/workflow/OWNERSHIP.yaml
