@@ -1,0 +1,32 @@
+{
+  "lens": "testability",
+  "decision": "APPROVE",
+  "per_ac": [
+    {
+      "req": "R1",
+      "hermetic": true,
+      "machinery": "execCommand seam (internal/gitutil/gitops_test.go swapExec L276-292 / swapExecFunc L1033-1048) + a small test-only extension",
+      "note": "Pinnable but NOT with capturedCall/swapExec EXACTLY as-written: capturedCall (L267-270) records only name+args, has NO env field, and the stub records the struct at call time then returns a FRESH exec.Command(\"/bin/sh\",...). Production sets cmd.Env=append(os.Environ(),\"GIT_TERMINAL_PROMPT=0\") on the Cmd AFTER execCommand returns (no helper sets .Env today; grep confirms zero existing GIT_TERMINAL_PROMPT / .Env in gitops.go), so the stub's captured struct never sees it. The env IS observable: the implementer retains the returned *exec.Cmd in the stub (or adds an env field captured lazily) and asserts .Env contains GIT_TERMINAL_PROMPT=0 after the FetchRemote/PushBranch/DetectDefaultBranch(remote-show) call. This is a mechanical test-machinery add, NOT a production redesign — production mutates the same Cmd object the stub returns and the test can hold. AC1 wording (\"threaded through the execCommand seam so it is assertable\") and AC2 (success path / non-zero-exit fallback unchanged, already covered by existing TestFetchRemote L1062-1077 and TestDefaultBranch_* L1082-1144) both achievable. Non-blocking caveat: AC1 should make the env-capture-seam addition explicit so the implementer doesn't try to assert via the unmodified capturedCall and find env invisible."
+    },
+    {
+      "req": "R2",
+      "hermetic": true,
+      "machinery": "bdSchemaDriftRE.MatchString table test + stubBd/stubBdFail (beads_test.go L867-877) + fakeBdDir (L932-939) + t.Setenv(PATH) + os.Symlink",
+      "note": "Regex broadening is a pure MatchString table test (no/few new fixtures): feed `no such column`, `unknown column`, `Error 1054` => true; an unrelated transient (`Error: some unrelated runtime failure`, already in TestCheckBdSchemaDrift_UnrelatedFailureSkips L913) => still false. checkMultipleBdOnPath reads os.Getenv(PATH) + real os.Stat/EvalSymlinks (beads.go L388-417) — the symlink/dup-PATH dedup test is a near-trivial extension of TestCheckMultipleBdOnPath_SingleBinary (L959-972): one real fakeBdDir, a second PATH entry that is a symlink to it (or the same dir duplicated) => exactly-one-bd, Status OK, no Warn. All seams (fakeBdDir, t.Setenv, os.Symlink) present and hermetic."
+    },
+    {
+      "req": "R3",
+      "hermetic": true,
+      "machinery": "SelectWorkByName pure function (internal/next/select.go L36-43) + existing next_test patterns (L168-196)",
+      "note": "Pure function over an in-memory []BeadInfo, zero I/O. Test mirrors TestSelectWorkByName_NamedInSetNotFirst/NamedNotInSet: items with ID `mindspec-xxxx`; assert SelectWorkByName(items,\"xxxx\") and SelectWorkByName(items,\"mindspec-xxxx\") both return that bead; a name in neither form returns the not-in-ready-set error and never falls through to items[0]. Fully hermetic."
+    },
+    {
+      "req": "R4",
+      "hermetic": true,
+      "machinery": "SetListJSONForTest (internal/phase/derive.go L33-38) injecting listJSONFn behind fetchChildren (cache.go L194-195) + cache_test.go patterns (L18,159,208)",
+      "note": "fetchChildren routes through listJSONFn (cache.go L195), stubbed via SetListJSONForTest — the exact seam cache_test.go already uses pervasively. Test: stub returns a JSON child list including one status=blocked child, call Cache.GetChildren/fetchChildren, assert the blocked child is in the result. To pin the breadth claim, the stub can also capture the args slice and assert the --status arg carries bead.AllStatuses breadth (open,in_progress,blocked,closed[+customs]) rather than the legacy open,in_progress,closed. Both the inclusion and the argv-breadth assertion are hermetic with the existing seam."
+    }
+  ],
+  "blocking": [],
+  "summary": "APPROVE. R2/R3/R4 are fully hermetically pinnable with EXISTING machinery: SelectWorkByName is a pure function; bdSchemaDriftRE is a pure MatchString table test and checkMultipleBdOnPath's symlink/dup-PATH dedup is a trivial extension of TestCheckMultipleBdOnPath_SingleBinary using the in-repo fakeBdDir + t.Setenv(PATH) + os.Symlink; fetchChildren's blocked-child inclusion rides the same SetListJSONForTest seam cache_test.go already exercises. R1 is the one caveat: it IS hermetically pinnable, but the env assertion is NOT possible with capturedCall/swapExec EXACTLY as-written — capturedCall has no env field and the stub returns a fresh Cmd recorded before production sets cmd.Env. The fix is a mechanical test-only seam extension (retain the returned *exec.Cmd and assert .Env contains GIT_TERMINAL_PROMPT=0), with no production redesign, and the AC already mandates the env be \"threaded through the execCommand seam so it is assertable.\" Non-blocking nit: AC1 would be sharper if it named the capturedCall/stub env-capture addition explicitly, so the implementer doesn't attempt to assert through the unmodified seam (where env is invisible) and conclude it can't be pinned. No blocking testability defects."
+}

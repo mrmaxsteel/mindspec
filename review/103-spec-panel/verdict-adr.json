@@ -1,0 +1,9 @@
+{
+  "lens": "adr-domains",
+  "decision": "APPROVE",
+  "domains_accurate": true,
+  "all_files_owned": true,
+  "coverage_ok": true,
+  "blocking": [],
+  "summary": "Impacted Domains {execution, workflow, core} accurate. All four in-scope files map cleanly to declared domains: internal/gitutil/gitops.go (R1) -> execution (OWNERSHIP: internal/gitutil/**); internal/doctor/beads.go (R2) + internal/next/select.go (R3) -> workflow (internal/doctor/**, internal/next/**); internal/phase/cache.go (R4) -> core (internal/phase/**). R4 trap cleared: cache.go does NOT import internal/complete; queryAllChildren stays in internal/complete (workflow, Out-of-Scope and unchanged). R4's fix calls bead.AllStatuses(root), and internal/phase already imports internal/bead (in derive.go/migrate.go); internal/bead is owned by execution (declared), and CustomStatuses(root) reads .beads/config.yaml with no internal/complete dependency, so no UNDECLARED domain (the spec-101 internal/redact=core trap does not recur). ADR coverage complete: execution covered by ADR-0035 (Accepted; domains workflow,execution,core) + ADR-0030 (Accepted; execution); workflow by ADR-0035 + ADR-0023 (Accepted; workflow,git,state); core by ADR-0035. ADR-0023 is RELEVANT (its workflow domain intersects the impacted set) and Accepted, so adr-cite-irrelevant is not tripped; ADR-0023 line 108 explicitly enumerates blocked children in the plan-phase derivation that R4 restores, confirming genuine relevance. All cited ADR file paths resolve. Self-consistency: every changed file is owned by a declared domain -> no self-block at complete. Note: implementation is not yet present (only spec.md + issues.jsonl differ from main); review is of the spec's declarations, which are sound."
+}

@@ -1,0 +1,29 @@
+{
+  "lens": "requirements",
+  "decision": "APPROVE",
+  "bug_reverify": [
+    {
+      "req": "R1",
+      "present": true,
+      "evidence": "internal/gitutil/gitops.go FetchRemote (L239-249), PushBranch (L294-304), and DetectDefaultBranch's `git remote show` fall-through (L277) set NO cmd.Env at all — execCommand returns a vanilla exec.Cmd with no GIT_TERMINAL_PROMPT=0. On a slow/auth-required origin git can prompt on stdin and hang. AC1 (env present in cmd.Env, asserted via execCommand seam) + AC2 (success path unchanged) fix it. Requirement scopes exactly fetch/push/remote-show + the symbolic-ref uniformity resolved in Open Question; design decision (env not timeout) is justified and bounded."
+    },
+    {
+      "req": "R2",
+      "present": true,
+      "evidence": "internal/doctor/beads.go bdSchemaDriftRE (L326) = `(?i)(column|table)\\s+\"?[\\w.]+\"?\\s+could not be found` — matches ONLY the Dolt `could not be found` phrasing; `no such column` (SQLite), `unknown column`, and `Error 1054` (MySQL/Dolt) all fall through checkBdSchemaDrift's MatchString gate (L362) and soft-skip to OK (L365-370), so real drift in those phrasings is undetected. checkMultipleBdOnPath (L388-440) has the EvalSymlinks + seenResolved + seenDir dedup but no direct test exists. Req broadens the regex conservatively (still false on unrelated transient errors) + adds the hermetic symlink/dup-PATH test; ACs match."
+    },
+    {
+      "req": "R3",
+      "present": true,
+      "evidence": "internal/next/select.go SelectWorkByName (L36-43) loops `if item.ID == name` only — an exact match. A short-form `xxxx` (vs stored `mindspec-xxxx`) misses every item and hits the not-in-ready-set error (L42). Req's suffix-aware match (item.ID == name OR item.ID ends with `-`+name) resolves both forms against whatever prefix the ready set carries, invents no helper, preserves the never-fall-through-to-items[0] guarantee (spec 101 R1). AC pins both forms + still-not-found. Design decision correctly rejects a hardcoded `mindspec-` literal (prefix is filepath.Base(root)-derived)."
+    },
+    {
+      "req": "R4",
+      "present": true,
+      "evidence": "internal/phase/cache.go fetchChildren (L194-195) issues `bd list --parent <id> --status=open,in_progress,closed -n 0` — OMITS blocked + customs. The reference path complete.go queryAllChildren (L856-857) iterates bead.AllStatuses(root) = BuiltinStatuses{open,in_progress,blocked,closed} + CustomStatuses (config.go:456-471), so it DOES include blocked+customs. Cache.GetChildren (L118-127) calls fetchChildren and feeds DerivePhaseFromChildren at every derive.go call site (derive.go L150-154,230-234,355,402-404,721). Mismatch confirmed; blocked children are dropped from the cache before derivation. Req aligns fetchChildren to AllStatuses; SetListJSONForTest seam exists (derive.go:34) for the blocked-child AC."
+    }
+  ],
+  "r4_rootcause_accurate": true,
+  "blocking": [],
+  "summary": "All four defects independently re-verified present in current code at the exact cited locations; none already-fixed or misdescribed. R4 root cause is accurate: fetchChildren (cache.go:194) queries the narrow open,in_progress,closed set while queryAllChildren (complete.go:856) uses bead.AllStatuses (open,in_progress,blocked,closed+customs), and fetchChildren feeds DerivePhaseFromChildren via Cache.GetChildren, so blocked/custom children are silently dropped. DerivePhaseFromChildren counts lifecycleTotal and the all-closed branch over the children it receives, so a dropped blocked child can flip a 'review' to a different phase — the skew claim and ADR-0023 blocked-counting reference hold. Requirements + ACs map 1:1 to each defect via hermetic seams (execCommand, bdSchemaDriftRE, SelectWorkByName, SetListJSONForTest). Scope/Non-Goals are crisp (timeout deferred, no new helper, no DerivePhase rule change)."
+}
