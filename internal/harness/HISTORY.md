@@ -926,3 +926,41 @@ _No runs recorded yet. First row will be added after the initial harness executi
 | Date | Result | Events | Turns | Time | Model | Change |
 |------|--------|--------|-------|------|-------|--------|
 
+### Session Summary — 2026-06-17 Sonnet Full-Suite Audit (MS_HARNESS_MODEL)
+
+First whole-suite audit run under **Sonnet** (`claude-sonnet-4-6`) instead of the
+Haiku-tuned default, via the new `MS_HARNESS_MODEL` runtime override (agent.go).
+All 26 `TestLLM_*` scenarios were run one at a time. **Initial result: 19 PASS /
+7 FAIL.** Each failure was root-caused with read-only diagnosis subagents and
+deep-fixed (or classified as a known limitation):
+
+| Scenario | Diagnosis | Fix | Verified |
+|----------|-----------|-----|----------|
+| PrecommitReexportComplete | Sandbox lacked the production policy `export.git-add: false`, so `bd` auto-`git add`s its JSONL export. Sonnet's slower pacing pushes the first `mindspec complete` late enough that the bd auto-add lands *inside* the pre-complete scan window → spurious `assertNoManualArtifactCommit`. Not a loop, not drift, not agent misbehavior. | `bd config set export.git-add false` in `initBeads` (sandbox.go) — fixes it at the source for all scenarios | **PASS** 106s |
+| SpecToIdle | Spec 105's `ms-spec-create` auto-chains the interactive `ms-spec-grill`, which the sandbox installs. Headless run has no human to answer the grill's grounding question, so the agent stopped at turn ~4 and never finished the lifecycle. Agent behaved correctly per installed guidance. | Scenario prompt declares the run non-interactive (uses the documented step-5 opt-out seam); the grill still runs, applies a default grounding fix, and continues. Shipped skill unchanged. | **PASS** 799s |
+| MultipleActiveSpecs | No `TimeoutMin` set (inherited 10m default); 30 turns × Sonnet per-turn latency exceeds 10m. A single un-returned `claude -p` process — not a Go loop, not a hard-gate block (panel + doc-sync gates fail open in the sandbox). | `TimeoutMin: 20` (mirrors the full-lifecycle scenario's explicit budget) | **PASS** 907s |
+| MultiBeadDeps | Not a real failure — passes within its own 10m budget; the skill's `-timeout 5m` baseline was tighter than the scenario's budget. | none (methodology, see below) | PASS 467s @10m |
+| UnmergedBeadGuard | Same `-timeout 5m` artifact; passes at its 10m budget. | none (methodology) | PASS 381s @10m |
+| BlockedBeadTransition | Agent uses `bd close` instead of `mindspec complete` (guidance-resistant since March 2026; implement.md already forbids it explicitly). | Known limitation — bead `mindspec-4gsz`. Real fix = a PreToolUse hook intercepting `bd close` mid-lifecycle. | deferred |
+| ImplApprove | Same `bd close` shortcut. | Known limitation — bead `mindspec-4gsz`. | deferred |
+
+**Key methodology finding:** the `llm-test-fix` skill prescribes `-timeout 5m`,
+which is *tighter than the scenarios' own `TimeoutMin` budgets* (10–15m+). The
+runner honors `scenario.TimeoutMin` (scenario_test.go) as a per-scenario ctx
+deadline, but the go-test `-timeout` flag is a hard process cap that fires first
+when set lower. Under Sonnet's higher per-turn latency, 3 of the 7 "failures"
+were purely this artifact. Run audits with `-timeout` ≥ the slowest scenario's
+`TimeoutMin` (+ margin) so the per-scenario deadline governs and a clean partial
+transcript is captured instead of a bare panic.
+
+**Product note:** the `ms-spec-grill` auto-chain (spec 105) blocks *any* headless
+`mindspec spec create`, not just tests — including the orchestrator/autopilot.
+The test was fixed via the opt-out seam without touching the shipped skill; a
+built-in non-interactive guard for automated flows is a separate product
+decision (recommended, consistent with spec 105's own non-TTY-safety principle).
+Tracked as **`mindspec-0uur`** (a non-TTY guard in the `ms-spec-create` grill
+auto-chain), distinct from the `bd_close` limitation (`mindspec-4gsz`).
+
+**Infra:** `MS_HARNESS_MODEL` env override (agent.go) lets future audits swap the
+model under test suite-wide without editing each scenario's `Model` field.
+

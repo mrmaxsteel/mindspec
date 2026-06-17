@@ -354,6 +354,18 @@ func initBeads(t *testing.T, root string) {
 	if err != nil {
 		t.Logf("warning: bd init: %v\n%s", err, out)
 	}
+
+	// Match production project policy (.beads/config.yaml: export.git-add:
+	// false): bd's default is to `git add <export.path>` after each export. In
+	// the sandbox that auto-stages a stray root-level issues.jsonl, which is
+	// indistinguishable from an agent manually staging the beads artifact and
+	// trips contract-hardening detectors (e.g. assertNoManualArtifactCommit).
+	// Disabling it here keeps the sandbox faithful to the real project.
+	cfg := exec.Command(bdPath, "config", "set", "export.git-add", "false")
+	cfg.Dir = root
+	if cout, cerr := cfg.CombinedOutput(); cerr != nil {
+		t.Logf("warning: bd config set export.git-add false: %v\n%s", cerr, cout)
+	}
 }
 
 // bdCreateIssue is the JSON response from bd create --json.

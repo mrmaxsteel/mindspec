@@ -48,8 +48,16 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, sandbox *Sandbox, prompt stri
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
+	// Model selection: the scenario's per-scenario Model is the default, but
+	// MS_HARNESS_MODEL overrides it at runtime so an audit can run the whole
+	// suite under a different model (e.g. sonnet instead of the haiku default)
+	// without editing every scenario definition. Test-infra only.
+	model := opts.Model
+	if override := os.Getenv("MS_HARNESS_MODEL"); override != "" {
+		model = override
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
