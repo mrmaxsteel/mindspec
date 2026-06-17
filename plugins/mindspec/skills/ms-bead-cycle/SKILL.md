@@ -73,7 +73,7 @@ merge terminal         (panel-approved bead — mindspec complete)
 
 ## Merge terminal — `mindspec complete`
 
-The panel gate passed (`/ms-panel-tally` decided merge; the pre-complete hook enforces it). Close the bead in `bd`, merge `bead/<id>` into the spec branch, and remove the bead worktree — this is `mindspec complete` plus a one-line verify.
+The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec complete` gate enforces it). Close the bead in `bd`, merge `bead/<id>` into the spec branch, and remove the bead worktree — this is `mindspec complete` plus a one-line verify.
 
 1. **Run the merge.**
    ```bash
@@ -91,7 +91,7 @@ The panel gate passed (`/ms-panel-tally` decided merge; the pre-complete hook en
 
 3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).
 
-> The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: 092 Bead 5's honest user-dirt blocking and `FormatResult`'s closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the pre-complete hook's dirty-tree Block (Spec 093 Req 11). Don't re-add the checklist as prose.
+> The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: 092 Bead 5's honest user-dirt blocking and `FormatResult`'s closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the in-binary `mindspec complete` gate's dirty-tree Block (Spec 093 Req 11). Don't re-add the checklist as prose.
 
 **Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.
 
