@@ -908,6 +908,40 @@ func TestCheckBdSchemaDrift_Healthy(t *testing.T) {
 	}
 }
 
+func TestCheckBdSchemaDrift_RegexBroadenedPhrasings(t *testing.T) {
+	// bdSchemaDriftRE must recognize the common alternate vendor phrasings of a
+	// missing-column/table error (SQLite `no such`, MySQL/Dolt `unknown`, the
+	// MySQL `Error 1054` code) in addition to the Dolt `could not be found`
+	// phrasing — yet stay conservative so an unrelated transient bd failure
+	// (the `_UnrelatedFailureSkips` string) still does NOT match.
+	cases := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		// Drift signatures → must match.
+		{"dolt-could-not-be-found", `Error: column "depends_on_id" could not be found`, true},
+		{"dolt-table-could-not-be-found", `Error: table "issues" could not be found`, true},
+		{"sqlite-no-such-column", `Error: no such column: depends_on_id`, true},
+		{"sqlite-no-such-table", `Error: no such table: issues`, true},
+		{"unknown-column", `unknown column "depends_on_id"`, true},
+		{"unknown-table", `unknown table "issues"`, true},
+		{"mysql-error-1054", `Error 1054: Unknown column 'depends_on_id' in 'field list'`, true},
+		// Benign / unrelated failures → must NOT match (no false-warn).
+		{"unrelated-transient", "Error: some unrelated runtime failure", false},
+		{"connection-refused", "Error: connection refused", false},
+		{"db-locked", "Error: database is locked", false},
+		{"deadline-exceeded", "Error: context deadline exceeded", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bdSchemaDriftRE.MatchString(tc.out); got != tc.want {
+				t.Errorf("bdSchemaDriftRE.MatchString(%q) = %v, want %v", tc.out, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCheckBdSchemaDrift_UnrelatedFailureSkips(t *testing.T) {
 	// A bd that fails but with no schema-error signature must NOT false-warn;
 	// it is skipped (OK) so unrelated transient failures don't masquerade as
@@ -967,5 +1001,33 @@ func TestCheckMultipleBdOnPath_SingleBinary(t *testing.T) {
 	c := findCheck(r, "bd on PATH")
 	if c == nil || c.Status != OK {
 		t.Fatalf("got %+v, want OK", c)
+	}
+}
+
+// TestCheckMultipleBdOnPath_SymlinkDedup exercises the EvalSymlinks /
+// seenResolved dedup guard: a SINGLE real bd binary reachable via TWO PATH
+// entries (the real dir plus a symlink dir pointing at it) must resolve to
+// exactly one bd → OK, no false multi-bd Warn. The _SingleBinary test only
+// uses one dir and never crosses the symlink-resolution path.
+func TestCheckMultipleBdOnPath_SymlinkDedup(t *testing.T) {
+	real := fakeBdDir(t)
+	// A second PATH entry that is a symlink to the real dir: filepath.Join(link,
+	// "bd") and filepath.Join(real, "bd") EvalSymlinks to the same real file.
+	link := filepath.Join(t.TempDir(), "bdlink")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("os.Symlink unsupported on this platform: %v", err)
+	}
+	t.Setenv("PATH", real+string(os.PathListSeparator)+link)
+	root := beadsRoot(t, false)
+
+	r := &Report{}
+	checkMultipleBdOnPath(r, root)
+
+	c := findCheck(r, "bd on PATH")
+	if c == nil || c.Status != OK {
+		t.Fatalf("single bd via real dir + symlink dir should resolve to one bd (OK); got %+v", c)
+	}
+	if !strings.Contains(c.Message, "exactly one `bd` on PATH") {
+		t.Errorf("want the single-bd OK message; got %q", c.Message)
 	}
 }

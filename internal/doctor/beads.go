@@ -321,9 +321,20 @@ func checkBdVersionFloor(r *Report, root string) {
 // `column "depends_on_id" could not be found`. The version-floor check
 // (checkBdVersionFloor) cannot catch this: a binary can report a fresh
 // `--version` yet still query columns the live DB lacks (or vice versa).
-// Anchored on the `could not be found` phrasing for a missing column/table so
-// unrelated runtime failures don't masquerade as drift.
-var bdSchemaDriftRE = regexp.MustCompile(`(?i)(column|table)\s+"?[\w.]+"?\s+could not be found`)
+//
+// Anchored on a small set of DISTINCTIVE missing-column/table signatures so
+// unrelated runtime failures don't masquerade as drift:
+//   - `(column|table) "<name>" could not be found` — the Dolt phrasing.
+//   - `no such column` / `no such table`           — SQLite.
+//   - `unknown column` / `unknown table`            — MySQL / Dolt.
+//   - `Error 1054`                                  — the MySQL unknown-column
+//     error code (often emitted without the word "column" in front).
+//
+// Each alternative names "column"/"table" (or the 1054 code) explicitly, so a
+// benign transient error (connection refused, db locked, deadline exceeded,
+// "some unrelated runtime failure") still does NOT match and the probe stays
+// OK/skip rather than false-warning.
+var bdSchemaDriftRE = regexp.MustCompile(`(?i)((column|table)\s+"?[\w.]+"?\s+could not be found|no such (column|table)|unknown (column|table)|error 1054)`)
 
 // checkBdSchemaDrift runs a cheap read-only bd probe and, when it fails with a
 // recognizable schema-error class, warns that the bd binary's schema
