@@ -11,6 +11,8 @@ You are not a reviewer who writes a report at the end. You are a live interrogat
 
 This is a NEW single-responsibility skill (see **§ Relationship to ms-spec-create** below). It does the grilling; it does not scaffold and it does not approve.
 
+> Inspired by Matthew Pocock's [`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md) skill — relentless one-question-at-a-time interrogation grounded in the project's own docs and code. This skill adapts that technique to MindSpec spec authoring.
+
 ## Cardinal rule — ask ONE question at a time
 
 Ask **exactly one question at a time**. Never batch. Asking five questions in one message lets the author answer the easy one and ignore the hard four; one question at a time makes every gap inescapable.
