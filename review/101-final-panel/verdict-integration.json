@@ -1,0 +1,9 @@
+{
+  "lens": "integration",
+  "decision": "APPROVE",
+  "executor_coherent": true,
+  "redact_registered": true,
+  "suites_green": true,
+  "blocking": [],
+  "summary": "Cross-bead integration verified on the integrated spec/101 branch. (1) internal/executor/mindspec_executor.go cleanly contains BOTH bead sets: B2 RemoveBeadWorktreeAndRestore (L82) and B4 InitSpecWorkspace (L96) + specBranchBase (L142) + warnStaleBase (L162) calling gitutil.HasRemote/FetchRemote/DetectDefaultBranch; the gitutil import is present and neither merge clobbered the other (+72 lines, coherent). (2) internal/next coexistence: B1 SelectWorkByName (select.go L36, wired at next.go:237) and B3 ClaimBead (beads.go L169, called at next.go:247) both present in different files. (3) The release redaction fix-up is registered: redact.CommandTokens contains \"release\" (redact.go L84), release cmd has Use \"release <bead-id>\" and is AddCommand'd to rootCmd (root.go:230); TestRedactEnum_NoCobraDrift PASSES on the integrated branch, walking the live cobra tree (34 top-level cmds incl. release) -- the exact guard the fix-up commit 417e5566 satisfies. (4) go build ./... green; all 6 touched suites green: cmd/mindspec (24.1s), internal/next, internal/doctor, internal/executor, internal/gitutil, internal/redact -- no cobra-drift, no cwd test flake. (5) No ordering dependency violated: B4's gitutil additions and their executor consumers land in the same integrated tree; the review/ restore commit (7990cb94) recovered the panel tree a bead's `git add -A` had deleted, with no code impact."
+}

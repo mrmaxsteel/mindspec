@@ -1,0 +1,33 @@
+{
+  "lens": "ac-conformance",
+  "decision": "APPROVE",
+  "ac_findings": [
+    {
+      "req": "R1",
+      "met": true,
+      "evidence": "Shared helper internal/validate/ownership_resolve.go:72 normalizeImpactedDomains: rule1 keeps domain-dir entries verbatim (L108), rule2 keeps bare names (L116), rule3 glob-matches path-like entries via loadOwnershipForRef+matchesAny minus Exclude (L128-141), zero-owner ERROR (L149), >1-owner ambiguity ERROR naming conflicting owners (L154). Wired into divergence.go:152 (candidateDomains = normalized; per-file attributeDomain loop + blast-radius guard below UNCHANGED; empty-set fallback to resolveDomains preserved) and plan.go:144 ValidatePlan (impacted=normalized before both checkADRCoverage/checkADRCitations). Named-domain path unchanged. ParseSpec/contextpack untouched (no contextpack->validate edge).",
+      "test": "TestValidateDivergenceFilePathImpactedDomainResolves (file-path resolves, 0 unowned), TestValidateDivergenceNamedDomainUnchanged (099-style), TestValidateDivergenceGenuinelyUnownedStillFails (gate not disabled), TestValidateDivergenceZeroOwnerEntryErrors + TestCompleteRejectsUndeclaredDomainTouch + TestUnownedFileRejected (blast-radius intact), TestNormalizeImpactedDomains{KeepsDomainDirNameVerbatim,GlobResolvesPathEntry,ZeroOwnerErrors,AmbiguousOwnerErrors,KeepsBareNameWithoutManifest}, TestPlanCoverageFilePathImpactedResolves, TestCheckADRCitationsFilePathImpactedResolves, TestNormalizeZeroAndAmbiguousAtPlanGate"
+    },
+    {
+      "req": "R2",
+      "met": true,
+      "evidence": "plan.go:547 checkADRCoverage: when hasAcceptedCitation(store,citations) (new helper L569) the adr-coverage-missing message presents BOTH remedies (add domain to existing cited Accepted ADR Domain(s) line OR adr create); when no Accepted ADR cited, keeps the adr create-only hint.",
+      "test": "TestPlanCoverageHintMentionsExistingADR (asserts 'existing'+'domain'), TestPlanCoverageHintCreateWhenNoCitation (asserts 'mindspec adr create --domain payments')"
+    },
+    {
+      "req": "R3",
+      "met": true,
+      "evidence": "cmd/mindspec/adr.go:99 new adrReadStore overlays FindLocalRoot ADR dir over FindRoot main dir (NewOverlayStore branch-over-main); collapses to single FileStore in plain checkout. adrListCmd (L121) and adrShowCmd (L161) both call adrReadStore instead of FindRoot. internal/adr/parse.go UNCHANGED (L74 strings.Contains accepts both **Domain(s)**: forms).",
+      "test": "TestAdrShowWorktree_FindsWorktreeLocalADR, TestAdrListWorktree_ListsWorktreeLocalADR, TestAdrShowWorktree_StillFindsMainOnlyADR, TestAdrShowMainCheckout_StillWorks, TestParseADR_NonListDomainLine (asserts Domains==[foo,bar] for both list/non-list forms)"
+    },
+    {
+      "req": "R4",
+      "met": true,
+      "evidence": "internal/approve/spec.go:233 scaffoldPlan emits a commented adr_citations key block in frontmatter. plan.go:159/161 the adr-citations empty-citations WARN and ERROR both name the `adr_citations` frontmatter key.",
+      "test": "TestScaffoldPlanEmitsADRCitations (literal key inside frontmatter fences), TestValidatePlanCitationsWarnNamesKey (WARN text contains adr_citations)"
+    }
+  ],
+  "tests_pass": true,
+  "blocking": [],
+  "summary": "All 4 requirements (R1 5 ACs, R2 2, R3 2, R4 2) are satisfied by the merged spec/100 code, not merely claimed. R1 normalizes at one shared source (ownership_resolve.go) consumed by the divergence gate AND both plan-time gates; per-file attribution + blast-radius guard preserved unchanged; zero/ambiguous owners hard-error; named-domain + genuinely-unowned behave as before. R2 dual-remedy hint gated on hasAcceptedCitation. R3 worktree-aware overlay read store for show/list; parser untouched with a regression lock. R4 scaffold emits adr_citations + WARN/ERROR names the key. ADR-0032 amendment note authored and workflow added to its Domain(s). go build ./... succeeds; full pinning suite green across internal/validate, internal/approve, internal/adr, cmd/mindspec."
+}
