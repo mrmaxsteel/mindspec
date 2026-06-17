@@ -20,3 +20,4 @@ spec4	P3	SYNONYM	llm	Enable delivery of a notification	Req1 "Enable delivery" �
 spec4	P4	CONTRADICTION	llm	delivered exactly once per job	Req2 (exactly once, no duplicates) contradicts Req3 (at-least-once, may arrive more than once)
 spec4	P5	STRUCTURAL	both	### Out of Scope	Out of Scope is "(none)" — effectively empty
 spec4	P6	SEMANTIC	llm	Notifications behave the way users expect	AC1 "behave the way users expect" — unfalsifiable, no observable
+spec4	P7	CONTRADICTION	llm	dispatched before the job has finished running	Req5 (notification dispatched BEFORE the job finishes) contradicts AC4 (enqueued ONLY AFTER the job has fully completed) — novel temporal req-vs-AC ordering contradiction, not present in spec1-3 (those are req-vs-req)
