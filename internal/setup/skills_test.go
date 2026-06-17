@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// TestSkillInventory_Eleven pins the merged skill surface count: exactly 12 —
+// TestSkillInventory_Twelve pins the merged skill surface count: exactly 12 —
 // 4 lifecycle gates + 8 plugin skills (the spec-093 thin-down baseline of 7
 // plugin skills plus ms-spec-grill).
-func TestSkillInventory_Eleven(t *testing.T) {
+func TestSkillInventory_Twelve(t *testing.T) {
 	all := skillFiles()
 	if len(all) != 12 {
 		t.Fatalf("skillFiles() must return 12 skills (4 lifecycle + 8 plugin), got %d: %v", len(all), keys(all))
@@ -60,6 +60,32 @@ var removedNameToken = regexp.MustCompile(`ms-bead-next|ms-bead-merge|ms-bead-pr
 // These name a removed skill but are NOT live invocation references.
 var provenanceLine = regexp.MustCompile(`(?i)previously|folded|superseded|used to carry|no longer a skill|are folded`)
 
+// clauseSplit breaks a physical line into its sentence/clause fragments so the
+// HC-2 provenance exemption can be scoped to the SPECIFIC reference rather than
+// the whole line. Without this, a live removed-skill reference sharing a
+// physical line with an unrelated provenance keyword (e.g. a table row plus a
+// trailing fold-note) would be wrongly exempted (bug mindspec-5xnr).
+var clauseSplit = regexp.MustCompile(`[;.—\n]|\.\s`)
+
+// liveRemovedRefs returns the removed-skill references on a line that are NOT
+// in an HC-2 provenance context. A reference is exempt only when its OWN clause
+// carries a provenance keyword; a reference whose clause has no provenance
+// keyword is reported as live even if some other clause on the same physical
+// line does. Returns the offending clause fragments (trimmed) for diagnostics.
+func liveRemovedRefs(line string) []string {
+	var live []string
+	for _, clause := range clauseSplit.Split(line, -1) {
+		if !removedNameToken.MatchString(clause) {
+			continue
+		}
+		if provenanceLine.MatchString(clause) {
+			continue // documented fold/superseded mapping (HC-2), scoped to this clause
+		}
+		live = append(live, strings.TrimSpace(clause))
+	}
+	return live
+}
+
 // TestGrepClean_NoLiveRemovedSkillReferences is the binding grep-clean
 // acceptance criterion (spec 093 Req 16): no SURVIVING skill carries a LIVE
 // reference (handoff / prerequisite / table row) to a removed skill. The
@@ -69,13 +95,9 @@ var provenanceLine = regexp.MustCompile(`(?i)previously|folded|superseded|used t
 func TestGrepClean_NoLiveRemovedSkillReferences(t *testing.T) {
 	for name, content := range skillFiles() {
 		for i, line := range strings.Split(content, "\n") {
-			if !removedNameToken.MatchString(line) {
-				continue
+			for _, ref := range liveRemovedRefs(line) {
+				t.Errorf("skill %s line %d carries a live reference to a removed skill:\n  %s", name, i+1, ref)
 			}
-			if provenanceLine.MatchString(line) {
-				continue // documented fold/superseded mapping (HC-2)
-			}
-			t.Errorf("skill %s line %d carries a live reference to a removed skill:\n  %s", name, i+1, strings.TrimSpace(line))
 		}
 	}
 }
@@ -124,14 +146,59 @@ func TestGrepClean_NoLiveRemovedSkillReferences_ACSurfaces(t *testing.T) {
 			t.Fatalf("reading AC surface %s: %v", rel, err)
 		}
 		for i, line := range strings.Split(string(data), "\n") {
-			if !removedNameToken.MatchString(line) {
-				continue
+			for _, ref := range liveRemovedRefs(line) {
+				t.Errorf("%s line %d carries a live reference to a removed skill:\n  %s", rel, i+1, ref)
 			}
-			if provenanceLine.MatchString(line) {
-				continue // documented fold/superseded mapping (HC-2)
-			}
-			t.Errorf("%s line %d carries a live reference to a removed skill:\n  %s", rel, i+1, strings.TrimSpace(line))
 		}
+	}
+}
+
+// TestLiveRemovedRefs_PerReferenceExemption pins the mindspec-5xnr tightening:
+// the HC-2 provenance exemption is scoped per-REFERENCE (per clause), not
+// per-physical-line. A live removed-skill reference sharing a line with an
+// unrelated provenance keyword must STILL be FLAGGED, while a genuine
+// fold/superseded note remains exempt.
+func TestLiveRemovedRefs_PerReferenceExemption(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want []string // expected live (flagged) references
+	}{
+		{
+			// The bug case: a live invocation reference AND an unrelated
+			// provenance keyword on the SAME physical line. The old per-line
+			// exemption wrongly skipped this; per-reference must flag it.
+			name: "live ref sharing a line with an unrelated provenance keyword is flagged",
+			line: "Run `/ms-bead-next` to claim the next bead. Plan files were previously kept elsewhere.",
+			want: []string{"Run `/ms-bead-next` to claim the next bead"},
+		},
+		{
+			// Real HC-2 fold-note: the removed skill and its provenance keyword
+			// live in the SAME clause; must remain exempt.
+			name: "genuine fold-note stays exempt",
+			line: "Step 0 was previously the separate `/ms-panel-create` skill; it is folded in here.",
+			want: nil,
+		},
+		{
+			// Mixed line: a real fold-note clause (exempt) plus a separate live
+			// reference clause (flagged). Only the live clause is reported.
+			name: "fold-note clause exempt, live clause in same line flagged",
+			line: "These were previously `/ms-bead-merge`, folded in here; now run `/ms-spec-status` to check.",
+			want: []string{"now run `/ms-spec-status` to check"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := liveRemovedRefs(tc.line)
+			if len(got) != len(tc.want) {
+				t.Fatalf("liveRemovedRefs(%q) = %v; want %v", tc.line, got, tc.want)
+			}
+			for i := range tc.want {
+				if !strings.Contains(got[i], strings.TrimSpace(tc.want[i])) {
+					t.Errorf("flagged ref %d = %q; want it to contain %q", i, got[i], tc.want[i])
+				}
+			}
+		})
 	}
 }
 

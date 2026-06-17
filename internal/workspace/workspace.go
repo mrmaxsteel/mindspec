@@ -259,11 +259,6 @@ func SessionPath(root string) string {
 	return filepath.Join(root, ".mindspec", "session.json")
 }
 
-// FocusPath returns the path to .mindspec/focus under root.
-func FocusPath(root string) string {
-	return filepath.Join(root, ".mindspec", "focus")
-}
-
 // WorktreeKind describes the type of worktree context.
 const (
 	WorktreeMain = "main" // Main repository root
