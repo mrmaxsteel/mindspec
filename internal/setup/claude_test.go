@@ -19,10 +19,10 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Fatalf("RunClaude: %v", err)
 	}
 
-	// Should create settings.json, 4 lifecycle skill files, 7 plugin skill
-	// files, and CLAUDE.md = 13 items (spec 093: skills thinned 16 → 11).
-	if len(r.Created) != 13 {
-		t.Errorf("expected 13 created items, got %d: %v", len(r.Created), r.Created)
+	// Should create settings.json, 4 lifecycle skill files, 8 plugin skill
+	// files, and CLAUDE.md = 14 items (spec 093 thinned 16 → 11; +ms-spec-grill).
+	if len(r.Created) != 14 {
+		t.Errorf("expected 14 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -49,14 +49,15 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 		t.Error("retired PreToolUse pre-complete panel-gate hook should not be installed")
 	}
 
-	// Verify skill files exist — both the 4 lifecycle gates and the 7
-	// plugin skills (embedded from plugins/mindspec/skills/) = 11 (spec 093).
+	// Verify skill files exist — both the 4 lifecycle gates and the 8
+	// plugin skills (embedded from plugins/mindspec/skills/) = 12.
 	for _, name := range []string{
 		// Lifecycle gates
 		"ms-spec-create", "ms-spec-approve", "ms-plan-approve", "ms-impl-approve",
-		// Plugin skills (bead/panel/orchestrator)
+		// Plugin skills (bead/panel/orchestrator/grill)
 		"ms-bead-cycle", "ms-bead-fix", "ms-bead-impl", "ms-panel-run",
 		"ms-panel-tally", "ms-spec-autopilot", "ms-spec-final-review",
+		"ms-spec-grill",
 	} {
 		skillPath := filepath.Join(root, ".claude", "skills", name, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
@@ -98,8 +99,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 13 {
-		t.Errorf("second run should skip 13 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 14 {
+		t.Errorf("second run should skip 14 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 

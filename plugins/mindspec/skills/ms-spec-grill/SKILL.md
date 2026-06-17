@@ -19,6 +19,7 @@ Ask **exactly one question at a time**. Never batch. Asking five questions in on
 - **Refuse to advance** until the current answer is *concrete*. "I think so", "probably", "it should be fine", "we can figure that out later" are not answers — they are deferrals. Re-ask, narrowed, until you get a concrete, falsifiable answer or an explicit, recorded deferral.
 - Work top-to-bottom but loop back: a concrete answer to a later question often invalidates an earlier one. When it does, re-open the earlier item.
 - Keep score out loud: tell the author which requirements are still vague, which ACs still lack a runnable proof, and which Open Questions are unresolved. The grill is not complete until that list is empty.
+- Reconciling the dump with one-at-a-time: **emit the full tagged finding list ONCE up front** (so the author sees the whole scope), **then drive resolution ONE question at a time**. The single up-front dump is inventory; the one-question-at-a-time rule governs the interactive resolution that follows.
 
 ## Ground EVERYTHING live in the real repo (never from memory)
 
@@ -34,7 +35,7 @@ A claim you cannot ground in a file is a claim you reject.
 
 Validate **every** `## Impacted Domains` entry against the real domain set under `.mindspec/docs/domains/`.
 
-- **Reject invented domains.** If the author writes a domain that is not a directory under `.mindspec/docs/domains/` — e.g. "caching", "scheduling", "auth" when no such domain exists — reject it. Name the real domains that exist and ask which actual domain owns this work, or whether a new domain genuinely needs to be created (a heavy decision, not a typo).
+- **Reject invented domains.** If the author writes a domain that is not a directory under `.mindspec/docs/domains/` — e.g. "caching", "scheduling", "auth" when no such domain exists — reject it. Name the real domains that exist and ask which actual domain owns this work, or whether a new domain genuinely needs to be created (a heavy decision, not a typo). An invented/non-existent Impacted Domain is a repo-grounding failure: tag it **`[GROUNDING]`** (the domain does not exist in the tree), never `[STRUCTURAL]`.
 - **Map file-path entries to owners.** When an Impacted Domains entry is a file path or glob rather than a bare domain name, normalize it to its **owning domain** per the ADR-0036 (Ownership Discovery) model — look up which domain's `OWNERSHIP.yaml` claims that path. A path that no domain owns is itself a finding: either the wrong path, or an ownership gap the spec must close.
 - Cross-check that the domains the author declared actually match the files the spec will touch. A spec that edits `internal/setup/**` but never declares the domain that owns it is mis-scoped.
 
@@ -101,13 +102,21 @@ Format each finding as:
 [CATEGORY] "<verbatim span copied from the spec exactly as written>" — <your critique and the concrete fix you are coaching toward>
 ```
 
-Why this matters: the detection eval (`bench/grill/run_eval.sh`) credits a finding **deterministically**, with no LLM judge, by checking that (a) your `[CATEGORY]` tag matches the planted problem's category AND (b) the planted problem's anchor — a substring of the *fixture's own text* — appears in your finding line. If you paraphrase the span instead of quoting it verbatim, the anchor will not match and a real, correct finding will score as a false negative. **Quote the source span verbatim, every time, with the right category tag.** Categories:
+Why this matters: the detection eval (`bench/grill/run_eval.sh`) credits a finding **deterministically**, with no LLM judge, by checking that (a) your `[CATEGORY]` tag matches the planted problem's category AND (b) the planted problem's anchor — a substring of the *fixture's own text* — appears in your finding line. If you paraphrase the span instead of quoting it verbatim, the anchor will not match and a real, correct finding will score as a false negative. **Quote the source span verbatim, every time, with the right category tag.**
 
-- `[SEMANTIC]` — a requirement/AC that is vague or non-falsifiable in meaning ("works correctly", "behave as expected").
+**`[STRUCTURAL]` absence/aggregate carve-out.** A `[STRUCTURAL]` finding is about an *absence or aggregate* — a missing section, an empty section, fewer than 3 acceptance criteria, a placeholder — so there is no single sentence that "is" the finding. It still MUST anchor on a verbatim string that is a real substring of the fixture; never on an ellipsis, a summary, or a synthesized "AC1 …/AC2 …" paraphrase (that scores as a MISS because it is not a fixture substring). Specifically:
+
+- For a **"fewer than 3 (falsifiable) acceptance criteria"** finding, quote ONE real offending acceptance criterion **verbatim** (the exact AC text as written) and critique the floor in the prose.
+- For a **"missing/empty section"** finding, quote the **verbatim section heading** that is present-but-empty — e.g. `## Open Questions` — exactly as it appears in the fixture.
+- In every case the anchor is that exact verbatim string (a real substring of the fixture), never an ellipsis or a summary.
+
+Categories:
+
+- `[SEMANTIC]` — a requirement/AC that is vague or non-falsifiable in meaning by general reading, NOT one of the enumerated blocklist phrases ("works correctly", "behave as expected"). SEMANTIC = general vagueness/unfalsifiability that is not a known blocklist phrase.
 - `[SYNONYM]` — a synonym-dodge verb with no falsifiable behavior ("Enable resumable exports", "Support caching").
 - `[CONTRADICTION]` — two spans that cannot both hold; quote the span you are flagging (name the conflicting partner in the critique).
-- `[GROUNDING]` — a factual claim about the repo the tree does not support ("already prompts the author").
-- `[EXACT_PHRASE]` — a known bad phrase from the spec template / blocklist ("is fast", "reasonable time").
+- `[GROUNDING]` — a factual claim about the repo the tree does not support ("already prompts the author"). An invented/non-existent Impacted Domain (e.g. `caching`, `scheduling`, `auth` with no matching directory under `.mindspec/docs/domains/`) is tagged `[GROUNDING]`, NOT `[STRUCTURAL]`.
+- `[EXACT_PHRASE]` — a known bad phrase from the enumerated blocklist: `it works`, `works correctly`, `is fast`, `is robust`, `reasonable time`, `performance is acceptable`. If the offending text is one of these blocklist phrases, tag it `[EXACT_PHRASE]`; if it is general vagueness NOT on the blocklist, tag it `[SEMANTIC]`.
 - `[STRUCTURAL]` — a missing/empty section, < 3 ACs, an unresolved Open Question, a placeholder.
 
 ## Relationship to ms-spec-create
