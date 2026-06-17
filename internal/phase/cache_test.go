@@ -2,6 +2,7 @@ package phase
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,61 @@ func TestCache_GetChildren_MemoizesPerEpic(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("listJSON called %d times, want 2 (one per distinct epic ID)", calls)
+	}
+}
+
+// TestCache_GetChildren_IncludesBlockedChild pins R4 (mindspec-7rih): the
+// child-fetch must query the full bead.AllStatuses breadth (built-ins
+// open/in_progress/blocked/closed + customs) in ONE comma-joined bd list call,
+// so a blocked child is not dropped from the cache before
+// DerivePhaseFromChildren sees it. The genuinely-RED assertion (against the old
+// hardcoded "open,in_progress,closed") is that the captured --status arg
+// contains "blocked"; the stub returns the blocked child regardless of breadth,
+// so the inclusion check guards the parse/return path.
+func TestCache_GetChildren_IncludesBlockedChild(t *testing.T) {
+	var capturedStatus string
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if strings.HasPrefix(a, "--status=") {
+				capturedStatus = strings.TrimPrefix(a, "--status=")
+			}
+		}
+		return []byte(`[{"id":"b-blocked","title":"blocked child","status":"blocked","issue_type":"task"}]`), nil
+	})
+	defer restore()
+
+	c := NewCache()
+	kids, err := c.GetChildren("epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren(epic-1): %v", err)
+	}
+
+	// The blocked child must survive into the returned set.
+	found := false
+	for _, k := range kids {
+		if k.ID == "b-blocked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("GetChildren dropped the blocked child; got %+v", kids)
+	}
+
+	// The genuinely-RED assertion: the captured --status arg must cover the
+	// AllStatuses breadth (must include blocked), not the legacy
+	// open,in_progress,closed.
+	if capturedStatus == "" {
+		t.Fatalf("no --status= arg captured")
+	}
+	statuses := strings.Split(capturedStatus, ",")
+	hasBlocked := false
+	for _, s := range statuses {
+		if strings.TrimSpace(s) == "blocked" {
+			hasBlocked = true
+		}
+	}
+	if !hasBlocked {
+		t.Errorf("--status arg %q does not include blocked (AllStatuses breadth)", capturedStatus)
 	}
 }
 

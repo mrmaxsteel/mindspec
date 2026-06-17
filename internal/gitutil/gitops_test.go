@@ -264,9 +264,15 @@ func TestEnsureGitignoreEntry_ExistingFile(t *testing.T) {
 // --- Tests for new helpers added in ARCH-9 ---
 
 // capturedCall records a single execCommand invocation made during a test.
+//
+// cmd retains the *exec.Cmd the seam handed back to production. Spec 103 R1
+// (GIT_TERMINAL_PROMPT=0 hardening) sets cmd.Env AFTER execCommand returns, so
+// name+args alone cannot observe it; tests read (*capturedCall).cmd.Env once
+// the production call has completed to assert the env reached the child.
 type capturedCall struct {
 	name string
 	args []string
+	cmd  *exec.Cmd
 }
 
 // swapExec replaces execCommand for the test's duration, capturing every
@@ -279,14 +285,17 @@ func swapExec(t *testing.T, stdout string, exitCode int) *[]capturedCall {
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...)})
 		// Use /bin/sh to emit stdout and control exit code. Quote stdout
 		// safely via printf %s.
 		shArg := "printf %s " + shellQuote(stdout)
 		if exitCode != 0 {
 			shArg += "; exit " + itoa(exitCode)
 		}
-		return exec.Command("/bin/sh", "-c", shArg)
+		cmd := exec.Command("/bin/sh", "-c", shArg)
+		// Retain the returned cmd so a test can read cmd.Env AFTER production
+		// sets GIT_TERMINAL_PROMPT=0 on it (Spec 103 R1).
+		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...), cmd: cmd})
+		return cmd
 	}
 	return calls
 }
@@ -1036,13 +1045,16 @@ func swapExecFunc(t *testing.T, reply func(name string, args []string) (stdout s
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...)})
 		stdout, exitCode := reply(name, append([]string(nil), args...))
 		shArg := "printf %s " + shellQuote(stdout)
 		if exitCode != 0 {
 			shArg += "; exit " + itoa(exitCode)
 		}
-		return exec.Command("/bin/sh", "-c", shArg)
+		cmd := exec.Command("/bin/sh", "-c", shArg)
+		// Retain the returned cmd so a test can read cmd.Env AFTER production
+		// sets GIT_TERMINAL_PROMPT=0 on it (Spec 103 R1).
+		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...), cmd: cmd})
+		return cmd
 	}
 	return calls
 }
@@ -1141,4 +1153,87 @@ func TestDefaultBranch_BothSourcesFail(t *testing.T) {
 	if _, err := DetectDefaultBranch("origin"); err == nil {
 		t.Fatal("DetectDefaultBranch: expected error when both detection sources fail, got nil")
 	}
+}
+
+// --- Spec 103 Bead 1 (R1, o7tp): network ops fast-fail via GIT_TERMINAL_PROMPT=0 ---
+
+// assertNoPromptEnv asserts the captured child cmd carries GIT_TERMINAL_PROMPT=0
+// (so git fast-fails on a slow/auth-prompting origin instead of hanging on
+// stdin) AND that the inherited environment is preserved (e.g. PATH is still
+// present), proving the env was APPENDED to os.Environ() rather than clobbered.
+func assertNoPromptEnv(t *testing.T, c capturedCall) {
+	t.Helper()
+	if c.cmd == nil {
+		t.Fatalf("captured call %s %v: nil cmd (seam did not retain it)", c.name, c.args)
+	}
+	var sawNoPrompt, sawInherited bool
+	for _, kv := range c.cmd.Env {
+		if kv == "GIT_TERMINAL_PROMPT=0" {
+			sawNoPrompt = true
+		}
+		if strings.HasPrefix(kv, "PATH=") {
+			sawInherited = true
+		}
+	}
+	if !sawNoPrompt {
+		t.Errorf("%s %v: cmd.Env missing GIT_TERMINAL_PROMPT=0 (git can prompt/hang on stdin); env=%v", c.name, c.args, c.cmd.Env)
+	}
+	if !sawInherited {
+		t.Errorf("%s %v: cmd.Env missing inherited PATH (env was clobbered, not appended to os.Environ()); env=%v", c.name, c.args, c.cmd.Env)
+	}
+}
+
+// TestFetchRemote_SetsNoPromptEnv pins R1: FetchRemote's `git fetch` carries
+// GIT_TERMINAL_PROMPT=0 (appended, not clobbered). RED before the fix (no env
+// set), GREEN after.
+func TestFetchRemote_SetsNoPromptEnv(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := FetchRemote("origin"); err != nil {
+		t.Fatalf("FetchRemote: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "fetch", "origin")
+	assertNoPromptEnv(t, (*calls)[0])
+}
+
+// TestPushBranch_SetsNoPromptEnv pins R1 for PushBranch's `git push`.
+func TestPushBranch_SetsNoPromptEnv(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := PushBranch("bead/x.1"); err != nil {
+		t.Fatalf("PushBranch: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "push", "-u", "origin", "bead/x.1")
+	assertNoPromptEnv(t, (*calls)[0])
+}
+
+// TestDefaultBranch_SetsNoPromptEnv pins R1 for both network/credential ops
+// in DetectDefaultBranch: the cheap `git symbolic-ref` step AND the
+// `git remote show` fall-through both carry GIT_TERMINAL_PROMPT=0. Drives the
+// fall-through so both subprocesses are exercised in one run.
+func TestDefaultBranch_SetsNoPromptEnv(t *testing.T) {
+	calls := swapExecFunc(t, func(name string, args []string) (string, int) {
+		switch {
+		case hasArg(args, "symbolic-ref"):
+			return "", 1 // miss → fall through to remote show
+		case hasArg(args, "show"):
+			return "* remote origin\n  HEAD branch: develop\n", 0
+		default:
+			return "", 0
+		}
+	})
+	if _, err := DetectDefaultBranch("origin"); err != nil {
+		t.Fatalf("DetectDefaultBranch: unexpected error: %v", err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("expected 2 calls (symbolic-ref then remote show), got %d: %v", len(*calls), *calls)
+	}
+	assertArgs(t, (*calls)[0].args, "symbolic-ref", "refs/remotes/origin/HEAD")
+	assertNoPromptEnv(t, (*calls)[0])
+	assertArgs(t, (*calls)[1].args, "remote", "show", "origin")
+	assertNoPromptEnv(t, (*calls)[1])
 }

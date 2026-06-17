@@ -195,6 +195,94 @@ func TestSelectWorkByName_NamedNotInSet(t *testing.T) {
 	}
 }
 
+// A positional bead ID supplied in EITHER the short form ("xxxx") or the full
+// prefixed form ("mindspec-xxxx") resolves to the same ready bead, even when it
+// is not items[0]. RED before R3 (short form fails the exact `==` match).
+func TestSelectWorkByName_ShortAndFullForm(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-aaaa", Title: "First"},
+		{ID: "mindspec-xxxx", Title: "Target"},
+		{ID: "mindspec-bbbb", Title: "Third"},
+	}
+	for _, name := range []string{"xxxx", "mindspec-xxxx"} {
+		result, err := SelectWorkByName(items, name)
+		if err != nil {
+			t.Fatalf("SelectWorkByName(%q) unexpected error: %v", name, err)
+		}
+		if result.ID != "mindspec-xxxx" {
+			t.Errorf("SelectWorkByName(%q): expected mindspec-xxxx, got %s", name, result.ID)
+		}
+	}
+}
+
+// A suffix that matches no bead in NEITHER short nor full form returns the
+// not-in-ready-set error and never falls through to items[0] (spec 101 R1
+// guarantee preserved under suffix-aware matching).
+func TestSelectWorkByName_SuffixNotInSet(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-aaaa", Title: "First"},
+		{ID: "mindspec-bbbb", Title: "Second"},
+	}
+	result, err := SelectWorkByName(items, "zzzz")
+	if err == nil {
+		t.Fatalf("expected error for suffix not in ready set, got %v", result)
+	}
+	if result.ID == "mindspec-aaaa" {
+		t.Errorf("must not fall through to items[0]; got %s", result.ID)
+	}
+}
+
+// An exact full-ID match must win even when an EARLIER item in the slice
+// suffix-matches the same trailing segment. Exact intent is never shadowed by
+// a looser suffix match (e.g. claiming "mindspec-qmq" must not resolve to an
+// earlier "mindspec-mol-qmq" that shares the "-qmq" suffix).
+func TestSelectWorkByName_ExactWinsOverEarlierSuffix(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-mol-qmq", Title: "Earlier suffix match"},
+		{ID: "mindspec-qmq", Title: "Exact target"},
+	}
+	result, err := SelectWorkByName(items, "mindspec-qmq")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ID != "mindspec-qmq" {
+		t.Errorf("exact match must win; expected mindspec-qmq, got %s", result.ID)
+	}
+}
+
+// A SHORT form that suffix-matches more than one ready item is genuinely
+// ambiguous: return an error (telling the caller to qualify with the full ID)
+// rather than silently claim an order-dependent arbitrary bead.
+func TestSelectWorkByName_AmbiguousShortFormErrors(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-mol-qmq", Title: "First suffix match"},
+		{ID: "mindspec-qmq", Title: "Second suffix match"},
+	}
+	result, err := SelectWorkByName(items, "qmq")
+	if err == nil {
+		t.Fatalf("expected ambiguity error for short form matching >1 item, got %v", result)
+	}
+	if result.ID != "" {
+		t.Errorf("ambiguous match must not resolve to a bead; got %s", result.ID)
+	}
+}
+
+// An empty name can never name a specific bead and must error, never matching
+// an ID that merely ends in "-" (defense-in-depth; caller already guards).
+func TestSelectWorkByName_EmptyNameErrors(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-mol-", Title: "Trailing hyphen"},
+		{ID: "mindspec-aaaa", Title: "Real bead"},
+	}
+	result, err := SelectWorkByName(items, "")
+	if err == nil {
+		t.Fatalf("expected error for empty name, got %v", result)
+	}
+	if result.ID != "" {
+		t.Errorf("empty name must not resolve to a bead; got %s", result.ID)
+	}
+}
+
 func TestFormatWorkList(t *testing.T) {
 	items := []BeadInfo{
 		{ID: "abc", Title: "Do something", Priority: 2, IssueType: "task"},
