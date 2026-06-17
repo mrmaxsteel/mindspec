@@ -10,7 +10,7 @@
 #   row credited at most once. recall = matched / M.
 #
 # ANTI-PARROT PRECISION GATE: an adversarial panel showed a degenerate "parrot"
-# (tag EVERY fixture line [SEMANTIC]/[CONTRADICTION]) scored 14/14 recall with
+# (tag EVERY fixture line [SEMANTIC]/[CONTRADICTION]) scored 15/15 recall with
 # ZERO comprehension, because surplus findings used to neither credit nor
 # penalize. We now ALSO compute precision = (distinct M-class rows matched) /
 # (total M-class-TAGGED finding lines emitted) and gate PASS on BOTH recall >=
@@ -218,7 +218,7 @@ prec_str() {
 # --- HERMETIC degenerate-parrot SELF-TEST (no claude; bead-blocking) -----------
 # Deterministically construct the "parrot" output: for EVERY line of EVERY
 # fixture, emit  [SEMANTIC] [CONTRADICTION] "<that exact line>" — parrot.
-# This is the pathological grill the adversarial panel found scored 14/14 under
+# This is the pathological grill the adversarial panel found scored 15/15 under
 # the old recall-only gate (it sprays M-class tags on all ~100 lines, so every
 # anchor trivially matches → recall is maxed, ZERO comprehension). Feed it
 # through the SAME score_run/gate logic and ASSERT it FAILS the PASS condition
