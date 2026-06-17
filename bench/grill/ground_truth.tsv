@@ -1,0 +1,23 @@
+fixture	id	category	catchable_by	anchor	problem
+spec1	P1	SEMANTIC	llm	make things faster	Goal "make things faster" — no measurable user outcome
+spec1	P2	GROUNDING	both	caching: the new cache layer	Domain "caching" is not a real mindspec domain
+spec1	P3	EXACT_PHRASE	both	Support caching of responses	Req1 "Support caching" — vague support-X with no acceptance condition
+spec1	P4	CONTRADICTION	llm	that entry never expires	Req3 (never expires, served unchanged) contradicts Req2 (invalidated when data changes)
+spec1	P5	STRUCTURAL	both	### Out of Scope	Out of Scope is "(none)" — effectively empty
+spec1	P6	EXACT_PHRASE	both	Caching works correctly	AC1 "Caching works correctly" — not falsifiable, exact bad phrase
+spec1	P7	SEMANTIC	llm	The cache is fast	AC2 "The cache is fast" — no threshold or runnable proof (vagueness family)
+spec2	P1	SEMANTIC	llm	exports are more reliable	Goal "improve reliability so exports are more reliable" — circular, no outcome
+spec2	P2	SYNONYM	llm	Enable resumable exports after a crash	Req1 "Enable resumable exports" — Enable-X dodges support/handle rule, no AC
+spec2	P3	SEMANTIC	llm	finish within a reasonable time	Req2 "finish within a reasonable time" — unfalsifiable (vagueness family)
+spec2	P4	SYNONYM	llm	Resumable exports behave as expected	AC1 "Resumable exports behave as expected" — unfalsifiable, no observable
+spec2	P5	SEMANTIC	llm	Performance is acceptable	AC3 "Performance is acceptable" — unfalsifiable, no threshold (vagueness family)
+spec3	P1	GROUNDING	both	scheduling: the new parallel scheduler	Domain "scheduling" is not a real mindspec domain
+spec3	P2	CONTRADICTION	llm	at most one bead at a time	Req2 (at most one at a time) contradicts Req1 (run concurrently)
+spec3	P3	SEMANTIC	llm	scheduler is robust under load	AC2 "The scheduler is robust under load" — unfalsifiable, no threshold (vagueness family)
+spec4	P1	SEMANTIC	llm	so they stay in the loop	Goal "stay in the loop" — no measurable user outcome
+spec4	P2	GROUNDING	both	notifications: the new alerting layer	Domain "notifications" is not a real mindspec domain
+spec4	P3	SYNONYM	llm	Enable delivery of a notification	Req1 "Enable delivery" — Enable-X dodges support/handle rule, no observable
+spec4	P4	CONTRADICTION	llm	delivered exactly once per job	Req2 (exactly once, no duplicates) contradicts Req3 (at-least-once, may arrive more than once)
+spec4	P5	STRUCTURAL	both	### Out of Scope	Out of Scope is "(none)" — effectively empty
+spec4	P6	SEMANTIC	llm	Notifications behave the way users expect	AC1 "behave the way users expect" — unfalsifiable, no observable
+spec4	P7	CONTRADICTION	llm	dispatched before the job has finished running	Req5 (notification dispatched BEFORE the job finishes) contradicts AC4 (enqueued ONLY AFTER the job has fully completed) — novel temporal req-vs-AC ordering contradiction, not present in spec1-3 (those are req-vs-req)
