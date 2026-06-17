@@ -1,9 +1,0 @@
-{
-  "lens": "integration",
-  "decision": "APPROVE",
-  "harness_coherent": true,
-  "suites_green": true,
-  "lint_clean": true,
-  "blocking": [],
-  "summary": "Cross-bead integration is clean on the integrated HEAD (75c1957e). internal/harness coexistence verified: B1 (ettz.1) deleted scenario_panel_gate.go + scenario_panel_gate_test.go and removed the ScenarioPanelGateBlocksPrematureComplete() registration from scenario.go; B2 (ettz.2) edited a DIFFERENT file (analyzer.go) to retire extractMentionedPaths, leaving PlanFidelity commands-only. Both deletions confirmed gone, analyzer.go present and commands-only; neither merge clobbered the other. No dangling refs to extractMentionedPaths/scenario_panel_gate/precomplete/completeMatcher anywhere in harness/hook/setup/cmd. filepath import still legitimately used in analyzer.go (line 251, ClassCorrection), so no unused-import breakage. go vet ./internal/harness/ clean. go build ./... green. All four touched suites pass: TestNames_Sorted (hook), TestSetup|TestClaude (setup), TestPanelGate (complete), TestAnalyzer_PlanFidelity|TestAllScenarios|TestReport (harness). golangci-lint v2.11.1 on ./internal/hook/... ./internal/setup/... ./internal/harness/... ./cmd/mindspec/... = 0 issues (proactive CI lint gate clears, unlike spec-101). Merge ordering honored: B1/ettz.1 merged (058b04b9) before B2/ettz.2 (28ce9a2c). B2's RED witness TestAnalyzer_PlanFidelity_PathTermRetired correctly pins the path-term removal (0.5 pre-change -> 0.0 post). No integration regression."
-}

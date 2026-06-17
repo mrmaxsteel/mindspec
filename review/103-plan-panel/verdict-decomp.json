@@ -1,9 +1,0 @@
-{
-  "lens": "decomposition",
-  "decision": "APPROVE",
-  "independence_ok": true,
-  "no_file_overlap": true,
-  "redundancy_warn_acceptable": true,
-  "blocking": [],
-  "summary": "4 genuinely independent beads, each a distinct file in a distinct package (gitutil/gitops.go, doctor/beads.go, next/select.go, phase/cache.go) verified present and matching the plan's target lines; no cross-bead symbol/output sharing, so all empty depends_on are correct and the four can cycle in any order or in parallel. Each is right-sized: one localized change plus a hermetic test via an existing seam (execCommand / bdSchemaDriftRE / SelectWorkByName / SetListJSONForTest) — too small to split, and merging any two would mix unrelated domains in one review. The R=0.00 decomposition-scope-redundancy is a [WARN] (validate plan exits 0, non-blocking like a lifecycle-binding WARN), flagging the beads as TOO disjoint; but batching four small deferred P3 polish follow-ups (from specs 101/095, all removing a silent/hostile failure mode, none touching a public contract or happy path) into one spec is an acceptable efficiency choice the user explicitly made. Forcing artificial file-overlap to clear the 0.15 lower bound would be the WRONG move (it would couple unrelated changes purely to satisfy a metric). No split warranted. Minor non-blocking note: fetchAllEpics also uses the narrow status set but is correctly out of R4's scope (epics are top-level roots, not status-derived children)."
-}

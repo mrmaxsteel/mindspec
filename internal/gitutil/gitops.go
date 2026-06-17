@@ -21,6 +21,20 @@ var ErrRefNotFound = errors.New("ref not found")
 // Package-level function variables for testability.
 var execCommand = exec.Command
 
+// noPrompt sets GIT_TERMINAL_PROMPT=0 on a built *exec.Cmd so git fast-fails
+// (non-zero exit) on a slow/auth-prompting origin instead of HANGING or
+// prompting on stdin — e.g. during `mindspec spec create` (Spec 103 R1,
+// ADR-0030 git-exec boundary). The executor reads that non-zero exit as the
+// signal to fall back to a local base + WARN. The env is APPENDED to
+// os.Environ() (NOT a fresh slice) so PATH/HOME/git-config discovery survive;
+// a fresh []string{...} would clobber the inherited environment and break git.
+// Applied only to the network/credential ops (fetch, push, remote show,
+// symbolic-ref); pure-local ops never prompt. Returns cmd for chaining.
+func noPrompt(cmd *exec.Cmd) *exec.Cmd {
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd
+}
+
 // RejectOptionLike is the package-boundary argument-safety guard
 // (SEC-5 / spec 097 R1, finding obxo). git parses a positional argv slot
 // that begins with `-` as an OPTION rather than a ref/branch/refspec/range
@@ -240,7 +254,7 @@ func FetchRemote(remote string) error {
 	if err := rejectOptionLike(remote); err != nil {
 		return err
 	}
-	cmd := execCommand("git", "fetch", remote)
+	cmd := noPrompt(execCommand("git", "fetch", remote))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("fetching %s: %s", remote, strings.TrimSpace(string(out)))
@@ -263,7 +277,7 @@ func DetectDefaultBranch(remote string) (string, error) {
 
 	// 1) Cached symbolic-ref (cheap, offline-friendly).
 	symRefPrefix := "refs/remotes/" + remote + "/"
-	out, err := execCommand("git", "symbolic-ref", symRefPrefix+"HEAD").Output()
+	out, err := noPrompt(execCommand("git", "symbolic-ref", symRefPrefix+"HEAD")).Output()
 	if err == nil {
 		ref := strings.TrimSpace(string(out))
 		// Only accept a well-formed refs/remotes/<remote>/<name>; anything
@@ -274,7 +288,7 @@ func DetectDefaultBranch(remote string) (string, error) {
 	}
 
 	// 2) Fall through to `git remote show <remote>` ("HEAD branch: <name>").
-	out, err = execCommand("git", "remote", "show", remote).CombinedOutput()
+	out, err = noPrompt(execCommand("git", "remote", "show", remote)).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("detecting default branch of %s: %s", remote, strings.TrimSpace(string(out)))
 	}
@@ -295,7 +309,7 @@ func PushBranch(branch string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
 	}
-	cmd := execCommand("git", "push", "-u", "origin", branch)
+	cmd := noPrompt(execCommand("git", "push", "-u", "origin", branch))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pushing %s: %s", branch, strings.TrimSpace(string(out)))
