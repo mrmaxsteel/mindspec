@@ -577,8 +577,8 @@ func ScenarioMultipleActiveSpecs() Scenario {
 		// resolution + ref-anchored doc-sync/ownership/ADR gates added since the
 		// scenario was last tuned) exceeds the implicit 10m default on slower
 		// models. Mirror the full-lifecycle scenario's explicit budget.
-		TimeoutMin:  20,
-		Model:       "haiku",
+		TimeoutMin: 20,
+		Model:      "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-alpha"
 
