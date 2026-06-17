@@ -5,7 +5,7 @@ description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json
 
 # Run a 6-Reviewer Panel
 
-Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the pre-complete gate and `mindspec instruct --panel-state` consume. Then fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
+Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the in-binary `mindspec complete` gate and `mindspec instruct --panel-state` consume. Then fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
 
 Step 0 was previously the separate `/ms-panel-create` skill; it is folded in here so the panel directory, BRIEF, and `panel.json` are always created together — the gate's source of truth (`panel.json`) cannot be forgotten.
 

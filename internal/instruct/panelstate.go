@@ -177,7 +177,7 @@ func renderPanelState(entries []PanelStateEntry) string {
 	var b strings.Builder
 	b.WriteString("## Open Panel Rounds\n\n")
 	b.WriteString("Where each open review panel stands vs the `mindspec complete` gate (Bead 4). ")
-	b.WriteString("This INFORMS; the pre-complete hook ENFORCES.\n")
+	b.WriteString("This INFORMS; the `mindspec complete` gate ENFORCES.\n")
 
 	for _, e := range entries {
 		v, reason := e.verdict()
@@ -609,7 +609,7 @@ func renderFullPanelState(inProgress []BeadStateEntry, panels []PanelStateEntry,
 	var b strings.Builder
 	b.WriteString("# Panel/Subagent State\n\n")
 	b.WriteString("Recovery snapshot of in-flight panels and worktrees (post-compaction; Reqs 14-15). ")
-	b.WriteString("This INFORMS; the `mindspec complete` hook ENFORCES.\n")
+	b.WriteString("This INFORMS; the `mindspec complete` gate ENFORCES.\n")
 
 	for _, sub := range []string{ip, op, sw} {
 		if sub != "" {

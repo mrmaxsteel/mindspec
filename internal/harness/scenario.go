@@ -61,6 +61,5 @@ func AllScenarios() []Scenario {
 		ScenarioPrecommitReexportComplete(),
 		ScenarioWrongDirectoryGuardRecovery(),
 		ScenarioApprovalGateDiscovery(),
-		ScenarioPanelGateBlocksPrematureComplete(),
 	}
 }

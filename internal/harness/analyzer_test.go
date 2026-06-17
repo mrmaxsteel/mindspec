@@ -601,6 +601,52 @@ version: 1
 	}
 }
 
+// TestAnalyzer_PlanFidelity_PathTermRetired is the RED→GREEN witness pinning the
+// removal of the prose path-extraction term (ADR-0036). The plan mentions exactly
+// one path (internal/foo/bar.go) and one command (go test). The agent WRITES that
+// path but runs a non-mentioned command (ls): the path matches, the command does
+// not. Under the OLD path-aware PlanFidelity this scored 1/2 = 0.5 (1 path matched
+// of 2 expectations); under the NEW commands-only PlanFidelity it scores 0/1 = 0.0
+// (no command matched, path term gone). Asserting EXACTLY 0.0 fails against the
+// pre-change function (0.5) and passes after the path-term removal.
+//
+// Authoring constraint: the plan body must contain NO stray command tokens
+// (mindspec/git/make/go test) and NO stray path-like tokens beyond the single
+// intended path, so the extracted sets are exactly {go test} and {internal/foo/bar.go}.
+func TestAnalyzer_PlanFidelity_PathTermRetired(t *testing.T) {
+	planContent := "---\n" +
+		"spec_id: 001-test\n" +
+		"status: Approved\n" +
+		"version: 1\n" +
+		"---\n" +
+		"\n" +
+		"# Plan\n" +
+		"\n" +
+		"## Bead 1\n" +
+		"\n" +
+		"1. Edit internal/foo/bar.go\n" +
+		"2. Run go test\n"
+
+	planPath := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(planPath, []byte(planContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Path matches (Write internal/foo/bar.go), command does NOT (ls, not go test).
+	events := []ActionEvent{
+		{ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo/bar.go"}},
+		{ActionType: "command", Command: "ls"},
+	}
+
+	score, err := PlanFidelity(planPath, events)
+	if err != nil {
+		t.Fatalf("PlanFidelity: %v", err)
+	}
+	if score != 0.0 {
+		t.Errorf("path term retired: expected commands-only score 0.0 (got %.4f); a non-zero score means the prose path term still contributes", score)
+	}
+}
+
 func TestReport_FormatText(t *testing.T) {
 	summaries := []TurnSummary{
 		{Turn: 0, Class: ClassForward},

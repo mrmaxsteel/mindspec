@@ -40,7 +40,7 @@ Read `<repo>/review/<panel-slug>/*-round-<N>.json`, summarise verdicts, apply th
    | APPROVE ≥ N−1 AND no HARD-block flags AND head SHA fresh | Panel passes → merge terminal. |
    | Below N−1 APPROVE | Fix-up needed → `/ms-bead-fix`. Flag to the user if ≤2 APPROVE (significant rework). |
 
-   On a pass, hand off to the cycle's **merge terminal**: run `mindspec complete <bead-id> "<summary>"` (hook-gated — the pre-complete gate re-verifies this tally before the merge lands). The "Then" handoff points at `/ms-bead-cycle`'s merge terminal.
+   On a pass, hand off to the cycle's **merge terminal**: run `mindspec complete <bead-id> "<summary>"` (gate-enforced — the in-binary `mindspec complete` gate re-verifies this tally before the merge lands). The "Then" handoff points at `/ms-bead-cycle`'s merge terminal.
 
 4. **Consolidate `concrete_changes_required`.** This is the input to `/ms-bead-fix`. Process:
 
@@ -93,13 +93,13 @@ When the matrix halts (REJECT, HARD block, or `max-rounds` exceeded):
    - **HARD block** → commission the missing measurement run as a separate work unit, land the artifact at the named path, then re-panel.
    - **max-rounds exceeded** → halt with the bead `in_progress`; the user may revise the plan or split the bead.
 
-3. **Stale-verdict rule (now mechanized).** If commits landed on the bead branch after the panel reviewed it (`reviewed_head_sha` ≠ current branch tip), the verdicts are stale — bump the round and re-panel via `/ms-panel-run` step 0 (which re-captures `reviewed_head_sha` in the same write). The pre-complete gate Blocks a stale-SHA complete, so this is enforced, not advisory.
+3. **Stale-verdict rule (now mechanized).** If commits landed on the bead branch after the panel reviewed it (`reviewed_head_sha` ≠ current branch tip), the verdicts are stale — bump the round and re-panel via `/ms-panel-run` step 0 (which re-captures `reviewed_head_sha` in the same write). The in-binary `mindspec complete` gate Blocks a stale-SHA complete, so this is enforced, not advisory.
 
 4. **Abandon procedure (legitimate exit).** To abandon a panel without merging (e.g. the bead is being reworked outside the panel loop): set `"abandoned": true` in `panel.json` AND record who/why in `"abandon_reason"`. Completion then writes a `panel_abandoned` audit entry (plus the reason) to the bead metadata. Abandonment is a plain repo-file edit and therefore agent-performable — it is legitimate precisely because it is always audited, never silent. Do NOT abandon to skip a HARD block; abandon only when the bead is genuinely leaving the panel flow.
 
 ## Escape hatch
 
-Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKIP_PANEL=1` in their own shell environment before launching the session; the pre-complete hook inherits that environment and passes the gate, emitting an audited Warn, and `mindspec complete` records `panel_gate_skipped: true` + timestamp on the bead metadata. The variable is env-only and never pasted into a command line — a blocked agent cannot set it via a Bash-line prefix (the hook never consults the command string for the hatch). This is the only place `MINDSPEC_SKIP_PANEL` is documented; the hook's Block message deliberately never prints a paste-able skip incantation.
+Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKIP_PANEL=1` in their own shell environment before launching the session; the in-binary `mindspec complete` gate reads that environment and passes the gate, emitting an audited Warn, and `mindspec complete` records `panel_gate_skipped: true` + timestamp on the bead metadata. The variable is env-only and never pasted into a command line — a blocked agent cannot set it via a Bash-line prefix (the gate never consults the command string for the hatch). This is the only place `MINDSPEC_SKIP_PANEL` is documented; the gate's Block message deliberately never prints a paste-able skip incantation.
 
 ## Anti-patterns
 

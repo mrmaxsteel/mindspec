@@ -42,10 +42,11 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Error("missing SessionStart hook")
 	}
-	// Spec 093 Req 9: the PreToolUse pre-complete panel-gate entry ships
-	// from wantedHooks(). It must be present after a fresh setup.
-	if !hooksContainCommand(hooks, "PreToolUse", "mindspec hook pre-complete") {
-		t.Error("missing PreToolUse pre-complete panel-gate hook")
+	// Spec 102 R1: the PreToolUse pre-complete panel-gate entry was RETIRED.
+	// wantedHooks() no longer ships it, so it must be ABSENT after a fresh
+	// setup (the in-binary `mindspec complete` gate is now authoritative).
+	if hooksContainCommand(hooks, "PreToolUse", "mindspec hook pre-complete") {
+		t.Error("retired PreToolUse pre-complete panel-gate hook should not be installed")
 	}
 
 	// Verify skill files exist — both the 4 lifecycle gates and the 7
@@ -220,28 +221,18 @@ func TestWantedHooks_SessionStartUsesShim(t *testing.T) {
 	}
 }
 
-// TestWantedHooks_HasPreCompletePreToolUse pins the Spec 093 Req 9 entry:
-// wantedHooks() ships a PreToolUse "Bash" entry whose command is
-// `mindspec hook pre-complete` with the "Checking panel verdicts..."
-// statusMessage.
-func TestWantedHooks_HasPreCompletePreToolUse(t *testing.T) {
+// TestWantedHooks_NoPreCompletePreToolUse is the removed-by-omission witness
+// for Spec 102 R1: the PreToolUse pre-complete panel-gate entry was RETIRED,
+// so wantedHooks() ships NO PreToolUse key at all. Because the entry is absent
+// from the wanted set, removeStaleMindspecEntries strips it from existing
+// installs (the spec-072 retired-hook precedent). The in-binary `mindspec
+// complete` gate (Spec 099) is now the single authoritative enforcement point.
+func TestWantedHooks_NoPreCompletePreToolUse(t *testing.T) {
 	t.Parallel()
 
 	hooks := wantedHooks()
-	entries, ok := hooks["PreToolUse"]
-	if !ok || len(entries) != 1 {
-		t.Fatalf("wantedHooks should include exactly one PreToolUse entry, got %v", entries)
-	}
-	e := entries[0]
-	if e["matcher"] != "Bash" {
-		t.Errorf("PreToolUse matcher = %v, want Bash", e["matcher"])
-	}
-	hl, _ := e["hooks"].([]map[string]any)
-	if len(hl) != 1 || hl[0]["command"] != "mindspec hook pre-complete" {
-		t.Errorf("PreToolUse command = %v, want mindspec hook pre-complete", hl)
-	}
-	if hl[0]["statusMessage"] != "Checking panel verdicts..." {
-		t.Errorf("PreToolUse statusMessage = %v", hl[0]["statusMessage"])
+	if _, ok := hooks["PreToolUse"]; ok {
+		t.Errorf("wantedHooks should not ship a PreToolUse entry after the pre-complete retirement, got %v", hooks["PreToolUse"])
 	}
 }
 
@@ -261,10 +252,12 @@ func jsonEntry(matcher string, commands ...string) map[string]any {
 	}
 }
 
-// preCompleteWantedEntry is the Bead-4 PreToolUse gate entry shape from spec
-// 093 Req 9, used synthetically until wantedHooks() carries the real one —
-// the regression trio for Reqs 7-8 must pin the merge machinery against the
-// exact shape the gate will ship with.
+// preCompleteWantedEntry is a SYNTHETIC PreToolUse "Bash" gate entry shape.
+// The real pre-complete hook was retired (Spec 102 R1), so wantedHooks() no
+// longer ships it; this synthetic entry is retained purely to drive the
+// settings-merge machinery tests (Reqs 7-8) — they pin merge/append/self-strip
+// behavior against an INJECTED PreToolUse shape, independent of whether
+// wantedHooks() itself ships any PreToolUse entry.
 func preCompleteWantedEntry() map[string]any {
 	return map[string]any{
 		"matcher": "Bash",
@@ -752,9 +745,10 @@ func TestRunClaude_CleansStalePreToolUse(t *testing.T) {
 		t.Error("expected settings.json to be updated (stale PreToolUse cleaned)")
 	}
 
-	// Verify the STALE PreToolUse entries are removed but the legitimate
-	// Spec 093 pre-complete gate entry remains (it is in the wanted set, so
-	// the second run merges it in while cleaning the stale ones).
+	// Verify the STALE PreToolUse entries are removed. The pre-complete gate
+	// entry is now ALSO retired (Spec 102 R1) — it is no longer in the wanted
+	// set, so it must be ABSENT after cleanup, exactly like the worktree-file /
+	// instruct legacy entries above it.
 	data, _ = os.ReadFile(settingsPath)
 	var updated map[string]any
 	json.Unmarshal(data, &updated)
@@ -765,8 +759,8 @@ func TestRunClaude_CleansStalePreToolUse(t *testing.T) {
 	if n := len(entriesWithCommandPrefix(updatedHooks, "PreToolUse", "mindspec instruct")); n != 0 {
 		t.Errorf("stale instruct-form guard not removed (N1), got %d", n)
 	}
-	if !hooksContainCommand(updatedHooks, "PreToolUse", "mindspec hook pre-complete") {
-		t.Error("legitimate pre-complete gate entry should be present after cleanup")
+	if hooksContainCommand(updatedHooks, "PreToolUse", "mindspec hook pre-complete") {
+		t.Error("retired pre-complete gate entry should be absent after cleanup")
 	}
 }
 

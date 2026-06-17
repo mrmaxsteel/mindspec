@@ -27,7 +27,7 @@ var setupClaudeCmd = &cobra.Command{
 	Short: "Set up Claude Code integration (hooks, skills, CLAUDE.md)",
 	Long: `Creates Claude Code-specific configuration:
 
-  - .claude/settings.json with SessionStart and PreToolUse hooks
+  - .claude/settings.json with SessionStart hooks
   - .claude/skills/ms-*/SKILL.md workflow skills (spec-init, approve, etc.)
   - CLAUDE.md with pointer to AGENTS.md and MindSpec guidance
 

@@ -37,8 +37,9 @@ var (
 // flows that never route through Claude Code hooks (codex sessions,
 // raw-shell agents, externally-orchestrated panels). No registered panel →
 // no output and no added subprocess cost (panel.Scan is fs-only and returns
-// nothing when no panel.json exists). Hard enforcement stays at the hook
-// layer alone (HC-4).
+// nothing when no panel.json exists). Hard enforcement lives in the
+// authoritative in-binary gate (panelGate below) — the sole panel-gate
+// enforcer now that the PreToolUse hook is retired (HC-4).
 //
 // It returns the matched registration so the caller can drive the post-
 // completion audit writes (panel_gate_skipped / panel_abandoned) off the
@@ -64,7 +65,7 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 	var label string
 	switch verdict {
 	case panel.VotePass:
-		label = "would PASS (vote only — the hook also checks staleness + dirty tree)"
+		label = "would PASS (vote only — the in-binary gate also checks staleness + dirty tree)"
 	case panel.VoteAbandoned:
 		label = "abandoned (gate passes with a warning)"
 	default:
@@ -100,9 +101,10 @@ var (
 // R1+R5; ADR-0037). It runs in complete.Run at the step-2.25 site — BEFORE
 // exec.CommitAll, bd close, and the bead→spec merge — over the DECLARED
 // beadID (no shell parsing; ADR-0036 Zero Framework Cognition). It invokes
-// the SAME extracted panel.PanelGateDecision over panel.GateFacts produced by
-// the SAME panel.ResolveGateFacts the PreToolUse hook uses (the hook is now a
-// defense-in-depth backstop), so the two cannot disagree by construction.
+// the extracted panel.PanelGateDecision over panel.GateFacts produced by
+// panel.ResolveGateFacts. With the PreToolUse hook retired, this in-binary
+// gate is the sole authoritative panel-gate enforcement — it gathers the
+// staleness + dirty-tree facts itself rather than leaning on any hook.
 //
 // Ordering is load-bearing: the gate measures the bead/<id> tip as it stands
 // BEFORE CommitAll. CommitAll would advance the tip past reviewed_head_sha
