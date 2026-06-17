@@ -18,7 +18,7 @@ func ScenarioSpecToIdle() Scenario {
 			// Sandbox comes with a clean repo; agent starts from scratch
 			return nil
 		},
-		Prompt: `IMPORTANT: Do NOT respond conversationally. Do NOT ask what I'd like to do. Execute immediately.
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Do NOT ask what I'd like to do. Execute immediately. This is an automated, non-interactive run: there is NO human available to answer questions, so do NOT pause to ask for input or clarification — make reasonable default decisions and proceed. If a spec section (e.g. Impacted Domains) has no registered value to reference, mark it N/A and continue.
 
 You are in a MindSpec project with no active work. Your task: add a simple "greeting" feature — a hello.go program that prints "Hello!". Take it from idea all the way through to a completed implementation using the mindspec workflow.
 Finish only when the project is back in idle with cleanup complete.`,
@@ -573,6 +573,11 @@ func ScenarioMultipleActiveSpecs() Scenario {
 		Name:        "multiple_active_specs",
 		Description: "Two active specs, agent completes one without disrupting the other",
 		MaxTurns:    30,
+		// 30 turns through the now-heavier complete-lifecycle (panel-fact
+		// resolution + ref-anchored doc-sync/ownership/ADR gates added since the
+		// scenario was last tuned) exceeds the implicit 10m default on slower
+		// models. Mirror the full-lifecycle scenario's explicit budget.
+		TimeoutMin:  20,
 		Model:       "haiku",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-alpha"
