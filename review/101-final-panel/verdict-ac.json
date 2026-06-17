@@ -1,0 +1,33 @@
+{
+  "lens": "ac-conformance",
+  "decision": "APPROVE",
+  "ac_findings": [
+    {
+      "req": "R1",
+      "met": true,
+      "evidence": "cmd/mindspec/next.go:222-243 — claim path captures the positional (named=args[0]) and routes to next.SelectWorkByName (internal/next/select.go:36-43), which returns the named bead or a clear 'not in the ready set' error, never items[0]. Positional+--pick conflict rejected at next.go:55-57. Help (next.go:35-40) describes the claim path ('claim that bead') and --emit-only, no longer 'accepted generally'.",
+      "test": "internal/next: TestSelectWorkByName_NamedInSetNotFirst (claims that bead, not items[0]), TestSelectWorkByName_NamedNotInSet (error). cmd/mindspec: TestNextHelpDescribesPositionalOnClaimPath, TestNextPositionalPickConflictErrors."
+    },
+    {
+      "req": "R2",
+      "met": true,
+      "evidence": "cmd/mindspec/release.go runRelease (L188-257) enforces the strict 6-step order: dirty-check refuse/--force pre-gate (L200-214), removeWorktree FIRST (L219) which is exec.RemoveBeadWorktreeAndRestore (mindspec_executor.go:82-92 — WorktreeOps.Remove then os.Chdir(g.Root), ADR-0030 no raw git worktree remove), setOpen LAST (L234, bd update --status=open --assignee=), cursor/mindspec_phase sync only when released bead was active (L249-253). Registered in root.go:230; release added to redact.CommandTokens.",
+      "test": "cmd/mindspec: TestReleaseOrdering, TestReleaseOrdering_RemoveBeforeSetOpenOnFailurePath, TestReleaseBeadStateSetOpen, TestReleaseDefaultSetOpenArgs, TestReleaseDirtyRefusesWithoutForce, TestReleaseDirtyProceedsWithForce, TestReleaseCursorRewindOnlyWhenActive. executor: TestRelease_RemoveBeadWorktreeAndRestore_RecoversCwd (real repo, fake.onRemove actually deletes the dir — non-vacuous cwd-safety, spec-092 Req 3c)."
+    },
+    {
+      "req": "R3",
+      "met": true,
+      "evidence": "internal/next/beads.go ClaimBead (L169-175) returns 'claim failed: <bd CombinedOutput>' — the misleading 'may already be claimed' prefix removed, real stderr surfaced verbatim (ADR-0035 paste-safe). Two additive doctor checks wired in doctor.go:100-101: checkBdSchemaDrift (beads.go:337-380, regex on column/table could-not-be-found, OK/skip on no-signature) and checkMultipleBdOnPath (beads.go:388-440, dedups symlinks/dup PATH dirs, Warn on >1).",
+      "test": "internal/next: TestClaimBead_SurfacesRealStderr (asserts 'depends_on_id' present, not flattened). internal/doctor: TestCheckBdSchemaDrift_Mismatch/_Healthy/_UnrelatedFailureSkips, TestCheckMultipleBdOnPath_TwoBinaries/_SingleBinary."
+    },
+    {
+      "req": "R4",
+      "met": true,
+      "evidence": "internal/executor/mindspec_executor.go specBranchBase (L142-158): HasRemote→FetchRemote→DetectDefaultBranch then base=origin/<default>; any miss (no remote/fetch err/detect err) → 'HEAD' + warnStaleBase WARN; never a hard failure. InitSpecWorkspace L118-123 branches from that base. gitutil.DetectDefaultBranch (gitops.go) tries cached symbolic-ref, falls THROUGH to `git remote show` on empty/garbage; FetchRemote routes git I/O behind the executor→gitutil seam (ADR-0030).",
+      "test": "executor: TestInitSpecWorkspace_BranchesFromOriginDetectedDefault (non-default branch 'develop' proves not hardcoded main; branches from freshly-fetched origin tip), TestInitSpecWorkspace_NoRemoteFallsBackToHEADWithWarn, TestInitSpecWorkspace_FetchErrorFallsBackToHEADWithWarn. gitutil: TestDefaultBranch_DetectedFromSymbolicRef, TestDefaultBranch_EmptyOrGarbageSymbolicRefFallsThrough, TestDefaultBranch_BothSourcesFail, TestFetchRemote_RunsFetch."
+    }
+  ],
+  "suites_green": true,
+  "blocking": [],
+  "summary": "All four ACs (R1-R4) are satisfied by the merged spec/101 code, each pinned by a non-vacuous test. go build ./... clean; all six touched suites green (cmd/mindspec 35.1s, internal/next 11.2s, doctor 4.5s, executor 9.4s, gitutil 2.5s, redact 1.4s). R1 routes the claim-path positional through SelectWorkByName (named-or-error, never items[0]) + help/conflict guards. R2 release.go enforces the strict remove-first/chdir/set-open-last reversal via WorktreeOps (ADR-0030) with a real-repo cwd-safety test that actually deletes the worktree. R3 surfaces bd's real stderr and adds the two doctor checks (schema-drift, multiple-bd-on-PATH). R4 branches from origin/<detected-default> after fetch with detection non-hardcoded (proven via 'develop') and offline→HEAD+WARN. Minor note (non-blocking): R1's named-claims-that-bead behavior is pinned at the unit (SelectWorkByName) rather than a full rootCmd.SetArgs claim-harness test, but the cmd wiring is direct and the named-vs-items[0] guarantee is unambiguously covered."
+}

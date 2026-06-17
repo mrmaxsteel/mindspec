@@ -1,0 +1,15 @@
+{
+  "lens": "scope-completeness",
+  "decision": "CHANGES",
+  "scope_clean": true,
+  "domains_accurate": true,
+  "matcher_retirement_tracked": "absent",
+  "stale_docs": ["/Users/Max/replit/mindspec/.worktrees/worktree-spec-099-panel-gate-in-complete/.mindspec/docs/adr/ADR-0037-panel-gate-enforced-contract.md (lines 60-63)"],
+  "blocking": [
+    "ADR-0037 (the ADR this spec explicitly touches per its ADR Touchpoints) lines 60-63 still claim 'hard enforcement exists at the hook layer alone' for codex/raw-shell flows. Spec 099 inverts exactly this: the in-binary gate in `mindspec complete` is now the AUTHORITATIVE enforcement covering those flows, and the hook is a backstop. The spec.md ADR Touchpoints promised 'an amendment note records that the in-binary path is now authoritative and the hook is a backstop' — that amendment is MISSING from the diff. The ADR body now describes the OLD architecture and is materially stale/inaccurate."
+  ],
+  "non_blocking": [
+    "Matcher-retirement follow-up bead is NOT yet filed. wpf0 is the originating bead that became spec 099 (not a clean separate retirement follow-up); the epic pqju has only 2 children (both done, the extraction + the gate). precomplete.go's comment and plan.md both say the retirement bead is 'FILED at merge' (post-merge by the orchestrator), so this is expected-but-pending. Flagging so it is not forgotten — the deferral IS tracked-in-intent (Req 4, plan Bead 1 step 6) but no standalone open bead exists yet."
+  ],
+  "summary": "Scope is clean and domains are accurate: every changed source file traces to a requirement and is owned by a declared domain (complete/panel/hook/guard=workflow, executor=execution); `mindspec validate spec 099` passes. The internal/executor change is minimal and ADR-0030-justified (three thin RevParseRef/Status/IsRefNotFound pass-throughs over existing gitutil + mock plumbing — no over-build). precomplete.go's doc amendments correctly record the new authoritative/backstop posture. CHANGES is raised on ONE doc-sync gap: ADR-0037 lines 60-63 still assert 'hard enforcement exists at the hook layer alone', which spec 099 directly inverts; the spec's own ADR Touchpoints promised an amendment note marking the in-binary path authoritative and the hook a backstop, and that amendment is absent — leaving the ADR describing the pre-099 architecture. Matcher-retirement deferral is tracked-in-intent (filed at merge per plan/comment) but has no standalone open bead yet; non-blocking but flagged."
+}

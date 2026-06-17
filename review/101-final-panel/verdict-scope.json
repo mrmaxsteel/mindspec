@@ -1,0 +1,19 @@
+{
+  "lens": "scope-completeness",
+  "decision": "CHANGES",
+  "scope_clean": false,
+  "redact_domain_ok": false,
+  "review_restored": true,
+  "stale_docs": [],
+  "deferred_followups": [
+    "R4 fetch-hang: FetchRemote has no timeout/context; a hung remote could stall spec create (panel-noted, non-blocking).",
+    "R3 schema-drift regex breadth: the drift detector keys on specific column-not-found text and may miss other schema-mismatch shapes.",
+    "R1 id-normalization: next positional matches the ready-set ID as given; no canonicalization (e.g. short vs mindspec- prefix) for the positional.",
+    "R2 symlink-dedup: multiple-bd-on-PATH check has no symlink/realpath dedup test, so a symlinked duplicate could false-warn.",
+    "R4 intentional-local-base opt-out (--from-local-head) explicitly deferred as a Non-Goal."
+  ],
+  "blocking": [
+    "internal/redact/redact.go is owned by the 'core' domain (.mindspec/docs/domains/core/OWNERSHIP.yaml: internal/redact/**), which is NOT in the spec's declared Impacted Domains [workflow, execution]. The ADR-divergence gate (validate.ValidateDivergence) only attributes changed files against the declared impacted-domain manifests; a file owned solely by an undeclared domain surfaces as adr-divergence-unowned (confirmed by TestValidateDivergenceGenuinelyUnownedStillFails). The redaction fix-up (commit 417e5566, registering 'release' in CommandTokens) therefore introduces an undeclared third domain and will trip the unowned divergence ERROR at mindspec complete / impl-approve. `mindspec validate spec` passes (0 errors) only because it does not run the changed-files divergence lane. Resolution: either (a) add 'core' to the spec's Impacted Domains and cite an Accepted ADR covering core (then re-check coverage), or (b) confirm the impl-approve path tolerates/overrides this via --override-adr."
+  ],
+  "summary": "All four requirements (R1 next-positional, R2 release verb, R3 stderr+doctor checks, R4 branch-from-origin) are delivered and every in-scope source file traces to R1-R4 or the spec doc; the accidental review/ deletion was restored (git diff --stat main...HEAD -- review/ is EMPTY) and no stray artifacts. The single blocker is a domain-divergence issue: the redaction fix-up touched internal/redact/redact.go, which is owned by the undeclared 'core' domain. The spec declares only [workflow, execution], so this file is NOT covered by an impacted-domain manifest and will surface as adr-divergence-unowned at the bead-complete / impl-approve gate. mindspec validate spec passes because it does not run the changed-files lane. Fix by declaring core (with ADR coverage) or via the impl-approve override. Docs are not stale: README references to `mindspec next` are generic and do not describe the old buggy positional behavior; `mindspec release` is auto-surfaced by cobra help (no prose doc actively describes wrong/old behavior)."
+}
