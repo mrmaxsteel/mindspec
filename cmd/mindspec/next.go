@@ -1,18 +1,16 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -450,31 +448,20 @@ func recoverySpecSlug(root, specFlag string, selected next.BeadInfo) string {
 }
 
 // checkUnmergedBeads checks for closed sibling beads that still have a bead/<id>
-// branch, indicating they were closed via `bd close` without `mindspec complete`.
-// Returns an error to block `mindspec next` until cleanup is performed.
+// branch which is NOT merged into the spec branch, indicating they were closed
+// via `bd close` without `mindspec complete`. Returns an error to block
+// `mindspec next` until cleanup is performed.
+//
+// It delegates to the shared lifecycle.FindOrphanedClosedBeads predicate so the
+// IsAncestor confirmation (skipping a benign merged-but-branch-undeleted bead)
+// stays in lockstep with `mindspec complete` and `mindspec doctor`.
 func checkUnmergedBeads(specID string) error {
-	epicID, err := phase.FindEpicBySpecID(specID)
-	if err != nil || epicID == "" {
+	orphans := lifecycle.FindOrphanedClosedBeads(specID, ".", "")
+	if len(orphans) == 0 {
 		return nil
 	}
-
-	out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
-	if err != nil {
-		return nil
-	}
-
-	var items []bead.BeadInfo
-	if json.Unmarshal(out, &items) != nil {
-		return nil
-	}
-
-	for _, item := range items {
-		id := strings.TrimSpace(item.ID)
-		if id != "" && gitutil.BranchExists("bead/"+id) {
-			return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", id, id)
-		}
-	}
-	return nil
+	o := orphans[0]
+	return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", o.BeadID, o.BeadID)
 }
 
 func init() {

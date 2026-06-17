@@ -16,7 +16,50 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
+
+// TestRun_BlocksOnOrphanedSibling (bead mindspec-4gsz): if another sibling
+// bead under the epic was closed without `mindspec complete` (its branch is
+// unmerged into the spec branch), complete.Run blocks BEFORE any mutation and
+// points at `mindspec complete <sibling>`. The guard excludes the very bead in
+// flight (chicken-and-egg) — verified by the predicate receiving beadID as the
+// exclude argument.
+func TestRun_BlocksOnOrphanedSibling(t *testing.T) {
+	saveAndRestore(t)
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+
+	var gotExclude string
+	findOrphanedClosedBeadsFn = func(specID, workdir, excludeBeadID string) []lifecycle.Orphan {
+		gotExclude = excludeBeadID
+		return []lifecycle.Orphan{{BeadID: "sib-1", BeadBranch: "bead/sib-1", SpecBranch: "spec/008-test"}}
+	}
+
+	// A close stub that, if reached, would record a mutation — it must NOT be.
+	closed := false
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	_, err := Run(root, "bead-self", "", "", newMockExec(), CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a block when an orphaned sibling exists")
+	}
+	if closed {
+		t.Error("Run must block BEFORE any mutation (close must not run)")
+	}
+	if gotExclude != "bead-self" {
+		t.Errorf("predicate exclude arg = %q, want bead-self (the bead in flight)", gotExclude)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "sib-1") {
+		t.Errorf("error must name the orphaned sibling; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec complete sib-1") {
+		t.Errorf("error must point at the sibling recovery command; got:\n%s", msg)
+	}
+}
 
 // setupCompleteBeadFailure wires the minimal happy-path stubs up to the
 // CompleteBead call, with the executor's CompleteBead failing with

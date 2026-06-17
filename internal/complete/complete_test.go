@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -93,8 +94,10 @@ func saveAndRestore(t *testing.T) {
 	origPostCloseBackoff := postCloseReadBackoff
 	origDoltCommit := doltCommitFn
 	origVerifyCommitted := verifyCommittedFn
+	origFindOrphans := findOrphanedClosedBeadsFn
 
 	t.Cleanup(func() {
+		findOrphanedClosedBeadsFn = origFindOrphans
 		closeBeadFn = origClose
 		worktreeListFn = origWtList
 		runBDFn = origRunBD
@@ -159,6 +162,10 @@ func saveAndRestore(t *testing.T) {
 	// commit-failure / committed-mismatch RED paths.
 	doltCommitFn = func() error { return nil }
 	verifyCommittedFn = func(beadID string) error { return nil }
+	// bead mindspec-4gsz: keep the bd_close lifecycle-bypass guard inert by
+	// default (no orphaned siblings) so existing happy-path tests don't shell
+	// out to bd/git or false-block. The guard's own tests override this.
+	findOrphanedClosedBeadsFn = func(specID, workdir, excludeBeadID string) []lifecycle.Orphan { return nil }
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
