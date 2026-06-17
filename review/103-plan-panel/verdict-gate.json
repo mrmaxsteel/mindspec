@@ -1,0 +1,9 @@
+{
+  "lens": "gate-honesty",
+  "decision": "APPROVE",
+  "coverage_ok": true,
+  "all_files_declared_domain": true,
+  "override_needed": false,
+  "blocking": [],
+  "summary": "ADR coverage verified against authoritative OWNERSHIP.yaml + ADR frontmatter. adr_citations=[0035,0030,0023]: ADR-0035 (Accepted; workflow,execution,core) covers all three declared domains alone; 0030 (Accepted; execution+...) covers execution; 0023 (Accepted; workflow,git,state) intersects via workflow. Every impacted domain {execution,workflow,core} has a cited Accepted ADR -> no adr-coverage-missing. Every cited ADR's domains intersect impacted domains via intersectFold -> no adr-cite-irrelevant. All changed files map to a DECLARED domain via glob ownership: gitutil/** -> execution; doctor/** & next/** -> workflow; phase/** -> core. R4 (mindspec-7rih) edits ONLY internal/phase/cache.go + cache_test.go; it CALLS bead.AllStatuses (already-exported, internal/bead/config.go:456) but changes no internal/bead or internal/complete file -> cross-domain call does not move cache.go's ownership; the normalize-glob gate keys on the changed-file path, not callees. internal/phase already imports internal/bead (derive.go, migrate.go). decomposition-scope-redundancy R=0.00 is a WARN (r.AddWarning, plan.go:1074) -> non-blocking at plan-approve/complete. No --override-adr referenced; no self-block. Plan is gate-honest."
+}
