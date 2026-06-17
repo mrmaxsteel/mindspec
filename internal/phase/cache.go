@@ -3,8 +3,12 @@ package phase
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Cache memoizes bd subprocess results within a single CLI invocation.
@@ -112,8 +116,10 @@ func (c *Cache) FindEpic(epicID string) (*EpicInfo, error) {
 }
 
 // GetChildren returns all children (any status) of an epic via a single
-// `bd list --parent <epicID> --status=open,in_progress,closed -n 0` call,
-// memoized per epicID. Callers that only want a subset (e.g. in_progress for
+// `bd list --parent <epicID> --status=<bead.AllStatuses> -n 0` call,
+// memoized per epicID. The status set covers built-ins (open, in_progress,
+// blocked, closed) plus project custom statuses, matching advanceState.
+// Callers that only want a subset (e.g. in_progress for
 // FindActiveBeadForEpic) filter the returned slice in-process.
 func (c *Cache) GetChildren(epicID string) ([]ChildInfo, error) {
 	if c == nil {
@@ -190,9 +196,29 @@ func fetchAllEpics() ([]EpicInfo, error) {
 	return epics, nil
 }
 
-// fetchChildren issues a single `bd list --parent <id> --status=open,in_progress,closed -n 0 --json`.
+// fetchChildren issues a single `bd list --parent <id> --status=<AllStatuses> -n 0 --json`.
+//
+// The status set is the full bead.AllStatuses breadth — built-ins
+// (open, in_progress, blocked, closed) plus every project custom status —
+// matching the advanceState/queryAllChildren view in complete.go, so a
+// `blocked` or custom-status child is not silently dropped from the cache
+// before DerivePhaseFromChildren sees it (ADR-0023 counts blocked children).
+//
+// CRITICAL: this stays a SINGLE comma-joined `--status=` call (not one bd call
+// per status) to preserve the GetChildren single-call contract and keep
+// TestCache_GetChildren_MemoizesPerEpic green (exactly one listJSON call per
+// epic). The root is resolved from cwd here without changing the public
+// GetChildren(epicID) signature; if root resolution fails it degrades to ""
+// and bead.AllStatuses("") still returns the built-ins (which include blocked).
 func fetchChildren(epicID string) ([]ChildInfo, error) {
-	out, err := listJSONFn("--parent", epicID, "--status=open,in_progress,closed", "-n", "0")
+	root := ""
+	if cwd, err := os.Getwd(); err == nil {
+		if r, err := workspace.FindRoot(cwd); err == nil {
+			root = r
+		}
+	}
+	statusArg := "--status=" + strings.Join(bead.AllStatuses(root), ",")
+	out, err := listJSONFn("--parent", epicID, statusArg, "-n", "0")
 	if err != nil {
 		return nil, fmt.Errorf("bd list --parent failed: %w", err)
 	}
