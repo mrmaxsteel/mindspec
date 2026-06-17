@@ -187,6 +187,49 @@ func TestInstallSkills_RefreshesPreviouslyShipped(t *testing.T) {
 	}
 }
 
+// TestInstallSkills_RefreshesPriorSpecCreateSnapshot covers the grill
+// auto-chain propagation (spec 105): an existing install carries the PRIOR
+// canonical ms-spec-create body — with the `managed-by: mindspec` marker but
+// WITHOUT the step-5 ms-spec-grill auto-invoke — recorded byte-exact in
+// historical_skills/ms-spec-create.md. installSkills must recognize it as a
+// shipped snapshot and refresh it in place to the new canonical (which invokes
+// ms-spec-grill), NOT leave it as user-modified.
+func TestInstallSkills_RefreshesPriorSpecCreateSnapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// The prior shipped body lives in historical_skills/ms-spec-create.md.
+	priorVariants := previouslyShippedSkills()["ms-spec-create"]
+	var prior string
+	for _, v := range priorVariants {
+		if strings.Contains(v, "managed-by: mindspec") && !strings.Contains(v, "ms-spec-grill") {
+			prior = v
+			break
+		}
+	}
+	if prior == "" {
+		t.Fatal("expected a historical ms-spec-create snapshot carrying the managed-by marker without the step-5 ms-spec-grill auto-invoke")
+	}
+	writeExisting(t, skillsDir, "ms-spec-create", prior)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := lifecycleSkillFiles()["ms-spec-create"]
+	got := readSkill(t, skillsDir, "ms-spec-create")
+	if got != canonical {
+		t.Errorf("prior ms-spec-create snapshot not refreshed to canonical content;\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "ms-spec-grill") {
+		t.Errorf("refreshed ms-spec-create must carry the step-5 ms-spec-grill auto-invoke; got:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-create", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-create; got %v", r.Refreshed)
+	}
+}
+
 // TestInstallSkills_LeavesUserModified covers HC-6: a user-modified skill file
 // (matching neither the canonical nor any shipped snapshot) is left untouched
 // with a notice.
