@@ -958,6 +958,8 @@ transcript is captured instead of a bare panic.
 The test was fixed via the opt-out seam without touching the shipped skill; a
 built-in non-interactive guard for automated flows is a separate product
 decision (recommended, consistent with spec 105's own non-TTY-safety principle).
+Tracked as **`mindspec-0uur`** (a non-TTY guard in the `ms-spec-create` grill
+auto-chain), distinct from the `bd_close` limitation (`mindspec-4gsz`).
 
 **Infra:** `MS_HARNESS_MODEL` env override (agent.go) lets future audits swap the
 model under test suite-wide without editing each scenario's `Model` field.

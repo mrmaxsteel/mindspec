@@ -78,7 +78,7 @@ func ScenarioSpecInit() Scenario {
 			}
 			return nil
 		},
-		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately.
+		Prompt: `IMPORTANT: Do NOT respond conversationally. Execute immediately. This is an automated, non-interactive run: there is NO human available to answer questions, so do NOT pause to ask for input or clarification — make reasonable default decisions and proceed.
 
 Start a new specification called "001-calculator" for adding basic arithmetic operations.
 Create it through the MindSpec lifecycle. Stop after the spec is initialized.`,
