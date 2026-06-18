@@ -225,6 +225,11 @@ func ScenarioBlockedBeadTransition() Scenario {
 		MaxTurns:    20,
 		TimeoutMin:  10,
 		Model:       "haiku",
+		// Start the agent IN the bead worktree (matches a real implement
+		// session). From the sandbox root, `mindspec instruct` reports "No
+		// Active Work"/idle and the agent wastes turns spelunking with `bd list`
+		// to rediscover the claimed bead.
+		StartDir: ".worktrees/worktree-spec-001-blocker/.worktrees/worktree-*",
 		Setup: func(sandbox *Sandbox) error {
 			specID := "001-blocker"
 
@@ -248,6 +253,8 @@ Test blocked bead transition.
 			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
+adr_citations:
+- ADR-0001
 ---
 # Plan
 ## Bead 1: Core module
@@ -255,6 +262,14 @@ Create core.go with a Core() function.
 ## Bead 2: Extension (depends on Bead 1)
 Create extension.go that uses Core().
 `)
+			// Full ADR-divergence coverage triple (ownership manifest claiming the
+			// bead's source files + Accepted ADR-0001, cited by the plan above),
+			// committed to the BASE before setupWorktrees so the spec/bead refs
+			// inherit it. Without this, `mindspec complete` blocks on the
+			// unconditional adr-divergence gate (unowned/uncovered for core.go),
+			// which the agent cannot recover from within the turn budget.
+			writeSandboxDomainCoverage(sandbox, "core.go", "extension.go")
+			sandbox.Commit("base: spec + plan + ownership + ADR-0001")
 
 			setupWorktrees(sandbox, specID, bead1, "implement")
 
@@ -275,9 +290,14 @@ Then finish the currently claimed bead through the MindSpec lifecycle.`,
 				bead2: "open",
 			})
 
-			// Core spirit: mode should be plan (not implement) because bead-2 is blocked.
-			// This catches the bd close shortcut — bd close skips state transitions.
-			assertMindspecMode(t, sandbox, "plan")
+			// After completing bead-1, bead-2's only dependency is satisfied so it
+			// becomes ready; under ADR-0023 the derived phase therefore stays
+			// "implement" (beads exist & not all closed => implement; "plan" is
+			// unreachable once beads are minted). The bd_close shortcut is caught
+			// by assertCommandRan(complete) + bead-1 "closed" above; the mode
+			// check confirms the agent did NOT over-advance the lifecycle (e.g.
+			// by closing the epic) — it remains in implement with bead-2 open.
+			assertMindspecMode(t, sandbox, "implement")
 		},
 	}
 }
