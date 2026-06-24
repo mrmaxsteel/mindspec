@@ -51,6 +51,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/tokenize"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -166,8 +167,15 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 		return nil, fmt.Errorf("bead JSON for %s lacks metadata.spec_id; cannot resolve spec", beadID)
 	}
 
-	// 3. Resolve spec dir + read spec.md, plan.md.
-	specDir := filepath.Join(".mindspec", "docs", "specs", specID)
+	// 3. Resolve spec dir + read spec.md, plan.md. The spec dir is resolved
+	// tier-aware (spec 106 Req 3) via the Bead-1 specs enumeration-root
+	// accessor (flat .mindspec/specs → canonical .mindspec/docs/specs → legacy
+	// docs/specs), keyed off the CWD-relative root the bundler already uses for
+	// the ADR store below, so a pack assembles identically on flat/canonical/
+	// legacy projects. On a canonical/legacy tree this is byte-identical to the
+	// pre-spec .mindspec/docs/specs/<id> join.
+	const root = "."
+	specDir := filepath.Join(workspace.SpecsDir(root), specID)
 	specPath := filepath.Join(specDir, "spec.md")
 	planPath := filepath.Join(specDir, "plan.md")
 
@@ -213,9 +221,10 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 
 	// 7. Resolve domain docs.
 	var domainDocs []budDomainDoc
+	domainsRoot := workspace.DomainsDir(root) // tier-aware (spec 106 Req 3)
 	for _, d := range domains {
 		for _, kind := range []string{"overview.md", "interfaces.md"} {
-			p := filepath.Join(".mindspec", "docs", "domains", d, kind)
+			p := filepath.Join(domainsRoot, d, kind)
 			body, rerr := os.ReadFile(p)
 			dd := budDomainDoc{Domain: d, Kind: kind, Path: p}
 			if rerr == nil {

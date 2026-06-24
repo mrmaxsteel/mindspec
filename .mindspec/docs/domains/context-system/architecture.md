@@ -37,6 +37,19 @@ All context packs must be:
 - **Deduped** — no repeated sections within a session
 - **Provenance-preserving** — records exactly what was loaded and why (input provenance)
 
+### Tier-Aware Artifact Resolution (Spec 106)
+
+The bead context-pack budgeter (`internal/contextpack/budgeter.go`) resolves the
+spec directory and per-domain docs through the Bead-1 tier-aware accessors
+(`workspace.SpecsDir` / `workspace.DomainsDir`) instead of hardcoded
+`.mindspec/docs/...` joins, and the ADR store is already tier-aware via
+`workspace.ADRDir`. A pack therefore assembles byte-identical CONTENT sections
+(Bead / Spec / Cited ADRs / Plan / Domain Docs) on a flat
+(`.mindspec/{specs,adr,domains}`), canonical (`.mindspec/docs/...`), or legacy
+(`docs/...`) project — only the Provenance block, which embeds the resolved
+file paths, differs by layout. No spec, domain, or ADR is silently dropped
+across the flatten.
+
 ## Invariants
 
 1. Context assembly is deterministic — same inputs produce same pack.

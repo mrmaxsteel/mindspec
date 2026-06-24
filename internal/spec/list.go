@@ -19,7 +19,7 @@ type SpecEntry struct {
 
 // List scans the specs directory and returns all specs with their status and phase.
 func List(root string) ([]SpecEntry, error) {
-	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
+	specsDir := workspace.SpecsDir(root) // tier-aware enumeration root (spec 106 Req 3)
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
 		return nil, err
