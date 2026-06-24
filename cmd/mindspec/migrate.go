@@ -95,6 +95,8 @@ publish; the lifecycle is forward-only, ADR-0023).`,
 		abort, _ := cmd.Flags().GetBool("abort")
 		runID, _ := cmd.Flags().GetString("run-id")
 		target, _ := cmd.Flags().GetString("target")
+		force, _ := cmd.Flags().GetBool("force")
+		allowBranches, _ := cmd.Flags().GetStringArray("allow-branch")
 
 		root, err := gitutil.RevParseShowToplevel()
 		if err != nil {
@@ -119,31 +121,76 @@ publish; the lifecycle is forward-only, ADR-0023).`,
 			return nil
 		}
 
-		// Precondition: clean tree + branch/PR discovery scan.
-		locked, _ := gitutil.LockedWorktreeBranches(root)
-		lockedSet := make(map[string]bool, len(locked))
-		for _, b := range locked {
-			lockedSet[b] = true
+		// RESUME detection (panel R5): an in-progress run is resumed BEFORE the
+		// fresh-run clean-tree precondition is enforced. A crash AFTER the
+		// rewrite-but-before-commit step leaves dirty moved markdown; enforcing
+		// the clean-tree check first would refuse to resume it. The clean-tree
+		// precondition applies only to a FRESH start.
+		resumeID := runID
+		if resumeID == "" {
+			id, found, ferr := layout.FindResumableRun(root)
+			if ferr != nil {
+				return ferr
+			}
+			if found {
+				resumeID = id
+			}
 		}
-		res, err := layout.CheckPrecondition(exec, root, layout.PreconditionOptions{
-			Target:           target,
-			LockedWorktrees:  lockedSet,
-			Offline:          !gitutil.HasRemote(),
-			RequireCleanTree: true,
-		})
-		if err != nil {
-			return err
-		}
-		for _, w := range res.Warnings {
-			fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", w)
-		}
-		if len(res.Blocking) > 0 {
-			return layout.BlockingError(res)
+		resuming := false
+		if resumeID != "" {
+			ok, rerr := layout.IsResumable(root, resumeID)
+			if rerr != nil {
+				return rerr
+			}
+			resuming = ok
 		}
 
-		if runID == "" {
-			runID = time.Now().UTC().Format("20060102T150405Z")
+		if resuming {
+			runID = resumeID
+			fmt.Fprintf(cmd.ErrOrStderr(), "migrate layout: resuming in-progress run %s (skipping fresh-run clean-tree precondition)\n", runID)
+		} else {
+			// Fresh run: clean tree + branch/PR discovery scan.
+			allowlist := make(map[string]bool, len(allowBranches))
+			for _, b := range allowBranches {
+				if b = strings.TrimSpace(b); b != "" {
+					allowlist[b] = true
+				}
+			}
+			remoteDefault := ""
+			if gitutil.HasRemote() {
+				if d, derr := gitutil.DetectDefaultBranch("origin"); derr == nil {
+					remoteDefault = d
+				}
+			}
+			locked, _ := gitutil.LockedWorktreeBranches(root)
+			lockedSet := make(map[string]bool, len(locked))
+			for _, b := range locked {
+				lockedSet[b] = true
+			}
+			res, perr := layout.CheckPrecondition(exec, root, layout.PreconditionOptions{
+				Target:           target,
+				RemoteDefault:    remoteDefault,
+				LockedWorktrees:  lockedSet,
+				Allowlist:        allowlist,
+				Force:            force,
+				Offline:          !gitutil.HasRemote(),
+				RequireCleanTree: true,
+			})
+			if perr != nil {
+				return perr
+			}
+			for _, w := range res.Warnings {
+				fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", w)
+			}
+			if len(res.Blocking) > 0 {
+				return layout.BlockingError(res)
+			}
+
+			if runID == "" {
+				runID = time.Now().UTC().Format("20060102T150405Z")
+			}
 		}
+
 		mover := layout.NewMover(exec, root, runID)
 		if err := mover.Run(); err != nil {
 			return err
@@ -159,6 +206,8 @@ func init() {
 	migrateLayoutCmd.Flags().Bool("abort", false, "Hard-reset a pre-publish run to its pre-run ref")
 	migrateLayoutCmd.Flags().String("run-id", "", "Run identifier (default: UTC timestamp; required with --abort)")
 	migrateLayoutCmd.Flags().String("target", "main", "Merge target the discovery scan evaluates refs against")
+	migrateLayoutCmd.Flags().Bool("force", false, "Bypass the unmerged pre-flatten branch/PR blockers (for known-irrelevant old/abandoned branches)")
+	migrateLayoutCmd.Flags().StringArray("allow-branch", nil, "Branch name to treat as known-irrelevant (repeatable); tolerated, never a blocker")
 	migrateCmd.AddCommand(migrateLayoutCmd)
 }
 
