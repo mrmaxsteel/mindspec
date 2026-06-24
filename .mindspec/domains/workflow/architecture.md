@@ -142,4 +142,10 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   `domain list`/`show`, the doctor docs/orphan scans via `docsRootRel`) swap
   hardcoded `.mindspec/docs/...` joins for the Bead-1 tier-aware accessors
   (`workspace.SpecsDir`/`DomainsDir`), so they enumerate identically on
-  flat/canonical/legacy.
+  flat/canonical/legacy. `isProcessArtifact` additionally classifies the
+  irreversible-flatten run-state (`isMoverRunState`: `.mindspec/lineage/**`,
+  `.mindspec/migrations/<run>/**`) and the ADR-0018 vestigial config drops
+  (`isVestigialConfigDrop`: `.mindspec/policies.yml`,
+  `.mindspec/docs/glossary.md`) as workflow-owned process artifacts, so the
+  flatten's own diff (and future real user cutovers) does not trip
+  `adr-divergence-unowned`.
