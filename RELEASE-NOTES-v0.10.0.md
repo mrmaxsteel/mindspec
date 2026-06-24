@@ -26,7 +26,9 @@ mindspec migrate layout
 A transactional mover does **two commits per move** (a pure `git mv`, then a
 link-rewrite), so history stays clean and bisectable.
 
-**Preconditions:** a clean working tree and no unmerged pre-flatten branch.
+**Preconditions:** a clean working tree and no unmerged pre-flatten branch. If an
+unrelated stale pre-flatten branch trips the precondition, exempt it with
+`--allow-branch <name>` (repeatable) or bypass the scan with `--force` (logged).
 
 `mindspec migrate layout --abort` rolls back a **pre-publish** run; once the run
 is published the flatten is **forward-only**. Run `mindspec doctor` afterward to
@@ -46,3 +48,12 @@ confirm links resolve.
 
 - **ADR-0039** (Flat `.mindspec/` Layout v2) — **Accepted**.
 - **DOCS-LAYOUT.md** and **ADR-0037** amended (reviews co-location).
+
+## Known issues
+
+- On a **branch-protected** `main`, `mindspec impl approve` can momentarily leave
+  the bead tracker's committed `.beads/issues.jsonl` out of sync with the
+  source-of-truth Dolt store, because the lifecycle's finalize commit cannot land
+  directly on protected `main`. A one-time manual `.beads` sync resolves it (the
+  post-merge hook is then idempotent). Tracked as `mindspec-wu7t`. Normal feature
+  work and non-protected repositories are unaffected.
