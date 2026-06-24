@@ -61,6 +61,25 @@ type MockExecutor struct {
 	StatusResult      string
 	StatusErr         error
 	IsRefNotFoundFn   func(error) bool
+
+	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when
+	// non-nil, fully drive the corresponding method so tests can inject
+	// ref-discovery / fingerprint facts and per-call errors; otherwise the
+	// simple result/err fields are returned.
+	GitMvFn                  func(workdir, src, dst string) error
+	GitMvErr                 error
+	ResetHardFn              func(workdir, ref string) error
+	ResetHardErr             error
+	CleanForceFn             func(workdir string) error
+	CleanForceErr            error
+	CommitPathsFn            func(workdir, msg string, paths []string) error
+	CommitPathsErr           error
+	LocalBranchRefsFn        func(workdir string) ([]string, error)
+	LocalBranchRefsResult    []string
+	LocalBranchRefsErr       error
+	RemoteTrackingRefsFn     func(workdir string) ([]string, error)
+	RemoteTrackingRefsResult []string
+	RemoteTrackingRefsErr    error
 }
 
 // MockCall records a single method invocation.
@@ -194,6 +213,54 @@ func (m *MockExecutor) IsRefNotFound(err error) bool {
 		return m.IsRefNotFoundFn(err)
 	}
 	return false
+}
+
+func (m *MockExecutor) GitMv(workdir, src, dst string) error {
+	m.record("GitMv", workdir, src, dst)
+	if m.GitMvFn != nil {
+		return m.GitMvFn(workdir, src, dst)
+	}
+	return m.GitMvErr
+}
+
+func (m *MockExecutor) ResetHard(workdir, ref string) error {
+	m.record("ResetHard", workdir, ref)
+	if m.ResetHardFn != nil {
+		return m.ResetHardFn(workdir, ref)
+	}
+	return m.ResetHardErr
+}
+
+func (m *MockExecutor) CleanForce(workdir string) error {
+	m.record("CleanForce", workdir)
+	if m.CleanForceFn != nil {
+		return m.CleanForceFn(workdir)
+	}
+	return m.CleanForceErr
+}
+
+func (m *MockExecutor) CommitPaths(workdir, msg string, paths []string) error {
+	m.record("CommitPaths", workdir, msg, paths)
+	if m.CommitPathsFn != nil {
+		return m.CommitPathsFn(workdir, msg, paths)
+	}
+	return m.CommitPathsErr
+}
+
+func (m *MockExecutor) LocalBranchRefs(workdir string) ([]string, error) {
+	m.record("LocalBranchRefs", workdir)
+	if m.LocalBranchRefsFn != nil {
+		return m.LocalBranchRefsFn(workdir)
+	}
+	return m.LocalBranchRefsResult, m.LocalBranchRefsErr
+}
+
+func (m *MockExecutor) RemoteTrackingRefs(workdir string) ([]string, error) {
+	m.record("RemoteTrackingRefs", workdir)
+	if m.RemoteTrackingRefsFn != nil {
+		return m.RemoteTrackingRefsFn(workdir)
+	}
+	return m.RemoteTrackingRefsResult, m.RemoteTrackingRefsErr
 }
 
 // Compile-time interface check.

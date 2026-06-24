@@ -686,6 +686,43 @@ func (g *MindspecExecutor) IsRefNotFound(err error) bool {
 	return errors.Is(err, gitutil.ErrRefNotFound)
 }
 
+// GitMv runs a history-preserving `git mv -- <src> <dst>` in workdir. Thin
+// pass-through to gitutil — the layout mover's rename primitive routed through
+// the executor boundary (ADR-0030, spec 106 Bead 3).
+func (g *MindspecExecutor) GitMv(workdir, src, dst string) error {
+	return gitutil.GitMv(workdir, src, dst)
+}
+
+// ResetHard runs `git reset --hard <ref>` in workdir (the mover's pre-publish
+// rollback). Thin pass-through to gitutil.
+func (g *MindspecExecutor) ResetHard(workdir, ref string) error {
+	return gitutil.ResetHard(workdir, ref)
+}
+
+// CleanForce runs `git clean -fd` in workdir (paired with ResetHard on
+// rollback). Thin pass-through to gitutil.
+func (g *MindspecExecutor) CleanForce(workdir string) error {
+	return gitutil.CleanForce(workdir)
+}
+
+// CommitPaths stages the given paths and commits them in workdir. Thin
+// pass-through to gitutil — the mover's bd-export-free commit primitive.
+func (g *MindspecExecutor) CommitPaths(workdir, msg string, paths []string) error {
+	return gitutil.CommitPaths(workdir, msg, paths)
+}
+
+// LocalBranchRefs returns the short names of every local branch in workdir.
+// Thin pass-through to gitutil — source (1) of the migrate-layout discovery scan.
+func (g *MindspecExecutor) LocalBranchRefs(workdir string) ([]string, error) {
+	return gitutil.LocalBranchRefs(workdir)
+}
+
+// RemoteTrackingRefs returns the short names of every remote-tracking ref in
+// workdir. Thin pass-through to gitutil — source (2) of the discovery scan.
+func (g *MindspecExecutor) RemoteTrackingRefs(workdir string) ([]string, error) {
+	return gitutil.RemoteTrackingRefs(workdir)
+}
+
 // commitWithExport runs the pre-stage beads export, then delegates to the
 // underlying commit. Used by every executor path that ends in `git commit`
 // so every mindspec-driven commit carries current beads state.
