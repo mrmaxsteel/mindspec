@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Content-integrity lens. Reviewed all 4 pure-M files (AGENTS.md, README.md, instruct/templates/spec.md, lineage manifest) and all 106 renames-with-content-change. The overwhelming majority are benign inline-`code` path rewrites (.mindspec/docs/X -> .mindspec/X or project-docs/X) inside historical spec/plan/ADR/core/domain docs; no prose was deleted — every '-' line has a matching '+' line differing only in the path or a link->inline-text conversion that preserves the visible label. Sampled 10+ real markdown-link repairs: AGENTS/README guide+ADR+USAGE links, 095 ADR-0031/0036 renamed-target fixes, 085 executor.go depth fix, 022 ADR depth fix, and all dogfood AGENTS/CLAUDE/README/INIT/guides/friction depth fixes — every target verified to exist on disk. Neutralizations (ADR-NNNN, docs/templates/, architecture/policies.yml, happy-path.md, runbook placeholder) all target paths confirmed never to have existed. No .go/cmd source changed; .mindspec/docs, review, docs all absent; zero live markdown links point into the dead .mindspec/docs/ tree. No meaningful documentation destroyed and no fixable link masked.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "internal/instruct/templates/spec.md",
+      "issue": "Bead 5 removed only the glossary line; the template still emits stale '.mindspec/docs/{specs,domains,core,adr}' path references in Spec-Mode guidance. These are inline-code (not markdown links) so they do not fail the doctor 404 gate, and updating template path strings is plausibly a sibling-bead/Bead-6 concern, but the emitted guidance will point agents at dead docs/ paths post-flatten. Flag for final-review to confirm a later bead covers it. Not content destruction.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": ".mindspec/core/MODES.md + USAGE.md + context-system docs",
+      "issue": "Doc-consistency leftover: MODES.md still lists '| Glossary entries | GLOSSARY.md |' as a spec-mode artifact and several docs describe the now-dropped glossary in prose. All are descriptive/historical text with no dangling markdown link, so harmless, but a completeness cleanup would fully retire the glossary feature alongside Req 13's drop.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "historical spec docs (e.g. 034 spec.md)",
+      "issue": "A few inline-code path rewrites are internally inconsistent within a single line (034 keeps '.mindspec/docs/adr' and '.mindspec/docs/glossary.md' while flattening sibling paths in the same command). Cosmetic, confined to historical specs, no link impact.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": ".mindspec/core/MODES.md template links",
+      "issue": "MODES.md template links (../templates/spec.md, ../templates/adr.md, ../../architecture/policies.yml) were neutralized to inline code rather than repointed. Verified '.mindspec/docs/templates/' never existed in the parent commit, so these were genuinely-dead pre-existing links; neutralization is acceptable even though a different file (project-docs/user/templates/spec.md) exists, since the original link target conceptually differed and was never reachable.",
+      "hard_block": false
+    }
+  ]
+}

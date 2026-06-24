@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.82,
+  "rationale": "The central factual premises hold. Dolt/bd reports both mindspec-3d3i and mindspec-3d3i.6 closed, while committed HEAD:.beads/issues.jsonl has the epic open and bead .6 in_progress. The installed post-merge hook is a bd shim; because Git runs post-merge after the merge/FF updates the worktree, a chore PR that commits the corrected JSONL should cause the hook to import the corrected closed state, not fight it. HEAD is fa3e7f40 with the flat layout live, project-docs present, and .mindspec/docs absent. v0.9.0 is the last tag, and release workflow plus .goreleaser.yml exist. sc0w/3jq7 remain open P2 migration bugs and ADR-0039 is still Proposed, matching the plan's optional cleanup. I could not independently verify main CI because gh could not connect to api.github.com in this environment; confidence is reduced, but the plan already requires CI verification before merge/tag.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "beads-state",
+      "issue": "Verified Dolt/bd closed state diverges from committed HEAD JSONL: mindspec-3d3i is open and mindspec-3d3i.6 is in_progress in HEAD, while both are closed in bd/current JSONL."
+    },
+    {
+      "severity": "info",
+      "area": "post-merge-hook",
+      "issue": "The hook delegates to bd hooks run post-merge; after a merge containing corrected JSONL, the import should use the corrected worktree file and durably clear the self-revert."
+    },
+    {
+      "severity": "low",
+      "area": "ci",
+      "issue": "gh run list --branch main --limit 3 failed with api.github.com connectivity, so this review did not independently confirm the live green CI claim."
+    },
+    {
+      "severity": "info",
+      "area": "release-layout",
+      "issue": "Verified v0.9.0 is the latest tag, release tooling exists, and committed HEAD has .mindspec/{specs,adr,domains,core} plus project-docs with .mindspec/docs absent."
+    }
+  ]
+}

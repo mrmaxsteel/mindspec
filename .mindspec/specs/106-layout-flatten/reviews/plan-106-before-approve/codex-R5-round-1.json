@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "The core dependency spine is mostly sound: Bead 2 correctly front-loads the flat-prefix `LoadOwnershipAtRef`/`domainManifestRelPath` work before Bead 5, Bead 3 can be built against captured physical fixtures without Bead 1/2, Bead 5 consumes the required mover/matcher/panel capabilities, and the longest serial chain is 3. The blocking sequencing defect is the Bead 2 reviews classifier transition: before any review co-location or file move, the plan says to replace the current root `review/` process-artifact exclusion with a spec-dir `/reviews/` segment exclusion. That can make still-current root review artifacts source/unowned during the interim before Bead 4/5, risking gate failures. Make the classifier additive/dual-location through the transition, or move the removal to the co-location bead.",
+  "concrete_changes_required": [
+    "Revise Bead 2 so `isProcessArtifact` keeps the existing root `review/**` exclusion while adding the new spec-scoped `/reviews/` exclusion, at least until Bead 4/5 moves/disables the root review convention. Prefer documenting this as a permanent historical-ref compatibility matcher, analogous to the permanent multi-prefix doc/ownership matchers.",
+    "Update Bead 2 verification to assert both current root `review/<slug>/...` process artifacts and future `<spec-dir>/reviews/<slug>/...` process artifacts are classified non-source during the transition."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 2 sequencing / process-artifact classification",
+      "issue": "Plan Bead 2 step 3 replaces `HasPrefix(path,\"review/\")` with a spec-dir `/reviews/` segment exclusion before any review files are co-located and before Bead 4 changes the panel scan. Root `review/**` is still the live convention in that interim, so review artifact diffs can stop being process artifacts and trip source/ownership gates.",
+      "hard_block": true
+    }
+  ]
+}

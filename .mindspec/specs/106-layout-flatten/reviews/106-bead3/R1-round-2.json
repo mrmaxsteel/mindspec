@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "Round-2 scope is correct. (1) The new dogfood-eviction + review-co-location move generators belong in Bead 3: plan Bead-3 step 4 explicitly assigns the rewriter the 'review-co-location depth changes, dogfood eviction depth changes' subset, and these are GENERATORS/rules (DefaultFlattenPlan dogfood groups, DefaultFlattenRules + run-time reviewRules, reviewGroups() panel.json/slug routing, project-docs link-check root) — the mover's out-of-box behavior. Bead 5 (plan §Bead 5) merely RUNS the mover on the live tree; that EXECUTION is NOT done here. No creep into Bead 5. (2) Live tree NOT flattened: `git show 99a6bd5a --diff-filter=RCD` is EMPTY (0 renamed/copied/deleted); no `.mindspec/docs` path is touched; removeEmptyReviewDir/resolvePlan run only inside Run(), which Bead 3 never invokes live; new fixture newFullMoveRepo uses t.TempDir(). (3) No Bead 1/2/4 creep: no internal/workspace, internal/panel, internal/complete, or doctor/migration.go touched; links.go is Bead 3's own lane (created R1); CleanForcePaths extends the R1-endorsed additive primitive surface; review routing reads panel.json via os.ReadFile+json (no internal/panel import). Build of all touched packages passes. My R1 deviation-C forward-note is RESOLVED in the correct bead.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/no-live-flatten",
+      "issue": "Confirmed the live .mindspec/docs tree is STILL not flattened. `git show 99a6bd5a --diff-filter=RCD` is empty (0 renamed/copied/deleted files) and the commit touches NO `.mindspec/docs` path — it edits only Go source/tests. The new dogfood/review generators and removeEmptyReviewDir() fire exclusively inside Run(), which Bead 3 never invokes against the live tree; the new full-move test fixture (newFullMoveRepo) uses root := t.TempDir(). Bead 5's irreversible move remains un-pre-empted.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "scope/generators-in-bead3-not-bead5",
+      "issue": "The dogfood-eviction (.mindspec/docs/{user,installation,research} → project-docs/{...}) and content-aware review-co-location (reviewGroups/routeReviewSlug/panelSpec → <spec-dir>/reviews/<slug>/) generators are correctly placed in Bead 3, not Bead 5. Plan Bead-3 step 4 names exactly 'review-co-location depth changes, dogfood eviction depth changes' as the rewriter's closed breaking subset; plan Bead 5 only EXECUTES the mover on the live tree. These are the mover's defaults/logic (the GENERATOR), which is Bead-3 territory; the execution that Bead 5 owns is not present.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "scope/no-bead-1-2-4-creep",
+      "issue": "No new cross-bead creep. Round-2 touches no internal/workspace (Bead 1), internal/panel or internal/complete (Bead 4), or doctor/migration.go (Bead 4 detector). The only doctor edit is links.go (+1 `project-docs` scan root) — Bead 3's own link-check lane created in R1, gating the dogfood depth-change links per AC10. CleanForcePaths extends the executor/gitutil additive primitive surface already established and endorsed in R1. The new review routing reads review/<slug>/panel.json via plain os.ReadFile+json.Unmarshal inside internal/layout (no internal/panel import), so no Bead-4 coupling. Bead 2's Req-14 classification half (project-docs non-source in the workspace predicate) is NOT touched here.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "round-1-forward-note/deviation-C",
+      "issue": "My R1 minor (deviation-C) flagged the review-co-location + dogfood depth-change rewrite rules as ABSENT from Bead 3 and forward-noted Bead 5 would have to add them or lean on the link-check. Round 2 RESOLVES this by adding them to the mover itself — which is where plan step 4 assigned them all along — so the gap is closed in the CORRECT bead, not deferred. DefaultFlattenRules now carries the three dogfood rules and reviewRules() generates the per-review rule at run time; the symmetric `../`-relative preservation invariant is retained.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "dissent-closure/R5-R6",
+      "issue": "The R1 dissent is genuinely closed (cross-checked though scope is my primary lens). R6's two integration hard_blocks: dogfood + review moves now in DefaultFlattenPlan/reviewGroups, lineage records ALL landed groups (dest-exists guard) plus Skipped, and WithPlan/WithRules/WithRootDocs injection added (defaults already cover spec-106, R6 blocker-3 preferred path). R5's rollback major: rollback() now calls CleanForcePaths(root, touchedRoots()) — scoped to .mindspec/project-docs/review/plan-roots via firstSegment over the frozen plan — instead of repo-wide clean, with the Bead-5 Published-arming note added. Build of all touched packages passes.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "minor",
+      "area": "deviation/injection-api-surface",
+      "issue": "WithPlan/WithRules/WithRootDocs are net-new exported Mover methods that the static defaults already make unnecessary for spec-106 (the defaults drive the full flatten out of the box). They are a small, justified additive surface on the Bead-3-owned Mover type (the cheap customization hook R6 blocker-3 allowed for a future non-canonical tree or Bead 4/5). Exported-but-unused-in-this-spec; harmless, not scope creep. No action required.",
+      "status": "NEW"
+    }
+  ]
+}

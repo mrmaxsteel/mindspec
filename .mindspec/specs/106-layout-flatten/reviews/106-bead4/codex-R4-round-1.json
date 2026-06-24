@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Empirical lens, all green. go build ./... and go vet ./... clean; gofmt -l empty; git show d7f3fa77 --diff-filter=RCD empty (zero moves, code-only wiring as required). go test -count=1 across panel/complete/executor/doctor PASS, exit 0. CRITICAL PROPERTY 1 VERIFIED: panelGateRoots (panel_advisory.go:236-245) appends repo-root `root` for ANY non-flat layout (canonical/legacy/greenfield/mixed), and TestPanelGateRoots_LayoutAware/'canonical unions repo-root and spec-dir' asserts containsRoot(roots, root) AND the spec dir; TestPanelGate_CoLocatedCanonical_Blocks exercises it through complete.Run. So this spec's own root review/106-bead5,6 panels keep gating complete on the still-canonical tree. The flat subtest proves root is excluded only post-flatten. CRITICAL PROPERTY 2 VERIFIED: layout_guard_test.go matrix asserts regression(canonical/legacy->flat)=BLOCK, migration(flat->canonical/legacy)=ALLOW, same-layout=ALLOW, live-run(recoveryActive=true)=EXEMPT, read-error=fail-open; integration tests block at the real CompleteBead + FinalizeEpic seams with mutate-nothing checks. Guard wired at all 3 local-merge seams (executor.go 294/379/431) ahead of merges. Deviation A (3-line MigrationRecoveryActive reuse wrapper) and Deviation B (docs.go orphan scans deferred to Bead 2 to avoid conflict) both sound. No hard blocks.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/test",
+      "issue": "go build ./..., go vet ./..., gofmt -l all clean; go test -count=1 ./internal/panel/... ./internal/complete/... ./internal/executor/... ./internal/doctor/... PASS (exit 0). git show d7f3fa77 --diff-filter=RCD --name-only empty: 16-file code-only commit, zero renames/copies/deletes.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "panel-gate (Critical Property 1)",
+      "issue": "Root review/ keeps driving the gate on canonical: panelGateRoots returns [wtPath, root, specDir...] for any layout != LayoutFlat (only flat returns specDirs-only). panel.Scan dual-globs `review/*` and `reviews/*` (literal `review` does not substring-match `reviews`), deduped by canonicalPath. TestPanelGateRoots_LayoutAware asserts root present on canonical, absent on flat; TestPanelGate_CoLocatedCanonical_Blocks confirms end-to-end. Property holds.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "merge guard (Critical Property 2)",
+      "issue": "Directional guard correct and exhaustively tested. mergeLayoutRegression blocks iff target==flat AND source in {canonical,legacy}. TestMergeLayoutRegression_Matrix + TestGuardMergeLayout_Directional cover BLOCK/ALLOW/same/EXEMPT(live run)/fail-open. Bead 5's flat->canonical move-merge is the ALLOWED migration direction (not blocked); only canonical->flat regression blocks, with an ADR-0035 rebase recovery line. Guard installed at all 3 local-merge seams; remote-PR non-coverage honestly documented.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "doctor (Req 8) + deviations",
+      "issue": "checkLayout emits would-migrate-layout Warn (canonical/legacy), dual-layout-spec ERROR on cross-tier id collision; checkDryRunMigration made tier-aware via workspace.SpecsDir — all tested and passing. Deviation A: MigrationRecoveryActive is a thin exported wrapper over Bead-1's migrationRecoveryActive (reuse, not reimplement) — acceptable. Deviation B: docs.go orphan/docs scans correctly deferred to Bead 2 to avoid a pre-merge conflict — correct scoping, not a gap.",
+      "hard_block": false
+    }
+  ]
+}

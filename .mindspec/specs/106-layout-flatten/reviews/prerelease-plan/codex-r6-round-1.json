@@ -1,0 +1,56 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The JSONL self-revert diagnosis is sound and the chore PR should durably fix spec-106 bead state, but the release plan is incomplete. GoReleaser auto-changelog excludes docs/test/chore and cannot substitute for curated release notes; there is no CHANGELOG file. Resolver unit tests cover flat/canonical/legacy, but install-smoke only tests installer checksum parsing and no binary-level downstream canonical/legacy project smoke exists. More importantly, current user-facing docs still advertise .mindspec/docs/ and docs/specs/ as live locations, so v0.10.0 would ship contradictory guidance. v0.10.0 is defensible only if the opt-in/non-breaking story is documented and tested. The two known test failures are not a clean CI blocker: TestRun_IdleNoBeads passes in this idle checkout, and TestInstructPhaseDetection is skipped under CI -short. ADR-0039 remains Proposed despite the layout shipping, and untracked review/handover artifacts need an explicit disposition.",
+  "concrete_changes_required": [
+    "Before tagging, add curated release notes or a CHANGELOG entry that explicitly explains the flat layout, opt-in migration, downstream compatibility, co-located reviews, project-docs eviction, and any known migrate-layout limitations if sc0w/3jq7 are not fixed.",
+    "Add or run and record a binary-level downstream smoke test against at least one canonical .mindspec/docs project and one legacy docs project with the new binary; install-smoke.yml does not cover this.",
+    "Fix or explicitly quarantine current user-facing stale path docs before release: README.md project structure, .mindspec/core/CONVENTIONS.md, .mindspec/core/WORKFLOW-STATE-MACHINE.md, and project-docs user guides still describe docs/specs or .mindspec/docs as live locations.",
+    "Flip ADR-0039 to Accepted before the tag, or make the release explicitly block on that governance step.",
+    "Resolve the untracked review/106-* artifacts plus AUTOPILOT-LOG.md and HANDOVER-spec106.md: co-locate/commit the durable audit records under the spec reviews path or remove them before release.",
+    "Either fix sc0w and 3jq7 before the tag or mark migrate layout as supervised/known-limited in release notes; 3jq7 in particular weakens the mover's advertised link-check guarantee."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "release notes",
+      "issue": ".goreleaser.yml only auto-generates a commit-subject changelog and excludes docs/test/chore; there is no CHANGELOG file or curated release-note artifact covering opt-in migration, compatibility, or known migrate-layout caveats."
+    },
+    {
+      "severity": "blocker",
+      "area": "downstream compatibility",
+      "issue": "internal/workspace has resolver matrix tests for canonical/legacy/flat, but no pre-release or install-smoke test builds the new binary and exercises real commands against a canonical/legacy-layout consumer project."
+    },
+    {
+      "severity": "blocker",
+      "area": "user-facing docs",
+      "issue": "Current, non-archive docs still advertise stale locations: README.md shows .mindspec/docs/, CONVENTIONS.md says canonical docs live under .mindspec/docs/, WORKFLOW-STATE-MACHINE.md uses docs/specs lifecycle paths, and user guides say agents create docs/specs/*.md."
+    },
+    {
+      "severity": "major",
+      "area": "ADR governance",
+      "issue": "ADR-0039-flat-layout-v2.md is still Status: Proposed even though the flat layout has shipped on main; the plan treats acceptance as optional cleanup but it should precede the release tag."
+    },
+    {
+      "severity": "major",
+      "area": "migrate layout",
+      "issue": "Open sc0w and 3jq7 are not just cosmetic: sc0w can block normal users with stale unrelated branches, and 3jq7 means the advertised 404 gate missed broken tracked root docs. If not fixed, they need explicit release-note limitations."
+    },
+    {
+      "severity": "major",
+      "area": "working tree hygiene",
+      "issue": "Untracked root review/106-* panels plus AUTOPILOT-LOG.md and HANDOVER-spec106.md are release-adjacent audit artifacts. Leaving them untracked/root-level conflicts with the new co-located review story and risks accidental omission or later noisy commits."
+    },
+    {
+      "severity": "minor",
+      "area": "known tests",
+      "issue": "The two cited failures do not currently look like release-runner blockers: TestRun_IdleNoBeads passes from this idle checkout, and TestInstructPhaseDetection is skipped under CI -short; still, the plan should state that reconciliation explicitly."
+    },
+    {
+      "severity": "minor",
+      "area": "version semantics",
+      "issue": "v0.10.0 is reasonable for opt-in/non-breaking in-tree resolver behavior, but migrated projects will break external tooling that hardcodes .mindspec/docs paths, so release notes must call that out rather than relying on semver implication alone."
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Empirical whole-branch checks all clean. `go build ./...` and `go vet ./...` pass; `gofmt -l .` (minus docs_archive) is empty. Full non-harness suite (cmd/... + all internal/* except harness) is GREEN except internal/instruct, whose ONLY failing test is TestRun_IdleNoBeads (z4ps, pre-existing). Harness builds and `go test -run 'Test[^L]'` fails ONLY TestInstructPhaseDetection/{plan,implement} (idle subtest PASSes) — the documented init.defaultBranch=main protected-branch idle short-circuit, dated pre-106. No third failure surfaced; both known failures reproduce identically and are layout-independent, not 106 regressions. Every structural AC holds: .mindspec/{specs,adr,domains,core} + context-map.md present; .mindspec/docs, root review/, and .mindspec/policies.yml ALL absent; project-docs/user present; ADR-0039-flat-layout-v2.md present. AC19 grep hits live ONLY in internal/validate/divergence.go and are the intended drop-classifier (comments + isVestigialConfigDrop matching the deleted policies.yml/glossary.md), not loader references. Nothing blocks merge.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/fmt",
+      "issue": "go build ./... OK, go vet ./... OK, gofmt -l . (excluding docs_archive) empty.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "test-suite (non-harness)",
+      "issue": "cmd/... and all internal/* (journal, layout, lifecycle, lint, ndjson, next, otel, ownership, panel, phase, recording, redact, resolve, safeio, setup, spec, specgate, state, tokenize, trace, validate, version, workspace) PASS. Only internal/instruct FAILs.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "pre-existing failure #1 (z4ps)",
+      "issue": "internal/instruct TestRun_IdleNoBeads is the sole failing instruct test — known test-isolation leak, layout-independent, not a 106 regression.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "pre-existing failure #2 (harness)",
+      "issue": "internal/harness Test[^L] run + go build OK; only TestInstructPhaseDetection/{plan,implement} fail (idle subtest PASSes) — env init.defaultBranch=main protected-branch idle short-circuit, dated pre-106.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "no-third-failure",
+      "issue": "Exactly the 2 documented pre-existing failures reproduce; no additional/regression failure observed across the whole branch.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "structural ACs",
+      "issue": "All pass: .mindspec/{specs,adr,domains,core}+context-map.md present; .mindspec/docs, root review/, .mindspec/policies.yml absent; project-docs/user present; ADR-0039-flat-layout-v2.md present.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "AC19",
+      "issue": "grep 'GLOSSARY.md|policies.yml' over internal+cmd non-test .go hits only internal/validate/divergence.go — the intended divergence drop-classifier (comments + isVestigialConfigDrop path-equality), not loader references.",
+      "hard_block": false
+    }
+  ]
+}

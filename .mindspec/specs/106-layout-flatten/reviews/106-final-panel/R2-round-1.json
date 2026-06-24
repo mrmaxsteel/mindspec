@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Walked all 25 ACs against the spec-branch worktree. 23 are SATISFIED: I ran the load-bearing suites green — workspace+bootstrap+contextpack (AC1-6,12,18), validate (92s; AC11,21), layout (AC7-9,16), panel+complete+doctor+executor (AC10,13-15), setup+cmd+spec+domain (AC5,17,24) — and verified structure on disk: flat .mindspec/{specs,adr,domains,core}+context-map.md, project-docs/ present, no root docs/, root review/ GONE with 42 artifacts co-located under <spec-dir>/reviews/, no stale domain self-globs, DOCS-LAYOUT.md amended, ADR-0039 Proposed/uncited, ADR-0037 reviews-location amendment, AC17 breadth grep EMPTY. AC25 is DEFERRED (validate spec unrunnable — Dolt offline) but structurally sound (Approved frontmatter, 4 Accepted ADR touchpoints, 25 ACs). One nuance on AC19: substance is met (glossary.md/policies.yml + template line gone) but the spec's exact load-bearing grep is NON-empty — 3 hits in divergence.go's intentional isVestigialConfigDrop matcher (needed so the deletion diff doesn't trip adr-divergence-unowned; consistent with Req 6's permanent-matcher posture). Defensible, not a regression. No core AC is genuinely unmet; no merge-blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "AC19 / internal/validate/divergence.go",
+      "issue": "The spec's exact load-bearing AC19 proof — `grep -rn 'GLOSSARY.md\\|policies.yml' internal cmd | grep -v _test` — is NON-EMPTY: 3 hits in divergence.go's isVestigialConfigDrop matcher (lines 287/315/321, `path == \".mindspec/policies.yml\"`). The substance of AC19 is fully met (both files dropped, instruct/templates/spec.md:35 glossary line removed). The matcher is intentional and arguably necessary so the flatten's deletion diff isn't flagged adr-divergence-unowned, consistent with Req 6's permanent multi-prefix posture. Recommend a one-line reconciliation note (or narrowing AC19's proof to exclude the gate matcher) so the literal proof matches the shipped code; not a blocker.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "AC23 / .mindspec/context-map.md",
+      "issue": "6 stale `docs/domains|docs/specs|...` labels survive in context-map.md link DISPLAY TEXT (e.g. line 59 `[docs/domains/workflow/interfaces.md](domains/workflow/interfaces.md)`). The link TARGETS are the correct flat paths and the files exist, so AC10 (zero 404s) holds and the doctor link-check passes — purely a cosmetic stale label, not a broken link. Polish, not a blocker.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "AC25 / mindspec validate spec",
+      "issue": "AC25 could not be executed (Dolt git-network offline in sandbox). Assessed by structure: spec frontmatter Approved; ADR touchpoints 0037/0018/0023/0025 all Accepted and jointly cover all four impacted domains; ADR-0039 lands Proposed+uncited (earns no adr-divergence-proposed block); 25 ACs present; Impacted Domains are real. No structural reason validate would report errors. DEFERRED (unrunnable-offline), not unmet.",
+      "hard_block": false
+    }
+  ]
+}

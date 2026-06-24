@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.82,
+  "rationale": "Correctness/safety lens. Transactional design is sound: PreRunRef is durably written in ensureInit BEFORE the first mutation, and resume re-runs the whole plan idempotently rather than trusting a stage to skip work — so a torn intermediate checkpoint cannot corrupt convergence. Every step is idempotent (move guarded by exists(src); CommitPaths is a no-op when nothing is staged via DiffCachedQuiet; ReplaceAll rules are no-ops once Old tokens are gone), and nonOperationalDirtyPaths re-commits an uncommitted working-tree rewrite on resume — proven across all six boundaries. No double-apply. The finite breaking set is closed and, crucially, fails CLOSED: a missed/mis-pointed link is caught by the whole-tree doctor link-existence gate (404 -> run fails -> rollback), and ../../adr/... relatives never match a rule (preserved). SEC-5: all new gitutil primitives and executor MergeBase/TreeDirsAtRef guard every ref/path operand and put paths after --; no operand bypasses the guard. Precondition block <=> unmerged AND pre-flatten fingerprints the merge-base correctly and degrades offline with a WARN (fail-closed). Deviations A (CommitPaths/LockedWorktreeBranches) and B (redact 'layout' token) are justified and safe. One latent sharp edge noted (repo-wide clean -fd in rollback), safe as shipped.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "rollback / data-safety",
+      "issue": "rollback() does ResetHard(preRunRef) + CleanForce (`git clean -fd`, repo-wide). It is data-loss-safe in the shipped CLI path ONLY because CheckPrecondition(RequireCleanTree:true) refuses any untracked non-operational file at start, so the only untracked content at rollback is the mover's own operational residue. But Mover.Run()/Abort() are public and the clean is unconditional + unscoped; if Bead 5's LIVE flatten (or any future caller) drives Run() without that precondition, `git clean -fd` would destroy untracked user work. Recommend hardening before Bead 5: scope the clean to the migration surface (e.g. `git clean -fd -- .mindspec`) and/or re-assert the clean-tree invariant inside rollback. Not a shipped-path hole, so not a blocker for Bead 3.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "refuse-after-publish",
+      "issue": "State.Published is never set true in production (only in TestMover_AbortRefusesAfterPublish); the mover only commits locally and never pushes in Bead 3, so the forward-only refusal is correct-but-inert here. The guard mechanism is sound and unit-tested, but Bead 5 (the live run that actually publishes) MUST set Published before/at push, else auto-rollback would remain armed against an already-published tree.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "finite rewriter",
+      "issue": "ReplaceAll rewrites EVERY occurrence of `.mindspec/docs/<child>` in file content, including prose/historical examples (cosmetic over-rewrite), and the directory-link form without a trailing slash (e.g. `.mindspec/docs/specs`) is not in the rule set so it survives unrewritten. Both are fail-safe: prose rewrites don't affect link resolution, and a missed breaking link is caught by the link-existence gate (run FAILS + rolls back rather than shipping a 404). Acceptable; optionally add the no-slash directory forms.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "precondition fingerprint",
+      "issue": "PreFlatten is taken at the merge-base. An 'unknown' (pre-.mindspec) merge-base yields PreFlatten=false (non-blocking). A branch that forked before .mindspec existed AND independently introduced `.mindspec/docs` would be a theoretical false-negative (merge could resurrect the canonical layout). Extremely contrived; not a real-repo risk given the layout was introduced on the mainline before any divergence. Offline degrade is fail-closed and warned.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "test coverage",
+      "issue": "gitutil/executor mover-primitive tests cover behavior but not an explicit option-injection case for the new primitives (GitMv/ResetHard/CommitPaths/MergeBase/TreeDirsAtRef). The RejectOptionLike guard is applied per-operand and is itself well-tested (spec 097), so coverage is adequate; a `-`-prefixed-operand assertion per primitive would close the loop.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Correctness lens clears. LINCHPIN holds: LoadOwnershipAtRef tries domainManifestRelPaths flat->canonical->legacy first-present-wins; on a flat ref the flat candidate resolves (Source()=='manifest', not 'missing'). The absent-vs-error split is made at git ls-tree (pathExistsAtRef): valid-ref/absent-path => present=false no-error => loop advances; bad-ref => error returned immediately and PROPAGATED, never swallowed as missing — so a git glitch cannot falsely pass adr-divergence. No masking: flat is probed first, so a present flat manifest is never shadowed by a stale canonical residue. The adjacent non-empty-Impacted-Domains branch (normalizeImpactedDomains) reuses loadOwnershipForRef/resolveDomains, inheriting the fix. Canonical/legacy classification is byte-identical (diff is purely additive; DomainsDir returns canonical on the current repo). hasArtifactPrefix/specMDID/isADRMarkdown reject nested+wrong-subtree; isProcessArtifact's two review matchers are independent (literal review/ never substring-matches /reviews/); project-docs/ scoped exactly, not over-broad. validate tests pass. Two low-severity latent notes below, neither a regression today.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "ownership.go LoadOwnership vs LoadOwnershipAtRef",
+      "issue": "On-disk LoadOwnership/listDomainDirs resolve to a SINGLE tier via workspace.DomainsDir (first-existing-dir wins), whereas the ref loader tries all three manifest candidates first-present-wins. They agree only under a uniform tree; in a hypothetical mixed tree (some domains flat, some canonical) the on-disk loader could read a canonical-only manifest as 'missing'. Safe in practice because Bead 5 is an atomic move and the linchpin complete-gate uses the robust ref loader, but the loaders are not strictly 'aligned across layouts' as the comment claims. Informational.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "divergence.go isCoLocatedReview",
+      "issue": "isCoLocatedReview uses strings.Contains(path, \"/reviews/\"), broader than the lifecycle-artifact subtrees. A future real source file under any */reviews/* path (e.g. internal/<pkg>/reviews/foo.go) would be silently skipped by the adr-divergence gate (false-negative), even though doc-sync's isSourceFile would still flag it as source — a minor asymmetry between the two gates. No such git-tracked path exists today (verified), so no current impact.",
+      "hard_block": false
+    }
+  ]
+}

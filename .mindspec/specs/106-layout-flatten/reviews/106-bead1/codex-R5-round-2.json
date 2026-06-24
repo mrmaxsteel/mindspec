@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "My round-1 recovery-scoping hard_block is ADDRESSED. The exception now keys on migrationRunInProgress (state.json parses + non-empty, non-terminal stage), not mere dir existence. I verified the terminal set against the REAL mover: mover.go apply() (L248-267) writes stageApplied=\"applied\" as the sole successful terminal; the doctor schema (migration.go L217-224) independently treats only \"applied\" as OK — so migrationTerminalStage=\"applied\" cannot be re-armed by a different clean finalize value (none exists). stageLinkCheckFailed is correctly NON-terminal: it is a failure that leaves the tree mixed and needs recovery, so the exception rightly stays active. A genuine crash is correctly tolerated: ensureInit (L206) writes \"pre-run\" BEFORE any move, so a live run that has progressed far enough to be mixed always carries a non-empty, non-\"applied\" stage. Stateless/unparseable/empty-stage records read as NOT in progress — the SAFE direction that closes the masking hole (tests at workspace_test.go L780-797 cover applied-completed and state-less). Both real on-disk records carry \"applied\" → no longer suppress ErrMixedLayout. SpecsDir/DomainsDir delegate to resolveArtifact, byte-identical to DocsDir join for non-flat trees. No re-mis-scoping in either direction.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "DetectLayout migration-recovery exception scope (Req 2 / AC3)",
+      "issue": "ROUND-1 BLOCKER (migrationRecoveryActive fired on any .mindspec/migrations/ subdir, so completed/stale runs suppressed ErrMixedLayout). Now scoped to LIVE runs via migrationRunInProgress reading state.json stage. Verified: \"applied\" is the ONLY clean terminal the mover writes (mover.go apply L264-267) and the ONLY OK stage in the doctor schema (migration.go L217-224), so migrationTerminalStage=\"applied\" matches the mover's real finalize value with no alternate clean terminal that could re-arm the bug. A completed/stale \"applied\" record and a state-less dir both STILL return ErrMixedLayout (tests L780-797). Both real repo records (\"applied\") no longer suppress.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Crashed-mid-migration is correctly tolerated (Req 2 / question 3)",
+      "issue": "A legitimately in-flight run is NOT wrongly hard-errored: ensureInit (mover.go L206) records stagePreRun before any tree mutation and checkpoint (L492-498) always sets a non-empty stage, so by the time the tree can be mixed the run carries a non-empty, non-\"applied\" stage → migrationRunInProgress=true → exception active. stageLinkCheckFailed (a failure terminal leaving a mixed tree) is also treated as in-progress, which is correct — it needs recovery. Empty-stage state.json mapping to NOT-in-progress is safe: that window only exists before the pre-run write, when no move has happened and the tree is not yet mixed.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Abandoned link-check-failed run keeps exception armed",
+      "issue": "A link-check-failed run left in place persists with stage \"link-check-failed\", which migrationRunInProgress treats as live indefinitely; if the operator abandons it without resume/rollback, a future genuine mixed tree would be tolerated. This matches Req 2's intent (a link-check-failed run IS an unfinished recovery and the doctor surfaces it as a Warn, so it is not silent), and clearing it via resume/rollback/remove is the correct flow. Not a regression of the round-1 bug (a COMPLETED \"applied\" run no longer masks mixed). No change required for Bead 1; recorded for awareness.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Non-atomic state.json write durability (Bead-3 mover, out of scope)",
+      "issue": "writeJSON (runstate.go) does MkdirAll+WriteFile without atomic rename, so a crash mid-write could truncate state.json during a genuine recovery, making it unparseable → migrationRunInProgress=false → hard error. This is a pre-existing Bead-3 mover durability concern, NOT introduced by this Bead-1 resolver fix, and the resolver's conservative unparseable→inactive choice is the SAFE direction for the round-1 masking concern (the opposite would re-open the hole). Flag for Bead 3, no Bead-1 change.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "SpecsDir/DomainsDir enumerator roots (R6 round-1, Req 1)",
+      "issue": "SpecsDir(root)/DomainsDir(root) delegate to resolveArtifact(root,\"specs\"|\"domains\"): flat (.mindspec/specs) when present or tree is flat, else filepath.Join(DocsDir(root), rel) — byte-identical to the pre-spec enumeration root for every canonical/legacy/greenfield tree. Correctly NOT worktree-aware (enumeration root of the primary tree, consistent with the per-item resolvers' non-worktree tiers). No new correctness issue.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Codebase-pin lens: no stubs, no hollow tests. (1) artifactPrefixes/hasArtifactPrefix are real and wired into isDocFile, specMDID, isADRMarkdown, checkInternalPackages (both domain-doc sites), the cmd-docs accept-set (isUserDoc/isCoreUsageDoc), and validateSpecArtifactSync — all with substantive bodies. divergence.go keeps the PERMANENT root review/ matcher and adds an INDEPENDENT /reviews/ segment matcher (literal 'review/' never substring-collides with 'reviews/'); project-docs/** routes non-source via isDocFile. The ownership pair is genuine: domainManifestRelPaths returns 3 ordered candidates, LoadOwnershipAtRef loops first-present-wins and still hard-errors on an operational git failure on the first probe, listDomainDirsAtRef unions+dedups the 3 tree roots. Enumerator swaps call the real tier-aware workspace.SpecsDir/DomainsDir (resolveArtifact flat-first, byte-identical on canonical/legacy). (2) The +305 classifier test and the budgeter/doctor/domain/spec layout tests assert real values (three-prefix equivalence, nested/wrong-subtree rejection, both review forms, contextpack pre-Provenance byte-identity with non-empty sanity, flat enumeration with content reads). (3) THE LINCHPIN is covered: TestLoadOwnershipAtRef_FlatRef mocks only the flat rel present and asserts Source()==manifest, Paths, and flat ref-qualified ManifestPath — proves a flat ref returns claims, not 'missing'. Deviations A/C sound; B (doctor/ownership.go, orphaned_beads.go flat-blind) is out-of-scope, acceptable Bead-6 deferral.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "doctor (out of Bead-2 scope)",
+      "issue": "doctor/ownership.go and doctor/orphaned_beads.go still hardcode canonical .mindspec/docs/... paths and remain flat-blind. Outside Bead 2's listed files; the LoadOwnership/LoadOwnershipAtRef gate path that drives `complete`'s adr-divergence is tier-aware, so the Bead-5 flat merge is not blocked. Track for Bead 6 / follow-up.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "ownership.go ref-anchored probes",
+      "issue": "LoadOwnershipAtRef now issues up to 3 FileAtRefOrAbsent probes per domain and listDomainDirsAtRef 3 TreeDirsAtRef calls per ref (vs 1 pre-spec). Pure perf cost of the intended permanent multi-prefix posture; correctness/byte-identity of the chosen manifest is preserved. Not a blocker.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "specMDID degenerate quirk (deviation A)",
+      "issue": "specMDID still returns 'spec.md' for a '<root>/specs/spec.md' path (TrimSuffix quirk preserved verbatim from original code); only the pre-existing wrong test expectation was corrected. Behavior-preserving and consistent across all three prefixes. Acceptable.",
+      "hard_block": false
+    }
+  ]
+}

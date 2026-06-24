@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "Contract/interface lens: no backward-incompatible change. The 6 new Executor methods (GitMv/ResetHard/CleanForce/CommitPaths/LocalBranchRefs/RemoteTrackingRefs) are purely additive, appended after the existing interface; no existing exported signature changed. Both — and only — implementers (MindspecExecutor, MockExecutor) are updated, with compile-time asserts (`_ Executor = (*MockExecutor)(nil)`, executor_test asserts both). Full-module `go build ./...` + `go vet ./...` pass, so no caller anywhere is broken; no downstream rework forced. The methods are consistent with ADR-0030's established single-git-seam pattern (interface already exposes RevParseRef/Status/MergeBase/TreeDirsAtRef) and its additive-growth precedent; internal/layout (not an enforcement pkg, not lint-banned) still routes git purely through GitOps/Executor, importing neither os/exec nor gitutil. CommitPaths is justified: CommitAll couples bead.Export via commitWithExport, unusable in a deterministic mover. internal/layout's public API (narrow GitOps interface, NewMover/Run/Abort, CheckPrecondition, exported State/Lineage structs) is cohesive and stable for Bead 4/5. Only a minor least-surface concern (below); not a contract break.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "Executor interface segregation (deviation A)",
+      "issue": "6 mover primitives were added to the widely-published Executor INTERFACE for a single consumer. Because the mover already declares its own narrow 10-method GitOps interface and Go satisfies it structurally, these primitives only needed to live on the concrete *MindspecExecutor and *MockExecutor types — they did not need to be on the Executor interface at all. Adding them to the interface grows the contract every future Executor implementer must satisfy. Additive and non-breaking (build green), consistent with the single-seam pattern and ADR-0030's additive precedent, so a taste/least-surface call rather than a defect; acceptable as-is.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "internal/layout stability for Bead 4/5",
+      "issue": "Mover.plan/rules/rootDocs are unexported with no exported option/setter (only same-package tests mutate them). If Bead 4/5 needs to customize the flatten plan for the live tree (e.g. residual dogfood subtrees), it must edit the package rather than configure via the public API. The default plan already IS the live flatten plan, so likely fine; flag only as a possible future churn point. Entry points (NewMover/Run/Abort/CheckPrecondition/BlockingError) are otherwise clean and stable.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "redact lockstep edit (deviation B)",
+      "issue": "internal/redact SubcommandTokens gains a one-line `\"layout\"` entry — a mechanical, append-only registration required because the RedactEnum_NoCobraDrift guard hard-fails on any unregistered subcommand. No interface/contract impact.",
+      "hard_block": false
+    }
+  ]
+}

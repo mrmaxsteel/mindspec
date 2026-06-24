@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Spec-goal / completeness lens: the merged branch DELIVERS the stated goal. End state in the spec worktree is correct: flat .mindspec/ (specs, adr, domains, core, context-map.md, config.yaml, lineage, migrations) with NO .mindspec/docs/ wrapper; project-docs/ holds the evicted user/installation/research; NO root review/; glossary.md + policies.yml dropped. Reviews co-located: 42 artifacts now live under <spec-dir>/reviews/ (matches the spec's 42-file claim). Every promised deliverable is present: per-artifact three-tier resolvers + 5-state DetectLayout (mixed hard-error + recovery exception) in internal/workspace; net-new internal/layout transactional two-commit mover + runstate + rewriter + precondition; doctor links.go link-check + layout detector + dual-id error; DIRECTIONAL merge-fingerprint guard wired at the REAL executor seams (CompleteBead/FinalizeEpic); permanently multi-prefix gate matchers (canonical/legacy literals deliberately retained, incl. LoadOwnershipAtRef); flat-aware budgeter; migrate layout CLI. Governance complete: ADR-0039 (Proposed), DOCS-LAYOUT.md amended to flat, ADR-0037 reviews-location amendment, migrate rubric reconciled. AC17 skill/setup grep is clean; go build ./... succeeds. No missing core deliverable; the 2 known failures are pre-existing and layout-independent.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "completeness/end-state",
+      "issue": "Verified merge-readiness end state: .mindspec/docs/ wrapper gone, flat .mindspec/{specs,adr,domains,core}+context-map.md, project-docs/ eviction landed, root review/ eliminated with 42 review artifacts co-located under <spec-dir>/reviews/, glossary.md+policies.yml dropped. All 6 beads' deliverables present (resolvers, mover, gate matchers, merge guard, doctor lanes, governance). go build ./... OK.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "AC19 literal-proof drift (non-blocking)",
+      "issue": "AC19's load-bearing grep ('grep -rn GLOSSARY.md|policies.yml internal cmd | grep -v _test' empty) no longer returns empty: internal/validate/divergence.go:287/315/321 retain the dropped '.mindspec/policies.yml'/'.mindspec/docs/glossary.md' paths as a deliberate isProcessArtifact process-artifact classifier (+ its comments) for permanent historical-ref compatibility, consistent with the Req 6 'permanently multi-prefix, decoupled from deprecation' posture. These are intentional classifier literals, NOT dangling references to live files — the actual files and the instruct/templates/spec.md glossary line ARE gone. AC19's intent (no live glossary/policies, no stale template line) is satisfied; only the literal proof-grep wording is now stale. Worth a one-line AC note in a follow-up, not a merge-blocker.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "user-facing message cosmetics",
+      "issue": "internal/validate/divergence.go:213 the unowned-file remediation message still points users at '.mindspec/docs/domains/<name>/OWNERSHIP.yaml' (canonical) rather than the flat '.mindspec/domains/<name>/...' on a now-flat repo. Purely cosmetic guidance text on the gate-matcher side (the matcher itself correctly recognizes all three prefixes); harmless and out-of-scope of any AC. Optional follow-up.",
+      "hard_block": false
+    }
+  ]
+}

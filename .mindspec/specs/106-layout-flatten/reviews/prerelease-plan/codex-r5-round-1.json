@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "sc0w and 3jq7 are real but not independently release-blocking: sc0w fails closed before mutation and has workarounds (delete/prune stale refs or migrate from a single-branch main clone); 3jq7 can silently leave non-scanned root docs with broken links, but it is not data loss and is catchable by a full markdown link scan. The blocker I would not ship under current claims is user-facing recovery: Mover.Run is crash-resumable, but the CLI always enforces the clean-tree precondition before loading run-state, so a crash after rewrite-before-commit leaves dirty moved docs and `mindspec migrate layout` refuses to resume. `--abort` remains a safe pre-publish rollback, but crash-resume and post-publish forward-only refusal are overclaimed from the CLI side. Ship only after fixing that or explicitly downgrading the command to supervised/experimental abort-and-retry recovery.",
+  "concrete_changes_required": [
+    "Make the `mindspec migrate layout` CLI detect an existing run-state and resume before enforcing the fresh-run clean-tree precondition, with a regression for crash after subtree/root-doc rewrite leaves dirty markdown; alternatively remove the crash-resumable claim and document abort-and-rerun recovery for v0.10.0.",
+    "If sc0w/3jq7 are not fixed before tag, release notes/help must mark `migrate layout` supervised/experimental and document the stale-branch workaround plus a required full markdown link check after migration."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "migrate layout CLI recovery",
+      "issue": "The mover's direct crash-resume works, but the CLI runs `CheckPrecondition(...RequireCleanTree:true)` before `NewMover(...).Run()`. A real crash after rewrites but before the rewrite commit leaves dirty moved/root docs, so rerunning the user-facing command is refused as a dirty tree instead of resumed. `--abort` can recover pre-publish, but the crash-resumable release claim is not true at the CLI boundary."
+    },
+    {
+      "severity": "medium",
+      "area": "sc0w precondition",
+      "issue": "The branch scan blocks any unmerged origin/local ref whose merge-base is canonical, even if the branch is stale or unrelated to the migration target. This is severe adoption friction for repos with old fix branches, but it fails before mutation and can be worked around by deleting/pruning stale refs or migrating from a single-branch main clone."
+    },
+    {
+      "severity": "medium",
+      "area": "3jq7 link gate",
+      "issue": "The link gate scans moved trees plus README/AGENTS/context-map, while the root-doc rewriter touches only README/AGENTS. A downstream root doc such as BENCH-MOVED.md can keep `.mindspec/docs/...` links and silently break. This is a missed-warning/link-integrity risk, not data loss, because files are moved and recoverable."
+    },
+    {
+      "severity": "low",
+      "area": "forward-only semantics",
+      "issue": "State has a `Published` flag and rollback refuses when set, but the CLI has no publish step that sets it. Post-publish abort refusal is therefore procedural rather than automatically enforced; documentation should avoid implying the CLI detects publication."
+    }
+  ]
+}

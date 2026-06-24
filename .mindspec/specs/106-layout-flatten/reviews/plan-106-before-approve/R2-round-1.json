@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.72,
+  "rationale": "Coverage itself is sound: all of AC1-AC25 map to >=1 bead (no orphans), every bead satisfies >=1 AC (no make-work), and the non-obvious cross-bead ACs are split correctly with both halves assigned a concrete owner: AC10 = Bead3(build/gate+FAIL tests) + Bead5(green on real migrated tree); AC18 = Bead5(move/test -d) + Bead1(resolver capability, test listed in Bead5); AC21 = Bead3(ownership glob) + Bead2(project-docs/** classification); AC22 = Beads1+2 gate + Beads1-4 matrix at the orchestrator Phase-1 tip. No mis-attributions found. BUT two beads' runnable verification commands do not exercise the package where the mapped AC's tests live: (F1) AC5 names spec-list, domain-list AND doctor scans, yet Bead2's go test omits internal/spec and internal/domain (where list.go enumeration + tests live) -- only the doctor third runs. (F2) AC10's net-new doctor link-check lane is assigned to Bead3 by the plan's own shared-file note, but Bead3's changed-files/go-test both omit internal/doctor. A subagent passing the literal command could claim PASS without exercising the AC. One-line fixes; coverage is otherwise approve-grade.",
+  "concrete_changes_required": [
+    "Bead 2 Verification: extend the go-test command from `./internal/validate/... ./internal/contextpack/... ./internal/doctor/...` to also include `./internal/spec/... ./internal/domain/...` (and `./cmd/mindspec/...` if the command-level tests land there). AC5 names spec-list and domain-list explicitly, and that enumeration + its tests live in internal/spec/list.go and internal/domain/list.go|show.go -- as written only the doctor-scan third of AC5 is actually run.",
+    "Bead 3: pin where the AC10 doctor link-existence check lives. The plan's shared-file note says 'Bead 3 = the link-check lane' in internal/doctor, but Bead 3's changed-files (internal/layout/**, cmd/mindspec/migrate.go, OWNERSHIP.yaml) and its go-test (`./internal/layout/... ./cmd/mindspec/...`) both omit internal/doctor. Either state the check lives in internal/layout (then go-test is fine), or add internal/doctor to Bead 3's changed-files and `./internal/doctor/...` to its verification so the AC10 build-half tests (FAIL-on-dangling and FAIL-on-un-rewritten-link) are exercised."
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "AC coverage completeness",
+      "issue": "All 25 ACs (AC1-AC25) are present in the Provenance table and map to >=1 bead -- no orphaned AC. Every bead satisfies >=1 AC: B1{AC1,2,3,4,12,18-resolver}, B2{AC5,6,11,21-class}, B3{AC7,8,9,10-build,16,21-own}, B4{AC13,14,15,17}, B5{AC10-post,18-move,19,20,23,24}; AC22 spans B1-4, AC25 spec-level. No make-work bead.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "AC5 verification runnability",
+      "issue": "AC5 names three enumerating consumers (spec list, domain list/show, doctor scans). Bead 2's runnable verification `go test ./internal/validate/... ./internal/contextpack/... ./internal/doctor/...` exercises only the doctor scan. spec-list enumeration is in internal/spec/list.go (list_test.go) and domain-list in internal/domain/list.go|show.go (list_test.go); neither package is in Bead 2's go-test path, so the spec-list/domain-list flat-fixture proof for AC5 would not run under the stated command. The changed-files line says 'plus the spec-list/domain-list command paths' but the verification omits those packages.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "AC10 verification location ambiguity",
+      "issue": "The AC10 doctor link-existence check is net-new (no existing checker on disk). The plan's shared-file note explicitly states 'Beads 3 and 4 both touch internal/doctor (Bead 3 = the link-check lane...)', yet Bead 3's changed-files omit internal/doctor and its verification go-test is `./internal/layout/... ./cmd/mindspec/...` (no ./internal/doctor/...). If the lane lands in internal/doctor as the note says, Bead 3's stated command would not run the AC10 FAIL-on-dangling / FAIL-on-un-rewritten tests. Needs the package pinned and the go-test path aligned.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "AC17 step enumeration",
+      "issue": "Spec AC17's named surface includes ms-spec-create, but Bead 4 Step 4's explicit skill list (ms-spec-grill, lifecycleSkillFiles, claude/codex text, ms-panel-run/tally, ms-bead-impl/cycle/fix, ms-spec-final-review, historical_skills) omits ms-spec-create by name. Coverage is preserved because the Bead 4 breadth grep targets whole skill directories (.agents/skills .claude/skills plugins/mindspec/skills), which catch ms-spec-create. Worth naming it for completeness; not a coverage gap.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "AC25 spec-level verification",
+      "issue": "AC25 (`mindspec validate spec 106-layout-flatten` reports 0 errors) is attributed to 'All beads (spec-level)' with no single bead's Verification block running `mindspec validate spec`. Acceptable for a cross-cutting spec-level AC (the orchestrator runs it at final review), but no bead pins it as a runnable step; a one-line note that the orchestrator owns AC25 would make the attribution explicit.",
+      "hard_block": false
+    }
+  ]
+}

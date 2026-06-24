@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "The diff implements EXACTLY Bead 1 (Reqs 1,2,7,15) and nothing else. resolveArtifact drives the three-tier flat-first read precedence for ADRDir/DomainDir/ContextMapPath/CoreDir; SpecDir gains flat + flat-worktree tiers (RecordingDir inherits via SpecDir); DetectLayout is whole-tree five-state with ErrMixedLayout and the recorded .mindspec/migrations/<run-id>/ recovery exception; ClassifyLayout + LayoutMarkersFromMindspecChildren are the pure, I/O-free signature helper (plan minor-12, assigned to Bead 1); TreeRootForSpecDir recognizes the flat shape, preserving the ew79 fix; bootstrap manifest is born-flat. No creep: internal/validate (Bead 2), internal/complete+executor (Bead 4 — helper is DEFINED not WIRED), internal/panel, internal/setup, cmd/ all untouched. Behavior preserved: --diff-filter=RCD is empty (zero moves), and the canonical/legacy fallback stays docs-root-keyed for byte-identity. Deviation A is correct (neither guard.go nor worktree.go constructs .mindspec/docs artifact paths). Deviation B is acceptable: AC4 (bootstrap->flat) and AC3 (empty->greenfield) both hold; the literal greenfield->flat write-default is realized through the born-flat bootstrap manifest, the actual greenfield entry point. go test ./internal/workspace/... ./internal/bootstrap/... PASS.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/behavior-preservation",
+      "issue": "git show da7eea3e --diff-filter=RCD is empty (zero renames/copies/deletes); the repo .mindspec/docs/ tree is untouched. The bootstrap manifest change alters only what NEW greenfield projects create, not any existing file, so AC22's ZERO-layout-change-on-disk holds. Born-flat bootstrap is explicitly assigned to Bead 1 by the plan decomposition.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation-A / Req 7 worktree recipes",
+      "issue": "Plan step 4 and Req 7 literally name internal/workspace/worktree.go and guard.go worktree-add recipes as targets to make layout-aware. Verified by grep: neither constructs .mindspec/docs/{specs,adr,domains,core} artifact paths — guard.go only resolves worktree PATHS via workspace.SpecWorktreePath/BeadWorktreePath, and worktree.go has no doc-path joins. All worktree doc-layout awareness lives in SpecDir's two worktree tiers + TreeRootForSpecDir, both updated and regression-pinned (ew79 flat test). The deviation is correct, not a missed Req-7 surface.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "deviation-B / greenfield write-default",
+      "issue": "isFlatTree gates born-flat on detectLayoutKind==LayoutFlat, so a bare .mindspec/ with no lifecycle children (DetectLayout==greenfield) writes the historical canonical default rather than flat. This diverges from the spec's literal 'greenfield ... write flat' phrasing, but is realized end-to-end because mindspec init/bootstrap creates the flat lifecycle dirs first (making the tree flat before any spec is written). AC3 (empty->greenfield) and AC4 (bootstrapped->flat, asserted in bootstrap_test) both pass, and canonical/legacy/greenfield byte-identity (Req 15/AC1) is preserved. Reasonable and in-scope; the in-code doc comment on isFlatTree records the rationale. Not a blocker.",
+      "hard_block": false
+    }
+  ]
+}

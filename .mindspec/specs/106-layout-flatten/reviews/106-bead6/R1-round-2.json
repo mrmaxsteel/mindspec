@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.96,
+  "rationale": "Scope lens. The round-2 fix is exactly the 4 files the BRIEF names: `git diff --name-only 0024150f c08e7e45` returns only plugins/mindspec/{README,FINDINGS}.md and internal/ownership/{populate.go,populate_test.go} — zero creep, zero other-bead work, no re-move (no renames). The whole round-1 flatten (60-file cleanup) is undisturbed: those 4 paths are the ONLY additions on top of r1 0024150f. Both panel gaps are closed and tightly scoped: (R2) README's tree/cycle and FINDINGS items 3/8 now show flat .mindspec/specs/ + co-located <spec-dir>/reviews/ — the AC17 breadth grep over both plugin files is empty. (R5) DomainsNeedingPopulate swaps the hardcoded .mindspec/docs/domains Join for workspace.DomainsDir, which I confirmed is genuine flat-first three-tier precedence (.mindspec/domains → .mindspec/docs/domains → docs/domains); TestDomainsNeedingPopulate_FlatTree pins flat enumeration and the canonical-tier test still pins the old root. Remaining docs/domains Joins are unchanged-from-r1 canonical/legacy resolver + migration code (out of this diff). Build + vet clean; ownership/doctor/validate suites all PASS. My round-1 CCR was empty, so nothing to re-mark.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/round-1-status",
+      "issue": "Round-1 verdict was APPROVE with an EMPTY concrete_changes_required — no items to mark ADDRESSED/PARTIAL/MISSED. The two driving gaps belonged to R2 and R5; both are closed by this commit.",
+      "status": "n/a",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/no-creep",
+      "issue": "git diff --name-only 0024150f c08e7e45 == exactly the 4 brief-named files (populate.go, populate_test.go, README.md, FINDINGS.md); +67/-22, 0 deletions, 0 renames. Round-1's big flatten is byte-untouched.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R2/plugin-docs",
+      "issue": "README tree+cycle and FINDINGS items 3/8 flattened to .mindspec/specs/ + <spec-dir>/reviews/ (prep/ and panel-slug now nested under the spec). AC17 breadth grep over README.md+FINDINGS.md is clean (no .mindspec/docs/specs or repo-root review/ live-shape references).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R5/populate",
+      "issue": "DomainsNeedingPopulate now enumerates via workspace.DomainsDir (flat-first); regression test TestDomainsNeedingPopulate_FlatTree exercises absent/stub/filled under .mindspec/domains and asserts [absent stub]. No new flat-blind enumeration consumer introduced; the surviving docs/domains references are pre-existing canonical-tier resolver/migration code outside this diff.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "gates",
+      "issue": "go build ./... OK; go vet ./internal/ownership/... OK; go test ./internal/ownership/... ./internal/doctor/... ./internal/validate/... all ok. No TestLLM_* invoked. The pre-existing instruct z4ps leak is out of this diff's scope and unaffected.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

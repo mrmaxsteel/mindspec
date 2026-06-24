@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Lens = author-of-record/scope. The move is EXACTLY Bead 5: specs/adr/domains/core+context-map flattened up; dogfood evicted to top-level project-docs/ (NOT docs/); root review/{092,099,100,101,102} co-located under <spec>/reviews/; glossary.md + policies.yml dropped; core+workflow self-globs repointed to flat paths (execution/context-system never had self-globs originally). .mindspec/docs, review, docs all GONE; lineage manifest written. The deviation-C link repairs are within legitimate scope: the mover's hard 404 gate forces them, and they path-correct to real targets (INIT.md ADRs to ../../../.mindspec/adr; AGENTS/CLAUDE guides to real co-located project-docs paths) or neutralize only never-existing placeholders (templates ADR-NNNN). No meaningful content destroyed; zero residual dangling .mindspec/docs or review/ links. NO Bead 6 work: skills, internal/setup, testdata/fixtures, ADR-0039 all untouched; DOCS-LAYOUT body not rewritten (only 2 inline path tokens via link-rewriter); TestLayoutPackageIsOwned correctly left failing. NO internal/cmd .go source changed — only internal/instruct/templates/spec.md (markdown template, glossary-line drop the plan explicitly assigns to Bead 5). No temp driver committed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/source-integrity",
+      "issue": "No internal/ or cmd/ .go source modified. Only non-rename touches: glossary.md+policies.yml (D), 2 mover run-state jsons (A), lineage manifest (M), AGENTS.md/README.md (M, link repairs), internal/instruct/templates/spec.md (M, single glossary-line drop). All within Bead 5 scope per plan lines 132-137. Temp driver removed before commit (no stray .go/.sh).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/bead-6-boundary",
+      "issue": "Bead 6 surfaces correctly untouched: skills/plugins, internal/setup, testdata/fixtures, ADR-0039 not present. DOCS-LAYOUT.md is a pure rename apart from 2 mover-rewritten inline ADR path tokens; its body is left for Bead 6. TestLayoutPackageIsOwned left failing (Bead 6 fixture scope) as expected.",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "doc-consistency (Bead 6 follow-up, not a Bead 5 blocker)",
+      "issue": "DOCS-LAYOUT.md Directory Structure ASCII tree still shows the nested .mindspec/docs/{adr,core,domains,specs} layout (the link-rewriter only matched full-path inline tokens, not the bare 'docs/' tree node), and internal/instruct/templates/spec.md lines 33-36,59 still emit stale .mindspec/docs/* paths. These static-text rewrites are explicitly Bead 6 scope; flagged only so Bead 6 reconciles them so the governance doc/template describe the SHIPPED flat tree.",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "deviation-C content repairs",
+      "issue": "Spot-checked the riskiest link repairs (ADR-0018, CONVENTIONS, USAGE, user/templates/spec.md, user/archive/INIT.md, user/AGENTS.md, user/CLAUDE.md): all are sound path-prefix corrections, correct relative-depth repoints, or neutralizations of never-existing placeholders. Link text upgraded from raw paths to human labels in a few cases. No prose/semantic content destroyed or distorted.",
+      "hard_block": false
+    }
+  ]
+}

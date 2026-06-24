@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Empirically verified. Dolt has epic mindspec-3d3i + all 6 beads closed; committed HEAD:.beads/issues.jsonl has epic=open, .6=in_progress — the close_reason fields themselves cite the post-merge re-import. .git/hooks/post-merge runs `bd hooks run post-merge` which imports JSONL->Dolt on every merge/FF; no post-checkout hook exists, so only merge/pull re-imports. Chore-PR (a) is durably correct and idempotent: bd auto-exports Dolt->JSONL after writes, so the working tree ALREADY carries all-7-closed; committing it makes future re-imports a no-op. Diagnosis (b) is accurate — ApproveImpl closes the epic in Dolt (mutation 1/3) but FinalizeEpic's `pr` strategy means main merged via PR #158 BEFORE the close, orphaning the finalize JSONL on protected main. Filing it as a bead is acceptable for THIS minor release (pre-existing, not a 106 regression, deterministic recovery), but it is a recurring user-facing defect that warrants a known-issue release note + high priority. State otherwise consistent: only the two named ids diverge; sc0w/3jq7 genuinely open.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "state-integrity",
+      "issue": "Self-revert diagnosis empirically confirmed: Dolt closed for epic mindspec-3d3i + all 6 beads; committed HEAD JSONL has epic=open and .6=in_progress; post-merge shim execs `bd hooks run post-merge` (JSONL->Dolt import). The ONLY incorrect divergence in the whole tracker is these two ids; all other committed-open ids are genuinely open in Dolt too. No other spec/epic is stuck."
+    },
+    {
+      "severity": "info",
+      "area": "lifecycle-durability",
+      "issue": "Chore-PR (a) durably fixes the revert. No post-checkout hook is installed, so checking out the chore branch will NOT re-import; only merge/pull does, and by then main's JSONL is correct -> the re-import is idempotent (no-op). The corrected JSONL is already auto-exported in the working tree (status M, all 7 closed)."
+    },
+    {
+      "severity": "low",
+      "area": "release-process",
+      "issue": "When authoring the chore PR, generate the JSONL FROM the closed Dolt state (bd export) and verify Dolt still shows all closed immediately before committing. Guard against an intervening `git pull`/merge re-importing the stale main JSONL into Dolt mid-authoring, which would then export the reverted (open) state. The current working-tree blob is already correct — committing it directly is the safest path."
+    },
+    {
+      "severity": "medium",
+      "area": "lifecycle-bug",
+      "issue": "The impl-approve-on-protected-main orphaned-finalize bug (plan step b) is real and confirmed in code (ApproveImpl mutation 1/3 closes epic in Dolt; FinalizeEpic `pr` strategy merges via PR before the close reaches main). It is NOT a v0.10.0 blocker (pre-existing, independent of the flatten feature, deterministic recovery exists), so filing the bead is acceptable. BUT it recurs on EVERY future spec finalized on a protected main and is user-facing (downstream users will see closed beads silently reopen on sync) — recommend filing it HIGH priority and adding a 'known limitation' note to the v0.10.0 release notes so downstream protected-main users aren't surprised."
+    }
+  ]
+}

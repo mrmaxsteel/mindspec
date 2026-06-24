@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Lens = scope. Round-1 verdict (APPROVE, empty concrete_changes) carries forward; nothing to mark ADDRESSED/PARTIAL/MISSED on my side. The round-2 fix is tightly scoped to the 2 panel hard_blocks. Verified: (1) commit 03ab678e touches EXACTLY 4 files — BENCH-MOVED.md (R5 root-doc link repair to .mindspec/adr/), divergence.go + layout_classifier_test.go (R6 classifier), workflow/architecture.md (doc-sync note). git show --name-only confirms zero Bead-6 surface: no skills/plugins, internal/setup, testdata/fixtures, ADR-0039, or TestLayoutPackageIsOwned. (2) Parent of 03ab678e is 75312443 (the round-1 move) — the fix is a clean stack ON TOP; none of the 445 renames are revisited, move tree undisturbed. (3) The .go change is minimal and in-scope: isProcessArtifact is consumed only at divergence.go:200 (adr-divergence lane), the extension adds just 2 OR clauses + 2 precise helpers (prefix-match lineage/migrations, exact-match 2 vestigial drops), and the test asserts BOTH classification AND non-over-match (.mindspec/config.yaml not swept, .mindspec/adr/ADR-0018.md not matched). Workflow-domain, ADR-0018-covered, required for Bead 5's own complete. go test ./internal/validate passes.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/round-2-delta",
+      "issue": "Round-2 commit 03ab678e changes exactly 4 files (BENCH-MOVED.md, internal/validate/divergence.go, internal/validate/layout_classifier_test.go, .mindspec/domains/workflow/architecture.md). git show --name-only confirms no Bead-6 surface (skills/plugins, internal/setup, testdata/fixtures, ADR-0039, TestLayoutPackageIsOwned) is touched. No creep beyond the 2 hard_blocks.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/round-1-move-integrity",
+      "issue": "Parent of 03ab678e is 75312443 (the round-1 move). The fix is a clean additive stack; none of the 445 renames are revisited or reverted. The only round-1-move path re-touched is workflow/architecture.md, which gets a doc-sync note for the new classifier (a workflow-domain doc the bead owns) — the move's structure/content is intact.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/go-source-change-justification",
+      "issue": "The divergence.go change is the minimal classifier extension required by R6: isProcessArtifact is used only at divergence.go:200 (adr-divergence attribution loop), so the change is confined to that lane and cannot affect doc-sync or other validators. isMoverRunState uses dedicated run-state prefixes (.mindspec/lineage/, .mindspec/migrations/) that hold no governable source in the flat layout; isVestigialConfigDrop is exact-match on the 2 ADR-0018 drops. No over-match risk to real .mindspec/-rooted source. Workflow-domain + ADR-covered, and Bead 5's own complete needs it — acceptable in Bead 5.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/test-and-build",
+      "issue": "New TestMoverRunStateAndVestigials_ProcessArtifacts asserts both positive classification (process artifact, not source) for all 6 run-state/vestigial paths AND negative over-match guards (.mindspec/config.yaml, .mindspec/adr/ADR-0018.md). go test ./internal/validate (TestMoverRunStateAndVestigials_ProcessArtifacts|TestReviewMatchers|Divergence) is green.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "doc-consistency (Bead 6 follow-up, unchanged from round 1)",
+      "issue": "My round-1 note stands: DOCS-LAYOUT.md ASCII tree + internal/instruct/templates/spec.md stale .mindspec/docs/* path tokens remain Bead-6 static-text reconciliation. Round-2 correctly did NOT pull that forward — confirming the fix stayed scoped. Not a Bead-5 blocker.",
+      "hard_block": false
+    }
+  ]
+}

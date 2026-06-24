@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.82,
+  "rationale": "Lens: Impacted Domains / ownership / ADR-divergence gate-safety. (1) All four Impacted Domains (workflow, core, execution, context-system) are REAL: each has an OWNERSHIP.yaml on disk and in the worktree, and the spec's per-domain glob recitations (lines 53-56) match the manifests verbatim. (2) Every In-Scope edited path resolves to one of the four globs (verified path-by-path). The two NEW trees are handled: internal/layout/** (segment 'internal', not excluded) is required into the workflow manifest (Req 13); project-docs/** is classified via the Req 5 predicate, correctly NOT added to any OWNERSHIP (excludedFirstSegments={viz,agentmind,bench}, ownership.go:60). (3) ADR statuses/domains verified on disk and match the spec exactly; ADR-0022 'Proposed' is NOT a gate risk because every impacted domain has an Accepted covering ADR (coverageOf is tri-state; adr-divergence-proposed fires only on Proposed-ONLY coverage). (4) Doc-sync stays satisfiable: the multi-prefix matcher requirement (Req 5) plus Phase1->Phase3 ordering keeps the gates green through the moves. No hard-block on my lens. Non-blocking: Req 5 names LoadOwnership(:79) but the gate actually uses ref-anchored LoadOwnershipAtRef(:127)+domainManifestRelPath(:123) — the plan must carry those too.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "ownership/domains",
+      "issue": "All four Impacted Domains (workflow, core, execution, context-system) exist with OWNERSHIP.yaml on disk and in the worktree; spec lines 53-56 recite the actual globs accurately. Every In-Scope edited path is owned (internal/workspace,redact->core; internal/validate,panel,complete,doctor,bootstrap,setup,instruct,cmd,plugins/mindspec,.claude/skills,.agents/skills->workflow; internal/executor,gitutil,harness->execution; internal/contextpack->context-system).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "adr-divergence gate-safety",
+      "issue": "ADR-0022 cited as 'Proposed' is gate-safe. Verified divergence.go:225-242: coverageOf is tri-state and adr-divergence-proposed (hard error at impl-approve) fires ONLY when a domain is covered solely by a Proposed ADR. Every impacted domain has an Accepted covering ADR among the citations (workflow<-0037/0023/0025, core<-0018, execution<-0037/0025, context-system<-0018). On-disk ADR Status/Domain(s) frontmatter matches the spec verbatim for all five touchpoints. No domain relies solely on 0022.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "ownership loader multi-prefix scope",
+      "issue": "Req 5 names 'LoadOwnership's manifest path (ownership.go:79)' and TreeDirsAtRef (ownership.go:198), but the divergence gate at `complete` actually loads ownership via the ref-anchored LoadOwnershipAtRef (ownership.go:127) and domainManifestRelPath (ownership.go:123-125), both of which ALSO hardcode '.mindspec/docs/domains/'. The requirement's general clause ('every git-ref matcher must recognize all three prefixes') subsumes them, so this is not a spec defect — but if the plan only updates the on-disk LoadOwnership and misses the ref-anchored pair, then after the domains flatten EVERY domain reads 'missing', all changed source becomes adr-divergence-unowned, and every 106 bead hard-blocks. The plan MUST explicitly include LoadOwnershipAtRef + domainManifestRelPath in the multi-prefix set.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "OWNERSHIP self-glob staleness",
+      "issue": "Each OWNERSHIP.yaml self-claims '.mindspec/docs/domains/<d>/OWNERSHIP.yaml'. When Req 12 flattens domains to '.mindspec/domains/<d>/OWNERSHIP.yaml', the self-referencing glob inside each manifest becomes stale (no longer matches its own new path). Manifests are doc files (isProcessArtifact via isDocFile, once Req 5 makes isDocFile flat-aware) so the unowned lane skips them and this will NOT hard-block; but the plan should update the self-glob entries when moving domains to avoid a latent inconsistency. Not gate-blocking.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "project-docs / doc-sync classification",
+      "issue": "Confirmed isDocFile (docsync.go:330) matches only docs/, .mindspec/docs/, CLAUDE.md, AGENTS.md and isSourceFile (docsync.go:338) only internal//cmd/ *.go. So today project-docs/foo.md would NOT be a doc and would trip adr-divergence-unowned, and flat .mindspec/specs|adr|domains|core would no longer classify as docs. The spec correctly identifies and requires both fixes (Req 5) and stages the predicate in Phase 1 before the Phase 3 moves, keeping doc-sync satisfiable. internal/layout/**/*.go is source and must be owned in the same bead (Req 13) — ref-anchored OWNERSHIP claim satisfies its own gate.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "bead_id": "mindspec-3d3i.3",
+  "spec": "106-layout-flatten",
+  "target": "bead/mindspec-3d3i.3",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "5c3bbe284a1e64397478c26e2b06476641adb294",
+  "sha_advance_note": "round-2 verdicts reviewed code at 99a6bd5a; 5c3bbe2 is a .beads/issues.jsonl-only auto-commit (ADR-0025 build artifact) made by the first complete attempt — diff 99a6bd5a..5c3bbe2 excluding .beads/ is empty, so the 6/6 code verdict is unaffected."
+}

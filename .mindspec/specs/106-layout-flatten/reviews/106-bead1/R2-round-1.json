@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Codebase-pin lens: the implementation is real and substantive, no stubs. (1) resolveArtifact has a real flat-first→canonical/legacy body; ADRDir/CoreDir/ContextMapPath/DomainDir route through it; SpecDir owns an explicit 5-tier ladder (two worktree shapes + flat/canonical/legacy + layout-aware write default); RecordingDir inherits the flat tier transitively via SpecDir. DetectLayout is real: ClassifyLayout + flatTreePresent + exists(canonical/legacy), ErrMixedLayout, and a migrationRecoveryActive exception. ClassifyLayout and LayoutMarkersFromMindspecChildren (slash/full-path tolerant) have real bodies. TreeRootForSpecDir is genuinely rewritten to a parent-base switch recognizing the flat shape. Born-flat manifest moves specs/domains directly under .mindspec/. (2) Tests are substantive with concrete byte-path/error assertions: resolver matrix (canonical/legacy/flat), flat-first-wins, five-state DetectLayout incl. both mixed hard-errors + recovery + new-id-in-legacy, both worktree shapes, the ew79 flat-worktree regression, born-flat — none hollow. (3) The DocsDir funnel is dissolved: each accessor owns its flat tier; DocsDir survives only as the canonical/legacy fallback inside resolveArtifact, preserving byte-identity. go vet clean on both packages. Deviation A justified (guard/worktree.go construct no artifact paths). Scope-clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace.go",
+      "issue": "Each per-artifact accessor now calls isFlatTree→detectLayoutKind, which can issue up to ~7 stat() calls per call (5 flat-children + canonical + legacy) vs the single stat in the pre-spec DocsDir. Behavior-correct; negligible perf regression on hot accessors. Not a blocker; potential future memoization.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace.go",
+      "issue": "In a mixed tree the resolvers silently fall back to the canonical DocsDir (isFlatTree returns false on LayoutMixed) rather than surfacing ErrMixedLayout; the hard-error gate is intentionally whole-tree via DetectLayout, invoked elsewhere, not the resolvers' job. Correct for Bead 1 scope.",
+      "hard_block": false
+    }
+  ]
+}

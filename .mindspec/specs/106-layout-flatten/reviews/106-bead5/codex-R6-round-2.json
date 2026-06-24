@@ -1,0 +1,48 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Lens = completion integration. The original 4 are ADDRESSED: isMoverRunState classifies .mindspec/lineage/** + .mindspec/migrations/**; isVestigialConfigDrop classifies .mindspec/policies.yml (+ glossary.md). The new test confirms precise, non-over-matching (it does NOT sweep .mindspec/config.yaml or .mindspec/adr/ADR-0018.md), so no real source is mis-excluded. Directional guard + 4-domain ownership resolution unchanged (still allow flat->canonical). BUT the hard_block is NOT resolved — re-tracing the FULL base..head diff (2cfed766..03ab678e) surfaces TWO remaining unowned paths the fix missed: README.md (M, by move 75312443) and BENCH-MOVED.md (M, NEWLY added by the round-2 fix's link repair 03ab678e). Both are top-level docs, but isDocFile's root-doc allowlist is {CLAUDE.md, AGENTS.md} ONLY — README.md is omitted even though mover.DefaultRootDocs and doctor.movedTreeRootDocs both treat README.md as a root doc. Neither is claimed by an OWNERSHIP glob; attributeDomain has no top-level fallback -> both emit adr-divergence-unowned (corroborated by complete_test.go:2658 treating README.md as gate-tripping drift). So Bead 5's `mindspec complete` STILL hard-blocks; the round-2 link repair even ADDED BENCH-MOVED.md to the diff.",
+  "concrete_changes_required": [
+    "Extend isDocFile (internal/validate/docsync.go) — or isProcessArtifact (divergence.go) — to classify top-level operator markdown docs as docs, at minimum README.md and BENCH-MOVED.md, consistent with internal/layout/mover.go DefaultRootDocs ({README.md, AGENTS.md}) and internal/doctor/links.go movedTreeRootDocs. isDocFile currently lists only CLAUDE.md + AGENTS.md among root docs, so README.md (modified by the move) and BENCH-MOVED.md (modified by the round-2 link repair) reach attributeDomain unclaimed and emit adr-divergence-unowned.",
+    "Add the missing root docs to TestMoverRunStateAndVestigials_ProcessArtifacts (or a sibling) so README.md and BENCH-MOVED.md are asserted isProcessArtifact==true && isSourceFile==false, preventing regression.",
+    "After the classifier fix, re-run the adr-divergence lane over base..head (2cfed766..03ab678e) and confirm ZERO adr-divergence-unowned errors before merge (the original 4 are already clean). Until then, plain `mindspec complete` fails; --override-adr would be required, which the classifier fix should make unnecessary."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "complete / adr-divergence-unowned (Bead 5 completion integration)",
+      "issue": "Bead 5's `mindspec complete` STILL hard-blocks on adr-divergence-unowned. ChangedFiles(2cfed766..03ab678e) includes two top-level docs that are NOT isDocFile, NOT owned by any OWNERSHIP glob, and NOT process artifacts: README.md (M, by move commit 75312443) and BENCH-MOVED.md (M, by round-2 fix commit 03ab678e). isDocFile (docsync.go:373) root-doc allowlist = {docs/, .mindspec/docs/, project-docs/, CLAUDE.md, AGENTS.md} — README.md and BENCH-MOVED.md match none; attributeDomain (ownership.go:299) returns \"\" (no top-level fallback) -> each emits adr-divergence-unowned ERROR -> adrResult.HasFailures() -> hard block. Inconsistent with mover.go:85 DefaultRootDocs and doctor/links.go:46 movedTreeRootDocs which both treat README.md as a root doc; corroborated by complete_test.go:2658 treating README.md as gate-tripping drift. The round-2 link repair INTRODUCED BENCH-MOVED.md into the bead diff.",
+      "status": "PARTIAL",
+      "hard_block": true
+    },
+    {
+      "severity": "info",
+      "area": "Req-6 process-artifact classifier (original 4 paths)",
+      "issue": "ADDRESSED: isMoverRunState classifies .mindspec/lineage/** + .mindspec/migrations/** as non-source; isVestigialConfigDrop classifies .mindspec/policies.yml + .mindspec/docs/glossary.md. isProcessArtifact now short-circuits all four original unowned paths (.mindspec/lineage/manifest.json M, .mindspec/migrations/bead5-flatten/{lineage,state}.json A, .mindspec/policies.yml D) before attribution. TestMoverRunStateAndVestigials_ProcessArtifacts asserts each isProcessArtifact && !isSourceFile and verifies precision (isMoverRunState rejects .mindspec/config.yaml; isVestigialConfigDrop rejects .mindspec/adr/ADR-0018.md), so the extension does NOT over-match real .mindspec/-rooted source.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "owned source in round-2 diff (not unowned)",
+      "issue": "The round-2 .go/template edits are owned, not unowned: internal/validate/divergence.go (M), internal/validate/layout_classifier_test.go (M), and internal/instruct/templates/spec.md (M) all match workflow domain OWNERSHIP globs (internal/validate/**, internal/instruct/**) -> attributed, not adr-divergence-unowned. All R-renames resolve to doc trees (.mindspec/{specs,adr,domains,core}/**, project-docs/**) via isDocFile. Coverage of the workflow domain by a cited ADR is the separate uncovered lane and not part of this unowned hard_block.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "structure / merge guard / ownership (unchanged from round 1, re-confirmed)",
+      "issue": "Positive confirmations carry over: directional merge guard ALLOWS the flat->canonical bead->spec merge (mergeLayoutRegression returns false when target is canonical); LoadOwnershipAtRef resolves all four flat .mindspec/domains/<d>/OWNERSHIP.yaml (present, well-formed, self-globs repointed). The round-2 fix touched only BENCH-MOVED.md, divergence.go, layout_classifier_test.go, and the workflow architecture.md doc-sync note — it did not disturb the move's 445 renames or the guard/ownership inputs.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Bead-6 handoff / transitional CI red",
+      "issue": "TestLayoutPackageIsOwned + internal/harness scenario fixtures still pin canonical .mindspec/docs/ paths and FAIL against the flat tree until Bead 6 migrates fixtures + adds tier-awareness. Expected per BRIEF (documented deferral), not a Bead-5 defect; Bead 6 must land before any go-test gate or final review is green.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

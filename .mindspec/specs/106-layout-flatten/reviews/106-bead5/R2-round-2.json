@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Pinned all four round-2 claims to disk; the fix is real and substantive, not hollow. (1) BENCH-MOVED.md: both links now point at .mindspec/adr/ADR-0027/0028; both targets exist on disk (6845/3630 bytes); zero residual .mindspec/docs/adr link; repo-wide tracked-markdown scan (excl docs_archive) shows ZERO live links to any dead .mindspec/docs//docs//review/ target. (2) isMoverRunState (prefix .mindspec/lineage/ + .mindspec/migrations/) and isVestigialConfigDrop (exact .mindspec/policies.yml + .mindspec/docs/glossary.md) have real bodies and are both wired into isProcessArtifact. Over-match is bounded: prefixes target dedicated run-state subtrees (which actually exist on disk: lineage/manifest.json, migrations/<run>/{state,lineage,...}.json), exact-match covers two named drops, and isSourceFile only matches internal//cmd/ *.go — so no real .mindspec/-rooted source is excluded from the gate. (3) TestMoverRunStateAndVestigials asserts all 6 paths are process-artifact AND not source, plus negative over-match checks (.mindspec/config.yaml, .mindspec/adr/ADR-0018.md). (4) .mindspec is flat (adr/core/domains/specs/context-map.md/lineage/migrations); .mindspec/docs absent; policies.yml dropped. Round-1 move undisturbed; tree clean at 03ab678e. R5/R6 hard_blocks ADDRESSED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "BENCH-MOVED.md link repair (R5)",
+      "issue": "Both ADR links repointed to .mindspec/adr/ADR-0027/0028; targets exist on disk; no residual .mindspec/docs/adr link; repo-wide markdown scan shows zero live link to a now-dead target outside docs_archive/.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "isProcessArtifact extension (R6, the critical one)",
+      "issue": "isMoverRunState + isVestigialConfigDrop have real bodies wired into isProcessArtifact; lineage/migrations run-state exists on disk and is dedicated (no real source there); exact-match for the two drops. isSourceFile (internal//cmd/ *.go only) guarantees no .mindspec/ source is swept. Bead 5's complete will PASS adr-divergence.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "test coverage TestMoverRunStateAndVestigials_ProcessArtifacts",
+      "issue": "Asserts all 6 paths classify process-artifact + NOT source, with explicit negative over-match checks (.mindspec/config.yaml not matched by isMoverRunState; .mindspec/adr/ADR-0018.md not matched by isVestigialConfigDrop). Substantive, not a tautology. (R4 runs it.)",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "move integrity",
+      "issue": "Round-1 flat structure intact and undisturbed by the fix: .mindspec flat, .mindspec/docs gone, policies.yml dropped; worktree clean at 03ab678e; round-2 diff touches only the 4 declared files (1 doc, divergence.go, test, workflow architecture note).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "instruct-templates (deferred to Bead 6)",
+      "issue": "Round-1 low finding unchanged: internal/instruct/templates/{spec,plan,review}.md still emit pre-flatten .mindspec/docs/... paths. Not a Bead-5 defect and out of this round-2 scope; confirm Bead 6 covers user-facing instruct output, not just testdata/harness fixtures.",
+      "status": "PARTIAL",
+      "hard_block": false
+    }
+  ]
+}

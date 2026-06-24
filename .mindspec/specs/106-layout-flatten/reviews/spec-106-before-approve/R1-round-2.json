@@ -1,0 +1,58 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "All five of my round-1 asks are ADDRESSED, each grounded in code I re-verified. (1) budgeter.go is now governed by new Req 3 (consume per-artifact accessors) + AC6 (identical pack bytes flat vs canonical) and added to the Req 15/AC22 flat test matrix; budgeter.go:170/218 joins confirmed. (2) The redact contradiction is resolved: the 'must become layout-aware' claim is struck (Impacted Domains now states redact is untouched) AND added to Out-of-Scope; redact.go:129/:320 confirm it is layout-agnostic. (3) DOCS-LAYOUT.md amendment is now Req 16 + AC23. (4) migrate prompt-rubric is now Req 17 + AC24; migrate.go:286-287 confirmed. (5) Req 1 'FIRST' clarified as read-order precedence, not delivery order. Renumbering is clean: 17 reqs / 25 ACs, every req has ≥1 AC, all AC→Req and inter-req cross-references (incl. Req 16→Req 8 for the ADR-0037 amendment) resolve correctly. No new requirement contradicts Scope/Non-Goals. The only ungoverned-deliverable candidate (layout-v2 ADR) is deliberately deferred via Open Questions per the spec-105 convention — acceptable, not a regression. No new blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "requirements completeness",
+      "issue": "Round-1 blocker: internal/contextpack/budgeter.go flat-awareness ungoverned. Revision adds Req 3 (all DocsDir consumers, incl. the budgeter at budgeter.go:170/218, MUST resolve through layout-aware accessors so packs assemble identically) + AC6 (go test ./internal/contextpack/... asserts byte-identical sections flat vs canonical) + AC22/Req 15 adds the context-pack builder to the flat test matrix. Code re-verified: both joins are still hardcoded today, so the requirement is real and now covered.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "internal consistency / accuracy",
+      "issue": "Round-1 major: internal/redact contradiction (claimed 'must become layout-aware' yet absent from Scope/reqs and unsupported by code). Revision strikes the claim: Impacted Domains/core now states redact is NOT touched (only a regex docstring at :320 + cobra subcommand-set entry at :129; slashpath regex layout-agnostic), and Out-of-Scope adds 'Making internal/redact layout-aware'. Code re-verified at redact.go:129/:320 — accurate.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "requirements completeness",
+      "issue": "Round-1 major: DOCS-LAYOUT.md amendment ungoverned. Revision adds Req 16 (amend .mindspec/docs/core/DOCS-LAYOUT.md to the flat layout, three-tier read order, reviews co-location) + AC23 (doc-content test/grep asserts it documents the flat shape and no longer presents .mindspec/docs/{specs,adr,domains} as live). Req 16 correctly cross-refs the ADR-0037 amendment as Req 8.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "requirements completeness",
+      "issue": "Round-1 minor: migrate.go prompt-rubric reconciliation ungoverned. Revision adds Req 17 (reconcile the migrate.go:264-298 rubric so user/dogfood docs route to project-docs/ and lifecycle/authored artifacts to the flat .mindspec/{specs,adr,domains,core}, never .mindspec/docs/user/-/agent/) + AC24 (go test ./cmd/mindspec/... asserts the rubric never targets the evicted paths). migrate.go:286-287 re-verified.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "internal consistency (non-blocking)",
+      "issue": "Round-1 minor: Req 1 'FIRST' ambiguity vs phased delivery. Revision clarifies in Req 1: 'FIRST here is read-order precedence, NOT delivery order: the flat directories do not physically exist until the Phase-3 moves, so a Phase-1 tree resolves exactly as it does today.' Resolves the ambiguity.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "requirements completeness (new, non-blocking)",
+      "issue": "The layout-v2 ADR is listed as an in-scope deliverable (Background Governance, Scope In-Scope) but has no governing Req and no AC. Unlike round-1 DOCS-LAYOUT, this is deliberately deferred to plan/impl via Open Questions ('[x] DEFERRED ... this spec neither writes it nor cites an unwritten id as a touchpoint') following the documented spec-105 convention for net-new ADR ids. Acceptable as governed-by-deferral; not a regression from round 1 (I did not flag it then). No change required.",
+      "status": "NEW",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "internal consistency (new, cosmetic)",
+      "issue": "Cosmetic cross-reference looseness: Req 6 cites the project-docs/** non-source classification as '(Req 13)', while the classification deliverable is actually Req 14 (Req 13 is the eviction move that creates project-docs/). Both readings are defensible (Req 13 originates project-docs/, Req 14 governs its classification) and AC11/AC21 resolve correctly to Req 6/Req 14. Pure polish; no change required.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Next-bead lens. Both round-1 hard_blocks ADDRESSED. (a) All THREE move types are now drivable by a bare NewMover(...).Run() / `migrate layout`: DefaultFlattenPlan carries the 5 symmetric groups PLUS 3 dogfood-eviction groups (.mindspec/docs/{user,installation,research} -> project-docs/, deliberately NOT docs/ to avoid the legacy root-docs resolver), and resolvePlan() appends the content-aware review-co-location groups at run time then freezes them in state.Plan so crash-resume keeps a stable group->checkpoint index space. No Bead-3 re-open, no mover logic leaks into Bead 5; WithPlan/WithRules/WithRootDocs add a clean injection seam on top. (b) reviewGroups() routes each root review/<slug>/ via panel.json `spec` -> numeric slug-prefix fallback -> skip+record, lands at .mindspec/specs/<id>/reviews/<slug>/ (== Req 8 <spec-dir>/reviews), and removeEmptyReviewDir() drops root review/ only when no un-routable residue remains. (c) writeLineage records EVERY landed group (symmetric+dogfood+review, dest-existence gated) plus Skipped; State extra keys parse under doctor's Stage-only schema, feeding Bead 4 detection / Bead 6 verify. doctor link roots gained project-docs so asymmetric depth-change links are gated. Build green; layout+doctor tests pass incl. the new dogfood/review/rollback cases. (d) No capability gap forces Bead 5 rework.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "dogfood eviction move + asymmetric rewrite rules",
+      "issue": "Round-1 HB1: DefaultFlattenPlan now appends user/installation/research -> project-docs/ groups; DefaultFlattenRules adds the three absolute .mindspec/docs/<dogfood>/ -> project-docs/<dogfood>/ depth-change rules; uniform sibling moves preserve ../sibling relative links; doctor movedTreeRoots gained project-docs so eviction links are 404-gated. Verified by TestMover_DogfoodAndReviewMoves (absolute cross-tree + sibling links resolve) and TestMover_RollbackAfterDogfoodReview.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "blocker",
+      "area": "review co-location move/rules + mover drivability",
+      "issue": "Round-1 HB2: reviewGroups() content-aware router (panel.json spec -> numeric-prefix fallback -> skip+record) lands review/<slug> at .mindspec/specs/<id>/reviews/<slug> (matches Req 8), reviewRules() generates the per-group depth-change rule, root review/ removed when fully migrated, un-routable dirs recorded in lineage.Skipped. The full set runs out-of-box via Run(); WithPlan/WithRules/WithRootDocs add injection. Bead 5 drives all three move types without owning internal/layout. Confirmed by tests.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "lineage provenance",
+      "issue": "Round-1 minor: writeLineage now iterates the full frozen m.plan and records every group whose Dst landed (symmetric+dogfood+review), with un-routable reviews in Skipped — complete move provenance for doctor detection and Bead 6 verification. TestMover_DogfoodAndReviewMoves asserts all groups + the skipped dir.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "Bead 5 publishing ergonomics (non-blocking)",
+      "issue": "rollback() refuses once State.Published is armed and the field is persisted, but there is no exported MarkPublished()/option — only the documented NOTE that Bead 5's publishing run must arm it. Arming is squarely Bead-5 publish-orchestration scope (the mechanism + durable field exist; Bead 5 can persist it or add a trivial additive setter in its own bead), so this does NOT force re-opening Bead 3's move logic. R5's round-1 ask (document the requirement) is satisfied.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "finite-pattern rewriter vs relative cross-tree links",
+      "issue": "A ../-relative link FROM an evicted dogfood doc INTO a lifecycle tree (e.g. ../adr/) is not in the closed rule set and would 404 post-eviction — but the whole-tree gating link-check fails the run rather than shipping breakage (fail-closed), the same risk profile the panel endorsed for the symmetric flatten. Any real occurrence is a content fix, not a mover capability gap; does not block Bead 5.",
+      "status": "NEW",
+      "hard_block": false
+    },
+    {
+      "severity": "note",
+      "area": "Bead 4 merge-guard / Bead 6 verify primitives (positive)",
+      "issue": "No integration gap: GitOps surface (TreeDirsAtRef/MergeBase/RevParseRef/CommitPaths/CleanForcePaths) keeps the merge guard off internal/layout (no import cycle); State.Stage + LineageManifest/Entry mirror the doctor migration-metadata schema with PlanResolved/Plan/SkippedReviews as ignored extra keys, feeding Bead 4 detection and Bead 6 verification cleanly. Frozen state.Plan keeps crash-resume index-stable after review sources move.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

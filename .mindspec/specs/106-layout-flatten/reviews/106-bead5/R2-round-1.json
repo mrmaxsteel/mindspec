@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Verified the flat structure directly (not via the report). Structure is correct and complete: .mindspec/{specs,adr,domains,core,context-map.md} present; .mindspec/docs GONE; project-docs/{user,installation,research} present; NO top-level docs/; root review/ GONE; co-located .mindspec/specs/{092,099,100,101,102}/reviews/ present; glossary.md + policies.yml dropped. Spot-checked renames land at the right flat paths (091 spec; review/099-102-final-panel into each owning spec's reviews/; dogfood into project-docs; context-map up). The two manifest-'skipped' artifacts (review/prep, scenario1-fix-design.md) were git-renamed (R100) into 092/reviews because their content references 092 — consistent. Lineage manifest = exactly 12 move entries + 2 skipped, matching the actual renames. OWNERSHIP self-globs (core, workflow) repoint to flat .mindspec/domains/<d>/OWNERSHIP.yaml; zero stale .mindspec/docs/ in any OWNERSHIP.yaml. ZERO .go files touched. Doctor-404-GREEN claim is credible: zero actual markdown link forms ](.mindspec/docs|docs/|review/) remain in the flat tree — remaining .mindspec/docs/ strings are prose/inline-code in historical specs (correctly NOT rewritten). M-file and sampled R0xx content repairs are clean repoints/neutralizations, no content destroyed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "instruct-templates (internal/instruct/templates/{spec,plan,review}.md)",
+      "issue": "These user-facing templates still emit pre-flatten paths (e.g. spec.md line 33 'Create/edit .mindspec/docs/specs/{{.ActiveSpec}}/spec.md'; plan.md context-map.md/specs/research refs; review.md spec path). After merge, `mindspec instruct` in spec/plan/review mode directs users to non-existent .mindspec/docs/... locations. spec.md was already touched here (only to drop the dead glossary line), so the path-shape staleness is a deliberate deferral. Same 'things encoding the canonical shape' bucket as the deferred test fixtures — confirm Bead 6's scope explicitly covers the instruct templates (user-facing output), not just testdata/harness fixtures. Does not break the 404 gate, the merge guard, or `complete`.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "move-integrity",
+      "issue": "No .go source changed (verified zero .go in the diff); fixture/test path-constant updates and TestLayoutPackageIsOwned breakage are correctly left to Bead 6 per the plan. Single squashed commit retains git rename classification (R063-R100), so structural lineage is preserved despite losing per-group commit history.",
+      "hard_block": false
+    }
+  ]
+}

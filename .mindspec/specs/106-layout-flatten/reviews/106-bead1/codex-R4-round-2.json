@@ -1,0 +1,58 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Empirical lens, every gate green on round-2 commit 2f4aee3d. `go build ./...` and `go vet ./...` exit 0. Owner packages (workspace, bootstrap) PASS; consumer/Phase-1 gate (spec, domain, validate, doctor, complete) all PASS. `gofmt -l` on the changed .go files is empty; `git show 2f4aee3d --diff-filter=RCD --name-only` is empty — zero moves, still behavior-preserving. The R5 recovery-scoping hard_block is GENUINELY closed: DetectLayout's ONLY non-nil error path is ErrMixedLayout (workspace.go:239-242), so the new mixed+completed(\"applied\") subtest asserting wantErr=true proves a stale terminal record no longer suppresses the hard error; mixed+state-less-dir also asserts wantErr=true; the in-progress(\"after-mv\") subtest asserts wantErr=false. All three execute (verbose run shows RUN+PASS). The fix is grounded in the real Bead-3 schema: runstate.go:25 stageApplied=\"applied\", json:\"stage\"; \"after-mv\" is a genuine intermediate stage; doctor/migration.go treats \"applied\" as terminal. SpecsDir/DomainsDir = resolveArtifact(root,\"specs\"/\"domains\"), byte-identical to filepath.Join(DocsDir(root),...) on canonical/legacy/greenfield and flat-first on a flat tree — TestSpecsDirAndDomainsDir asserts exact paths incl. flat-first-wins. No new issue; both round-1 CRs ADDRESSED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/fmt",
+      "issue": "go build ./... and go vet ./... exit 0; gofmt -l on the changed .go files (workspace.go, workspace_test.go) is empty.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "tests",
+      "issue": "Owner packages (workspace, bootstrap) PASS; consumer/Phase-1 gate spec/domain/validate/doctor/complete all PASS. No flake surfaced.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "no-moves",
+      "issue": "git show 2f4aee3d --diff-filter=RCD --name-only is empty — zero renames/copies/deletes; round-2 is pure-additive (workspace.go, workspace_test.go, core/interfaces.md). Behavior preserved (Req 15).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R5-recovery-scoping",
+      "issue": "R5 hard_block genuinely closed by executing tests. DetectLayout's sole non-nil error is ErrMixedLayout (workspace.go:239-242), so assertLayout(...,LayoutMixed,true) proves ErrMixedLayout is returned. New subtest 'mixed with a COMPLETED migration record is STILL a hard error' writes state.json stage=\"applied\" and asserts wantErr=true → stale completed record no longer suppresses the error. 'mixed with a state-less migration dir' also asserts wantErr=true (mere dir existence no longer activates the exception). The in-progress 'after-mv' subtest asserts wantErr=false (live recovery tolerated). All three run and PASS (verbose RUN/PASS confirmed).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "predicate-grounding",
+      "issue": "migrationRunInProgress reads .mindspec/migrations/<id>/state.json, json:\"stage\", in-progress iff stage non-empty AND != \"applied\". Grounded in real Bead-3 schema: internal/layout/runstate.go:25 stageApplied=\"applied\" (json:\"stage\"), after-mv a genuine intermediate stage; internal/doctor/migration.go:218 treats \"applied\" as terminal/OK. Absent/unreadable/unparseable state, empty stage, and terminal all read NOT-in-progress — correct conservative direction.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "SpecsDir/DomainsDir",
+      "issue": "SpecsDir(root)=resolveArtifact(root,\"specs\"), DomainsDir(root)=resolveArtifact(root,\"domains\"). On canonical/legacy/greenfield (no flat tree) resolveArtifact returns filepath.Join(DocsDir(root),rel) → byte-identical to the canonical/pre-spec join; flat-first on a flat tree. TestSpecsDirAndDomainsDir asserts exact got==want for canonical/legacy/flat fixtures, the greenfield DocsDir-join, and flat-first-wins. Enumerators themselves untouched — scope-clean fold-in for Bead 2 (R6 CR ADDRESSED).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "doc-sync",
+      "issue": "DetectLayout doc comment and migrationRecoveryActive/migrationRunInProgress comments accurately describe the in-progress-scoped exception and cite the runstate/doctor sources. core/interfaces.md additions describe SpecsDir/DomainsDir correctly. No regression.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

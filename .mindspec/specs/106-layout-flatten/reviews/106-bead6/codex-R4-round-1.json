@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Empirical lens, all run. go build ./... and go vet ./... clean (exit 0); gofmt -l outside docs_archive empty. Harness build clean. Full non-harness module suite: 41 test-bearing packages GREEN; sole failure is internal/instruct TestRun_IdleNoBeads. Harness deterministic (Test[^L]) fails ONLY TestInstructPhaseDetection/{plan,implement} — exactly the two claimed, no more. Both verified PRE-EXISTING + layout/106-independent: (1) TestInstructPhaseDetection fails IDENTICALLY on the un-flattened main baseline 1d043af2 (no spec 106) — same subtests, same 'got idle', same lines 536/559 — env init.defaultBranch=main → RenderIdleIfProtected short-circuit, zero layout dependency. (2) TestRun_IdleNoBeads is the z4ps isolation leak that surfaces AMBIENT repo state: main (idle) passes 4/4, this active bead worktree (implement mode) fails 4/4; 106's only instruct diff is the read-only listSpecs tier-aware change (off the idle path) — it touches none of the leak machinery, which is byte-identical to main. AC17 live-emitter grep EMPTY; remaining matches are tier-fallback reads/migration records/build cache. ADR-0039 well-formed (Proposed, Supersedes n/a, next-free id; 0038 taken). No regression attributable to spec 106.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/fmt",
+      "issue": "go build ./... (exit 0), go vet ./... (exit 0), go build ./internal/harness/ (exit 0), and gofmt -l . | grep -v '^docs_archive/' all clean in the bead worktree at 0024150f.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "test-suite/AC22",
+      "issue": "Full module suite excluding harness LLM tests: 41 test-bearing packages PASS (cmd/mindspec + 40 internal/*); plugins/mindspec has no tests. Only internal/instruct and internal/harness fail, with exactly the two claimed tests and NO additional failures.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "internal/harness TestInstructPhaseDetection",
+      "issue": "TestInstructPhaseDetection/{plan,implement} fail with 'got idle'. VERIFIED pre-existing: the same test fails IDENTICALLY on the un-flattened main baseline (commit 1d043af2, no spec 106 present) — same two subtests, same message, same scenario_test.go lines 536 and 559. Cause is environment (git init.defaultBranch=main makes the sandbox branch protected → RenderIdleIfProtected short-circuits to idle), zero layout dependency. Not introduced by spec 106.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "internal/instruct TestRun_IdleNoBeads",
+      "issue": "z4ps test-isolation leak. The leak makes Run() surface the AMBIENT repo's active state instead of the temp project's idle state. Empirically: idle main checkout passes the full instruct package 4/4 (one observed run ~69s cold, then 19-20s warm x3); this ACTIVE bead worktree (branch bead/mindspec-3d3i.6, implement mode) fails 4/4 — concurrent full-suite run leaked 'implement mode' guidance, three isolated runs failed in ~6s. 106's ONLY internal/instruct source change is listSpecs switching to workspace.SpecsDir() (read-only enumeration, off the idle/handleNoState path); it does NOT touch the test, setupTestProject, getwdFn, FindRoot/FindLocalRoot, RenderIdleIfProtected, or any global-state mechanism — all byte-identical to main. The pass/fail flip is driven purely by ambient repo state (idle main vs active worktree), so the failure is pre-existing and 106-independent. Note: because the leak surfaces ambient active state, this test fails in ANY active bead worktree regardless of spec — the existing z4ps follow-up should fix the leak; not a blocker for this bead.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "AC17 flat-path audit",
+      "issue": "git grep '.mindspec/docs/(specs|adr|domains|core)' scoped to LIVE emitters (.claude/.agents/plugins skills, setup/claude.go|codex.go|skills.go, bootstrap, instruct/templates, cmd/mindspec/migrate.go; excluding historical_skills snapshots) returns EMPTY (exit 1). Whole-tree remaining matches are all non-emitters: tier-aware READ fallbacks (workspace.go SpecsDir/DocsDir/AdrDir compat layer), doc comments, .mindspec/migrations+lineage historical records, and .cache/ build artifacts. AC17 satisfied.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "governance ADR-0039",
+      "issue": "ADR-0039-flat-layout-v2.md present and well-formed: Status Proposed, Supersedes n/a, Superseded-by n/a (uncited), dated 2026-06-24, next-free id (ADR-0038 is taken). ADR-0037 panel-gate amendment file present. Structure correct.",
+      "hard_block": false
+    }
+  ]
+}

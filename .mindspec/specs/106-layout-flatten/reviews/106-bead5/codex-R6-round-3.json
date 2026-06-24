@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "My round-2 hard_block (README.md + BENCH-MOVED.md unowned) is ADDRESSED. docsync.go now classifies them via rootOperatorDocs={CLAUDE.md,AGENTS.md,README.md,BENCH-MOVED.md} (exact-name, consistent with layout.DefaultRootDocs + doctor.movedTreeRootDocs), so isDocFile→isProcessArtifact→skipped before attribution. I re-traced ALL 458 base..head paths (2cfed766..ade250ef) against the real predicates: 449 docs, 4 process-artifacts (.mindspec/lineage/manifest.json, .mindspec/migrations/bead5-flatten/{lineage,state}.json, .mindspec/policies.yml via isMoverRunState/isVestigialConfigDrop), 5 workflow-owned source (internal/validate/{divergence,divergence_test,docsync,layout_classifier_test}.go + internal/instruct/templates/spec.md), ZERO unowned. Spec 106 declares all four domains impacted, so candidateDomains covers every owner. Precision holds: no internal/cmd path is absorbed by isDocFile (exact-name set, not 'any top-level .md'); the new end-to-end test keeps a control internal/foo.go as the sole unowned finding. Cited ADRs (0037/0018/0023/0025, all Accepted) cover all four domains, so adr-divergence-uncovered is also clean. Round-3 touched only 4 files; merge guard, ownership.go, and the 445 renames undisturbed; build OK; regression tests PASS. Bead 5's complete passes the adr-divergence lane.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "complete / adr-divergence-unowned (Bead 5 completion integration) — the decisive check",
+      "issue": "RESOLVED. Full re-trace of git diff --name-only 2cfed766 ade250ef (458 paths) yields ZERO adr-divergence-unowned. README.md + BENCH-MOVED.md (the two paths I flagged in round 2) now classify as docs via docsync.go rootOperatorDocs (exact-name {CLAUDE.md,AGENTS.md,README.md,BENCH-MOVED.md}); isDocFile→isProcessArtifact short-circuits them before attributeDomain. Breakdown: 449 isDocFile, 4 process-artifacts, 5 workflow-owned source, 0 none-of-those. Spec 106 Impacted Domains = {workflow,core,execution,context-system}, so candidateDomains == the union I classified against; all 5 owned files (internal/validate/**, internal/instruct/**) attribute to workflow. mindspec complete will pass the unowned lane.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "classifier precision (no over-match)",
+      "issue": "The fix is exact-name, not a broad 'any top-level .md' or 'anything' rule. Re-trace confirms no internal/ or cmd/ path is absorbed by isDocFile; isSourceFile('internal/foo.go') still true. TestRootOperatorDocsNotUnowned proves end-to-end that README.md+BENCH-MOVED.md are skipped while a control internal/foo.go remains the ONLY unowned finding — the lane was not silenced wholesale. A real source-adjacent top-level .md would still classify as source and stay governed.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Req-6 process-artifact classifier (original 4 paths) — re-confirmed",
+      "issue": "isMoverRunState (.mindspec/lineage/** + .mindspec/migrations/**) and isVestigialConfigDrop (.mindspec/policies.yml + .mindspec/docs/glossary.md) still short-circuit all four original non-doc .mindspec paths in the diff before attribution. TestMoverRunStateAndVestigials_ProcessArtifacts and TestProcessArtifactsFiltered PASS; the matchers do not over-match real .mindspec source.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "adr-divergence-uncovered (sibling lane, out of primary lens) — verified not blocking",
+      "issue": "Checked defensively: the diff's only owned source is workflow-owned, and the plan cites ADR-0037 (Accepted; workflow,execution), ADR-0023 (Accepted; workflow), ADR-0025 (Accepted; workflow,execution,bootstrap), ADR-0018 (Accepted; core,context-system) — all four impacted domains covered by Accepted ADRs. So neither unowned NOR uncovered hard-blocks complete. Round-3 did not touch this lane; no regression.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "structure / merge guard / ownership / no-regression",
+      "issue": "Round-3 commit ade250ef touches only 4 files (docsync.go, divergence.go, divergence_test.go, .mindspec/domains/workflow/architecture.md). The directional merge guard (mergeLayoutRegression: allows flat→canonical), ownership.go, and the 445 renames are undisturbed. All four flat .mindspec/domains/<d>/OWNERSHIP.yaml (context-system, core, execution, workflow) resolve at head — present, well-formed, self-globs repointed to .mindspec/domains/<d>/OWNERSHIP.yaml. go build ./internal/validate/... OK; TestRootOperatorDocsNotUnowned, TestIsDocFile pass.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Bead-6 handoff / transitional CI red (documented deferral)",
+      "issue": "Unchanged from round 1/2: TestLayoutPackageIsOwned + harness scenario fixtures still pin canonical .mindspec/docs/ paths and fail against the flat tree until Bead 6 migrates fixtures + adds tier-awareness. Expected per BRIEF, not a Bead-5 defect; Bead 6 must land before any go-test gate or final review is green.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

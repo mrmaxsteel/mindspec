@@ -1,0 +1,50 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The spec captures most prior panel preconditions: per-artifact resolver intent, permanent diff-path matchers, worktree-shape fixes, project-docs avoidance, and merge-time cross-layout guards are directionally sound. I cannot approve yet because the migration mechanism still has correctness holes. Req 2 only defines flat/legacy/greenfield and duplicate same-ID detection; it does not make mixed flat+canonical/legacy lifecycle trees a first-class error, so a partial migration or residue can still create half-old/half-flat writes/read masking. Req 3/4 say transactional/idempotent/rollback, but do not define the run-state ordering or recovery contract for crashes between git mv, commit, rewrite, and state/lineage writes. Also, the accessor plan covers the named artifact accessors but leaves direct DocsDir-root listings under-specified, and the link gate must prove all post-migration markdown links, not just rewritten candidates, are checked.",
+  "concrete_changes_required": [
+    "Amend Req 2/8/AC3/AC10 so DetectLayout has an explicit mixed/error state when any flat lifecycle artifact coexists with any canonical/legacy lifecycle artifact, even for different spec IDs or different artifact classes, except inside a recorded in-progress migration recovery path. Add tests for flat specs plus canonical adr/domains and flat ID A plus canonical ID B.",
+    "Amend Req 3/4/AC4 to define the mover state machine precisely: checkpoint order before and after each git mv, pure-move commit, link rewrite, rewrite commit, and lineage write; required rerun behavior after crashes at each boundary; and whether rollback means hard reset to pre-run refs or compensating inverse commits.",
+    "Add explicit layout-aware root accessors or requirements for all direct DocsDir consumers that enumerate roots, especially spec list, domain list/show/context-map paths, core docs paths, and doctor/orphan scans. Add AC coverage for those commands on flat fixtures.",
+    "Tighten the link-rewriter/doctor contract so the migration gate scans every markdown link in the resulting moved tree and root docs affected by the move, not only links that matched the finite rewrite set. Add fixtures for review co-location links and absolute .mindspec/docs/core/context-map references."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "Req 2 / Req 8 DetectLayout",
+      "issue": "DetectLayout is specified as only flat/legacy/greenfield, with duplicate-ID detection as a separate doctor check. That does not reject mixed layouts where flat and canonical/legacy lifecycle trees coexist for different IDs or artifact classes. First-exists-wins readers can mask the residue while writes go flat, reintroducing the half-old/half-flat split the design panel rejected.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "Req 3 / Req 4 migrate layout",
+      "issue": "Transactional/idempotent/two-commit migration is not operationally defined. The spec does not state what happens if the process crashes after git mv but before state write, after the pure-move commit but before link rewrite, or after rewrite before lineage/state finalization. Rollback is named but not defined in git terms.",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "Req 1 accessors",
+      "issue": "The named accessors are covered, but root-enumerating callers still ride DocsDir directly today, including spec/domain listing and context-map enrichment paths. Without explicit root accessors or command-level ACs, an implementation could satisfy the resolver matrix while flat projects still miss specs/domains in list/show flows.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Req 4 link rewriting",
+      "issue": "The symmetric ../../adr preservation claim is sound for spec-root artifacts, but the finite breaking set is not proven closed. The doctor gate is worded around rewritten or moved links; if an unenumerated stale link is not considered rewritten, it can slip unless the gate scans all markdown links in the post-migration tree.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "Req 9 / Req 10 drain enforcement",
+      "issue": "The merge-time fingerprint and branch/PR precondition are the right shape, but the spec should name the source of truth for unmerged pre-flatten branches/PRs and clarify locked worktree handling. External forks can only be guarded when they merge through MindSpec-controlled paths.",
+      "hard_block": false
+    },
+    {
+      "severity": "positive",
+      "area": "Req 5 / Req 12",
+      "issue": "The permanent multi-prefix diff-string matcher posture is technically correct because ref/diff classification cannot be absorbed by filesystem accessors. The project-docs name constraint is also correct: top-level docs would alias LegacyDocsDir and risk resolver capture.",
+      "hard_block": false
+    }
+  ]
+}

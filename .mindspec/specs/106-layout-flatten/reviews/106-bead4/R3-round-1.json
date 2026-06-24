@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Contract/interface lens: no breaking change to any existing consumer. (1) panel.Scan globs `review` and `reviews` as independent EXACT path segments; filepath.Glob does not substring-match, so `review/` never picks up `reviews/` and vice-versa, and seen[canonicalPath] dedup prevents double-count. The added `reviews/` glob is a no-op where the dir is absent, so existing root-`review/` callers (incl. internal/instruct's HasIncompletePanel/gatherPanelState) are unaffected. (2) panelGateRoots on canonical/legacy returns a SUPERSET of the old dedupeRoots(wtPath,root) — root review/ STILL gates, so this spec's beads 5/6 keep blocking complete (critical property 1 verified); specID=='' falls back to the exact old set. (3) Merge guard blocks ONLY canonical/legacy->flat; same-layout and flat->canonical migration pass as no-ops (critical property 2 verified — Bead 5's move-merge allowed). Guards run pre-merge/pre-cleanup → mutate nothing; fail-open on read error is safe (no new failure mode); remote-PR path untouched. (4) MigrationRecoveryActive is an additive wrapper, no import cycle (workspace !-> executor). (5) No exported signature changed but the additive wrapper. Build + all 5 contract-surface packages green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "panel.Scan backward-compat",
+      "issue": "Literal `review` glob segment matches only the exact dir; `reviews/` is globbed separately and deduped by canonicalPath — no substring overlap, no double-count. TestScan_FindsCoLocatedReviewsPanels pins this. Existing root-`review/` callers preserved.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "complete panelGateRoots",
+      "issue": "Canonical/legacy path is a strict superset of the old (wtPath,root) set, so root review/ keeps driving the gate (property 1). Empty specID degrades to the exact old behavior. No breaking change for the current canonical repo.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "executor merge guard",
+      "issue": "guardMergeLayout is a no-op pass-through for same-layout and for the flat->canonical migration direction (property 2: Bead 5 move-merge allowed). Pre-merge/pre-cleanup placement mutates nothing on block; fail-open on read error introduces no new failure for legitimate merges; remote-PR seam unguarded so remote projects see zero change.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "second Scan consumer",
+      "issue": "internal/instruct/panelstate.go (SessionStart panel surfacing) also calls panel.Scan; the additive reviews/ glob is benign/no-op on canonical trees lacking such dirs and only surfaces the new co-located convention. Not a contract break; signature unchanged.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "exported surface",
+      "issue": "Only additive change is workspace.MigrationRecoveryActive (wrapper over existing unexported migrationRecoveryActive); no import cycle since workspace does not import executor. Scan/PanelDirScanRoot/CompleteBead/FinalizeEpic/checkDryRunMigration signatures unchanged.",
+      "hard_block": false
+    }
+  ]
+}

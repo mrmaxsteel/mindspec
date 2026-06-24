@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Round-1 hard_block ADDRESSED. BENCH-MOVED.md's two links are repaired to .mindspec/adr/ADR-0027-mindspec-otel-only.md and .mindspec/adr/ADR-0028-bench-rescue-procedure.md; both targets exist on disk and are git-tracked, so they resolve. I re-ran completeness independently: a path-resolving link scanner over all 395 non-docs_archive tracked .md files found 0 links resolving under a dead tree (.mindspec/docs/, top-level docs/, root review/) and 0 dangling links of any kind. A broad textual grep confirms the residual `.mindspec/docs/` strings are prose/inline-code spans, not live `](...)` links, and there are zero reference-style or relative inline links into the dead trees. BENCH-MOVED.md was the sole casualty and is now fixed; nothing else remains broken. R6 classifier sanity (correctness): isMoverRunState uses slash-anchored prefixes .mindspec/lineage/ and .mindspec/migrations/ (run-state only — manifests/snapshots/plan.md), and isVestigialConfigDrop uses exact equality on .mindspec/policies.yml and .mindspec/docs/glossary.md. Neither over-matches governable source — config.yaml and .mindspec/{specs,adr,domains,core}/** stay governed (the test asserts isMoverRunState(config.yaml)==false and isVestigialConfigDrop(ADR-0018.md)==false). Validate package tests pass. No new defect; the round-1 move is intact.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "link-integrity / round-1 hard_block resolution",
+      "issue": "BENCH-MOVED.md links [ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md) and [ADR-0028](.mindspec/adr/ADR-0028-bench-rescue-procedure.md) now point to the flat .mindspec/adr/ targets; both targets exist on disk and are git-tracked, so both resolve. My round-1 hard_block is fully repaired.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "move-completeness (independent re-scan)",
+      "issue": "Path-resolving scanner over 395 non-docs_archive tracked .md files: 0 links resolve under .mindspec/docs/, docs/, or review/, and 0 dangling links overall. Broad grep confirms remaining `.mindspec/docs/` occurrences are prose / inline-code spans (skills, ADR-0014/0017, ARCHITECTURE/CONVENTIONS, domain architecture, migration plan.md), not live markdown links. No reference-style or relative inline links into the dead trees. BENCH-MOVED.md was the only casualty; it is now fixed, so the moved tree is 0-dangling and no root/non-moved-tree doc link remains broken.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R6 classifier correctness (no over-match)",
+      "issue": "isMoverRunState matches only slash-anchored .mindspec/lineage/ and .mindspec/migrations/ (verified contents are run-state: manifest.json, classification/inventory/lineage/plan/state snapshots, plan.md, staging copies). isVestigialConfigDrop is exact equality on .mindspec/policies.yml and .mindspec/docs/glossary.md (glossary also caught by isDocFile's .mindspec/docs/ prefix — defense-in-depth). Real governable .mindspec/ source is untouched: .mindspec/config.yaml and .mindspec/{specs,adr,domains,core}/** are NOT matched by either new predicate, so they remain subject to the adr-divergence gate. The new test asserts both the positive classification and the precision negatives (isMoverRunState(config.yaml)==false, isVestigialConfigDrop(ADR-0018.md)==false). `go test ./internal/validate` passes.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

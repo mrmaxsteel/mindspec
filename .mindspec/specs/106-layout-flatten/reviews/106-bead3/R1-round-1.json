@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Scope discipline is clean. The commit implements EXACTLY Bead 3: net-new internal/layout mover (mover/runstate/rewrite/precondition), the gitutil + Executor git primitives, the doctor link-check lane, the migrate layout CLI, and the internal/layout/** OWNERSHIP claim. No Bead 1 creep (internal/workspace untouched; the mover carries its own thin signatureAtRef probe per the minor-12 note). No Bead 4 creep (no internal/panel, internal/complete, merge-guard, or doctor/migration detector). No Bead 5 execution: git show --diff-filter=RCD is empty — the live .mindspec/docs tree is NOT flattened; the only .mindspec edit is the +1 OWNERSHIP line. Reqs 4/5/11/14 and ACs 7/8/9/10/16/21 are each present and test-backed (Golden/TwoCommitPerMove/CrashResumeEveryBoundary/Rollback/LinkCheck x2/Abort x2/Lineage; precondition block+tolerate+offline+dirty; LayoutPackageOwned). Deviations A-D are all within legitimate Bead-3 scope. B is a FORCED lockstep edit: TestRedactEnum_NoCobraDrift build-fails on an unregistered subcommand, redact is core-owned (a spec-declared domain), and it is not the out-of-scope docs-layout change. C honors AC7 (first commit is a 100%-similarity rename; empty rewrite commits correctly skipped). D is fine (root docs are not a move group).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/no-live-flatten",
+      "issue": "Confirmed the live .mindspec/docs tree was NOT flattened: `git show 52b32b6a --diff-filter=RCD` is empty and the only .mindspec change is a one-line OWNERSHIP.yaml add (`internal/layout/**`). removeEmptyDocsDir/DefaultFlattenPlan only run when the mover is invoked, which Bead 3 never does against the live tree (tests use temp fixtures). Bead 5's irreversible move is not pre-empted."
+    },
+    {
+      "severity": "info",
+      "area": "deviation-A/primitive-count",
+      "issue": "The +2 primitives beyond the plan's named 5 are justified, not interface bloat. CommitPaths is a bd-export-free `--no-verify` staged commit the deterministic mover needs (Executor.CommitAll couples bead.Export) and is surfaced on the Executor boundary consistent with ADR-0030. LockedWorktreeBranches is gitutil-only, CLI-layer, and directly serves the Req-11 / AC16 locked-worktree tolerance; the mover/precondition core still receives the locked set as data and stays executor-routed."
+    },
+    {
+      "severity": "info",
+      "area": "deviation-B/redact-edit",
+      "issue": "The internal/redact +1 line (`\"layout\"` token) is a forced lockstep registration, not scope creep. cmd/mindspec/redact_enum_drift_test.go TestRedactEnum_NoCobraDrift walks the live cobra tree and FAILS the build for any leaf subcommand not in redact.SubcommandTokens (redact.go:547 would otherwise DROP its events). The migrate layout CLI is squarely Bead-3 scope (step 5), so its token must be registered. redact is owned by `core` — a spec-declared impacted domain — so no adr-divergence-unowned. The spec's redact out-of-scope note concerned the docs-layout regex, a different thing; this edit does not make redact layout-aware."
+    },
+    {
+      "severity": "minor",
+      "area": "deviation-C/rewriter-coverage",
+      "issue": "DefaultFlattenRules covers only absolute .mindspec/docs/{context-map,specs,adr,domains,core} prefixes; the plan's Bead-3 step-4 wording also names review-co-location and dogfood-eviction depth-change rules, which are absent. This is acceptable for Bead 3 because those two moves are Bead 5's (not in DefaultFlattenPlan), the RewriteRule set is injectable/extensible, and the gating doctor link-check (AC10) is the backstop for any un-rewritten breaking link. Forward note for downstream: Bead 5 must add the reviews/dogfood depth rules when it wires those moves, or rely on the link-check to BLOCK (not auto-fix) the resulting 404s. Not a Bead-3 blocker."
+    },
+    {
+      "severity": "info",
+      "area": "ac-completeness",
+      "issue": "Two-commit-per-move (deviation C) honors AC7: processGroup always commits the pure 100%-similarity rename first (git log --follow survives) and skips the second rewrite commit only when the symmetric flatten leaves in-tree links unchanged; the strict 2-commit path is proven by TestMover_TwoCommitPerMove, and the canonical golden run (5 rename + 1 root-doc commit) is the correct, noise-free outcome. Req-14 split is correct: Bead 3 does the ownership-claim half; project-docs/** non-source classification is Bead 2's half."
+    }
+  ]
+}

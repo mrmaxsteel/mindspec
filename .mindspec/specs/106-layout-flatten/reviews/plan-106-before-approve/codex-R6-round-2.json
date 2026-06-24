@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.8,
+  "rationale": "The four R6 hard blocks are addressed. Bead 5 is now focused on the irreversible tree cut: mover execution, dogfood eviction, root review migration, vestigial drops, and self-globs, with no skills/governance/fixture churn and no false full-suite claim. It explicitly migrates the 42 tracked root review artifacts to spec-scoped reviews and removes root review/. The flat-path skill/snapshot rewrites are strictly post-move in Bead 6. AC22 is now honest: Phase-1 green is tied to no live moves, and post-move full-suite green is tied to Bead 6 fixture migration. The biggest remaining risk is Bead 6 breadth: skills, setup snapshots, governance, migrate rubric, and fixtures are still one cleanup bead. I do not consider that a structural blocker because it is not the irreversible move and has concrete greps/tests.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "resolved",
+      "area": "Bead 5 decomposition",
+      "issue": "Bead 5 no longer bundles static skill rewrites, governance prose, migrate rubric work, or fixture migration with the irreversible move. The remaining scope is the physical cut and immediately necessary moved-tree cleanup.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "resolved",
+      "area": "Review co-location coverage",
+      "issue": "Bead 5 now explicitly migrates the tracked root review/** artifacts to <spec-dir>/reviews/**, verifies all 42 tracked artifacts moved, and verifies ! test -d review.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "resolved",
+      "area": "Sequencing",
+      "issue": "Flat-path skill/snapshot/setup-text rewrites moved out of Bead 4 and into Bead 6, which depends on the physical move in Bead 5.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "resolved",
+      "area": "Fixture migration / AC22",
+      "issue": "AC22 now states why Phase-1 go test ./... is green before any move and defers post-move harness/testdata fixture migration plus full-suite green to Bead 6.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Residual Bead 6 breadth",
+      "issue": "Bead 6 remains wide: path-bearing skills/snapshots, setup generated text, DOCS-LAYOUT, ADR-0039, ADR-0037 amendment, migrate rubric, and harness/testdata fixtures all land in one cleanup bead. This is the single biggest remaining risk, but it is reviewable as post-move cleanup and is not a hard block.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Lens: AC testability + req coverage. All five of my round-1 concrete asks are ADDRESSED and code-verified: (1) the trivially-passable AC8 grep is now AC19 with the `*.go` filter DROPPED — I ran `grep -rn 'GLOSSARY.md\\|policies.yml' internal cmd | grep -v _test` and it returns exactly the `internal/instruct/templates/spec.md:35` line today and goes empty after removal, so it is load-bearing (old *.go form returns 0, confirming the prior defect). (2) Req 2 bootstrap-flat now has AC4. (3) Lineage write now has its own AC9. (4) ms-spec-grill flat-path read now AC17, whose grep target I confirmed real in all three SKILL.md copies. (5) Mover-package OWNERSHIP now AC21. The AC7/14/15 wording fixes landed as AC18 (load-bearing resolver assertion), AC22 (`git diff --name-status main...phase1`), and AC16 (tolerate-locked/forks half). Re-mapped all 17 reqs → 25 ACs: every req has ≥1 concrete, falsifiable, runnable AC; numbering is sequential with no orphans. No new untestable/circular AC introduced. Remaining nits (cmd-docs accept-set sub-clause, line-number drift) are plan/impl granularity, not blockers.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "AC19 / testability",
+      "issue": "Round-1 AC8 grep was trivially-passable (`--include='*.go'` returns empty today and cannot reach the .md template line). Revised AC19 DROPS the *.go filter: `grep -rn 'GLOSSARY.md\\|policies.yml' internal cmd | grep -v _test`. Verified on the worktree: it returns exactly 1 hit today (`internal/instruct/templates/spec.md:35`) and is satisfiable-only-after-removal, so it is the load-bearing proof. The old *.go form returns 0, confirming the prior defect. AC18 also now carries the resolver assertion rather than the trivially-true `! test -d docs`.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Req 12 / ms-spec-grill coverage (was Req 11)",
+      "issue": "AC17 now directly asserts ms-spec-grill's SKILL.md domain-set read AND next-ADR-number scan reference the flat paths, with a grep that the SKILL.md 'no longer reads .mindspec/docs/domains/.mindspec/docs/adr'. Verified the grep target is real: SKILL.md lines 30/38/40 (domains) and 31 (adr) in plugins/.claude/.agents copies. Central correctness claim is now proven, not just the panel-snapshot path.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "minor",
+      "area": "Req 2 bootstrap coverage",
+      "issue": "AC4 now asserts `mindspec init`/`bootstrap` writes the flat `.mindspec/{specs,domains}` dirs and DetectLayout classifies the tree `flat`. bootstrap.go manifest entries for `.mindspec/docs/{domains,specs}` confirmed present (line drift only).",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "minor",
+      "area": "Req 4 lineage coverage (lineage relocated from Req 3)",
+      "issue": "AC9 now asserts a completed mover writes a lineage manifest under `.mindspec/lineage/` + a `.mindspec/migrations/<run-id>/` state record parsing under the doctor migration-metadata schema. Correctly placed under the mover requirement (Req 4) since the mover writes it. AC8 additionally adds per-boundary crash-recovery coverage.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "minor",
+      "area": "Req 14 mover-package ownership coverage",
+      "issue": "AC21 now asserts the net-new `internal/layout/**` mover package is listed in workflow OWNERSHIP.yaml (no `adr-divergence-unowned`) and `project-docs/**` is doc-classified. Ownership-claim deliverable now spec-proven, not only caught at `complete`.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "minor",
+      "area": "AC18 / AC22 / AC16 wording",
+      "issue": "AC18 makes the resolver assertion + `test -d project-docs` load-bearing (round-1 AC7 fix). AC22 replaces `git status` with `git diff --name-status main...<phase1-tip>` no-rename-under-.mindspec/docs (round-1 AC14 fix). AC16 adds the tolerate-locked-worktrees/forks half via a second test (round-1 AC15 fix). All three wording asks landed.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "coverage map (positive)",
+      "issue": "All 17 reqs map to >=1 concrete/falsifiable AC: R1->AC1/2/12, R2->AC3/4, R3->AC5/6, R4->AC7/8/9, R5->AC10, R6->AC11, R7->AC12, R8->AC13, R9->AC14, R10->AC15, R11->AC16, R12->AC17, R13->AC18/19/20, R14->AC21, R15->AC22, R16->AC23, R17->AC24, +AC25 validator. AC1-25 sequential, no orphan ACs, no req uncovered. Proofs are runnable (go test, golden-file, grep, test -d). No new untestable/circular AC introduced.",
+      "status": "ADDRESSED"
+    },
+    {
+      "severity": "info",
+      "area": "residual nits (non-blocking, plan/impl granularity)",
+      "issue": "(a) Req 6's cmd-docs accept-set sub-clause (accept post-flatten core/USAGE.md + project-docs/user/**) is folded under AC11's three-prefix equivalence rather than asserted by a dedicated proof line; (b) minor citation line-drift (LoadOwnershipAtRef now ownership.go:150 vs cited :127; bootstrap.go entries now ~:224-225 vs :222-223) — symbols and behavior verified correct, drift is cosmetic. Neither affects AC testability; deferrable to plan.",
+      "status": "NEW"
+    }
+  ]
+}

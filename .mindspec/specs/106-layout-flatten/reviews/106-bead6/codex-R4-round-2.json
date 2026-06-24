@@ -1,0 +1,50 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Empirical lens, all re-run at c08e7e45. go build ./... + go vet ./... clean (exit 0); gofmt -l outside docs_archive empty. go test -count=1 ./internal/ownership/... ./internal/doctor/... ./internal/validate/... all PASS — verbose run confirms TestDomainsNeedingPopulate_FlatTree RUNS and PASSES alongside the canonical TestDomainsNeedingPopulate_{MissingAndEmptyStubOnly,NoDomainsDir}, so R5's flat-blind enumeration is empirically fixed. Round-1 finding holds: setup PASS, complete PASS; internal/instruct fails ONLY TestRun_IdleNoBeads — the known z4ps isolation leak surfacing this active bead worktree's implement-mode ambient state (output names spec 106-layout-flatten), not a new break. AC17 breadth grep INCLUDING plugins/mindspec/{README,FINDINGS}.md: both files CLEAN of pre-flatten .mindspec/docs/{specs,adr,domains,core} AND repo-root review/<slug> (R2 fix verified — flattened to .mindspec/specs/ + co-located <spec-dir>/reviews/). Live-emitter surfaces (.claude/.agents/plugins skills, setup) emit zero pre-flatten paths; remaining tree matches are comments, compat-tier test fixtures, the tier-fallback resolver, and .beads descriptive text. ADR-0039 physically landed at FLAT .mindspec/adr/, proving adr create is tier-aware. No failing test beyond z4ps; no live pre-flatten path remains.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/fmt",
+      "issue": "At c08e7e45: go build ./... (exit 0), go vet ./... (exit 0), gofmt -l . | grep -v '^docs_archive/' empty (no matches).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R5 DomainsNeedingPopulate flat enumeration",
+      "issue": "go test -count=1 ./internal/ownership/... ./internal/doctor/... ./internal/validate/... all PASS. Verbose -run TestDomainsNeedingPopulate shows TestDomainsNeedingPopulate_FlatTree RUN -> PASS, and the canonical TestDomainsNeedingPopulate_MissingAndEmptyStubOnly + _NoDomainsDir still PASS. R5's flat-blind hardcoded '.mindspec/docs/domains' read is empirically fixed (now via workspace.DomainsDir).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "internal/instruct TestRun_IdleNoBeads (z4ps)",
+      "issue": "Sole failure in the regression re-run. go test ./internal/setup/... PASS, ./internal/complete/... PASS; ./internal/instruct/... FAILs only TestRun_IdleNoBeads, which surfaces this ACTIVE bead worktree's ambient implement-mode guidance (output literally names Active Spec 106-layout-flatten) instead of the temp project's idle template. This is the documented pre-existing z4ps test-isolation leak that fails in ANY active worktree regardless of spec; 106's only instruct change is the read-only tier-aware listSpecs (instruct.go:292, off the idle path). Acceptable per brief; NOT a new break, NOT 106-attributable.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R2 AC17 plugin README/FINDINGS flatten",
+      "issue": "Explicit git grep over plugins/mindspec/README.md + FINDINGS.md for '.mindspec/docs/(specs|adr|domains|core)' AND repo-root 'review/<slug>' both return EMPTY (exit 1). Round-2 diff confirms .mindspec/docs/specs/ -> .mindspec/specs/ (flat, annotated 'spec 106 / ADR-0039') and review/ -> co-located <spec-dir>/reviews/. R2 completeness gap closed.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "AC17 live-emitter audit",
+      "issue": "git grep '.mindspec/docs/(specs|adr|domains|core)' scoped to live emitters (.claude/**, .agents/**, plugins/mindspec/**, setup/claude.go|codex.go|skills.go, instruct/**, cmd/mindspec/**, excluding historical_skills) returns NO matches from any skill/setup surface. Remaining hits are non-emitters: code comments (adr.go:31, instruct.go:290 tier-fallback resolver doc), and backward-compat test fixtures in cmd/mindspec/*_test.go exercising the canonical read tier. No live pre-flatten emitter remains.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "adr create flat-awareness (empirical proof)",
+      "issue": "ADR-0039-flat-layout-v2.md physically resides at ./.mindspec/adr/ (FLAT), proving mindspec adr create's write store is tier-aware. The .mindspec/docs/adr/ string at adr.go:31 is stale prose in a doc-comment (adr.go is unchanged across this bead's commits, range 2c16fa70..HEAD) and is not a live emitter; cosmetic-only, out of bead-6 scope.",
+      "hard_block": false
+    }
+  ]
+}

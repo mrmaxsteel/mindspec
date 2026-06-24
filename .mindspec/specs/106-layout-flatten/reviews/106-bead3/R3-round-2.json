@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Contract/interface lens. (1) CleanForcePaths is purely additive: appended after CleanForce in the Executor interface, with no existing signature touched, and ALL satisfiers are updated — *MindspecExecutor and *MockExecutor (thin pass-throughs), the mover's narrow GitOps interface, and the fakeGit test fake. gitutil.CleanForcePaths backs it. Compile-time asserts (`var _ Executor = (*MindspecExecutor/MockExecutor)(nil)`) hold; `go build ./...` and `go vet` on layout/executor/gitutil are both clean, so no caller breaks. (2) WithPlan/WithRules/WithRootDocs are a clean builder/functional-option extension (exported, chainable, taking the exported MoveGroup/RewriteRule types), callable before Run(); resolvePlan reads them and appends the run-time review rules on top — a predictable, documented contract Bead 4/5 can drive with no package edits. (3) No backward-incompatible change anywhere: State gains PlanResolved/Plan/SkippedReviews and LineageManifest gains Skipped, all omitempty/additive (doctor schema ignores unknown keys); DefaultFlattenPlan/Rules grew their returns under unchanged signatures. (4) My round-1 churn concern (unexported plan/rules forcing Bead 5 to edit the package) is now directly RESOLVED by these injection points. No new blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "Executor interface segregation (round-1 deviation A)",
+      "issue": "CleanForcePaths is the 7th mover primitive added to the widely-published Executor interface for a single consumer; like its round-1 siblings it only strictly needed to live on the concrete types since the mover satisfies its own narrow GitOps structurally. Additive, build-green, and consistent with the established single-git-seam / ADR-0030 additive precedent, so unchanged taste-call rather than a defect.",
+      "status": "PARTIAL",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "internal/layout stability for Bead 4/5 (round-1 concern)",
+      "issue": "Round-1 flagged unexported plan/rules/rootDocs as a possible Bead 5 churn point (caller would have to edit the package to customize). Round 2 adds exported WithPlan/WithRules/WithRootDocs chaining methods over the exported MoveGroup/RewriteRule types — a stable, documented injection surface (run-time review rules layer on top). Concern resolved.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "State/LineageManifest schema growth",
+      "issue": "State.{PlanResolved,Plan,SkippedReviews} and LineageManifest.Skipped are new omitempty fields; the frozen-Plan field keeps crash-resume's group→checkpoint index space stable. Doctor migration metadata reads only Stage, so these parse as ignored unknown keys — additive, no schema-contract break for downstream readers.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

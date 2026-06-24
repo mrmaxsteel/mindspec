@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The plan is close structurally, but not clean enough to approve. Bead 5 is over-converged: it executes the irreversible tree move, evicts dogfood docs, drops vestigials, updates domain self-globs, creates/amends governance docs, reconciles migrate.go, and migrates harness/test fixtures. That is too much for one meaningful per-bead complete/panel. Worse, some transition work is misplaced or missing: Bead 4 updates static skills/snapshots to flat paths before the tree is flat, and Bead 5 never explicitly moves the existing repo-root review/** artifacts into <spec-dir>/reviews/** even though the spec goal requires eliminating root review/. Fixture migration is also inconsistent: AC22 requires go test ./... after Beads 1+2, but harness Go tests with hard-coded .mindspec/docs paths are deferred to Bead 5. Biggest risk: final integration discovers broken fixtures/reviews/static paths only after the irreversible move. This is a blocker, but fixable by splitting/resequencing.",
+  "concrete_changes_required": [
+    "Split Bead 5 into reviewable post-Bead-3 units, at minimum separating the irreversible filesystem move/review co-location from governance/rubric/static-text/fixture cleanup.",
+    "Add an explicit step and verification for migrating existing repo-root review/** panel artifacts to <spec-dir>/reviews/** and eliminating the root review/ tree.",
+    "Move static skill/snapshot path rewrites out of pre-move Bead 4 unless they are made dual-layout safe; they must not leave a canonical tree with instructions that only read flat paths.",
+    "Resolve the AC22 contradiction: either migrate harness fixtures before the Phase-1 go test ./... gate, or change the Phase-1 gate/provenance so it does not claim full-suite green before deferred harness migration."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "Bead 5 decomposition",
+      "issue": "Bead 5 combines irreversible tree moves, dogfood eviction, vestigial drops, self-glob updates, ADR/DOCS-LAYOUT governance, migrate.go rubric changes, and harness/testdata migration. A per-bead complete/panel cannot meaningfully review this blast radius as one unit.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "Review co-location coverage",
+      "issue": "Req 8 / goal require eliminating repo-root review/ by co-locating tracked reviews under <spec-dir>/reviews/, but Bead 5 changed files/steps omit review/** migration. AC13 proves scanner behavior, not migration of the existing 42 tracked artifacts.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "Sequencing",
+      "issue": "Bead 4 updates static skills/snapshots to post-flatten paths before Bead 5 creates the flat tree. That leaves an intermediate canonical repo whose live skill instructions point at missing .mindspec/domains and .mindspec/adr paths.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "Fixture migration / AC22",
+      "issue": "The plan defers harness scenario fixture migration to Bead 5, but AC22 requires go test ./... green after Beads 1+2. internal/harness contains active Go tests and many hard-coded .mindspec/docs paths, so the claimed Phase-1 full-suite gate is not honest.",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "Dependency convergence",
+      "issue": "The 2+3+4 -> 5 convergence hides integration work across cmd/mindspec/migrate.go, internal/doctor, moved-tree fixtures, link checks, and ownership manifests. The dependency graph is acyclic, but the final bead absorbs most cross-branch conflict and validation risk.",
+      "hard_block": false
+    }
+  ]
+}

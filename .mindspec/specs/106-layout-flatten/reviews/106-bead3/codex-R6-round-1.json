@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Next-bead lens. The symmetric specs/adr/domains/core+context-map flatten is clean and Bead-4-ready: TreeDirsAtRef/MergeBase are on the GitOps+Executor surface so Bead 4's directional merge guard reads signatures without importing the mover (no cycle), and the lineage/State schema mirror doctor's migration-metadata shape for Bead 4 detection + Bead 6 verification. But the mover is NOT drivable for two of Bead 5's three mandated moves. plan/rules/rootDocs are private; the ONLY constructor NewMover hardcodes DefaultFlattenPlan/DefaultFlattenRules/DefaultRootDocs with no WithPlan/WithRules/setter and the CLI hardcodes the defaults. There is zero dogfood-eviction or review-co-location support (only a 'handled later' comment, mover.go:382). DefaultFlattenRules is symmetric-only and deliberately preserves '../' forms — yet dogfood/review moves are asymmetric depth changes that break exactly those relative links. Plan Bead 3 step 4 explicitly assigns 'review-co-location depth changes, dogfood eviction depth changes' to THIS rewriter, and Bead 5 step 1-2 'run the mover's review-co-location step'. Bead 5 doesn't own internal/layout and its isolation (R6 blocker 4) forbids adding mover logic. So Bead 5 is blocked: either re-open Bead 3 or leak scope. Symmetric core is otherwise solid.",
+  "concrete_changes_required": [
+    "Add a move-plan/rules/root-docs injection API to the mover (functional options e.g. NewMover(git, root, runID, opts ...MoverOption) with WithPlan/WithRules/WithRootDocs, or exported setters), and thread it through the CLI, so Bead 5 — which does not own internal/layout — can drive the dogfood-eviction and review-co-location moves without editing the package and reopening the isolated-move boundary.",
+    "Implement the dogfood-eviction and review-co-location depth-change rewrite rules in rewrite.go (the closed breaking subset Bead-3 plan step 4 enumerates: 'review-co-location depth changes, dogfood eviction depth changes'). These are asymmetric moves that break the very '../adr/'-relative links DefaultFlattenRules deliberately preserves, so the symmetric rule set cannot cover them.",
+    "Provide a move-group generator (or a documented contract Bead 5 can call) for review co-location keyed by leading spec id (review/<slug> -> <spec-dir>/reviews/<slug>) and dogfood eviction (user|installation|research -> project-docs/), so Bead 5 step 1-2 can run 'the mover's review-co-location step' as the plan states. ALTERNATIVELY, get the panel/orchestrator to explicitly re-assign this rewriter+generator scope to Bead 5 AND still add the injection API so Bead 5 can supply it.",
+    "Ensure writeLineage records ALL move groups a run executes (dogfood + review, not just the 5 symmetric entries) so the doctor migration-metadata provenance and Bead 6 verification see every move."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "mover extensibility / Bead 5 integration",
+      "issue": "The mover exposes no way to drive moves beyond the hardcoded symmetric plan: plan/rules/rootDocs are unexported, NewMover hardcodes DefaultFlattenPlan/DefaultFlattenRules/DefaultRootDocs, there is no WithPlan/WithRules option or setter, and the CLI is hardcoded to the defaults. Bead 5 must 'evict dogfood -> project-docs' and 'migrate root review/** -> <spec-dir>/reviews/**' via the mover (plan Bead 5 steps 1-2) but does not own internal/layout and cannot inject a custom plan/rules. Bead 5 is blocked.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "rewrite rules / link-check survivability",
+      "issue": "DefaultFlattenRules covers only the symmetric .mindspec/docs/{specs,adr,domains,core}+context-map case and deliberately preserves '../' relative forms. Plan Bead 3 step 4 explicitly assigns the dogfood-eviction and review-co-location DEPTH-CHANGE rules to this finite-pattern rewriter; they are absent (only a 'residual dogfood trees handled later' comment at mover.go:382). Dogfood/review moves change relative depth, so spec->ADR and into-tree relative links would 404 under the Bead 3 doctor link-check that Bead 5 gates on — and the rules to fix them do not exist.",
+      "hard_block": true
+    },
+    {
+      "severity": "minor",
+      "area": "lineage provenance",
+      "issue": "writeLineage emits one entry per m.plan group (the 5 symmetric moves only). If the dogfood/review moves are added later (in whatever bead), they must also be recorded in the lineage manifest so doctor layout detection and Bead 6 verification have complete move provenance; the current shape would silently omit them."
+    },
+    {
+      "severity": "note",
+      "area": "Bead 4 merge-guard primitives (positive)",
+      "issue": "No gap for Bead 4: TreeDirsAtRef + MergeBase + RevParseRef are on the GitOps/Executor surface and the merge guard fingerprints source/target via the Bead-1 workspace helper fed by TreeDirsAtRef, not via the mover, so there is no executor->internal/layout import cycle. State.Stage and LineageManifest/Entry field names match the doctor migration-metadata schema, feeding Bead 4 detection and Bead 6 cleanly. CommitPaths (bd-export-free) is the right deterministic commit primitive for Bead 5 to drive."
+    }
+  ]
+}
