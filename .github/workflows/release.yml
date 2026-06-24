@@ -46,10 +46,29 @@ jobs:
       # for every archive and the checksums file (SPDX-JSON output).
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
+      # Use a curated, per-tag release-notes file (RELEASE-NOTES-<tag>.md) as the
+      # GitHub release body when present; otherwise fall back to GoReleaser's
+      # auto-generated changelog. This keeps the headline narrative (e.g. the
+      # v0.10.0 flat-layout notes) from being buried under raw commit subjects.
+      # Fail-soft: a tag without a matching notes file still releases (with a
+      # warning), so this never blocks a release.
+      - name: Resolve release notes source
+        id: notes
+        run: |
+          set -euo pipefail
+          f="RELEASE-NOTES-${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then
+            echo "args=release --clean --release-notes $f" >> "$GITHUB_OUTPUT"
+            echo "Using curated release notes: $f"
+          else
+            echo "::warning::no $f found; using GoReleaser auto-generated changelog"
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ steps.notes.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
