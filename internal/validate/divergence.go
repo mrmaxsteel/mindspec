@@ -270,7 +270,8 @@ func ValidateDivergence(
 // artifact the ADR-divergence lane must skip before domain
 // attribution: documentation (doc-sync's isDocFile set, which covers
 // every layout's lifecycle docs — ADRs, specs, domain docs, OWNERSHIP
-// manifests — plus docs/, project-docs/, CLAUDE.md, AGENTS.md), the
+// manifests — plus docs/, project-docs/, and the repo-root operator
+// docs CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md), the
 // beads JSONL build artifact tree (.beads/, ADR-0025), and review-panel
 // working notes (both the historical root review/** tree and the
 // post-flatten co-located <spec-dir>/reviews/** tree). Mirrors doc-sync's

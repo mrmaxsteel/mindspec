@@ -148,4 +148,9 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   (`isVestigialConfigDrop`: `.mindspec/policies.yml`,
   `.mindspec/docs/glossary.md`) as workflow-owned process artifacts, so the
   flatten's own diff (and future real user cutovers) does not trip
-  `adr-divergence-unowned`.
+  `adr-divergence-unowned`. `isDocFile` recognizes the repo-root operator docs
+  (`rootOperatorDocs`: `CLAUDE.md`, `AGENTS.md`, `README.md`, `BENCH-MOVED.md`)
+  by EXACT name — consistent with `internal/layout` `DefaultRootDocs` and
+  `internal/doctor` `movedTreeRootDocs` — so the link-repair edits the flatten
+  makes to `README.md`/`BENCH-MOVED.md` classify as docs and likewise do not
+  trip `adr-divergence-unowned`.
