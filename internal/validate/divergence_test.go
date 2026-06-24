@@ -478,8 +478,9 @@ func TestProcessArtifactsFiltered(t *testing.T) {
 // TestRootOperatorDocsNotUnowned — spec 106 Bead 5 R3: the irreversible
 // flatten's move commit repairs links in the repo-root operator docs
 // README.md (move commit) and BENCH-MOVED.md (R2 fix). Those are root docs
-// (consistent with internal/layout DefaultRootDocs and internal/doctor
-// movedTreeRootDocs), so isDocFile must classify them as documentation and the
+// (consistent with internal/layout DefaultRootDocs and the internal/doctor
+// repo-root *.md link scan, repoRootMarkdown), so isDocFile must classify them
+// as documentation and the
 // ADR-divergence lane must never emit adr-divergence-unowned for them. A real
 // source file in the same diff still surfaces, proving the doc classification
 // did not silence the lane wholesale.

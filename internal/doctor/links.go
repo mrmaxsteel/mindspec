@@ -28,7 +28,8 @@ var refDefRe = regexp.MustCompile(`^\[[^\]]+\]:\s+(\S+)`)
 
 // movedTreeRoots is the set of post-migration flat lifecycle locations the
 // link-existence lane scans (Req 5 / AC10) — every markdown link under these,
-// PLUS the affected repo-root docs (movedTreeRootDocs), is checked. The flat
+// PLUS every repo-root *.md (repoRootMarkdown) and the flat
+// .mindspec/context-map.md (alwaysScannedDocs), is checked. The flat
 // lifecycle children carry the co-located reviews (`<spec-dir>/reviews/…`)
 // under `.mindspec/specs`; `project-docs` is the dogfood-eviction destination,
 // scanned so the asymmetric depth-change links the eviction introduces are
@@ -41,14 +42,48 @@ var movedTreeRoots = []string{
 	"project-docs",
 }
 
-// movedTreeRootDocs are the repo-root docs that reference INTO the moved trees
-// and so must be scanned alongside them (Req 5: README/AGENTS refs).
-var movedTreeRootDocs = []string{"README.md", "AGENTS.md", ".mindspec/context-map.md"}
+// alwaysScannedDocs are docs OUTSIDE both the moved-tree roots and the repo-root
+// markdown sweep that the link lane must still scan: the flat context-map lives
+// directly under .mindspec/ (not inside a moved-tree root, and not at the repo
+// root), and references INTO the moved trees.
+var alwaysScannedDocs = []string{".mindspec/context-map.md"}
+
+// repoRootMarkdown returns every repo-ROOT *.md file (top-level only, NOT
+// recursive) under root — README.md, AGENTS.md, BENCH-MOVED.md, CLAUDE.md, and
+// any other tracked root operator note. Widening the link lane from the old
+// fixed {README,AGENTS} set to EVERY repo-root *.md closes the bead-3jq7 hole:
+// the spec-106 flatten broke two links in BENCH-MOVED.md (a tracked root doc
+// outside the old set) and the gate reported GREEN. The sweep is deliberately
+// repo-root-only — it does NOT descend into nested frozen snapshots
+// (docs_archive/, internal/setup/historical_skills/) whose links are pinned to
+// a past tree — so it stays the "at minimum every repo-root *.md" guarantee
+// without flagging intentionally-stale archived references.
+func repoRootMarkdown(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(e.Name()), ".md") {
+			files = append(files, filepath.Join(root, e.Name()))
+		}
+	}
+	return files, nil
+}
 
 // CheckMovedTreeLinks scans EVERY markdown link in the post-migration flat
-// lifecycle tree (.mindspec/{specs,adr,domains,core}) AND the affected root
-// docs (README.md, AGENTS.md, .mindspec/context-map.md), resolving each LOCAL
-// link target against the filesystem, and returns every link that 404s.
+// lifecycle tree (.mindspec/{specs,adr,domains,core}), EVERY repo-root *.md doc
+// (README.md, AGENTS.md, BENCH-MOVED.md, and any other root operator note — see
+// repoRootMarkdown / bead-3jq7), AND the flat .mindspec/context-map.md,
+// resolving each LOCAL link target against the filesystem, and returns every
+// link that 404s.
 //
 // This is the GATING link-existence lane the `migrate layout` mover runs after
 // the moves+rewrites and before it finalizes (Req 5): it scans the WHOLE tree,
@@ -82,7 +117,12 @@ func CheckMovedTreeLinks(root string) ([]DanglingLink, error) {
 			return nil, err
 		}
 	}
-	for _, rel := range movedTreeRootDocs {
+	rootDocs, err := repoRootMarkdown(root)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, rootDocs...)
+	for _, rel := range alwaysScannedDocs {
 		abs := filepath.Join(root, filepath.FromSlash(rel))
 		if fileExists(abs) {
 			files = append(files, abs)

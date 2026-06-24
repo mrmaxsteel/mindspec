@@ -76,3 +76,30 @@ func TestLinksReport_RendersChecks(t *testing.T) {
 		t.Fatalf("expected 1 OK check after fix, got %+v", checks)
 	}
 }
+
+// TestCheckMovedTreeLinks_NonReadmeRootDocBrokenLink is the bead-3jq7
+// regression: a broken local link in a tracked repo-root doc that is NOT
+// README.md or AGENTS.md (here BENCH-MOVED.md) is now caught by the 404 gate.
+// Before the fix the lane scanned only {README,AGENTS} among root docs, so the
+// spec-106 flatten broke two BENCH-MOVED.md links and the gate reported GREEN.
+func TestCheckMovedTreeLinks_NonReadmeRootDocBrokenLink(t *testing.T) {
+	root := t.TempDir()
+	// A clean flat lifecycle tree.
+	writeFileAt(t, root, ".mindspec/specs/000-x/spec.md", "# Spec\n[adr](../../adr/ADR-0001.md)\n")
+	writeFileAt(t, root, ".mindspec/adr/ADR-0001.md", "# ADR\n")
+	// A NON-README/AGENTS repo-root doc with one broken local link and one good
+	// link (the good link proves the scan is not flagging everything).
+	writeFileAt(t, root, "BENCH-MOVED.md",
+		"# Bench moved\n[good](.mindspec/adr/ADR-0001.md)\n[gone](.mindspec/docs/adr/ADR-0001.md)\n[ext](https://x.test)\n")
+
+	dangling, err := CheckMovedTreeLinks(root)
+	if err != nil {
+		t.Fatalf("CheckMovedTreeLinks: %v", err)
+	}
+	if len(dangling) != 1 {
+		t.Fatalf("expected exactly 1 dangling link from BENCH-MOVED.md, got %+v", dangling)
+	}
+	if dangling[0].File != "BENCH-MOVED.md" || dangling[0].Target != ".mindspec/docs/adr/ADR-0001.md" {
+		t.Errorf("unexpected dangling link: %+v", dangling[0])
+	}
+}
