@@ -5,9 +5,9 @@ Spec 084 (`mindspec-otel-only`) deleted `internal/bench/` and the
 spec/plan/lifecycle tool that points at any OTLP/HTTP endpoint via
 `mindspec otel setup`; it does not own a benchmarking subsystem.
 
-See [ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md)
+See [ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md)
 (OTEL-only posture) and
-[ADR-0028](.mindspec/docs/adr/ADR-0028-bench-rescue-procedure.md)
+[ADR-0028](.mindspec/adr/ADR-0028-bench-rescue-procedure.md)
 (this rescue procedure).
 
 ## Rescue procedure

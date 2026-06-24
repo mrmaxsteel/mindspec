@@ -365,17 +365,37 @@ func hasArtifactPrefix(path, name string) bool {
 	return false
 }
 
+// rootOperatorDocs is the explicit set of repo-root operator/governance docs
+// the gates classify as documentation (never governable source). It is kept
+// CONSISTENT with the authoritative root-doc sets at the two other sites that
+// treat these as root docs: the layout mover's link-rewrite set
+// (internal/layout DefaultRootDocs = README.md, AGENTS.md) and the link lane's
+// scan set (internal/doctor movedTreeRootDocs = README.md, AGENTS.md,
+// .mindspec/context-map.md). CLAUDE.md is the agent-entry doc; BENCH-MOVED.md
+// is the tracked bench-relocation operator note touched by the flatten (spec
+// 106 Bead 5). Matched by EXACT name — deliberately NOT an "any top-level .md"
+// rule — so a real source-adjacent top-level .md is still classified as source
+// and the ADR-divergence lane keeps governing it.
+var rootOperatorDocs = map[string]struct{}{
+	"CLAUDE.md":      {},
+	"AGENTS.md":      {},
+	"README.md":      {},
+	"BENCH-MOVED.md": {},
+}
+
 // isDocFile returns true for documentation files. It recognizes the canonical
 // (.mindspec/docs/**) and legacy (docs/**) docs roots — which cover every
 // nested lifecycle subtree — plus the flat lifecycle subtrees that live
 // directly under .mindspec/ (spec 106 Req 6), the post-flatten evicted dogfood
-// tree (project-docs/**, Req 14), and the repo-root operator docs.
+// tree (project-docs/**, Req 14), and the repo-root operator docs
+// (rootOperatorDocs: CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md).
 func isDocFile(path string) bool {
 	if strings.HasPrefix(path, "docs/") ||
 		strings.HasPrefix(path, ".mindspec/docs/") ||
-		strings.HasPrefix(path, "project-docs/") ||
-		strings.HasPrefix(path, "CLAUDE.md") ||
-		strings.HasPrefix(path, "AGENTS.md") {
+		strings.HasPrefix(path, "project-docs/") {
+		return true
+	}
+	if _, ok := rootOperatorDocs[path]; ok {
 		return true
 	}
 	// Flat lifecycle docs: .mindspec/{specs,adr,domains,core}/** and the flat

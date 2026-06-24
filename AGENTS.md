@@ -1,6 +1,6 @@
 # AGENTS.md — MindSpec
 
-MindSpec is a spec-driven development framework. See [USAGE.md](.mindspec/docs/core/USAGE.md) for the development workflow, or [.mindspec/docs/guides/codex.md](.mindspec/docs/guides/codex.md) for the Codex quick start guide.
+MindSpec is a spec-driven development framework. See [USAGE.md](.mindspec/core/USAGE.md) for the development workflow, or [Codex quick start](project-docs/user/guides/codex.md) for the Codex quick start guide.
 
 ## Guidance
 
@@ -42,7 +42,7 @@ Transition between modes using `mindspec approve spec|plan` and `mindspec comple
 
 ### Conventions
 
-- Every functional change must reference a spec in `.mindspec/docs/specs/`
+- Every functional change must reference a spec in `.mindspec/specs/`
 - In Spec and Plan modes, only documentation may be created or modified — no code changes
 - Working tree must be clean before switching modes
 - Run `mindspec doctor` to verify project structure health
@@ -131,7 +131,7 @@ DI wiring: `cmd/mindspec/root.go` has `newExecutor(root)` factory.
 
 Workflow packages call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This keeps enforcement logic testable with `MockExecutor` and decouples workflow decisions from git mechanics.
 
-See `.mindspec/docs/domains/execution/` and `.mindspec/docs/domains/workflow/` for full documentation.
+See `.mindspec/domains/execution/` and `.mindspec/domains/workflow/` for full documentation.
 
 ## Landing the Plane (Session Completion)
 

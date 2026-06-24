@@ -475,6 +475,68 @@ func TestProcessArtifactsFiltered(t *testing.T) {
 	}
 }
 
+// TestRootOperatorDocsNotUnowned — spec 106 Bead 5 R3: the irreversible
+// flatten's move commit repairs links in the repo-root operator docs
+// README.md (move commit) and BENCH-MOVED.md (R2 fix). Those are root docs
+// (consistent with internal/layout DefaultRootDocs and internal/doctor
+// movedTreeRootDocs), so isDocFile must classify them as documentation and the
+// ADR-divergence lane must never emit adr-divergence-unowned for them. A real
+// source file in the same diff still surfaces, proving the doc classification
+// did not silence the lane wholesale.
+func TestRootOperatorDocsNotUnowned(t *testing.T) {
+	// Unit guard: the root operator docs classify as docs/process-artifacts,
+	// while a real source-adjacent file stays source (negative guard — the
+	// fix must NOT be a broad "any top-level .md / anything" rule).
+	for _, d := range []string{"README.md", "BENCH-MOVED.md", "CLAUDE.md", "AGENTS.md"} {
+		if !isDocFile(d) {
+			t.Errorf("isDocFile(%q) = false, want true (repo-root operator doc)", d)
+		}
+		if !isProcessArtifact(d) {
+			t.Errorf("isProcessArtifact(%q) = false, want true", d)
+		}
+	}
+	if isDocFile("internal/foo.go") || isProcessArtifact("internal/foo.go") {
+		t.Error("internal/foo.go must NOT classify as doc/process-artifact")
+	}
+	if !isSourceFile("internal/foo.go") {
+		t.Error("internal/foo.go must still classify as source")
+	}
+
+	// End-to-end guard: README.md + BENCH-MOVED.md in a divergence diff are
+	// skipped before attribution; the control source file is the only finding.
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "106-flatten")
+	writeSpecAndPlan(t, root, specDir, "106-flatten",
+		[]string{"core"},
+		[]string{},
+	)
+	writeManifest(t, root, "core", "paths:\n  - internal/core/**\n")
+
+	rootDocs := []string{"README.md", "BENCH-MOVED.md"}
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: append(append([]string{}, rootDocs...),
+			"internal/foo.go"), // control: unowned source still surfaces
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly 1 finding (the control source file), got %+v", findings)
+	}
+	if findings[0].Path != "internal/foo.go" || findings[0].Kind != "unowned" {
+		t.Errorf("control finding = %+v, want unowned internal/foo.go", findings[0])
+	}
+	for _, i := range r.Issues {
+		for _, d := range rootDocs {
+			if strings.Contains(i.Message, d) {
+				t.Errorf("root operator doc %q leaked into issue %+v", d, i)
+			}
+		}
+	}
+}
+
 // TestValidateDivergenceFilePathImpactedDomainResolves — spec 100 R1 AC1:
 // a spec whose `## Impacted Domains` entry is a FILE PATH (not the
 // domain dir name) is normalized to its owning domain, so the changed

@@ -166,6 +166,43 @@ func TestReviewMatchers_RootAndCoLocated(t *testing.T) {
 	}
 }
 
+// TestMoverRunStateAndVestigials_ProcessArtifacts: the irreversible flatten's
+// own diff carries non-doc .mindspec/** paths — the lineage manifest, per-run
+// migration snapshots, and the ADR-0018 vestigial config drops
+// (.mindspec/policies.yml, .mindspec/docs/glossary.md). All must classify as
+// process artifacts (skipped before attribution) so the move's diff does not
+// trip adr-divergence-unowned (Spec 106 Bead 5). None of them is governable
+// source.
+func TestMoverRunStateAndVestigials_ProcessArtifacts(t *testing.T) {
+	cases := []struct {
+		path string
+		desc string
+	}{
+		{".mindspec/lineage/manifest.json", "lineage manifest"},
+		{".mindspec/lineage/x.json", "lineage entry"},
+		{".mindspec/migrations/bead5-flatten/state.json", "migration state snapshot"},
+		{".mindspec/migrations/bead5-flatten/lineage.json", "migration lineage snapshot"},
+		{".mindspec/policies.yml", "vestigial top-level policies.yml drop"},
+		{".mindspec/docs/glossary.md", "vestigial glossary.md drop"},
+	}
+	for _, tc := range cases {
+		if !isProcessArtifact(tc.path) {
+			t.Errorf("%s (%q) must classify as a process artifact (skipped before attribution)", tc.desc, tc.path)
+		}
+		if isSourceFile(tc.path) {
+			t.Errorf("%s (%q) must NOT classify as source", tc.desc, tc.path)
+		}
+	}
+	// Run-state matcher is precise: an unrelated .mindspec/ config path is NOT
+	// swept up just because it sits under .mindspec/.
+	if isMoverRunState(".mindspec/config.yaml") {
+		t.Error("isMoverRunState must not match arbitrary .mindspec/ paths")
+	}
+	if isVestigialConfigDrop(".mindspec/adr/ADR-0018.md") {
+		t.Error("isVestigialConfigDrop must match only the named vestigial drops")
+	}
+}
+
 // writeFlatManifest writes an OWNERSHIP.yaml under the FLAT layout root
 // (.mindspec/domains/<domain>/OWNERSHIP.yaml).
 func writeFlatManifest(t *testing.T, root, domain, body string) {

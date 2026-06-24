@@ -32,7 +32,6 @@ Discuss user-facing value and define what "done" means. Spec Mode is intentional
 
 - Create/edit `.mindspec/docs/specs/{{.ActiveSpec}}/spec.md`
 - Create/edit domain docs (`.mindspec/docs/domains/`)
-- Add glossary entries (`GLOSSARY.md`)
 - Edit architecture docs (`.mindspec/docs/core/`)
 - Draft ADRs (`.mindspec/docs/adr/`)
 
