@@ -71,7 +71,7 @@ func Show(root, name string) (*DomainInfo, error) {
 	}
 
 	// Scan specs for impacted domains
-	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
+	specsDir := workspace.SpecsDir(root) // tier-aware enumeration root (spec 106 Req 3)
 	if entries, err := os.ReadDir(specsDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {

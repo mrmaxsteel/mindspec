@@ -121,3 +121,25 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   stale-duplicate read hazard a half-migrated tree creates. The
   dry-run-migration spec walk is tier-aware (`workspace.SpecsDir`), so a
   flat tree's specs are still enumerated.
+- **Permanently multi-prefix gate matchers + tier-aware enumerators
+  (Spec 106).** The doc-sync / ADR-divergence / ownership lanes match git-DIFF
+  PATH STRINGS, so the per-artifact filesystem resolvers cannot absorb them.
+  `internal/validate` carries a relative-path layout classifier whose matchers
+  (`isDocFile`, `specMDID`, the domain-doc prefixes in `checkInternalPackages`,
+  the cmd-docs accept-set, `isADRMarkdown`, `isProcessArtifact`,
+  `listDomainDirs`/`listDomainDirsAtRef`, `LoadOwnership`, and — critically —
+  the ref-anchored `LoadOwnershipAtRef` / `domainManifestRelPaths` pair the
+  `complete` ADR-divergence gate loads ownership through) recognize ALL THREE
+  layouts: flat `.mindspec/{specs,adr,domains,core}/`, canonical
+  `.mindspec/docs/...`, and legacy `docs/...`. This posture is PERMANENT and
+  decoupled from the filesystem read-tier lifecycle — historical refs, old
+  branches, and external forks emit the canonical/legacy paths forever. The
+  root `review/**` exclusion is KEPT as a permanent historical-ref matcher; an
+  ADDITIVE `/reviews/` segment matcher classifies co-located
+  `<spec-dir>/reviews/**` non-source; and `project-docs/**` (the dogfood
+  eviction tree) classifies non-source docs so neither the doc-sync source lane
+  nor `adr-divergence-unowned` trips. The enumerating consumers (`spec list`,
+  `domain list`/`show`, the doctor docs/orphan scans via `docsRootRel`) swap
+  hardcoded `.mindspec/docs/...` joins for the Bead-1 tier-aware accessors
+  (`workspace.SpecsDir`/`DomainsDir`), so they enumerate identically on
+  flat/canonical/legacy.

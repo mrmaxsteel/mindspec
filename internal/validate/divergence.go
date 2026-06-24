@@ -269,13 +269,34 @@ func ValidateDivergence(
 // isProcessArtifact reports whether path is a non-source process
 // artifact the ADR-divergence lane must skip before domain
 // attribution: documentation (doc-sync's isDocFile set, which covers
-// .mindspec/docs/** — ADRs, specs, domain docs, OWNERSHIP manifests —
-// plus docs/, CLAUDE.md, AGENTS.md), the beads JSONL build artifact
-// tree (.beads/, ADR-0025), and review-panel working notes (review/).
-// Mirrors doc-sync's classification so the two gates agree on what
-// counts as governable source.
+// every layout's lifecycle docs — ADRs, specs, domain docs, OWNERSHIP
+// manifests — plus docs/, project-docs/, CLAUDE.md, AGENTS.md), the
+// beads JSONL build artifact tree (.beads/, ADR-0025), and review-panel
+// working notes (both the historical root review/** tree and the
+// post-flatten co-located <spec-dir>/reviews/** tree). Mirrors doc-sync's
+// classification so the two gates agree on what counts as governable source.
+//
+// Spec 106 Req 6/14: the project-docs/** dogfood-eviction tree is non-source
+// (via isDocFile) so eviction trips neither the doc-sync source lane nor
+// adr-divergence-unowned; both review matchers below classify non-source.
 func isProcessArtifact(path string) bool {
 	return isDocFile(path) ||
 		strings.HasPrefix(path, ".beads/") ||
-		strings.HasPrefix(path, "review/")
+		strings.HasPrefix(path, "review/") ||
+		isCoLocatedReview(path)
+}
+
+// isCoLocatedReview reports whether path is a co-located reviews artifact —
+// any path carrying a `/reviews/` segment, e.g.
+// .mindspec/specs/<id>/reviews/<slug>/panel.json (spec 106 Req 6). This is an
+// INDEPENDENT matcher additive to the PERMANENT root review/ exclusion in
+// isProcessArtifact: the literal "review/" does NOT substring-match
+// "reviews/", so the two never collapse. Both must classify non-source so
+// that, during the transition (the root review/** tree still live until the
+// move bead migrates it, co-located <spec-dir>/reviews/** appearing after),
+// neither reads as source/unowned and trips a gate. The root matcher is a
+// PERMANENT historical-ref compatibility matcher — historical refs and
+// external forks emit the root review/ path forever.
+func isCoLocatedReview(path string) bool {
+	return strings.Contains(path, "/reviews/")
 }
