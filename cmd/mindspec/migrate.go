@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/layout"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -65,8 +68,96 @@ Use --json to output just the file inventory for programmatic use.`,
 	},
 }
 
+// migrateLayoutCmd drives the deterministic, transactional, idempotent flatten
+// of .mindspec/docs/{specs,adr,domains,core} + context-map.md into the flat
+// .mindspec/ layout (spec 106, Reqs 4/5/11/14). It runs the precondition
+// branch/PR discovery scan first (blocks on an unmerged pre-flatten branch/PR
+// and on a dirty tree; tolerates locked worktrees / external forks; offline it
+// degrades + WARNs), then drives the internal/layout mover. `--abort`
+// hard-resets a pre-publish run to its pre-run ref.
+var migrateLayoutCmd = &cobra.Command{
+	Use:   "layout",
+	Short: "Flatten .mindspec/docs/{specs,adr,domains,core} into .mindspec/ (irreversible)",
+	Long: `Flattens the canonical .mindspec/docs/{specs,adr,domains,core} +
+context-map.md tree into the flat .mindspec/ layout via a deterministic,
+two-commit-per-move (pure git mv, then link-rewrite), crash-resumable mover.
+
+Precondition: a clean working tree and no unmerged pre-flatten branch/PR.
+Locked agent worktrees and external forks are tolerated. Offline, the scan
+degrades to local + remote-tracking refs and warns that hosted PRs could not
+be consulted.
+
+--abort hard-resets a pre-publish run to its pre-run ref (refused after
+publish; the lifecycle is forward-only, ADR-0023).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		abort, _ := cmd.Flags().GetBool("abort")
+		runID, _ := cmd.Flags().GetString("run-id")
+		target, _ := cmd.Flags().GetString("target")
+
+		root, err := gitutil.RevParseShowToplevel()
+		if err != nil {
+			cwd, wdErr := os.Getwd()
+			if wdErr != nil {
+				return fmt.Errorf("resolving repo root: %w", err)
+			}
+			root = cwd
+		}
+
+		exec := executor.NewMindspecExecutor(root)
+
+		if abort {
+			if runID == "" {
+				return fmt.Errorf("--abort requires --run-id <id> of the run to roll back")
+			}
+			mover := layout.NewMover(exec, root, runID)
+			if err := mover.Abort(); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "migrate layout: aborted run %s (hard-reset to pre-run ref)\n", runID)
+			return nil
+		}
+
+		// Precondition: clean tree + branch/PR discovery scan.
+		locked, _ := gitutil.LockedWorktreeBranches(root)
+		lockedSet := make(map[string]bool, len(locked))
+		for _, b := range locked {
+			lockedSet[b] = true
+		}
+		res, err := layout.CheckPrecondition(exec, root, layout.PreconditionOptions{
+			Target:           target,
+			LockedWorktrees:  lockedSet,
+			Offline:          !gitutil.HasRemote(),
+			RequireCleanTree: true,
+		})
+		if err != nil {
+			return err
+		}
+		for _, w := range res.Warnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", w)
+		}
+		if len(res.Blocking) > 0 {
+			return layout.BlockingError(res)
+		}
+
+		if runID == "" {
+			runID = time.Now().UTC().Format("20060102T150405Z")
+		}
+		mover := layout.NewMover(exec, root, runID)
+		if err := mover.Run(); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "migrate layout: flatten complete (run %s)\n", runID)
+		return nil
+	},
+}
+
 func init() {
 	migrateCmd.Flags().Bool("json", false, "Output file inventory as JSON instead of a prompt")
+
+	migrateLayoutCmd.Flags().Bool("abort", false, "Hard-reset a pre-publish run to its pre-run ref")
+	migrateLayoutCmd.Flags().String("run-id", "", "Run identifier (default: UTC timestamp; required with --abort)")
+	migrateLayoutCmd.Flags().String("target", "main", "Merge target the discovery scan evaluates refs against")
+	migrateCmd.AddCommand(migrateLayoutCmd)
 }
 
 // scanSourceMarkdown walks the repo for .md files outside the canonical docs area.

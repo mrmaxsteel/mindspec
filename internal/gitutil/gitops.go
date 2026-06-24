@@ -769,6 +769,182 @@ func CheckoutNewBranch(workdir, branch string) error {
 	return nil
 }
 
+// --- layout-mover primitives (spec 106 Bead 3) ------------------------------
+//
+// These are NET-NEW git primitives the `migrate layout` mover stands on
+// (R4 blocker 2). They live here, the ADR-0030 git-process I/O boundary, and
+// are surfaced on the Executor interface so internal/layout reaches git THROUGH
+// the executor seam rather than shelling out itself. Each ref/path operand is
+// passed the SEC-5 RejectOptionLike guard before reaching git argv, and path
+// operands additionally ride behind a trailing `--` so a path that begins with
+// `-` cannot be reparsed as an option.
+
+// GitMv runs `git mv -- <src> <dst>` in workdir — a history-preserving rename
+// (the move's pure 100%-similarity step, so `git log --follow` and 3-way
+// rename detection stay reliable). src and dst are repo-relative paths.
+func GitMv(workdir, src, dst string) error {
+	if err := rejectOptionLike(src); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(dst); err != nil {
+		return err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "mv", "--", src, dst)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git mv %s %s: %s", src, dst, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ResetHard runs `git reset --hard <ref>` in workdir — the mover's
+// pre-publish rollback to the pre-run ref. ref is guarded (SEC-5); no `--`
+// is appended because `git reset --hard <ref>` takes a commit operand, not a
+// pathspec.
+func ResetHard(workdir, ref string) error {
+	if err := rejectOptionLike(ref); err != nil {
+		return err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "reset", "--hard", ref)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git reset --hard %s: %s", ref, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CleanForce runs `git clean -fd` in workdir — removes untracked files and
+// directories left behind by a rolled-back mover run (paired with ResetHard).
+// It does NOT pass `-x`, so gitignored runtime files are preserved.
+func CleanForce(workdir string) error {
+	cmd := execCommand("git", gitArgs(workdir, "clean", "-fd")...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git clean -fd: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the SCOPED
+// counterpart of CleanForce. It removes untracked residue only UNDER the given
+// repo-relative pathspecs, so a rolled-back mover run cannot delete
+// user-untracked files OUTSIDE the move set (the mover scopes its rollback to
+// its own touched roots — `.mindspec`, `project-docs`, `review`, etc.). Each
+// path operand rides behind the `--` separator and the SEC-5 leading-`-` guard.
+// A pathspec that matches nothing on disk is a no-op (git clean does not error
+// on an absent pathspec). With no paths it is equivalent to CleanForce.
+func CleanForcePaths(workdir string, paths []string) error {
+	if len(paths) == 0 {
+		return CleanForce(workdir)
+	}
+	for _, p := range paths {
+		if err := rejectOptionLike(p); err != nil {
+			return err
+		}
+	}
+	args := append([]string{"clean", "-fd", "--"}, paths...)
+	cmd := execCommand("git", gitArgs(workdir, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git clean -fd -- %s: %s", strings.Join(paths, " "), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CommitPaths stages the given repo-relative paths (`git add -- <paths...>`)
+// and commits them with msg (`git commit -m <msg> --no-verify`) in workdir.
+// When paths is empty it commits whatever is already staged (used for the
+// pure-rename commit, where `git mv` already staged the rename). `--no-verify`
+// bypasses the pre-commit hooks the deterministic migration must not trip.
+// Returns nil silently when there is nothing staged to commit.
+func CommitPaths(workdir, msg string, paths []string) error {
+	if len(paths) > 0 {
+		for _, p := range paths {
+			if err := rejectOptionLike(p); err != nil {
+				return err
+			}
+		}
+		addArgs := append([]string{"add", "--"}, paths...)
+		addCmd := execCommand("git", gitArgs(workdir, addArgs...)...)
+		if out, err := addCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git add: %s", strings.TrimSpace(string(out)))
+		}
+	}
+	// Nothing staged → nothing to commit (idempotent resume reaches here).
+	if DiffCachedQuiet(workdir) == nil {
+		return nil
+	}
+	cmd := execCommand("git", gitArgs(workdir, "commit", "-m", msg, "--no-verify")...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// LocalBranchRefs returns the short names of every local branch
+// (`git for-each-ref --format=%(refname:short) refs/heads`) in workdir — the
+// (1) local-refs source of the migrate-layout pre-flatten discovery scan
+// (Req 11).
+func LocalBranchRefs(workdir string) ([]string, error) {
+	return forEachRefShort(workdir, "refs/heads")
+}
+
+// RemoteTrackingRefs returns the short names of every remote-tracking ref
+// (`git for-each-ref --format=%(refname:short) refs/remotes`) in workdir —
+// e.g. "origin/main", "fork/feature" — the (2) remote-tracking source of the
+// migrate-layout discovery scan (Req 11). A non-origin remote prefix marks an
+// external fork, which the precondition tolerates rather than blocks.
+func RemoteTrackingRefs(workdir string) ([]string, error) {
+	return forEachRefShort(workdir, "refs/remotes")
+}
+
+// LockedWorktreeBranches returns the short branch names checked out in LOCKED
+// linked worktrees (parsed from `git worktree list --porcelain`). The
+// migrate-layout precondition TOLERATES these (a locked agent worktree cannot
+// be drained, only fingerprint-guarded at merge — Req 11), so they are excluded
+// from the block-candidate set. Best-effort: returns nil on any git failure.
+func LockedWorktreeBranches(workdir string) ([]string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "worktree", "list", "--porcelain")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("worktree list --porcelain: %w", err)
+	}
+	var branches []string
+	var curBranch string
+	var curLocked bool
+	flush := func() {
+		if curLocked && curBranch != "" {
+			branches = append(branches, curBranch)
+		}
+		curBranch = ""
+		curLocked = false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "branch "):
+			ref := strings.TrimPrefix(line, "branch ")
+			curBranch = strings.TrimPrefix(strings.TrimSpace(ref), "refs/heads/")
+		case line == "locked" || strings.HasPrefix(line, "locked "):
+			curLocked = true
+		}
+	}
+	flush()
+	return branches, nil
+}
+
+// forEachRefShort runs `git for-each-ref --format=%(refname:short) <pattern>`
+// and returns the trimmed, non-empty lines.
+func forEachRefShort(workdir, pattern string) ([]string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "for-each-ref", "--format=%(refname:short)", pattern)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("for-each-ref %s: %w", pattern, err)
+	}
+	return splitLines(string(out)), nil
+}
+
 // splitLines splits s on '\n', trims each entry, and drops empty entries.
 func splitLines(s string) []string {
 	var out []string

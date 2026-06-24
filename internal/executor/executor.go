@@ -112,6 +112,45 @@ type Executor interface {
 	// it through the executor keeps the gitutil.ErrRefNotFound sentinel out of
 	// the enforcement packages (ADR-0030).
 	IsRefNotFound(err error) bool
+
+	// --- layout-mover git primitives (spec 106 Bead 3) ---
+	//
+	// These surface the net-new gitutil mover primitives on the executor
+	// boundary so internal/layout drives the `migrate layout` transactional
+	// mover THROUGH the executor (ADR-0030) instead of shelling out. They are
+	// thin pass-throughs to gitutil in MindspecExecutor.
+
+	// GitMv runs a history-preserving `git mv -- <src> <dst>` in workdir (the
+	// pure 100%-similarity rename step of each move group).
+	GitMv(workdir, src, dst string) error
+
+	// ResetHard runs `git reset --hard <ref>` in workdir — the mover's
+	// pre-publish rollback to the pre-run ref.
+	ResetHard(workdir, ref string) error
+
+	// CleanForce runs `git clean -fd` in workdir — removes the untracked
+	// run-state/lineage residue after a rolled-back run (paired with ResetHard).
+	CleanForce(workdir string) error
+
+	// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the
+	// SCOPED clean the mover's rollback uses so it removes untracked residue
+	// only under its own touched roots and cannot delete user-untracked files
+	// outside the move set.
+	CleanForcePaths(workdir string, paths []string) error
+
+	// CommitPaths stages the given repo-relative paths and commits them with
+	// msg in workdir (`--no-verify`). Empty paths commits whatever is already
+	// staged (the pure-rename commit). A no-op when nothing is staged.
+	CommitPaths(workdir, msg string, paths []string) error
+
+	// LocalBranchRefs returns the short names of every local branch in workdir
+	// — the local-refs source of the migrate-layout pre-flatten discovery scan.
+	LocalBranchRefs(workdir string) ([]string, error)
+
+	// RemoteTrackingRefs returns the short names of every remote-tracking ref
+	// in workdir (e.g. "origin/main", "fork/feature") — the remote-tracking
+	// source of the migrate-layout discovery scan.
+	RemoteTrackingRefs(workdir string) ([]string, error)
 }
 
 // WorkspaceInfo describes a created workspace.

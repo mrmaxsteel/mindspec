@@ -8,6 +8,45 @@ import (
 	"testing"
 )
 
+// TestMigrateLayoutSubcommandRegistered asserts the `migrate layout` mover
+// subcommand is wired under `migrate` with its precondition flags (spec 106
+// Bead 3, AC7/AC16).
+func TestMigrateLayoutSubcommandRegistered(t *testing.T) {
+	t.Parallel()
+
+	found := false
+	for _, c := range migrateCmd.Commands() {
+		if c.Name() == "layout" {
+			found = true
+			for _, flag := range []string{"abort", "run-id", "target"} {
+				if c.Flags().Lookup(flag) == nil {
+					t.Errorf("migrate layout missing --%s flag", flag)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("migrate layout subcommand not registered under migrate")
+	}
+}
+
+// TestLayoutPackageOwned is the AC21 ownership half: the net-new mover package
+// internal/layout/** is claimed in the workflow OWNERSHIP.yaml, so a complete
+// gate does not trip adr-divergence-unowned. The manifest is resolved relative
+// to this package (cmd/mindspec → repo root is ../..).
+func TestLayoutPackageOwned(t *testing.T) {
+	t.Parallel()
+
+	manifest := filepath.Join("..", "..", ".mindspec", "docs", "domains", "workflow", "OWNERSHIP.yaml")
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatalf("read workflow OWNERSHIP.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "internal/layout/**") {
+		t.Errorf("workflow OWNERSHIP.yaml does not claim internal/layout/**:\n%s", data)
+	}
+}
+
 func TestScanSourceMarkdown(t *testing.T) {
 	t.Parallel()
 
