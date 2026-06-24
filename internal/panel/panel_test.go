@@ -57,6 +57,38 @@ func TestScan_FindsRegisteredPanels(t *testing.T) {
 	}
 }
 
+// TestScan_FindsCoLocatedReviewsPanels (Spec 106 Bead 4, AC13): Scan globs the
+// spec-scoped `reviews/<slug>/panel.json` convention as well as the repo-root
+// `review/<slug>/panel.json` one, so handing it a spec-dir root surfaces the
+// co-located panel. The literal `review/` must not substring-match `reviews/`.
+func TestScan_FindsCoLocatedReviewsPanels(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "106-x")
+	// Co-located panel under <spec-dir>/reviews/<slug>/.
+	writeFile(t, specDir, "reviews/106-bead4/panel.json", beadPanelJSON)
+	// A repo-root review/ panel under the repo root.
+	writeFile(t, root, "review/106-root/panel.json", beadPanelJSON)
+
+	// Scanning the spec dir finds ONLY the co-located reviews/ panel.
+	specRegs := Scan(specDir)
+	if len(specRegs) != 1 || specRegs[0].Slug() != "106-bead4" {
+		t.Fatalf("spec-dir scan should find the co-located reviews/ panel; got %+v", specRegs)
+	}
+
+	// Scanning the repo root finds ONLY the root review/ panel (reviews/ lives
+	// under the spec dir, not the repo root).
+	rootRegs := Scan(root)
+	if len(rootRegs) != 1 || rootRegs[0].Slug() != "106-root" {
+		t.Fatalf("repo-root scan should find the root review/ panel; got %+v", rootRegs)
+	}
+
+	// The union (both roots) dedupes to both distinct panels.
+	union := Scan(root, specDir)
+	if len(union) != 2 {
+		t.Fatalf("union scan should find both panels, got %d: %+v", len(union), union)
+	}
+}
+
 func TestScan_LegacyBriefOnlyDirIsUnregistered(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "review/legacy-panel/BRIEF.md", "# brief")

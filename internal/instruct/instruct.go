@@ -286,9 +286,11 @@ func readSpecGoal(root, specID string) string {
 	return string(goal)
 }
 
-// listSpecs returns the names of spec directories under the active docs root.
+// listSpecs returns the names of spec directories under the tier-aware specs
+// enumeration root (flat .mindspec/specs → canonical .mindspec/docs/specs →
+// legacy docs/specs, spec 106 Req 3).
 func listSpecs(root string) []string {
-	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
+	specsDir := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
 		return nil

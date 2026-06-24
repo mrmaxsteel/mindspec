@@ -288,6 +288,12 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	}
 	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if _, err := os.Stat(specWtPath); err == nil {
+		// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard in front
+		// of the bead→spec merge. Blocks ONLY the regression direction (a
+		// canonical/legacy bead branch onto a flat spec target); mutates nothing.
+		if guardErr := guardMergeLayout(beadBranch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+			return guardErr
+		}
 		if mergeErr := gitutil.MergeInto(specWtPath, beadBranch); mergeErr != nil {
 			// Spec 092 Req 14(a) incident amendment (2026-06-11
 			// merge-driver incident, panel j3-recurrence): a failed
@@ -367,6 +373,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			if _, statErr := os.Stat(specWtPath); statErr == nil {
 				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 				if ancErr == nil && !isAnc {
+					// Spec 106 Bead 4 (Req 9): directional guard in front of the
+					// FinalizeEpic bead→spec auto-merge — same regression-only
+					// rule as CompleteBead; mutates nothing on a block.
+					if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+						return result, guardErr
+					}
 					if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
 						// Spec 092 Req 14(a) — SEMANTIC abort, not a
 						// warning: a bead→spec conflict here used to
@@ -407,6 +419,20 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		result.MergeStrategy = "direct"
 	}
 
+	// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard for the
+	// no-remote DIRECT spec→main merge. Evaluated HERE — before the cleanup
+	// block below removes any worktree — so a blocked regression (a
+	// canonical/legacy spec branch onto a flat main) mutates NOTHING: no
+	// worktree removal, no branch deletion, no merge commit. The remote-PR path
+	// above pushed the branch for a PR and does NOT local-merge, so this guard
+	// covers only the local direct-merge seam (the PR path relies on the Bead-3
+	// precondition + PR review).
+	if result.MergeStrategy == "direct" {
+		if guardErr := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+			return result, guardErr
+		}
+	}
+
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
 		// Clean up lingering bead worktrees/branches.
@@ -427,7 +453,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			}
 		}
 
-		// Direct merge for local (no-remote) workflows.
+		// Direct merge for local (no-remote) workflows. The Spec 106 Bead 4
+		// layout-regression guard for this seam already ran ABOVE (before any
+		// cleanup), so a cross-layout regression never reaches this merge.
 		if result.MergeStrategy == "direct" {
 			if err := gitutil.MergeBranch(g.Root, specBranch, "main"); err != nil {
 				// Spec 092 Req 14(b) + Req 18: a direct spec→main
@@ -684,6 +712,50 @@ func (g *MindspecExecutor) Status(workdir string) (string, error) {
 // (ADR-0030); behavior is byte-identical to errors.Is(err, ErrRefNotFound).
 func (g *MindspecExecutor) IsRefNotFound(err error) bool {
 	return errors.Is(err, gitutil.ErrRefNotFound)
+}
+
+// GitMv runs a history-preserving `git mv -- <src> <dst>` in workdir. Thin
+// pass-through to gitutil — the layout mover's rename primitive routed through
+// the executor boundary (ADR-0030, spec 106 Bead 3).
+func (g *MindspecExecutor) GitMv(workdir, src, dst string) error {
+	return gitutil.GitMv(workdir, src, dst)
+}
+
+// ResetHard runs `git reset --hard <ref>` in workdir (the mover's pre-publish
+// rollback). Thin pass-through to gitutil.
+func (g *MindspecExecutor) ResetHard(workdir, ref string) error {
+	return gitutil.ResetHard(workdir, ref)
+}
+
+// CleanForce runs `git clean -fd` in workdir (paired with ResetHard on
+// rollback). Thin pass-through to gitutil.
+func (g *MindspecExecutor) CleanForce(workdir string) error {
+	return gitutil.CleanForce(workdir)
+}
+
+// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the SCOPED
+// rollback clean (paired with ResetHard) restricted to the mover's touched
+// roots. Thin pass-through to gitutil.
+func (g *MindspecExecutor) CleanForcePaths(workdir string, paths []string) error {
+	return gitutil.CleanForcePaths(workdir, paths)
+}
+
+// CommitPaths stages the given paths and commits them in workdir. Thin
+// pass-through to gitutil — the mover's bd-export-free commit primitive.
+func (g *MindspecExecutor) CommitPaths(workdir, msg string, paths []string) error {
+	return gitutil.CommitPaths(workdir, msg, paths)
+}
+
+// LocalBranchRefs returns the short names of every local branch in workdir.
+// Thin pass-through to gitutil — source (1) of the migrate-layout discovery scan.
+func (g *MindspecExecutor) LocalBranchRefs(workdir string) ([]string, error) {
+	return gitutil.LocalBranchRefs(workdir)
+}
+
+// RemoteTrackingRefs returns the short names of every remote-tracking ref in
+// workdir. Thin pass-through to gitutil — source (2) of the discovery scan.
+func (g *MindspecExecutor) RemoteTrackingRefs(workdir string) ([]string, error) {
+	return gitutil.RemoteTrackingRefs(workdir)
 }
 
 // commitWithExport runs the pre-stage beads export, then delegates to the

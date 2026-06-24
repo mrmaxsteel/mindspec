@@ -16,11 +16,20 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 - `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
 - `expected-reviewers` (default `6`) — the default panel size.
 
+> **`<spec-dir>` / co-located reviews (spec 106 flat layout).** Panels are
+> co-located under the spec they review: `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`,
+> so the panel dir is `<spec-dir>/reviews/<panel-slug>/` (a sibling of the spec's
+> `recording/`). The in-binary `mindspec complete` gate scans
+> `<spec-dir>/reviews/*/panel.json` on a flat tree — the old repo-root `review`
+> directory no longer drives the gate. `<spec-slug>` is the full spec directory
+> name (e.g. `106-layout-flatten`); for a `pr`/`commit` target with no owning spec,
+> use the spec the work belongs to.
+
 ## Step 0 — create panel dir + BRIEF + panel.json
 
 1. **Create the panel directory.**
    ```bash
-   mkdir -p <repo>/review/<panel-slug>
+   mkdir -p <spec-dir>/reviews/<panel-slug>
    ```
 
 2. **Write `panel.json`** — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read. Schema:
@@ -81,7 +90,7 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 
    Verdict: APPROVE / REQUEST_CHANGES / REJECT.
 
-   Output JSON to `<repo>/review/<panel-slug>/<your-slot>-round-<N>.json` with keys:
+   Output JSON to `<spec-dir>/reviews/<panel-slug>/<your-slot>-round-<N>.json` with keys:
    `reviewer_id`, `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings` (per round-<N-1> item). An artifact-gate finding may set `"hard_block": true`.
    ```
 
@@ -95,7 +104,7 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 1. **Launch Codex first** (they run 4-10 min vs Claude 1-3 min; start the slow ones first).
 
    For each codex slot R4, R5, R6:
-   - The `/tmp/codex_<panel-slug>_r<N>.md` prompt (from step 0) tells the reviewer to read `<repo>/review/<panel-slug>/BRIEF.md`, names the slot id (`R4 codex`, etc.) and the lens, and for round >= 2 points at the previous round's JSON.
+   - The `/tmp/codex_<panel-slug>_r<N>.md` prompt (from step 0) tells the reviewer to read `<spec-dir>/reviews/<panel-slug>/BRIEF.md`, names the slot id (`R4 codex`, etc.) and the lens, and for round >= 2 points at the previous round's JSON.
 
      **Prompt MUST include this terminal instruction verbatim:**
 
@@ -129,7 +138,7 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 
 4. **Detect codex failures.** See "Codex failure detection (deterministic)" below.
 
-5. **Verify all six JSON files exist** at `<repo>/review/<panel-slug>/<slot>-round-<N>.json`.
+5. **Verify all six JSON files exist** at `<spec-dir>/reviews/<panel-slug>/<slot>-round-<N>.json`.
 
 ## Codex failure detection (deterministic)
 
@@ -138,7 +147,7 @@ A healthy codex run writes its JSON verdict to the named output path. Failure mo
 **Pre-condition: honest task-notification timing.** This check is only reliable when the `<task-notification>` fires on *codex* exit, not on a shell-wrapper exit. That requires single-source backgrounding (see launch step 1 above) — drop `&` and `nohup`; use only the Bash tool's `run_in_background: true`. The earlier double-backgrounded pattern made the file-existence primary check race against still-running codex, producing false "completed in 1 sec, file empty" reports. With the timing honest, layer 1 below is reliable on first read.
 
 ```bash
-EXPECTED_JSON="<repo>/review/<panel-slug>/codex-<slot>-round-<N>.json"
+EXPECTED_JSON="<spec-dir>/reviews/<panel-slug>/codex-<slot>-round-<N>.json"
 OUT="/tmp/codex_<panel-slug>_r<slot>.out"
 
 # Layer 1 (primary): did the file land?
@@ -177,16 +186,16 @@ When deciding whether to retry codex once before substituting: don't. Empiricall
 
 ## Working directory matters
 
-Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<repo>/review/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
+Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
 
-**Launch convention**: always `cd <repo>` first so `<repo>/review/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
+**Launch convention**: always `cd <repo>` first so `<spec-dir>/reviews/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
 
 ```bash
 cd <repo>
 codex exec --skip-git-repo-check < /tmp/codex_<panel-slug>_r<slot>.md > /tmp/codex_<panel-slug>_r<slot>.out 2>&1
 ```
 
-If the panel runs in a worktree under a parent repo, `cd` to the worktree, not the parent — the worktree's `review/` subtree is where the verdict needs to land.
+If the panel runs in a worktree under a parent repo, `cd` to the worktree, not the parent — the worktree's `<spec-dir>/reviews/` subtree is where the verdict needs to land.
 
 ## Slot lens defaults
 

@@ -51,7 +51,7 @@ Research on scaling agent systems ([arXiv:2512.08296](https://arxiv.org/abs/2512
   which workload-config files (Claude Code settings, Codex config)
   carry the stanza.
 - **No OTLP receiver in mindspec.** As of spec 084
-  ([ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md)),
+  ([ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md)),
   mindspec does not run an OTLP receiver, does not parse OTLP, does
   not read NDJSON, and does not depend on any specific
   collector binary. If you want the AgentMind viz / replay / bench
@@ -75,8 +75,8 @@ deprecation message and exits with code 2:
 
 The deprecation messages live for exactly one mindspec release after
 spec 084 and are then deleted. See
-[ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md) and
-[ADR-0028](.mindspec/docs/adr/ADR-0028-bench-rescue-procedure.md) for
+[ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md) and
+[ADR-0028](.mindspec/adr/ADR-0028-bench-rescue-procedure.md) for
 the architectural rationale.
 
 **Project Setup & Integration**
@@ -232,14 +232,14 @@ Tell the agent what you want to build. It will walk you through the lifecycle:
 
 | Goal | Guide |
 |:-----|:------|
-| **Full workflow with Claude Code** | [Claude Code guide](.mindspec/docs/user/guides/claude-code.md) |
-| **Full workflow with Codex** | [Codex guide](.mindspec/docs/user/guides/codex.md) |
-| **Full workflow with Copilot** | [Copilot guide](.mindspec/docs/user/guides/copilot.md) |
+| **Full workflow with Claude Code** | [Claude Code guide](project-docs/user/guides/claude-code.md) |
+| **Full workflow with Codex** | [Codex guide](project-docs/user/guides/codex.md) |
+| **Full workflow with Copilot** | [Copilot guide](project-docs/user/guides/copilot.md) |
 | **Point mindspec at any OTLP/HTTP collector** | `mindspec otel setup --endpoint <url>` (see ADR-0027) |
-| **Visualize & benchmark agent activity (downstream of mindspec)** | [AgentMind guide](.mindspec/docs/user/guides/agentmind.md) |
-| **Installing the AgentMind binary (downstream tool)** | [AgentMind install](.mindspec/docs/installation/agentmind.md) |
-| **Workflow state machine (allowed/disallowed transitions)** | [WORKFLOW-STATE-MACHINE.md](.mindspec/docs/core/WORKFLOW-STATE-MACHINE.md) |
-| **Complete reference** | [USAGE.md](.mindspec/docs/core/USAGE.md) |
+| **Visualize & benchmark agent activity (downstream of mindspec)** | [AgentMind guide](project-docs/user/guides/agentmind.md) |
+| **Installing the AgentMind binary (downstream tool)** | [AgentMind install](project-docs/installation/agentmind.md) |
+| **Workflow state machine (allowed/disallowed transitions)** | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
+| **Complete reference** | [USAGE.md](.mindspec/core/USAGE.md) |
 
 ## Project Structure
 

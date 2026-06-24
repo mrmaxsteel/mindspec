@@ -64,8 +64,8 @@ func writeSandboxDomainCoverage(sandbox *Sandbox, files ...string) {
 	for _, f := range files {
 		fmt.Fprintf(&b, "- %s\n", f)
 	}
-	sandbox.WriteFile(".mindspec/docs/domains/sandbox/OWNERSHIP.yaml", b.String())
-	sandbox.WriteFile(".mindspec/docs/adr/ADR-0001-sandbox-domain.md", `# ADR-0001: Sandbox Domain
+	sandbox.WriteFile(".mindspec/domains/sandbox/OWNERSHIP.yaml", b.String())
+	sandbox.WriteFile(".mindspec/adr/ADR-0001-sandbox-domain.md", `# ADR-0001: Sandbox Domain
 
 - **Date**: 2026-06-11
 - **Status**: Accepted
@@ -146,14 +146,14 @@ func ScenarioStalePhaseImplApprove() Scenario {
 			// Spec/plan/impl artifacts committed on the spec branch (doc-sync
 			// gate and FinalizeEpic need real content; bead_ids lets the
 			// plan-bead gate verify the closed bead).
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Stale Phase Feature
 status: Approved
 ---
 # Stale Phase Feature
 A completed feature whose epic phase cache went stale.
 `)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -271,14 +271,14 @@ func assertStaleApproveSelfHeals(t *testing.T, sandbox *Sandbox) {
 		`{"spec_num":2,"spec_title":"staleprobe","mindspec_phase":"implement"}`)
 
 	wt := setupWorktrees(sandbox, specID, "", "plan")
-	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Stale Probe Feature
 status: Approved
 ---
 # Stale Probe Feature
 Deterministic Req 1 self-heal probe (docs-only spec branch).
 `)
-	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+	sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -349,14 +349,14 @@ func ScenarioCompleteFromDoomedWorktree() Scenario {
 			sandbox.runBDMust("defer", keepaliveID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Doomed Worktree Feature
 status: Approved
 ---
 # Doomed Worktree Feature
 Add a doomed function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -721,14 +721,14 @@ func ScenarioPrecommitReexportComplete() Scenario {
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
 			sandbox.runBDMust("defer", keepaliveID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Reexport Feature
 status: Approved
 ---
 # Reexport Feature
 Add a reexport.go file.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -858,14 +858,14 @@ func ScenarioWrongDirectoryGuardRecovery() Scenario {
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
 			sandbox.runBDMust("defer", keepaliveID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Wrong Directory Feature
 status: Approved
 ---
 # Wrong Directory Feature
 Add a wrongdir.go file.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -978,14 +978,14 @@ func ScenarioApprovalGateDiscovery() Scenario {
 			sandbox.Commit("setup: sandbox domain coverage (ownership + ADR-0001)")
 
 			wt := setupWorktrees(sandbox, specID, "", "plan")
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Gate Feature
 status: Approved
 ---
 # Gate Feature
 A completed feature awaiting the final approval gate.
 `)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:

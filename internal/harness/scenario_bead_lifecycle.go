@@ -24,14 +24,14 @@ func ScenarioSingleBead() Scenario {
 			sandbox.ClaimBead(beadID)
 
 			// Set up as if spec and plan are already approved
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Greeting Feature
 status: Approved
 ---
 # Greeting Feature
 Add a greeting function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -111,14 +111,14 @@ func ScenarioMultiBeadDeps() Scenario {
 			sandbox.CreateBead("["+specID+"] Tests", "task", epicID)
 			sandbox.ClaimBead(bead1)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Multi-bead Feature
 status: Approved
 ---
 # Multi-bead Feature
 Implement a feature in three phases.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: 002-multi
 ---
@@ -165,14 +165,14 @@ func ScenarioResumeAfterCrash() Scenario {
 			sandbox.ClaimBead(beadID)
 
 			// Spec and plan artifacts
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Process Feature
 status: Approved
 ---
 # Process Feature
 Add a process function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -238,14 +238,14 @@ func ScenarioBlockedBeadTransition() Scenario {
 			sandbox.ClaimBead(bead1)
 
 			// Approved spec + plan
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Blocker Feature
 status: Approved
 ---
 # Blocker Feature
 Test blocked bead transition.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -315,14 +315,14 @@ func ScenarioUnmergedBeadGuard() Scenario {
 			sandbox.runBDMust("close", bead1)
 
 			// Approved spec + plan
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Guard Feature
 status: Approved
 ---
 # Guard Feature
 Test unmerged bead guard.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -398,14 +398,14 @@ func ScenarioStopAfterComplete() Scenario {
 			sandbox.runBDMust("dep", "add", bead2, bead1)
 			sandbox.ClaimBead(bead1)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Stop Test
 status: Approved
 ---
 # Stop Test
 Two tasks.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -498,14 +498,14 @@ func ScenarioStopDoesNotBlockApproveImpl() Scenario {
 			beadID = sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Approve Test
 status: Approved
 ---
 # Approve Test
 Single feature.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -581,14 +581,14 @@ func ScenarioBeadsArtifactPassthrough() Scenario {
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
 			sandbox.runBDMust("defer", keepaliveID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Hello Feature
 status: Approved
 ---
 # Hello Feature
 Add a hello.go file that prints a greeting.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:

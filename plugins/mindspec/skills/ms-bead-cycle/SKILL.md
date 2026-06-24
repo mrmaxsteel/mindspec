@@ -14,7 +14,9 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orch
 - `bead-id` (optional) — if absent, step 0 picks the next eligible bead for the active spec.
 - `spec-slug` (optional) — restrict step 0 to a given spec; otherwise honour the active spec.
 - `max-rounds` (default `3`) — stop iterating after this many panel rounds.
-- `prompt-path` (optional) — pre-staged impl prompt at `<repo>/review/prep/bead<N>_impl_prompt.md`.
+- `prompt-path` (optional) — pre-staged impl prompt at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`.
+
+> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel and prep artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
 
 ## Step 0 — pick + claim the next bead
 

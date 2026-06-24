@@ -309,7 +309,9 @@ func TestBootstrapParadoxDoc_Exists(t *testing.T) {
 	if root == "" {
 		t.Skip("repo root not found")
 	}
-	path := filepath.Join(root, ".mindspec", "docs", "user", "guides", "friction-bootstrap-paradox.md")
+	// Spec 106: dogfood/user docs were evicted out of .mindspec/docs/user/
+	// to top-level project-docs/ by the flatten.
+	path := filepath.Join(root, "project-docs", "user", "guides", "friction-bootstrap-paradox.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("bootstrap-paradox doc artifact missing: %v", err)

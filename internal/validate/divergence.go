@@ -269,13 +269,70 @@ func ValidateDivergence(
 // isProcessArtifact reports whether path is a non-source process
 // artifact the ADR-divergence lane must skip before domain
 // attribution: documentation (doc-sync's isDocFile set, which covers
-// .mindspec/docs/** — ADRs, specs, domain docs, OWNERSHIP manifests —
-// plus docs/, CLAUDE.md, AGENTS.md), the beads JSONL build artifact
-// tree (.beads/, ADR-0025), and review-panel working notes (review/).
-// Mirrors doc-sync's classification so the two gates agree on what
-// counts as governable source.
+// every layout's lifecycle docs — ADRs, specs, domain docs, OWNERSHIP
+// manifests — plus docs/, project-docs/, and the repo-root operator
+// docs CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md), the
+// beads JSONL build artifact tree (.beads/, ADR-0025), and review-panel
+// working notes (both the historical root review/** tree and the
+// post-flatten co-located <spec-dir>/reviews/** tree). Mirrors doc-sync's
+// classification so the two gates agree on what counts as governable source.
+//
+// Spec 106 Req 6/14: the project-docs/** dogfood-eviction tree is non-source
+// (via isDocFile) so eviction trips neither the doc-sync source lane nor
+// adr-divergence-unowned; both review matchers below classify non-source.
+//
+// Spec 106 Bead 5: the irreversible flatten's own diff carries non-doc
+// .mindspec/** paths that are mover/lifecycle run-state or ADR-0018 vestigial
+// config drops — the lineage manifest, per-run migration snapshots, and the
+// dropped top-level .mindspec/policies.yml / .mindspec/docs/glossary.md. These
+// are workflow-owned process records, not governable source, so isMoverRunState
+// and isVestigialConfigDrop classify them non-source. This honors the spec's
+// promise that the flatten won't trip adr-divergence-unowned and future-proofs
+// real user cutovers (which emit the same run-state).
 func isProcessArtifact(path string) bool {
 	return isDocFile(path) ||
 		strings.HasPrefix(path, ".beads/") ||
-		strings.HasPrefix(path, "review/")
+		strings.HasPrefix(path, "review/") ||
+		isCoLocatedReview(path) ||
+		isMoverRunState(path) ||
+		isVestigialConfigDrop(path)
+}
+
+// isMoverRunState reports whether path is layout-mover / lifecycle run-state
+// emitted under .mindspec/lineage/** (the lineage manifest) or
+// .mindspec/migrations/<run>/** (per-run lineage/state snapshots). Spec 106
+// Bead 5: the irreversible flatten writes these as the record of the move, not
+// as governable source — the ADR-divergence lane must skip them so the move's
+// own diff (and future real user cutovers, which emit the same run-state) does
+// not trip adr-divergence-unowned.
+func isMoverRunState(path string) bool {
+	return strings.HasPrefix(path, ".mindspec/lineage/") ||
+		strings.HasPrefix(path, ".mindspec/migrations/")
+}
+
+// isVestigialConfigDrop reports whether path is a vestigial top-level .mindspec
+// config artifact the flatten DELETES per ADR-0018: the legacy
+// .mindspec/policies.yml and .mindspec/docs/glossary.md. These are
+// workflow-owned process drops, not source; classifying them keeps the flatten
+// diff (a deletion of each) from reading as adr-divergence-unowned.
+// (.mindspec/docs/glossary.md already classifies via isDocFile's .mindspec/docs/
+// prefix; it is listed here for defense-in-depth.)
+func isVestigialConfigDrop(path string) bool {
+	return path == ".mindspec/policies.yml" ||
+		path == ".mindspec/docs/glossary.md"
+}
+
+// isCoLocatedReview reports whether path is a co-located reviews artifact —
+// any path carrying a `/reviews/` segment, e.g.
+// .mindspec/specs/<id>/reviews/<slug>/panel.json (spec 106 Req 6). This is an
+// INDEPENDENT matcher additive to the PERMANENT root review/ exclusion in
+// isProcessArtifact: the literal "review/" does NOT substring-match
+// "reviews/", so the two never collapse. Both must classify non-source so
+// that, during the transition (the root review/** tree still live until the
+// move bead migrates it, co-located <spec-dir>/reviews/** appearing after),
+// neither reads as source/unowned and trips a gate. The root matcher is a
+// PERMANENT historical-ref compatibility matcher — historical refs and
+// external forks emit the root review/ path forever.
+func isCoLocatedReview(path string) bool {
+	return strings.Contains(path, "/reviews/")
 }

@@ -141,7 +141,7 @@ func ScenarioSpecApprove() Scenario {
 			wt := setupWorktrees(sandbox, specID, "", "spec")
 
 			// Write spec file in the worktree — must pass ValidateSpec
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Calculator Feature
 status: Draft
 ---
@@ -242,7 +242,7 @@ func ScenarioPlanApprove() Scenario {
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write approved spec
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Planner Feature
 status: Approved
 ---
@@ -256,7 +256,7 @@ Add a planning feature.
 `)
 			// Write draft plan with bead sections (must pass ValidatePlan: version, ADR Fitness,
 			// Testing Strategy, 3+ steps per bead, verification with test artifact references)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", `---
 status: Draft
 spec_id: 001-planner
 version: "1"
@@ -389,14 +389,14 @@ func ScenarioImplApprove() Scenario {
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write spec files in the worktree (where they'd be in real workflow)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Done Feature
 status: Approved
 ---
 # Done Feature
 A completed feature.
 `)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 bead_ids:
@@ -485,7 +485,7 @@ func ScenarioSpecStatus() Scenario {
 			wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
 			// Write spec files in the spec worktree
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Status Feature
 status: Approved
 ---
@@ -587,14 +587,14 @@ func ScenarioMultipleActiveSpecs() Scenario {
 			beadAlpha = sandbox.CreateBead("[001-alpha] Implement greeting", "task", epicAlpha)
 			sandbox.ClaimBead(beadAlpha)
 
-			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/001-alpha/spec.md", `---
 title: Alpha Feature
 status: Approved
 ---
 # Alpha Feature
 Add a greeting function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/001-alpha/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/001-alpha/plan.md", `---
 status: Approved
 spec_id: 001-alpha
 ---
@@ -605,14 +605,14 @@ Create greeting.go with a Greet function.
 
 			// --- Spec 002-beta: plan mode (no beads yet) ---
 			epicBeta = sandbox.CreateSpecEpic("002-beta")
-			sandbox.WriteFile(".mindspec/docs/specs/002-beta/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/002-beta/spec.md", `---
 title: Beta Feature
 status: Approved
 ---
 # Beta Feature
 Add a calculator function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/002-beta/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/002-beta/plan.md", `---
 status: Draft
 spec_id: 002-beta
 ---

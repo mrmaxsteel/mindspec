@@ -9,6 +9,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // defaultPanelSkipEnv reports whether the env-only panel-skip hatch is set
@@ -211,6 +212,52 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		fmt.Fprintf(warnOut, "panel gate: %s\n", firstWarn)
 	}
 	return matched, nil
+}
+
+// panelGateRoots returns the directories the authoritative panel gate scans,
+// chosen by the project's docs layout (Spec 106 Bead 4, AC13). panel.Scan globs
+// BOTH the repo-root `review/` and the co-located `reviews/` segment under each
+// root, so the RETURNED SET decides which conventions actually drive the gate:
+//
+//   - flat (post-flatten): the co-located <spec-dir>/reviews/ ONLY. The repo
+//     root is omitted, so a leftover root review/<slug>/panel.json no longer
+//     drives the gate once the tree is flat and Bead 5 has migrated root review/
+//     away.
+//   - canonical/legacy/greenfield (pre-flatten, incl. a transient mixed tree):
+//     the bead-worktree + repo-root review/ convention UNION the co-located
+//     <spec-dir>/reviews/ convention. BOTH drive the gate through the
+//     transition — root review/ stays live until Bead 5 migrates it, so this
+//     spec's own remaining beads, reviewed at repo-root review/<slug>, keep
+//     gating complete.
+//
+// The layout is read once from the main repo root via workspace.DetectLayout;
+// its mixed-tree error is non-fatal here — the returned kind still selects the
+// safe transitional union (anything not flat → union).
+func panelGateRoots(root, wtPath, specID string) []string {
+	specDirs := specScopedReviewRoots(root, specID)
+	if layout, _ := workspace.DetectLayout(root); layout == workspace.LayoutFlat {
+		return dedupeRoots(specDirs...)
+	}
+	roots := make([]string, 0, len(specDirs)+2)
+	roots = append(roots, wtPath, root)
+	roots = append(roots, specDirs...)
+	return dedupeRoots(roots...)
+}
+
+// specScopedReviewRoots resolves the spec directory whose co-located reviews/
+// subdir (a sibling of workspace.RecordingDir) holds this spec's panels. Passed
+// to panel.Scan as a root, it contributes the <spec-dir>/reviews/<slug> panels.
+// Returns nil when specID is empty or not resolvable (the gate then scans only
+// the repo-root/worktree review/ convention).
+func specScopedReviewRoots(root, specID string) []string {
+	if specID == "" {
+		return nil
+	}
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil || specDir == "" {
+		return nil
+	}
+	return []string{specDir}
 }
 
 // dedupeRoots returns the non-empty, distinct roots in order — the scan-root

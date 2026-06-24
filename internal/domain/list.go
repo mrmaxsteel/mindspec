@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -99,7 +98,7 @@ func ParseBoundedContexts(path string) ([]BoundedContext, error) {
 // List returns all domains found under docs/domains/, enriched with
 // ownership and relationship data from the context map.
 func List(root string) ([]DomainEntry, error) {
-	domainsDir := filepath.Join(workspace.DocsDir(root), "domains")
+	domainsDir := workspace.DomainsDir(root) // tier-aware enumeration root (spec 106 Req 3)
 	entries, err := os.ReadDir(domainsDir)
 	if err != nil {
 		if os.IsNotExist(err) {

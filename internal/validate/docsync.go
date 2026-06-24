@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // classifiedChanges groups a diff's changed files by category so doc-sync
@@ -326,12 +327,86 @@ func classifyChanges(files []string) (source, docs []string) {
 	return
 }
 
-// isDocFile returns true for documentation files.
+// --- Permanently multi-prefix layout-path classifiers (spec 106 Req 6) ---
+//
+// The doc-sync, ownership, and ADR-divergence lanes match git-DIFF PATH
+// STRINGS, not filesystem reads, so the per-artifact filesystem resolvers in
+// internal/workspace cannot absorb them. These predicates recognize ALL THREE
+// layout prefixes for each lifecycle artifact subtree — flat
+// (.mindspec/<name>/), canonical (.mindspec/docs/<name>/), and legacy
+// (docs/<name>/). This posture is PERMANENT and decoupled from the filesystem
+// read-tier deprecation lifecycle: historical refs, old branches, and external
+// forks emit the canonical/legacy paths forever, so the matchers are NEVER
+// made conditional on a current layout.
+
+// lifecycleDocSubtrees are the docs-relative subtree names that, post-flatten,
+// collapse up one level from .mindspec/docs/<name>/ to .mindspec/<name>/.
+var lifecycleDocSubtrees = []string{"specs", "adr", "domains", "core"}
+
+// artifactPrefixes returns the three layout prefixes (flat, canonical, legacy)
+// for a lifecycle subtree name, each with a trailing slash. name may carry
+// extra path segments (e.g. "specs/106" or "domains/workflow") to scope the
+// match to a single artifact directory.
+func artifactPrefixes(name string) []string {
+	return []string{
+		".mindspec/" + name + "/",      // flat
+		".mindspec/docs/" + name + "/", // canonical
+		"docs/" + name + "/",           // legacy
+	}
+}
+
+// hasArtifactPrefix reports whether path is under any layout's <name>/ subtree.
+func hasArtifactPrefix(path, name string) bool {
+	for _, p := range artifactPrefixes(name) {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// rootOperatorDocs is the explicit set of repo-root operator/governance docs
+// the gates classify as documentation (never governable source). It is kept
+// CONSISTENT with the authoritative root-doc sets at the two other sites that
+// treat these as root docs: the layout mover's link-rewrite set
+// (internal/layout DefaultRootDocs = README.md, AGENTS.md) and the link lane's
+// scan set (internal/doctor movedTreeRootDocs = README.md, AGENTS.md,
+// .mindspec/context-map.md). CLAUDE.md is the agent-entry doc; BENCH-MOVED.md
+// is the tracked bench-relocation operator note touched by the flatten (spec
+// 106 Bead 5). Matched by EXACT name — deliberately NOT an "any top-level .md"
+// rule — so a real source-adjacent top-level .md is still classified as source
+// and the ADR-divergence lane keeps governing it.
+var rootOperatorDocs = map[string]struct{}{
+	"CLAUDE.md":      {},
+	"AGENTS.md":      {},
+	"README.md":      {},
+	"BENCH-MOVED.md": {},
+}
+
+// isDocFile returns true for documentation files. It recognizes the canonical
+// (.mindspec/docs/**) and legacy (docs/**) docs roots — which cover every
+// nested lifecycle subtree — plus the flat lifecycle subtrees that live
+// directly under .mindspec/ (spec 106 Req 6), the post-flatten evicted dogfood
+// tree (project-docs/**, Req 14), and the repo-root operator docs
+// (rootOperatorDocs: CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md).
 func isDocFile(path string) bool {
-	return strings.HasPrefix(path, "docs/") ||
+	if strings.HasPrefix(path, "docs/") ||
 		strings.HasPrefix(path, ".mindspec/docs/") ||
-		strings.HasPrefix(path, "CLAUDE.md") ||
-		strings.HasPrefix(path, "AGENTS.md")
+		strings.HasPrefix(path, "project-docs/") {
+		return true
+	}
+	if _, ok := rootOperatorDocs[path]; ok {
+		return true
+	}
+	// Flat lifecycle docs: .mindspec/{specs,adr,domains,core}/** and the flat
+	// .mindspec/context-map.md (canonical .mindspec/docs/context-map.md is
+	// already covered by the .mindspec/docs/ prefix above).
+	for _, name := range lifecycleDocSubtrees {
+		if strings.HasPrefix(path, ".mindspec/"+name+"/") {
+			return true
+		}
+	}
+	return strings.HasPrefix(path, ".mindspec/context-map.md")
 }
 
 // isSourceFile returns true for Go source files.
@@ -342,14 +417,16 @@ func isSourceFile(path string) bool {
 }
 
 // listDomainDirs returns the lexicographically-sorted list of domain
-// directory names under .mindspec/docs/domains/ in the given root.
-// Returns an empty slice (no error) when the domains directory is
+// directory names under the domains enumeration root in the given root,
+// resolved tier-aware (flat .mindspec/domains → canonical
+// .mindspec/docs/domains → legacy docs/domains) via the Bead-1 accessor (spec
+// 106 Req 3). Returns an empty slice (no error) when the domains directory is
 // missing — checkInternalPackages then takes its zero-domains
 // disclosed default (per-package internal/<pkg>/ attribution). The
 // per-domain loader itself has NO fallback: a domain directory whose
 // manifest is missing claims nothing (spec 091 Req 13).
 func listDomainDirs(root string) ([]string, error) {
-	dir := filepath.Join(root, ".mindspec", "docs", "domains")
+	dir := workspace.DomainsDir(root)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -419,7 +496,7 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		}
 		hasDomainDocs := false
 		for _, f := range docs {
-			if strings.HasPrefix(f, "docs/domains/") || strings.HasPrefix(f, ".mindspec/docs/domains/") {
+			if hasArtifactPrefix(f, "domains") {
 				hasDomainDocs = true
 				break
 			}
@@ -482,10 +559,8 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 	for _, domain := range domainNames {
 		a := byDomain[domain]
 		hasDomainDocs := false
-		mindspecPrefix := ".mindspec/docs/domains/" + domain + "/"
-		legacyPrefix := "docs/domains/" + domain + "/"
 		for _, f := range docs {
-			if strings.HasPrefix(f, mindspecPrefix) || strings.HasPrefix(f, legacyPrefix) {
+			if hasArtifactPrefix(f, "domains/"+domain) {
 				hasDomainDocs = true
 				break
 			}
@@ -529,18 +604,38 @@ func checkCmdChanges(r *Result, source, docs []string) {
 			hasRelevantDoc = true
 			break
 		}
-		// Spec-086 additive operator-docs accept set (Requirement 10):
-		// any user-facing doc or the core USAGE manual also satisfies the lane.
-		if strings.HasPrefix(f, ".mindspec/docs/user/") ||
-			f == ".mindspec/docs/core/USAGE.md" {
+		// Spec-086 additive operator-docs accept set (Requirement 10),
+		// made permanently multi-prefix in spec 106 Req 6/14: any
+		// user-facing doc or the core USAGE manual satisfies the lane across
+		// the canonical, legacy, AND flat layouts (the latter accepts the
+		// post-flatten core/USAGE.md and the evicted dogfood project-docs/user/**).
+		if isUserDoc(f) || isCoreUsageDoc(f) {
 			hasRelevantDoc = true
 			break
 		}
 	}
 
 	if !hasRelevantDoc {
-		r.AddWarning("cmd-docs", "cmd/ changes without operator-docs update (one of CLAUDE.md, CONVENTIONS.md, .mindspec/docs/user/**, .mindspec/docs/core/USAGE.md)")
+		r.AddWarning("cmd-docs", "cmd/ changes without operator-docs update (one of CLAUDE.md, CONVENTIONS.md, user docs (.mindspec/docs/user/**, project-docs/user/**), or the core USAGE manual (.mindspec/docs/core/USAGE.md, .mindspec/core/USAGE.md))")
 	}
+}
+
+// isUserDoc reports whether path is an operator-facing user doc across the
+// three layouts (spec 106 Req 6/14): canonical .mindspec/docs/user/**, legacy
+// docs/user/**, and the post-flatten evicted dogfood project-docs/user/**.
+func isUserDoc(path string) bool {
+	return strings.HasPrefix(path, ".mindspec/docs/user/") ||
+		strings.HasPrefix(path, "docs/user/") ||
+		strings.HasPrefix(path, "project-docs/user/")
+}
+
+// isCoreUsageDoc reports whether path is the core USAGE manual across the
+// three layouts (spec 106 Req 6): canonical .mindspec/docs/core/USAGE.md,
+// legacy docs/core/USAGE.md, and flat .mindspec/core/USAGE.md.
+func isCoreUsageDoc(path string) bool {
+	return path == ".mindspec/docs/core/USAGE.md" ||
+		path == "docs/core/USAGE.md" ||
+		path == ".mindspec/core/USAGE.md"
 }
 
 // validateSpecArtifactSync enforces that any modification to a
@@ -579,18 +674,19 @@ func validateSpecArtifactSync(r *Result, changes classifiedChanges) {
 	sort.Strings(ids)
 
 	for _, id := range ids {
-		prefix := ".mindspec/docs/specs/" + id + "/"
-		specMD := prefix + "spec.md"
 		hasCompanion := false
 		for _, f := range changes.All {
-			if f == specMD {
+			// The spec.md itself (in any layout) is never its own companion.
+			if specMDID(f) == id {
 				continue
 			}
-			if strings.HasPrefix(f, prefix) {
+			// A sibling artifact under the same spec dir, in any layout.
+			if hasArtifactPrefix(f, "specs/"+id) {
 				hasCompanion = true
 				break
 			}
-			if strings.HasPrefix(f, ".mindspec/docs/adr/") && strings.HasSuffix(f, ".md") {
+			// Any ADR markdown, in any layout.
+			if isADRMarkdown(f) {
 				hasCompanion = true
 				break
 			}
@@ -604,19 +700,32 @@ func validateSpecArtifactSync(r *Result, changes classifiedChanges) {
 	}
 }
 
-// specMDID returns the spec ID iff path is .mindspec/docs/specs/<id>/spec.md.
-// Returns "" otherwise.
+// specMDID returns the spec ID iff path is <specs-prefix>/<id>/spec.md in any
+// layout (flat .mindspec/specs/, canonical .mindspec/docs/specs/, or legacy
+// docs/specs/ — spec 106 Req 6). Returns "" otherwise.
 func specMDID(path string) string {
-	const prefix = ".mindspec/docs/specs/"
 	const suffix = "/spec.md"
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+	if !strings.HasSuffix(path, suffix) {
 		return ""
 	}
-	rest := strings.TrimPrefix(path, prefix)
-	rest = strings.TrimSuffix(rest, suffix)
-	// Reject nested paths — must be exactly one segment.
-	if rest == "" || strings.Contains(rest, "/") {
-		return ""
+	for _, prefix := range artifactPrefixes("specs") {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(path, prefix)
+		rest = strings.TrimSuffix(rest, suffix)
+		// Reject nested paths — must be exactly one segment.
+		if rest == "" || strings.Contains(rest, "/") {
+			return ""
+		}
+		return rest
 	}
-	return rest
+	return ""
+}
+
+// isADRMarkdown reports whether path is an ADR markdown file in any layout
+// (flat .mindspec/adr/, canonical .mindspec/docs/adr/, or legacy docs/adr/ —
+// spec 106 Req 6).
+func isADRMarkdown(path string) bool {
+	return strings.HasSuffix(path, ".md") && hasArtifactPrefix(path, "adr")
 }

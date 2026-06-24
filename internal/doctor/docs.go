@@ -154,8 +154,15 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// docsRootRel returns the repo-relative directory that holds the specs/ and
+// domains/ enumeration roots, resolved tier-aware (spec 106 Req 3): .mindspec
+// (flat), .mindspec/docs (canonical), or docs (legacy). It is derived from the
+// PARENT of the Bead-1 specs enumeration root so the doctor docs scans probe
+// the right tree on a flat project, not the canonical/legacy DocsDir. On a
+// canonical/legacy tree with no flat tree this is byte-identical to the
+// pre-spec Rel(root, DocsDir(root)).
 func docsRootRel(root string) string {
-	rel, err := filepath.Rel(root, workspace.DocsDir(root))
+	rel, err := filepath.Rel(root, filepath.Dir(workspace.SpecsDir(root)))
 	if err != nil {
 		return "docs"
 	}
@@ -175,7 +182,7 @@ func checkStaleFocusLifecycle(r *Report, root string) {
 	}
 
 	// Check for stale lifecycle.yaml files in spec directories
-	specsDir := filepath.Join(workspace.DocsDir(root), "specs")
+	specsDir := workspace.SpecsDir(root) // tier-aware enumeration root (spec 106 Req 3)
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
 		return

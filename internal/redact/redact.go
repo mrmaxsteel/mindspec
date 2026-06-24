@@ -131,6 +131,7 @@ var SubcommandTokens = map[string]struct{}{
 	"help":             {}, // cobra `help` subcommand under any parent
 	"hygiene":          {},
 	"impl":             {}, // approve impl (Bead 2's PRIMARY override-on-impl capture)
+	"layout":           {}, // migrate layout (spec 106 flatten mover)
 	"list":             {},
 	"phase":            {},
 	"plan":             {},

@@ -23,14 +23,14 @@ func ScenarioInterruptForBug() Scenario {
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Feature
 status: Approved
 ---
 # Feature
 Add a feature function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---

@@ -1,0 +1,63 @@
+{
+  "run_id": "bead5-flatten",
+  "stage": "applied",
+  "pre_run_ref": "2cfed7662778d6e26db412c53dcd3fdb2343afeb",
+  "published": false,
+  "group": -1,
+  "group_stage": "",
+  "plan_resolved": true,
+  "plan": [
+    {
+      "Src": ".mindspec/docs/specs",
+      "Dst": ".mindspec/specs"
+    },
+    {
+      "Src": ".mindspec/docs/adr",
+      "Dst": ".mindspec/adr"
+    },
+    {
+      "Src": ".mindspec/docs/domains",
+      "Dst": ".mindspec/domains"
+    },
+    {
+      "Src": ".mindspec/docs/core",
+      "Dst": ".mindspec/core"
+    },
+    {
+      "Src": ".mindspec/docs/context-map.md",
+      "Dst": ".mindspec/context-map.md"
+    },
+    {
+      "Src": ".mindspec/docs/user",
+      "Dst": "project-docs/user"
+    },
+    {
+      "Src": ".mindspec/docs/installation",
+      "Dst": "project-docs/installation"
+    },
+    {
+      "Src": ".mindspec/docs/research",
+      "Dst": "project-docs/research"
+    },
+    {
+      "Src": "review/099-final-panel",
+      "Dst": ".mindspec/specs/099-panel-gate-in-complete/reviews/099-final-panel"
+    },
+    {
+      "Src": "review/100-final-panel",
+      "Dst": ".mindspec/specs/100-ownership-gate-resolution/reviews/100-final-panel"
+    },
+    {
+      "Src": "review/101-final-panel",
+      "Dst": ".mindspec/specs/101-lifecycle-cli-ergonomics/reviews/101-final-panel"
+    },
+    {
+      "Src": "review/102-final-panel",
+      "Dst": ".mindspec/specs/102-zfc-cleanup/reviews/102-final-panel"
+    }
+  ],
+  "skipped_reviews": [
+    "review/prep",
+    "review/scenario1-fix-design.md"
+  ]
+}

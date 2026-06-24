@@ -245,7 +245,12 @@ func TestADR0034FinalizedStatus(t *testing.T) {
 	// Walk up from this test file's directory to the repo root.
 	// Using a relative path keeps the test independent of where the
 	// repo is checked out.
+	// Spec 106: the flat layout serves ADRs from .mindspec/adr/; the
+	// canonical .mindspec/docs/adr/ candidates are kept for historical
+	// checkouts.
 	candidates := []string{
+		filepath.Join("..", "..", ".mindspec", "adr", "ADR-0034-ceremony-collapse.md"),
+		filepath.Join("..", "..", "..", ".mindspec", "adr", "ADR-0034-ceremony-collapse.md"),
 		filepath.Join("..", "..", ".mindspec", "docs", "adr", "ADR-0034-ceremony-collapse.md"),
 		filepath.Join("..", "..", "..", ".mindspec", "docs", "adr", "ADR-0034-ceremony-collapse.md"),
 	}

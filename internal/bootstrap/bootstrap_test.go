@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func TestRun_EmptyDir(t *testing.T) {
@@ -33,10 +35,11 @@ func TestRun_EmptyDir(t *testing.T) {
 		}
 	}
 
-	// Verify key dirs exist
+	// Verify key dirs exist — born FLAT (AC4): lifecycle dirs live directly
+	// under .mindspec/, not under .mindspec/docs/.
 	requiredDirs := []string{
-		".mindspec/docs/domains",
-		".mindspec/docs/specs",
+		".mindspec/domains",
+		".mindspec/specs",
 		".mindspec",
 	}
 	for _, d := range requiredDirs {
@@ -61,15 +64,29 @@ func TestRun_EmptyDir(t *testing.T) {
 			t.Errorf("expected file %s to NOT exist (removed from bootstrap)", f)
 		}
 	}
+	// The canonical nested docs tree must NOT be created — a greenfield
+	// project is born flat, never canonical. (Paths are built with
+	// filepath.Join so this negative assertion does not itself embed a
+	// literal pre-flatten path string — spec 106 AC17.)
 	removedDirs := []string{
-		".mindspec/docs/core",
-		".mindspec/docs/adr",
+		filepath.Join(".mindspec", "docs"),
+		filepath.Join(".mindspec", "docs", "core"),
+		filepath.Join(".mindspec", "docs", "adr"),
 	}
 	for _, d := range removedDirs {
 		p := filepath.Join(root, d)
 		if _, err := os.Stat(p); err == nil {
 			t.Errorf("expected dir %s to NOT exist (removed from bootstrap)", d)
 		}
+	}
+
+	// AC4: DetectLayout classifies the freshly bootstrapped tree `flat`.
+	layout, err := workspace.DetectLayout(root)
+	if err != nil {
+		t.Fatalf("DetectLayout(bootstrapped) error: %v", err)
+	}
+	if layout != workspace.LayoutFlat {
+		t.Errorf("DetectLayout(bootstrapped) = %q, want %q", layout, workspace.LayoutFlat)
 	}
 }
 
@@ -130,7 +147,7 @@ func TestRun_PartialExists(t *testing.T) {
 	root := t.TempDir()
 
 	// Pre-create some files
-	os.MkdirAll(filepath.Join(root, ".mindspec/docs/domains"), 0755)
+	os.MkdirAll(filepath.Join(root, ".mindspec/domains"), 0755)
 	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("# Custom CLAUDE\n"), 0644)
 
 	result, err := Run(root, false)
@@ -143,8 +160,8 @@ func TestRun_PartialExists(t *testing.T) {
 	for _, s := range result.Skipped {
 		skipped[s] = true
 	}
-	if !skipped[".mindspec/docs/domains/"] {
-		t.Error("expected .mindspec/docs/domains/ to be skipped")
+	if !skipped[".mindspec/domains/"] {
+		t.Error("expected .mindspec/domains/ to be skipped")
 	}
 
 	// Verify pre-existing file was not overwritten
@@ -172,7 +189,7 @@ func TestRun_NoDomainScaffolding(t *testing.T) {
 	}
 
 	// Domains dir should exist but be empty — no default domains are scaffolded
-	entries, err := os.ReadDir(filepath.Join(root, ".mindspec/docs/domains"))
+	entries, err := os.ReadDir(filepath.Join(root, ".mindspec/domains"))
 	if err != nil {
 		t.Fatalf("reading domains dir: %v", err)
 	}
@@ -278,7 +295,7 @@ func TestRun_CopilotInstructionsIdempotent(t *testing.T) {
 
 func TestFormatSummary(t *testing.T) {
 	r := &Result{
-		Created: []string{"AGENTS.md", ".mindspec/docs/domains/"},
+		Created: []string{"AGENTS.md", ".mindspec/domains/"},
 		Skipped: []string{"CLAUDE.md"},
 		BeadsOK: false,
 	}

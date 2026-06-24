@@ -126,8 +126,8 @@ func TestBuildDesignField_CitesADRsByID(t *testing.T) {
 		}
 	}
 	// Where to find the full text.
-	if !strings.Contains(design, ".mindspec/docs/adr/") {
-		t.Errorf("design field should point at .mindspec/docs/adr/ for full text; got:\n%s", design)
+	if !strings.Contains(design, ".mindspec/adr/") {
+		t.Errorf("design field should point at .mindspec/adr/ for full text; got:\n%s", design)
 	}
 	// NO inlined Decision text.
 	if strings.Contains(design, decisionMarker) {

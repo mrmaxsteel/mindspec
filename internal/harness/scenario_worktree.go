@@ -40,14 +40,14 @@ func ScenarioStaleWorktree() Scenario {
 			beadID := sandbox.CreateBead("["+specID+"] Implement widget", "task", epicID)
 			sandbox.ClaimBead(beadID)
 
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
 title: Widget Feature
 status: Approved
 ---
 # Widget Feature
 Add a widget function.
 `)
-			sandbox.WriteFile(".mindspec/docs/specs/"+specID+"/plan.md", `---
+			sandbox.WriteFile(".mindspec/specs/"+specID+"/plan.md", `---
 status: Approved
 spec_id: `+specID+`
 ---
@@ -126,14 +126,14 @@ func ScenarioCompleteFromSpecWorktree() Scenario {
 			wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
 			// Write spec files in the spec worktree (where they live during implementation)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", `---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", `---
 title: Greeting Feature
 status: Approved
 ---
 # Greeting Feature
 Add a greeting function.
 `)
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 status: Approved
 spec_id: %s
 ---
@@ -199,7 +199,7 @@ func ScenarioApproveSpecFromWorktree() Scenario {
 			wt := setupWorktrees(sandbox, specID, "", "spec")
 
 			// Write spec files ONLY in the spec worktree
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", fmt.Sprintf(`---
 spec_id: %s
 status: Draft
 version: 1
@@ -292,7 +292,7 @@ func ScenarioApprovePlanFromWorktree() Scenario {
 			wt := setupWorktrees(sandbox, specID, "", "plan")
 
 			// Write spec + plan ONLY in the spec worktree
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/spec.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/spec.md", fmt.Sprintf(`---
 spec_id: %s
 status: Approved
 version: 1
@@ -319,7 +319,7 @@ Users can generate personalized greetings.
 None.
 `, specID, specID))
 
-			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/docs/specs/"+specID+"/plan.md", fmt.Sprintf(`---
+			sandbox.WriteFile(wt.SpecWtDir+"/.mindspec/specs/"+specID+"/plan.md", fmt.Sprintf(`---
 spec_id: %s
 status: Draft
 version: 1

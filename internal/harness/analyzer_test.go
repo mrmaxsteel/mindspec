@@ -107,7 +107,7 @@ func TestAnalyzer_Classify_WrongAction(t *testing.T) {
 func TestAnalyzer_WrongAction_CodeInSpecMode(t *testing.T) {
 	events := []ActionEvent{
 		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
-		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/docs/spec.md"}},
+		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/spec.md"}},
 	}
 
 	a := NewAnalyzer()
@@ -181,7 +181,7 @@ func TestAnalyzer_WrongAction_NoFalsePositives(t *testing.T) {
 	events := []ActionEvent{
 		{Phase: "implement", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": "internal/foo.go"}},
 		{Phase: "implement", ActionType: "command", Command: "go", Args: map[string]string{"0": "test"}},
-		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/docs/spec.md"}},
+		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/spec.md"}},
 	}
 
 	a := NewAnalyzer()
@@ -243,7 +243,7 @@ func TestSkipNext_NonImplementSessionNoViolation(t *testing.T) {
 		{Turn: 1, Phase: "spec", ActionType: "command", Command: "git",
 			ArgsList: []string{"commit", "-m", "chore: initialize spec"}},
 		{Turn: 2, Phase: "spec", ActionType: "tool_invoke", ToolName: "Write",
-			Args: map[string]string{"file_path": ".mindspec/docs/specs/010-test/spec.md"}},
+			Args: map[string]string{"file_path": ".mindspec/specs/010-test/spec.md"}},
 		{Turn: 3, Phase: "plan", ActionType: "command", Command: "mindspec",
 			ArgsList: []string{"approve", "spec", "010-test"}},
 		{Turn: 3, Phase: "plan", ActionType: "command", Command: "git",
@@ -279,7 +279,7 @@ func TestSkipNext_NonImplementWithNextStillChecks(t *testing.T) {
 func TestSkipNext_DocEditsIgnored(t *testing.T) {
 	// Editing docs/markdown before next should not trigger.
 	events := []ActionEvent{
-		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/docs/spec.md"}},
+		{Phase: "spec", ActionType: "tool_invoke", ToolName: "Write", Args: map[string]string{"file_path": ".mindspec/spec.md"}},
 		{ActionType: "command", Command: "mindspec", ArgsList: []string{"next"}},
 	}
 

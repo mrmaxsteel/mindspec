@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/layout"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +29,9 @@ var migrateCmd = &cobra.Command{
 	Short: "Emit a prompt instructing the coding agent to reorganize docs",
 	Long: `Scans the repository for markdown files and emits a structured prompt
 that instructs the coding agent to reorganize them into the canonical
-MindSpec documentation structure under .mindspec/docs/.
+MindSpec documentation structure: lifecycle/authored artifacts under the flat
+.mindspec/{specs,adr,domains,core} children, and user/dogfood docs under
+top-level project-docs/.
 
 Use --json to output just the file inventory for programmatic use.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,8 +70,96 @@ Use --json to output just the file inventory for programmatic use.`,
 	},
 }
 
+// migrateLayoutCmd drives the deterministic, transactional, idempotent flatten
+// of .mindspec/docs/{specs,adr,domains,core} + context-map.md into the flat
+// .mindspec/ layout (spec 106, Reqs 4/5/11/14). It runs the precondition
+// branch/PR discovery scan first (blocks on an unmerged pre-flatten branch/PR
+// and on a dirty tree; tolerates locked worktrees / external forks; offline it
+// degrades + WARNs), then drives the internal/layout mover. `--abort`
+// hard-resets a pre-publish run to its pre-run ref.
+var migrateLayoutCmd = &cobra.Command{
+	Use:   "layout",
+	Short: "Flatten .mindspec/docs/{specs,adr,domains,core} into .mindspec/ (irreversible)",
+	Long: `Flattens the canonical .mindspec/docs/{specs,adr,domains,core} +
+context-map.md tree into the flat .mindspec/ layout via a deterministic,
+two-commit-per-move (pure git mv, then link-rewrite), crash-resumable mover.
+
+Precondition: a clean working tree and no unmerged pre-flatten branch/PR.
+Locked agent worktrees and external forks are tolerated. Offline, the scan
+degrades to local + remote-tracking refs and warns that hosted PRs could not
+be consulted.
+
+--abort hard-resets a pre-publish run to its pre-run ref (refused after
+publish; the lifecycle is forward-only, ADR-0023).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		abort, _ := cmd.Flags().GetBool("abort")
+		runID, _ := cmd.Flags().GetString("run-id")
+		target, _ := cmd.Flags().GetString("target")
+
+		root, err := gitutil.RevParseShowToplevel()
+		if err != nil {
+			cwd, wdErr := os.Getwd()
+			if wdErr != nil {
+				return fmt.Errorf("resolving repo root: %w", err)
+			}
+			root = cwd
+		}
+
+		exec := executor.NewMindspecExecutor(root)
+
+		if abort {
+			if runID == "" {
+				return fmt.Errorf("--abort requires --run-id <id> of the run to roll back")
+			}
+			mover := layout.NewMover(exec, root, runID)
+			if err := mover.Abort(); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "migrate layout: aborted run %s (hard-reset to pre-run ref)\n", runID)
+			return nil
+		}
+
+		// Precondition: clean tree + branch/PR discovery scan.
+		locked, _ := gitutil.LockedWorktreeBranches(root)
+		lockedSet := make(map[string]bool, len(locked))
+		for _, b := range locked {
+			lockedSet[b] = true
+		}
+		res, err := layout.CheckPrecondition(exec, root, layout.PreconditionOptions{
+			Target:           target,
+			LockedWorktrees:  lockedSet,
+			Offline:          !gitutil.HasRemote(),
+			RequireCleanTree: true,
+		})
+		if err != nil {
+			return err
+		}
+		for _, w := range res.Warnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", w)
+		}
+		if len(res.Blocking) > 0 {
+			return layout.BlockingError(res)
+		}
+
+		if runID == "" {
+			runID = time.Now().UTC().Format("20060102T150405Z")
+		}
+		mover := layout.NewMover(exec, root, runID)
+		if err := mover.Run(); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "migrate layout: flatten complete (run %s)\n", runID)
+		return nil
+	},
+}
+
 func init() {
 	migrateCmd.Flags().Bool("json", false, "Output file inventory as JSON instead of a prompt")
+
+	migrateLayoutCmd.Flags().Bool("abort", false, "Hard-reset a pre-publish run to its pre-run ref")
+	migrateLayoutCmd.Flags().String("run-id", "", "Run identifier (default: UTC timestamp; required with --abort)")
+	migrateLayoutCmd.Flags().String("target", "main", "Merge target the discovery scan evaluates refs against")
+	migrateCmd.AddCommand(migrateLayoutCmd)
 }
 
 // scanSourceMarkdown walks the repo for .md files outside the canonical docs area.
@@ -229,7 +322,7 @@ instructs you to derive them by inspecting the tree.
 
 ## Phase 5 — Context Map Population
 
-After domains exist, populate ` + "`.mindspec/docs/context-map.md`" + `:
+After domains exist, populate ` + "`.mindspec/context-map.md`" + `:
 
 1. Identify upstream/downstream relationships between domains
 2. Document peer relationships and shared-kernel patterns
@@ -264,27 +357,30 @@ Finally, classify and move any stray documentation files into canonical location
 ### Canonical Structure
 
 ` + "```" + `
-.mindspec/docs/
-├── adr/              # Architecture Decision Records (ADR-NNNN.md)
-├── core/             # Project-wide architecture, conventions, modes, usage
-├── domains/          # Bounded domain docs (overview.md, architecture.md, interfaces.md, runbook.md)
-├── specs/            # Feature specs (NNN-slug/spec.md, plan.md)
-├── user/             # READMEs, guides, onboarding, operational notes
-├── agent/            # Agent instruction files (CLAUDE.md, .cursorrules, etc.)
-└── context-map.md    # Bounded-context map and cross-context contracts
+.mindspec/                # Lifecycle/authored artifacts (FLAT — no docs/ nesting)
+├── adr/                  # Architecture Decision Records (ADR-NNNN.md)
+├── core/                 # Project-wide architecture, conventions, modes, usage
+├── domains/              # Bounded domain docs (overview.md, architecture.md, interfaces.md, runbook.md)
+├── specs/                # Feature specs (NNN-slug/spec.md, plan.md)
+└── context-map.md        # Bounded-context map and cross-context contracts
+
+project-docs/             # User/dogfood docs — TOP-LEVEL, NOT under .mindspec/
+├── user/                 # READMEs, guides, onboarding, operational notes
+├── installation/         # Install/setup notes
+└── research/             # Background research
 ` + "```" + `
 
 ### Category Rubric
 
 | Category | Description | Target |
 |----------|-------------|--------|
-| adr | Architecture Decision Records (ADR-NNNN, decision/status content) | .mindspec/docs/adr/ |
-| spec | Feature specs, plans, acceptance criteria, context packs | .mindspec/docs/specs/ |
-| domain | Docs scoped to a bounded domain (overview, architecture, interfaces, runbook) | .mindspec/docs/domains/<domain-name>/ |
-| core | Project-wide architecture, process, conventions (not domain-specific) | .mindspec/docs/core/ |
-| context-map | Bounded-context map and cross-context relationships | .mindspec/docs/context-map.md |
-| user-docs | READMEs, guides, operational notes, onboarding/help content | .mindspec/docs/user/ |
-| agent | Agent/tool instruction files (CLAUDE.md, agents.md, .cursorrules, copilot configs) | .mindspec/docs/agent/ |
+| adr | Architecture Decision Records (ADR-NNNN, decision/status content) | .mindspec/adr/ |
+| spec | Feature specs, plans, acceptance criteria, context packs | .mindspec/specs/ |
+| domain | Docs scoped to a bounded domain (overview, architecture, interfaces, runbook) | .mindspec/domains/<domain-name>/ |
+| core | Project-wide architecture, process, conventions (not domain-specific) | .mindspec/core/ |
+| context-map | Bounded-context map and cross-context relationships | .mindspec/context-map.md |
+| user-docs | READMEs, guides, operational notes, onboarding/help content | project-docs/ |
+| agent | Agent/tool instruction files (CLAUDE.md, agents.md, .cursorrules, copilot configs) | (repo root — typically category: skip) |
 | skip | Files that should stay where they are (e.g., root README.md, CHANGELOG.md) | (no move) |
 
 ### Decision Rules
@@ -292,14 +388,14 @@ Finally, classify and move any stray documentation files into canonical location
 1. Content outweighs path when they conflict
 2. If a file contains mixed content that should be split, split it into separate files
 3. Root-level README.md and CHANGELOG.md typically stay in place (category: skip)
-4. Files already under .mindspec/docs/ are already canonical — skip them
+4. Files already under .mindspec/ (specs/, adr/, domains/, core/) or project-docs/ are already canonical — skip them
 5. Preserve relative links between documents (update paths after moving)
 
 `)
 
 	b.WriteString("## Source Files to Classify\n\n")
 	if len(sourceFiles) == 0 {
-		b.WriteString("No source markdown files found outside .mindspec/docs/.\n\n")
+		b.WriteString("No source markdown files found outside the canonical .mindspec/ + project-docs/ locations.\n\n")
 	} else {
 		b.WriteString("These markdown files were found outside the canonical docs location:\n\n")
 		for _, f := range sourceFiles {
@@ -310,7 +406,7 @@ Finally, classify and move any stray documentation files into canonical location
 
 	b.WriteString("## Existing Canonical Docs\n\n")
 	if len(canonicalFiles) == 0 {
-		b.WriteString("No existing canonical docs found. The .mindspec/docs/ directory will be created.\n\n")
+		b.WriteString("No existing canonical docs found. The flat .mindspec/ structure will be created.\n\n")
 	} else {
 		b.WriteString("These files already exist in the canonical location:\n\n")
 		for _, f := range canonicalFiles {

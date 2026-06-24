@@ -32,13 +32,13 @@ Turn the approved spec into bounded, executable work chunks (implementation bead
 
 1. Read accepted ADRs for impacted domains
 2. Read domain docs (`overview.md`, `architecture.md`, `interfaces.md`)
-3. Check Context Map (`.mindspec/docs/context-map.md`) for neighboring context contracts
+3. Check Context Map (`.mindspec/context-map.md`) for neighboring context contracts
 4. Verify existing constraints and invariants
 5. **ADR Fitness Evaluation**: After reviewing ADRs, actively evaluate whether each relevant ADR still represents the best architectural choice for the work being planned. Do not blindly conform — if a better design would diverge from an accepted ADR, propose the divergence with justification. Prefer adherence when ADRs are sound; propose superseding when they are not. Document your evaluation in the `## ADR Fitness` section of the plan.
 
 ## Permitted Actions
 
-- Create/edit `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`
+- Create/edit `.mindspec/specs/{{.ActiveSpec}}/plan.md`
 - Define implementation beads as work chunks in the plan (the spec-lifecycle formula creates the molecule at spec-init; implementation beads are tracked via the molecule's step mapping)
 - Propose new ADRs if divergence detected (`mindspec adr create --supersedes <old-id>`)
 - Update documentation to clarify scope
@@ -129,7 +129,7 @@ Required plan sections:
 
 ## Decomposition Heuristics
 
-Apply these research-backed questions while decomposing the spec into beads (see `.mindspec/docs/research/scaling-agent-systems.md` for full context).
+Apply these research-backed questions while decomposing the spec into beads (see `project-docs/research/scaling-agent-systems.md` for full context).
 
 1. **Independence test**: Can this bead be completed without reading the output of another bead? If yes, don't add a dependency edge. Shared source files are not dependencies — only state produced by one bead and consumed by another is. *Why: sequential dependency chains degrade multi-agent performance by -39% to -70% due to coordination overhead.*
 
@@ -154,5 +154,5 @@ Apply these research-backed questions while decomposing the spec into beads (see
 Plan is approved. Run `mindspec next` to claim the next bead.
 {{- else}}
 
-Complete the plan at `.mindspec/docs/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. After approval, STOP — run `/clear`, then `mindspec next` to claim your first bead.
+Complete the plan at `.mindspec/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. After approval, STOP — run `/clear`, then `mindspec next` to claim your first bead.
 {{- end}}

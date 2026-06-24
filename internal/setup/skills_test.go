@@ -297,6 +297,52 @@ func TestInstallSkills_RefreshesPriorSpecCreateSnapshot(t *testing.T) {
 	}
 }
 
+// TestInstallSkills_RefreshesPre106Snapshot covers the spec 106 (Req 12 /
+// AC17) install-refresh path: each path-bearing skill was rewritten to the
+// flat .mindspec/{specs,adr,domains} + co-located reviews/ layout, and a
+// byte-exact capture of its CANONICAL pre-flatten bytes was added at
+// historical_skills/<skill>.pre106.md so an existing pre-106 install refreshes
+// in place to the flat content (instead of being treated as user-modified and
+// stranded on dead .mindspec/docs/ paths). The multi-snapshot-per-skill keying
+// (segment before the first dot) is what makes the .pre106 capture coexist with
+// the older frozen pre-093 snapshot.
+func TestInstallSkills_RefreshesPre106Snapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// The pre-flatten canonical bytes live in
+	// historical_skills/ms-panel-run.pre106.md and still carry the old
+	// repo-root `review/` panel path.
+	var pre106 string
+	for _, v := range previouslyShippedSkills()["ms-panel-run"] {
+		if strings.Contains(v, "<repo>/review/") {
+			pre106 = v
+			break
+		}
+	}
+	if pre106 == "" {
+		t.Fatal("expected a historical ms-panel-run snapshot carrying the pre-flatten repo-root `review/` panel path")
+	}
+	writeExisting(t, skillsDir, "ms-panel-run", pre106)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := claudeSkillFiles()["ms-panel-run"]
+	got := readSkill(t, skillsDir, "ms-panel-run")
+	if got != canonical {
+		t.Errorf("pre-106 ms-panel-run snapshot not refreshed to flat canonical content")
+	}
+	if strings.Contains(got, "<repo>/review/") {
+		t.Errorf("refreshed ms-panel-run must NOT retain the pre-flatten repo-root `review/` panel path")
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-panel-run", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-panel-run; got %v", r.Refreshed)
+	}
+}
+
 // TestInstallSkills_LeavesUserModified covers HC-6: a user-modified skill file
 // (matching neither the canonical nor any shipped snapshot) is left untouched
 // with a notice.

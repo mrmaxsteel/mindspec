@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -76,7 +77,10 @@ var excludedFirstSegments = map[string]struct{}{
 // Exported so internal/doctor can reuse the loader (spec 091) —
 // doctor must NOT reimplement manifest loading.
 func LoadOwnership(root, domain string) (*Ownership, error) {
-	manifestPath := filepath.Join(root, ".mindspec", "docs", "domains", domain, "OWNERSHIP.yaml")
+	// Tier-aware manifest location (spec 106 Req 3/6): flat
+	// .mindspec/domains/<d> → canonical .mindspec/docs/domains/<d> → legacy
+	// docs/domains/<d>, via the Bead-1 enumeration-root accessor.
+	manifestPath := filepath.Join(workspace.DomainsDir(root), domain, "OWNERSHIP.yaml")
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -116,12 +120,22 @@ func LoadOwnership(root, domain string) (*Ownership, error) {
 	}, nil
 }
 
-// domainManifestRelPath returns the repo-relative (forward-slash) path
-// to a domain's OWNERSHIP.yaml, the form git refs address. It is kept
-// separate from LoadOwnership's filepath.Join so the on-disk and
-// ref-anchored loaders cannot drift on the manifest location.
-func domainManifestRelPath(domain string) string {
-	return ".mindspec/docs/domains/" + domain + "/OWNERSHIP.yaml"
+// domainManifestRelPaths returns the repo-relative (forward-slash) candidate
+// paths to a domain's OWNERSHIP.yaml across the three layouts, in
+// read-precedence order: flat (.mindspec/domains/<d>/), canonical
+// (.mindspec/docs/domains/<d>/), legacy (docs/domains/<d>/). git refs address
+// the repo-relative form, so the ref-anchored loader must try each — a flat
+// ref emits the flat path while historical refs and forks emit the
+// canonical/legacy paths forever (spec 106 Req 6, PERMANENT multi-prefix
+// posture, decoupled from the filesystem read-tier lifecycle). Kept separate
+// from LoadOwnership's filepath.Join so the on-disk and ref-anchored loaders
+// stay aligned on the manifest location across layouts.
+func domainManifestRelPaths(domain string) []string {
+	return []string{
+		".mindspec/domains/" + domain + "/OWNERSHIP.yaml",      // flat
+		".mindspec/docs/domains/" + domain + "/OWNERSHIP.yaml", // canonical
+		"docs/domains/" + domain + "/OWNERSHIP.yaml",           // legacy
+	}
 }
 
 // LoadOwnershipAtRef is the ref-anchored sibling of LoadOwnership (spec
@@ -148,13 +162,26 @@ func domainManifestRelPath(domain string) string {
 // byte-identically on the ref bytes. ManifestPath is ref-qualified
 // (`<ref>:<rel-path>`) since it is no longer an on-disk path.
 func LoadOwnershipAtRef(exec executor.Executor, ref, domain string) (*Ownership, error) {
-	relPath := domainManifestRelPath(domain)
-
-	data, present, err := exec.FileAtRefOrAbsent(ref, relPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading OWNERSHIP.yaml for domain %q at ref %q: %w", domain, ref, err)
+	// Try the three layout candidates in read-precedence order, first-present
+	// wins (spec 106 Req 6). On a canonical/legacy ref the flat candidate is
+	// simply absent (present=false, no error) and the canonical/legacy one is
+	// used — byte-identical to the pre-spec single-path read. An OPERATIONAL
+	// failure (bad ref) errors on the FIRST probe and is propagated, never
+	// collapsed to claims-nothing (ADR-0036 amend).
+	var data []byte
+	var foundRel string
+	for _, relPath := range domainManifestRelPaths(domain) {
+		d, present, err := exec.FileAtRefOrAbsent(ref, relPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading OWNERSHIP.yaml for domain %q at ref %q: %w", domain, ref, err)
+		}
+		if present {
+			data = d
+			foundRel = relPath
+			break
+		}
 	}
-	if !present {
+	if foundRel == "" {
 		return &Ownership{
 			Paths:        []string{},
 			Exclude:      nil,
@@ -167,7 +194,7 @@ func LoadOwnershipAtRef(exec executor.Executor, ref, domain string) (*Ownership,
 		Exclude []string `yaml:"exclude"`
 	}
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return nil, fmt.Errorf("parsing %s:%s: %w", ref, relPath, err)
+		return nil, fmt.Errorf("parsing %s:%s: %w", ref, foundRel, err)
 	}
 
 	for _, entry := range parsed.Paths {
@@ -184,23 +211,45 @@ func LoadOwnershipAtRef(exec executor.Executor, ref, domain string) (*Ownership,
 	return &Ownership{
 		Paths:        parsed.Paths,
 		Exclude:      parsed.Exclude,
-		ManifestPath: ref + ":" + relPath,
+		ManifestPath: ref + ":" + foundRel,
 	}, nil
 }
 
+// domainsTreeRoots are the repo-relative domains enumeration roots across the
+// three layouts (flat, canonical, legacy). The ref-anchored enumerator unions
+// over all three so a branch in ANY layout is enumerable (spec 106 Req 6).
+var domainsTreeRoots = []string{
+	".mindspec/domains",      // flat
+	".mindspec/docs/domains", // canonical
+	"docs/domains",           // legacy
+}
+
 // listDomainDirsAtRef is the ref-anchored sibling of listDomainDirs
-// (spec 095): it enumerates the domain directories under
-// .mindspec/docs/domains/ in ref's tree via the executor, so a
-// branch-only domain dir is discovered from the diffed ref. An absent
-// domains/ tree at a valid ref yields an empty slice (no error); an
-// operational git failure (invalid ref) is a hard error.
+// (spec 095): it enumerates the domain directories under the domains
+// enumeration root in ref's tree via the executor, so a branch-only domain dir
+// is discovered from the diffed ref. Spec 106 Req 6: it unions the three
+// layout roots (flat/canonical/legacy), deduping by name, so a flat ref AND a
+// canonical/legacy ref both enumerate correctly. An absent domains/ tree at a
+// valid ref yields an empty slice (no error — TreeDirsAtRef returns empty for
+// an absent dir at a valid ref); an operational git failure (invalid ref) is a
+// hard error.
 func listDomainDirsAtRef(exec executor.Executor, ref string) ([]string, error) {
-	dirs, err := exec.TreeDirsAtRef(ref, ".mindspec/docs/domains")
-	if err != nil {
-		return nil, fmt.Errorf("listing domain dirs at ref %q: %w", ref, err)
+	seen := map[string]struct{}{}
+	for _, root := range domainsTreeRoots {
+		dirs, err := exec.TreeDirsAtRef(ref, root)
+		if err != nil {
+			return nil, fmt.Errorf("listing domain dirs at ref %q: %w", ref, err)
+		}
+		for _, d := range dirs {
+			seen[d] = struct{}{}
+		}
 	}
-	sort.Strings(dirs)
-	return dirs, nil
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // resolveDomains enumerates domain directory names for the gate. When

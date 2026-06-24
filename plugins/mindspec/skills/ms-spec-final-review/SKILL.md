@@ -37,7 +37,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    ```
    Record the totals — files touched, +X/-Y lines, file count by directory. The bead-level panels saw this incrementally; the final reviewers see it as one thing.
 
-3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<repo>/review/<spec-slug>-final/`, writes `panel.json` (`bead_id` null, `expected_reviewers` 6, `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
+3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<spec-dir>/reviews/<spec-slug>-final/` (where `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/` — reviews are co-located under the spec per the spec 106 flat layout), writes `panel.json` (`bead_id` null, `expected_reviewers` 6, `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
 
    The BRIEF (composed by step 0, with the final-review specifics) carries: PR link, spec.md scope summary, cumulative diff stat, list of merged beads (with round-N commit SHAs), known fix-author deviations from each round-2 panel that the final reviewer should re-assess in cumulative context.
 
@@ -52,7 +52,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    | F5 | AC release-gate readiness | For each AC the spec.md claims, identify the expected gate-evidence artifact path and check `[ -f <path> ]` on the spec branch. If the artifact does NOT exist at the path: emit a `concrete_changes_required` item `"materialize <artifact-name> at <path>"` with `"hard_block": true`. PR-body naming the path is necessary but not sufficient (see `/ms-panel-tally` § Artifact gates). |
    | F6 | Operator readiness | Runbooks updated, revert MTTR claim verifiable, on-call escalation paths defined, follow-up beads filed with concrete IDs. |
 
-   Each reviewer writes a verdict JSON to `<repo>/review/<spec-slug>-final/<slot>-round-1.json`.
+   Each reviewer writes a verdict JSON to `<spec-dir>/reviews/<spec-slug>-final/<slot>-round-1.json`.
 
 5. **Tally through `/ms-panel-tally`** — the single decision authority. The artifact-gate HARD-block rule, the N−1 threshold, and the halt-recovery procedure all live there; the F5 "evidence path NAMED but artifact MISSING → HARD block" finding is a `"hard_block": true` verdict the tally halts on regardless of vote count. On APPROVE → proceed to `/ms-impl-approve`.
 

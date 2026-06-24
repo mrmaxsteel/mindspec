@@ -44,7 +44,7 @@ All implementation beads are complete. Present the work for human review before 
 
 ## Review Checklist
 
-1. **Acceptance criteria**: Read the spec at `.mindspec/docs/specs/{{.ActiveSpec}}/spec.md` and verify each acceptance criterion is met
+1. **Acceptance criteria**: Read the spec at `.mindspec/specs/{{.ActiveSpec}}/spec.md` and verify each acceptance criterion is met
 2. **Tests**: Run `make test` and confirm all tests pass
 3. **Build**: Run `make build` and confirm clean build
 4. **Doc-sync**: Verify documentation matches the implementation

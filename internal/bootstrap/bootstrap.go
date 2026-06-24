@@ -217,10 +217,12 @@ type manifestItem struct {
 
 func manifest() []manifestItem {
 	items := []manifestItem{
-		// Required directories
+		// Required directories — NEW (greenfield) projects are born FLAT
+		// (Req 2 / AC4): lifecycle artifacts live directly under .mindspec/,
+		// so DetectLayout classifies a freshly bootstrapped tree `flat`.
 		{path: ".mindspec", isDir: true},
-		{path: ".mindspec/docs/domains", isDir: true},
-		{path: ".mindspec/docs/specs", isDir: true},
+		{path: ".mindspec/domains", isDir: true},
+		{path: ".mindspec/specs", isDir: true},
 
 		// Root files
 		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
@@ -299,7 +301,7 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 
 ## Conventions
 
-- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
+- Every functional change must reference a spec in ` + "`.mindspec/specs/`" + `
 - In Spec and Plan modes, only documentation may be created or modified — no code changes
 - Working tree must be clean before switching modes
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
@@ -376,7 +378,7 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 
 ### Conventions
 
-- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
+- Every functional change must reference a spec in ` + "`.mindspec/specs/`" + `
 - In Spec and Plan modes, only documentation may be created or modified — no code changes
 - Working tree must be clean before switching modes
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
