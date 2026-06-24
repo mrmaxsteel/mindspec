@@ -3,11 +3,11 @@ package ownership
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // populatePromptTemplate is the spec 091 Requirement 10 agent prompt,
@@ -59,16 +59,20 @@ func BuildPopulatePrompt(domain string) string {
 }
 
 // DomainsNeedingPopulate returns the lexicographically-sorted domain
-// directory names under .mindspec/docs/domains/ whose OWNERSHIP.yaml
+// directory names under the resolved domains root whose OWNERSHIP.yaml
 // is missing or an empty stub (Ownership.Source() ∈ {"missing",
-// "empty-stub"}). This drives the no-arg `mindspec ownership populate`
-// enumeration (spec 091 Req 10): one prompt per unpopulated manifest
-// so the agent can fill them all in one pass. Populated manifests are
-// skipped — re-emission for those requires an explicit domain arg.
-// Manifest state comes from validate.LoadOwnership (Bead 1's loader);
-// this package must NOT reimplement manifest parsing.
+// "empty-stub"}). The enumeration root comes from
+// workspace.DomainsDir (spec 106 Req 3 flat-first precedence: flat
+// .mindspec/domains → canonical .mindspec/docs/domains → legacy
+// docs/domains), so the no-arg `mindspec ownership populate` sees
+// every domain on a flat or born-flat tree, not zero. This drives the
+// no-arg enumeration (spec 091 Req 10): one prompt per unpopulated
+// manifest so the agent can fill them all in one pass. Populated
+// manifests are skipped — re-emission for those requires an explicit
+// domain arg. Manifest state comes from validate.LoadOwnership (Bead
+// 1's loader); this package must NOT reimplement manifest parsing.
 func DomainsNeedingPopulate(root string) ([]string, error) {
-	dir := filepath.Join(root, ".mindspec", "docs", "domains")
+	dir := workspace.DomainsDir(root)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

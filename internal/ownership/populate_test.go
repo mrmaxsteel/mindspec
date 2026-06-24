@@ -148,6 +148,47 @@ func TestDomainsNeedingPopulate_NoDomainsDir(t *testing.T) {
 	}
 }
 
+// writeFlatDomain creates .mindspec/domains/<name>/ (the spec 106 flat
+// tier) with optional OWNERSHIP.yaml content (manifest omitted when
+// content is "").
+func writeFlatDomain(t *testing.T, root, name, manifest string) {
+	t.Helper()
+	dir := filepath.Join(root, ".mindspec", "domains", name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if manifest != "" {
+		if err := os.WriteFile(filepath.Join(dir, "OWNERSHIP.yaml"), []byte(manifest), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestDomainsNeedingPopulate_FlatTree is the spec 106 Req 3 regression:
+// on a FLAT tree (domains under .mindspec/domains, no .mindspec/docs/),
+// DomainsNeedingPopulate must enumerate the unpopulated domains rather
+// than read a non-existent canonical .mindspec/docs/domains and report
+// zero (the flat-blindness bug). The canonical tier is exercised by
+// TestDomainsNeedingPopulate_MissingAndEmptyStubOnly above (which writes
+// to .mindspec/docs/domains), so the two together pin both tiers.
+func TestDomainsNeedingPopulate_FlatTree(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	writeFlatDomain(t, root, "absent", "")                                           // missing manifest
+	writeFlatDomain(t, root, "stub", string(RenderStub("mindspec domain add stub"))) // empty stub
+	writeFlatDomain(t, root, "filled", "paths:\n  - internal/filled/**\n")           // populated
+
+	got, err := DomainsNeedingPopulate(root)
+	if err != nil {
+		t.Fatalf("DomainsNeedingPopulate: %v", err)
+	}
+	want := []string{"absent", "stub"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DomainsNeedingPopulate on flat tree = %v, want %v (flat-blindness regression)", got, want)
+	}
+}
+
 // --- BuildSourcePopulatePrompt (Req 12) ---
 
 func TestBuildSourcePopulatePrompt_RequiredContent(t *testing.T) {

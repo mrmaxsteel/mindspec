@@ -72,7 +72,7 @@ Each cycle iteration:
 ```
 step 0              → pick + claim next bead, create worktree
 /ms-bead-impl       → implementation subagent commits to bead/<id>
-/ms-panel-run       → step 0 writes BRIEF + panel.json at review/<panel>/; 6 reviewers fan out in parallel
+/ms-panel-run       → step 0 writes BRIEF + panel.json at <spec-dir>/reviews/<panel>/; 6 reviewers fan out in parallel
 /ms-panel-tally     → verdicts summarised; if ≥ N−1 APPROVE (5/6) → done
 /ms-bead-fix        → consolidated changes → fix subagent → new commit
 /ms-panel-run       → round 2 re-bumps round + reviewed_head_sha, verifies the fix
@@ -155,17 +155,17 @@ When codex hits its usage limit mid-panel, the orchestrator detects the empty/tr
 
 ```
 <repo>/
-  .mindspec/docs/specs/<spec-id>/
+  .mindspec/specs/<spec-id>/                # flat layout (spec 106 / ADR-0039)
     spec.md
     plan.md
-  review/
-    prep/                                   # pre-staged impl prompts (optional)
-      bead<N>_impl_prompt.md
-    <panel-slug>/                           # one per panel round
-      BRIEF.md
-      claude-1-round-1.json
-      ...
-      codex-6-round-2.json                  # round 2 after fix-up
+    reviews/                                # panel artifacts co-located with the spec they review
+      prep/                                 # pre-staged impl prompts (optional)
+        bead<N>_impl_prompt.md
+      <panel-slug>/                         # one per panel round
+        BRIEF.md
+        claude-1-round-1.json
+        ...
+        codex-6-round-2.json                # round 2 after fix-up
 ```
 
 ## Integration with mindspec core
