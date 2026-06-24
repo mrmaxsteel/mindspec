@@ -37,18 +37,28 @@ type PreconditionResult struct {
 }
 
 // classifyRefs splits the discovered local and remote-tracking refs into
-// block-candidates and TOLERATED refs (Req 11). The target itself and the
-// remote HEAD are excluded. Locked agent worktrees and external forks are
-// tolerated, never counted as blockers:
+// block-candidates and TOLERATED refs (Req 11, bead sc0w). The migration TARGET
+// and the remote default branch — the branches the flatten actually lands onto
+// — plus the remote HEAD are excluded, so refs that do not target the migration
+// branch or the remote default are not arbitrarily counted as blockers. Locked
+// agent worktrees, external forks, and operator-allowlisted refs are tolerated,
+// never counted as blockers:
 //   - a local branch in lockedWorktrees is a locked agent worktree → tolerated;
 //   - a remote-tracking ref under a remote OTHER than origin is an external
-//     fork → tolerated (it cannot be drained, only fingerprint-guarded at merge).
-func classifyRefs(locals, remotes []string, target string, lockedWorktrees map[string]bool) (candidates, tolerated []string) {
+//     fork → tolerated (it cannot be drained, only fingerprint-guarded at merge);
+//   - a ref whose branch name is in allowlist is an operator-declared
+//     known-irrelevant branch → tolerated (the bead-sc0w escape for old/
+//     abandoned branches that would otherwise wall the flatten).
+func classifyRefs(locals, remotes []string, target, remoteDefault string, lockedWorktrees, allowlist map[string]bool) (candidates, tolerated []string) {
 	for _, r := range locals {
-		if r == target {
+		if r == target || (remoteDefault != "" && r == remoteDefault) {
 			continue
 		}
 		if lockedWorktrees[r] {
+			tolerated = append(tolerated, r)
+			continue
+		}
+		if allowlisted(r, allowlist) {
 			tolerated = append(tolerated, r)
 			continue
 		}
@@ -64,12 +74,29 @@ func classifyRefs(locals, remotes []string, target string, lockedWorktrees map[s
 			continue
 		}
 		branch := strings.TrimPrefix(r, "origin/")
-		if branch == target || branch == "HEAD" {
+		if branch == target || branch == "HEAD" || (remoteDefault != "" && branch == remoteDefault) {
+			continue
+		}
+		if allowlisted(r, allowlist) {
+			tolerated = append(tolerated, r)
 			continue
 		}
 		candidates = append(candidates, r)
 	}
 	return candidates, tolerated
+}
+
+// allowlisted reports whether ref is operator-allowlisted: a match on the FULL
+// ref name (covering a slashed local branch such as "fix/old-thing") or on the
+// branch part of an "origin/<branch>" remote-tracking ref.
+func allowlisted(ref string, allowlist map[string]bool) bool {
+	if allowlist[ref] {
+		return true
+	}
+	if b := strings.TrimPrefix(ref, "origin/"); b != ref && allowlist[b] {
+		return true
+	}
+	return false
 }
 
 // evaluateCandidate computes a candidate ref's merged/pre-flatten facts via the
@@ -98,7 +125,10 @@ func evaluateCandidate(git GitOps, root, target, ref string) (RefCandidate, erro
 // PreconditionOptions tunes the discovery scan.
 type PreconditionOptions struct {
 	Target           string          // merge target (default "main")
+	RemoteDefault    string          // remote default branch (e.g. "main"/"master"); excluded from blockers alongside Target (bead sc0w)
 	LockedWorktrees  map[string]bool // local branches checked out in LOCKED worktrees (tolerated)
+	Allowlist        map[string]bool // operator-declared known-irrelevant branch names (tolerated, never blockers — bead sc0w)
+	Force            bool            // drop EVERY discovered blocker (the unrelated-stale-branch escape — bead sc0w); dropped blockers surface as a WARN
 	Offline          bool            // no hosted-PR consultation possible → WARN, degrade to refs
 	RequireCleanTree bool            // refuse to proceed on a dirty idle working tree
 }
@@ -136,7 +166,7 @@ func CheckPrecondition(git GitOps, root string, opts PreconditionOptions) (*Prec
 		opts.Offline = true
 	}
 
-	candidates, tolerated := classifyRefs(locals, remotes, target, opts.LockedWorktrees)
+	candidates, tolerated := classifyRefs(locals, remotes, target, opts.RemoteDefault, opts.LockedWorktrees, opts.Allowlist)
 
 	res := &PreconditionResult{Tolerated: tolerated}
 	if opts.Offline || len(remotes) == 0 {
@@ -152,6 +182,20 @@ func CheckPrecondition(git GitOps, root string, opts PreconditionOptions) (*Prec
 		if c.blocks() {
 			res.Blocking = append(res.Blocking, c)
 		}
+	}
+
+	// --force escape (bead sc0w): the operator has judged the discovered
+	// pre-flatten branches irrelevant. Drop them to TOLERATED and surface a
+	// WARN so the bypass is auditable rather than silent.
+	if opts.Force && len(res.Blocking) > 0 {
+		names := make([]string, 0, len(res.Blocking))
+		for _, c := range res.Blocking {
+			names = append(names, c.Name)
+			res.Tolerated = append(res.Tolerated, c.Name)
+		}
+		res.Warnings = append(res.Warnings,
+			"--force: bypassing "+fmt.Sprintf("%d", len(names))+" unmerged pre-flatten blocker(s) at operator request: "+strings.Join(names, ", "))
+		res.Blocking = nil
 	}
 	return res, nil
 }
