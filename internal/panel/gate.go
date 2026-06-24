@@ -415,8 +415,12 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 	return f
 }
 
-// PanelDirScanRoot returns the scan root that owns a panel dir: review/<slug>'s
-// grandparent. Pure path math (filepath only) so callers need not re-derive it.
+// PanelDirScanRoot returns the scan root that owns a panel dir: the panel
+// dir's grandparent. This resolves BOTH supported conventions (Spec 106 Bead
+// 4) without special-casing: a repo-root `review/<slug>` grandparent is the
+// repo root, and a co-located `<spec-dir>/reviews/<slug>` grandparent is the
+// spec dir — each a valid git workdir for the gate's bead/<id> staleness
+// rev-parse. Pure path math (filepath only) so callers need not re-derive it.
 func PanelDirScanRoot(panelDir string) string {
 	return filepath.Dir(filepath.Dir(panelDir))
 }

@@ -105,13 +105,28 @@ type Registration struct {
 // review/<slug>).
 func (r Registration) Slug() string { return filepath.Base(r.Dir) }
 
-// Scan globs `review/*/panel.json` under each root and returns one
-// Registration per distinct panel directory, deduped across
-// overlapping roots (by symlink-resolved absolute path) and sorted by
-// directory for determinism.
+// reviewSegments are the two directory-name conventions a registered
+// panel directory can live under (Spec 106 Bead 4): the historical
+// repo-root `review/<slug>` and the spec-scoped co-located
+// `<spec-dir>/reviews/<slug>` (a sibling of workspace.RecordingDir).
+// Scan globs `<root>/<seg>/*/panel.json` for BOTH, so a caller can hand
+// it repo-root, worktree, AND spec-dir roots in one call and pick up
+// panels under whichever convention each root uses (the literal
+// `review/` does not substring-match `reviews/`, so the two are
+// independent). The LAYOUT-AWARE choice of WHICH roots to scan — root
+// `review/` stays live while the tree is canonical, co-located
+// `reviews/` only once flat — is the CALLER's, made from
+// workspace.DetectLayout: internal/panel is a dependency-clean leaf and
+// performs no layout I/O of its own.
+var reviewSegments = []string{"review", "reviews"}
+
+// Scan globs `review/*/panel.json` AND `reviews/*/panel.json` under each
+// root and returns one Registration per distinct panel directory,
+// deduped across overlapping roots and segments (by symlink-resolved
+// absolute path) and sorted by directory for determinism.
 //
 // Scan is fs-only and forgiving by design: nonexistent roots and
-// review dirs contribute nothing, and legacy panel directories
+// review/reviews dirs contribute nothing, and legacy panel directories
 // (BRIEF.md but no panel.json) are NOT returned — they are
 // unregistered, which is exactly the fail-open contract (HC-4):
 // no panel.json, no gate.
@@ -122,19 +137,21 @@ func Scan(roots ...string) []Registration {
 		if root == "" {
 			continue
 		}
-		matches, err := filepath.Glob(filepath.Join(root, "review", "*", FileName))
-		if err != nil {
-			// Only malformed patterns error; root is a literal path.
-			continue
-		}
-		for _, m := range matches {
-			dir := filepath.Dir(m)
-			key := canonicalPath(dir)
-			if seen[key] {
+		for _, seg := range reviewSegments {
+			matches, err := filepath.Glob(filepath.Join(root, seg, "*", FileName))
+			if err != nil {
+				// Only malformed patterns error; root is a literal path.
 				continue
 			}
-			seen[key] = true
-			regs = append(regs, load(dir))
+			for _, m := range matches {
+				dir := filepath.Dir(m)
+				key := canonicalPath(dir)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				regs = append(regs, load(dir))
+			}
 		}
 	}
 	sort.Slice(regs, func(i, j int) bool { return regs[i].Dir < regs[j].Dir })
