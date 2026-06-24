@@ -52,8 +52,8 @@ the run-state read. A stale/completed run record never activates it.
 
 `mindspec doctor` validates project structure. Checks are categorized:
 
-- **Errors**: Missing critical files (e.g., `GLOSSARY.md`, `docs/core/`)
-- **Warnings**: Missing optional structure (e.g., `docs/domains/`, `docs/context-map.md`)
+- **Errors**: Missing critical files (e.g., `GLOSSARY.md`, `.mindspec/core/`)
+- **Warnings**: Missing optional structure (e.g., `.mindspec/domains/`, `.mindspec/context-map.md`)
 
 The distinction allows fresh projects to pass basic checks while still surfacing incomplete scaffolding.
 

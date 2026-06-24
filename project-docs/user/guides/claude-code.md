@@ -23,7 +23,7 @@ make build && make install
 mindspec init
 ```
 
-This scaffolds the full directory structure: `.mindspec/`, `docs/` (core, domains, specs, templates), `GLOSSARY.md`, `CLAUDE.md`, `.claude/` hooks, and more. All creation is additive — existing files are never overwritten.
+This scaffolds the full directory structure: `.mindspec/` (core, domains, specs), `GLOSSARY.md`, `CLAUDE.md`, `.claude/` hooks, and more. All creation is additive — existing files are never overwritten.
 
 ### 3. Verify
 
@@ -45,7 +45,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 
 **1. Start a specification**
 
-Use the `/ms-spec-create` custom command (or `mindspec spec create 001-my-feature`). This creates `docs/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
+Use the `/ms-spec-create` custom command (or `mindspec spec create 001-my-feature`). This creates `.mindspec/specs/001-my-feature/spec.md` from a template and sets the workflow state to Spec Mode.
 
 **2. Draft the spec collaboratively**
 
@@ -57,7 +57,7 @@ Type `/ms-spec-approve`. This validates the spec, updates its frontmatter to `AP
 
 **4. Draft the plan**
 
-The agent reviews domain docs and ADRs, then creates `docs/specs/001-my-feature/plan.md` — decomposing the spec into bounded work chunks with dependencies and verification steps.
+The agent reviews domain docs and ADRs, then creates `.mindspec/specs/001-my-feature/plan.md` — decomposing the spec into bounded work chunks with dependencies and verification steps.
 
 **5. Approve the plan**
 

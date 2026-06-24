@@ -291,11 +291,11 @@ mindspec bench run \
 | `--work-dir <path>` | Base dir for worktrees | `/tmp/mindspec-bench-<spec-id>` |
 | `--skip-cleanup` | Preserve worktrees after completion | false |
 | `--skip-qualitative` | Skip qualitative analysis (quantitative only) | false |
-| `--skip-commit` | Don't commit results to docs/specs/ | false |
+| `--skip-commit` | Don't commit results to .mindspec/specs/ | false |
 
 ### Output
 
-Results are written to `docs/specs/<spec-id>/benchmark/`:
+Results are written to `.mindspec/specs/<spec-id>/benchmark/`:
 
 - **`report.md`** — metadata, N-way side-by-side quantitative report, qualitative analysis with per-dimension 1-5 ratings
 - **`improvements.md`** — actionable findings: what the non-MindSpec sessions did better
@@ -311,11 +311,11 @@ The command auto-commits these to the current branch unless `--skip-commit` is p
 2. Neutralizes A (removes CLAUDE.md, .mindspec/, MindSpec commands, hooks, and docs/) and B (same but keeps docs/)
 3. Starts in-process OTLP collectors (one goroutine per session, no subprocesses)
 4. Runs `claude -p` sequentially (A → B → C; MindSpec last to avoid cache warmup advantage)
-5. Collects plans: Session C's `docs/specs/<ID>/plan.md`, Sessions A/B's `.claude/plans/*.md`
+5. Collects plans: Session C's `.mindspec/specs/<ID>/plan.md`, Sessions A/B's `.claude/plans/*.md`
 6. Generates N-way side-by-side quantitative report (all sessions in columns)
 7. Runs a qualitative analysis via `claude -p` comparing all 3 implementations and plans
 8. Runs an improvements analysis identifying what A/B did better
-9. Writes all artifacts to `docs/specs/<spec-id>/benchmark/` and cleans up worktrees
+9. Writes all artifacts to `.mindspec/specs/<spec-id>/benchmark/` and cleans up worktrees
 
 ### N-way Reports
 

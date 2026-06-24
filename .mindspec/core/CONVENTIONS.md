@@ -14,10 +14,10 @@ This document outlines the file organization, naming, and structural conventions
 | `(binary-internal templates)` | Templates for specs, ADRs, and domain docs are embedded in the `mindspec` binary |
 | `AGENTS.md` | Agent behavioral instructions |
 | `CLAUDE.md` | Claude Code project instructions |
-| `docs/archive/mindspec-v1-spec.md` | Original product specification (archived) |
+| `project-docs/user/archive/mindspec-v1-spec.md` | Original product specification (archived) |
 | `.mindspec/state.json` | Convenience cursor: last focused spec/bead (ADR-0015; not authoritative for mode — see [Lifecycle State](#lifecycle-state)) |
 
-Canonical docs live under `.mindspec/docs/`. Legacy `docs/` paths remain compatibility fallbacks for older repositories until migrated.
+Canonical docs live in the flat layout directly under `.mindspec/` (spec 106 / ADR-0039). The nested `.mindspec/docs/` and root `docs/` paths remain read-only compatibility fallbacks for pre-flatten repositories until migrated.
 
 ## Domain Doc Structure
 

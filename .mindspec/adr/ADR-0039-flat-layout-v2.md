@@ -1,7 +1,7 @@
 # ADR-0039: Flat `.mindspec/` Layout v2 — Per-Artifact Three-Tier Resolver, Permanent Multi-Prefix Matchers, and Co-Located Reviews
 
 - **Date**: 2026-06-24
-- **Status**: Proposed
+- **Status**: Accepted
 - **Domain(s)**: core, workflow, execution, context-system
 - **Deciders**: Max
 - **Supersedes**: n/a
