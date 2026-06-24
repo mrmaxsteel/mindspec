@@ -217,10 +217,12 @@ type manifestItem struct {
 
 func manifest() []manifestItem {
 	items := []manifestItem{
-		// Required directories
+		// Required directories — NEW (greenfield) projects are born FLAT
+		// (Req 2 / AC4): lifecycle artifacts live directly under .mindspec/,
+		// so DetectLayout classifies a freshly bootstrapped tree `flat`.
 		{path: ".mindspec", isDir: true},
-		{path: ".mindspec/docs/domains", isDir: true},
-		{path: ".mindspec/docs/specs", isDir: true},
+		{path: ".mindspec/domains", isDir: true},
+		{path: ".mindspec/specs", isDir: true},
 
 		// Root files
 		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
