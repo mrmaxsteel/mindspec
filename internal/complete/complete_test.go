@@ -2487,7 +2487,7 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 	if !(iOwnership < iRevert && iRevert < iBypass) {
 		t.Errorf("ladder must be repair-first (OWNERSHIP.yaml < revert < bypass), got %d/%d/%d: %q", iOwnership, iRevert, iBypass, msg)
 	}
-	if !strings.Contains(msg, ".mindspec/docs/domains/<name>/OWNERSHIP.yaml") {
+	if !strings.Contains(msg, ".mindspec/domains/<name>/OWNERSHIP.yaml") {
 		t.Errorf("ladder must name the OWNERSHIP.yaml path: %q", msg)
 	}
 

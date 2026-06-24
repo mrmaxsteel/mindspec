@@ -616,7 +616,7 @@ func buildDesignField(specDir, requirements string, adrCitationIDs []string) str
 			citations = append(citations, fmt.Sprintf("- see %s — %s", id, a.Title))
 		}
 		if len(citations) > 0 {
-			parts = append(parts, "## ADR Decisions\n\nCited by ID — full text under `.mindspec/docs/adr/`:\n\n"+strings.Join(citations, "\n"))
+			parts = append(parts, "## ADR Decisions\n\nCited by ID — full text under `.mindspec/adr/`:\n\n"+strings.Join(citations, "\n"))
 		}
 	}
 

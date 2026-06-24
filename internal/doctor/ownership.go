@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // walkExclusions are the top-level directory names skipped by the
@@ -60,11 +61,12 @@ func checkOwnershipManifests(r *Report, root string) {
 }
 
 // canonicalDomains returns the lexicographically-sorted domain
-// directory names under .mindspec/docs/domains/ — the layout
-// validate.LoadOwnership reads. Returns nil when the directory is
-// absent.
+// directory names under the tier-aware domains enumeration root
+// (flat .mindspec/domains → canonical .mindspec/docs/domains → legacy
+// docs/domains, spec 106 Req 3) — the same layout validate.LoadOwnership
+// reads. Returns nil when the directory is absent.
 func canonicalDomains(root string) []string {
-	dir := filepath.Join(root, ".mindspec", "docs", "domains")
+	dir := workspace.DomainsDir(root)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil

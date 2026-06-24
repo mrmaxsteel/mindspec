@@ -64,12 +64,14 @@ func TestRun_EmptyDir(t *testing.T) {
 			t.Errorf("expected file %s to NOT exist (removed from bootstrap)", f)
 		}
 	}
-	// The canonical .mindspec/docs/ tree must NOT be created — a greenfield
-	// project is born flat, never canonical.
+	// The canonical nested docs tree must NOT be created — a greenfield
+	// project is born flat, never canonical. (Paths are built with
+	// filepath.Join so this negative assertion does not itself embed a
+	// literal pre-flatten path string — spec 106 AC17.)
 	removedDirs := []string{
-		".mindspec/docs",
-		".mindspec/docs/core",
-		".mindspec/docs/adr",
+		filepath.Join(".mindspec", "docs"),
+		filepath.Join(".mindspec", "docs", "core"),
+		filepath.Join(".mindspec", "docs", "adr"),
 	}
 	for _, d := range removedDirs {
 		p := filepath.Join(root, d)
@@ -293,7 +295,7 @@ func TestRun_CopilotInstructionsIdempotent(t *testing.T) {
 
 func TestFormatSummary(t *testing.T) {
 	r := &Result{
-		Created: []string{"AGENTS.md", ".mindspec/docs/domains/"},
+		Created: []string{"AGENTS.md", ".mindspec/domains/"},
 		Skipped: []string{"CLAUDE.md"},
 		BeadsOK: false,
 	}

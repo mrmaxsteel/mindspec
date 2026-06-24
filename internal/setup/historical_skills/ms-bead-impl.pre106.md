@@ -14,19 +14,17 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in every sub
 ## Inputs
 
 - `bead-id` (required) — the `bd` id, e.g. `lola-8gbp.3`.
-- `prompt-path` (optional) — pre-staged implementation prompt at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`. If supplied, skip Phase A and read it; if absent, run Phase A to stage one.
-
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; prep prompts and panel artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
+- `prompt-path` (optional) — pre-staged implementation prompt at `<repo>/review/prep/bead<N>_impl_prompt.md`. If supplied, skip Phase A and read it; if absent, run Phase A to stage one.
 
 ## Phase A — stage the prompt
 
-Skip this phase if `prompt-path` was supplied. Otherwise compose a structured prompt and stage it at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`.
+Skip this phase if `prompt-path` was supplied. Otherwise compose a structured prompt and stage it at `<repo>/review/prep/bead<N>_impl_prompt.md`.
 
 1. **Resolve spec context.**
    ```bash
    bd show <bead-id>
    ```
-   Capture: parent epic id, plan path (`.mindspec/specs/<spec-slug>/plan.md`), spec path, declared Rs/ACs, declared `Depends on:` beads. Status must be `open` or `in_progress`.
+   Capture: parent epic id, plan path (`.mindspec/docs/specs/<spec-slug>/plan.md`), spec path, declared Rs/ACs, declared `Depends on:` beads. Status must be `open` or `in_progress`.
 
 2. **Extract the plan section.** Grep the bead's `## Bead N — ...` header out of `plan.md` and read through to the next `## Bead` header (or EOF). Capture:
    - Files in scope (look for "Files:" or "Touches:" lines).
@@ -40,7 +38,7 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - Read each helper file and extract its public API: function signatures (with types), exported class names + public method signatures, key module-level constants.
    - Note import paths the new bead should use to consume these (no reimplementation).
 
-5. **Compose the prompt.** Write to `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md` with this skeleton:
+5. **Compose the prompt.** Write to `<repo>/review/prep/bead<N>_impl_prompt.md` with this skeleton:
 
    ```markdown
    # Bead <N> implementation prompt — <spec-slug>
@@ -52,8 +50,8 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - Spec branch: spec/<spec-slug>
 
    ## Read first
-   - `.mindspec/specs/<spec-slug>/spec.md` §R<n> + §AC<n>
-   - `.mindspec/specs/<spec-slug>/plan.md` §Bead <N>
+   - `.mindspec/docs/specs/<spec-slug>/spec.md` §R<n> + §AC<n>
+   - `.mindspec/docs/specs/<spec-slug>/plan.md` §Bead <N>
 
    ## Files in scope
    - `<path>` — <one-line purpose>
@@ -91,14 +89,14 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
 
 6. **Verify file landed.**
    ```bash
-   ls -l <spec-dir>/reviews/prep/bead<N>_impl_prompt.md
+   ls -l <repo>/review/prep/bead<N>_impl_prompt.md
    ```
 
 ## Phase B — dispatch the subagent
 
 1. **Confirm the bead worktree.** The cycle's Step 0 (`/ms-bead-cycle`) already claimed the bead and created `<spec-worktree>/.worktrees/worktree-<bead-id>/` on branch `bead/<bead-id>`. Verify it exists; if it is missing, re-run `mindspec next --spec <slug>` (auto-recovers the worktree for an already-claimed bead).
 
-2. **Load the prompt.** Read the staged `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md` (from `prompt-path` or Phase A).
+2. **Load the prompt.** Read the staged `<repo>/review/prep/bead<N>_impl_prompt.md` (from `prompt-path` or Phase A).
 
 3. **Dispatch.** Spawn a `general-purpose` `Agent` with the prompt as `prompt`. Run in background if you have other parallel work; otherwise foreground.
    - The subagent makes exactly ONE commit on the bead branch ending `Deviations: <list or "none">`.

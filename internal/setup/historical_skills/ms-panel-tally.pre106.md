@@ -5,9 +5,7 @@ description: The single decision authority for a mindspec panel — read all ver
 
 # Tally Panel Verdicts
 
-Read `<spec-dir>/reviews/<panel-slug>/*-round-<N>.json`, summarise verdicts, apply the decision matrix (including the HARD artifact gates), consolidate the convergent `concrete_changes_required` list, and decide whether the panel passes. This skill is the **single decision authority** — both per-bead cycles and `/ms-spec-final-review` route their tally through here.
-
-> Reviews are co-located under the spec (spec 106 flat layout): `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`, so panels live at `<spec-dir>/reviews/<panel-slug>/` — the location the `mindspec complete` gate scans.
+Read `<repo>/review/<panel-slug>/*-round-<N>.json`, summarise verdicts, apply the decision matrix (including the HARD artifact gates), consolidate the convergent `concrete_changes_required` list, and decide whether the panel passes. This skill is the **single decision authority** — both per-bead cycles and `/ms-spec-final-review` route their tally through here.
 
 ## Inputs
 
@@ -19,7 +17,7 @@ Read `<spec-dir>/reviews/<panel-slug>/*-round-<N>.json`, summarise verdicts, app
 
 1. **Load all verdicts.**
    ```bash
-   cd <spec-dir>/reviews/<panel-slug>
+   cd <repo>/review/<panel-slug>
    for f in *-round-<N>.json; do
      python3 -c "import json; d=json.load(open('$f')); print(f, d['verdict'], d.get('confidence'))"
    done
@@ -56,7 +54,7 @@ Read `<spec-dir>/reviews/<panel-slug>/*-round-<N>.json`, summarise verdicts, app
       - **Refactors / sharing** (e.g. "reuse the shared model") — fix if it changes behaviour, defer if pure style
       - **Documentation / prose** — fix if user-facing, defer otherwise
 
-   d. Write the consolidated list to `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md` for the fix subagent to read.
+   d. Write the consolidated list to `<repo>/review/<panel-slug>/consolidated-round-<N>.md` for the fix subagent to read.
 
 5. **Report to the orchestrator** (`/ms-bead-cycle`):
    ```

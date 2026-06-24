@@ -48,7 +48,7 @@ See item 16 in Part 1 below for details.
    **Resolution:** No separate skill — the resumption path lives in the canonical halt-recover section of `/ms-panel-tally` (the single decision authority), which now defines the resume-from-latest-commit and abandon procedures. Keeping it there avoids a 12th skill and the operational-knowledge fan-out the 093 thin-down removed (orchestration in skills, recovery recipes at point-of-use).
 
 3. **No `/ms-bead-prep` skill for drafting impl prompts.** **[CLOSED — commit `f823476`]**
-   The pre-staged prompts at `<repo>/review/prep/bead<N>_impl_prompt.md` are referenced by `/ms-bead-impl` as "if absent, draft one in-conversation". In practice good prompts are the single biggest lever on impl-subagent quality — they should have their own skill that reads the plan section + spec context + prior-bead helper signatures and produces a structured prompt. The lola session benefited massively from pre-staged prompts; the plugin doesn't tell you how to write them.
+   The pre-staged prompts at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md` are referenced by `/ms-bead-impl` as "if absent, draft one in-conversation". In practice good prompts are the single biggest lever on impl-subagent quality — they should have their own skill that reads the plan section + spec context + prior-bead helper signatures and produces a structured prompt. The lola session benefited massively from pre-staged prompts; the plugin doesn't tell you how to write them.
 
 4. **Codex-substitution logic is prose, not deterministic.** **[CLOSED — commit `c8ef5c8`]**
    `/ms-panel-run` says "if output is empty or just the prompt echoed, substitute a Claude `Agent` in the same slot". In practice the detection signal is `"ERROR: You've hit your usage limit"` in the codex output file. Should be a one-liner: `grep -q "ERROR: You've hit your usage limit" /tmp/codex_*.out && launch_claude_sub`. The plugin should encode this as a check, not as advice.
@@ -71,9 +71,9 @@ See item 16 in Part 1 below for details.
    Bead 5 showed in `bd ready` before Bead 4 merged because the plan dep ("Beads 1-4") wasn't reflected in bd's explicit dep edges. Fixed manually with `bd dep add lola-8gbp.5 lola-8gbp.4`. The plan-to-bd dep-graph sync should be automatic — either `mindspec plan approve` should walk the plan's `**Depends on:**` lines and call `bd dep add` for each, or `/ms-bead-next` should refuse to claim a bead whose plan deps don't match bd.
 
 8. **`mindspec instruct` (SessionStart hook) doesn't surface panel/subagent state.** **[ADJUDICATED — spec 093, Bead 5: `--panel-state` shipped]**
-   The hook prints "Multiple Active Specs" with phases, but doesn't tell a fresh post-compaction session which beads have in-flight implementation subagents or pending panel rounds. Cost us several minutes after compaction to reconstruct state from `review/<panel>/*.json` and `git worktree list`. Should add a `--panel-state` block to `mindspec instruct` that lists:
+   The hook prints "Multiple Active Specs" with phases, but doesn't tell a fresh post-compaction session which beads have in-flight implementation subagents or pending panel rounds. Cost us several minutes after compaction to reconstruct state from `<spec-dir>/reviews/<panel>/*.json` and `git worktree list`. Should add a `--panel-state` block to `mindspec instruct` that lists:
    - In-progress beads (worktree + last commit on bead branch)
-   - Open panel rounds (`review/<panel-slug>/` with mismatched verdict-file count vs expected)
+   - Open panel rounds (`<spec-dir>/reviews/<panel-slug>/` with mismatched verdict-file count vs expected)
    - Any locked agent worktrees (`.claude/worktrees/agent-*` still in place)
 
    **Resolution:** Shipped in spec 093 (Bead 5, Reqs 14-15). `mindspec instruct --panel-state` renders the three-block Panel/Subagent State view (in-progress beads, open panel rounds, locked worktrees), auto-included in implement-mode SessionStart output and zero-cost when no panel dir exists. The "gate would BLOCK" line agrees with a direct `mindspec hook pre-complete` invocation (one-source-of-truth proof).

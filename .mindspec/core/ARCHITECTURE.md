@@ -35,7 +35,7 @@ MindSpec is a **spec-driven development and context management framework** (Clau
 | Roadmap hierarchy | Beads (release/milestone → spec beads → implementation beads) |
 | Isolated execution | Git worktrees |
 
-Canonical MindSpec docs live under `/.mindspec/docs/`. Legacy `docs/` paths are read-only compatibility fallbacks for pre-migration repositories.
+Canonical MindSpec docs live under a FLAT `.mindspec/{specs,adr,domains,core}` + `.mindspec/context-map.md` layout (spec 106 / ADR-0039); user/dogfood docs live at top-level `project-docs/`. The nested `.mindspec/docs/…` and root `docs/…` paths are read-only compatibility fallbacks for pre-flatten repositories (the per-artifact three-tier resolver reads flat → canonical → legacy, first-exists-wins).
 
 Beads is a **passive, execution-oriented tracking substrate** (see [ADR-0002](../adr/ADR-0002.md)). It is not responsible for planning, spec authoring, context routing, or architectural governance.
 

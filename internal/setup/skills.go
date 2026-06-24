@@ -25,6 +25,14 @@ var historicalSkillsFS embed.FS
 //
 //   - Every embedded historical_skills/<name>.md (the pre-093 plugin skills,
 //     including the four now removed, and the removed ms-spec-status).
+//   - Additional dated snapshots named historical_skills/<name>.<tag>.md (e.g.
+//     the spec 106 `ms-panel-run.pre106.md` capture of the canonical
+//     pre-flatten bytes). A skill may carry MULTIPLE snapshots — the skill
+//     name is the segment BEFORE the first dot, so both `<name>.md` and
+//     `<name>.<tag>.md` resolve to the same skill and are appended together.
+//     This lets a single skill be refreshed in place from ANY previously
+//     shipped revision (pre-093 AND pre-106) without overwriting the older
+//     frozen snapshot. Skill names never contain a dot.
 //   - The marker-less variant of each lifecycle skill: pre-093 lifecycle
 //     skills shipped without the `managed-by: mindspec` frontmatter line, so
 //     stripping that line from the current canonical content reconstructs the
@@ -38,7 +46,12 @@ func previouslyShippedSkills() map[string][]string {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		name := strings.TrimSuffix(e.Name(), ".md")
+		// The skill name is the segment before the first dot: <name>.md and
+		// <name>.<tag>.md both belong to skill <name>.
+		name := e.Name()
+		if i := strings.IndexByte(name, '.'); i >= 0 {
+			name = name[:i]
+		}
 		data, err := historicalSkillsFS.ReadFile("historical_skills/" + e.Name())
 		if err != nil {
 			continue

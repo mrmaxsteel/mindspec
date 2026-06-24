@@ -25,7 +25,7 @@ Evaluate whether an idea is worth pursuing before committing to the spec-driven 
 The agent works through these steps conversationally:
 
 1. **Clarify the problem** — What pain point or opportunity is the user describing?
-2. **Check prior art** — Search existing ADRs, specs, and glossary for related decisions
+2. **Check prior art** — Search existing ADRs and specs for related decisions
 3. **Assess feasibility** — Is this technically achievable? What are the rough costs and risks?
 4. **Enumerate alternatives** — What other approaches could solve the same problem? Include "do nothing"
 5. **Recommend** — Based on the above, is this worth pursuing?
@@ -33,7 +33,7 @@ The agent works through these steps conversationally:
 ### Permitted Actions
 
 - Read any project files (specs, ADRs, domain docs, code)
-- Run `mindspec` read-only commands (`adr list`, `glossary list`, `doctor`, etc.)
+- Run `mindspec` read-only commands (`adr list`, `spec list`, `doctor`, etc.)
 - Discuss trade-offs and alternatives with the user
 
 ### Forbidden Actions
@@ -75,13 +75,12 @@ A specification containing:
 
 ### Permitted Artifacts
 
-| Artifact | Location | Template | Purpose |
-|:---------|:---------|:---------|:--------|
-| Spec files | `docs/specs/<id>/spec.md` | `docs/templates/spec.md` | Formal specification |
-| Domain docs | `docs/domains/<domain>/` | `docs/templates/domain/` | Domain documentation |
-| Glossary entries | `GLOSSARY.md` | — | New term definitions |
-| Architecture docs | `docs/core/` | — | Context/rationale |
-| ADR drafts | `docs/adr/` or `docs/domains/<domain>/adr/` | `docs/templates/adr.md` | Proposed decisions |
+| Artifact | Location | Purpose |
+|:---------|:---------|:--------|
+| Spec files | `.mindspec/specs/<id>/spec.md` | Formal specification |
+| Domain docs | `.mindspec/domains/<domain>/` | Domain documentation |
+| Architecture docs | `.mindspec/core/` | Context/rationale |
+| ADR drafts | `.mindspec/adr/` or `.mindspec/domains/<domain>/adr/` | Proposed decisions |
 
 ### Forbidden Actions
 
@@ -119,7 +118,7 @@ Before planning, the agent must review:
 
 ### Plan Artifact
 
-When Plan Mode starts, create `docs/specs/<id>/plan.md` using the template at `docs/templates/plan.md`. Initialize the YAML frontmatter:
+When Plan Mode starts, create `.mindspec/specs/<id>/plan.md`. Initialize the YAML frontmatter:
 
 ```yaml
 status: Draft
@@ -161,7 +160,7 @@ If the planner detects that an accepted ADR blocks progress or is unfit:
 
 ### Permitted Artifacts
 
-- `docs/specs/<id>/plan.md` (the live plan draft)
+- `.mindspec/specs/<id>/plan.md` (the live plan draft)
 - Beads entries (implementation beads, dependency links)
 - ADR proposals (if divergence detected)
 - Documentation updates (if clarifying scope)
@@ -264,11 +263,12 @@ MindSpec requires explicit human confirmation for:
 
 ### Policy Integration
 
-Mode enforcement policies are defined in `architecture/policies.yml`:
+Mode enforcement is implemented directly by the in-binary CLI guards and the
+lifecycle gates (the standalone `policies.yml` subsystem was removed per
+ADR-0018). The enforced rules:
 
-- `spec-mode-no-code`: Blocks code changes in Spec Mode
-- `plan-mode-no-code`: Blocks code changes in Plan Mode
-- `implementation-requires-approved-plan`: Blocks implementation without plan approval
+- Spec Mode and Plan Mode block code changes (branch-protection + mode guards)
+- Implementation requires an approved plan (the `plan approve` gate)
 
 ### State Tracking
 
@@ -283,5 +283,4 @@ Lifecycle state is **derived per-spec from the spec-lifecycle molecule's step st
 - [WORKFLOW-STATE-MACHINE.md](WORKFLOW-STATE-MACHINE.md) — Exhaustive allowed/disallowed transitions and guard map
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Core system design
 - [CONVENTIONS.md](CONVENTIONS.md) — File organization and naming
-- `policies.yml` — Machine-checkable policies
 - [mindspec-v1-spec.md](../../project-docs/user/archive/mindspec-v1-spec.md) — Original product specification (archived)

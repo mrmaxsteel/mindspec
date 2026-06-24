@@ -23,7 +23,7 @@ Read the `Setup` function and check every layer of sandbox state. For each item,
 - **MindSpec focus**: Is `.mindspec/focus` written? Does it have the correct mode, activeSpec, specBranch, activeWorktree, activeBead fields for the scenario's starting state?
 - **Git branches**: Are spec/ and bead/ branches created? Do they branch from the right parents (main → spec → bead)?
 - **Worktrees**: Are worktrees created when the scenario expects them? Are they deliberately absent when testing stale/missing worktree recovery?
-- **Spec artifacts**: Is there a valid `spec.md` with correct YAML frontmatter (title, status)? Is it in the right directory (`.mindspec/docs/specs/<id>/`)?
+- **Spec artifacts**: Is there a valid `spec.md` with correct YAML frontmatter (title, status)? Is it in the right directory (`.mindspec/specs/<id>/`)?
 - **Plan artifacts**: Is there a valid `plan.md` with correct YAML frontmatter (status, spec_id, version)? Does it pass `ValidatePlan` if the scenario starts post-plan-approval?
 - **File contents**: Are any source files pre-created that the agent is expected to find or modify?
 - **Git state**: Are setup files committed? Is the working tree clean when the agent starts? Are commits on the right branches?

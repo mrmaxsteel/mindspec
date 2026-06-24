@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // findOrphanedClosedBeadsFn is the shared bd_close lifecycle-bypass predicate
@@ -38,14 +38,15 @@ func defaultRunMindspecComplete(root, beadID string) error {
 // bead/<id> branch still exists and is NOT merged into the spec branch, so the
 // work is unmerged and ungated and the lifecycle can no longer see it.
 //
-// It walks .mindspec/docs/specs/ and runs the shared
-// lifecycle.FindOrphanedClosedBeads predicate per spec (the same trigger
-// `mindspec next` and `mindspec complete` block on). Each orphan is reported as
-// Status=Error with the `mindspec complete <id>` recovery line and a FixFunc
-// that re-invokes completion under `--fix`. Read-only by default; the binary is
-// run only when Fix() calls the FixFunc.
+// It walks the tier-aware specs enumeration root (flat .mindspec/specs →
+// canonical .mindspec/docs/specs → legacy docs/specs, spec 106 Req 3) and runs
+// the shared lifecycle.FindOrphanedClosedBeads predicate per spec (the same
+// trigger `mindspec next` and `mindspec complete` block on). Each orphan is
+// reported as Status=Error with the `mindspec complete <id>` recovery line and
+// a FixFunc that re-invokes completion under `--fix`. Read-only by default; the
+// binary is run only when Fix() calls the FixFunc.
 func checkOrphanedBeads(r *Report, root string) {
-	specsRoot := filepath.Join(root, ".mindspec", "docs", "specs")
+	specsRoot := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsRoot)
 	if err != nil {
 		// No specs dir = nothing to check.
