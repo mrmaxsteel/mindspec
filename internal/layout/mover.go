@@ -21,10 +21,12 @@
 package layout
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
@@ -39,6 +41,7 @@ type GitOps interface {
 	GitMv(workdir, src, dst string) error
 	ResetHard(workdir, ref string) error
 	CleanForce(workdir string) error
+	CleanForcePaths(workdir string, paths []string) error
 	CommitPaths(workdir, msg string, paths []string) error
 	LocalBranchRefs(workdir string) ([]string, error)
 	RemoteTrackingRefs(workdir string) ([]string, error)
@@ -52,8 +55,18 @@ type MoveGroup struct {
 	Dst string
 }
 
-// DefaultFlattenPlan is the canonical flatten move plan: the four lifecycle
-// directories plus the context-map file. Order is deterministic.
+// DefaultFlattenPlan is the canonical spec-106 move plan: the four lifecycle
+// directories plus the context-map file flatten OUT of the `.mindspec/docs/`
+// wrapper into `.mindspec/` (the symmetric flatten), and the three dogfood
+// directories EVICT out of `.mindspec/` to top-level `project-docs/` (the
+// asymmetric depth-change eviction — explicitly NOT `docs/`, which would alias
+// the legacy `root/docs` resolver tier). Order is deterministic. The
+// content-aware review-co-location moves are NOT static (they depend on each
+// review's resolved owning spec) and are appended at run time by the mover.
+//
+// A group whose source is absent on a given tree (e.g. a project with no
+// dogfood docs) is a no-op skip, so this single plan drives every spec-106
+// flatten out of the box.
 func DefaultFlattenPlan() []MoveGroup {
 	return []MoveGroup{
 		{Src: ".mindspec/docs/specs", Dst: ".mindspec/specs"},
@@ -61,6 +74,9 @@ func DefaultFlattenPlan() []MoveGroup {
 		{Src: ".mindspec/docs/domains", Dst: ".mindspec/domains"},
 		{Src: ".mindspec/docs/core", Dst: ".mindspec/core"},
 		{Src: ".mindspec/docs/context-map.md", Dst: ".mindspec/context-map.md"},
+		{Src: ".mindspec/docs/user", Dst: "project-docs/user"},
+		{Src: ".mindspec/docs/installation", Dst: "project-docs/installation"},
+		{Src: ".mindspec/docs/research", Dst: "project-docs/research"},
 	}
 }
 
@@ -97,6 +113,11 @@ type Mover struct {
 	rules    []RewriteRule
 	rootDocs []string
 
+	// skippedReviews holds the repo-root review/<slug> dirs the
+	// review-co-location step could not attribute to a spec; recorded in the
+	// lineage manifest rather than failing the run.
+	skippedReviews []string
+
 	// linkCheck is the gating link-existence lane; defaults to
 	// doctor.CheckMovedTreeLinks. Injectable for tests.
 	linkCheck func(root string) ([]doctor.DanglingLink, error)
@@ -128,6 +149,22 @@ func NewMover(git GitOps, root, runID string) *Mover {
 		failAtGroup:  -2,
 	}
 }
+
+// WithPlan overrides the static move plan (the symmetric flatten + dogfood
+// eviction groups). The default already covers all of spec-106's static moves;
+// this is the cheap injection point Bead 4/5 (or a future caller migrating a
+// non-canonical tree) can use to customize the set. Returns the Mover for
+// chaining.
+func (m *Mover) WithPlan(plan []MoveGroup) *Mover { m.plan = plan; return m }
+
+// WithRules overrides the base finite-pattern rewrite rules. The run-time
+// review-co-location rules are still appended on top of whatever base is set.
+// Returns the Mover for chaining.
+func (m *Mover) WithRules(rules []RewriteRule) *Mover { m.rules = rules; return m }
+
+// WithRootDocs overrides the repo-root docs the rewriter touches. Returns the
+// Mover for chaining.
+func (m *Mover) WithRootDocs(docs []string) *Mover { m.rootDocs = docs; return m }
 
 // Run drives (or resumes) the migration to completion. It is idempotent:
 // re-running on an already-flat tree is a no-op. A pre-publish operational
@@ -171,6 +208,16 @@ func (m *Mover) ensureInit() error {
 }
 
 func (m *Mover) run() error {
+	// Resolve the FULL move plan once — the static flatten/dogfood groups PLUS
+	// the content-aware review-co-location groups — and freeze it so a
+	// crash-resume reuses the same group→checkpoint index space (the review
+	// sources are gone after they move, so re-deriving them on resume would
+	// shift indices). resolvePlan also appends the per-review depth-change
+	// rewrite rules to m.rules.
+	if err := m.resolvePlan(); err != nil {
+		return err
+	}
+
 	for i, g := range m.plan {
 		if err := m.processGroup(i, g); err != nil {
 			return err
@@ -195,6 +242,7 @@ func (m *Mover) run() error {
 		}
 	}
 	m.removeEmptyDocsDir()
+	m.removeEmptyReviewDir()
 
 	// Gating link-existence lane: scan EVERY link and FAIL on any 404.
 	if err := m.checkpoint(stageFinalize, -1); err != nil {
@@ -217,6 +265,175 @@ func (m *Mover) run() error {
 	m.state.Group = -1
 	m.state.GroupStage = ""
 	return m.writeState()
+}
+
+// resolvePlan freezes the full move plan and the active rule set. On the FIRST
+// resolve it computes the content-aware review-co-location groups, appends them
+// to the static plan, appends their per-group depth-change rewrite rules to the
+// base rules, records the un-routable review dirs, and persists the frozen plan
+// to the run state. On a RESUME (PlanResolved already set) it reuses the frozen
+// plan verbatim and regenerates the review rules deterministically from the
+// review groups in it — so the plan is identical to the first run even though
+// the review/<slug> sources have already moved.
+func (m *Mover) resolvePlan() error {
+	if m.state.PlanResolved {
+		m.plan = m.state.Plan
+		m.skippedReviews = m.state.SkippedReviews
+		m.rules = append(m.rules, reviewRules(m.plan)...)
+		return nil
+	}
+
+	rgs, skipped, err := m.reviewGroups()
+	if err != nil {
+		return err
+	}
+	m.plan = append(append([]MoveGroup(nil), m.plan...), rgs...)
+	m.rules = append(m.rules, reviewRules(rgs)...)
+	m.skippedReviews = skipped
+
+	m.state.PlanResolved = true
+	m.state.Plan = m.plan
+	m.state.SkippedReviews = skipped
+	return m.writeState()
+}
+
+// isReviewGroup reports whether a move group is a review-co-location move (its
+// source is a repo-root review/<slug> directory).
+func isReviewGroup(g MoveGroup) bool {
+	return strings.HasPrefix(filepath.ToSlash(g.Src), "review/")
+}
+
+// reviewRules generates the finite-pattern depth-change rewrite rule for each
+// review-co-location group: an absolute repo-root `review/<slug>/` reference
+// rewrites to its co-located `<spec-dir>/reviews/<slug>/` destination. Sibling
+// links WITHIN a moved review dir are unchanged (the subtree's internal depth
+// is preserved), so only the absolute root-anchored form needs a rule.
+func reviewRules(groups []MoveGroup) []RewriteRule {
+	var rules []RewriteRule
+	for _, g := range groups {
+		if isReviewGroup(g) {
+			rules = append(rules, RewriteRule{
+				Old: filepath.ToSlash(g.Src) + "/",
+				New: filepath.ToSlash(g.Dst) + "/",
+			})
+		}
+	}
+	return rules
+}
+
+// reviewGroups discovers the review-co-location moves: each repo-root
+// review/<slug>/ directory is routed to its owning spec's flat
+// <spec-dir>/reviews/<slug>/ home. The owning spec is keyed by the review's
+// panel.json `spec` field when present and resolvable, else inferred from the
+// slug's leading numeric prefix (e.g. 099-final-panel → spec 099-…). A dir that
+// cannot be attributed to a spec — and any loose non-directory entry — is
+// SKIPPED and recorded (returned in skipped) rather than failing the run.
+func (m *Mover) reviewGroups() (groups []MoveGroup, skipped []string, err error) {
+	reviewRoot := filepath.Join(m.root, "review")
+	entries, err := os.ReadDir(reviewRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil // no root review/ tree → nothing to co-locate
+		}
+		return nil, nil, err
+	}
+	specIDs := m.listSpecIDs()
+	// Deterministic order so the frozen plan + checkpoint indices are stable.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, ent := range entries {
+		slug := ent.Name()
+		if !ent.IsDir() {
+			skipped = append(skipped, "review/"+slug) // loose file → not routable
+			continue
+		}
+		specID := m.routeReviewSlug(slug, specIDs)
+		if specID == "" {
+			skipped = append(skipped, "review/"+slug)
+			continue
+		}
+		groups = append(groups, MoveGroup{
+			Src: "review/" + slug,
+			Dst: ".mindspec/specs/" + specID + "/reviews/" + slug,
+		})
+	}
+	return groups, skipped, nil
+}
+
+// routeReviewSlug resolves the owning spec id for a review slug: first the
+// review's panel.json `spec` field (when it names an existing spec), then the
+// slug's leading numeric prefix matched against the present spec ids. Returns
+// "" when neither attributes the slug to a spec.
+func (m *Mover) routeReviewSlug(slug string, specIDs []string) string {
+	if specID := m.panelSpec(slug); specID != "" && m.specExists(specID) {
+		return specID
+	}
+	if prefix := numericPrefix(slug); prefix != "" {
+		for _, id := range specIDs {
+			if strings.HasPrefix(id, prefix+"-") {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// panelSpec reads review/<slug>/panel.json and returns its `spec` field, or ""
+// when the file is absent/unreadable/unparseable (then the slug-prefix fallback
+// applies).
+func (m *Mover) panelSpec(slug string) string {
+	data, err := os.ReadFile(filepath.Join(m.root, "review", slug, "panel.json"))
+	if err != nil {
+		return ""
+	}
+	var p struct {
+		Spec string `json:"spec"`
+	}
+	if json.Unmarshal(data, &p) != nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Spec)
+}
+
+// specExists reports whether spec id has a directory under any active layout
+// tier (flat first, then canonical, then legacy).
+func (m *Mover) specExists(specID string) bool {
+	for _, root := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+		if exists(filepath.Join(m.root, filepath.FromSlash(root), specID)) {
+			return true
+		}
+	}
+	return false
+}
+
+// listSpecIDs returns the spec-id directory names under the active specs root
+// (flat → canonical → legacy, first non-empty wins) for slug-prefix routing.
+func (m *Mover) listSpecIDs() []string {
+	for _, root := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+		ents, err := os.ReadDir(filepath.Join(m.root, filepath.FromSlash(root)))
+		if err != nil {
+			continue
+		}
+		var ids []string
+		for _, e := range ents {
+			if e.IsDir() {
+				ids = append(ids, e.Name())
+			}
+		}
+		if len(ids) > 0 {
+			return ids
+		}
+	}
+	return nil
+}
+
+// numericPrefix returns the leading run of ASCII digits in s (e.g.
+// "099-final-panel" → "099"), or "" when s does not start with a digit.
+func numericPrefix(s string) string {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return s[:i]
 }
 
 // processGroup runs one move group's two-commit sequence (pure rename, then
@@ -288,9 +505,23 @@ func (m *Mover) checkpoint(s stage, group int) error {
 	return nil
 }
 
-// rollback hard-resets to the pre-run ref and cleans untracked residue. It
-// REFUSES once the run is published (ADR-0023 forward-only): a published run
-// can only move forward.
+// rollback hard-resets to the pre-run ref and cleans the untracked residue the
+// run left behind. It REFUSES once the run is published (ADR-0023 forward-only):
+// a published run can only move forward.
+//
+// The clean is SCOPED to the mover's own touched roots (touchedRoots) rather
+// than a repo-wide `git clean -fd`. The CLI precondition refuses a dirty idle
+// tree before a fresh run, but Run()/Abort() are exported and Bead 5 reuses
+// Run() on the LIVE tree (which now also writes project-docs/ and the
+// co-located reviews); a repo-wide clean on rollback could then delete
+// user-untracked files OUTSIDE the move set. Scoping it to .mindspec /
+// project-docs / review / the configured plan roots removes only this run's
+// residue.
+//
+// NOTE for Bead 5: a PUBLISHING run (one that lands the irreversible flatten on
+// a shared branch) MUST arm State.Published BEFORE the point of no return, so
+// this auto-rollback path correctly REFUSES rather than hard-resetting a
+// published cut.
 func (m *Mover) rollback() error {
 	if m.state.Published {
 		return fmt.Errorf("migrate layout: refusing to auto-roll-back a PUBLISHED run (ADR-0023 forward-only)\nrecovery: roll forward — fix the tree on a new branch and rebase onto post-flatten main")
@@ -301,7 +532,46 @@ func (m *Mover) rollback() error {
 	if err := m.git.ResetHard(m.root, m.state.PreRunRef); err != nil {
 		return err
 	}
-	return m.git.CleanForce(m.root)
+	return m.git.CleanForcePaths(m.root, m.touchedRoots())
+}
+
+// touchedRoots returns the repo-relative top-level directories the run may have
+// created untracked residue under: `.mindspec` (always — run-state + lineage),
+// plus the first path segment of every move group's source and destination
+// (`.mindspec`, `project-docs`, `review`, and any custom-plan roots). It reads
+// the FROZEN plan from run state when available so the scope is correct even on
+// a resumed/aborted run whose in-memory plan was not re-resolved.
+func (m *Mover) touchedRoots() []string {
+	set := map[string]bool{".mindspec": true}
+	plan := m.state.Plan
+	if len(plan) == 0 {
+		plan = m.plan
+	}
+	for _, g := range plan {
+		if r := firstSegment(g.Src); r != "" {
+			set[r] = true
+		}
+		if r := firstSegment(g.Dst); r != "" {
+			set[r] = true
+		}
+	}
+	roots := make([]string, 0, len(set))
+	for r := range set {
+		roots = append(roots, r)
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+// firstSegment returns the first slash-separated path segment of a
+// repo-relative path (e.g. ".mindspec/docs/specs" → ".mindspec",
+// "project-docs/user" → "project-docs").
+func firstSegment(p string) string {
+	p = filepath.ToSlash(p)
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return p
 }
 
 // Abort is the explicit pre-publish `--abort`: hard-reset to the pre-run ref.
@@ -318,12 +588,21 @@ func (m *Mover) Abort() error {
 	return m.rollback()
 }
 
-// writeLineage writes the doctor-schema lineage manifest (one entry per move
-// group) to .mindspec/lineage/manifest.json and a per-run copy under the run
-// dir.
+// writeLineage writes the doctor-schema lineage manifest to
+// .mindspec/lineage/manifest.json and a per-run copy under the run dir. It
+// records one entry for EVERY move group that actually landed — across ALL
+// groups: the symmetric flatten, the dogfood eviction, AND the review
+// co-location — by checking that each group's destination exists on disk (so a
+// planned-but-absent group, e.g. dogfood docs a project does not have, is not
+// falsely recorded, and a group whose move landed in a prior crashed run is
+// still recorded after resume). The un-routable review dirs ride along in
+// Skipped as provenance.
 func (m *Mover) writeLineage() error {
-	manifest := LineageManifest{RunID: m.runID}
+	manifest := LineageManifest{RunID: m.runID, Skipped: m.skippedReviews}
 	for _, g := range m.plan {
+		if !exists(filepath.Join(m.root, filepath.FromSlash(g.Dst))) {
+			continue // source was absent → no move landed → nothing to record
+		}
 		manifest.Entries = append(manifest.Entries, LineageEntry{
 			Source:    g.Src,
 			Canonical: g.Dst,
@@ -383,6 +662,16 @@ func (m *Mover) rootDocAbsPaths() []string {
 // left in place.
 func (m *Mover) removeEmptyDocsDir() {
 	_ = os.Remove(filepath.Join(m.root, ".mindspec", "docs"))
+}
+
+// removeEmptyReviewDir removes the now-empty repo-root review/ tree once every
+// review/<slug> dir has been co-located under its owning spec (resolving the
+// homeless-review friction, adwu). Best-effort: os.Remove only succeeds on an
+// EMPTY directory, so a tree still holding SKIPPED (un-routable) review dirs or
+// loose files is intentionally left in place — those are recorded in the
+// lineage manifest's Skipped list rather than deleted.
+func (m *Mover) removeEmptyReviewDir() {
+	_ = os.Remove(filepath.Join(m.root, "review"))
 }
 
 // isOperationalPath reports whether a repo-relative path is the mover's own

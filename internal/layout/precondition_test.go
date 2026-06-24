@@ -99,6 +99,7 @@ func (f *fakeGit) Status(string) (string, error)                 { return f.stat
 func (f *fakeGit) GitMv(string, string, string) error            { return nil }
 func (f *fakeGit) ResetHard(string, string) error                { return nil }
 func (f *fakeGit) CleanForce(string) error                       { return nil }
+func (f *fakeGit) CleanForcePaths(string, []string) error        { return nil }
 func (f *fakeGit) CommitPaths(string, string, []string) error    { return nil }
 func (f *fakeGit) LocalBranchRefs(string) ([]string, error)      { return f.locals, nil }
 func (f *fakeGit) RemoteTrackingRefs(string) ([]string, error)   { return f.remotes, f.remoteErr }

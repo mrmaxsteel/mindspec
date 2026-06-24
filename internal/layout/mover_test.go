@@ -264,6 +264,7 @@ func TestMover_CrashResumeEveryBoundary(t *testing.T) {
 		{stageAfterMoveCommit, 0},
 		{stageAfterRewrite, 0},
 		{stageAfterRewriteCommit, 0},
+		{stageRootRewrite, -1},
 		{stageFinalize, -1},
 	}
 	for _, b := range boundaries {
@@ -453,13 +454,22 @@ func TestMover_LineageManifest(t *testing.T) {
 	if manifest.RunID != "run-lineage" {
 		t.Errorf("run_id = %q, want run-lineage", manifest.RunID)
 	}
-	if len(manifest.Entries) != len(DefaultFlattenPlan()) {
-		t.Errorf("entries = %d, want %d", len(manifest.Entries), len(DefaultFlattenPlan()))
+	// newCanonicalRepo carries the 5 symmetric groups but NO dogfood dirs, so
+	// the 3 dogfood plan entries land no move and are correctly NOT recorded
+	// (writeLineage records only groups whose move landed). The full
+	// symmetric+dogfood+review recording is asserted in
+	// TestMover_DogfoodAndReviewMoves.
+	if len(manifest.Entries) != 5 {
+		t.Errorf("entries = %d, want 5 (the symmetric groups present in the fixture): %+v", len(manifest.Entries), manifest.Entries)
 	}
 	foundSpecs := false
 	for _, e := range manifest.Entries {
 		if e.Source == ".mindspec/docs/specs" && e.Canonical == ".mindspec/specs" {
 			foundSpecs = true
+		}
+		// A recorded group's destination must actually exist on disk.
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(e.Canonical))); err != nil {
+			t.Errorf("lineage recorded a group whose dest is missing: %+v", e)
 		}
 	}
 	if !foundSpecs {
@@ -473,4 +483,201 @@ func TestMover_LineageManifest(t *testing.T) {
 	if st.Stage != string(stageApplied) {
 		t.Errorf("terminal stage = %q, want applied", st.Stage)
 	}
+}
+
+// newFullMoveRepo builds a canonical repo exercising the FULL spec-106 move
+// set: the symmetric lifecycle flatten, the asymmetric dogfood eviction to
+// project-docs/ (with both a symmetric sibling link and an absolute cross-tree
+// link whose depth changes), and root review/<slug> dirs routed two ways —
+// by panel.json `spec` (a non-numeric slug only panel.json can place) and by
+// the slug's numeric prefix — plus one un-routable review dir.
+func newFullMoveRepo(t *testing.T) (string, *executor.MindspecExecutor) {
+	t.Helper()
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@test.com")
+	runGit(t, root, "config", "user.name", "test")
+
+	files := map[string]string{
+		// Lifecycle (symmetric flatten).
+		".mindspec/docs/specs/106-layout-flatten/spec.md": "# Spec 106\n[adr](../../adr/ADR-0001.md)\n",
+		".mindspec/docs/specs/099-prior/spec.md":          "# Spec 099\n",
+		".mindspec/docs/adr/ADR-0001.md":                  "# ADR-0001\n",
+		".mindspec/docs/core/USAGE.md":                    "# Usage\n",
+		".mindspec/docs/context-map.md":                   "# Context Map\n",
+		// Dogfood (asymmetric eviction to project-docs/). guide.md carries a
+		// SYMMETRIC sibling link (preserved across the depth change — both
+		// user/ and installation/ shed .mindspec/docs/ and gain project-docs/)
+		// and a repo-root-relative absolute link into the flattened adr tree
+		// (rewritten by the symmetric rule).
+		".mindspec/docs/user/guide.md":         "# Guide\n[install](../installation/setup.md)\n[adr](/.mindspec/docs/adr/ADR-0001.md)\n",
+		".mindspec/docs/installation/setup.md": "# Setup\n",
+		".mindspec/docs/research/notes.md":     "# Notes\n",
+		// Reviews: zzz-custom has NO numeric prefix, so ONLY its panel.json can
+		// route it (isolates panel.json routing). 099-final-panel has no
+		// panel.json, so ONLY the slug prefix can route it. prep is un-routable.
+		"review/zzz-custom/panel.json":    `{"spec":"106-layout-flatten","target":"main"}`,
+		"review/zzz-custom/summary.md":    "# Summary\n[v](verdict.md)\n",
+		"review/zzz-custom/verdict.md":    "# Verdict\n",
+		"review/099-final-panel/notes.md": "# Prior panel notes\n",
+		"review/prep/log.md":              "# scratch log\n",
+		// Root doc referencing INTO the evicted dogfood tree.
+		"README.md": "# Project\n- guide: [g](.mindspec/docs/user/guide.md)\n",
+	}
+	for rel, content := range files {
+		writeRepoFile(t, root, rel, content)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-m", "initial fixture")
+	return root, executor.NewMindspecExecutor(root)
+}
+
+// TestMover_DogfoodAndReviewMoves is the R6 blocker test: the dogfood eviction
+// and review co-location moves apply, their depth-change links resolve (no
+// 404), review routing reads panel.json `spec` AND falls back to the slug
+// prefix, an un-routable review dir is skipped + recorded, and the lineage
+// records ALL move groups (symmetric + dogfood + review).
+func TestMover_DogfoodAndReviewMoves(t *testing.T) {
+	root, exec := newFullMoveRepo(t)
+	if err := NewMover(exec, root, "run-full").Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Symmetric flatten landed.
+	mustExist(t, root, ".mindspec/specs/106-layout-flatten/spec.md")
+	mustExist(t, root, ".mindspec/adr/ADR-0001.md")
+	mustNotExist(t, root, ".mindspec/docs")
+
+	// Dogfood evicted to project-docs/ (NOT a root docs/ alias).
+	mustExist(t, root, "project-docs/user/guide.md")
+	mustExist(t, root, "project-docs/installation/setup.md")
+	mustExist(t, root, "project-docs/research/notes.md")
+	mustNotExist(t, root, ".mindspec/docs/user/guide.md")
+	mustNotExist(t, root, "docs/user/guide.md")
+	// The absolute cross-tree link was rewritten to the flat adr path; the
+	// symmetric sibling link is preserved.
+	guide := readRepoFile(t, root, "project-docs/user/guide.md")
+	if strings.Contains(guide, ".mindspec/docs/adr/") {
+		t.Errorf("guide.md absolute adr link not rewritten:\n%s", guide)
+	}
+	if !strings.Contains(guide, ".mindspec/adr/ADR-0001.md") {
+		t.Errorf("guide.md missing rewritten flat adr link:\n%s", guide)
+	}
+	if !strings.Contains(guide, "[install](../installation/setup.md)") {
+		t.Errorf("guide.md symmetric sibling link should be preserved:\n%s", guide)
+	}
+	// Root doc reference into the evicted tree rewritten.
+	if readme := readRepoFile(t, root, "README.md"); !strings.Contains(readme, "project-docs/user/guide.md") {
+		t.Errorf("README not rewritten to evicted dogfood path:\n%s", readme)
+	}
+
+	// Review routing: zzz-custom via panel.json `spec` (non-numeric slug);
+	// 099-final-panel via slug prefix → spec 099-prior.
+	mustExist(t, root, ".mindspec/specs/106-layout-flatten/reviews/zzz-custom/summary.md")
+	mustExist(t, root, ".mindspec/specs/106-layout-flatten/reviews/zzz-custom/verdict.md")
+	mustExist(t, root, ".mindspec/specs/099-prior/reviews/099-final-panel/notes.md")
+	mustNotExist(t, root, "review/zzz-custom")
+	mustNotExist(t, root, "review/099-final-panel")
+	// The un-routable dir is left in place (so root review/ is NOT removed).
+	mustExist(t, root, "review/prep/log.md")
+
+	// Depth-change links resolve: the gating link-check is clean across the
+	// flat lifecycle tree, the co-located reviews, AND project-docs/.
+	dangling, err := doctor.CheckMovedTreeLinks(root)
+	if err != nil {
+		t.Fatalf("link-check: %v", err)
+	}
+	if len(dangling) != 0 {
+		t.Errorf("expected zero dangling links after full move, got %+v", dangling)
+	}
+
+	// Lineage records ALL move groups (symmetric + dogfood + review) and the
+	// skipped un-routable review dir.
+	var manifest LineageManifest
+	data, err := os.ReadFile(lineageManifestPath(root))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	want := map[string]string{
+		".mindspec/docs/specs":    ".mindspec/specs",
+		".mindspec/docs/adr":      ".mindspec/adr",
+		".mindspec/docs/user":     "project-docs/user",
+		".mindspec/docs/research": "project-docs/research",
+		"review/zzz-custom":       ".mindspec/specs/106-layout-flatten/reviews/zzz-custom",
+		"review/099-final-panel":  ".mindspec/specs/099-prior/reviews/099-final-panel",
+	}
+	got := map[string]string{}
+	for _, e := range manifest.Entries {
+		got[e.Source] = e.Canonical
+	}
+	for src, dst := range want {
+		if got[src] != dst {
+			t.Errorf("lineage missing/incorrect group %s → %s (got %q)", src, dst, got[src])
+		}
+	}
+	if !containsStr(manifest.Skipped, "review/prep") {
+		t.Errorf("lineage Skipped should record the un-routable review/prep dir: %+v", manifest.Skipped)
+	}
+}
+
+// TestMover_ReviewTreeRemovedWhenFullyMigrated asserts the root review/ tree is
+// removed entirely once every review/<slug> dir has been co-located (no
+// un-routable residue), resolving the homeless-review friction.
+func TestMover_ReviewTreeRemovedWhenFullyMigrated(t *testing.T) {
+	root, exec := newFullMoveRepo(t)
+	// Drop the un-routable dir so every review dir routes.
+	if err := os.RemoveAll(filepath.Join(root, "review", "prep")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-m", "drop un-routable review dir")
+
+	if err := NewMover(exec, root, "run-review-clean").Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	mustNotExist(t, root, "review")
+	mustExist(t, root, ".mindspec/specs/106-layout-flatten/reviews/zzz-custom/summary.md")
+}
+
+// TestMover_RollbackAfterDogfoodReview asserts an injected failure AFTER a
+// dogfood/review move has landed hard-resets to the pre-run ref, restoring the
+// pre-run tree cleanly (no project-docs/ or co-located reviews leak, and the
+// scoped clean leaves no residue) (R6 item 5 + R5 rollback safety).
+func TestMover_RollbackAfterDogfoodReview(t *testing.T) {
+	root, exec := newFullMoveRepo(t)
+	preRun := runGit(t, root, "rev-parse", "HEAD")
+
+	m := NewMover(exec, root, "run-full-rb")
+	// The dogfood `user` group is index 5 in DefaultFlattenPlan; failing after
+	// its move commit proves rollback undoes a landed dogfood eviction.
+	m.failAt = stageAfterMoveCommit
+	m.failAtGroup = 5
+	if err := m.Run(); err == nil {
+		t.Fatal("expected injected failure, got nil")
+	}
+
+	if head := runGit(t, root, "rev-parse", "HEAD"); head != preRun {
+		t.Errorf("rollback did not restore pre-run ref: %s != %s", head, preRun)
+	}
+	// The canonical tree is intact; no evicted/co-located trees leaked.
+	mustExist(t, root, ".mindspec/docs/user/guide.md")
+	mustExist(t, root, "review/zzz-custom/summary.md")
+	mustNotExist(t, root, "project-docs")
+	mustNotExist(t, root, ".mindspec/specs")
+	// The scoped clean left no untracked residue anywhere.
+	if status := runGit(t, root, "status", "--porcelain"); status != "" {
+		t.Errorf("rollback left a dirty tree:\n%s", status)
+	}
+}
+
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

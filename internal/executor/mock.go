@@ -72,6 +72,8 @@ type MockExecutor struct {
 	ResetHardErr             error
 	CleanForceFn             func(workdir string) error
 	CleanForceErr            error
+	CleanForcePathsFn        func(workdir string, paths []string) error
+	CleanForcePathsErr       error
 	CommitPathsFn            func(workdir, msg string, paths []string) error
 	CommitPathsErr           error
 	LocalBranchRefsFn        func(workdir string) ([]string, error)
@@ -237,6 +239,14 @@ func (m *MockExecutor) CleanForce(workdir string) error {
 		return m.CleanForceFn(workdir)
 	}
 	return m.CleanForceErr
+}
+
+func (m *MockExecutor) CleanForcePaths(workdir string, paths []string) error {
+	m.record("CleanForcePaths", workdir, paths)
+	if m.CleanForcePathsFn != nil {
+		return m.CleanForcePathsFn(workdir, paths)
+	}
+	return m.CleanForcePathsErr
 }
 
 func (m *MockExecutor) CommitPaths(workdir, msg string, paths []string) error {

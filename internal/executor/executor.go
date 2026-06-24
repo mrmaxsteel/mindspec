@@ -132,6 +132,12 @@ type Executor interface {
 	// run-state/lineage residue after a rolled-back run (paired with ResetHard).
 	CleanForce(workdir string) error
 
+	// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the
+	// SCOPED clean the mover's rollback uses so it removes untracked residue
+	// only under its own touched roots and cannot delete user-untracked files
+	// outside the move set.
+	CleanForcePaths(workdir string, paths []string) error
+
 	// CommitPaths stages the given repo-relative paths and commits them with
 	// msg in workdir (`--no-verify`). Empty paths commits whatever is already
 	// staged (the pure-rename commit). A no-op when nothing is staged.

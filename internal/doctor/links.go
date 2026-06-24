@@ -28,12 +28,17 @@ var refDefRe = regexp.MustCompile(`^\[[^\]]+\]:\s+(\S+)`)
 
 // movedTreeRoots is the set of post-migration flat lifecycle locations the
 // link-existence lane scans (Req 5 / AC10) — every markdown link under these,
-// PLUS the affected repo-root docs (movedTreeRootDocs), is checked.
+// PLUS the affected repo-root docs (movedTreeRootDocs), is checked. The flat
+// lifecycle children carry the co-located reviews (`<spec-dir>/reviews/…`)
+// under `.mindspec/specs`; `project-docs` is the dogfood-eviction destination,
+// scanned so the asymmetric depth-change links the eviction introduces are
+// gated for 404s alongside the lifecycle trees.
 var movedTreeRoots = []string{
 	filepath.Join(".mindspec", "specs"),
 	filepath.Join(".mindspec", "adr"),
 	filepath.Join(".mindspec", "domains"),
 	filepath.Join(".mindspec", "core"),
+	"project-docs",
 }
 
 // movedTreeRootDocs are the repo-root docs that reference INTO the moved trees

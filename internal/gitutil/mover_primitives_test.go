@@ -106,6 +106,35 @@ func TestResetHardAndCleanForce(t *testing.T) {
 	}
 }
 
+// TestCleanForcePaths_ScopedToRoots asserts the SCOPED clean removes untracked
+// residue only UNDER the given pathspecs and leaves user-untracked files
+// OUTSIDE the move set in place (the mover's rollback safety property).
+func TestCleanForcePaths_ScopedToRoots(t *testing.T) {
+	repo := initGitRepoCfg(t)
+	// Untracked residue inside a touched root, and an untracked user file
+	// outside it.
+	if err := os.MkdirAll(filepath.Join(repo, ".mindspec", "migrations", "run-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".mindspec", "migrations", "run-1", "state.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "user-scratch.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CleanForcePaths(repo, []string{".mindspec", "project-docs", "review"}); err != nil {
+		t.Fatalf("CleanForcePaths: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(repo, ".mindspec", "migrations")); err == nil {
+		t.Error(".mindspec residue should have been cleaned")
+	}
+	if _, err := os.Stat(filepath.Join(repo, "user-scratch.txt")); err != nil {
+		t.Errorf("untracked user file OUTSIDE the scoped roots must be preserved: %v", err)
+	}
+}
+
 func TestCommitPaths_NoopWhenNothingStaged(t *testing.T) {
 	repo := initGitRepoCfg(t)
 	before, _ := RevParseHEAD(repo)

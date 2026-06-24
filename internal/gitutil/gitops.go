@@ -825,6 +825,32 @@ func CleanForce(workdir string) error {
 	return nil
 }
 
+// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the SCOPED
+// counterpart of CleanForce. It removes untracked residue only UNDER the given
+// repo-relative pathspecs, so a rolled-back mover run cannot delete
+// user-untracked files OUTSIDE the move set (the mover scopes its rollback to
+// its own touched roots — `.mindspec`, `project-docs`, `review`, etc.). Each
+// path operand rides behind the `--` separator and the SEC-5 leading-`-` guard.
+// A pathspec that matches nothing on disk is a no-op (git clean does not error
+// on an absent pathspec). With no paths it is equivalent to CleanForce.
+func CleanForcePaths(workdir string, paths []string) error {
+	if len(paths) == 0 {
+		return CleanForce(workdir)
+	}
+	for _, p := range paths {
+		if err := rejectOptionLike(p); err != nil {
+			return err
+		}
+	}
+	args := append([]string{"clean", "-fd", "--"}, paths...)
+	cmd := execCommand("git", gitArgs(workdir, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git clean -fd -- %s: %s", strings.Join(paths, " "), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // CommitPaths stages the given repo-relative paths (`git add -- <paths...>`)
 // and commits them with msg (`git commit -m <msg> --no-verify`) in workdir.
 // When paths is empty it commits whatever is already staged (used for the

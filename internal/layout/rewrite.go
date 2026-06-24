@@ -16,18 +16,28 @@ type RewriteRule struct {
 	New string
 }
 
-// DefaultFlattenRules is the closed breaking set for the symmetric flatten of
-// .mindspec/docs/{specs,adr,domains,core} + context-map.md into .mindspec/.
+// DefaultFlattenRules is the closed breaking set for the full spec-106 move:
+// the symmetric flatten of .mindspec/docs/{specs,adr,domains,core} +
+// context-map.md into .mindspec/, AND the ASYMMETRIC dogfood eviction of
+// .mindspec/docs/{user,installation,research} OUT to top-level project-docs/.
 //
-// Each rule drops the `docs/` segment from an ABSOLUTE (.mindspec-rooted)
-// reference — the form repo-root docs (README.md / AGENTS.md) and any absolute
-// in-tree reference use to point INTO a moved tree. Rules are ordered
-// most-specific-first so the context-map.md file rule fires before the
-// directory rules.
+// Each symmetric rule drops the `docs/` segment from an ABSOLUTE
+// (.mindspec-rooted) reference — the form repo-root docs (README.md /
+// AGENTS.md) and any absolute in-tree reference use to point INTO a moved tree.
+// The three dogfood rules rewrite an absolute `.mindspec/docs/<dogfood>/`
+// reference to its evicted `project-docs/<dogfood>/` location (a depth change
+// OUT of `.mindspec/`). Rules are ordered most-specific-first so the
+// context-map.md file rule fires before the directory rules.
 //
-// Crucially, NO rule touches a `../`-relative target, so the SYMMETRIC
-// spec→ADR links like `../../adr/ADR-NNNN.md` (both specs/ and adr/ shed the
-// same `docs/` level) are PRESERVED unchanged — exactly the Req 5 invariant.
+// Crucially, NO rule touches a `../`-relative target, so SYMMETRIC sibling
+// links are PRESERVED unchanged: the spec→ADR links like `../../adr/ADR-NNNN.md`
+// (both specs/ and adr/ shed the same `docs/` level) AND the dogfood
+// cross-sibling links like `../installation/setup.md` (both user/ and
+// installation/ shed `.mindspec/docs/` and gain `project-docs/` at the same
+// depth) resolve unchanged — exactly the Req 5 invariant. The review
+// co-location move's per-group depth-change rules are GENERATED at run time
+// (they depend on each review's resolved owning spec) and appended to this base
+// set by the mover, not listed statically here.
 func DefaultFlattenRules() []RewriteRule {
 	return []RewriteRule{
 		{Old: ".mindspec/docs/context-map.md", New: ".mindspec/context-map.md"},
@@ -35,6 +45,9 @@ func DefaultFlattenRules() []RewriteRule {
 		{Old: ".mindspec/docs/adr/", New: ".mindspec/adr/"},
 		{Old: ".mindspec/docs/domains/", New: ".mindspec/domains/"},
 		{Old: ".mindspec/docs/core/", New: ".mindspec/core/"},
+		{Old: ".mindspec/docs/user/", New: "project-docs/user/"},
+		{Old: ".mindspec/docs/installation/", New: "project-docs/installation/"},
+		{Old: ".mindspec/docs/research/", New: "project-docs/research/"},
 	}
 }
 
@@ -72,8 +85,8 @@ func rewriteFile(path string, rules []RewriteRule) (bool, error) {
 }
 
 // applyRewritesInTree applies the rules to every markdown file under target
-// (which may be a directory subtree OR a single file). Returns the repo-… no,
-// returns the absolute paths that changed. Idempotent.
+// (which may be a directory subtree OR a single file). Returns the absolute
+// paths of the files that changed. Idempotent.
 func applyRewritesInTree(target string, rules []RewriteRule) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {

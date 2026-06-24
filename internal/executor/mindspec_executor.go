@@ -705,6 +705,13 @@ func (g *MindspecExecutor) CleanForce(workdir string) error {
 	return gitutil.CleanForce(workdir)
 }
 
+// CleanForcePaths runs `git clean -fd -- <paths...>` in workdir — the SCOPED
+// rollback clean (paired with ResetHard) restricted to the mover's touched
+// roots. Thin pass-through to gitutil.
+func (g *MindspecExecutor) CleanForcePaths(workdir string, paths []string) error {
+	return gitutil.CleanForcePaths(workdir, paths)
+}
+
 // CommitPaths stages the given paths and commits them in workdir. Thin
 // pass-through to gitutil — the mover's bd-export-free commit primitive.
 func (g *MindspecExecutor) CommitPaths(workdir, msg string, paths []string) error {

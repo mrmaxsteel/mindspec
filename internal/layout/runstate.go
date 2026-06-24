@@ -39,6 +39,18 @@ type State struct {
 	Published  bool   `json:"published"`
 	Group      int    `json:"group"`
 	GroupStage string `json:"group_stage"`
+
+	// PlanResolved records that the full move plan (the static flatten/dogfood
+	// groups PLUS the content-aware review-co-location groups) has been computed
+	// and frozen into Plan. A resumed run reuses the FROZEN plan rather than
+	// re-deriving the review groups from a partially-moved tree (where the
+	// review/<slug> sources have already moved), keeping the group→checkpoint
+	// index space stable across a crash-resume. These fields are extra to the
+	// doctor migration-metadata schema (migration.go reads only Stage), so they
+	// parse there as ignored unknown keys.
+	PlanResolved   bool        `json:"plan_resolved,omitempty"`
+	Plan           []MoveGroup `json:"plan,omitempty"`
+	SkippedReviews []string    `json:"skipped_reviews,omitempty"`
 }
 
 // LineageManifest is the move-provenance manifest written under
@@ -48,6 +60,12 @@ type State struct {
 type LineageManifest struct {
 	RunID   string         `json:"run_id"`
 	Entries []LineageEntry `json:"entries"`
+	// Skipped lists the repo-root review/<slug> directories the
+	// review-co-location step could NOT attribute to a spec (no panel.json
+	// `spec`, no spec-id slug prefix, or a loose non-directory entry) and
+	// therefore left in place rather than failing the run. It is provenance,
+	// not a move; the doctor schema ignores the unknown key.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // LineageEntry records one move group's source→canonical(dest) mapping. The
