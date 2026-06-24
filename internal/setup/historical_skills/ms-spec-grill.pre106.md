@@ -27,17 +27,17 @@ Ask **exactly one question at a time**. Never batch. Asking five questions in on
 
 Every factual claim in the spec — and every claim *you* make while grilling — must be checked against the actual repository, live, before you accept it. Do not reason from memory about what the repo contains.
 
-1. **Domains.** Read the real domain set from the directories under `.mindspec/domains/`. The author may only declare domains that exist there. (See **§ Technique: domain alignment**.)
-2. **ADRs.** For each impacted domain, read the relevant ADRs under `.mindspec/adr/` and surface them to the author: which existing principles constrain this spec, and which it must cite as touchpoints. When the spec introduces a genuinely new architectural principle that no existing ADR covers, say so and **suggest the next-free ADR number** (compute it: scan `.mindspec/adr/` for the highest `ADR-NNNN` and propose `NNNN+1`). Do not let the author cite an unwritten ADR id as a touchpoint.
+1. **Domains.** Read the real domain set from the directories under `.mindspec/docs/domains/`. The author may only declare domains that exist there. (See **§ Technique: domain alignment**.)
+2. **ADRs.** For each impacted domain, read the relevant ADRs under `.mindspec/docs/adr/` and surface them to the author: which existing principles constrain this spec, and which it must cite as touchpoints. When the spec introduces a genuinely new architectural principle that no existing ADR covers, say so and **suggest the next-free ADR number** (compute it: scan `.mindspec/docs/adr/` for the highest `ADR-NNNN` and propose `NNNN+1`). Do not let the author cite an unwritten ADR id as a touchpoint.
 3. **"X already does Y" claims.** Whenever the draft (or the author) asserts a fact about the codebase — "`mindspec spec create` already prompts the author", "the runner already checkpoints", "this is already validated" — **reality-check it against the actual tree** (grep / read the named file) before accepting it. If the tree does not support the claim, flag it as unverified-or-contradicted and make the author either prove it with a file/line reference or strike it. A spec built on a false premise about the repo is worse than a vague one.
 
 A claim you cannot ground in a file is a claim you reject.
 
 ## Technique: domain alignment
 
-Validate **every** `## Impacted Domains` entry against the real domain set under `.mindspec/domains/`.
+Validate **every** `## Impacted Domains` entry against the real domain set under `.mindspec/docs/domains/`.
 
-- **Reject invented domains.** If the author writes a domain that is not a directory under `.mindspec/domains/` — e.g. "caching", "scheduling", "auth" when no such domain exists — reject it. Name the real domains that exist and ask which actual domain owns this work, or whether a new domain genuinely needs to be created (a heavy decision, not a typo). An invented/non-existent Impacted Domain is a repo-grounding failure: tag it **`[GROUNDING]`** (the domain does not exist in the tree), never `[STRUCTURAL]`.
+- **Reject invented domains.** If the author writes a domain that is not a directory under `.mindspec/docs/domains/` — e.g. "caching", "scheduling", "auth" when no such domain exists — reject it. Name the real domains that exist and ask which actual domain owns this work, or whether a new domain genuinely needs to be created (a heavy decision, not a typo). An invented/non-existent Impacted Domain is a repo-grounding failure: tag it **`[GROUNDING]`** (the domain does not exist in the tree), never `[STRUCTURAL]`.
 - **Map file-path entries to owners.** When an Impacted Domains entry is a file path or glob rather than a bare domain name, normalize it to its **owning domain** per the ADR-0036 (Ownership Discovery) model — look up which domain's `OWNERSHIP.yaml` claims that path. A path that no domain owns is itself a finding: either the wrong path, or an ownership gap the spec must close.
 - Cross-check that the domains the author declared actually match the files the spec will touch. A spec that edits `internal/setup/**` but never declares the domain that owns it is mis-scoped.
 
@@ -117,7 +117,7 @@ Categories:
 - `[SEMANTIC]` — a requirement/AC that is vague or non-falsifiable in meaning by general reading, NOT one of the enumerated blocklist phrases ("works correctly", "behave as expected"). SEMANTIC = general vagueness/unfalsifiability that is not a known blocklist phrase.
 - `[SYNONYM]` — a synonym-dodge verb with no falsifiable behavior ("Enable resumable exports", "Support caching").
 - `[CONTRADICTION]` — two spans that cannot both hold; quote the span you are flagging (name the conflicting partner in the critique).
-- `[GROUNDING]` — a factual claim about the repo the tree does not support ("already prompts the author"). An invented/non-existent Impacted Domain (e.g. `caching`, `scheduling`, `auth` with no matching directory under `.mindspec/domains/`) is tagged `[GROUNDING]`, NOT `[STRUCTURAL]`.
+- `[GROUNDING]` — a factual claim about the repo the tree does not support ("already prompts the author"). An invented/non-existent Impacted Domain (e.g. `caching`, `scheduling`, `auth` with no matching directory under `.mindspec/docs/domains/`) is tagged `[GROUNDING]`, NOT `[STRUCTURAL]`.
 - `[EXACT_PHRASE]` — a known bad phrase from the enumerated blocklist: `it works`, `works correctly`, `is fast`, `is robust`, `reasonable time`, `performance is acceptable`. If the offending text is one of these blocklist phrases, tag it `[EXACT_PHRASE]`; if it is general vagueness NOT on the blocklist, tag it `[SEMANTIC]`.
 - `[STRUCTURAL]` — a missing/empty section, < 3 ACs, an unresolved Open Question, a placeholder.
 

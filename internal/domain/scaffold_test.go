@@ -223,7 +223,7 @@ func TestAddPrintsPopulatePrompt(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, ".mindspec/docs/domains/payments/OWNERSHIP.yaml") {
+	if !strings.Contains(out, ".mindspec/domains/payments/OWNERSHIP.yaml") {
 		t.Errorf("populate prompt not printed (missing manifest path):\n%s", out)
 	}
 	if !strings.Contains(out, "The framework deliberately provides no pattern hints") {

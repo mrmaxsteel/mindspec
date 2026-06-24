@@ -40,10 +40,10 @@ func TestRunOwnershipPopulate_NoArgEnumeratesWithSeparator(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, `.mindspec/docs/domains/alpha/OWNERSHIP.yaml`) {
+	if !strings.Contains(out, `.mindspec/domains/alpha/OWNERSHIP.yaml`) {
 		t.Errorf("missing alpha prompt:\n%s", out)
 	}
-	if !strings.Contains(out, `.mindspec/docs/domains/bravo/OWNERSHIP.yaml`) {
+	if !strings.Contains(out, `.mindspec/domains/bravo/OWNERSHIP.yaml`) {
 		t.Errorf("missing bravo prompt (mutant 8a drops trailing domains):\n%s", out)
 	}
 	if !strings.Contains(out, "\n---\n") {
@@ -74,7 +74,7 @@ func TestRunOwnershipPopulate_AllPopulatedMessage(t *testing.T) {
 	if !strings.Contains(out, "All domain OWNERSHIP.yaml manifests are populated") {
 		t.Errorf("missing all-populated message:\n%s", out)
 	}
-	if strings.Contains(out, "Populate .mindspec/docs/domains/alpha/OWNERSHIP.yaml") {
+	if strings.Contains(out, "Populate .mindspec/domains/alpha/OWNERSHIP.yaml") {
 		t.Errorf("populated domain should NOT get a prompt in no-arg form:\n%s", out)
 	}
 }
@@ -92,7 +92,7 @@ func TestRunOwnershipPopulate_ExplicitArgReEmitsForPopulated(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "Populate .mindspec/docs/domains/alpha/OWNERSHIP.yaml") {
+	if !strings.Contains(out, "Populate .mindspec/domains/alpha/OWNERSHIP.yaml") {
 		t.Errorf("explicit arg must re-emit for a populated domain:\n%s", out)
 	}
 }

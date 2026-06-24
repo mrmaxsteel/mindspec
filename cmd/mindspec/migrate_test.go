@@ -37,7 +37,7 @@ func TestMigrateLayoutSubcommandRegistered(t *testing.T) {
 func TestLayoutPackageOwned(t *testing.T) {
 	t.Parallel()
 
-	manifest := filepath.Join("..", "..", ".mindspec", "docs", "domains", "workflow", "OWNERSHIP.yaml")
+	manifest := filepath.Join("..", "..", ".mindspec", "domains", "workflow", "OWNERSHIP.yaml")
 	data, err := os.ReadFile(manifest)
 	if err != nil {
 		t.Fatalf("read workflow OWNERSHIP.yaml: %v", err)
@@ -207,6 +207,47 @@ func TestBuildMigratePrompt_ContainsRequiredSections(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Phases 1-4 first") || strings.Contains(prompt, "per Phase 5") {
 		t.Errorf("Instructions still contain stale pre-renumber text (mutant 4):\n%s", prompt)
+	}
+}
+
+// TestBuildMigratePrompt_FlatTargets is the spec 106 AC24 assertion: the
+// migrate prompt's classification rubric routes user/dogfood docs to top-level
+// project-docs/ and lifecycle/authored artifacts to the FLAT
+// .mindspec/{specs,adr,domains,core} children — never to the evicted
+// project-docs/user/ path nor the pre-flatten .mindspec/docs/ nesting.
+func TestBuildMigratePrompt_FlatTargets(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildMigratePrompt(nil, nil)
+
+	// Flat lifecycle/authored targets must be present.
+	for _, want := range []string{
+		".mindspec/adr/",
+		".mindspec/specs/",
+		".mindspec/domains/",
+		".mindspec/core/",
+		".mindspec/context-map.md",
+		"project-docs/",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("rubric missing flat target %q", want)
+		}
+	}
+
+	// The pre-flatten canonical nesting and the evicted nested user path
+	// must NOT appear as rubric targets.
+	for _, forbidden := range []string{
+		".mindspec/docs/adr/",
+		".mindspec/docs/specs/",
+		".mindspec/docs/domains/",
+		".mindspec/docs/core/",
+		".mindspec/docs/context-map.md",
+		"project-docs/user/",
+		"project-docs/agent/",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("rubric must NOT target the pre-flatten/evicted path %q", forbidden)
+		}
 	}
 }
 

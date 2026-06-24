@@ -102,6 +102,24 @@ retirement deferred to a follow-up bead. See the amendment below.
 > hatches) are unchanged; only the now-redundant non-authoritative
 > backstop was removed.
 
+> **Amendment (2026-06-24, spec 106 — reviews LOCATION; see ADR-0039):** Panel
+> registration RELOCATES from a repo-root `review/<slug>/panel.json` to a
+> spec-co-located `.mindspec/specs/<id>/reviews/<panel-slug>/panel.json` (a
+> sibling of the spec's `recording/`), resolving the homeless-review friction
+> (adwu). The `mindspec complete` panel gate is now LAYOUT-AWARE: on a
+> canonical/legacy (pre-flatten) tree it scans BOTH the repo-root
+> `review/<slug>/panel.json` AND the co-located
+> `<spec-dir>/reviews/<slug>/panel.json` (the transition union — a sub-threshold
+> panel in EITHER blocks), and on a flat (post-flatten) tree it honors the
+> co-located reviews ONLY (the repo-root `review/` is migrated away and no
+> longer drives the gate). The divergence/doc-sync classifier KEEPS the root
+> `review/**` non-source matcher PERMANENTLY (historical refs/forks) and ADDS a
+> `<spec-dir>/reviews/**` matcher alongside it. This amends the registration
+> LOCATION ONLY — registration identity, round derivation (§2), the N−1
+> threshold (§3), staleness (§4), the dirty-tree rule (§5), fail-open/fail-closed
+> (§6), and the hatches (§7) are all UNCHANGED. The layout-v2 decision and the
+> per-artifact three-tier resolver this rides on are recorded in **ADR-0039**.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —

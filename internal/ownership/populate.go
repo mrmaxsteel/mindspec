@@ -15,10 +15,10 @@ import (
 // framework provides NO pattern hints and pre-fills NO globs — the
 // prompt says so explicitly; regression tests assert the emitted text
 // never contains a framework-proposed `internal/<domain>/**` value.
-const populatePromptTemplate = `Populate .mindspec/docs/domains/<domain>/OWNERSHIP.yaml
+const populatePromptTemplate = `Populate .mindspec/domains/<domain>/OWNERSHIP.yaml
 for the "<domain>" domain.
 
-Read ` + "`.mindspec/docs/domains/<domain>/overview.md`" + ` and
+Read ` + "`.mindspec/domains/<domain>/overview.md`" + ` and
 ` + "`architecture.md`" + ` to understand what this domain owns.
 Then inspect THIS repo's actual layout — ` + "`ls`, `find`" + `,
 ` + "`go list ./...`" + `, or whatever discovery commands fit your

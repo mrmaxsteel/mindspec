@@ -15,9 +15,7 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-s
 - `bead-worktree` (required) — absolute path.
 - `panel-slug` (required).
 - `round` (required) — the round whose verdicts you're acting on; the fix commit goes into round-<N+1>'s review scope.
-- `consolidated-path` — usually `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md`.
-
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
+- `consolidated-path` — usually `<repo>/review/<panel-slug>/consolidated-round-<N>.md`.
 
 ## Steps
 

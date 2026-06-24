@@ -60,9 +60,8 @@ func testRepo(t *testing.T) string {
 	// .mindspec structure
 	for _, d := range []string{
 		".mindspec",
-		".mindspec/docs",
-		".mindspec/docs/specs",
-		".mindspec/docs/adr",
+		".mindspec/specs",
+		".mindspec/adr",
 	} {
 		must(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
@@ -79,7 +78,7 @@ enforcement:
 	// Spec 087: plan-time ADR coverage gate requires every impacted
 	// domain to have a cited Accepted ADR. Write a test-fixture ADR
 	// covering the `core` domain used by validSpecMD.
-	writeFile(t, root, ".mindspec/docs/adr/ADR-9999.md", testFixtureADR())
+	writeFile(t, root, ".mindspec/adr/ADR-9999.md", testFixtureADR())
 
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "initial commit")
@@ -286,7 +285,7 @@ func simulateSpecInit(t *testing.T, root, specID string) {
 	specDir := mustSpecDir(t, root, specID)
 	must(t, os.MkdirAll(specDir, 0o755))
 
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "spec.md"), validSpecMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "spec.md"), validSpecMD(specID))
 
 	// ADR-0023: no lifecycle.yaml or focus file — state derived from beads.
 
@@ -338,7 +337,7 @@ func TestScenario_HappyPath(t *testing.T) {
 	assertState(t, root, specID, state.ModePlan, state.ModePlan)
 
 	// Write plan.md for plan approval
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "plan.md"), validPlanMD(specID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
@@ -390,7 +389,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	}
 
 	// Write and approve plan
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "plan.md"), validPlanMD(specID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
@@ -416,7 +415,7 @@ func TestScenario_InterruptForBug(t *testing.T) {
 	}
 
 	// Write and approve bug plan
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", bugSpecID, "plan.md"), validPlanMD(bugSpecID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", bugSpecID, "plan.md"), validPlanMD(bugSpecID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add bug plan")
 
@@ -504,7 +503,7 @@ func TestValidateFromWorktree(t *testing.T) {
 	specID := "090-wt-validate"
 
 	// Create spec worktree directory structure with spec artifacts
-	// (spec files do NOT exist in main repo's .mindspec/docs/specs/)
+	// (spec files do NOT exist in main repo's .mindspec/specs/)
 	wtSpecDir := filepath.Join(root, ".worktrees", "worktree-spec-"+specID,
 		".mindspec", "docs", "specs", specID)
 	must(t, os.MkdirAll(wtSpecDir, 0o755))
@@ -540,7 +539,7 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
 
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "plan.md"), validPlanMD(specID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
@@ -578,7 +577,7 @@ func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
 
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "plan.md"), validPlanMD(specID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 
@@ -612,7 +611,7 @@ func TestScenario_PlanApprovalDirtyTreeIsHardError(t *testing.T) {
 		t.Fatalf("ApproveSpec: %v", err)
 	}
 
-	writeFile(t, root, filepath.Join(".mindspec/docs/specs", specID, "plan.md"), validPlanMD(specID))
+	writeFile(t, root, filepath.Join(".mindspec/specs", specID, "plan.md"), validPlanMD(specID))
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-m", "add plan")
 

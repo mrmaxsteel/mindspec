@@ -6,35 +6,76 @@ This document is the reference for MindSpec's documentation structure: what each
 
 ## Directory Structure
 
+MindSpec uses a **flat** lifecycle tree (spec 106 / ADR-0039): the lifecycle
+artifacts live DIRECTLY under `.mindspec/` (no intermediate `docs/` directory),
+and user/dogfood documentation is evicted to a TOP-LEVEL `project-docs/` tree
+(never under `.mindspec/`, and never aliased to a root `docs/`).
+
 ```
 .mindspec/
-  docs/
-    adr/                   # Cross-cutting Architecture Decision Records
-      ADR-NNNN.md
-    core/                  # Project-wide architecture, conventions, modes
-      ARCHITECTURE.md
-      CONVENTIONS.md
-      MODES.md
-      USAGE.md
-      DOCS-LAYOUT.md       # This file
-    domains/               # Bounded domain documentation
-      <domain>/
-        overview.md
-        architecture.md
-        interfaces.md
-        runbook.md
-        adr/               # Domain-scoped ADRs
-          ADR-NNNN.md
-    specs/                 # Feature specifications
-      NNN-slug/
-        spec.md
-        plan.md
-        context-pack.md    # Generated
-    context-map.md         # Bounded-context relationships
+  adr/                     # Cross-cutting Architecture Decision Records
+    ADR-NNNN.md
+  core/                    # Project-wide architecture, conventions, modes
+    ARCHITECTURE.md
+    CONVENTIONS.md
+    MODES.md
+    USAGE.md
+    DOCS-LAYOUT.md         # This file
+  domains/                 # Bounded domain documentation
+    <domain>/
+      overview.md
+      architecture.md
+      interfaces.md
+      runbook.md
+      OWNERSHIP.yaml       # Doc-sync ownership manifest
+      adr/                 # Domain-scoped ADRs
+        ADR-NNNN.md
+  specs/                   # Feature specifications
+    NNN-slug/
+      spec.md
+      plan.md
+      context-pack.md      # Generated
+      recording/           # Session recordings
+      reviews/             # Co-located panel-review artifacts (ADR-0037 amend)
+        <panel-slug>/
+          panel.json       # The gate's source of truth
+  context-map.md           # Bounded-context relationships
+  config.yaml              # Project config
   state.json               # Convenience cursor (not source of truth)
+project-docs/              # User/dogfood docs — TOP-LEVEL, NOT under .mindspec/
+  user/                    # READMEs, guides, onboarding, operational notes
+  installation/            # Install/setup notes
+  research/                # Background research
 AGENTS.md                  # Cross-agent instruction file
 CLAUDE.md                  # Claude Code-specific instructions
 ```
+
+### Per-artifact three-tier read order (spec 106 Req 1 / ADR-0039)
+
+Every artifact accessor resolves with **flat → canonical → legacy**
+first-exists-wins precedence, so the framework reads pre-flatten checkouts
+unchanged while preferring the flat shape:
+
+1. **flat** — `.mindspec/{specs,adr,domains,core}`, `.mindspec/context-map.md`
+   (the current shape).
+2. **canonical** — `.mindspec/docs/{specs,adr,domains,core}`,
+   `.mindspec/docs/context-map.md` (the pre-spec-106 nested shape).
+3. **legacy** — root `docs/{specs,adr,domains,core}` (oldest pre-`.mindspec`
+   repos).
+
+The git-ref gate matchers (doc-sync, ownership, divergence) recognize ALL THREE
+prefixes **permanently** — decoupled from the filesystem read-tier lifecycle —
+because historical refs, old branches, and external forks keep emitting the
+canonical/legacy paths forever.
+
+### Reviews co-location (ADR-0037 amendment)
+
+Panel-review artifacts (`panel.json`, BRIEF, verdicts) are **co-located under
+the spec they review** at `.mindspec/specs/<id>/reviews/<panel-slug>/` — a
+sibling of `recording/` — rather than a repo-root `review/` tree. On a flat
+tree the `mindspec complete` panel gate scans the co-located
+`<spec-dir>/reviews/*/panel.json` ONLY; the old repo-root `review/` location no
+longer drives the gate.
 
 ---
 

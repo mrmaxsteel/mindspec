@@ -33,6 +33,30 @@ func touchFile(t *testing.T, root, rel string) {
 	}
 }
 
+// TestCanonicalDomains_FlatTree is the spec 106 doctor tier-awareness
+// regression: on a FLAT tree (domains under .mindspec/domains/, no
+// .mindspec/docs/ nesting) the doctor ownership scan must still enumerate the
+// domains. Before the fix canonicalDomains read .mindspec/docs/domains/ only and
+// returned nil on a flat tree, silently skipping every per-domain manifest check.
+func TestCanonicalDomains_FlatTree(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"workflow", "core"} {
+		dir := filepath.Join(root, ".mindspec", "domains", d)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "OWNERSHIP.yaml"), []byte("paths:\n  - internal/"+d+"/**\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := canonicalDomains(root)
+	want := []string{"core", "workflow"} // sorted
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("canonicalDomains on a flat tree = %v, want %v", got, want)
+	}
+}
+
 func manifestWarn(r *Report, domain string) *Check {
 	name := manifestCheckName(domain)
 	for i := range r.Checks {
@@ -342,7 +366,7 @@ func TestOwnershipFixer_ScaffoldsStub(t *testing.T) {
 	// Req 15: --fix surfaces the populate prompt via the check message.
 	// The prompt is BuildPopulatePrompt(domain); assert on its
 	// domain-specific opening line.
-	if !strings.Contains(c.Message, "Populate .mindspec/docs/domains/foo/OWNERSHIP.yaml") {
+	if !strings.Contains(c.Message, "Populate .mindspec/domains/foo/OWNERSHIP.yaml") {
 		t.Errorf("fix output must surface the populate prompt, got %q", c.Message)
 	}
 }

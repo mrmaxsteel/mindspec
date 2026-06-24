@@ -29,7 +29,9 @@ var migrateCmd = &cobra.Command{
 	Short: "Emit a prompt instructing the coding agent to reorganize docs",
 	Long: `Scans the repository for markdown files and emits a structured prompt
 that instructs the coding agent to reorganize them into the canonical
-MindSpec documentation structure under .mindspec/docs/.
+MindSpec documentation structure: lifecycle/authored artifacts under the flat
+.mindspec/{specs,adr,domains,core} children, and user/dogfood docs under
+top-level project-docs/.
 
 Use --json to output just the file inventory for programmatic use.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -320,7 +322,7 @@ instructs you to derive them by inspecting the tree.
 
 ## Phase 5 — Context Map Population
 
-After domains exist, populate ` + "`.mindspec/docs/context-map.md`" + `:
+After domains exist, populate ` + "`.mindspec/context-map.md`" + `:
 
 1. Identify upstream/downstream relationships between domains
 2. Document peer relationships and shared-kernel patterns
@@ -355,27 +357,30 @@ Finally, classify and move any stray documentation files into canonical location
 ### Canonical Structure
 
 ` + "```" + `
-.mindspec/docs/
-├── adr/              # Architecture Decision Records (ADR-NNNN.md)
-├── core/             # Project-wide architecture, conventions, modes, usage
-├── domains/          # Bounded domain docs (overview.md, architecture.md, interfaces.md, runbook.md)
-├── specs/            # Feature specs (NNN-slug/spec.md, plan.md)
-├── user/             # READMEs, guides, onboarding, operational notes
-├── agent/            # Agent instruction files (CLAUDE.md, .cursorrules, etc.)
-└── context-map.md    # Bounded-context map and cross-context contracts
+.mindspec/                # Lifecycle/authored artifacts (FLAT — no docs/ nesting)
+├── adr/                  # Architecture Decision Records (ADR-NNNN.md)
+├── core/                 # Project-wide architecture, conventions, modes, usage
+├── domains/              # Bounded domain docs (overview.md, architecture.md, interfaces.md, runbook.md)
+├── specs/                # Feature specs (NNN-slug/spec.md, plan.md)
+└── context-map.md        # Bounded-context map and cross-context contracts
+
+project-docs/             # User/dogfood docs — TOP-LEVEL, NOT under .mindspec/
+├── user/                 # READMEs, guides, onboarding, operational notes
+├── installation/         # Install/setup notes
+└── research/             # Background research
 ` + "```" + `
 
 ### Category Rubric
 
 | Category | Description | Target |
 |----------|-------------|--------|
-| adr | Architecture Decision Records (ADR-NNNN, decision/status content) | .mindspec/docs/adr/ |
-| spec | Feature specs, plans, acceptance criteria, context packs | .mindspec/docs/specs/ |
-| domain | Docs scoped to a bounded domain (overview, architecture, interfaces, runbook) | .mindspec/docs/domains/<domain-name>/ |
-| core | Project-wide architecture, process, conventions (not domain-specific) | .mindspec/docs/core/ |
-| context-map | Bounded-context map and cross-context relationships | .mindspec/docs/context-map.md |
-| user-docs | READMEs, guides, operational notes, onboarding/help content | .mindspec/docs/user/ |
-| agent | Agent/tool instruction files (CLAUDE.md, agents.md, .cursorrules, copilot configs) | .mindspec/docs/agent/ |
+| adr | Architecture Decision Records (ADR-NNNN, decision/status content) | .mindspec/adr/ |
+| spec | Feature specs, plans, acceptance criteria, context packs | .mindspec/specs/ |
+| domain | Docs scoped to a bounded domain (overview, architecture, interfaces, runbook) | .mindspec/domains/<domain-name>/ |
+| core | Project-wide architecture, process, conventions (not domain-specific) | .mindspec/core/ |
+| context-map | Bounded-context map and cross-context relationships | .mindspec/context-map.md |
+| user-docs | READMEs, guides, operational notes, onboarding/help content | project-docs/ |
+| agent | Agent/tool instruction files (CLAUDE.md, agents.md, .cursorrules, copilot configs) | (repo root — typically category: skip) |
 | skip | Files that should stay where they are (e.g., root README.md, CHANGELOG.md) | (no move) |
 
 ### Decision Rules
@@ -383,14 +388,14 @@ Finally, classify and move any stray documentation files into canonical location
 1. Content outweighs path when they conflict
 2. If a file contains mixed content that should be split, split it into separate files
 3. Root-level README.md and CHANGELOG.md typically stay in place (category: skip)
-4. Files already under .mindspec/docs/ are already canonical — skip them
+4. Files already under .mindspec/ (specs/, adr/, domains/, core/) or project-docs/ are already canonical — skip them
 5. Preserve relative links between documents (update paths after moving)
 
 `)
 
 	b.WriteString("## Source Files to Classify\n\n")
 	if len(sourceFiles) == 0 {
-		b.WriteString("No source markdown files found outside .mindspec/docs/.\n\n")
+		b.WriteString("No source markdown files found outside the canonical .mindspec/ + project-docs/ locations.\n\n")
 	} else {
 		b.WriteString("These markdown files were found outside the canonical docs location:\n\n")
 		for _, f := range sourceFiles {
@@ -401,7 +406,7 @@ Finally, classify and move any stray documentation files into canonical location
 
 	b.WriteString("## Existing Canonical Docs\n\n")
 	if len(canonicalFiles) == 0 {
-		b.WriteString("No existing canonical docs found. The .mindspec/docs/ directory will be created.\n\n")
+		b.WriteString("No existing canonical docs found. The flat .mindspec/ structure will be created.\n\n")
 	} else {
 		b.WriteString("These files already exist in the canonical location:\n\n")
 		for _, f := range canonicalFiles {

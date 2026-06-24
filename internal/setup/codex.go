@@ -150,7 +150,7 @@ Transition between modes using ` + "`mindspec spec approve`" + ` / ` + "`mindspe
 
 ## Conventions
 
-- Every functional change must reference a spec in ` + "`.mindspec/docs/specs/`" + `
+- Every functional change must reference a spec in ` + "`.mindspec/specs/`" + `
 - In Spec and Plan modes, only documentation may be created or modified — no code changes
 - Working tree must be clean before switching modes
 - Run ` + "`mindspec doctor`" + ` to verify project structure health

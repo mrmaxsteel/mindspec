@@ -15,12 +15,14 @@ func TestSandboxCreatesValidRepo(t *testing.T) {
 		t.Error(".git directory missing")
 	}
 
-	// .mindspec structure (from bootstrap.Run + sandbox config overlay)
+	// .mindspec structure (from bootstrap.Run + sandbox config overlay).
+	// Spec 106: greenfield bootstrap is born FLAT — specs/ and domains/
+	// live directly under .mindspec/, not nested under .mindspec/docs/.
 	for _, path := range []string{
 		".mindspec",
 		".mindspec/config.yaml",
-		".mindspec/docs",
-		".mindspec/docs/specs",
+		".mindspec/specs",
+		".mindspec/domains",
 		"AGENTS.md",
 	} {
 		if !s.FileExists(path) {

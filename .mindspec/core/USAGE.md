@@ -20,7 +20,7 @@ All agent operating guidance is emitted dynamically by `mindspec instruct` (run 
 
 ## Phase 0: Project Bootstrap
 
-If the project has not been set up yet, run `mindspec init` to scaffold the full directory structure, starter files (GLOSSARY.md, CLAUDE.md, context-map, policies, state), and domain templates. All creation is additive — existing files are never overwritten. After init, `mindspec doctor` should report zero errors.
+If the project has not been set up yet, run `mindspec init` to scaffold the full flat directory structure, starter files (CLAUDE.md, AGENTS.md, state), and domain templates. All creation is additive — existing files are never overwritten. After init, `mindspec doctor` should report zero errors.
 
 ## Phase 0.5: Idle
 
@@ -46,7 +46,7 @@ Explore Mode is a lightweight, conversational pre-spec phase for evaluating idea
 ### Agent does
 1. Sets state to `mode: explore`
 2. Clarifies the problem statement
-3. Checks prior art (existing ADRs, specs, glossary entries)
+3. Checks prior art (existing ADRs and specs)
 4. Assesses feasibility and rough costs
 5. Enumerates alternatives (including "do nothing")
 6. Makes a recommendation: pursue or dismiss

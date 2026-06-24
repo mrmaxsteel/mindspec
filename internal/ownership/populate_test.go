@@ -56,7 +56,7 @@ func TestBuildPopulatePrompt_NamesDomainAndManifestPath(t *testing.T) {
 	prompt := BuildPopulatePrompt("payments")
 
 	required := []string{
-		".mindspec/docs/domains/payments/OWNERSHIP.yaml",
+		".mindspec/domains/payments/OWNERSHIP.yaml",
 		`the "payments" domain`,
 		"overview.md",
 		"architecture.md",

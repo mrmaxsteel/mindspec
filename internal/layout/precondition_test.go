@@ -217,7 +217,7 @@ func TestCheckPrecondition_DirtyTreeIgnoresOperationalResidue(t *testing.T) {
 // adr-divergence-unowned at complete (AC21 ownership half). The test resolves
 // the repo-root manifest relative to this package directory.
 func TestLayoutPackageIsOwned(t *testing.T) {
-	manifest := filepath.Join("..", "..", ".mindspec", "docs", "domains", "workflow", "OWNERSHIP.yaml")
+	manifest := filepath.Join("..", "..", ".mindspec", "domains", "workflow", "OWNERSHIP.yaml")
 	data, err := os.ReadFile(manifest)
 	if err != nil {
 		t.Fatalf("read OWNERSHIP.yaml: %v", err)
