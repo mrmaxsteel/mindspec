@@ -717,6 +717,120 @@ func TestResolverMatrix(t *testing.T) {
 	}
 }
 
+// TestDownstreamCompat_NoFlatFlip_ReadWrite is the panel R3/R6
+// downstream-compatibility smoke test: a do-nothing upgrader (one that never
+// runs `migrate layout`) is NOT broken by spec 106. It EXTENDS the read-only
+// coverage in TestResolverMatrix (which already pins byte-identical READ
+// resolution on canonical/legacy/flat fixtures) with the missing WRITE-path
+// assertion: for both a canonical .mindspec/docs/... project and a legacy
+// docs/... project, neither layout false-flips to flat, the resolvers READ AND
+// WRITE byte-identically, and a write through the resolver lands in — and reads
+// back unchanged from — the same legacy/canonical location, creating no flat
+// lifecycle tree.
+//
+// What I found: TestResolverMatrix asserts read resolution only and never writes
+// through a resolver nor re-checks DetectLayout afterward, so this adds the
+// explicit write-path + no-flat-flip guarantee.
+func TestDownstreamCompat_NoFlatFlip_ReadWrite(t *testing.T) {
+	const specID = "044-launch-website"
+	const body = "# downstream content\nbyte-identical roundtrip\n"
+
+	cases := []struct {
+		name       string
+		docsRel    []string
+		wantLayout Layout
+	}{
+		{name: "canonical", docsRel: []string{".mindspec", "docs"}, wantLayout: LayoutCanonical},
+		{name: "legacy", docsRel: []string{"docs"}, wantLayout: LayoutLegacy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			docsRoot := filepath.Join(append([]string{root}, tc.docsRel...)...)
+			mkTree(t, docsRoot, specID)
+
+			// (1) No false-flip to flat: the whole-tree classification stays
+			// canonical/legacy (and is not a hard error).
+			if got, err := DetectLayout(root); err != nil || got != tc.wantLayout {
+				t.Fatalf("DetectLayout = %q (err %v), want %q", got, err, tc.wantLayout)
+			}
+
+			// (2) READ path: every resolver points at the legacy/canonical tree
+			// (byte-identical to the pre-spec resolution).
+			specDir, err := SpecDir(root, specID)
+			if err != nil {
+				t.Fatalf("SpecDir: %v", err)
+			}
+			adrDir := ADRDir(root)
+			cmPath := ContextMapPath(root)
+			coreDir := CoreDir(root)
+			domDir, err := DomainDir(root, "core")
+			if err != nil {
+				t.Fatalf("DomainDir: %v", err)
+			}
+			for _, c := range []struct{ got, want string }{
+				{specDir, filepath.Join(docsRoot, "specs", specID)},
+				{adrDir, filepath.Join(docsRoot, "adr")},
+				{cmPath, filepath.Join(docsRoot, "context-map.md")},
+				{coreDir, filepath.Join(docsRoot, "core")},
+				{domDir, filepath.Join(docsRoot, "domains", "core")},
+			} {
+				if c.got != c.want {
+					t.Errorf("read resolver = %q, want %q", c.got, c.want)
+				}
+			}
+
+			// (3) WRITE path: writing a new artifact THROUGH the resolver lands in
+			// the legacy/canonical tree. Write a new spec file under the resolved
+			// spec dir and a new ADR via ADRFilePath.
+			specFile := filepath.Join(specDir, "plan.md")
+			if err := os.WriteFile(specFile, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			adrPath, err := ADRFilePath(root, "ADR-0007")
+			if err != nil {
+				t.Fatalf("ADRFilePath: %v", err)
+			}
+			if want := filepath.Join(docsRoot, "adr", "ADR-0007.md"); adrPath != want {
+				t.Fatalf("ADRFilePath = %q, want %q (legacy/canonical location)", adrPath, want)
+			}
+			if err := os.WriteFile(adrPath, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Re-resolve AFTER the writes: paths are unchanged (no flat flip).
+			if got, _ := SpecDir(root, specID); got != specDir {
+				t.Errorf("post-write SpecDir = %q, want %q (unchanged)", got, specDir)
+			}
+			if got := ADRDir(root); got != adrDir {
+				t.Errorf("post-write ADRDir = %q, want %q (unchanged)", got, adrDir)
+			}
+
+			// Read back byte-identical from the same location.
+			for _, p := range []string{specFile, adrPath} {
+				data, rerr := os.ReadFile(p)
+				if rerr != nil {
+					t.Fatalf("read back %s: %v", p, rerr)
+				}
+				if string(data) != body {
+					t.Errorf("read back %s = %q, want byte-identical %q", p, string(data), body)
+				}
+			}
+
+			// (4) Still NOT flat after writing, and NO flat lifecycle tree was
+			// created directly under .mindspec/.
+			if got, err := DetectLayout(root); err != nil || got != tc.wantLayout {
+				t.Fatalf("after writes DetectLayout = %q (err %v), want %q", got, err, tc.wantLayout)
+			}
+			for _, flatChild := range []string{"specs", "adr", "domains", "core"} {
+				if _, err := os.Stat(filepath.Join(root, ".mindspec", flatChild)); err == nil {
+					t.Errorf("a flat .mindspec/%s tree was created — layout false-flipped to flat", flatChild)
+				}
+			}
+		})
+	}
+}
+
 // TestResolverFlatFirstWins pins the flat-FIRST read precedence: when a flat
 // artifact coexists with a canonical one, the flat path wins (AC2).
 func TestResolverFlatFirstWins(t *testing.T) {

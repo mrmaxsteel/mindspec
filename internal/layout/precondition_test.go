@@ -41,7 +41,7 @@ func TestClassifyRefs_TolerateLockedAndForks(t *testing.T) {
 	remotes := []string{"origin/main", "origin/spec/106", "fork/feature", "someuser/experiment"}
 	locked := map[string]bool{"bead/locked-wt": true}
 
-	candidates, tolerated := classifyRefs(locals, remotes, "main", locked)
+	candidates, tolerated := classifyRefs(locals, remotes, "main", "", locked, nil)
 
 	hasCand := func(n string) bool {
 		for _, c := range candidates {
@@ -78,6 +78,46 @@ func TestClassifyRefs_TolerateLockedAndForks(t *testing.T) {
 	}
 	if hasCand("someuser/experiment") || !hasTol("someuser/experiment") {
 		t.Error("someuser/experiment fork must be tolerated, not a candidate")
+	}
+}
+
+// TestClassifyRefs_AllowlistAndRemoteDefault asserts the bead-sc0w scoping: a
+// branch in the allowlist is TOLERATED (never a candidate), the remote default
+// branch is excluded alongside the target (both local and origin/<default>
+// forms), and an ordinary unrelated branch is still a candidate.
+func TestClassifyRefs_AllowlistAndRemoteDefault(t *testing.T) {
+	locals := []string{"main", "master", "fix/old-thing", "spec/active"}
+	remotes := []string{"origin/main", "origin/master", "origin/fix/old-thing"}
+	// target=main, but the remote default is master (e.g. a repo whose default
+	// differs from the requested merge target).
+	allow := map[string]bool{"fix/old-thing": true}
+
+	candidates, tolerated := classifyRefs(locals, remotes, "main", "master", nil, allow)
+
+	in := func(set []string, n string) bool {
+		for _, c := range set {
+			if c == n {
+				return true
+			}
+		}
+		return false
+	}
+
+	// The remote default (master / origin/master) is excluded entirely,
+	// like the target.
+	if in(candidates, "master") || in(candidates, "origin/master") {
+		t.Error("remote default branch must not be a block-candidate")
+	}
+	// Allowlisted branch → tolerated by full name AND by origin/<branch> form.
+	if in(candidates, "fix/old-thing") || !in(tolerated, "fix/old-thing") {
+		t.Error("allowlisted local branch must be tolerated, not a candidate")
+	}
+	if in(candidates, "origin/fix/old-thing") || !in(tolerated, "origin/fix/old-thing") {
+		t.Error("allowlisted origin/<branch> must be tolerated, not a candidate")
+	}
+	// An ordinary unrelated branch is still a candidate.
+	if !in(candidates, "spec/active") {
+		t.Error("spec/active should still be a block-candidate")
 	}
 }
 
@@ -162,6 +202,74 @@ func TestCheckPrecondition_TolerateForkAndPostFlatten(t *testing.T) {
 	tolerated := strings.Join(res.Tolerated, ",")
 	if !strings.Contains(tolerated, "fork/experiment") {
 		t.Errorf("fork/experiment should be tolerated, got %q", tolerated)
+	}
+}
+
+// TestCheckPrecondition_UnrelatedStaleBranchEscapes is the bead-sc0w regression:
+// an unrelated stale (unmerged, pre-flatten) branch present in the repo does NOT
+// block the migration once the operator declares it irrelevant — via either the
+// --allow-branch allowlist or the blanket --force escape — instead of walling
+// the flatten the way the unscoped precondition did during spec-106's own
+// dogfood.
+func TestCheckPrecondition_UnrelatedStaleBranchEscapes(t *testing.T) {
+	// fix/stale is an old branch forked before the flatten and never merged:
+	// unmerged (tip != merge-base) AND pre-flatten (merge-base carries the
+	// canonical .mindspec/docs layout) — exactly the false-positive shape.
+	newGit := func() *fakeGit {
+		return &fakeGit{
+			locals:  []string{"main", "fix/stale"},
+			remotes: []string{"origin/main"},
+			mergeBase: map[string]string{
+				"fix/stale":   "base-canonical",
+				"origin/main": "base-flat",
+			},
+			refSha: map[string]string{
+				"fix/stale":   "tip-stale", // != merge-base → unmerged
+				"origin/main": "base-flat",
+			},
+			sig: map[string][]string{
+				"base-canonical": {"docs"},                            // pre-flatten
+				"base-flat":      {"specs", "adr", "domains", "core"}, // flat
+			},
+		}
+	}
+
+	// Baseline (no escape): the strict default still blocks, proving the test
+	// fixture is a genuine blocker.
+	if res, err := CheckPrecondition(newGit(), "/repo", PreconditionOptions{Target: "main"}); err != nil {
+		t.Fatalf("CheckPrecondition baseline: %v", err)
+	} else if len(res.Blocking) != 1 || res.Blocking[0].Name != "fix/stale" {
+		t.Fatalf("baseline: expected fix/stale to block, got %+v", res.Blocking)
+	}
+
+	// Allowlist escape: fix/stale is declared known-irrelevant → tolerated, NOT
+	// blocking.
+	res, err := CheckPrecondition(newGit(), "/repo", PreconditionOptions{
+		Target:    "main",
+		Allowlist: map[string]bool{"fix/stale": true},
+	})
+	if err != nil {
+		t.Fatalf("CheckPrecondition allowlist: %v", err)
+	}
+	if len(res.Blocking) != 0 {
+		t.Errorf("allowlist: expected no blocking refs, got %+v", res.Blocking)
+	}
+	if !strings.Contains(strings.Join(res.Tolerated, ","), "fix/stale") {
+		t.Errorf("allowlist: fix/stale should be tolerated, got %q", res.Tolerated)
+	}
+
+	// Force escape: blanket bypass clears all blockers and surfaces an auditable
+	// WARN naming the bypassed branch.
+	res, err = CheckPrecondition(newGit(), "/repo", PreconditionOptions{Target: "main", Force: true})
+	if err != nil {
+		t.Fatalf("CheckPrecondition force: %v", err)
+	}
+	if len(res.Blocking) != 0 {
+		t.Errorf("force: expected no blocking refs, got %+v", res.Blocking)
+	}
+	warned := strings.Join(res.Warnings, " | ")
+	if !strings.Contains(warned, "force") || !strings.Contains(warned, "fix/stale") {
+		t.Errorf("force: expected a force-bypass WARN naming fix/stale, got %q", warned)
 	}
 }
 

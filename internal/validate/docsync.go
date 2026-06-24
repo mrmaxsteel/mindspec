@@ -370,12 +370,13 @@ func hasArtifactPrefix(path, name string) bool {
 // CONSISTENT with the authoritative root-doc sets at the two other sites that
 // treat these as root docs: the layout mover's link-rewrite set
 // (internal/layout DefaultRootDocs = README.md, AGENTS.md) and the link lane's
-// scan set (internal/doctor movedTreeRootDocs = README.md, AGENTS.md,
-// .mindspec/context-map.md). CLAUDE.md is the agent-entry doc; BENCH-MOVED.md
-// is the tracked bench-relocation operator note touched by the flatten (spec
-// 106 Bead 5). Matched by EXACT name — deliberately NOT an "any top-level .md"
-// rule — so a real source-adjacent top-level .md is still classified as source
-// and the ADR-divergence lane keeps governing it.
+// 404 scan, which since bead-3jq7 sweeps EVERY repo-root *.md (internal/doctor
+// repoRootMarkdown) plus the flat .mindspec/context-map.md. CLAUDE.md is the
+// agent-entry doc; BENCH-MOVED.md is the tracked bench-relocation operator note
+// touched by the flatten (spec 106 Bead 5). Matched by EXACT name —
+// deliberately NOT an "any top-level .md" rule — so a real source-adjacent
+// top-level .md is still classified as source and the ADR-divergence lane keeps
+// governing it.
 var rootOperatorDocs = map[string]struct{}{
 	"CLAUDE.md":      {},
 	"AGENTS.md":      {},

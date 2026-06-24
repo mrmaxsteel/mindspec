@@ -110,6 +110,58 @@ func loadState(root, runID string) (State, bool, error) {
 	return s, true, nil
 }
 
+// IsResumable reports whether a run-state record for runID exists and has NOT
+// reached the terminal "applied" stage — i.e. a re-run should RESUME it rather
+// than start fresh (panel R5). The migrate-layout CLI consults this BEFORE
+// enforcing the fresh-run clean-tree precondition, so a crash AFTER the
+// rewrite-but-before-commit step (which leaves dirty moved markdown) resumes to
+// completion instead of being refused by the clean-tree check. An absent record
+// is not resumable (a fresh run).
+func IsResumable(root, runID string) (bool, error) {
+	s, found, err := loadState(root, runID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	return s.Stage != string(stageApplied), nil
+}
+
+// FindResumableRun scans .mindspec/migrations/<run-id>/ for an in-progress
+// (non-terminal) run to resume when the operator did not pass an explicit
+// --run-id (panel R5). Run-id directory names are UTC timestamps, so the
+// lexical max is the newest; the newest resumable run wins. A
+// terminal/absent/unreadable run is skipped. Returns ("", false, nil) when no
+// resumable run exists.
+func FindResumableRun(root string) (runID string, found bool, err error) {
+	migrationsDir := filepath.Join(root, ".mindspec", "migrations")
+	entries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	best := ""
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		s, ok, lerr := loadState(root, e.Name())
+		if lerr != nil || !ok { // unreadable/unparseable/absent → not a live recovery
+			continue
+		}
+		if s.Stage == "" || s.Stage == string(stageApplied) {
+			continue
+		}
+		if e.Name() > best {
+			best = e.Name()
+		}
+	}
+	return best, best != "", nil
+}
+
 // writeJSON marshals v (indented) to path, creating parent dirs.
 func writeJSON(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

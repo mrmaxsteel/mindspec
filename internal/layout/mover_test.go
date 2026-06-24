@@ -681,3 +681,107 @@ func containsStr(s []string, v string) bool {
 	}
 	return false
 }
+
+// TestMover_LinkCheckFailsBrokenNonReadmeRootDoc is the bead-3jq7 migration-gate
+// regression: a broken link in a tracked repo-root doc OUTSIDE the rewriter's
+// {README,AGENTS} set (here BENCH-MOVED.md) now FAILS the migration. The mover
+// rewrites only README/AGENTS, so BENCH-MOVED.md keeps its pre-flatten
+// `.mindspec/docs/...` link, which 404s after the flatten — and the widened
+// link-existence gate catches it instead of reporting GREEN.
+func TestMover_LinkCheckFailsBrokenNonReadmeRootDoc(t *testing.T) {
+	root, exec := newCanonicalRepo(t)
+	// A repo-root doc that is NOT rewritten (not in DefaultRootDocs) referencing
+	// a pre-flatten adr path that ceases to exist after the flatten.
+	writeRepoFile(t, root, "BENCH-MOVED.md", "# Bench moved\n[adr](.mindspec/docs/adr/ADR-0001.md)\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-m", "add BENCH-MOVED.md root doc with a pre-flatten link")
+	preRun := runGit(t, root, "rev-parse", "HEAD")
+
+	err := NewMover(exec, root, "run-rootdoc-404").Run()
+	if err == nil {
+		t.Fatal("expected link-check failure on broken non-README root doc, got nil")
+	}
+	lce, ok := errAsLinkCheck(err)
+	if !ok {
+		t.Fatalf("expected *LinkCheckError, got %T: %v", err, err)
+	}
+	foundBench := false
+	for _, d := range lce.Dangling {
+		if d.File == "BENCH-MOVED.md" {
+			foundBench = true
+		}
+	}
+	if !foundBench {
+		t.Errorf("expected BENCH-MOVED.md among dangling links, got %+v", lce.Dangling)
+	}
+	// Pre-publish failure rolled back to the pre-run ref.
+	if head := runGit(t, root, "rev-parse", "HEAD"); head != preRun {
+		t.Errorf("link-check failure did not roll back: %s != %s", head, preRun)
+	}
+}
+
+// TestMover_ResumeAfterDirtyRewriteCrash is the panel-R5 regression: a crash
+// AFTER the subtree rewrite but BEFORE its commit leaves dirty moved markdown.
+// The migrate-layout CLI must detect the in-progress run and RESUME it BEFORE
+// enforcing the fresh-run clean-tree precondition — the clean-tree check applies
+// only to a fresh start. This drives the exact resume-detection helpers the CLI
+// consults (FindResumableRun / IsResumable) and proves the old ordering
+// (clean-tree first) WOULD have refused the resume.
+func TestMover_ResumeAfterDirtyRewriteCrash(t *testing.T) {
+	root, exec := newCustomRewriteRepo(t)
+
+	// Crash right after the rewrite is applied to the working tree but before it
+	// is committed → dirty, uncommitted moved markdown.
+	crash := customMover(exec, root, "run-resume")
+	crash.crashAt = stageAfterRewrite
+	crash.crashAtGroup = 0
+	if err := crash.Run(); err == nil {
+		t.Fatal("expected simulated crash at after-rewrite, got nil")
+	}
+
+	// The crash left dirty moved markdown (the rewrite is uncommitted).
+	if status := runGit(t, root, "status", "--porcelain", "--", "moved"); status == "" {
+		t.Fatal("precondition: expected a dirty moved tree after the rewrite-before-commit crash")
+	}
+
+	// The fresh-run clean-tree precondition WOULD refuse this dirty tree — which
+	// is exactly why resume must be detected BEFORE it runs.
+	if _, err := CheckPrecondition(exec, root, PreconditionOptions{Target: "main", RequireCleanTree: true}); err == nil {
+		t.Fatal("expected the clean-tree precondition to refuse the dirty post-crash tree")
+	} else if !strings.Contains(err.Error(), "dirty working tree") {
+		t.Fatalf("unexpected precondition error: %v", err)
+	}
+
+	// Resume detection: the CLI's helpers identify the in-progress run.
+	id, found, err := FindResumableRun(root)
+	if err != nil {
+		t.Fatalf("FindResumableRun: %v", err)
+	}
+	if !found || id != "run-resume" {
+		t.Fatalf("FindResumableRun = (%q, %v), want (run-resume, true)", id, found)
+	}
+	if ok, err := IsResumable(root, "run-resume"); err != nil || !ok {
+		t.Fatalf("IsResumable(run-resume) = (%v, %v), want (true, nil)", ok, err)
+	}
+
+	// Resume to completion (the CLI skips the clean-tree precondition here).
+	if err := customMover(exec, root, "run-resume").Run(); err != nil {
+		t.Fatalf("resume Run: %v", err)
+	}
+	mustExist(t, root, "moved/a.md")
+	mustNotExist(t, root, "things")
+	if got := readRepoFile(t, root, "moved/a.md"); !strings.Contains(got, "[b](b.md)") || strings.Contains(got, "old-target.md") {
+		t.Errorf("after resume, a.md not rewritten: %q", got)
+	}
+	// The doc tree is clean of uncommitted changes after resume (the mover's own
+	// .mindspec/ run-state residue is untracked operational output, not a dirty
+	// doc change — scope the assertion to the moved doc tree).
+	if status := runGit(t, root, "status", "--porcelain", "--", "moved"); status != "" {
+		t.Errorf("after resume the moved doc tree should be clean, got:\n%s", status)
+	}
+
+	// A completed run is no longer resumable.
+	if ok, err := IsResumable(root, "run-resume"); err != nil || ok {
+		t.Errorf("IsResumable after completion = (%v, %v), want (false, nil)", ok, err)
+	}
+}
