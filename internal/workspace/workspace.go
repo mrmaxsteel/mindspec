@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -225,9 +226,12 @@ func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers {
 var ErrMixedLayout = errors.New("mixed docs layout: a flat .mindspec lifecycle tree coexists with a canonical (.mindspec/docs) or legacy (docs/) tree")
 
 // DetectLayout classifies the whole-tree docs layout under root (Req 2). A
-// mixed tree is a hard error UNLESS a migration recovery is recorded under
-// .mindspec/migrations/<run-id>/, in which case the transient mixed state is
-// tolerated and returned without error. The classification drives the
+// mixed tree is a hard error UNLESS an IN-PROGRESS (non-terminal) migration run
+// is recorded under .mindspec/migrations/<run-id>/, in which case the transient
+// mixed state of a live recovery is tolerated and returned without error. A
+// COMPLETED run's record (which persists past the run; Req 4 / AC9) does NOT
+// activate the exception — see migrationRecoveryActive. The classification
+// drives the
 // write-default (see isFlatTree): a bootstrapped flat tree is born flat;
 // existing canonical/legacy projects keep writing their existing form.
 func DetectLayout(root string) (Layout, error) {
@@ -262,20 +266,67 @@ func flatTreePresent(root string) bool {
 	return exists(filepath.Join(mindspec, "context-map.md"))
 }
 
-// migrationRecoveryActive reports whether a migration run-state is recorded
-// under .mindspec/migrations/<run-id>/ — the recorded-recovery exception that
-// lets a transient mixed tree pass (Req 2).
+// migrationRunState is the minimal projection of the layout mover's per-run
+// checkpoint record (.mindspec/migrations/<run-id>/state.json — see
+// internal/layout/runstate.go State and internal/doctor/migration.go runState)
+// needed to tell a LIVE run from a COMPLETED one. Only the stage field matters
+// here; the full schema carries crash-resume bookkeeping the resolver ignores.
+type migrationRunState struct {
+	Stage string `json:"stage"`
+}
+
+// migrationTerminalStage is the mover's terminal/finalize stage: a run that
+// reached it has fully applied and is NO LONGER a live recovery. It mirrors the
+// doctor schema's OK stage (internal/doctor/migration.go) and the mover's
+// stageApplied (internal/layout/runstate.go). A completed run still persists
+// its .mindspec/migrations/<run-id>/ record (Req 4 / AC9), so keying the
+// mixed-layout exception on mere dir existence would let a STALE completed
+// record mask a real half-old/half-flat split — hence the predicate keys on a
+// non-terminal stage, not dir presence.
+const migrationTerminalStage = "applied"
+
+// migrationRecoveryActive reports whether an IN-PROGRESS (non-terminal)
+// migration run is recorded under .mindspec/migrations/<run-id>/ — the
+// recorded-recovery exception that lets a transient mixed tree pass (Req 2).
+//
+// The exception is scoped to a LIVE run: a run dir whose state.json parses and
+// records a non-empty, non-terminal stage (the mover is mid-flight — crashed,
+// interrupted, or stopped at a link-check failure that left the tree mixed). A
+// run dir with no readable state, an empty stage, or the terminal "applied"
+// stage is a COMPLETED (or unrecognizable) record and does NOT activate the
+// exception, so a stale completed record can never silently mask the
+// half-old/half-flat split the spec makes a hard error.
 func migrationRecoveryActive(root string) bool {
-	entries, err := os.ReadDir(filepath.Join(MindspecDir(root), "migrations"))
+	migrationsDir := filepath.Join(MindspecDir(root), "migrations")
+	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
 		return false
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		if !e.IsDir() {
+			continue
+		}
+		if migrationRunInProgress(filepath.Join(migrationsDir, e.Name())) {
 			return true
 		}
 	}
 	return false
+}
+
+// migrationRunInProgress reports whether the migration run recorded in runDir
+// is LIVE: its state.json parses and records a non-empty, non-terminal stage.
+// An absent/unreadable/unparseable state.json, an empty stage, or the terminal
+// stage all read as NOT in progress.
+func migrationRunInProgress(runDir string) bool {
+	data, err := os.ReadFile(filepath.Join(runDir, "state.json"))
+	if err != nil {
+		return false
+	}
+	var st migrationRunState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return false
+	}
+	return st.Stage != "" && st.Stage != migrationTerminalStage
 }
 
 // isFlatTree reports whether root is an actual FLAT lifecycle tree — the
@@ -465,6 +516,31 @@ func DomainDir(root, domain string) (string, error) {
 		return "", err
 	}
 	return resolveArtifact(root, filepath.Join("domains", domain)), nil
+}
+
+// SpecsDir returns the flat-aware ENUMERATION root for specs — the directory
+// that holds every spec's per-id subdirectory — resolved with the same
+// three-tier flat-first precedence as the per-item resolvers (Req 1):
+// .mindspec/specs (flat) → .mindspec/docs/specs (canonical) → docs/specs
+// (legacy). It is the parent that SpecDir(root, id) resolves an <id> under, so a
+// filesystem enumerator can list specs without re-deriving the layout. For
+// every canonical/legacy/greenfield tree with no flat tree present this is
+// byte-for-byte filepath.Join(DocsDir(root), "specs") — the pre-spec
+// enumeration root.
+func SpecsDir(root string) string {
+	return resolveArtifact(root, "specs")
+}
+
+// DomainsDir returns the flat-aware ENUMERATION root for domains — the directory
+// that holds every domain's per-name subdirectory — resolved with the same
+// three-tier flat-first precedence as the per-item resolvers (Req 1):
+// .mindspec/domains (flat) → .mindspec/docs/domains (canonical) → docs/domains
+// (legacy). It is the parent that DomainDir(root, d) resolves a <d> under. For
+// every canonical/legacy/greenfield tree with no flat tree present this is
+// byte-for-byte filepath.Join(DocsDir(root), "domains") — the pre-spec
+// enumeration root.
+func DomainsDir(root string) string {
+	return resolveArtifact(root, "domains")
 }
 
 // RecordingDir returns the path to a spec's recording directory.

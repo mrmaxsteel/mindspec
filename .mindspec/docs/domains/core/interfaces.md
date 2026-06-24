@@ -24,6 +24,14 @@ func DomainDir(root, domain string) (string, error)
 func ContextMapPath(root string) string
 func RecordingDir(root, specID string) (string, error)
 
+// Flat-aware ENUMERATION roots: the parent dirs SpecDir/DomainDir resolve
+// an <id>/<domain> under (same three-tier flat-first precedence). For
+// filesystem enumerators that list all specs/domains without re-deriving
+// the layout. Byte-identical to filepath.Join(DocsDir(root), "specs"|
+// "domains") on canonical/legacy/greenfield trees.
+func SpecsDir(root string) string
+func DomainsDir(root string) string
+
 // TreeRootForSpecDir resolves the checkout tree root from a spec dir in any
 // of the flat / canonical / legacy shapes (preserves mindspec-ew79).
 func TreeRootForSpecDir(specDir string) string
@@ -32,7 +40,8 @@ func TreeRootForSpecDir(specDir string) string
 type Layout string // flat | canonical | legacy | greenfield | mixed
 
 // DetectLayout classifies the tree; mixed is a hard error (ErrMixedLayout)
-// except under a recorded .mindspec/migrations/<run-id>/ recovery.
+// except under an IN-PROGRESS (non-terminal) .mindspec/migrations/<run-id>/
+// run — a completed/"applied" record does not tolerate a mixed tree.
 func DetectLayout(root string) (Layout, error)
 
 // ClassifyLayout is the pure layout-signature classifier shared by

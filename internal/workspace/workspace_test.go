@@ -768,13 +768,51 @@ func TestDetectLayout_FiveStates(t *testing.T) {
 		os.MkdirAll(filepath.Join(root, "docs", "specs"), 0o755)
 		assertLayout(t, root, LayoutMixed, true)
 	})
-	t.Run("mixed is tolerated under a recorded migration recovery", func(t *testing.T) {
+	t.Run("mixed is tolerated under an IN-PROGRESS migration recovery", func(t *testing.T) {
 		root := t.TempDir()
 		os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0o755)
 		os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0o755)
-		os.MkdirAll(filepath.Join(root, ".mindspec", "migrations", "20260101T000000Z"), 0o755)
+		// A LIVE run: state.json records a non-terminal stage. The transient
+		// mixed tree of a recovery in flight is tolerated (Req 2).
+		writeMigrationState(t, root, "20260101T000000Z", "after-mv")
 		assertLayout(t, root, LayoutMixed, false)
 	})
+	t.Run("mixed with a COMPLETED migration record is STILL a hard error", func(t *testing.T) {
+		root := t.TempDir()
+		os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0o755)
+		os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0o755)
+		// A finished run persists its record with the terminal "applied" stage
+		// (Req 4 / AC9). A stale completed record must NOT mask a real
+		// half-old/half-flat split — the exception is scoped to LIVE runs.
+		writeMigrationState(t, root, "20260217T213341Z", "applied")
+		assertLayout(t, root, LayoutMixed, true)
+	})
+	t.Run("mixed with a state-less migration dir is STILL a hard error", func(t *testing.T) {
+		root := t.TempDir()
+		os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0o755)
+		os.MkdirAll(filepath.Join(root, ".mindspec", "docs", "specs"), 0o755)
+		// Mere dir existence no longer activates the exception: an empty run dir
+		// (no readable state.json) is not a live recovery (BLOCKER regression).
+		os.MkdirAll(filepath.Join(root, ".mindspec", "migrations", "20260101T000000Z"), 0o755)
+		assertLayout(t, root, LayoutMixed, true)
+	})
+}
+
+// writeMigrationState writes a layout-mover run-state record
+// (.mindspec/migrations/<runID>/state.json) carrying the given stage, matching
+// the Bead-3 schema (internal/layout/runstate.go State.Stage). Stage "applied"
+// is the terminal/completed value; any other non-empty stage is an in-progress
+// (live recovery) run.
+func writeMigrationState(t *testing.T, root, runID, stage string) {
+	t.Helper()
+	runDir := filepath.Join(root, ".mindspec", "migrations", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"run_id":"` + runID + `","stage":"` + stage + `"}` + "\n")
+	if err := os.WriteFile(filepath.Join(runDir, "state.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestDetectLayout_NewIdInLegacyStaysLegacy: a legacy tree's whole-tree
@@ -863,6 +901,67 @@ func TestLayoutMarkersFromMindspecChildren(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSpecsDirAndDomainsDir pins the flat-aware ENUMERATION roots (Fold-in for
+// Bead 2): SpecsDir/DomainsDir resolve byte-identically to the pre-spec
+// DocsDir-join on canonical/legacy/greenfield trees, and flat on a flat tree.
+func TestSpecsDirAndDomainsDir(t *testing.T) {
+	const specID = "044-launch-website"
+	cases := []struct {
+		name    string
+		docsRel []string // path segments of the docs root, relative to root; nil = greenfield (no tree)
+	}{
+		{name: "canonical", docsRel: []string{".mindspec", "docs"}},
+		{name: "legacy", docsRel: []string{"docs"}},
+		{name: "flat", docsRel: []string{".mindspec"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			docsRoot := filepath.Join(append([]string{root}, tc.docsRel...)...)
+			mkTree(t, docsRoot, specID)
+
+			if got, want := SpecsDir(root), filepath.Join(docsRoot, "specs"); got != want {
+				t.Errorf("SpecsDir = %q, want %q", got, want)
+			}
+			if got, want := DomainsDir(root), filepath.Join(docsRoot, "domains"); got != want {
+				t.Errorf("DomainsDir = %q, want %q", got, want)
+			}
+		})
+	}
+
+	t.Run("greenfield falls back to the DocsDir join (byte-identical)", func(t *testing.T) {
+		root := t.TempDir()
+		// No tree present: matches the pre-spec filepath.Join(DocsDir(root), …).
+		if got, want := SpecsDir(root), filepath.Join(DocsDir(root), "specs"); got != want {
+			t.Errorf("SpecsDir greenfield = %q, want %q", got, want)
+		}
+		if got, want := DomainsDir(root), filepath.Join(DocsDir(root), "domains"); got != want {
+			t.Errorf("DomainsDir greenfield = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("flat-first wins at the enumeration root", func(t *testing.T) {
+		root := t.TempDir()
+		// Flat AND canonical specs/domains roots both present: flat wins.
+		for _, d := range []string{
+			filepath.Join(root, ".mindspec", "specs"),
+			filepath.Join(root, ".mindspec", "domains"),
+			filepath.Join(root, ".mindspec", "docs", "specs"),
+			filepath.Join(root, ".mindspec", "docs", "domains"),
+		} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, want := SpecsDir(root), filepath.Join(root, ".mindspec", "specs"); got != want {
+			t.Errorf("SpecsDir flat-first = %q, want %q", got, want)
+		}
+		if got, want := DomainsDir(root), filepath.Join(root, ".mindspec", "domains"); got != want {
+			t.Errorf("DomainsDir flat-first = %q, want %q", got, want)
+		}
+	})
 }
 
 // TestSpecDir_BothWorktreeShapes pins SpecDir resolution for BOTH the canonical
