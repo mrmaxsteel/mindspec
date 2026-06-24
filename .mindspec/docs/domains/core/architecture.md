@@ -6,6 +6,41 @@
 
 The `Workspace` package finds the project root by walking up from the current directory looking for `.mindspec/` or `.git`. All path resolution is relative to this root.
 
+#### Per-artifact three-tier resolvers (spec 106)
+
+Each docs accessor (`SpecDir`, `ADRDir`, `DomainDir`, `ContextMapPath`,
+`CoreDir`, `RecordingDir`) resolves its artifact independently with a
+three-tier, **flat-first** read precedence, first-exists-wins:
+
+1. **flat** — `.mindspec/<artifact>` (e.g. `.mindspec/adr`, `.mindspec/specs/<id>`, `.mindspec/context-map.md`)
+2. **canonical** — `.mindspec/docs/<artifact>`
+3. **legacy** — root `docs/<artifact>`
+
+"Flat FIRST" is read precedence, not delivery order. When no flat tier exists
+on disk the resolvers fall back to the historical `DocsDir` canonical-or-legacy
+join, so a canonical, legacy, or greenfield tree with no flat tree present
+resolves byte-for-byte as before. The single `DocsDir` join-point no longer
+funnels the per-artifact accessors — each owns its flat tier (so they can be
+flattened independently). `SpecDir` additionally probes both the flat and the
+canonical worktree shapes, and `TreeRootForSpecDir` recognizes the flat spec
+shape (`<tree>/.mindspec/specs/<id>`) so the cross-worktree ADR-visibility fix
+(mindspec-ew79) survives a flattened worktree.
+
+#### Whole-tree layout classification (`DetectLayout`)
+
+`DetectLayout(root) → {flat | canonical | legacy | greenfield | mixed}`
+classifies the whole tree. A flat lifecycle tree coexisting with any
+canonical/legacy tree is **mixed** — a hard error (`ErrMixedLayout`) except
+inside a recorded `.mindspec/migrations/<run-id>/` recovery. The
+classification drives the write-default: a bootstrapped flat tree is born flat;
+existing canonical/legacy projects keep writing their existing form. New
+(greenfield) projects are bootstrapped born-flat (`.mindspec/{specs,domains}`).
+
+The pure, I/O-free classifier `ClassifyLayout(LayoutMarkers)` (with
+`LayoutMarkersFromMindspecChildren`, fed from a git tree listing) is the single
+source of truth that both `DetectLayout` (filesystem) and the cross-layout
+merge guard (git refs) reuse, so the two fingerprints never drift.
+
 ### Health Checks
 
 `mindspec doctor` validates project structure. Checks are categorized:

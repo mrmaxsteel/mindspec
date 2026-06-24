@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -131,14 +132,203 @@ func LegacyDocsDir(root string) string {
 	return filepath.Join(root, "docs")
 }
 
+// Layout classifies the whole-tree docs layout of a project (Req 2). The flat
+// layout keeps lifecycle artifacts directly under .mindspec/; the canonical
+// layout nests them under .mindspec/docs/; the legacy layout keeps them under
+// a repo-root docs/ directory.
+type Layout string
+
+const (
+	// LayoutFlat — lifecycle artifacts live directly under .mindspec/
+	// (.mindspec/{specs,adr,domains,core}, .mindspec/context-map.md).
+	LayoutFlat Layout = "flat"
+	// LayoutCanonical — lifecycle artifacts live under .mindspec/docs/.
+	LayoutCanonical Layout = "canonical"
+	// LayoutLegacy — lifecycle artifacts live under a repo-root docs/ tree.
+	LayoutLegacy Layout = "legacy"
+	// LayoutGreenfield — an empty tree with no docs layout yet. `mindspec
+	// init`/bootstrap creates the flat lifecycle dirs, after which the tree
+	// classifies flat and new artifacts are born flat.
+	LayoutGreenfield Layout = "greenfield"
+	// LayoutMixed — a flat lifecycle tree coexisting with a canonical or
+	// legacy one. A hard error outside a recorded migration recovery (Req 2).
+	LayoutMixed Layout = "mixed"
+)
+
+// LayoutMarkers records which docs layouts are present in a tree. It is the
+// pure input to ClassifyLayout: callers populate it from a filesystem probe
+// (DetectLayout) or from a git tree listing (the Bead-4 merge guard, via
+// executor.TreeDirsAtRef). ClassifyLayout itself does no I/O.
+type LayoutMarkers struct {
+	Flat      bool // a flat lifecycle child is present directly under .mindspec/
+	Canonical bool // a .mindspec/docs/ tree is present
+	Legacy    bool // a repo-root docs/ tree is present
+}
+
+// ClassifyLayout is the pure layout-signature classifier (plan minor 12): the
+// single source of truth that both DetectLayout (filesystem) and the Bead-4
+// merge guard (git refs) reuse to fingerprint a tree, so the two never drift.
+// A flat tree coexisting with any canonical/legacy tree is mixed; otherwise
+// the most-specific present layout wins (flat > canonical > legacy), and an
+// empty tree is greenfield.
+func ClassifyLayout(m LayoutMarkers) Layout {
+	if m.Flat && (m.Canonical || m.Legacy) {
+		return LayoutMixed
+	}
+	switch {
+	case m.Flat:
+		return LayoutFlat
+	case m.Canonical:
+		return LayoutCanonical
+	case m.Legacy:
+		return LayoutLegacy
+	default:
+		return LayoutGreenfield
+	}
+}
+
+// flatLifecycleChildren are the directory names that, when present directly
+// under .mindspec/, mark a FLAT lifecycle tree (as distinct from the same
+// names nested under .mindspec/docs/).
+var flatLifecycleChildren = []string{"specs", "adr", "domains", "core"}
+
+// LayoutMarkersFromMindspecChildren derives the flat/canonical markers from
+// the immediate child names of a .mindspec/ directory — e.g. the output of
+// executor.TreeDirsAtRef(ref, ".mindspec"). It is pure (no I/O) so the Bead-4
+// merge guard can fingerprint a tree at a git ref without touching the working
+// copy. Legacy (a repo-root docs/ tree) is not observable from .mindspec
+// children, so callers that need it set LayoutMarkers.Legacy themselves.
+func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers {
+	var m LayoutMarkers
+	for _, c := range children {
+		name := path.Base(strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(c)), "/"))
+		switch {
+		case name == "docs":
+			m.Canonical = true
+		case name == "context-map.md":
+			m.Flat = true
+		default:
+			for _, f := range flatLifecycleChildren {
+				if name == f {
+					m.Flat = true
+					break
+				}
+			}
+		}
+	}
+	return m
+}
+
+// ErrMixedLayout is returned by DetectLayout when a flat lifecycle tree
+// coexists with a canonical or legacy one outside a recorded migration
+// recovery (Req 2). The two shapes must never be live simultaneously.
+var ErrMixedLayout = errors.New("mixed docs layout: a flat .mindspec lifecycle tree coexists with a canonical (.mindspec/docs) or legacy (docs/) tree")
+
+// DetectLayout classifies the whole-tree docs layout under root (Req 2). A
+// mixed tree is a hard error UNLESS a migration recovery is recorded under
+// .mindspec/migrations/<run-id>/, in which case the transient mixed state is
+// tolerated and returned without error. The classification drives the
+// write-default (see isFlatTree): a bootstrapped flat tree is born flat;
+// existing canonical/legacy projects keep writing their existing form.
+func DetectLayout(root string) (Layout, error) {
+	kind := detectLayoutKind(root)
+	if kind == LayoutMixed && !migrationRecoveryActive(root) {
+		return LayoutMixed, ErrMixedLayout
+	}
+	return kind, nil
+}
+
+// detectLayoutKind probes the filesystem under root and classifies it via the
+// shared pure classifier. It never errors — the mixed→error decision and the
+// recorded-recovery exception live in DetectLayout.
+func detectLayoutKind(root string) Layout {
+	return ClassifyLayout(LayoutMarkers{
+		Flat:      flatTreePresent(root),
+		Canonical: exists(CanonicalDocsDir(root)),
+		Legacy:    exists(LegacyDocsDir(root)),
+	})
+}
+
+// flatTreePresent reports whether any flat lifecycle artifact exists directly
+// under .mindspec/ (.mindspec/{specs,adr,domains,core} or
+// .mindspec/context-map.md).
+func flatTreePresent(root string) bool {
+	mindspec := MindspecDir(root)
+	for _, child := range flatLifecycleChildren {
+		if exists(filepath.Join(mindspec, child)) {
+			return true
+		}
+	}
+	return exists(filepath.Join(mindspec, "context-map.md"))
+}
+
+// migrationRecoveryActive reports whether a migration run-state is recorded
+// under .mindspec/migrations/<run-id>/ — the recorded-recovery exception that
+// lets a transient mixed tree pass (Req 2).
+func migrationRecoveryActive(root string) bool {
+	entries, err := os.ReadDir(filepath.Join(MindspecDir(root), "migrations"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// isFlatTree reports whether root is an actual FLAT lifecycle tree — the
+// condition under which NEW artifacts are born flat (Req 2). A bare/greenfield
+// tree is deliberately NOT treated as flat here: born-flat is realized once
+// `mindspec init`/bootstrap has created the flat lifecycle dirs, which makes
+// detectLayoutKind report flat. Gating the born-flat write target on an actual
+// flat tree (rather than on bare-greenfield) keeps the write-default and the
+// resolvers byte-for-byte identical on canonical, legacy, AND greenfield trees
+// (Req 15 / AC1) while still delivering born-flat for a bootstrapped project.
+func isFlatTree(root string) bool {
+	return detectLayoutKind(root) == LayoutFlat
+}
+
+// resolveArtifact resolves a docs-relative artifact path with the per-artifact,
+// three-tier, flat-first read precedence (Req 1): flat (.mindspec/<rel>) →
+// canonical (.mindspec/docs/<rel>) → legacy (docs/<rel>), first-exists-wins.
+// "Flat FIRST" is READ-PRECEDENCE, not delivery order: when the flat artifact
+// is absent on disk it falls back to the flat tree's own root if (and only if)
+// the tree is already flat (so a flat project writes a not-yet-created artifact
+// flat too), otherwise to the historical DocsDir join-point. For every
+// canonical/legacy/greenfield tree with no flat tree present this is
+// byte-for-byte the pre-spec resolution (Req 15). The canonical/legacy fallback
+// stays docs-root-keyed (canonical whenever .mindspec/docs/ exists) rather than
+// per-artifact-existence-keyed, which is what preserves byte-identity with the
+// pre-spec DocsDir behavior.
+func resolveArtifact(root, rel string) string {
+	if flat := filepath.Join(MindspecDir(root), rel); exists(flat) {
+		return flat
+	}
+	if isFlatTree(root) {
+		return filepath.Join(MindspecDir(root), rel)
+	}
+	return filepath.Join(DocsDir(root), rel)
+}
+
 // SpecDir returns the path to a specific spec directory under root.
-// Resolution order (ADR-0022): worktree → canonical → legacy.
-// 1. root/.worktrees/worktree-spec-<specID>/.mindspec/docs/specs/<specID>/
-// 2. root/.mindspec/docs/specs/<specID>/
-// 3. root/docs/specs/<specID>/
-// Returns the first path that exists on disk. If none exist, returns the
-// canonical path (option 2) so that callers creating new specs write to
-// the right location.
+// Resolution order (ADR-0022 + Req 7), first-exists-wins:
+//  1. worktree, flat shape:      root/.worktrees/worktree-spec-<id>/.mindspec/specs/<id>/
+//  2. worktree, canonical shape: root/.worktrees/worktree-spec-<id>/.mindspec/docs/specs/<id>/
+//  3. flat:                      root/.mindspec/specs/<id>/
+//  4. canonical:                 root/.mindspec/docs/specs/<id>/
+//  5. legacy:                    root/docs/specs/<id>/
+//
+// Returns the first path that exists on disk. If none exist, it returns the
+// layout-aware write target so callers creating new specs write to the right
+// location: born flat for an actual flat tree (a bootstrapped project), and
+// the historical canonical default otherwise (Req 2/15). For every
+// canonical/legacy/greenfield tree with no flat tree present this is
+// byte-for-byte the pre-spec resolution.
+//
+// The flat worktree tier (1) preserves the mindspec-ew79 cross-worktree
+// ADR-visibility fix once a worktree's tree is flat.
 //
 // SpecDir deliberately scans the default ".worktrees" root rather than
 // honoring cfg.WorktreeRoot — it must locate existing on-disk worktrees,
@@ -154,39 +344,60 @@ func SpecDir(root, specID string) (string, error) {
 	if err := idvalidate.SpecID(specID); err != nil {
 		return "", err
 	}
-	// 1. Worktree path (scan token uses default worktrees dir name).
-	wtPath := filepath.Join(DefaultWorktreesDir(root), SpecWorktreeName(specID),
-		".mindspec", "docs", "specs", specID)
-	if exists(wtPath) {
-		return wtPath, nil
+	wtBase := filepath.Join(DefaultWorktreesDir(root), SpecWorktreeName(specID))
+	// 1. Worktree, flat shape.
+	if p := filepath.Join(wtBase, ".mindspec", "specs", specID); exists(p) {
+		return p, nil
 	}
-	// 2. Canonical path
-	canonical := filepath.Join(CanonicalDocsDir(root), "specs", specID)
-	if exists(canonical) {
-		return canonical, nil
+	// 2. Worktree, canonical shape.
+	if p := filepath.Join(wtBase, ".mindspec", "docs", "specs", specID); exists(p) {
+		return p, nil
 	}
-	// 3. Legacy path
-	legacy := filepath.Join(LegacyDocsDir(root), "specs", specID)
-	if exists(legacy) {
-		return legacy, nil
+	// 3. Flat (read-precedence first).
+	if p := filepath.Join(MindspecDir(root), "specs", specID); exists(p) {
+		return p, nil
 	}
-	// Default: canonical (for new spec creation)
-	return canonical, nil
+	// 4. Canonical.
+	if p := filepath.Join(CanonicalDocsDir(root), "specs", specID); exists(p) {
+		return p, nil
+	}
+	// 5. Legacy.
+	if p := filepath.Join(LegacyDocsDir(root), "specs", specID); exists(p) {
+		return p, nil
+	}
+	// Default (new spec): born flat for an actual flat tree (a bootstrapped
+	// greenfield project), otherwise the historical canonical default —
+	// byte-identical for canonical/legacy/greenfield trees (Req 15).
+	if isFlatTree(root) {
+		return filepath.Join(MindspecDir(root), "specs", specID), nil
+	}
+	return filepath.Join(CanonicalDocsDir(root), "specs", specID), nil
 }
 
-// ContextMapPath returns the path to docs/context-map.md under root.
+// ContextMapPath returns the path to the context-map.md under root, resolved
+// with the three-tier flat-first precedence (Req 1): .mindspec/context-map.md
+// → .mindspec/docs/context-map.md → docs/context-map.md.
 func ContextMapPath(root string) string {
-	return filepath.Join(DocsDir(root), "context-map.md")
+	return resolveArtifact(root, "context-map.md")
 }
 
-// ADRDir returns the path to docs/adr/ under root.
+// ADRDir returns the path to the adr/ directory under root, resolved with the
+// three-tier flat-first precedence (Req 1): .mindspec/adr → .mindspec/docs/adr
+// → docs/adr.
 //
 // This takes no user input so its signature is unchanged. However, every
 // site that joins ADRDir with a user-supplied ADR ID (e.g.
 // `filepath.Join(workspace.ADRDir(root), id+".md")`) must validate the id
 // first. Use ADRFilePath, which bundles validation + path construction.
 func ADRDir(root string) string {
-	return filepath.Join(DocsDir(root), "adr")
+	return resolveArtifact(root, "adr")
+}
+
+// CoreDir returns the path to the core docs directory under root, resolved
+// with the three-tier flat-first precedence (Req 1): .mindspec/core →
+// .mindspec/docs/core → docs/core.
+func CoreDir(root string) string {
+	return resolveArtifact(root, "core")
 }
 
 // TreeRootForSpecDir returns the root of the checkout tree that a
@@ -198,10 +409,15 @@ func ADRDir(root string) string {
 // committed only on the spec branch are visible (mindspec-ew79).
 //
 // Recognized layouts:
-//   - <tree>/.mindspec/docs/specs/<id>  → returns <tree> (4 levels up)
-//   - <tree>/docs/specs/<id>            → returns <tree> (3 levels up, legacy)
+//   - <tree>/.mindspec/specs/<id>       → returns <tree> (flat, 3 levels up)
+//   - <tree>/.mindspec/docs/specs/<id>  → returns <tree> (canonical, 4 levels up)
+//   - <tree>/docs/specs/<id>            → returns <tree> (legacy, 3 levels up)
 //
-// Returns "" when specDir does not match either layout; callers should
+// The flat shape (Req 7) is required so the mindspec-ew79 cross-worktree
+// ADR-visibility fix is preserved once a worktree's tree is flattened — the
+// pre-spec check (filepath.Base(docs) != "docs") returned "" for a flat dir.
+//
+// Returns "" when specDir does not match any recognized layout; callers should
 // fall back to the primary root.
 func TreeRootForSpecDir(specDir string) string {
 	abs, err := filepath.Abs(specDir)
@@ -210,15 +426,25 @@ func TreeRootForSpecDir(specDir string) string {
 	}
 	abs = filepath.Clean(abs)
 	specs := filepath.Dir(abs)
-	docs := filepath.Dir(specs)
-	if filepath.Base(specs) != "specs" || filepath.Base(docs) != "docs" {
+	if filepath.Base(specs) != "specs" {
 		return ""
 	}
-	mindspec := filepath.Dir(docs)
-	if filepath.Base(mindspec) == ".mindspec" {
-		return filepath.Dir(mindspec)
+	parent := filepath.Dir(specs)
+	switch filepath.Base(parent) {
+	case "docs":
+		// canonical (<tree>/.mindspec/docs/specs/<id>) or legacy
+		// (<tree>/docs/specs/<id>).
+		grandparent := filepath.Dir(parent)
+		if filepath.Base(grandparent) == ".mindspec" {
+			return filepath.Dir(grandparent)
+		}
+		return grandparent
+	case ".mindspec":
+		// flat (<tree>/.mindspec/specs/<id>).
+		return filepath.Dir(parent)
+	default:
+		return ""
 	}
-	return mindspec
 }
 
 // ADRFilePath returns the on-disk path for a single ADR file by ID.
@@ -230,13 +456,15 @@ func ADRFilePath(root, adrID string) (string, error) {
 	return filepath.Join(ADRDir(root), adrID+".md"), nil
 }
 
-// DomainDir returns the path to a specific domain's doc directory under root.
+// DomainDir returns the path to a specific domain's doc directory under root,
+// resolved with the three-tier flat-first precedence (Req 1):
+// .mindspec/domains/<d> → .mindspec/docs/domains/<d> → docs/domains/<d>.
 // Returns an error if domain is not a well-formed domain name.
 func DomainDir(root, domain string) (string, error) {
 	if err := idvalidate.DomainName(domain); err != nil {
 		return "", err
 	}
-	return filepath.Join(DocsDir(root), "domains", domain), nil
+	return resolveArtifact(root, filepath.Join("domains", domain)), nil
 }
 
 // RecordingDir returns the path to a spec's recording directory.

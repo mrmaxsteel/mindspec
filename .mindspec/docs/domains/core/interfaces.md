@@ -10,11 +10,36 @@ package workspace
 // FindRoot walks up from startDir looking for .mindspec/ or .git.
 func FindRoot(startDir string) (string, error)
 
-// DocsDir returns the docs directory path under root.
+// DocsDir returns the canonical-or-legacy docs root (no flat tier). Retained
+// for consumers not yet migrated to the per-artifact accessors.
 func DocsDir(root string) string
 
-// GlossaryPath returns the GLOSSARY.md path under root.
-func GlossaryPath(root string) string
+// Per-artifact, three-tier flat-first resolvers (spec 106 Req 1):
+// flat (.mindspec/<artifact>) → canonical (.mindspec/docs/<artifact>) →
+// legacy (docs/<artifact>), first-exists-wins.
+func SpecDir(root, specID string) (string, error)
+func ADRDir(root string) string
+func CoreDir(root string) string
+func DomainDir(root, domain string) (string, error)
+func ContextMapPath(root string) string
+func RecordingDir(root, specID string) (string, error)
+
+// TreeRootForSpecDir resolves the checkout tree root from a spec dir in any
+// of the flat / canonical / legacy shapes (preserves mindspec-ew79).
+func TreeRootForSpecDir(specDir string) string
+
+// Whole-tree layout classification (spec 106 Req 2).
+type Layout string // flat | canonical | legacy | greenfield | mixed
+
+// DetectLayout classifies the tree; mixed is a hard error (ErrMixedLayout)
+// except under a recorded .mindspec/migrations/<run-id>/ recovery.
+func DetectLayout(root string) (Layout, error)
+
+// ClassifyLayout is the pure layout-signature classifier shared by
+// DetectLayout (filesystem) and the cross-layout merge guard (git refs).
+type LayoutMarkers struct{ Flat, Canonical, Legacy bool }
+func ClassifyLayout(m LayoutMarkers) Layout
+func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers
 ```
 
 Used by context-system (for glossary location) and workflow (for spec/bead resolution).
