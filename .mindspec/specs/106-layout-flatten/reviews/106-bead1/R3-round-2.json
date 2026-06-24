@@ -1,0 +1,40 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Contract/stability lens, all four checks pass. (1) ADDITIVE: SpecsDir/DomainsDir/migrationRunInProgress + migrationRunState/migrationTerminalStage are all new; migrationRecoveryActive and DetectLayout keep identical signatures (only bodies changed). No existing accessor touched. (2) The local migrationRunState{Stage `json:\"stage\"`} projection is a sound decoupling: internal/layout imports internal/doctor and both transitively import internal/workspace (verified via go list -deps), so importing layout/doctor INTO workspace would cycle. The projection mirrors the doctor json tag and the terminal \"applied\" matches stageApplied (runstate.go:25) and doctor's OK case (migration.go:217). (3) BYTE-IDENTICAL: resolveArtifact on a non-flat tree returns filepath.Join(DocsDir(root),rel) — exactly the DocsDir-keyed enumerators (instruct/spec.list/domain.show/domain.list); TestSpecsDirAndDomainsDir pins canonical/legacy/greenfield/flat/flat-first; Bead-2 swap is safe. (4) No infallible caller becomes fallible: migrationRunInProgress swallows every error (read/unmarshal->false), DetectLayout's error contract is unchanged, has no production callers, and accessors use detectLayoutKind/isFlatTree which never read state.json. My round-1 forward-note (always-on recovery) is genuinely closed by the in-progress predicate; R5's hard_block is resolved. Build/vet/targeted tests green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "DetectLayout / migrationRecoveryActive (round-1 forward-note)",
+      "issue": "My round-1 low finding flagged that migrationRecoveryActive activated on ANY migrations/ subdir, making the mixed-layout exception effectively always-on (the same issue R5 hard-blocked). The fix scopes the exception to a LIVE run via migrationRunInProgress: state.json must parse and record a non-empty, non-terminal stage. A completed (\"applied\") record, a state-less dir, or an unparseable record all read as NOT in progress, so a stale record can no longer mask a real half-old/half-flat split. New tests cover the COMPLETED and state-less cases (both STILL ErrMixedLayout). Forward-note resolved; R5 hard_block closed.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "import-cycle / decoupling soundness",
+      "issue": "Confirmed via go list -deps: internal/layout imports internal/doctor and both transitively pull in internal/workspace, so a direct import of layout/doctor into the foundational workspace package WOULD create a cycle (workspace->layout/doctor->workspace). The local migrationRunState{Stage} projection (json:\"stage\") is the correct decoupling and matches the doctor runState tag + the mover's stageApplied terminal value.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/workspace signatures (additivity)",
+      "issue": "SpecsDir(root)string, DomainsDir(root)string, migrationRunInProgress(runDir)bool, migrationRunState, migrationTerminalStage are all net-new. Pre-existing migrationRecoveryActive and DetectLayout retain byte-identical signatures (body-only changes). No existing consumer signature altered.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "SpecsDir/DomainsDir byte-identity (Bead-2 safety)",
+      "issue": "resolveArtifact on canonical/legacy/greenfield (no flat tree) returns filepath.Join(DocsDir(root),rel), byte-identical to the four DocsDir-keyed enumerators (instruct.go:291, spec/list.go:22, domain/show.go:74, domain/list.go:102) Bead 2 will swap. TestSpecsDirAndDomainsDir pins this. NOTE for Bead 2 only (not a Bead-1 break): a separate set of enumerators hardcodes .mindspec/docs/specs|domains (doctor/orphaned_beads.go:48, doctor/ownership.go:67, validate/docsync.go:352, ownership/populate.go:71) — these are NOT DocsDir-keyed and diverge from SpecsDir/DomainsDir on a legacy tree, so swapping them in is a behavior choice Bead 2 must make deliberately.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "schema coupling (maintenance, non-blocking)",
+      "issue": "The terminal stage string \"applied\" and the json:\"stage\" field are duplicated in workspace's projection rather than imported from internal/layout (necessarily, to avoid the cycle). A future rename of stageApplied or the json tag would silently drift this predicate back toward over/under-tolerance. Mitigated: explicit anchoring comments cite both source files, and TestDetectLayout_FiveStates pins the \"applied\"->hard-error behavior, so any drift surfaces as a test break. Acceptable.",
+      "hard_block": false
+    }
+  ]
+}

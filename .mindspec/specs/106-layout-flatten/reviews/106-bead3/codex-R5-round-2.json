@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Correctness/safety lens. My round-1 rollback MAJOR is ADDRESSED: rollback() now ResetHard(preRunRef) + CleanForcePaths(touchedRoots()). touchedRoots reads the FROZEN state.Plan (else m.plan) and unions firstSegment of every group Src/Dst, so the clean is `git clean -fd -- .mindspec project-docs review` — scoped to exactly the move surface INCLUDING project-docs and review. An untracked user file OUTSIDE those roots is NOT deleted (TestCleanForcePaths_ScopedToRoots asserts user-scratch.txt at root survives). The ordering is safe: the review groups (hence the `review` root) are frozen into state.Plan BEFORE any review move could land, so scope is never under-broad. Review routing is robust: panelSpec swallows absent/unparse/wrong-spec and falls through to numericPrefix+`-` exact-prefix; un-routable → skipped+recorded, root review/ preserved. Flat-Dst targeting is consistent because the specs flatten (group 0) runs before the appended review groups, so `.mindspec/specs/<id>/reviews/` exists at move time; frozen plan keeps Dst/specID stable across resume. Asymmetric rules rewrite only absolute `.mindspec/docs/<x>/` forms, never `../` siblings — preserved (verified in guide.md). Crash-resume reuses frozen plan + deterministically regenerated review rules: stable index space, every step idempotent, no double-apply. SEC-5: CleanForcePaths guards each operand AND rides behind `--`. Build+vet clean. No new hard_block.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "rollback / data-safety",
+      "issue": "Round-1 MAJOR: repo-wide `git clean -fd` in rollback could delete untracked user files outside the move set. Now rollback() calls CleanForcePaths(root, touchedRoots()); touchedRoots = {.mindspec} ∪ firstSegment(Src/Dst) over the FROZEN state.Plan, yielding `.mindspec project-docs review`. CleanForcePaths runs `git clean -fd -- <paths>`, so the clean removes ONLY untracked residue under the move surface; a file outside those roots is preserved (unit-asserted). The review root is in scope because state.Plan is frozen before any review move lands. Correctly scoped, including project-docs and review.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "rollback / within-scope clean",
+      "issue": "Residual (strictly smaller than round 1): the scoped clean still removes ALL untracked content UNDER .mindspec/project-docs/review, so a user's untracked draft living inside one of those roots would be deleted on a rollback. The CLI RequireCleanTree precondition forbids any such file at run start, so the shipped path is safe, and the NOTE-for-Bead-5 comment flags the live run must arm Published. Expected transactional-rollback semantics over the move surface; not a blocker.",
+      "status": "PARTIAL",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "review routing / flat-Dst",
+      "issue": "reviewGroups resolves owning specID from canonical/legacy specs (listSpecIDs scans flat→canonical→legacy) but ALWAYS targets the FLAT Dst `.mindspec/specs/<id>/reviews/<slug>`. This is correct for the default plan because the symmetric specs flatten (group 0) runs before the appended review groups, so the flat tree exists at review-move time, and the frozen plan keeps it stable across resume. A custom WithPlan that omits the specs flatten on a still-canonical tree would split-brain (new flat specs dir created just for reviews) — exotic caller misuse, not the default path.",
+      "status": "NEW",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "finite rewriter",
+      "issue": "Asymmetric dogfood rules rewrite only the absolute `.mindspec/docs/<dogfood>/` (trailing-slash) forms to `project-docs/<dogfood>/`; `../`-relative siblings are untouched and thus preserved (verified: guide.md keeps `../installation/setup.md`, rewrites `/.mindspec/docs/adr/`). No corruption of preserved links. The no-trailing-slash bare-dir forms remain outside the rule set (same as round 1) — fail-CLOSED via the whole-tree link gate (404 → run fails → rollback). Acceptable.",
+      "status": "PARTIAL",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "refuse-after-publish",
+      "issue": "State.Published is still only set in tests; the mover never pushes in Bead 3, so the forward-only refusal is correct-but-inert here. The rollback() NOTE now explicitly instructs Bead 5 to arm Published before the point of no return. Mechanism sound and unit-tested; remains a Bead-5 obligation.",
+      "status": "PARTIAL",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "test coverage / SEC-5",
+      "issue": "CleanForcePaths now has a scoping unit test (TestCleanForcePaths_ScopedToRoots) and applies RejectOptionLike per-operand plus a trailing `--`; touchedRoots only ever yields `-`-free roots. A `-`-prefixed-path assertion on CleanForcePaths would close the option-injection loop, but the guard is shared/well-tested (spec 097). Adequate.",
+      "status": "PARTIAL",
+      "hard_block": false
+    }
+  ]
+}

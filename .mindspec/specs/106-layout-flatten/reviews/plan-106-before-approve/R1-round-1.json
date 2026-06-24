@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Decomposition is coherent and the dependency edges are HONEST. Bead 3's depends_on:[] is correct: the mover golden-tests on a captured fixture, routes git I/O through internal/executor (FileAtRefOrAbsent/TreeDirsAtRef exist on main), and consumes the doctor migration-metadata schema already on main (lineageManifest/runState at migration.go:109-124). It needs NO Bead-1 resolver or Bead-2 classifier — its precondition fingerprint is a git-ref-tree signature, not the filesystem DetectLayout, so keeping it an independent root is decomposition-OPTIMAL (preserves 2 roots / 0.40 parallelism; routing it through Bead 1 would drop to 0.20 and trip the floor). Bead 2->1 is genuine produced-then-consumed: budgeter.go:170/218 hardcodes .mindspec/docs joins that must consume Bead-1 accessors for AC6. Bead 4->1 reuses DetectLayout + flat SpecDir for the reviews glob/merge fingerprint. Bead 5->[2,3,4] runs the mover, needs multi-prefix matchers (LoadOwnershipAtRef/domainManifestRelPath confirmed hardcoded at ownership.go:123/150) and the wiring; Bead 1 carried transitively. DAG acyclic, longest chain = 3 (ceiling), roots = 2. No -39%/-70% serial penalty, R=0.15 << 0.50. Bead 5 is large but its work is mechanical-move + governance + budgeted fixture migration; splitting would fracture the irreversible move from the fixtures it breaks.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "decomposition/bead-sizing",
+      "issue": "Bead 5 is the heaviest bead: irreversible moves + ADR-0039 creation + ADR-0037/DOCS-LAYOUT amendments + migrate-rubric reconciliation + domain self-globs + harness/testdata fixture migration (5 scenario files confirmed: scenario_spec_lifecycle/bead_lifecycle/worktree/contract_hardening/safety). This is at the upper bound of one bead, but splitting is NOT advisable - the moves break the fixtures, so both must land green together, and peeling governance into a 6th trailing bead would extend no chain while adding a convergence node. Acceptable; flag only so the impl subagent budgets the fixture sweep explicitly (98 occurrences / 21 non-test files verified, matching the spec's ~99/21 claim)."
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/scope-redundancy",
+      "issue": "Bead 3's migrate-precondition fingerprint and Bead 4's merge-time layout fingerprint both compute a 'layout signature'. Because Bead 3 is an independent root (correctly) and Bead 4 reuses DetectLayout, the two signature implementations may diverge. This is a code-quality/drift risk, NOT a dishonest edge - the implementer should extract a shared ref-tree-signature helper. Does not block; the R=0.15 scope-redundancy WARN already captures the doctor + migrate.go + workflow/OWNERSHIP.yaml file overlaps (Beads 3<->4, 3<->5), all of which rebase/cycle cleanly given the 3->5 and 4->5 edges."
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/bead-cohesion",
+      "issue": "Bead 2 bundles the diff-string matchers (independent of Bead 1) with the enumerating consumers/budgeter (which consume Bead-1 accessors), so its depends_on:[1] is driven only by the consumer half. This is a coherent same-review-lens grouping (non-workspace gate + consumer surface) and the bead-as-a-whole edge is honest; splitting out a matcher-only bead would be trivial-sized. No change needed."
+    }
+  ]
+}

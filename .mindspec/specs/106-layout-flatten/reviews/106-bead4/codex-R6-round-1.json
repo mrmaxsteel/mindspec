@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Next-bead integration lens. (1) Guard never blocks Bead 5/6. mergeLayoutRegression blocks IFF target==flat AND source==canonical/legacy. Bead 5's move-merge (flat bead branch -> canonical spec) has target!=flat -> allowed; Bead 6 (flat->flat) allowed; spec->main direct (flat source -> canonical main, still canonical pre-merge) allowed. Read errors fail-open. No hard block exists in the normal flow. (2) Panel gate survives the transition: panelGateRoots keys on DetectLayout(root) where root is complete's invocation-cwd workspace root (captured before the auto-chdir), i.e. clean main = canonical until impl-approve. Canonical -> UNION{wtPath,root,specDir}, so repo-root review/106-bead5|6/panel.json is found and enforced even though the bead worktree itself is flat (DetectLayout reads root, not wtPath). TestPanelGateRoots_LayoutAware pins this. (3) Doctor checkLayout feeds Bead 6 cleanly: would-migrate-layout Warn + sorted dual-layout-spec Error enumerating all three roots directly. (4) docs.go deferral is CORRECT, not a gap: plan.md L540-541/734-735 explicitly assign docs.go scans to Bead 2; Bead 4 owns only migration.go. Deviation A (thin MigrationRecoveryActive export) is plan-sanctioned reuse. Lone caveat below; non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "complete/panel_gate_layout (invocation-cwd dependence)",
+      "issue": "panelGateRoots selects the scan-root set from DetectLayout(root), and root = workspace.FindRoot(invocation cwd) captured BEFORE the --spec auto-chdir. Under the documented invariant (mindspec complete runs from clean main = canonical until impl-approve), this correctly yields the UNION and finds the repo-root review/106-bead5|6 panels. The latent edge: if Bead 6's complete were ever invoked with cwd INSIDE the post-Bead-5 FLAT spec worktree, root would classify flat -> spec-dir-only roots -> the repo-root review/106-bead6 panel is silently IGNORED -> fail-open (gate skipped). This does NOT block completion (so not a hard block) and is pre-existing CWD-derived-root behavior, not introduced here; Bead 5 is also expected to migrate root review/ -> co-located reviews/ so panels are co-located by the time anything is flat. Worth a one-line note in Bead 5/6 ops guidance that complete must be invoked from canonical main.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "doctor/docs.go tier-awareness sequencing",
+      "issue": "Bead 2 and Bead 4 are siblings (both depend_on [1]); if Bead 4 lands before Bead 2, docs.go orphan/docs scans (checkDocs/checkDomains/checkStaleFocusLifecycle/links) stay non-tier-aware until Bead 2 merges. Harmless for Beads 5/6 because main remains canonical through this spec (flat main only after impl-approve, post-both-beads), so canonical scans work throughout. Correct deferral per plan; flagged only as a land-Bead-2-before-impl-approve sequencing reminder.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "executor/layout_guard recovery exemption",
+      "issue": "guardMergeLayout's recoveryActive is computed from g.Root (= main repo). The mover records .mindspec/migrations/<run-id>/ in the BEAD worktree, not main, so MigrationRecoveryActive(main) is false during Bead 5's complete. This is benign: Bead 5's merge is flat->canonical (allowed regardless of the exemption), so the exemption is never load-bearing for the normal Bead 5/6 flow; it only matters for a transient canonical->flat recovery merge, which is out of scope here.",
+      "hard_block": false
+    }
+  ]
+}

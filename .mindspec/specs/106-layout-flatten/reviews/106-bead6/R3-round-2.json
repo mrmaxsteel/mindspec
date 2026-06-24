@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Contract lens; APPROVE-on-APPROVE. The populate.go change is sound. (1) DomainsNeedingPopulate now reads workspace.DomainsDir(root) = resolveArtifact(root,\"domains\") with flat-first precedence (flat .mindspec/domains → canonical .mindspec/docs/domains → legacy docs/domains); the workspace.go docstring confirms it is byte-for-byte filepath.Join(DocsDir,\"domains\") for every canonical/legacy/greenfield tree, so the swap is purely additive — zero behavior change for canonical projects, and the os.ReadDir + LoadOwnership + IsNotExist→nil control flow is untouched. (2) No import cycle: grep of internal/workspace finds NO ownership import, so the path/filepath→internal/workspace swap is acyclic; build ./... and vet pass clean. (3) Coverage: TestDomainsNeedingPopulate_FlatTree (flat tier, want [absent,stub]) + existing _MissingAndEmptyStubOnly (canonical .mindspec/docs/domains tier) + _NoDomainsDir pin all three states across both layouts — all PASS (count=1). ownership/doctor/validate suites green. The commit touches only populate.go, populate_test.go, and the 2 plugin docs; round-1 install-refresh + tier-awareness mechanisms are undisturbed. No contract issue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/ownership/populate.go DomainsNeedingPopulate",
+      "issue": "path/filepath→internal/workspace import swap; DomainsNeedingPopulate now enumerates workspace.DomainsDir(root) (flat-first, byte-identical to the old filepath.Join(root,.mindspec,docs,domains) on canonical/legacy). Verified additive, no behavior change for canonical projects.",
+      "status": "verified",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "import graph (cycle check)",
+      "issue": "internal/workspace does NOT import internal/ownership (grep clean), so ownership→workspace introduces no cycle. go build ./... and go vet ./internal/ownership/... both exit 0.",
+      "status": "verified",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/ownership/populate_test.go coverage",
+      "issue": "New TestDomainsNeedingPopulate_FlatTree covers the flat .mindspec/domains tier (missing+empty-stub+populated → want [absent,stub]); the pre-existing _MissingAndEmptyStubOnly covers the canonical .mindspec/docs/domains tier; _NoDomainsDir covers absence. Both layouts pinned; all three PASS under -count=1.",
+      "status": "verified",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "cmd/mindspec/migrate.go scanCanonicalDocs vs flat rubric (carryover from round-1)",
+      "issue": "Round-1 non-blocking finding unchanged by this commit: migrate inventory still keys 'canonical' solely to .mindspec/docs/ while the prompt rubric declares the flat tree canonical. Not regressed here; remains a follow-up, not a 106 blocker.",
+      "status": "unchanged",
+      "hard_block": false
+    }
+  ]
+}

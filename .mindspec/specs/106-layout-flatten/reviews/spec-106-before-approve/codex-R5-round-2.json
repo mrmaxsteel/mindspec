@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "The revised spec closes my round-1 migration-mechanism blockers. Req 2/AC3 now make DetectLayout a whole-tree five-state classifier, distinguish canonical vs legacy write defaults, and hard-error flat+canonical/legacy residue across different ids and artifact classes, with recovery explicitly tied to a live migration run-state. Req 4/AC7/AC8 now define checkpoint order, per-boundary resume, and git rollback semantics: hard reset/clean before publication, refuse after push/merge. My majors are also covered: Req 3/AC5/AC6 bind root-enumerating DocsDir consumers and budgeter.go, and Req 5/AC10 gates every markdown link in the moved tree plus affected root docs, including unrevised-link failures. I found no new approval-blocking technical hole. Validator output is clean except the expected pre-approval lifecycle-binding warning.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "Req 2 / AC3 DetectLayout",
+      "issue": "Round-1 mixed-state hole is closed: DetectLayout is whole-tree, returns flat/canonical/legacy/greenfield/mixed, drives the write default, and treats flat plus canonical/legacy residue across different spec ids or artifact classes as a hard error outside recorded migration recovery.",
+      "status": "ADDRESSED",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "Req 4 / AC7 / AC8 mover state",
+      "issue": "Round-1 rollback/resume hole is closed: the spec now names mutation checkpoints, committed vs working-tree resume behavior, pre-publish hard-reset rollback, and post-publish refusal in git terms.",
+      "status": "ADDRESSED",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "Req 3 / AC5 / AC6 DocsDir consumers",
+      "issue": "Root-enumerating consumers are now governed explicitly, including spec list, domain list/show, context-map enrichment, core docs, doctor scans, and contextpack/budgeter.go flat-vs-canonical byte identity.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Req 5 / AC10 link gate",
+      "issue": "The link gate now scans every markdown link in the post-migration moved tree and affected root docs, not only rewritten candidates, and includes fixtures for review co-location plus absolute .mindspec/docs/core/context-map references.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

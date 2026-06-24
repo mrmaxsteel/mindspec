@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Contract/interface lens: no break to any existing consumer. (1) All five accessors keep their exact signatures (SpecDir/DomainDir/RecordingDir still (string,error); ADRDir/ContextMapPath/DocsDir still string; TreeRootForSpecDir string). CoreDir/ClassifyLayout/LayoutMarkers*/ErrMixedLayout/DetectLayout/Layout are additive — confirmed no pre-existing definitions collide. The interfaces.md GlossaryPath removal is doc-only correctness: the func was already deleted by ADR-0018, so the stanza was stale. (2) Flat-FIRST is byte-preserving for existing callers: on the real canonical repo (.mindspec children: config.yaml,docs,lineage,migrations,policies.yml — no flat lifecycle child) flatTreePresent=false, isFlatTree=false, so resolveArtifact falls through to DocsDir join = pre-spec path. No caller can divert to a flat/empty path without an on-disk flat artifact or a flat lifecycle dir, neither of which exists today. RecordingDir delegates to SpecDir, inheriting this. (3) ClassifyLayout is pure/I-O-free in workspace; workspace imports only config+idvalidate, and executor/complete already import workspace — Bead-4's guard introduces NO import cycle. (4) DetectLayout has zero non-test callers; accessors use the never-erroring detectLayoutKind/isFlatTree, so no infallible path becomes fallible. Build+vet+workspace/bootstrap tests green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/workspace signatures",
+      "issue": "All pre-existing exported accessors retain identical signatures; new CoreDir/ClassifyLayout/LayoutMarkers/LayoutMarkersFromMindspecChildren/ErrMixedLayout/Layout/DetectLayout are additive (verified no collision in da7eea3e^). The interfaces.md GlossaryPath deletion is a stale-doc fix, not a code-contract change (func was already removed by ADR-0018).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "behavior preservation (resolveArtifact precedence)",
+      "issue": "Flat-first read precedence cannot change the resolved path for canonical/legacy/greenfield trees: divergence from the historical DocsDir join requires either an on-disk flat artifact or isFlatTree (a flat lifecycle child under .mindspec/), and the live repo has neither. SpecDir/ADRDir/DomainDir/ContextMapPath/CoreDir/RecordingDir resolve byte-identically on the real canonical tree; TestResolverMatrix and whole-module build corroborate.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "DetectLayout / migrationRecoveryActive (forward-looking, Bead 4 seam)",
+      "issue": "migrationRecoveryActive returns true whenever ANY directory exists under .mindspec/migrations/. The real repo carries persistent spec-100-era mover run dirs (20260217T213341Z, 20260217T234919Z), so the mixed-layout hard-error exception is effectively always-on for the live tree. Harmless for Bead 1 (the live tree is canonical, not mixed, and DetectLayout has no production callers yet), but when Bead 4's merge guard depends on ErrMixedLayout this always-active recovery could neuter the mixed safety net on the real repo. Out of Bead-1 contract scope; flag for Bead 4 to scope recovery detection to an in-flight run-id rather than any historical migration dir.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "import-cycle / Bead-4 seam stability",
+      "issue": "ClassifyLayout + LayoutMarkersFromMindspecChildren are pure (no I/O) and live in package workspace, which imports only internal/config and internal/idvalidate. internal/executor and internal/complete already import workspace, so reusing the classifier from Bead-4's merge guard creates no workspace<-executor cycle. Clean, stable seam.",
+      "hard_block": false
+    }
+  ]
+}

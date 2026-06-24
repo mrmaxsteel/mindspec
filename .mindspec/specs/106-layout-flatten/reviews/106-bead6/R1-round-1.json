@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Author-of-record / scope lens. Bead 6 implements its full scope with no creep. Req 12: every path-bearing LIVE surface flattened — ms-spec-grill/create, ms-panel-run/tally, ms-bead-impl/cycle/fix, ms-spec-final-review, lifecycleSkillFiles in claude.go, codex.go generated text, bootstrap.go, and the spec/plan/review instruct templates; co-located reviews/ used (verified). Req 16: ADR-0039 created Proposed/uncited at the next free id (0038 was latest), well-formed (Context/Decision/Consequences/Alternatives, ADR-0037 amend + ADR-0022 extension recorded); DOCS-LAYOUT amended (flat tree + 3-tier read order + reviews co-location); ADR-0037 reviews-location amendment present. Req 17: migrate.go rubric → flat + project-docs/, test-asserted. Req 15: scenario_*.go + harness/testdata fixtures flattened. historical_skills approach matches the plan exactly: frozen pre-093 snapshots untouched (no M), 8 new .pre106.md captures byte-identical to parent live bytes (verified), previouslyShippedSkills now keys the segment before the first dot. No re-move: zero renames in the commit; workspace.go untouched (SpecsDir/DomainsDir pre-exist). AC17 breadth grep EMPTY; setup+cmd/mindspec+doctor+complete+bootstrap green. The internal/instruct failure is the pre-existing z4ps TestRun_IdleNoBeads leak (reads real state.json mode, fails standalone, layout-independent, orthogonal to the listSpecs change). No missing deliverables.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/Req12",
+      "issue": "All 8 path-bearing live skills rewritten to flat + co-located reviews/ AND each given a byte-exact .pre106.md snapshot (verified identical to the parent commit's live bytes, including ms-spec-create's legacy docs/specs form). previouslyShippedSkills keying change (segment before first dot) lets pre-093 and pre-106 snapshots coexist per skill. Consistent with the plan's frozen-snapshot instruction.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "governance/Req16",
+      "issue": "ADR-0039 is the next free id (0038 latest on disk), Status Proposed, NOT cited as a spec touchpoint (matches spec's deferred-ADR convention). DOCS-LAYOUT documents flat + 3-tier + reviews co-location; the only residual .mindspec/docs/ mentions are correctly labelled the canonical compatibility tier, not the live shape. ADR-0037 amendment scopes to reviews LOCATION only.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "pre-existing-failures",
+      "issue": "internal/instruct TestRun_IdleNoBeads confirmed failing standalone (-run TestRun_IdleNoBeads) with the [activeBead] implement-mode warning => the known z4ps cwd/state test-isolation leak (reads the real repo state.json, layout-independent). Not introduced by Bead 6's listSpecs tier-aware change, which concerns spec-dir enumeration, not lifecycle mode. R4 owns the harness TestInstructPhaseDetection env-protected-branch claim.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "brief-accounting",
+      "issue": "BRIEF states '10 A + 1 D'; the actual commit is 9 A + 51 M (no deletions) = 60 files. Cosmetic BRIEF inaccuracy, not a defect in the bead; total file count and +1464/-223 reconcile.",
+      "hard_block": false
+    }
+  ]
+}

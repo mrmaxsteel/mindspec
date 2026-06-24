@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "The Bead 5/6 split is clean: it partitions by REVERSIBILITY + review-lens, not relocated over-convergence. Bead 5 is a cohesive irreversible-mutation unit — every step is a mover-driven filesystem cut (flatten specs/adr/domains/core+context-map, dogfood eviction, root review/** migration, vestigial drops, and the load-bearing domain self-glob rewrites the moved tree needs to pass adr-divergence-unowned). Bead 6 is a cohesive, fully-reversible post-move tail (skills/snapshot/setup-text re-pointing, governance, migrate rubric, harness fixtures) sharing one lens: path-correctness + suite-green. The split added a single-predecessor TAIL edge (6→5), no new fan-in node, so it did NOT relocate convergence. Edges honest: 5←[2,3,4] all produced-then-consumed (runs the mover, needs the multi-prefix matchers + the spec-scoped/recognizer wiring); 6←[5] intrinsic. Depth-4 is the honest minimum given R6's isolate-the-irreversible-move hard_block plus the intrinsic move→cleanup edge; not artificial. Primitives land correctly: verified GitMv/ResetHard/CleanForce/Local+RemoteRefs are net-new (absent today) in Bead 3; the merge guard reuses existing TreeDirsAtRef + Bead-1 signature helper (executor already imports internal/workspace — no cycle) in Bead 4; CompleteBead@291/FinalizeEpic@370,432 seams confirmed; 42 root review/ artifacts confirmed. My round-1 minors are addressed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "decomposition/bead-sizing",
+      "issue": "Round-1 minor (Bead 5 was the heaviest bead, bundling governance/ADR amendments/migrate-rubric/fixtures with the irreversible move). The revision peels all of that into the new reversible trailing Bead 6, leaving Bead 5 as a tight mover-driven irreversible-cut unit. Sizing concern resolved.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/scope-redundancy",
+      "issue": "Round-1 minor (Bead 3 and Bead 4 both compute a layout signature, risking drift). The revision extracts a pure layout-signature helper in Bead 1 step 3, has the Bead-4 merge guard consume it (executor already imports internal/workspace — verified, no cycle), and records Bead 3's thin local probe as intentional residual duplication for golden-test independence. Exactly the requested fix.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/bead-cohesion",
+      "issue": "Round-1 minor (Bead 2 bundles diff-string matchers, independent of Bead 1, with the Bead-1-consuming enumerating consumers). Unchanged and still a coherent same-review-lens grouping; the bead-as-a-whole 2←[1] edge remains honest. No action needed, no regression.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/key-file-paths",
+      "issue": "NEW: Bead 6 frontmatter key_file_paths lists the PRE-flatten '.mindspec/docs/core/DOCS-LAYOUT.md', but Bead 5 already flattens core/ so post-Bead-5 the file lives at '.mindspec/core/DOCS-LAYOUT.md' (confirmed current path is .mindspec/docs/core/DOCS-LAYOUT.md). The Bead-6 step text correctly notes 'already flattened by Bead 5', so this is only a stale advisory hint, not a sequencing error. Cosmetic; trivially resolved at impl.",
+      "status": "NEW",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "decomposition/shared-file-note",
+      "issue": "NEW: The shared-file prose says 'Beads 3, 5, and 6 all touch cmd/mindspec/migrate.go' then immediately 'Bead 5 touches only the moved trees, not migrate.go' — slightly self-contradictory wording. The frontmatter is correct: Bead 5's key_file_paths omit migrate.go; migrate.go is shared only by Bead 3 and Bead 6, which sit on the 3→5→6 path and rebase cleanly. Honest structurally; tighten the prose.",
+      "status": "NEW",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "gate-safety/cross-lens (non-decomposition)",
+      "issue": "NEW (flag for R3/R4 lens, not a decomposition defect): the Bead-4 merge guard must be DIRECTIONAL — block only nested-source onto flat-target ('rebase onto post-flatten main' recovery) — otherwise it would hard-fail Bead 5's own flat-bead→nested-spec merge and the later flat-spec→nested-main FinalizeEpic merge, stranding spec/106. The recovery-line framing implies the correct directional semantics, and the 5←[4] edge stays honest under that reading; recommend the guard's directionality be made explicit so the move bead can self-merge. Does not block decomposition approval.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

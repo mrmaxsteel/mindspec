@@ -1,0 +1,46 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "The revised spec fixes the three structural blockers I raised: DetectLayout now has canonical/legacy/flat/greenfield/mixed semantics with write-default cases; the mover has checkpointed resume plus pre-publish hard-reset/refuse-after-publish rollback semantics; and branch/PR discovery is now a real algorithm over local refs, remote-tracking refs, hosted PR metadata, offline degradation, merge-base fingerprinting, and locked/fork tolerance. Scope is large but coherent; the 17/25 expansion mostly converts previously implicit risk into testable work. The remaining approval blocker is narrower: AC17's requirement text names all path-bearing skill/plugin/setup artifacts, but its proof still only requires setup tests, panel-snapshot grep, and ms-spec-grill grep. That does not prove the broadened surface that my round-1 major explicitly asked to cover.",
+  "concrete_changes_required": [
+    "Tighten AC17 proof so it verifies every path-bearing artifact named in Req 12/AC17, not only panel snapshots and ms-spec-grill. Add a grep/audit over live .agents/.claude skills, plugins/mindspec skills + README/FINDINGS, internal/setup historical snapshots, setup Claude/Codex generated text, bootstrap text, and bead impl/cycle/fix/final-review paths, or explicitly classify each excluded surface out of scope with a recorded reason."
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "STAGING / write-default",
+      "issue": "Req 2 and AC3 now distinguish canonical, legacy, flat, greenfield, and mixed, and test canonical-only, legacy-only, flat-only, no-tree, new-id-in-legacy, and mixed flat+canonical/artifact-class cases. The write-default is no longer ambiguous for the round-1 cases.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "FEASIBILITY / migration precondition",
+      "issue": "Req 11 now specifies local refs, remote-tracking refs, hosted PR metadata when available, offline warning/degrade, merge-base layout fingerprinting, exact block condition, dirty-tree refusal, and locked/fork tolerance. AC16 proves a branch block and the tolerate half; remote-hosted coverage can be refined in planning but the algorithm is concrete.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "FEASIBILITY / transactional mover",
+      "issue": "Req 4 defines durable checkpoints, resume behavior at each boundary, pre-publish hard-reset rollback, and refuse-after-publish semantics. AC7/AC8 cover rollback and crash-resume.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "SCOPE / verification coverage",
+      "issue": "Req 12/AC17 broaden the named surface, including ms-spec-grill, setup generated text, plugin README/FINDINGS, bead skills, bootstrap text, and historical snapshots. But AC17's proof still only requires setup tests plus grep checks for panel-skill snapshots and ms-spec-grill, so many named path-bearing artifacts are not actually verified by the acceptance proof.",
+      "status": "PARTIAL",
+      "hard_block": true
+    },
+    {
+      "severity": "minor",
+      "area": "SCOPE / spec size",
+      "issue": "The revision is larger at 17 requirements and 25 ACs, but the added scope mostly binds already-coupled layout surfaces. This should be split at plan/bead granularity, not by cutting the spec.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

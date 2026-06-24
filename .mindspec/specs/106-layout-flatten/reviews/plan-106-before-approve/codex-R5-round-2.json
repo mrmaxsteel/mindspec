@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "My round-1 hard block is addressed: Bead 2 now explicitly keeps root review/** as a permanent historical matcher, adds the /reviews/ segment matcher, and requires tests asserting both classify non-source. The 2+3+4 -> 5 move dependency is mostly sound, AC22 is now honest, and Bead 6 is the right home for flat-path skills/governance/fixtures. However the revised split introduces a new transition hazard: Bead 4 changes the live panel scan so old repo-root review/ panels no longer drive complete, while root reviews are not migrated until Bead 5 and panel skills are not updated until Bead 6. That creates an intermediate canonical state where the current review tooling can still write root panels but the in-binary gate ignores them. Make the panel scan/gate transitional or layout-aware so canonical pre-move roots still enforce, while flat post-move trees enforce co-located reviews.",
+  "concrete_changes_required": [
+    "Revise Bead 4 panel scan/complete-gate sequencing so the canonical intermediate after Beads 1-4 still honors repo-root review/<slug>/panel.json panels while also recognizing spec-scoped <spec-dir>/reviews/<slug>/panel.json. Prefer a layout-aware rule: canonical/pre-move scans both; flat/post-move ignores repo-root review/ and enforces co-located reviews.",
+    "Update Bead 4/5 verification to assert the transition explicitly: root review panels still block complete before the move; co-located panels block after the move; old root panels no longer drive the gate only once the tree is flat and root review/ has been migrated/removed.",
+    "Tighten Bead 6 changed-files and AC17 grep coverage to include the actual embedded snapshot files under internal/setup/historical_skills/*.md, or explicitly list any intentionally frozen historical snapshot with a recorded reason."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 2 sequencing / process-artifact classification",
+      "issue": "The destructive review classifier replacement from round 1 is fixed. The plan now keeps strings.HasPrefix(path, \"review/\") as a permanent historical-ref matcher, adds an independent /reviews/ segment matcher for co-located reviews, and requires tests for both paths classifying non-source.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Bead 4 -> Bead 5 sequencing / panel gate transition",
+      "issue": "Bead 4 makes the live complete gate spec-scoped and states an old repo-root review/ panel no longer drives the gate, but Bead 5 has not yet migrated the root review tree and Bead 6 has not yet updated panel skills. The canonical intermediate after Beads 1-4 can therefore ignore the still-live root panel convention.",
+      "status": "NEW",
+      "hard_block": true
+    },
+    {
+      "severity": "minor",
+      "area": "Bead 6 snapshot coverage",
+      "issue": "Bead 6 says path-bearing historical_skills snapshots live in internal/setup/skills.go, but the real embedded snapshots are internal/setup/historical_skills/*.md and currently contain root review/ and canonical docs paths. The plan should either update/verify those files or explicitly classify frozen snapshots out.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

@@ -99,7 +99,7 @@ mindspec approve spec 001-my-feature
 
 **4. Draft the plan**
 
-The agent creates `docs/specs/001-my-feature/plan.md` with work chunks and dependencies.
+The agent creates `.mindspec/specs/001-my-feature/plan.md` with work chunks and dependencies.
 
 **5. Approve the plan**
 

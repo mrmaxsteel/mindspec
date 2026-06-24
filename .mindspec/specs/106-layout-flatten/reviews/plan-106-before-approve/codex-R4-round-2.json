@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "The revised plan addresses both R4 hard blocks. Bead 4 now names the real executor seams: CompleteBead calls gitutil.MergeInto at mindspec_executor.go:291; FinalizeEpic calls gitutil.MergeInto at :370 for bead-to-spec auto-merge and gitutil.MergeBranch at :432 for the direct spec-to-main merge. Guarding those sites covers the in-repo bead-to-spec and direct spec-to-main merge mutations. Bead 3 now explicitly adds GitMv, ResetHard, CleanForce, LocalBranchRefs, and RemoteTrackingRefs across internal/gitutil, the Executor interface, MindspecExecutor, and MockExecutor; rg confirms these do not exist today. New citations are grounded: internal/spec.List, internal/domain.List, and internal/domain.Show exist; internal/doctor exists and links.go is correctly described as a net-new link-check lane. No material nonexistent seam remains.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 4 merge guard",
+      "issue": "The nonexistent internal/complete MergeBranch reference was removed. The plan now pins the guard to MindspecExecutor.CompleteBead and FinalizeEpic, directly before the real gitutil.MergeInto and gitutil.MergeBranch call sites.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Bead 3 mover execution seam",
+      "issue": "The plan now lists the missing git mover primitives and executor surface as Bead 3 changed surfaces, including internal/gitutil/gitops.go, internal/executor/executor.go, MindspecExecutor, and MockExecutor. Those APIs are absent today, matching the net-new implementation claim.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "New citations",
+      "issue": "internal/spec.List, internal/domain.List, and internal/domain.Show exist. internal/doctor/links.go does not exist yet, but the plan consistently describes it as a new link-check lane under the existing internal/doctor package.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "Spec-to-main merge wording",
+      "issue": "FinalizeEpic's gitutil.MergeBranch site is the direct/no-remote spec-to-main path; when a remote exists FinalizeEpic pushes the branch for PR instead of performing a local merge. This is a wording caveat, not a blocker for the requested real-seam check.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

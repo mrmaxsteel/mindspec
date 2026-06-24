@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.96,
+  "rationale": "Codebase-pin lens, all confirmed. (1) rootOperatorDocs map {CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md} is real (docsync.go:379) and wired into isDocFile via EXACT-name map lookup `rootOperatorDocs[path]` — NOT prefix/substring. The two old HasPrefix(path,\"CLAUDE.md\"/\"AGENTS.md\") checks are removed; the new lookup is strictly tighter (e.g. a source-adjacent top-level .md stays source). isDocFile feeds isProcessArtifact, which ValidateDivergence (divergence.go:200) checks to skip before attribution. (2) TestRootOperatorDocsNotUnowned has real assertions: positive (4 docs => isDocFile && isProcessArtifact), negative (internal/foo.go !doc !artifact, IS source), and end-to-end ValidateDivergence yields exactly one finding = unowned internal/foo.go, with a leak guard. Helpers/signature compile (writeSpecAndPlan, writeManifest, MockExecutor, imports present). (3) Set is consistent with layout DefaultRootDocs {README,AGENTS} and doctor movedTreeRootDocs {README,AGENTS,context-map}; CLAUDE/BENCH-MOVED extras and context-map (covered elsewhere in isDocFile) are honestly documented. (4) Round-1 flat subtrees + round-2 classifiers (isMoverRunState/isVestigialConfigDrop/isCoLocatedReview/review/) intact. Spot-check: full base..head diff's ONLY top-level files are AGENTS/BENCH-MOVED/README — all in the set; zero misses. Not hollow, no regression.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/validate/docsync.go",
+      "issue": "rootOperatorDocs map added and wired into isDocFile via exact-name lookup; old HasPrefix(CLAUDE.md/AGENTS.md) checks replaced (tighter, precise — no over-match letting source escape the gate).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/validate/divergence_test.go",
+      "issue": "TestRootOperatorDocsNotUnowned carries real positive/negative/end-to-end assertions plus a leak guard; control internal/foo.go is the sole unowned finding. Not a tautology.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "cross-site consistency",
+      "issue": "rootOperatorDocs consistent with layout DefaultRootDocs and doctor movedTreeRootDocs; divergences (CLAUDE.md, BENCH-MOVED.md, context-map handled elsewhere) documented in the var comment. No contradiction.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R6-class unowned regression (README.md + BENCH-MOVED.md)",
+      "issue": "Full base..head diff (458 paths) has exactly three top-level files (AGENTS.md, BENCH-MOVED.md, README.md), all in the set — zero top-level misses; complete will pass adr-divergence-unowned on these.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "round-1/round-2 integrity",
+      "issue": "Round-3 touches only docsync.go (set+isDocFile), divergence.go (comments), divergence_test.go (new test), architecture.md (doc). Flat lifecycle subtrees and round-2 process-artifact classifiers undisturbed.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

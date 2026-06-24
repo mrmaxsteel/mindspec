@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.79,
+  "rationale": "Next-bead integration lens. Bead 4 seam is solid: ClassifyLayout(LayoutMarkers) + LayoutMarkersFromMindspecChildren([]string) are the right shape to fingerprint a git-ref tree from executor.TreeDirsAtRef(ref, \".mindspec\"); the helper is pure (no I/O), idempotent on already-basenamed input, and Legacy is a settable field for a separate root-docs/ probe. NO import cycle: workspace imports only idvalidate (worktree.go: config); executor already imports workspace. ClassifyLayout exposes the 5-state incl mixed, so the directional regression guard can compare src/tgt kinds. Bead 2: Bead 1 added NO diff-string predicate, so it did not pre-empt isDocFile/isProcessArtifact; per-item SpecDir/DomainDir serve the budgeter. Bead 5/mover: signatureAtRef is the blessed minor-12 residual duplication; its canonical-wins precedence vs ClassifyLayout's mixed-on-both is intentional, not a conflict. Per-artifact existence-first resolution handles Bead 5's transient mid-move mixed tree and never resolves into project-docs (AC18 holds). One MAJOR seam gap (non-blocking): Bead 1 shipped whole-dir ADRDir/CoreDir but NO exported SpecsDir/DomainsDir enumerator roots, so Bead 2's filesystem enumerators must reconstruct three-tier precedence or expand scope into workspace.go.",
+  "concrete_changes_required": [
+    "Non-blocking (route to Bead 2 or a Bead 1 amendment): export flat-aware enumerator-root accessors SpecsDir(root) and DomainsDir(root) (each = resolveArtifact(root, \"specs\"/\"domains\")), mirroring the shipped whole-dir ADRDir/CoreDir. Bead 2's filesystem enumerators (internal/spec/list.go:22, internal/domain/list.go:102, internal/domain/show.go:74, internal/validate/docsync.go:352 listDomainDirs) currently join workspace.DocsDir+\"specs\"/\"domains\" or hardcode .mindspec/docs/domains; without these accessors they must re-implement the three-tier precedence inline (drift) or expand into workspace.go (not in Bead 2's declared file scope).",
+    "Doc-note for Bead 4 authors: executor.TreeDirsAtRef filters to tree entries only, so the context-map.md->Flat branch in LayoutMarkersFromMindspecChildren is inert when fed by TreeDirsAtRef. Flat is still detected via specs/adr/domains/core dirs (always present on a real flat tree); no code change needed, but the helper doc's \"e.g. the output of TreeDirsAtRef\" should note blobs are dropped."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 2 integration / enumerator seam",
+      "issue": "Bead 1 exported per-ITEM SpecDir(root,id)/DomainDir(root,d) and whole-dir flat-aware ADRDir/CoreDir/ContextMapPath, but NO whole-dir SpecsDir(root)/DomainsDir(root) enumerator roots, and resolveArtifact is unexported. Bead 2's plan (step 6) makes the filesystem enumerators tier-aware 'via the Bead-1 accessors', but those enumerators (spec list, domain list/show, docsync.listDomainDirs) need a flat-aware specs-/domains-root that no Bead-1 accessor provides. Bead 2 (whose key_file_paths exclude workspace.go) must therefore reconstruct the three-tier precedence inline or expand its scope. Asymmetric with the shipped ADRDir/CoreDir. Not a hard block: Bead 2 can add the two accessors itself, but it is downstream friction/drift risk the resolver bead should ideally absorb.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Bead 4 merge-guard seam",
+      "issue": "LayoutMarkersFromMindspecChildren maps context-map.md -> Flat, but executor.TreeDirsAtRef returns tree entries only (blobs dropped), so that branch never fires when fed by the documented TreeDirsAtRef source. Inert, not wrong: a real flat tree always carries specs/adr/domains/core dirs, so flat is still classified. Purely a documentation/expectation note for Bead 4.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "maintainability / signature drift",
+      "issue": "The lifecycle child-name set {specs,adr,domains,core} now lives in workspace.flatLifecycleChildren (unexported) and layout.signatureAtRef (blessed minor-12 duplicate), and Bead 2 will add a third copy in its diff-string prefix predicate. Three independent copies of the canonical lifecycle-child set is a drift surface. Consider exporting the canonical set from workspace as the single source of truth (kept distinct from the diff-string matchers).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Bead 5 / mover alignment + behavior preservation",
+      "issue": "Confirmed alignments: (1) no import cycle (workspace -> idvalidate/config only; executor already imports workspace); (2) ClassifyLayout's mixed-on-both vs signatureAtRef's canonical-on-both is the documented intentional residual duplication, not a conflict; (3) per-artifact existence-first resolveArtifact resolves moved artifacts flat and unmoved canonical during Bead 5's transient mid-move mixed tree, and never looks in project-docs/ (AC18 satisfied once files move); (4) DocsDir deliberately retained as canonical->legacy (no flat tier) is correct since a flat tree has no single docs root - this forces Bead 2 to migrate enumerators onto per-artifact accessors rather than silently mis-resolving.",
+      "hard_block": false
+    }
+  ]
+}

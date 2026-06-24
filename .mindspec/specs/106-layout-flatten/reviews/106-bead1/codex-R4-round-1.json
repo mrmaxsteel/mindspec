@@ -1,0 +1,57 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Empirical lens, all gates green. `go build ./...` and `go vet ./...` exit 0. Owner packages (workspace, bootstrap, guard) PASS. The Phase-1 behavior-preservation full-suite gate PASS across all eight resolver-consumer packages (spec, adr, contextpack, doctor, validate, complete, domain, approve) — no z4ps flake appeared (instruct is not in this set), so no stash-dance needed. `gofmt -l` on the four changed .go files is empty. ZERO file moves confirmed: `git show da7eea3e --diff-filter=RCD --name-only` is empty. Tests are genuine, not tautological: TestResolverMatrix asserts exact paths for all 6 accessors over canonical/legacy/flat fixtures; flat-first precedence, DetectLayout five-state (incl. both mixed hard-errors + recorded-recovery exception), new-id-in-legacy stability, ClassifyLayout/marker purity, both worktree shapes, and the ew79 flat-worktree regression all assert got!=want. Deviation A verified sound (guard/ and worktree.go construct no .mindspec/docs artifact paths; worktree.go only builds worktree-base paths). Deviation B keeps greenfield byte-identical (Req15/AC1) while bootstrap AC4 proves DetectLayout==flat. Scope clean: no Bead 2/4/5 work (only the plan-minor-12 pure helper).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/fmt",
+      "issue": "go build ./... and go vet ./... exit 0; gofmt -l on all four changed .go files is empty.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "tests",
+      "issue": "Owner packages (workspace, bootstrap, guard) PASS and all eight resolver-consumer packages PASS (behavior-preservation gate). z4ps flake did not surface (instruct package not exercised).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "no-moves",
+      "issue": "git show da7eea3e --diff-filter=RCD --name-only is empty — ZERO renames/copies/deletes, confirming pure-additive Phase-1 (Req 15).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "test-genuineness",
+      "issue": "Resolver matrix (6 accessors x canonical/legacy/flat), flat-first-wins, DetectLayout five-state incl. both mixed hard-errors and the recorded-migration recovery exception, new-id-in-legacy whole-tree stability, pure ClassifyLayout + LayoutMarkersFromMindspecChildren (trailing-slash/full-path tolerant, ignores mover state dirs), both worktree shapes, and the ew79 flat-worktree TreeRootForSpecDir regression all assert exact got!=want equality. No skips or tautologies.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation-A",
+      "issue": "Confirmed: internal/guard/*.go contains no docs/specs/adr/domains path literals, and internal/workspace/worktree.go only joins WorktreeRoot/SpecWorktreeName (no .mindspec/docs artifact construction). All doc-layout-awareness correctly lives in SpecDir + TreeRootForSpecDir. No missed Req-7 surface.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation-B",
+      "issue": "Born-flat gated on detectLayoutKind==flat (not bare-greenfield) preserves greenfield/canonical/legacy byte-identity (Req15/AC1, TestSpecDir_WorktreeAware_DefaultsToCanonical green) while bootstrap delivers flat (bootstrap_test AC4 asserts DetectLayout==flat post-bootstrap). Defensible and keeps the suite green.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "doc-sync",
+      "issue": "interfaces.md drops the stale GlossaryPath entry — verified `func GlossaryPath` no longer exists in internal/workspace, so this is a correct doc-accuracy cleanup, not a regression. architecture.md additions accurately describe the resolvers and DetectLayout.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "perf-nit",
+      "issue": "resolveArtifact, on a tree with no flat artifact present, calls isFlatTree -> detectLayoutKind which re-probes up to ~7 stats per accessor call (born-flat write-default check). Pure correctness is unaffected and CLI-scale cost is negligible; noting only as a possible future memoization target, not a blocker.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Both round-1 asks ADDRESSED and verified against real code. (F1/AC5) Bead 2's go-test now reads `./internal/validate/... ./internal/contextpack/... ./internal/spec/... ./internal/domain/... ./internal/doctor/...`; I confirmed `spec list` enumerates via workspace.DocsDir at internal/spec/list.go:22, `domain list|show` at internal/domain/list.go:102 + show.go:74, and the doctor scans (checkDocs/checkDomains) at internal/doctor/docs.go -- so all three AC5 enumerating-consumer homes are now exercised, plus changed-files/frontmatter list them. (F2/AC10) The link-check lane is pinned to internal/doctor/links.go (net-new, confirmed absent on disk), and Bead 3's changed-files, frontmatter key_file_paths, AND go-test (`./internal/doctor/...`) all include it -- AC10 build half is exercised where it lands. Full AC re-map across the 6-bead numbering: all 25 ACs map to >=1 bead, every bead satisfies >=1 AC (no make-work), and the Bead 5->{5,6} split is clean -- the irreversible move keeps AC10-post/AC13-real/AC18-move/AC19/AC20; cleanup takes AC17/AC22-fixtures/AC23/AC24. Cross-bead ACs (AC10 B3+B5, AC13 B4+B5, AC18 B1+B5, AC21 B2+B3, AC22 B1+2/B1-4/B6) are attributed to the bead that does the work. No orphan, no mis-attribution.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "AC5 verification runnability",
+      "issue": "Round-1 F1: Bead 2 go-test omitted internal/spec + internal/domain. REVISED Bead 2 verification now runs `./internal/validate/... ./internal/contextpack/... ./internal/spec/... ./internal/domain/... ./internal/doctor/...`; changed-files + frontmatter add internal/spec/list.go, internal/domain/list.go, internal/domain/show.go, internal/doctor/docs.go. Verified in-repo: spec-list at internal/spec/list.go:22, domain list/show at internal/domain/list.go:102 + show.go:74, doctor scans at internal/doctor/docs.go -- all three enumerating-consumer homes now exercised by the stated command.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "AC10 verification location",
+      "issue": "Round-1 F2: AC10 doctor link-check lane was unpinned and Bead 3's go-test omitted internal/doctor. REVISED: lane pinned to net-new internal/doctor/links.go (confirmed absent on disk today, consistent with 'net-new'); Bead 3 changed-files, frontmatter key_file_paths (internal/doctor/links.go), and verification (`go test ./internal/doctor/...`) all include it; AC10 row reads 'Bead 3 (build) + Bead 5 (post-move)'. Build-half FAIL-on-dangling/un-rewritten tests now run in the package where the lane lands.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "AC17 step enumeration",
+      "issue": "Round-1 minor 11: AC17 step list omitted ms-spec-create by name. REVISED Bead 6 step 1 names ms-spec-create explicitly ('per minor 11'), and the AC17 work is correctly relocated post-move to Bead 6 (skills/snapshot rewrites can only land once the tree is flat).",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "AC coverage completeness under 6-bead renumbering",
+      "issue": "All 25 ACs (AC1-AC25) map to >=1 bead; no orphan. Every bead satisfies >=1 AC: B1{AC1,2,3,4,12,18-resolver,22-matrix}, B2{AC5,6,11,21-class,22-Phase1}, B3{AC7,8,9,10-build,16,21-own}, B4{AC13-wiring,14,15,22-matrix}, B5{AC10-post,13-real,18-move,19,20}, B6{AC17,22-fixtures,23,24}; AC25 spec-level (orchestrator). The Bead 5->{5,6} split is clean -- no AC fell through the boundary: the irreversible move (B5) keeps the move/migration/drop ACs, the static-text cleanup (B6) keeps skills/governance/rubric/fixtures.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "AC25 spec-level attribution",
+      "issue": "AC25 (`mindspec validate spec` reports 0 errors) remains attributed to 'All beads (spec-level)' with no single bead pinning it as a runnable Verification step -- the orchestrator owns it at final review. Acceptable for a cross-cutting spec-level AC and carried unchanged from round 1; not a coverage gap. A one-line note that the orchestrator owns AC25 would make the attribution fully explicit (defer to impl).",
+      "status": "PARTIAL",
+      "hard_block": false
+    }
+  ]
+}

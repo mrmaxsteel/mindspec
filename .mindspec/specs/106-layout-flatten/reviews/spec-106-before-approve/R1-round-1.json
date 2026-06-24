@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "The 14 requirements cover almost every Goal/Background move (resolvers, DetectLayout, mover, link-rewriter, multi-prefix matchers, worktree fixes, reviews co-location, doctor, merge fingerprint, precondition, skills, moves/drops, ownership, test budget) and the forward-only/merge-guard story is internally coherent with Scope/Non-Goals. But three stated deliverables lack a governing requirement, and one is also an internal contradiction. The blocker: internal/contextpack/budgeter.go flat-awareness is described in Background, Impacted Domains, and Scope with an explicit silent-failure mode (drops spec/domain context on flat projects), yet no Req and no AC govern it; Req 14's test-matrix list also omits the context-pack builder. internal/redact is asserted in Impacted Domains as 'must become layout-aware' but is absent from Scope and all requirements, and its only docs references are a regex comment and a cobra subcommand set entry (layout-agnostic) — an unsupported claim plus a Scope/Impacted-Domains contradiction. The DOCS-LAYOUT.md amendment (Background+Scope) and the migrate prompt-rubric reconciliation (Scope) are also ungoverned. All are fixable by adding requirements + ACs (or striking the redact claim); the design is sound, so REQUEST_CHANGES, not REJECT.",
+  "concrete_changes_required": [
+    "Add a requirement governing internal/contextpack/budgeter.go: it MUST consume the new per-artifact accessors (or a layout-aware join) so context packs assemble identically on flat, canonical, and legacy projects, and add a falsifiable AC (e.g. 'go test ./internal/contextpack/... asserts identical pack bytes/sections for a flat vs canonical fixture'). Today this deliverable has no Req and no AC despite its stated silent-failure mode (spec lines 41, 56, 109).",
+    "Resolve the internal/redact contradiction: either add a requirement + Scope In-Scope entry + AC for making redact layout-aware, OR (per the evidence) strike the Impacted Domains/core claim that 'internal/redact also hardcodes the docs prefix and must become layout-aware' (spec line 54). Verified: internal/redact/redact.go has no functional docs-layout dependency (only a regex docstring comment at :320 and the cobra subcommand set entry \"docs\":{} at :129; the slashpath regex is layout-agnostic).",
+    "Add a requirement (or fold into Req 12) and an AC for the DOCS-LAYOUT.md amendment, which Background line 47 and Scope line 113 list as an in-this-spec deliverable (distinct from the deferred layout-v2 ADR). Leaving the canonical layout doc unamended contradicts the Goal of a self-describing flat layout.",
+    "Add a requirement (or fold into Req 3) covering the Scope-line-107 reconciliation of the existing cmd/mindspec/migrate.go prompt rubric (which still routes user-docs to .mindspec/docs/user/ and agent files to .mindspec/docs/agent/, migrate.go:286-287) with the new project-docs/ eviction target, so the legacy prompt emitter does not steer agents to the pre-flatten location."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "requirements completeness",
+      "issue": "internal/contextpack/budgeter.go flat-awareness is a claimed correctness deliverable (Background l.41, Impacted Domains l.56, Scope l.109) with an explicit silent-failure mode, but NO requirement (Req 1-14) governs it and NO AC (AC1-16) tests it; Req 14's test-matrix list also omits the context-pack builder. Code confirms the hardcoded joins at budgeter.go:170/218 bypass workspace entirely.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "internal consistency / accuracy",
+      "issue": "Impacted Domains/core (l.54) asserts 'internal/redact also hardcodes the docs prefix and must become layout-aware,' but redact is absent from Scope's In-Scope list and from every requirement (contradiction), and the claim is factually unsupported: redact.go's only docs references are a regex docstring comment (:320) and a cobra subcommand set member \"docs\":{} (:129); the slashpath regex is path/layout-agnostic.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "requirements completeness",
+      "issue": "The DOCS-LAYOUT.md amendment is listed as an in-this-spec deliverable in Background (l.47, 'amend DOCS-LAYOUT.md') and Scope (l.113) but has no governing requirement and no AC, unlike the ADR-0037 amendment (Req 7) and the deferred layout-v2 ADR (Open Questions). Flattening without amending the canonical layout doc leaves it stale, contradicting the Goal.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "requirements completeness",
+      "issue": "Scope l.107 requires reconciling the legacy migrate.go prompt rubric (routes user-docs to .mindspec/docs/user/, agent files to .mindspec/docs/agent/, migrate.go:286-287) with the new project-docs/ target, but no requirement covers it; Req 3/4 cover only the net-new mover, leaving the existing prompt emitter able to steer agents to the pre-flatten location.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "internal consistency (non-blocking)",
+      "issue": "Req 1 titles the flat tier 'FIRST' (resolution order) while Background Phase 1 (l.44) defers the flat tier to Phase 3 (l.46). Reading in context this is order-not-phase and is coherent (AC14 phase-1 zero-move still holds, flat dirs do not yet exist), but the 'FIRST' wording is ambiguous against the phased delivery and could be clarified to avoid a reader inferring the flat tier lands in Phase 1.",
+      "hard_block": false
+    }
+  ]
+}

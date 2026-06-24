@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "Lens: correctness/completeness of the irreversible flatten. The MOVED tree is complete and clean: no residual `.mindspec/docs/` (0 files), no root `review/`, no top-level `docs/`; flat specs(358)/adr(38)/domains(19)/core(8) populated; project-docs(21) holds only dogfood (user/installation/research). Review routing is correct — 099/100/101/102 panels → their matching specs; the 2 auto-unroutable artifacts (review/prep, scenario1-fix-design.md, both reference spec 092) co-located under 092; root review/ empty; nothing orphaned. Self-globs repointed core+workflow OWNERSHIP to flat `.mindspec/domains/<d>/OWNERSHIP.yaml` (old pointed at /docs/). No `.go`/cmd source changed (0 in commit). Neutralizations do NOT mask: only ADR-NNNN + `relative/path#anchor` placeholders (which never existed) were inlined; every path-fixed link resolves to a real target; an independent resolver over 546 .md files found the moved tree 0-dangling. ONE defect: `BENCH-MOVED.md` (tracked root doc, untouched by the bead) carries two links into `.mindspec/docs/adr/ADR-0027*/0028*` that were VALID pre-move and are now dangling — move-induced breakage the gate's README/AGENTS-only scope missed. Trivially fixable; irreversible move shouldn't ship it.",
+  "concrete_changes_required": [
+    "In repo-root BENCH-MOVED.md, path-correct the two move-induced dangling links from `.mindspec/docs/adr/` to `.mindspec/adr/` (ADR-0027-mindspec-otel-only.md line 8, ADR-0028-bench-rescue-procedure.md line 10); both flat targets exist, so they resolve cleanly.",
+    "(Recommended, engine/spec scope — not required for this commit) Widen the doctor 404 link-gate scan to ALL tracked root .md files that point into the moved trees, not just README.md/AGENTS.md, so this class (e.g. BENCH-MOVED.md) is caught at the gate."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "move-completeness / link-integrity",
+      "issue": "BENCH-MOVED.md (root, present pre-move, NOT modified by bead 5) links [ADR-0027](.mindspec/docs/adr/ADR-0027-mindspec-otel-only.md) and [ADR-0028](.mindspec/docs/adr/ADR-0028-bench-rescue-procedure.md). Both targets existed at `.mindspec/docs/adr/` before this commit and now live at `.mindspec/adr/`, so the flatten BROKE two previously-valid links. The doctor 404 gate reported GREEN only because its scan scope (moved tree + README/AGENTS) excludes BENCH-MOVED.md. On an irreversible move this is an incomplete move; fix = path-correct `.mindspec/docs/adr/`→`.mindspec/adr/`.",
+      "hard_block": true
+    },
+    {
+      "severity": "low",
+      "area": "instruct-template staleness",
+      "issue": "internal/instruct/templates/spec.md correctly drops the glossary line (Req 13) but retains code-span path references to `.mindspec/docs/{specs,domains,core,adr}` describing the OLD layout. These are inline-code spans (not markdown links), so the doctor gate does not flag them and Req 13 scoped only the glossary line for this file. Latent stale guidance emitted by `mindspec instruct`; appropriate as Bead-6/follow-up, not blocking.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "out-of-scope archive",
+      "issue": "docs_archive/ (frozen timestamped snapshots, 0 files in this commit) contains ~16 dangling relative links (e.g. into its own .mindspec/docs/ snapshot, `relative/path#anchor` placeholders). These are pre-existing within the archive and unrelated to this move; correctly excluded from the gate. No action.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "move correctness (confirmations)",
+      "issue": "Verified clean: residual `.mindspec/docs/` empty; root `review/` and top-level `docs/` absent; flat specs/adr/domains/core populated; project-docs holds only dogfood (nothing wrongly swept); lineage manifest 12 entries + 2 skipped matches actual moves; review routing matches owning specs; self-globs flattened; no .go source changed; moved tree 0-dangling under independent 546-file link resolver; all neutralizations target non-existent placeholders (no masking of a real post-move target).",
+      "hard_block": false
+    }
+  ]
+}

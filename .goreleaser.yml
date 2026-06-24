@@ -41,6 +41,7 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+      - "^Merge"
 
 release:
   github:

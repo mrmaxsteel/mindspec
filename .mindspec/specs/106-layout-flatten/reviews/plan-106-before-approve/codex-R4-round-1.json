@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "Most bead surfaces are empirically real: workspace accessors and TreeRootForSpecDir have the described canonical shape; validate docsync/divergence/ownership matchers, LoadOwnershipAtRef/domainManifestRelPath, and contextpack hardcodes exist; internal/layout is absent; panel Scan/PanelDirScanRoot, doctor migration/docs, migrate.go rubric, glossary/policies, domain self-globs, and ADR-0039-next are all grounded. However Bead 4 names a nonexistent internal/complete MergeBranch and omits the real spec-to-main merge surfaces. Bead 3 also claims git-mv/reset routing through internal/executor without including the executor/gitutil API work needed to make that possible.",
+  "concrete_changes_required": [
+    "Bead 4 must replace the nonexistent internal/complete MergeBranch reference with the actual merge surfaces: complete.Run before exec.CompleteBead for bead-to-spec, and the impl-approve/executor FinalizeEpic path for spec-to-main, or explicitly add an executor-level guard covering both.",
+    "Bead 4 key_file_paths and tests must include the real files needed for spec-to-main merge guarding, not only internal/complete.",
+    "Bead 3 must either add internal/executor and/or internal/gitutil API changes to its scope for git mv, hard reset, branch/ref discovery, and rollback, or revise the design to a repo-real seam that already exists."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 4 merge guard",
+      "issue": "Plan step 2 says to add the layout-fingerprint hard-fail to internal/complete MergeBranch, but no such function exists. The raw helpers are internal/gitutil.MergeBranch/MergeInto, while complete.Run only calls exec.CompleteBead; spec-to-main finalization flows through internal/approve to executor.FinalizeEpic.",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "Bead 3 mover execution seam",
+      "issue": "The plan says the mover's git-mv driver is routed through internal/executor, but the current Executor interface has no git mv, hard-reset, clean, or ref-discovery primitives, and Bead 3 does not list internal/executor or internal/gitutil as changed surfaces.",
+      "hard_block": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Empirical lens, all green. go build ./... and go vet ./... clean (exit 0). go test -count=1 on validate/contextpack/spec/domain/doctor/complete all PASS (validate 37.5s; explicit exit 0). gofmt -l empty; git show 288eda97 --diff-filter=RCD empty (zero moves). THE LINCHPIN is genuinely backed: TestLoadOwnershipAtRef_FlatRef mocks a flat-only .mindspec/domains/workflow/OWNERSHIP.yaml ref (canonical+legacy absent) and asserts the domain's claims are returned (Paths==[internal/validate/**]), Source()==manifest (NOT missing), and ManifestPath==bead/flat:.mindspec/domains/workflow/OWNERSHIP.yaml. RED-on-revert is airtight: Source() derives missing from ManifestPath=='', exactly the result a canonical-only probe against a flat-only ref would produce. Three-prefix equivalence, project-docs (classifier + end-to-end ValidateDivergence unowned), both review matchers (independence asserted), AC6 contextpack byte-identity (with non-empty sanity guard), and flat enumerators (spec/domain/doctor with status/content reads) are all substantively tested. Behavior-preservation confirmed: no tracked source path carries a /reviews/ segment and no tracked project-docs/ exists, so the two new matchers are inert on the canonical repo. Deviations A (degenerate specMDID quirk) and B (doctor ownership.go/orphaned_beads.go flat-blind) are out-of-scope deferrals that do not affect the complete gate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "build/vet/test/fmt",
+      "issue": "go build ./... and go vet ./... clean; targeted tests (validate 37.5s, contextpack, spec, domain, doctor, complete) PASS with explicit exit 0; gofmt -l empty; --diff-filter=RCD empty (zero renames/copies/deletes).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "linchpin: ref-anchored ownership",
+      "issue": "TestLoadOwnershipAtRef_FlatRef genuinely proves domainManifestRelPaths/LoadOwnershipAtRef resolve a domain's OWNERSHIP.yaml from a flat .mindspec/domains/<d>/OWNERSHIP.yaml ref path: asserts returned Paths, Source()==manifest, and flat ref-qualified ManifestPath. RED-on-revert is sound (Source()=='missing' for empty ManifestPath, the canonical-only-probe outcome). This is the property that lets Bead 5's flat merge pass adr-divergence-unowned.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "behavior-preservation",
+      "issue": "isCoLocatedReview (Contains '/reviews/') and the new project-docs/ isDocFile branch are additive and inert on the current canonical tree: git ls-files shows no tracked source path with a /reviews/ segment and no tracked project-docs/. Canonical/legacy classification is byte-identical; three-prefix equivalence and AC6 contextpack byte-identity (guarded against two-empty-packs) confirm no current gate behavior changes.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "deviation B: doctor flat-blindness",
+      "issue": "doctor/ownership.go and doctor/orphaned_beads.go still hardcode canonical .mindspec/docs/... and are outside Bead 2's plan scope (doctor confined to docs.go's 4 named funcs). Acceptable deferral: the complete gate uses the now-multi-prefix validate ownership pair, not these diagnostics, so the bd_close floor and Bead 5/6 flat merges are unaffected. Track as Bead 6 / follow-up.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "deviation A: specMDID degenerate quirk",
+      "issue": "specMDID('<legacy/flat>/specs/spec.md') yields the degenerate id 'spec.md' (preserved TrimSuffix quirk of the original canonical-only code, now consistent across all three prefixes). Only reachable by a malformed path (spec.md directly under specs/ with no id dir) that cannot occur in practice; benign and consistent.",
+      "hard_block": false
+    }
+  ]
+}

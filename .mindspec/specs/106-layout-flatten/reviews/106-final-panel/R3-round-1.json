@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Regression/back-compat lens: clean. (1) Resolvers are additive. DocsDir is byte-unchanged (canonical→legacy). resolveArtifact probes flat-first then gates the fallback on isFlatTree, which is false for any canonical/legacy/greenfield tree — so reads on existing projects resolve identically; SpecDir inserts flat tiers BEFORE canonical but they no-op when absent, preserving order and the canonical default-write. (2) Gate matchers are permanently multi-prefix: isDocFile/isProcessArtifact/specMDID/hasArtifactPrefix and the ref-anchored LoadOwnershipAtRef+domainManifestRelPaths/listDomainDirsAtRef UNION flat+canonical+legacy and classify canonical/legacy diffs identically (flat is additive); the ownership pair is first-present-wins with operational errors still propagated. (3) The directional merge guard blocks ONLY canonical/legacy→flat, passes same-layout + the migration direction, and is fail-open + recovery-exempt — normal operation untouched. (4) Both known failures reproduced as pre-existing/layout-independent: TestRun_IdleNoBeads is the z4ps ambient-bd leak (sees the live spec-106 review-phase epic, not layout); TestInstructPhaseDetection is the env protected-branch short-circuit via RenderIdleIfProtected, which 106 does not touch. No exported signature removed/changed (22 net-new exported funcs, additive). 14 targeted non-harness suites all green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/workspace resolvers (AC1/AC2)",
+      "issue": "resolveArtifact/SpecDir/DocsDir are additive: flat tier is read-precedence-first but gated behind isFlatTree for the write/fallback, so a canonical/legacy/greenfield project with no flat tree resolves byte-for-byte as pre-spec. go test ./internal/workspace passes (canonical+legacy+flat+both worktree shapes).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/validate matchers (AC11)",
+      "issue": "docsync/divergence/ownership matchers are unioned multi-prefix; canonical/legacy diffs classify identically and the ref-anchored LoadOwnershipAtRef/domainManifestRelPaths preserve byte-identical canonical-ref behavior while propagating bad-ref errors on the first probe. validate suite green (179s).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "executor directional merge guard (Req10/AC15)",
+      "issue": "mergeLayoutRegression blocks strictly canonical/legacy→flat; same-layout (flat→flat, canonical→canonical), the flat→canonical migration direction, greenfield/mixed all pass; guard is fail-open on git read errors and exempt under a recorded in-progress migration recovery. Does not break normal same-layout merges. complete suite green.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "known failures pre-existing (brief item 2)",
+      "issue": "Reproduced TestRun_IdleNoBeads: fails because ambient bd state leaks the live spec-106 review-phase epic into the test (z4ps isolation leak), independent of layout — 106's only instruct change is the byte-identical SpecsDir swap. TestInstructPhaseDetection/{plan,implement} is env-dependent: RenderIdleIfProtected (UNTOUCHED by 106) idle-short-circuits when the sandbox branch is main under this env's init.defaultBranch=main; harness scenario diffs are pure flat-path fixture migrations. Neither is a spec-106 regression.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "internal/validate/divergence.isCoLocatedReview",
+      "issue": "isCoLocatedReview uses strings.Contains(path, \"/reviews/\") to classify co-located reviews as non-source. This would over-match a hypothetical Go source path under a directory named reviews/ (e.g. internal/reviews/x.go), excluding it from adr-divergence. Verified no such package path exists today, so no live over-match; noting as a latent matcher-breadth risk only. Non-blocking.",
+      "hard_block": false
+    }
+  ]
+}

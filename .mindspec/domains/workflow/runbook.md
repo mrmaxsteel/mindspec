@@ -6,7 +6,7 @@
 
 Use `/spec-init` or create manually:
 ```
-docs/specs/<NNN-slug>/
+.mindspec/specs/<NNN-slug>/
   spec.md
   context-pack.md (placeholder)
 ```

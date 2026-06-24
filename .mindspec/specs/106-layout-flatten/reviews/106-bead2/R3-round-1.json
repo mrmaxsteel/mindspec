@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Contract/behavior-preservation lens: the change is genuinely additive on the canonical repo. (1) Every diff-string matcher preserves its prior canonical/legacy cases and only adds new prefixes: isDocFile keeps all 4 originals; specMDID/isADRMarkdown/cmd-docs were canonical-only and now also recognize flat (and legacy) — but no canonical path's classification changes, and no tracked path uses the new prefixes today. isProcessArtifact keeps root review/ and adds an independent /reviews/ matcher; git ls-files shows ZERO tracked /reviews/ paths, so no live reclassification. (2) The linchpin LoadOwnershipAtRef is first-present-wins: canonical ref still resolves the canonical manifest byte-identically; an operational error on ANY probe (incl. the first flat probe) is propagated, never swallowed as missing; all-absent yields the preserved missing Ownership (ManifestPath \"\", Source() missing). Tested (TestLoadOwnershipAtRef_FlatRef passes). (3) Enumerator swaps go through SpecsDir/DomainsDir, whose resolveArtifact falls back byte-for-byte to DocsDir join with no flat tree → identical canonical paths. (4) go build ./... clean; no stale domainManifestRelPath caller; affected-package tests all green. The live complete gate routes through validate.LoadOwnershipAtRef, not the deferred doctor files. No canonical behavior change; no blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "behavior-preservation / canonical byte-identity",
+      "issue": "Verified byte-identical canonical/legacy classification across isDocFile, specMDID, isADRMarkdown, checkInternalPackages domain prefixes, cmd-docs accept-set, validateSpecArtifactSync companion logic, and the SpecsDir/DomainsDir enumerator swaps. resolveArtifact returns filepath.Join(DocsDir(root), rel) when no flat tree exists, matching the pre-spec hardcoded .mindspec/docs/... joins exactly. go build clean; validate/contextpack/doctor/spec/domain tests all pass.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "matcher scope (framing nuance, not a regression)",
+      "issue": "specMDID, isADRMarkdown, and the cmd-docs accept-set (isUserDoc/isCoreUsageDoc) newly recognize LEGACY docs/ paths too, not 'flat only' as the commit framing implies (they were canonical-only before). Zero effect on the current canonical repo (no docs/specs|adr|user|core paths exist) and consistent with isDocFile, which already classified docs/ as docs. Strictly additive, not a regression — noted for accuracy only.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "isProcessArtifact / isCoLocatedReview breadth",
+      "issue": "isCoLocatedReview is strings.Contains(path, \"/reviews/\") — broader than spec-dir-scoped: ANY path with a /reviews/ segment is skipped before ADR-divergence attribution (the test intentionally asserts internal/foo/reviews/notes.md is non-source). git ls-files shows no tracked /reviews/ path, so zero current-repo impact; this is the intended co-located-reviews design. Independent of the permanent root review/ prefix (literal 'review/' does not substring-match 'reviews/'). Acceptable; flagged for awareness.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation B — deferred doctor canonical-hardcoding",
+      "issue": "doctor/ownership.go and doctor/orphaned_beads.go remain canonical-hardcoded and out of Bead 2 scope. From the behavior-preservation lens this is correct: they behave identically on the current canonical repo (no regression), and the LIVE complete ADR-divergence gate routes through validate.LoadOwnershipAtRef/listDomainDirsAtRef (now multi-prefix + tested), NOT through doctor. Grep confirms doctor does not invoke the ref-anchored gate. Acceptable deferral to Bead 5/6.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation A — specMDID degenerate-quirk test fix",
+      "issue": "specMDID(\"docs/specs/spec.md\") == \"spec.md\" is the preserved original TrimSuffix quirk (TrimSuffix('/spec.md') no-ops on the single 'spec.md' segment), now applied per-prefix; only the stale test expectation was corrected, not the production logic. Behavior of the original code is preserved. OK.",
+      "hard_block": false
+    }
+  ]
+}

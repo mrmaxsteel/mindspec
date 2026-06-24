@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "Lens = next-bead/completion integration. Move integrity is clean: .mindspec/docs, review/, docs/ all gone; targets exist; NO .go changed; the directional guard mergeLayoutRegression(Flat source, Canonical target)=false so the bead→spec flatten merge is ALLOWED (confirmed at mindspec_executor.go:294); LoadOwnershipAtRef flat-prefix resolves all 4 OWNERSHIP.yaml (present, well-formed, self-globs repointed); doc-sync is N/A (no source .go). BUT Bead 5's own `mindspec complete` HARD-BLOCKS on adr-divergence-unowned. The gate diffs base..beadHead; after isProcessArtifact filtering, four NON-doc .mindspec/ paths reach attributeDomain unclaimed: lineage/manifest.json (M), migrations/bead5-flatten/{lineage,state}.json (A), policies.yml (D). isProcessArtifact covers only docs/.beads/review//reviews/ — NOT .mindspec/lineage|migrations|policies — and no domain glob claims them, so each emits adr-divergence-unowned → adrResult.HasFailures() → adrDivergenceFailure (complete.go:461) unless --override-adr. The spec-mandated ADR-0018 vestigial drop of .mindspec/policies.yml trips this on its own. This directly falsifies spec line 58's 'adr-divergence-unowned gate will not hard-block.' Bead 6 otherwise inherits a clean, complete flat tree.",
+  "concrete_changes_required": [
+    "Fix the adr-divergence-unowned hard-block on Bead 5's complete: extend the Req-6 process-artifact classifier (internal/validate/divergence.go isProcessArtifact, workflow-owned + accepted-ADR-covered) to classify .mindspec/lineage/** and .mindspec/migrations/** as non-source process artifacts, so the mover's own committed lineage manifest + run-state are not flagged unowned. This also future-proofs real user cutovers, which would hit the same block at their next complete.",
+    "Ensure the spec-mandated vestigial deletion of .mindspec/policies.yml (a non-doc .mindspec/-root config file) is classified non-source so its removal does not trip adr-divergence-unowned — via the classifier above or a narrow .mindspec/-root non-doc-config exclusion. policies.yml alone trips the gate even if lineage/migrations are excluded.",
+    "If this bead must stay .go-free, the ms-bead-cycle step MUST run `mindspec complete --override-adr \"migration lineage/run-state + ADR-0018 vestigial policies.yml drop are process records, not owned source\"` and record the deviation; plain `mindspec complete` will fail. Prefer the classifier fix so the gate passes cleanly."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "complete / adr-divergence gate (Bead 5 completion integration)",
+      "issue": "Bead 5's `mindspec complete` hard-blocks. ChangedFiles(base..beadHead) includes 4 non-doc .mindspec/ paths that pass excludedFirstSegments + isProcessArtifact and reach attributeDomain unclaimed: .mindspec/lineage/manifest.json (M), .mindspec/migrations/bead5-flatten/lineage.json (A), .mindspec/migrations/bead5-flatten/state.json (A), .mindspec/policies.yml (D). isProcessArtifact (divergence.go) covers docs/.beads/review//reviews/ ONLY — not .mindspec/lineage|migrations|policies — and no OWNERSHIP.yaml glob claims them, so each → adr-divergence-unowned ERROR → adrResult.HasFailures() → adrDivergenceFailure at complete.go:461 (no --override-adr/--supersede-adr). The mandated policies.yml drop trips it standalone. Contradicts spec.md:58.",
+      "hard_block": true
+    },
+    {
+      "severity": "low",
+      "area": "Bead-6 handoff / transitional CI red",
+      "issue": "TestLayoutPackageIsOwned (internal/layout/precondition_test.go:220 os.ReadFile('../../.mindspec/docs/domains/workflow/OWNERSHIP.yaml')) and the internal/harness/scenario_*.go fixtures still pin canonical .mindspec/docs/ paths (no .go changed by this bead) and therefore FAIL against the flat tree until Bead 6 migrates fixtures + adds doctor/ownership.go tier-awareness. Expected per BRIEF item D, but the spec branch is CI-red between the Bead-5 merge and Bead-6 landing; Bead 6 must land before any go-test gate or final review can be green.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "structure / guard / ownership / Bead-6 inputs (verified clean)",
+      "issue": "Positive confirmations: directional merge guard ALLOWS the flat→canonical bead→spec merge (mergeLayoutRegression returns false when target is canonical; mindspec_executor.go:294); LoadOwnershipAtRef resolves the flat .mindspec/domains/<d>/OWNERSHIP.yaml for all four domains (present, well-formed, core+workflow self-globs repointed to flat path); zero .go source changed; .mindspec/docs, review/, docs/ all gone with no orphans; lineage manifest has 12 entries + skipped; README/AGENTS link repairs resolve to existing flat targets (project-docs/user/guides/*, .mindspec/core/*, .mindspec/adr/*). Bead-6 inputs all present: .mindspec/core/DOCS-LAYOUT.md, adr dir with ADR-0039 free, plugins/mindspec skills, canonical-shaped harness scenarios to migrate.",
+      "hard_block": false
+    }
+  ]
+}

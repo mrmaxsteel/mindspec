@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "106-layout-flatten",
+  "target": "spec/106-layout-flatten",
+  "round": 1,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "32d22f38d9828a5919f4e44d52953f3d0abc1527"
+}

@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens: round-2 code is real and substantive, no stubs. (1) migrationRunState is a minimal {Stage string json:\"stage\"} projection that matches Bead-3 State.Stage (internal/layout/runstate.go) and doctor runState.Stage (json tag \"stage\"). migrationTerminalStage=\"applied\" matches stageApplied and the doctor OK stage exactly. migrationRunInProgress has a real body: ReadFile(state.json) → json.Unmarshal → returns Stage!=\"\" && Stage!=\"applied\". The recovery exception now keys on a non-terminal stage, not mere dir existence — the R5 hard_block is genuinely closed: a completed/applied/stateless run no longer suppresses ErrMixedLayout. (2) SpecsDir/DomainsDir delegate to resolveArtifact(root,\"specs\"|\"domains\"); resolveArtifact is flat-first→isFlatTree→DocsDir join, so byte-identical to filepath.Join(DocsDir(root),...) on canonical/legacy/greenfield, flat when flat present. (3) Tests assert substantively against real stage values: in-progress(\"after-mv\")→tolerated(err nil); completed(\"applied\")→ErrMixedLayout; state-less dir→ErrMixedLayout; TestSpecsDirAndDomainsDir covers canonical/legacy/flat + greenfield byte-identity + flat-first precedence. No hollow assertions, no dead code. encoding/json import used. Scope-clean (3 files). Behavior-preserving — no moves.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace.go",
+      "issue": "R5 round-1 hard_block (mixed-layout recovery mis-scoped to ANY migrations dir, letting completed/stale runs suppress ErrMixedLayout) is ADDRESSED: migrationRunInProgress reads state.json and keys on a non-terminal stage; the terminal value \"applied\" mirrors stageApplied and the doctor OK stage 1:1.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace.go",
+      "issue": "R6 round-1 non-blocking major (need flat-aware enumerator roots for Bead 2) is ADDRESSED: SpecsDir/DomainsDir delegate to resolveArtifact and are byte-identical to filepath.Join(DocsDir(root),...) on canonical/legacy/greenfield. Enumerators themselves untouched — correct Bead-1 scope.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace_test.go",
+      "issue": "New tests use real schema/stage values: writeMigrationState emits {\"run_id\":...,\"stage\":...} matching State; \"after-mv\" is a genuine non-terminal stage and \"applied\" the genuine terminal one. Assertions are concrete (LayoutMixed + err sense). Not hollow.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

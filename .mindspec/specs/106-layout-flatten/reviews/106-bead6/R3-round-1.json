@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Contract/mechanism lens. (1) Install-refresh: the segment-before-first-dot keying is backward-compatible — for `<name>.md` it yields the same key as the old TrimSuffix, and all 14 skill names are dot-free, so `<name>.md`+`<name>.pre106.md` correctly group under `<name>` with no cross-skill collision. Pre-106 installs are detected+refreshed (new TestInstallSkills_RefreshesPre106Snapshot passes); a current install hits `current==content`→Skipped (no false flag); user-modified→notice (HC-6 test passes). Only callers are installSkills/cleanupRemovedSkills, both keyed by bare names. (2) Snapshots: exactly 8 `.pre106.md` Added, ZERO existing snapshots Modified; all 8 byte-exact to the parent canonical source. (3) Tier-awareness: doctor canonicalDomains/checkOrphanedBeads + instruct listSpecs swap hardcoded `.mindspec/docs/...` for pre-existing workspace.SpecsDir/DomainsDir (resolveArtifact flat→canonical→legacy, byte-identical on canonical/legacy); workspace pkg untouched; additive+correct on flat AND canonical. Build OK; setup/doctor/workspace tests pass; instruct's sole failure is the known z4ps leak, not this change. (4) Migrate rubric coherent for brownfield. No blockers.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/setup/skills.go previouslyShippedSkills (marker-less reconstruction)",
+      "issue": "stripManagedByMarker(canonical) now reconstructs the NEW flat-path body minus the marker, so a true pre-093 marker-less install of the only path-bearing lifecycle skill (ms-spec-create, docs/specs→.mindspec/specs) is no longer reconstructible from the marker-less heuristic. Not a new regression: ms-spec-create's body already diverged (step-5 grill added in spec 105), so the marker-less path stopped matching true pre-093 ms-spec-create before this bead; and the 093..pre-106 population is correctly caught by the new pre106 snapshot. Already tracked by follow-up 799d.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "cmd/mindspec/migrate.go scanSourceMarkdown/scanCanonicalDocs vs new flat rubric",
+      "issue": "The migrate PROMPT/rubric now declares flat .mindspec/{specs,adr,domains,core} + top-level project-docs/ as canonical, but the inventory partition still keys 'canonical' solely to .mindspec/docs/ (scanCanonicalDocs) and only SkipDir's .mindspec/docs|migrations (scanSourceMarkdown). On an ALREADY-FLAT mindspec repo, brownfield `migrate` would list flat lifecycle/project-docs files as 'source to classify'. Non-blocking: brownfield migrate targets external/unstructured repos (no flat tree present), and the prompt's decision-rule 4 instructs the agent to skip already-canonical flat/project-docs files. Worth a follow-up to align the scan with the rubric.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/instruct (test suite)",
+      "issue": "Full ./internal/instruct/ run FAILs with exactly one test — TestRun_IdleNoBeads — which is the known pre-existing z4ps cwd-isolation leak (documented, predates spec 106). The tier-aware listSpecs change introduced no new instruct failure. setup/doctor/workspace packages all green; module builds.",
+      "hard_block": false
+    }
+  ]
+}

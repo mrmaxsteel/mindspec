@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Correctness lens. (1) Directional guard is EXACT: mergeLayoutRegression blocks iff target==flat AND source in {canonical,legacy}; verified against the full (source,target) matrix (layout_guard_test.go:21-49). Critical property 2 holds — flat->canonical is ALLOWED (target!=flat short-circuits), so Bead 5's move-merge and the eventual flat-spec->canonical-main merge pass; canonical/legacy->flat correctly BLOCK with an ADR-0035 rebase recovery line. (2) MigrationRecoveryActive exemption is scoped to LIVE runs only: migrationRunInProgress requires a non-empty, non-terminal ('applied') state.json stage, so stale/completed/unreadable .mindspec/migrations records do NOT exempt. (3) layoutAtRef: TreeDirsAtRef returns trees only; absent .mindspec yields empty slice (no error) -> greenfield, so fail-open fires only on genuine git failure; legacy probed via ls-tree docs. (4) Critical property 1 holds — panelGateRoots unions repo-root review/ on canonical (only flat collapses to co-located reviews/), so root review/106-bead5|6 keep gating; reviewSegments {review,reviews} are distinct segments, deduped by symlink-resolved abs path: no double-count, no miss; mixed/error -> safe union. dualLayoutDuplicateSpecIDs enumerates all three tiers directly. Build + all five packages green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "internal/executor/layout_guard.go mergeLayoutRegression",
+      "issue": "A MIXED source onto a FLAT target is ALLOWED (deliberate, tested at layout_guard_test.go:39). A mixed source tree carries .mindspec/docs/ markers, so merging it onto flat would technically reintroduce canonical paths — a narrow residual gap the directional rule does not catch. Acceptable because: a mixed source ref is an anomalous state, a live migration exempts the guard anyway via MigrationRecoveryActive, and a mixed tree is already a hard error at DetectLayout. Noted, not blocking.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "internal/executor/layout_guard.go layoutAtRef + LayoutMarkersFromMindspecChildren",
+      "issue": "TreeDirsAtRef returns tree (dir) entries only, so the context-map.md->Flat marker is dead on the git-ref path; flat is recognized solely via specs/adr/domains/core dirs. Reliable in practice (any spec/bead branch has .mindspec/specs/<id>/), but a hypothetical flat tree carrying ONLY context-map.md would classify greenfield from a ref. No regression-blocking impact (greenfield never causes a wrong block).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/executor/mindspec_executor.go FinalizeEpic remote-PR path",
+      "issue": "The spec->main guard runs only when MergeStrategy==direct; the remote-PR push path is intentionally uncovered (documented in layout_guard.go header + code comment, relies on Bead-3 precondition + PR review). Acknowledged scope, not a defect.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/executor guardMergeLayout fail-open",
+      "issue": "A layout read error at either ref fails open (allows the merge) and the guard is the only local-merge protection. Documented tradeoff mirroring the panel gate; the common absent-.mindspec case does not error (ls-tree exits 0 empty), so fail-open triggers only on a genuine transient git failure. Safe.",
+      "hard_block": false
+    }
+  ]
+}

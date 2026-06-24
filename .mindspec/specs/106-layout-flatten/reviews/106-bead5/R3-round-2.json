@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Content-integrity / contract lens; I approved round 1. (1) BENCH-MOVED.md repair is a pure path-fix: both links go .mindspec/docs/adr/ADR-0027|0028 -> .mindspec/adr/ADR-0027|0028, preserving the visible labels; both new targets exist on disk and the dead .mindspec/docs/ tree is gone. No prose changed, no content distortion, no masked-fixable link. (2) Ran my own repo-wide scan: grep '](.mindspec/docs/|](docs/|](review/' over *.md yields 33 hits, ALL under docs_archive/** frozen snapshots; the inverse (^|/)docs_archive/ filter returns ZERO non-archive lines. No live broken markdown link remains. (3) isProcessArtifact extension is a sound, non-over-broadening contract change: isMoverRunState uses trailing-slash-tight prefixes (.mindspec/lineage/, .mindspec/migrations/) over trees that hold only json/md/yml run-state (no .go); isVestigialConfigDrop uses exact == on .mindspec/policies.yml and .mindspec/docs/glossary.md (not prefixes, cannot creep). isSourceFile stays scoped to internal/+cmd/ *.go, so no real source can escape the divergence gate. Validate tests pass.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "BENCH-MOVED.md",
+      "issue": "R5 round-1 hard_block (2 root-doc links into the now-dead .mindspec/docs/adr/ tree) repaired as a literal path-fix to .mindspec/adr/; both targets verified present on disk; link labels preserved; no content distortion.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "repo-wide markdown links",
+      "issue": "Independent repo-wide scan (']( .mindspec/docs/ | docs/ | review/') = 33 hits, 100% under docs_archive/** frozen snapshots; zero live broken links outside the archive.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/validate/divergence.go isProcessArtifact",
+      "issue": "R6 round-1 hard_block (lineage/migrations/policies.yml tripping adr-divergence-unowned) addressed. isMoverRunState prefixes are trailing-slash-tight (.mindspec/lineage/, .mindspec/migrations/) and those trees contain only json/md/yml run-state, no .go; isVestigialConfigDrop is exact-match (==) on the two named drops, not a prefix. isSourceFile remains scoped to internal/+cmd/ non-test .go, so the OR-extension adds to the process-artifact set without letting any real source escape the gate. Not over-broad.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "internal/validate/layout_classifier_test.go",
+      "issue": "New TestMoverRunStateAndVestigials_ProcessArtifacts asserts both positive classification and negative non-source classification, plus precision guards (isMoverRunState rejects .mindspec/config.yaml; isVestigialConfigDrop rejects .mindspec/adr/ADR-0018.md). go test ./internal/validate (classifier+divergence+ReviewMatchers) PASS.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": ".mindspec/domains/workflow/architecture.md",
+      "issue": "Doc-sync note describing the isMoverRunState/isVestigialConfigDrop classification accompanies the code change; keeps the workflow domain doc in sync with the new behavior. Content accurate.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Risk/regression lens: the core non-breaking claim HOLDS. For a user who does nothing, the new binary reads canonical/legacy/greenfield trees byte-identically (resolveArtifact/SpecDir fall to DocsDir whenever no flat tree is present; flatTreePresent cannot false-positive on a canonical/legacy tree), gate matchers recognize all three layout prefixes permanently, ref-anchored ownership loaders try flat->canonical->legacy first-present-wins, and the merge guard only blocks the regression direction (target must be flat — never true for a non-migrating project) and fails open on git errors. Proven by TestResolverMatrix, TestDetectLayout_*, TestLayoutClassifier_ThreePrefixEquivalence, ownership_ref_test.go (all GREEN) and the green dogfood (main flattened itself). migrate is strictly opt-in (no auto-trigger; no other engine callers) and data-safe: transactional git-mv, pre-publish reset-rollback, idempotent resume, fail-closed on a stale mixed tree. v0.10.0 (minor) is defensible. The ONE gap: the plan headlines migrate as clean/transactional while 3jq7 (404 gate reports GREEN on a broken non-README root-doc link) is a KNOWN silent-completeness hole, undisclosed. Don't ship that guarantee without fixing (c) or a release-notes known-limitations note.",
+  "concrete_changes_required": [
+    "Either take plan option (c) to fix mindspec-3jq7 (widen the migrate 404 link-check beyond README/AGENTS so a broken link in any tracked root doc fails the migration), OR add an explicit 'migrate layout — known limitations (supervised)' note to the v0.10.0 release notes disclosing: (1) 3jq7 — the post-flatten link-existence gate scans a narrow root-doc set and can report success while a non-scanned root doc's link is silently broken; (2) sc0w — the precondition over-blocks on unrelated stale pre-flatten branches. Do not headline migrate as 'transactional/safe' with 3jq7 undisclosed."
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "risk/non-breaking-claim",
+      "issue": "Non-breaking-for-non-migrators claim verified sound: resolveArtifact/SpecDir/SpecsDir/DomainsDir resolve byte-identically on canonical/legacy/greenfield (no flat tree => falls to DocsDir); flatTreePresent keys only on .mindspec/{specs,adr,domains,core}|context-map.md so a canonical/legacy tree never false-flips to flat or mixed. Gate matchers (isDocFile/specMDID/hasArtifactPrefix/isADRMarkdown) + ref loaders (LoadOwnershipAtRef, listDomainDirsAtRef) are permanently multi-prefix. Tests GREEN. v0.10.0 minor is justified."
+    },
+    {
+      "severity": "medium",
+      "area": "migrate/link-integrity (mindspec-3jq7)",
+      "issue": "The mover's gating link-check (doctor.CheckMovedTreeLinks, DefaultRootDocs = README.md+AGENTS.md only) can report zero-404 while a flatten silently breaks links in a tracked root doc OUTSIDE that set (BENCH-MOVED.md broke during the dogfood and the gate stayed GREEN — caught only by a human scanning all 546 .md). Only affects opt-in migrators; failure is dangling-links not data loss; recoverable. Disclose or fix before headlining migrate as complete/safe."
+    },
+    {
+      "severity": "low",
+      "area": "migrate/precondition (mindspec-sc0w)",
+      "issue": "CheckPrecondition blocks the flatten on ANY unmerged pre-flatten ref, including unrelated stale branches not targeting the migration — forced the dogfood to bypass the CLI and drive the mover engine directly. Fail-SAFE (over-blocks with an actionable error, never corrupts) but a real user with old branches hits the same wall. Affects opt-in migrators only; no --force/allowlist escape exists yet."
+    },
+    {
+      "severity": "low",
+      "area": "checklist-gap/downstream-smoke",
+      "issue": "All non-breaking proof is unit-level + a single dogfood. The HIGHEST-stakes claim (old-layout downstream projects keep working on the new binary) has no end-to-end smoke in the pre-release checklist: take a real canonical/legacy project, upgrade the binary, run a full lifecycle gate WITHOUT migrating, assert no behavior change. Recommended (not a blocker given the byte-identity unit coverage + green dogfood)."
+    },
+    {
+      "severity": "low",
+      "area": "migrate/data-safety (positive)",
+      "issue": "Mover data-safety verified: pure git-mv + commits (history preserved), pre-publish operational failure hard-resets to PreRunRef with a SCOPED clean (not repo-wide), forward-only refusal AFTER publish, idempotent crash-resume, and DetectLayout fail-closes (ErrMixedLayout) on a stale half-migrated tree so you cannot silently operate on a corrupt cutover. A user who runs migrate cannot lose data; a half-migrated tree is resumable or pre-publish abortable."
+    },
+    {
+      "severity": "low",
+      "area": "merge-guard/coverage-honesty",
+      "issue": "layout_guard correctly blocks only canonical/legacy->flat (the resurrection direction), exempts in-progress recoveries via the live-run-scoped MigrationRecoveryActive (stale 'applied' records do NOT exempt), and fails open on layout-read error. Coverage scope is honestly stated as LOCAL-merge-seams-only (remote-PR path relies on the precondition + review, not this guard) — not overclaimed."
+    },
+    {
+      "severity": "low",
+      "area": "adr-governance",
+      "issue": "ADR-0039 is still Status: Proposed while its layout has shipped and main itself is flattened (terminal 'applied' migration records). Plan option (c) flips it to Accepted; if (c) is skipped the ADR governance is stale (decided-in-practice but marked Proposed)."
+    }
+  ]
+}

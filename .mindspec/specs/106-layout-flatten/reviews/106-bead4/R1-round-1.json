@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Author-of-record/scope lens. The diff implements EXACTLY Bead 4: Req 8 (doctor checkLayout reusing DetectLayout + would-migrate-layout Warn + dual-layout-spec ERROR + tier-aware checkDryRunMigration via workspace.SpecsDir), Req 9 (directional guardMergeLayout installed at all three real local seams — CompleteBead MergeInto, FinalizeEpic auto-merge MergeInto, FinalizeEpic direct MergeBranch — with block iff source canonical/legacy AND target flat, run-state exempt, fail-open, rebase recovery line), Req 10/8 (panel.Scan globs both review/ and reviews/ segments; panelGateRoots/specScopedReviewRoots pick roots by DetectLayout). No file moves (RCD empty). No Bead-2 creep: internal/validate classifier untouched — the additive reviews/ matcher stays in Bead 2; only the panel SCAN is layout-aware here. No Bead-5 creep: no internal/layout, no cmd/migrate, no renames. No Bead-6 creep: no internal/setup, no skills/SKILL/ADR. Both critical properties verified: panelGateRoots unions repo-root review/ on any non-flat tree (canonical gate preserved for beads 5/6); mergeLayoutRegression allows flat->canonical so Bead 5's move-merge and flat-spec->canonical-main land. Deviation A (3-line exported MigrationRecoveryActive delegating to Bead-1's migrationRecoveryActive) is reuse-not-reimplement, minimal, additive. Deviation B is a CORRECT deferral the plan itself assigns to Bead 2. Bead-4 packages green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/deviation-A",
+      "issue": "internal/workspace/workspace.go gains a 3-line exported MigrationRecoveryActive wrapper that purely delegates to Bead-1's unexported migrationRecoveryActive, plus a core/architecture.md note. This is the minimal cross-package bridge the executor guard needs and matches the plan's reuse-not-reimplement intent (the exemption is the same run-state DetectLayout honors). Additive, no Bead-1 behavior change. Acceptable, not a scope violation.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/deviation-B",
+      "issue": "Only checkDryRunMigration was made tier-aware; docs.go orphan/docs scans were left to Bead 2. The plan (Bead 4 step 3) explicitly assigns those exact docs.go lines to Bead 2, which merges before Bead 5 flattens; on the canonical interim tree docs.go's hardcoded paths still resolve byte-for-byte. Correct deferral, no functional gap.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/file-set",
+      "issue": "panel_advisory.go (panelGateRoots/specScopedReviewRoots) and doctor.go (checkLayout registration) were touched beyond the plan's literal Changed-files list, but both are the natural homes for the helpers within the already-listed packages (internal/complete, internal/doctor). Not scope creep. The three domain architecture.md edits document the NEW code behavior in their owning domains (core/execution/workflow), not static-text path rewrites (Bead 6) — appropriate companions.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "transition/post-flatten-reviews",
+      "issue": "Once the tree is flat, a leftover repo-root review/ panel no longer drives the gate (by design). Sequencing beads 5/6 reviews relative to their own flatten merge is an orchestration concern the plan already documents (root review/ stays live until Bead 5 migrates it), not a Bead 4 correctness issue.",
+      "hard_block": false
+    }
+  ]
+}

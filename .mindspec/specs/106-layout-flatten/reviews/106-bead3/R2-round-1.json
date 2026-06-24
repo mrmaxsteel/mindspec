@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Codebase-pin lens. (1) Every claimed function/type exists with a real body, no TODO/panic/stub: gitutil GitMv/ResetHard/CleanForce/CommitPaths/LocalBranchRefs/RemoteTrackingRefs/LockedWorktreeBranches (SEC-5 rejectOptionLike-guarded, path operands behind `--`); Executor iface + MindspecExecutor pass-throughs + Mock Fn/result/err hooks; internal/layout mover/runstate/rewrite/precondition all fully implemented; doctor CheckMovedTreeLinks + LinksReport; the migrate layout cobra cmd wired with --abort/--run-id/--target. All referenced helpers (RevParseShowToplevel, HasRemote, MergeBase, TreeDirsAtRef, DiffCachedQuiet, checkMigrationMetadata, the doctor 'applied' terminal stage) verified to exist — the code grounds on real infra, not phantoms. (2) Tests are substantive: R100 pure-rename assertions, log --follow survival, idempotent no-new-commits, crash-resume at every boundary, pre-publish rollback restoring pre-run ref, link-check failing on BOTH rewritten-dangling and un-rewritten-breaking links, forward-only abort refusal, and lineage_schema_test that parses the manifest+state under the REAL doctor schema. (3) OWNERSHIP.yaml internal/layout/** and redact.go 'layout' edits are correct, complete, alphabetized, and double-tested. (4) Deviation A: CommitPaths is used throughout the mover; LockedWorktreeBranches is consumed in migrate.go — neither is dead code. No blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/layout (substance)",
+      "issue": "All net-new functions/types have real bodies and are grounded on verified pre-existing helpers; no TODO/panic/stub markers in any new non-test file."
+    },
+    {
+      "severity": "info",
+      "area": "tests (substance)",
+      "issue": "mover_test/precondition_test/links_test/lineage_schema_test/mover_primitives_test all carry consequential assertions (R100 rename, log --follow, crash-resume subtests, rollback-to-pre-run-ref, dual link-check fail paths, doctor-schema parse against real checkMigrationMetadata). Not hollow."
+    },
+    {
+      "severity": "info",
+      "area": "deviation A (dead-code cross-check)",
+      "issue": "CommitPaths is used in mover.go processGroup/run and tested; LockedWorktreeBranches is consumed in cmd/mindspec/migrate.go to build the tolerated lockedSet and tested against a real locked worktree. Neither is dead; LockedWorktreeBranches correctly stays gitutil/CLI-only and off the Executor interface."
+    },
+    {
+      "severity": "minor",
+      "area": "internal/layout/rewrite.go",
+      "issue": "applyRewritesInTree doc comment contains a self-corrected editing artifact: 'Returns the repo-… no, returns the absolute paths that changed.' Cosmetic only; trim to one clean sentence. Non-blocking."
+    }
+  ]
+}

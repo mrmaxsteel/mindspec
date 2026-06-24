@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Round-2 fix stays cleanly inside Bead 1 (resolver) scope. Only 3 files touched: internal/workspace/workspace.go, its test, and .mindspec/docs/domains/core/interfaces.md (the resolver's own contract doc — a comment/signature declaration, NOT a moved artifact). The recovery-scoping change (migrationRunInProgress reads state.json stage; exception now keys on a non-terminal stage, not bare dir existence) and the SpecsDir/DomainsDir enumeration ROOTS are both resolver-bead work, delegating to resolveArtifact's three-tier flat-first precedence. The Bead-2 enumerators themselves are NOT touched: zero files in internal/validate, internal/spec, internal/domain, and grep finds NO external caller of workspace.SpecsDir/DomainsDir — a pure defined-not-wired seam, mirroring the Bead-4 helper. Behavior-preserving confirmed: git show 2f4aee3d --diff-filter=RCD is empty (no renames/copies/deletes, no .mindspec/docs moves). Terminal stage \"applied\" matches both internal/layout/runstate.go stageApplied and internal/doctor/migration.go. No creep into Bead 2/4/5. Build OK; go test ./internal/workspace/... PASS. My round-1 verdict was APPROVE with empty concrete_changes_required — nothing to re-mark; the panel R5 hard_block is now addressed in-scope.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "scope/round-1-status",
+      "issue": "Round-1 verdict was APPROVE with empty concrete_changes_required — no R1 items to re-mark ADDRESSED/PARTIAL/MISSED. The fix is driven by the panel-level R5 hard_block (recovery mis-scoping) and R6 non-blocking enumerator-root request, both landed within the resolver bead.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/recovery-scoping",
+      "issue": "migrationRecoveryActive now delegates to migrationRunInProgress(runDir), which reads state.json and returns true only for a non-empty, non-terminal stage. Terminal value \"applied\" matches internal/layout/runstate.go:25 (stageApplied) and internal/doctor/migration.go:218 (case \"applied\"). This is resolver (Bead 1) DetectLayout logic — correctly in-scope, no reach into the Bead-3 mover or Bead-4 executor.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/enumerator-roots-not-enumerators",
+      "issue": "SpecsDir(root)/DomainsDir(root) added as flat-aware enumeration ROOTS delegating to resolveArtifact. Confirmed the actual enumerators in internal/validate, internal/spec, internal/domain are NOT touched, and no package outside workspace references SpecsDir/DomainsDir (grep: zero external callers). Pure seam for Bead 2 — no Bead-2 wiring creep.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "scope/behavior-preservation",
+      "issue": "git show 2f4aee3d --diff-filter=RCD is empty: zero renames/copies/deletes. Name-status shows only M on the 3 files; no .mindspec/docs/ artifact moves. interfaces.md change is a comment/signature update to the core contract, not a relocation. SpecsDir/DomainsDir are byte-identical to filepath.Join(DocsDir(root),\"specs\"|\"domains\") on canonical/legacy/greenfield (pinned by TestSpecsDirAndDomainsDir). AC22 zero-on-disk holds; build OK; workspace tests PASS.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

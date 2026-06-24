@@ -1,0 +1,50 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "The spec is not fundamentally too large: the layout surfaces are tightly coupled, and the 3-phase spine is the right shape. Phase 1 is independently valuable as a behavior-preserving resolver/gate refactor, and Phase 2 can be a tested migration primitive before Phase 3 moves. However, approval should wait because several load-bearing boundaries are still underspecified. Req 2 cannot actually drive write-defaults with only flat|legacy|greenfield; current canonical .mindspec/docs and root docs legacy need distinct or explicit mixed behavior. Req 10's no-unmerged-pre-flatten-branch/PR precondition is a safety gate but lacks a feasible, testable discovery algorithm. Req 3/AC4 combine committed two-step moves with rollback without defining rollback semantics after commits. These are fixable, but they are structural enough to block approval.",
+  "concrete_changes_required": [
+    "Revise Req 2/AC3 to distinguish canonical .mindspec/docs from root docs legacy, and define mixed-layout behavior. Add tests for new-spec write-default in canonical-only, legacy-only, flat, greenfield, and mixed canonical+legacy projects.",
+    "Revise Req 10/AC15 with a concrete branch/PR discovery algorithm: which local refs, remote-tracking refs, and hosted PR metadata are checked; what happens offline or without a remote; how the flatten base/fingerprint is computed; and what exact state blocks migration.",
+    "Revise Req 3/AC4 to define transactional rollback after committed git-mv/link-rewrite steps: whether rollback resets an unpublished branch, creates revert commits, or refuses after publish; what run-state values mean; and what idempotent resume does after partial committed success.",
+    "Broaden AC13/proofs so every path-bearing skill/plugin/setup artifact in scope is verified, not only panel snapshots. Include .agents/skills, .claude/skills, plugins/mindspec, internal/setup historical snapshots, generated Codex/Claude text, and bead-prep/impl paths."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "area": "STAGING / write-default",
+      "issue": "Req 2 defines DetectLayout(root) as {flat | legacy | greenfield}, but the repo has two non-flat write shapes: canonical .mindspec/docs and root docs legacy. A single 'legacy' state cannot unambiguously drive 'keeps writing to its existing form' for canonical-only, legacy-only, or mixed projects, and AC3 does not test canonical write-default preservation.",
+      "hard_block": true
+    },
+    {
+      "severity": "blocker",
+      "area": "FEASIBILITY / migration precondition",
+      "issue": "Req 10 requires absence of any unmerged pre-flatten branch/PR, but does not specify a feasible source of truth. Local branches, remote-tracking branches, hosted PR metadata, unavailable network/auth, external forks, and flatten-base detection are all materially different. The current AC only injects one branch, so it would not prove the safety gate the requirement promises.",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "FEASIBILITY / transactional mover",
+      "issue": "Req 3 and AC4 require committed two-step git moves plus full rollback on injected mid-run failure, but rollback after commits is undefined. Resetting, reverting, resuming, and published-branch refusal have different user-visible and history-preservation semantics. Without specifying this, implementation can appear compliant while leaving partial migration states.",
+      "hard_block": true
+    },
+    {
+      "severity": "major",
+      "area": "SCOPE / verification coverage",
+      "issue": "Req 11/Scope include skills, snapshots, generated setup text, and plugin skills, but AC13's proof only names internal/setup tests and a grep for panel-skill snapshots. Grep shows many other path-bearing artifacts: ms-bead-impl/prep/cycle/fix, ms-spec-final-review, ms-spec-create, plugin README/FINDINGS, internal/setup/codex.go, bootstrap text. The acceptance proof should cover all of them or explicitly classify some as out of scope.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "SCOPE / spec size",
+      "issue": "The 14 requirements and 16 ACs are large but not, by themselves, a reason to split. The surfaces are coupled by the layout invariant and the phase spine is coherent. Splitting should happen at plan/bead granularity only after the blockers above are made crisp.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "PRIOR PANEL COVERAGE",
+      "issue": "The spec appears to carry forward the prior panel's main design findings: staged no-move refactor, mover/link-rewriter, permanent multi-prefix diff matchers, flat worktree resolution, reviews co-location, branches-not-worktrees precondition, and merge fingerprint guard. The missing piece is not a whole omitted topic but the concrete feasibility of branch/PR drain detection.",
+      "hard_block": false
+    }
+  ]
+}

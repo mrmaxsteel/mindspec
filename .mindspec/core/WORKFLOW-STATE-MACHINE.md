@@ -37,7 +37,7 @@ MindSpec tracks three things:
 
 | Layer | File | Purpose |
 |:------|:-----|:--------|
-| **Lifecycle phase** | `docs/specs/<id>/lifecycle.yaml` | Per-spec phase: `spec → plan → implement → review → done` |
+| **Lifecycle phase** | `.mindspec/specs/<id>/lifecycle.yaml` | Per-spec phase: `spec → plan → implement → review → done` |
 | **Focus cursor** | `.mindspec/focus` (per-worktree) | Current working context: mode, activeSpec, activeBead, activeWorktree, specBranch |
 | **Work graph** | Beads epic + child beads | Execution status of each implementation unit |
 
@@ -54,7 +54,7 @@ MindSpec tracks three things:
 | Category | What happens |
 |:---------|:-------------|
 | **Git** | Creates branch `spec/<slug>` from HEAD; creates worktree `.worktrees/worktree-spec-<slug>`; auto-commits initial files |
-| **Files created** | `docs/specs/<slug>/spec.md` (template), `docs/specs/<slug>/lifecycle.yaml` |
+| **Files created** | `.mindspec/specs/<slug>/spec.md` (template), `.mindspec/specs/<slug>/lifecycle.yaml` |
 | **Beads** | Creates lifecycle epic: `[SPEC <slug>] <title>` |
 | **Focus** | `mode=spec`, `activeSpec=<slug>`, `specBranch=spec/<slug>`, `activeWorktree=<path>` |
 | **Lifecycle** | `phase: spec` |
@@ -148,7 +148,7 @@ repo/                                    # main checkout (idle)
 │   └── worktree-spec-123-my-spec/       # spec worktree (spec/plan/review)
 │       ├── .worktrees/
 │       │   └── worktree-beads-xxx.1/    # bead worktree (implement)
-│       ├── docs/specs/123-my-spec/
+│       ├── .mindspec/specs/123-my-spec/
 │       │   ├── spec.md
 │       │   ├── plan.md
 │       │   └── lifecycle.yaml

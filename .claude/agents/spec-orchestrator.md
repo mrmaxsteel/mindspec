@@ -92,8 +92,8 @@ and **Depends on** sections.
 Same six-reviewer protocol as spec review.
 
 Before running `mindspec plan approve`, stub any new ADRs cited by the
-plan in **BOTH** locations: the worktree's `.mindspec/docs/adr/` AND
-the main repo's `.mindspec/docs/adr/`. The validator looks in main, not
+plan in **BOTH** locations: the worktree's `.mindspec/adr/` AND
+the main repo's `.mindspec/adr/`. The validator looks in main, not
 the worktree.
 
 Then `mindspec plan approve <NNN-slug>`.
@@ -595,7 +595,7 @@ Cause: the validator resolves the repo root to the main checkout, not
 the spec worktree. ADR files must be visible there.
 
 Recovery: when stubbing a new ADR, copy the file to BOTH
-`<worktree>/.mindspec/docs/adr/` AND `<main-repo>/.mindspec/docs/adr/`
+`<worktree>/.mindspec/adr/` AND `<main-repo>/.mindspec/adr/`
 before running approve.
 
 ### 3. `mindspec next` claims wrong bead (auto-wiring missed)

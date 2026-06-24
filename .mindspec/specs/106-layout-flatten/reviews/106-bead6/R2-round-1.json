@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.72,
+  "rationale": "Codebase-pin lens. The substantive work is real, not hollow: ADR-0039 is well-formed (Proposed, real Context/Decision/Consequences/Alternatives, correct next-free id 0039 after 0038, all cross-refs 0018/0022/0023/0037 resolve); DOCS-LAYOUT ASCII tree + body now show the flat layout + co-located reviews; ms-spec-grill/ms-panel-run/setup-claude.go/instruct templates all repoint to flat paths; all 8 historical_skills/*.pre106.md are BYTE-EXACT captures of the old blobs (git-hash verified) and previouslyShippedSkills() now keys on the segment-before-first-dot with a genuine regression test (TestInstallSkills_RefreshesPre106Snapshot); the harness scenario_*.go fixtures are real flat-path migrations. The exact AC17 proof-grep over skills/setup/bootstrap is EMPTY. BUT the impl's 'AC17 audit grep is EMPTY' claim is false for the surface AC17 prose explicitly names ('plugin README/FINDINGS'): plugins/mindspec/README.md still shows the pre-flatten '.mindspec/docs/specs/<spec-id>/' and a repo-root 'review/' Disk-layout (lines 75/158/161), and FINDINGS.md references repo-root 'review/' (51/74/76). No recorded out-of-scope reason. The README Disk-layout section is now materially wrong. Doc-only and trivially fixable, but an incomplete cleanup of an AC17-named surface.",
+  "concrete_changes_required": [
+    "plugins/mindspec/README.md: update the '## Disk layout' block (lines ~158-167) from '.mindspec/docs/specs/<spec-id>/' to the flat '.mindspec/specs/<spec-id>/', and replace the repo-root 'review/ { prep/, <panel-slug>/ }' tree with the co-located '.mindspec/specs/<spec-id>/reviews/ { prep/, <panel-slug>/ }' layout (ADR-0037 amendment / ADR-0039).",
+    "plugins/mindspec/README.md line 75: change 'panel.json at review/<panel>/' to the co-located '<spec-dir>/reviews/<panel>/' path.",
+    "plugins/mindspec/FINDINGS.md (lines 51/74/76): either repoint the 'review/prep/...' and 'review/<panel>/' references to '<spec-dir>/reviews/...', OR add a one-line recorded note that FINDINGS entries are frozen historical narrative classified out of AC17 scope (AC17 requires deliberately-excluded surfaces be listed with a reason)."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "plugins/mindspec/README.md (AC17 / Req 12)",
+      "issue": "Live plugin README still documents the pre-flatten '.mindspec/docs/specs/<spec-id>/' path and a repo-root 'review/' panel tree in its '## Disk layout' section (lines 158/161) and line 75. AC17 prose explicitly lists 'plugin README/FINDINGS' as a must-be-flat surface; the impl's 'AC17 audit grep is EMPTY' claim does not hold for it, and the section now describes a layout the framework no longer uses.",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "plugins/mindspec/FINDINGS.md (AC17 / Req 12)",
+      "issue": "FINDINGS.md retains repo-root 'review/prep/...' and 'review/<panel>/' references (lines 51/74/76). Defensible as frozen historical narrative, but AC17 requires any deliberately-excluded surface be recorded with a one-line reason; no such record exists.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "ADR-0039 / snapshots / core surface",
+      "issue": "Positive confirmations: ADR-0039 next-free-id + cross-refs correct and content substantive; all 8 .pre106 snapshots byte-exact vs old blobs; previouslyShippedSkills first-dot keying + regression test real; DOCS-LAYOUT/ADR-0037 amendments correct; the skills/setup/bootstrap AC17 proof-grep is genuinely empty. llm-test-review is a repo-local (non-shipped) skill so needs no snapshot.",
+      "hard_block": false
+    }
+  ]
+}

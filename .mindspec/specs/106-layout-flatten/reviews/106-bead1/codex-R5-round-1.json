@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "The resolver/classifier core is correct and byte-identity-preserving. I verified against the pre-spec source: the new flat tiers in SpecDir (worktree-flat, flat, born-flat default) never fire when no flat tree exists, so canonical/legacy/greenfield resolve EXACTLY as today; new-id-in-legacy defaults to canonical just as pre-spec; TreeRootForSpecDir's canonical+legacy branches are unchanged and the flat branch correctly preserves the ew79 fix (test green). All five mixed-coexistence cases (flat+canonical, flat-idA+canonical-idB via .mindspec/docs existence, flat+legacy) classify mixed correctly; ClassifyLayout precedence is sound. Deviation A (guard/worktree.go untouched) is correct — neither constructs docs artifact paths (verified by grep). Deviation B (born-flat gated on DetectLayout==flat) preserves byte-identity and AC3/AC4 hold. BLOCKER: the migration-recovery exception is mis-scoped. `migrationRecoveryActive` tolerates ANY subdir under .mindspec/migrations/, but completed runs also leave a <run-id>/ record (Req4/AC9) and THIS repo already has two such records on disk. A real mixed tree would therefore have ErrMixedLayout silently suppressed — defeating Req2's central hard-error invariant. AC3 only tests a fresh fixture, so it misses this. Build + workspace/bootstrap/validate/doctor/panel/complete/contextpack tests pass.",
+  "concrete_changes_required": [
+    "Scope migrationRecoveryActive to a LIVE/in-progress run only — do not treat 'any subdir under .mindspec/migrations/' as active recovery. Gate on an explicit in-progress sentinel (a reserved marker/lock file the mover writes on start and removes on completion), so completed/stale records (the two already present in this repo: 20260217T213341Z, 20260217T234919Z) do NOT suppress ErrMixedLayout. If the Req-4 run-state status schema must wait for Bead 3, use a forward-compatible sentinel name now and leave a TODO referencing Bead 3.",
+    "Add a regression test: a mixed tree (flat specs + canonical .mindspec/docs) WITH a pre-existing COMPLETED migration record present STILL returns ErrMixedLayout; only a live/in-progress sentinel tolerates the mixed state. The current TestDetectLayout_FiveStates recorded-recovery subcase passes only because the fixture dir doubles as 'active'."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "DetectLayout migration-recovery exception scope (Req 2 / AC3)",
+      "issue": "migrationRecoveryActive returns true on the first IsDir() entry under .mindspec/migrations/, so it cannot distinguish a live in-progress migration from a COMPLETED run's persisted <run-id>/ record (Req4/AC9 writes one on completion). This repo already has two completed records on disk, so the exception is armed right now: any future mixed tree (flat residue beside the existing canonical .mindspec/docs) would return LayoutMixed with NO error, masking the exact half-old/half-flat split the spec makes a HARD error. Req2 explicitly scopes the exception to a 'live'/'in-progress' run-state. The AC3 recorded-recovery test uses a fresh single fixture dir and does not exercise the stale-record-defeats-guard path.",
+      "hard_block": true
+    },
+    {
+      "severity": "low",
+      "area": "Deviation B — born-flat gated on DetectLayout==flat (Req 2 / AC1/AC3/AC4)",
+      "issue": "A bare un-bootstrapped .mindspec/ (greenfield) keeps the historical canonical write-default rather than writing flat. Verified acceptable: it preserves greenfield byte-identity (Req15/AC1), bootstrap now creates flat dirs so real projects are flat before first write, DetectLayout still returns greenfield for empty (AC3) and flat post-bootstrap (AC4). No change required; recorded as an intentional, correct deviation.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Deviation A — guard/ + worktree.go untouched (Req 7)",
+      "issue": "Confirmed correct: grep shows neither internal/guard nor internal/workspace/worktree.go constructs .mindspec/docs artifact paths (guard only builds worktree DIR paths via SpecWorktreePath/Name). The plan's 'guard worktree-add recipes' referenced a surface that does not exist; all doc-layout-awareness correctly lives in SpecDir + TreeRootForSpecDir. No missed Req-7 surface.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "resolveArtifact precedence + ew79 (Req 1 / Req 7 / AC2/AC12)",
+      "issue": "Verified no wrong-tree read for non-mixed trees: flat-first only wins when the flat path EXISTS; otherwise isFlatTree gates the not-yet-created fallback (flat for an actual flat tree, else DocsDir = canonical-if-.mindspec/docs-exists-else-legacy), byte-identical to pre-spec DocsDir. Reading flat over canonical only occurs on a mixed tree, which is the guarded hard-error state by design. TreeRootForSpecDir flat/canonical/legacy + both worktree shapes resolve correctly; ew79 ADR-visibility preserved (test green).",
+      "hard_block": false
+    }
+  ]
+}

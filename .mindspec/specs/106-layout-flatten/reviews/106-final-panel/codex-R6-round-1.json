@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Merge-readiness lens: clean. (1) Direction: mergeLayoutRegression blocks ONLY target==flat AND source∈{canonical,legacy}. The PR is source=flat(spec/106)→target=canonical(main): target!=flat → guard returns false → ALLOWED (layout_guard.go:54-59). Moreover FinalizeEpic's spec→main guard at mindspec_executor.go:431 runs only when MergeStrategy==\"direct\"; origin remote exists → PR path pushes the branch and never local-merges, so the guard cannot fire on the real merge. impl-approve will not be blocked. (2) No flag-day: isFlatTree = detectLayoutKind==LayoutFlat, so existing canonical/legacy downstream projects keep WRITING their form (isFlatTree=false) and reads resolve via the 3-tier resolver; migrate layout is opt-in behind its clean-tree/no-pre-flatten-branch precondition. (3) Git mechanics: main IS an ancestor of spec/106 (fast-forwardable); git merge-tree --write-tree exits 0 with a clean tree (no conflicts); 441 renames detected cleanly (0 ambiguous copies); two-commit 100%-similarity moves keep rename/--follow robust. (4) The 2 red tests are verified pre-existing non-regressions; ADR-0039 Proposed is normal; AC25 hang is an offline-sandbox limitation; docs_archive pre-exists on main. No true merge-BLOCKER found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "merge-guard / direction",
+      "issue": "mergeLayoutRegression (layout_guard.go:54-59) blocks iff target==flat AND source is canonical/legacy. The spec→main merge is flat→canonical, which the guard explicitly ALLOWS. Additionally the spec→main guard (mindspec_executor.go:431) is gated behind MergeStrategy==\"direct\"; with an origin remote present FinalizeEpic takes the PR push path and does not local-merge, so the guard does not run there at all. impl-approve is not blocked by the spec's own merge guard.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "migration story / downstream users",
+      "issue": "No hard flag-day for existing non-flat users. Writes route through isFlatTree (detectLayoutKind==LayoutFlat only), so a canonical/legacy project keeps writing its existing form post-upgrade; reads resolve via the per-artifact flat→canonical→legacy tier. migrate layout is the opt-in cutover with a clean-idle-tree + no-unmerged-pre-flatten-branch/PR precondition. The Bead-5 flatten is this repo's own dogfood cutover, not forced on downstream installs.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "git mechanics",
+      "issue": "Cleanest-possible merge: main (1d043af2) is the merge-base AND an ancestor of spec/106 (32d22f38) — fast-forwardable, no 3-way content to conflict. git merge-tree --write-tree main spec/106 exits 0 producing a clean tree; 441 renames detected with 0 ambiguous copies. The two-commit-per-move design (pure rename commit first) keeps rename detection and git log --follow reliable.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "CI / known state",
+      "issue": "Two red non-LLM tests (instruct TestRun_IdleNoBeads z4ps isolation leak; harness TestInstructPhaseDetection plan/implement default-branch-protected short-circuit) are verified to fail identically on un-flattened main — pre-existing, layout-independent, NOT spec-106 regressions. Documented-acceptable, not a merge blocker; track the existing z4ps follow-up separately.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "governance / verification gaps",
+      "issue": "AC25 (mindspec validate spec) could not run in the offline Dolt sandbox (network hang) — an environment limitation, not a code defect; the spec is already Approved. ADR-0039 is Proposed/uncited, which is normal for a freshly-authored layout ADR shipping in the same PR. Neither blocks the PR/impl-approve; recommend running validate spec once on a networked host before final sign-off as due diligence.",
+      "hard_block": false
+    }
+  ]
+}

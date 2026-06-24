@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Next-bead integration holds. LINCHPIN: domainManifestRelPaths leads with flat .mindspec/domains/<d>/OWNERSHIP.yaml; LoadOwnershipAtRef first-present-wins resolves it; listDomainDirsAtRef unions the flat root. The absent-candidate tolerance is real: FileAtRefOrAbsent/TreeDirsAtRef use `git ls-tree` (empty output + exit 0 for an absent path/dir at a valid ref), so the 2 absent prefixes never hard-error. normalizeImpactedDomains routes through the same multi-prefix resolvers, so spec-106's declared Impacted-Domains candidate set resolves on a flat ref too. Tested with RED-on-revert: TestLoadOwnershipAtRef_FlatRef, TestListDomainDirsAtRef_FlatRef, TestValidateDivergence_ProjectDocsNotUnowned. Bead 5's move-diff stays doc-sync/divergence green: every renamed path (flat specs/adr/domains/core, old canonical side, project-docs eviction, root review/ + co-located /reviews/) classifies via isDocFile/isProcessArtifact/isCoLocatedReview; the spec.md rename keeps its renamed plan.md companion in-diff. DEVIATION B is NOT a gate gap: internal/doctor is imported only by cmd doctor (Run) + mover (CheckMovedTreeLinks); complete/next derive specID from the bead epic (bd+git, layout-independent) and call lifecycle.FindOrphanedClosedBeads directly, never the doctor canonical-specs walk. Build + validate/executor/complete/lifecycle tests pass. Recommend Bead 6 retarget the two doctor canonical hardcodes.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "adr-divergence gate (Bead 5 flat merge)",
+      "issue": "CONFIRMED non-blocking on a flat ref. ValidateDivergence -> resolveDomains/attributeDomain/normalizeImpactedDomains all route through LoadOwnershipAtRef (domainManifestRelPaths flat-first) and listDomainDirsAtRef (domainsTreeRoots union incl .mindspec/domains). A flat .mindspec/domains/<d>/OWNERSHIP.yaml resolves Source()==manifest, so post-flatten beads do NOT hard-block adr-divergence-unowned. Load-bearing dependency verified: FileAtRefOrAbsent/TreeDirsAtRef return (absent, no error) for the 2 non-present prefixes (git ls-tree empty/exit-0), so the union/first-present logic never errors. Covered by TestLoadOwnershipAtRef_FlatRef (RED-on-revert) + TestListDomainDirsAtRef_FlatRef.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "doc-sync classification (Bead 5 move-diff)",
+      "issue": "CONFIRMED green. isDocFile recognizes flat {specs,adr,domains,core}/** + project-docs/**; isProcessArtifact unions isDocFile + .beads/ + root review/ + isCoLocatedReview(/reviews/ segment). All of Bead 5's rename paths (both sides) and the dogfood project-docs eviction + reviews co-location classify non-source, so the move-diff trips neither the source lane nor adr-divergence-unowned. The spec.md rename satisfies validateSpecArtifactSync via the renamed plan.md/sibling companion in the same diff (specMDID + hasArtifactPrefix multi-prefix). Tested: TestProjectDocs_NonSourceNonUnowned, TestReviewMatchers_RootAndCoLocated.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Deviation B — doctor/ownership.go + doctor/orphaned_beads.go canonical hardcodes",
+      "issue": "Acceptable deferral, NOT a gate gap. canonicalDomains() (.mindspec/docs/domains) and checkOrphanedBeads()'s .mindspec/docs/specs walk run ONLY in `mindspec doctor` (internal/doctor imported solely by cmd/mindspec/doctor.go::Run and layout/mover.go::CheckMovedTreeLinks — a different fn). The complete/impl-approve GATE path is layout-independent: complete.go derives specID from the bead's epic (phase.FindEpicBySpecID) and calls lifecycle.FindOrphanedClosedBeads(specID,...) directly (bd + git branch ancestry), bypassing the doctor canonical-specs walk entirely. So Bead 5/6 `complete` is NOT hard-blocked. Residual: post-flatten `mindspec doctor` goes flat-blind on dead-manifest/hygiene/orphan ADVISORIES (canonicalDomains->nil early-return; specs walk empty) — non-blocking, fixable in Bead 6 by retargeting both to the tier-aware workspace accessors / multi-prefix enumeration.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Bead 6 classifier consistency",
+      "issue": "Bead 6 (domain self-globs + skill moves) inherits a clean, permanent multi-prefix base: artifactPrefixes/hasArtifactPrefix + the flat-first ref/disk ownership loaders. Domain self-glob diffs land under internal/ (source, layout-invariant via isSourceFile) and any moved domain-doc paths are already covered by isDocFile's flat lifecycle-subtree loop. No missing matcher identified that would hard-block Bead 6's complete.",
+      "hard_block": false
+    }
+  ]
+}

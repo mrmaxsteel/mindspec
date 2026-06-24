@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "The four migration pillars compose into a coherent, safe system. (1) Dual-read works on all layouts: on-disk resolvers (resolveArtifact 3-tier, SpecDir 5-tier, DomainsDir/SpecsDir, LoadOwnership) AND git-ref classification (artifactPrefixes/isDocFile/specMDID/isADRMarkdown multi-prefix; LoadOwnershipAtRef+domainManifestRelPaths first-present-wins; listDomainDirsAtRef unions all three roots) cover flat/canonical/legacy; the PERMANENT multi-prefix posture is correct since historical refs/forks emit legacy paths forever. The merge guard reuses the SAME ClassifyLayout/LayoutMarkersFromMindspecChildren as DetectLayout — one source of truth, cannot drift. (2) The move diff is entirely doc/non-source (renames between canonical and flat lifecycle subtrees, project-docs, review/->reviews/, mover run-state, vestigial drops all classify non-source via isProcessArtifact), so complete passes; two-commit move + gating 404 link-check is sound. (3) mergeLayoutRegression blocks ⟺ canonical/legacy->flat: the eventual flat-spec->canonical-main impl-approve merge is allowed, post-flatten regressions blocked; wired at all three local seams; remote-PR path honestly scoped out. (4) Mixed is a hard error keyed on a NON-TERMINAL run-state stage; stageApplied=='applied'==migrationTerminalStage so a stale completed record can never mask a half-migration — no silent split. Forward-only rollback refuses after Published with scoped clean. Build exit 0; workspace/layout/validate/executor suites GREEN.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "cross-package-contract",
+      "issue": "Verified the load-bearing terminal-stage string contract holds end-to-end: internal/layout/runstate.go stageApplied=\"applied\", internal/workspace migrationTerminalStage=\"applied\", and the doctor schema OK stage all agree, so the mixed-layout recovery exception keys on a live (non-terminal) run only and a completed run's persisted record cannot suppress the half-migration hard error.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "merge-guard-direction",
+      "issue": "Directional guard verified coherent and correctly wired at all three LOCAL merge seams (mindspec_executor.go:294 bead->spec CompleteBead, :379 bead->spec FinalizeEpic, :431 spec->main direct). Block rule (source canonical/legacy AND target flat) lets the flat-spec->canonical-main impl-approve merge land and blocks post-flatten regressions. Remote-PR path is explicitly out of in-binary-guard scope (relies on Bead-3 precondition + PR review) — honestly stated, not overclaimed.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "diagnostics",
+      "issue": "Several human-facing advisory strings still hard-code the canonical path (divergence.go adr-divergence-unowned text and docsync.go internal-docs / spec-artifact-sync messages name .mindspec/docs/domains|specs/... ). Resolution itself is tier-aware (workspace.DomainsDir/SpecDir), so this is cosmetic-only, but on a flat tree the advice could point a user at the canonical location instead of the flat one. Non-blocking follow-up; survived the per-bead panels.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "mixed-at-ref",
+      "issue": "The merge guard does NOT block a MIXED-signature ref (mergeLayoutRegression returns false unless source is purely canonical/legacy). This is intentional and safe: a mixed working tree is already a DetectLayout hard error, and the merge guard's narrow job is the regression direction only. No safety hole.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens: implementation is real and substantive, no stubs. checkLayout/dualLayoutDuplicateSpecIDs (doctor), layoutAtRef/mergeLayoutRegression/guardMergeLayout (layout_guard.go), and panelGateRoots/specScopedReviewRoots (complete) all have real bodies grounded on EXISTING seams — verified present: workspace.ClassifyLayout/DetectLayout/SpecsDir/SpecDir/LayoutMarkersFromMindspecChildren/MindspecDir/CanonicalDocsDir/LegacyDocsDir/migrationRecoveryActive and the executor's own TreeDirsAtRef/pathExistsAtRef. panel.Scan loops the literal {review,reviews} segments (no substring collision). Guard installed at exactly the 3 named seams (CompleteBead 294, FinalizeEpic auto-merge 379, direct spec->main 431, the last evaluated before cleanup so a block mutates nothing). Critical property 1 holds: panelGateRoots unions repo-root for every non-flat layout (canonical keeps root review/ driving the gate). Property 2 holds: mergeLayoutRegression returns false unless target==flat, so Bead 5's flat->canonical move-merge and flat-spec->canonical-main both pass. Tests carry real assertions (directional 11-case matrix, run-state exemption, read-error fail-open, canonical-union, flat-excludes-root len==1, dual-id Error+HasFailures, mutates-nothing hash/removeCalls checks) — none hollow. Deviation A (3-line exported MigrationRecoveryActive reuse) and B (docs.go tier-awareness deferred to Bead 2) are both correct. go build + go vet clean across all 5 packages.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "executor/layout_guard.go",
+      "issue": "guardMergeLayout fails OPEN on a layoutAtRef read error (returns nil/allow). This is the documented, deliberate posture mirroring the panel gate, and the on-disk vs ref fingerprints share one classifier (no drift), so a transient git error never false-blocks a legitimate merge. Acceptable; noted only for completeness.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "complete/panel_advisory.go",
+      "issue": "panelGateRoots discards DetectLayout's error (layout, _ := ...). Safe: a mixed tree returns kind=LayoutMixed (not flat), so the selection falls through to the transitional UNION — the safest direction, matching the BRIEF's stated 'anything not flat -> union' contract.",
+      "hard_block": false
+    }
+  ]
+}

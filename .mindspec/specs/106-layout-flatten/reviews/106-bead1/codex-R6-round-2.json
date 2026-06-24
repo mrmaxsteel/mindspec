@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Integration lens. My round-1 major (no enumerator roots) is ADDRESSED. SpecsDir(root)/DomainsDir(root) are exported and (a) delegate to resolveArtifact (= resolveArtifact(root,\"specs\"|\"domains\")), so they share the exact three-tier flat-first precedence as the per-item resolvers — no inlined drift. (b) Byte-identical to the DocsDir-based joins at spec/list.go:22, domain/list.go:102, domain/show.go:74 on canonical/legacy/greenfield (all three = filepath.Join(DocsDir(root),\"specs\"|\"domains\")); verified against real code + the new TestSpecsDirAndDomainsDir canonical/legacy/greenfield cases. (c) Returns .mindspec/specs / .mindspec/domains on a flat tree, via both the flat-existence branch and the isFlatTree fallback (pinned by the flat-first-wins subtest). ClassifyLayout / LayoutMarkersFromMindspecChildren bodies are untouched in the r2 diff — the Bead-4 merge-guard seam is intact. go build ./internal/workspace passes. One precision note: docsync.go:352 listDomainDirs is canonical-HARDCODED (filepath.Join(root,\".mindspec\",\"docs\",\"domains\")), NOT DocsDir-based as the BRIEF states; DomainsDir matches it on canonical/greenfield but ADDS a legacy fallback. Low-severity Bead-2 awareness, not a block. No remaining gap forces Bead 2/4 rework.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "Bead 2 integration / enumerator seam",
+      "issue": "Round-1 major: Bead 1 shipped per-item SpecDir/DomainDir and whole-dir ADRDir/CoreDir but no flat-aware SpecsDir/DomainsDir enumeration roots, forcing Bead 2 to re-derive three-tier precedence inline or expand into workspace.go. RESOLVED: r2 adds exported SpecsDir(root)=resolveArtifact(root,\"specs\") and DomainsDir(root)=resolveArtifact(root,\"domains\"), symmetric with ADRDir/CoreDir, sharing one precedence source. Byte-identical to filepath.Join(DocsDir(root),\"specs\"|\"domains\") at spec/list.go:22, domain/list.go:102, domain/show.go:74 on canonical/legacy/greenfield; .mindspec/specs|domains on a flat tree. Bead 2 can swap with no drift.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "Bead 2 awareness / docsync legacy divergence",
+      "issue": "docsync.go:352 listDomainDirs joins filepath.Join(root,\".mindspec\",\"docs\",\"domains\") (CanonicalDocsDir-hardcoded), NOT filepath.Join(DocsDir(root),\"domains\") as the BRIEF characterizes. DomainsDir(root) is byte-identical to it on canonical/greenfield trees but DIVERGES on a legacy tree: DomainsDir falls through to docs/domains while the current listDomainDirs reads .mindspec/docs/domains (empty on legacy). This is a strict superset that simply ADDS legacy fallback and aligns docsync onto the same legacy-aware behavior domain/list.go already has. Not a block — Bead 2 just notes that swapping DomainsDir into listDomainDirs grants legacy support at that one site (intended direction for a flatten spec).",
+      "status": "PARTIAL",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "Bead 4 merge-guard seam",
+      "issue": "Re-confirmed the Bead-4 seam is intact: ClassifyLayout and LayoutMarkersFromMindspecChildren bodies are untouched in the r2 diff (da7eea3e..2f4aee3d) — only the doc-comment context around them appears. The pure git-ref fingerprint path (ClassifyLayout(LayoutMarkersFromMindspecChildren(executor.TreeDirsAtRef(...)))) is unchanged, so Bead 4 can build the directional regression guard with no rework. go build ./internal/workspace passes.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "behavior preservation / flat-tree resolution",
+      "issue": "Verified .mindspec/specs|domains is returned on a flat tree even when the specs/domains subdir is not yet on disk: resolveArtifact's flat-existence branch returns it when present, and the isFlatTree(root) branch returns filepath.Join(MindspecDir(root),rel) otherwise — both yield .mindspec/<rel>. New TestSpecsDirAndDomainsDir pins canonical, legacy, flat, greenfield, and flat-wins-over-canonical precedence. No new imports; no import cycle introduced.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Lens: Impacted Domains / ownership / ADR-divergence gate-safety. My round-1 major is ADDRESSED: Req 6 + AC11 now name the ref-anchored ownership pair LoadOwnershipAtRef (ownership.go:127) and domainManifestRelPath (ownership.go:123-125) explicitly, state the complete gate loads through that pair (NOT LoadOwnership:79), and spell out the hard-block consequence — so the plan cannot miss them. Re-verified on the worktree: domainManifestRelPath does hardcode '.mindspec/docs/domains/'; the four Impacted Domains are real with on-disk OWNERSHIP.yaml; every In-Scope path is owned; internal/layout/** is genuinely absent from the workflow manifest so AC21 is required, not redundant. ADR statuses/domains match the spec verbatim; every impacted domain has an Accepted covering ADR, so ADR-0022 'Proposed' is sole coverage for none and adr-divergence-proposed never fires for 106. excludedFirstSegments={viz,agentmind,bench}; project-docs is classified via the predicate (isDocFile/isProcessArtifact), not an OWNERSHIP glob, so it dodges the schema check. Self-glob staleness now governed (Req 13/AC20). No new gate-safety hole; renumbered cross-refs consistent. Non-blocking: the plan must land Req 6's multi-prefix ref-anchored matcher in Phase 1, before any Phase-3 move, so beads never read a domain manifest as 'missing'.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "ownership loader multi-prefix scope (ref-anchored pair)",
+      "issue": "Round-1 major: Req 5 named only LoadOwnership(:79), but the complete divergence gate loads via the ref-anchored LoadOwnershipAtRef(:127)+domainManifestRelPath(:123-125), which also hardcode '.mindspec/docs/domains/'. Revised Req 6 now names BOTH explicitly, states the gate uses the ref-anchored pair NOT :79, and warns that updating only :79 leaves every domain manifest reading 'missing' on a flat tree (every 106 bead hard-blocks adr-divergence-unowned). AC11 adds a proof that a flat-tree LoadOwnershipAtRef returns the domain's claims. Re-verified on worktree: domainManifestRelPath returns '.mindspec/docs/domains/'+domain+'/OWNERSHIP.yaml' and LoadOwnershipAtRef reads through it via FileAtRefOrAbsent. Spec-level ask fully resolved.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "OWNERSHIP self-glob staleness",
+      "issue": "Round-1 minor #16: each manifest self-claims '.mindspec/docs/domains/<d>/OWNERSHIP.yaml', stale after the domains flatten. Revised Req 13 now mandates updating each self-glob to '.mindspec/domains/<d>/OWNERSHIP.yaml', and AC20 proves no manifest self-claims the pre-flatten path. First segment '.mindspec' is not in excludedFirstSegments so the updated glob passes the HC-5 schema check. Non-gate-blocking (doc files) but now governed rather than latent.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "ownership/domains reality + coverage",
+      "issue": "All four Impacted Domains (workflow, core, execution, context-system) exist with OWNERSHIP.yaml on disk; line-53/54/56 recitations match the manifests. Every In-Scope edited path is owned. internal/layout/** is confirmed ABSENT from the workflow manifest, so Req 14/AC21 (add the net-new mover package) is a genuine requirement. ADR statuses verified verbatim (0037/0018/0023/0025 Accepted; 0022 Proposed); every impacted domain has an Accepted covering ADR, so adr-divergence-proposed will not fire for 106 and 0022's Proposed status is gate-safe.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "project-docs / classification",
+      "issue": "excludedFirstSegments={viz,agentmind,bench} confirmed at ownership.go:60. project-docs is classified non-source via the Req 6 diff-path predicate (isDocFile/isProcessArtifact extension), NOT via an OWNERSHIP glob, so it never reaches the schema check and dogfood-eviction commits are neither adr-divergence-unowned nor mis-classified as source. isProcessArtifact = isDocFile || .beads/ || review/, confirming the predicate must be extended for both the flat prefixes and project-docs/. Req 6/AC21 cover this; gate-safe given the requirement lands with/before the Phase-3 eviction.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "minor",
+      "area": "phase sequencing of the multi-prefix git-ref matchers (plan-level)",
+      "issue": "NEW (non-blocking observation): the Phase-1 narrative says the classifier/matchers are 'landed against the EXISTING two forms (canonical + legacy)'. For gate-safety the FLAT prefix must be recognized by the ref-anchored matchers in Phase 1 (before any Phase-3 move), since a diff-string matcher can recognize a flat path-string before the dirs exist at zero cost. Req 6 states the matchers are PERMANENTLY multi-prefix (flat+canonical+legacy) and decouples this from the resolver-tier lifecycle, which resolves the ambiguity at the spec level. The plan must order the flat-prefix ref-anchored loader before the domains-flatten bead so no bead reads a domain manifest as 'missing' mid-migration. Not a spec defect; defer to plan.",
+      "status": "NEW",
+      "hard_block": false
+    }
+  ]
+}

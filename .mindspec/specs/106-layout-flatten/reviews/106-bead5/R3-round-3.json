@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Contract/precision lens, all three checks pass. (1) The new recognition is EXACT-name equality: rootOperatorDocs is a map and isDocFile does `if _, ok := rootOperatorDocs[path]; ok`, keyed on the FULL path. So `README.md` matches but `README.md.go`, `internal/x/README.md` (slash → not a key), and any source file do NOT — no over-match. The new TestRootOperatorDocsNotUnowned pins the negative guard (internal/foo.go stays source, never doc/process-artifact) and it passes. (2) isDocFile feeds BOTH consumers: the doc-sync source lane (classifyChanges) and divergence.isProcessArtifact (`return isDocFile(path) || ...`). Classifying these 4 repo-root operator docs as docs is correct in both — they are operator/governance docs, not governable source, so skipping them before attribution is right; the end-to-end ValidateDivergence test confirms README.md+BENCH-MOVED.md skip while the control source surfaces. (3) CLAUDE.md/AGENTS.md still classify; the HasPrefix→exact-map change actually TIGHTENS (drops phantom `CLAUDE.md*` prefix matches) — a precision gain, not a regression. go test ./internal/validate/... OK, vet+gofmt clean. No real source escapes any gate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "precision/exact-match",
+      "issue": "rootOperatorDocs is consumed via map-key equality on the full path (isDocFile), so recognition is exact-name on the fixed 4-element set {CLAUDE.md,AGENTS.md,README.md,BENCH-MOVED.md}; nested/suffixed variants (internal/x/README.md, README.md.go) correctly fall through to source/ownership governance.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "dual-consumer correctness",
+      "issue": "isDocFile is reused by divergence.isProcessArtifact; classifying the 4 root docs as docs is correct in both the doc-sync source lane and the divergence skip-before-attribution path — they are operator docs, not governable source.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "no-regression / CLAUDE.md+AGENTS.md",
+      "issue": "Existing CLAUDE.md/AGENTS.md classification preserved; migrating from strings.HasPrefix to exact map equality tightens (removes phantom prefix over-matches like CLAUDE.md.bak) — a precision improvement with no realistic loss since git emits the literal path.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "doc-sync coarse-net consistency",
+      "issue": "README.md/BENCH-MOVED.md now count toward the coarse 'source changed but no docs updated' net (line ~117), mirroring CLAUDE.md/AGENTS.md prior behavior. The precise blocking lanes (checkInternalPackages needs domain docs; checkCmdChanges needs CLAUDE.md/CONVENTIONS/user docs) are unaffected — no source escapes governance. Consistent extension, not a new precision hole.",
+      "status": "ADDRESSED",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Lens: author-of-record / scope. The diff implements EXACTLY Bead 2 (Reqs 3,6,14). Req 6: artifactPrefixes/hasArtifactPrefix classifier wired into isDocFile, specMDID, isADRMarkdown, checkInternalPackages domain prefixes, cmd-docs accept-set, validateSpecArtifactSync; the LINCHPIN ref-anchored pair domainManifestRelPaths + LoadOwnershipAtRef (first-present-wins) + listDomainDirsAtRef (3-root union) is implemented AND tested on a flat ref (TestLoadOwnershipAtRef_FlatRef) — packages green (validate 91s ok). Additive reviews: root review/ KEPT, independent isCoLocatedReview added. Req 3 enumerators (budgeter, spec/list, domain/list+show, doctor/docs) swap to workspace.SpecsDir/DomainsDir. Req 14 project-docs/**. NO creep: internal/workspace only imported; panel/complete/executor/layout/setup/migrate/migration.go/doctor-ownership/doctor-orphaned UNTOUCHED; --diff-filter=RCD empty (zero moves); all 15 files within plan's Bead-2 changed-files list. Behavior-preservation holds (no /reviews/ collisions in tree; canonical degenerate specMDID byte-identical). Dev A: no existing test modified, moot. Dev C: correct. Dev B is a real but non-blocking AC5 gap — see findings.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "scope/AC5 (doctor orphan + ownership enumeration)",
+      "issue": "Deviation B is an ACCEPTABLE deferral for Bead 2, not a scope violation: doctor/ownership.go canonicalDomains (.mindspec/docs/domains) and orphaned_beads.go (.mindspec/docs/specs) are NOT in the plan's Bead-2 changed-files list (plan L493-496) and step 6 scopes the doctor scans to docs.go 'via workspace.DocsDir' — the author correctly stayed in-scope. BUT AC5 names 'the doctor orphan/docs scans' enumerating the flat tree, and these two hardcode canonical paths, so on a FLAT tree (post-Bead-5) the orphan scan reports zero specs and ownership-hygiene zero domains (false-negative diagnostic degradation). This is OFF the complete/bd_close floor (adr-divergence-unowned routes through the now-fixed validate.LoadOwnershipAtRef) and behavior-preserving on today's canonical tree, so it does NOT block Bead 2. Recommend filing a follow-up (or folding into Bead 4/6) to make canonicalDomains + orphaned_beads.go tier-aware before final review, since the plan mis-located the orphan scan as living in docs.go.",
+      "hard_block": false
+    },
+    {
+      "severity": "low",
+      "area": "behavior-preservation (isCoLocatedReview breadth)",
+      "issue": "isCoLocatedReview matches any '/reviews/' substring (matches the plan's stated intent, step 3). No tracked path currently contains '/reviews/', so zero behavior change on the present tree. Latent: a future Go package literally named 'reviews' (e.g. internal/x/reviews/*.go) would be skipped before attribution. In-scope and plan-faithful; flagged informationally only.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation A (specMDID degenerate id)",
+      "issue": "Commit ADDS test files only; no existing test was modified. specMDID on a degenerate '<prefix>/spec.md' returns 'spec.md' on canonical both pre- and post-change (byte-identical; legacy 'docs/specs/' is newly + additively recognized). Non-issue for scope/behavior-preservation.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "deviation C / context-map enrichment",
+      "issue": "isSourceFile correctly unchanged (internal/, cmd/ .go paths are layout-invariant). Context-map enrichment already routes through workspace.ContextMapPath (Bead-1 accessor) so it is already tier-aware without a Bead-2 edit. doc-sync companions: workflow + context-system architecture.md updated to match the validate + contextpack changes (owned correctly). All Bead-2 test packages PASS.",
+      "hard_block": false
+    }
+  ]
+}

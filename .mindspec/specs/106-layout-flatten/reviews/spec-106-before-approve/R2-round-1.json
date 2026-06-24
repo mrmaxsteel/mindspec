@@ -1,0 +1,52 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.76,
+  "rationale": "Lens: AC testability + req coverage. Mapped reqs 1-14 -> ACs: every requirement has at least one AC touching it, so no req is fully uncovered (no blocker on that axis). The core ACs (AC1-AC6, AC9-AC12) are concrete, falsifiable, and runnable as `go test`/golden/doctor proofs - strong. But there are real defects: (1) AC8's proof grep filters `--include='*.go'`, so it returns EMPTY today, before any work, and structurally cannot detect the `internal/instruct/templates/spec.md:35` glossary line (a .md file) it claims to verify - trivially-passable; the `! test -e .mindspec/docs/glossary.md` half is also trivially true once Req 12 deletes the docs/ wrapper. (2) Partial-coverage gaps: Req 2's bootstrap-creates-flat clause, Req 3's lineage-manifest write, Req 11's central ms-spec-grill flat-path read, and Req 13's mover-package OWNERSHIP claim each lack a direct AC. AC14 is a real, checkable Phase-1 gate (modulo 'git status' wording). These are fixable in AC text without redesign - hence REQUEST_CHANGES, not REJECT.",
+  "concrete_changes_required": [
+    "AC8: fix the proof grep. As written `grep -rn 'GLOSSARY.md\\|policies.yml' internal cmd --include='*.go' | grep -v _test` is EMPTY today (verified) and cannot reach `internal/instruct/templates/spec.md:35` because that line is in a .md file excluded by --include='*.go'. Drop the `*.go` filter (or add --include='*.md') so the template-line removal is actually exercised. Also note `! test -e .mindspec/docs/glossary.md` becomes trivially-true once Req 12 removes the docs/ wrapper, so the grep - not the path-existence check - must carry the proof for 'zero remaining references'.",
+    "Req 2 coverage: add an AC (or extend AC3) asserting `mindspec init`/`bootstrap` CREATE the flat directories for a greenfield project. AC3 only tests DetectLayout classification; the bootstrap-writes-flat clause (replacing bootstrap.go:222-223) is currently untested.",
+    "Req 3 coverage: add an AC (or extend AC4) asserting the mover WRITES a lineage manifest under `.mindspec/lineage/` / `.mindspec/migrations/<run-id>/` consistent with the doctor migration-metadata schema. AC4 proves move mechanics (two-commit, idempotent, rollback) but not the lineage artifact deliverable.",
+    "Req 11 coverage: extend AC13 to directly assert (grep/test) that `ms-spec-grill`'s SKILL.md domain-set read and next-ADR-number scan reference the layout-correct path. AC13's stated proof only greps the repo-root review path, leaving Req 11's PRIMARY correctness claim (grill reads flat domains/adr, not empty dirs) unproven.",
+    "Req 13 coverage: add an AC (or extend AC11) asserting the net-new mover package (`internal/layout/**`) is present in the workflow OWNERSHIP.yaml. No AC covers the ownership-claim deliverable; it is otherwise only caught at `mindspec complete` adr-divergence-unowned, not by any spec-level proof.",
+    "Minor: AC7 - `! test -d docs` is trivially true today (no repo-root docs/ exists, verified); make the resolver assertion (ADRDir/DomainDir/ContextMapPath do NOT resolve into project-docs/) + `test -d project-docs` the load-bearing proof. AC15 - add a proof for the 'tolerates locked agent worktrees/forks' half (only the unmerged-branch block is currently proven). AC14 - replace 'git status shows no file moves' with a `git diff --name-status main...<phase1-tip>` no-rename-under-.mindspec/docs assertion (git status shows working tree, not the diff vs main)."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "AC8 / testability",
+      "issue": "AC8's proof grep is trivially-passable: `grep -rn 'GLOSSARY.md\\|policies.yml' internal cmd --include='*.go' | grep -v _test` returns empty TODAY (verified on the worktree) and structurally cannot detect the `internal/instruct/templates/spec.md:35` glossary line it explicitly claims to verify, because that line is in a .md file excluded by the *.go filter. The companion `! test -e .mindspec/docs/glossary.md` is also trivially-true after Req 12 deletes the docs/ wrapper. Net: the 'zero remaining references / template line gone' clause is not exercised by any runnable proof as written.",
+      "hard_block": false
+    },
+    {
+      "severity": "major",
+      "area": "Req 11 coverage",
+      "issue": "Req 11's central correctness claim - ms-spec-grill reads the layout-correct domains/adr path on a flat project (else reject-invented-domains and next-ADR-number mis-fire) - has no direct proof. AC13's proof greps only the repo-root review-path snapshot and runs `go test ./internal/setup/...` (Go literals), neither of which asserts the SKILL.md domain/ADR read path."
+    },
+    {
+      "severity": "minor",
+      "area": "Req 2 coverage",
+      "issue": "No AC asserts `mindspec init`/`bootstrap` create the flat directories for a greenfield project (Req 2 bootstrap clause). AC3 covers DetectLayout classification only."
+    },
+    {
+      "severity": "minor",
+      "area": "Req 3 coverage",
+      "issue": "No AC asserts the mover writes a lineage manifest consistent with the doctor migration-metadata schema (Req 3 lineage deliverable). AC4 covers move mechanics only."
+    },
+    {
+      "severity": "minor",
+      "area": "Req 13 coverage",
+      "issue": "No spec-level AC asserts the net-new mover package is added to the workflow OWNERSHIP.yaml (Req 13 ownership-claim deliverable). AC11 covers only the project-docs/** non-source classification half."
+    },
+    {
+      "severity": "minor",
+      "area": "AC7 / AC14 / AC15 wording",
+      "issue": "AC7 `! test -d docs` is trivially true today (no repo-root docs/, verified); load-bearing proof should be the resolver test + `test -d project-docs`. AC15 proves only the unmerged-branch block, not the 'tolerates locked worktrees/forks' half. AC14 says 'git status shows no file moves' but git status shows the working tree, not the diff vs main - should be a `git diff --name-status main...phase1` no-rename assertion."
+    },
+    {
+      "severity": "info",
+      "area": "coverage map (positive)",
+      "issue": "Every requirement 1-14 maps to >=1 AC (R1->AC1/AC2, R2->AC3, R3->AC4, R4->AC5, R5->AC11, R6->AC12, R7->AC6/AC13, R8->AC10, R9->AC9, R10->AC15, R11->AC13, R12->AC7/AC8/AC4, R13->AC11, R14->AC14). No requirement is fully uncovered, so no coverage blocker. AC1-AC6, AC9-AC12 are concrete, falsifiable, and runnable. AC14 is a real, checkable Phase-1 behavior-preservation gate."
+    }
+  ]
+}
