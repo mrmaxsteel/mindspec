@@ -313,6 +313,18 @@ func migrationRecoveryActive(root string) bool {
 	return false
 }
 
+// MigrationRecoveryActive reports whether an IN-PROGRESS (non-terminal) layout
+// migration run is recorded under .mindspec/migrations/<run-id>/ — the exported
+// accessor for the recorded-recovery exception (Req 2). It is the SAME in-flight
+// scoping DetectLayout honors, surfaced for the Bead-4 directional merge guard
+// (internal/executor) to EXEMPT a transient cross-layout merge during a live
+// recovery, so the guard reuses Bead-1's run-state scoping rather than
+// reimplementing it. A stale/completed run record (terminal/empty stage) does
+// NOT activate it, so the exemption can never silently mask a real regression.
+func MigrationRecoveryActive(root string) bool {
+	return migrationRecoveryActive(root)
+}
+
 // migrationRunInProgress reports whether the migration run recorded in runDir
 // is LIVE: its state.json parses and records a non-empty, non-terminal stage.
 // An absent/unreadable/unparseable state.json, an empty stage, or the terminal

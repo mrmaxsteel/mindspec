@@ -84,6 +84,10 @@ func RunWithOptions(root string, opts Options) *Report {
 		return r
 	}
 	checkDocs(r, root)
+	// Spec 106 Bead 4 (Req 8): detect the docs layout, warn when a
+	// canonical/legacy tree would flatten on the next `migrate layout`, and
+	// ERROR on a dual-layout duplicate spec id (the stale-duplicate read hazard).
+	checkLayout(r, root)
 	// Spec 091 Bead 4: static-time ownership manifest checks
 	// (dead-manifest Req 17 + the three hygiene Warns Req 20) and the
 	// missing-source-globs Warn (Req 18). All advisory; none blocks the

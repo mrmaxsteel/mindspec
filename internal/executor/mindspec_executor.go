@@ -288,6 +288,12 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	}
 	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if _, err := os.Stat(specWtPath); err == nil {
+		// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard in front
+		// of the bead→spec merge. Blocks ONLY the regression direction (a
+		// canonical/legacy bead branch onto a flat spec target); mutates nothing.
+		if guardErr := guardMergeLayout(beadBranch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+			return guardErr
+		}
 		if mergeErr := gitutil.MergeInto(specWtPath, beadBranch); mergeErr != nil {
 			// Spec 092 Req 14(a) incident amendment (2026-06-11
 			// merge-driver incident, panel j3-recurrence): a failed
@@ -367,6 +373,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			if _, statErr := os.Stat(specWtPath); statErr == nil {
 				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 				if ancErr == nil && !isAnc {
+					// Spec 106 Bead 4 (Req 9): directional guard in front of the
+					// FinalizeEpic bead→spec auto-merge — same regression-only
+					// rule as CompleteBead; mutates nothing on a block.
+					if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+						return result, guardErr
+					}
 					if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
 						// Spec 092 Req 14(a) — SEMANTIC abort, not a
 						// warning: a bead→spec conflict here used to
@@ -407,6 +419,20 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		result.MergeStrategy = "direct"
 	}
 
+	// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard for the
+	// no-remote DIRECT spec→main merge. Evaluated HERE — before the cleanup
+	// block below removes any worktree — so a blocked regression (a
+	// canonical/legacy spec branch onto a flat main) mutates NOTHING: no
+	// worktree removal, no branch deletion, no merge commit. The remote-PR path
+	// above pushed the branch for a PR and does NOT local-merge, so this guard
+	// covers only the local direct-merge seam (the PR path relies on the Bead-3
+	// precondition + PR review).
+	if result.MergeStrategy == "direct" {
+		if guardErr := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+			return result, guardErr
+		}
+	}
+
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
 		// Clean up lingering bead worktrees/branches.
@@ -427,7 +453,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			}
 		}
 
-		// Direct merge for local (no-remote) workflows.
+		// Direct merge for local (no-remote) workflows. The Spec 106 Bead 4
+		// layout-regression guard for this seam already ran ABOVE (before any
+		// cleanup), so a cross-layout regression never reaches this merge.
 		if result.MergeStrategy == "direct" {
 			if err := gitutil.MergeBranch(g.Root, specBranch, "main"); err != nil {
 				// Spec 092 Req 14(b) + Req 18: a direct spec→main

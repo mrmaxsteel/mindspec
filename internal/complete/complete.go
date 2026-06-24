@@ -301,7 +301,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if gateCfg, gateCfgErr := config.Load(root); gateCfgErr == nil {
 		panelGateEnabled = gateCfg.Enforcement.PanelGate
 	}
-	panelReg, panelGateErr := panelGate(beadID, dedupeRoots(wtPath, root), wtPath, panelGateEnabled, advisoryOut)
+	// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
+	// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
+	// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
+	// tree it honors the co-located reviews ONLY (root review/ ignored once
+	// flat). panelGateRoots picks the set from workspace.DetectLayout.
+	panelReg, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
 	if panelGateErr != nil {
 		return nil, panelGateErr
 	}

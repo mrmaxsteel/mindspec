@@ -100,3 +100,24 @@ The execution engine trusts that approved plans are well-decomposed and simply e
 - Operator-facing command forms are noun-verb (`mindspec spec
   approve`, `mindspec plan approve`, `mindspec impl approve`) across
   instruct templates and skipped-gate warnings.
+- **Layout-aware panel gate (Spec 106).** `internal/panel.Scan` globs
+  BOTH the historical repo-root `review/<slug>/panel.json` and the
+  spec-scoped co-located `<spec-dir>/reviews/<slug>/panel.json`
+  conventions under each root it is handed (internal/panel stays a
+  dependency-clean leaf and does no layout I/O). `complete.Run` chooses
+  WHICH roots to scan from the tree's docs layout
+  (`workspace.DetectLayout`, via `panelGateRoots`): a canonical/legacy
+  tree honors the UNION — repo-root + bead-worktree `review/` AND the
+  co-located `<spec-dir>/reviews/` — so root `review/` panels keep
+  driving the gate through the transition; a flat tree honors the
+  co-located `reviews/` ONLY, and a leftover root `review/` panel no
+  longer drives the gate. A sub-threshold panel in EITHER honored
+  location blocks `complete`.
+- **Doctor layout detection (Spec 106).** `mindspec doctor` reports the
+  detected docs layout (reusing `workspace.DetectLayout`), emits a
+  `would-migrate-layout` Warn when a canonical/legacy tree would flatten
+  on the next `mindspec migrate layout`, and ERRORs (`dual-layout-spec:
+  <id>`) when the SAME spec id exists under two layout tiers — the
+  stale-duplicate read hazard a half-migrated tree creates. The
+  dry-run-migration spec walk is tier-aware (`workspace.SpecsDir`), so a
+  flat tree's specs are still enumerated.

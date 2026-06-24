@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // excludedSpecPathPrefixes lists path prefixes that the dry-run-migration
@@ -19,9 +20,16 @@ import (
 // not silently feed them through the reporter.
 var excludedSpecPathPrefixes = []string{"viz/", "agentmind/", "bench/"}
 
-// checkDryRunMigration walks .mindspec/docs/specs/ and reports each
+// checkDryRunMigration walks the spec enumeration root and reports each
 // legacy spec (one whose lifecycle epic lacks the mindspec_phase
 // metadata key) that would migrate on its next lifecycle command.
+//
+// The walk root is TIER-AWARE (Spec 106 Bead 4): workspace.SpecsDir resolves
+// the flat .mindspec/specs, canonical .mindspec/docs/specs, or legacy
+// docs/specs root via first-exists-wins, so the reporter sees the same spec
+// inventory on a flat tree as on a canonical one (no silent drop). For a
+// canonical/legacy tree with no flat tree present this is byte-for-byte the
+// pre-spec .mindspec/docs/specs path.
 //
 // Output: one Check per legacy spec, of the form
 //
@@ -36,7 +44,7 @@ var excludedSpecPathPrefixes = []string{"viz/", "agentmind/", "bench/"}
 // in internal/phase/migrate.go. A single shared phase.Cache is used so
 // the walk costs one bd list per epic-set rather than N show calls.
 func checkDryRunMigration(r *Report, root string) {
-	specsRoot := filepath.Join(root, ".mindspec", "docs", "specs")
+	specsRoot := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsRoot)
 	if err != nil {
 		// No specs dir = nothing to migrate; reporter is a no-op.
@@ -104,6 +112,89 @@ func checkDryRunMigration(r *Report, root string) {
 			Message: fmt.Sprintf("epic=%s phase=%s", epicID, derived),
 		})
 	}
+}
+
+// checkLayout reports the detected docs layout (Spec 106 Bead 4 / Req 8),
+// WARNs when a canonical/legacy tree would flatten on the next
+// `mindspec migrate layout` (analogous to the would-migrate spec reporter), and
+// ERRORs when the SAME spec id exists under two layouts — the stale-duplicate
+// read hazard a half-migrated tree creates (the flat-first resolver would read
+// the flat copy and silently mask the canonical/legacy one). It reuses the
+// shared workspace.DetectLayout probe and writes nothing.
+func checkLayout(r *Report, root string) {
+	// DetectLayout returns the kind alongside any mixed-tree error; the kind is
+	// what we report. The dual-layout-duplicate scan below is the precise
+	// ERROR; the mixed error itself is surfaced through that scan + the kind.
+	layout, _ := workspace.DetectLayout(root)
+	r.Checks = append(r.Checks, Check{
+		Name:    "layout",
+		Status:  OK,
+		Message: string(layout),
+	})
+
+	switch layout {
+	case workspace.LayoutCanonical, workspace.LayoutLegacy:
+		r.Checks = append(r.Checks, Check{
+			Name:   "would-migrate-layout",
+			Status: Warn,
+			Message: fmt.Sprintf(
+				"layout=%s would flatten to .mindspec/{specs,adr,domains,core} (+ context-map.md) on `mindspec migrate layout`",
+				layout),
+		})
+	}
+
+	for _, dup := range dualLayoutDuplicateSpecIDs(root) {
+		r.Checks = append(r.Checks, Check{
+			Name:   fmt.Sprintf("dual-layout-spec: %s", dup.id),
+			Status: Error,
+			Message: fmt.Sprintf(
+				"spec %s exists under multiple layouts (%s) — remove the stale copy; the flat-first resolver would silently mask the others",
+				dup.id, strings.Join(dup.layouts, ", ")),
+		})
+	}
+}
+
+// dualLayoutDup records a spec id found under more than one layout tier.
+type dualLayoutDup struct {
+	id      string
+	layouts []string
+}
+
+// dualLayoutDuplicateSpecIDs returns the spec ids present under MORE THAN ONE
+// of the three spec-tree roots — flat (.mindspec/specs), canonical
+// (.mindspec/docs/specs), and legacy (docs/specs). It enumerates each root
+// DIRECTLY (not via the first-exists-wins workspace.SpecsDir, which would
+// surface only the highest-precedence one) so the stale-duplicate hazard is
+// caught. Results are sorted by id for a deterministic report.
+func dualLayoutDuplicateSpecIDs(root string) []dualLayoutDup {
+	roots := []struct {
+		layout string
+		dir    string
+	}{
+		{"flat", filepath.Join(workspace.MindspecDir(root), "specs")},
+		{"canonical", filepath.Join(workspace.CanonicalDocsDir(root), "specs")},
+		{"legacy", filepath.Join(workspace.LegacyDocsDir(root), "specs")},
+	}
+	idLayouts := map[string][]string{}
+	for _, rt := range roots {
+		entries, err := os.ReadDir(rt.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				idLayouts[e.Name()] = append(idLayouts[e.Name()], rt.layout)
+			}
+		}
+	}
+	var dups []dualLayoutDup
+	for id, layouts := range idLayouts {
+		if len(layouts) >= 2 {
+			dups = append(dups, dualLayoutDup{id: id, layouts: layouts})
+		}
+	}
+	sort.Slice(dups, func(i, j int) bool { return dups[i].id < dups[j].id })
+	return dups
 }
 
 type lineageManifest struct {

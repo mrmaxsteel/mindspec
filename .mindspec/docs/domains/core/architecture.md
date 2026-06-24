@@ -41,6 +41,13 @@ The pure, I/O-free classifier `ClassifyLayout(LayoutMarkers)` (with
 source of truth that both `DetectLayout` (filesystem) and the cross-layout
 merge guard (git refs) reuse, so the two fingerprints never drift.
 
+`MigrationRecoveryActive(root)` exposes the SAME in-flight-run-id scoping the
+`DetectLayout` mixed-tree exception uses — a recorded, non-terminal
+`.mindspec/migrations/<run-id>/` run — for cross-package reuse: the execution
+domain's directional merge guard (Spec 106) calls it to EXEMPT a transient
+cross-layout merge during a live migration recovery, rather than reimplementing
+the run-state read. A stale/completed run record never activates it.
+
 ### Health Checks
 
 `mindspec doctor` validates project structure. Checks are categorized:

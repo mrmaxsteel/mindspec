@@ -40,6 +40,32 @@ Worktree removal and branch deletion require CWD to be outside the target worktr
 
 Bead branches are created from the spec branch. On completion, bead branches merge back into the spec branch. On finalization, the spec branch merges into main.
 
+### Directional Layout-Fingerprint Merge Guard (Spec 106)
+
+`MindspecExecutor` installs a DIRECTIONAL layout-fingerprint guard in front of
+its three REAL local merge seams — `CompleteBead`'s and `FinalizeEpic`'s
+`gitutil.MergeInto` (bead→spec) and `FinalizeEpic`'s direct, no-remote
+`gitutil.MergeBranch` (spec→main). `layoutAtRef` fingerprints each ref's tree
+through the executor's own `TreeDirsAtRef(ref, ".mindspec")` read and the shared
+`workspace.ClassifyLayout`/`LayoutMarkersFromMindspecChildren` helper (one source
+of truth with `DetectLayout`, so the on-disk and ref-anchored signatures never
+drift); legacy (a repo-root `docs/` tree) is probed only when neither flat nor
+canonical markers are present.
+
+The rule is precise: **block ⟺ source is canonical/legacy AND target is flat** —
+the regression that would resurrect the pre-flatten `.mindspec/docs/...` paths on
+top of an already-flattened tree. The flatten is forward-only (ADR-0023), so the
+block carries a `git rebase <target> <source>` recovery line and mutates nothing
+(the direct spec→main guard runs BEFORE any worktree cleanup). The MIGRATION
+direction (flat source → canonical/legacy target) and same-layout merges are
+explicitly ALLOWED, so the flatten itself can land. The block is EXEMPT inside a
+recorded in-progress migration run (`workspace.MigrationRecoveryActive`, Bead-1's
+in-flight-run-id scoping, not a stale record). A layout read failure fails open.
+The REMOTE-PR path (`FinalizeEpic` pushes the branch for a PR when a remote
+exists) does NOT local-merge, so this in-binary guard covers the local-merge
+seams only; cross-layout protection on the PR path relies on the pre-flatten
+precondition + PR review.
+
 ## Invariants
 
 1. Workflow packages never import `internal/gitutil/` — all git operations go through `Executor`.
