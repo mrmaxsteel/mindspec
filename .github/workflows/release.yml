@@ -46,22 +46,28 @@ jobs:
       # for every archive and the checksums file (SPDX-JSON output).
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
-      # Use a curated, per-tag release-notes file (RELEASE-NOTES-<tag>.md) as the
-      # GitHub release body when present; otherwise fall back to GoReleaser's
-      # auto-generated changelog. This keeps the headline narrative (e.g. the
-      # v0.10.0 flat-layout notes) from being buried under raw commit subjects.
-      # Fail-soft: a tag without a matching notes file still releases (with a
-      # warning), so this never blocks a release.
+      # Use the matching CHANGELOG.md section as the GitHub release body so the
+      # curated headline narrative isn't buried under raw commit subjects. The
+      # section for tag `vX.Y.Z` is the block under `## [X.Y.Z]` up to the next
+      # `## [` heading. Fail-soft: a tag with no matching section still releases
+      # with GoReleaser's auto-generated changelog (and a warning), so a missing
+      # entry never blocks a release.
       - name: Resolve release notes source
         id: notes
         run: |
           set -euo pipefail
-          f="RELEASE-NOTES-${GITHUB_REF_NAME}.md"
-          if [ -f "$f" ]; then
-            echo "args=release --clean --release-notes $f" >> "$GITHUB_OUTPUT"
-            echo "Using curated release notes: $f"
+          version="${GITHUB_REF_NAME#v}"
+          notes="$(mktemp)"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > "$notes"
+          if [ -s "$notes" ] && grep -q '[^[:space:]]' "$notes"; then
+            echo "args=release --clean --release-notes $notes" >> "$GITHUB_OUTPUT"
+            echo "Using CHANGELOG.md section for [$version]"
           else
-            echo "::warning::no $f found; using GoReleaser auto-generated changelog"
+            echo "::warning::no CHANGELOG.md section for [$version]; using GoReleaser auto-generated changelog"
             echo "args=release --clean" >> "$GITHUB_OUTPUT"
           fi
 
