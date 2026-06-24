@@ -1,0 +1,13 @@
+paths:
+  - internal/state/**
+  - internal/config/**
+  - internal/workspace/**
+  - internal/spec/**
+  - internal/idvalidate/**
+  - internal/speclist/**
+  - internal/phase/**
+  - internal/recording/**
+  - internal/redact/**
+  - internal/version/**
+  - internal/journal/**
+  - .mindspec/domains/core/OWNERSHIP.yaml
