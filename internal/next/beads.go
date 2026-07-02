@@ -49,23 +49,6 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	return ParseBeadsJSON(out)
 }
 
-// findRoot attempts to find the workspace root for state reading.
-func findRoot() (string, error) {
-	out, err := runBDFn("worktree", "info", "--json")
-	if err != nil {
-		// Not in a worktree — try current directory
-		return ".", nil
-	}
-	var info struct {
-		MainRepo string `json:"main_repo"`
-		Path     string `json:"path"`
-	}
-	if json.Unmarshal(out, &info) == nil && info.MainRepo != "" {
-		return info.MainRepo, nil
-	}
-	return ".", nil
-}
-
 // ParseBeadsJSON parses the JSON output from bd commands into BeadInfo slices.
 func ParseBeadsJSON(data []byte) ([]BeadInfo, error) {
 	trimmed := strings.TrimSpace(string(data))

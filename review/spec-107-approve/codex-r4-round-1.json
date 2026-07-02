@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.8,
+  "rationale": "Ran every check in the brief against SHA c7c70000. `go build ./...` exits 0. `deadcode -test ./cmd/... ./internal/... ./plugins/...` reports exactly 26 unreachable funcs, and every one is in R1's deletion list — no tool-reported func is omitted. R1 also correctly includes `getCwd` (a dead `var getCwd = os.Getwd` at hook/helpers.go:64 with zero references; deadcode structurally can't flag vars) and correctly keeps live `dirExists` (used at hook.go:222,227). codex.go writers confirmed: os.WriteFile:68, os.OpenFile:79, os.WriteFile:96 — the symlink-safety gap is real. The three .golangci.yml carve-out targets are all stale: internal/brownfield absent, isNeighbor absent from contextpack/builder.go, next/beads.go findRoot present but R1-deleted. `grep -c 'Bead-loop guardrails' AGENTS.md` = 0, confirming the dangling CLAUDE.md:43 reference. Existing claude/copilot refusal tests exist to mirror. One inaccuracy (non-blocking, see findings): acceptance criterion #1's carve-outs describe no-test findings, not `-test` output. The trace descope itself is soundly justified on unowned-manifest grounds, so this doesn't block approval.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "Acceptance Criteria #1 / Requirement #1 wording",
+      "claim": "The spec says `deadcode -test` reports zero findings 'outside the internal/harness LLM-eval test seams and the deferred internal/trace/event.go Event.MarshalJSON finding'.",
+      "observed": "At c7c70000, `deadcode -test` reports exactly the 26 R1-targeted funcs and NOTHING else — no internal/harness entries and no internal/trace/event.go Event.MarshalJSON. Event.MarshalJSON does not appear under `-test` NOR under the plain (no -test) invocation (the no-test run surfaces trace.EstimateTokensBytes/SetGlobal/SetRunID but not MarshalJSON, because it satisfies json.Marshaler and deadcode treats it as reachable). The 'harness test seams' and 'trace MarshalJSON' exceptions both describe the NO-TEST output (~250 funcs), not the `-test` invocation the criterion names.",
+      "impact": "Benign / safe direction. After R1 deletes the 26 funcs, `deadcode -test` will report zero, which trivially satisfies 'zero outside {A,B}' — the two named exceptions are simply never exercised, so the gate is not weakened.",
+      "recommendation": "Reword acceptance criterion #1 to expect zero `-test` findings after R1, and drop or footnote the trace/MarshalJSON + harness-seam carve-outs (they belong to the no-test sweep). The trace DESCOPE decision needs no change — it is correctly justified by internal/trace being claimed by zero OWNERSHIP.yaml manifests (would trip adr-divergence-unowned), independent of deadcode.",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "R1 completeness cross-check",
+      "claim": "R1 deletes every confirmed-dead func/cluster from report §1.",
+      "observed": "Confirmed: all 26 `deadcode -test` findings map 1:1 to R1 entries (contextpack.NewADRStore/readFileContent; doctor.Run; gitutil.MainWorktreePath/IsMainWorktree; harness.filterEnv/assertCommandUsedFlag/assertCleanWorktree; hook.hasPathPrefix/stripEnvPrefixes/parseEnvPrefixes/isEnvVarName; layout.Mover.WithPlan/WithRules/WithRootDocs; next.findRoot; phase.FindActiveBeadForEpic; recording.DefaultCodexConfigPath; setup.hasManagedBlock; validate.SpecStatusFromBytes/SpecIsApproved/IsDomainCoveredCtx/BeadID; plugins.SkillNames/sortStrings). getCwd is additionally covered (dead var). No omissions.",
+      "impact": "Positive — R1's deletion list is complete and accurate against the tool.",
+      "hard_block": false
+    }
+  ]
+}

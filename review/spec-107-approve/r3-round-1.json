@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.87,
+  "rationale": "Gate-forwardness lens. PASS: (a) all six cited ADRs are Accepted and their real Domain(s) lines cover every impacted domain (workflow/core/execution/context-system); each citation intersects >=1 impacted domain, so checkADRCoverage + adr-cite-irrelevant pass. (c) deleted exports are genuinely dead (live callers use *WithCache/*WithOptions variants; SpecIsApproved's only hit is a comment), all in internal/ or repo-specific cmd/plugins -- this is a CLI, so export removal is contract-safe. (d) R6/R7 preserve freshness: uncached phase.FetchChildren at the post-close site, only the immutable spec->epic lookup hoisted; anchors verified. BLOCKING (b): the spec's Open-Question-1 resolution claims .golangci.yml is exempt from divergence attribution 'because it is not Go source'. That is FALSE -- ValidateDivergence gates on isProcessArtifact + ownership, NOT source-ness. .golangci.yml is neither a doc/process-artifact nor claimed by any OWNERSHIP.yaml. I ran the lane against it: it emits adr-divergence-unowned ERROR, which will block mindspec complete on the bead that removes the carve-outs -- the exact failure the spec descoped internal/trace to avoid.",
+  "concrete_changes_required": [
+    "Fix the false claim in Open Questions ('RESOLVED -- domain-unclaimed path attribution') and the Impacted-Domains note: root-level .golangci.yml is NOT invisible to divergence attribution. Empirically it fires adr-divergence-unowned ERROR at complete because internal/validate/divergence.go attributes every changed file that is not a process-artifact/doc and .golangci.yml matches no OWNERSHIP.yaml glob (source-ness is irrelevant to that lane; only AGENTS.md is safe, via the rootOperatorDocs allowlist in isDocFile).",
+    "Resolve the .golangci.yml gate failure by one of: (1) add a `.golangci.yml` entry to workflow's OWNERSHIP.yaml paths (workflow is a cited-covered domain, and that manifest is self-owned + doc-classified so the edit itself is skipped) as a new requirement; OR (2) defer R2 (the three stale unparam carve-out removals) to wave 2 exactly as internal/trace was deferred -- a stale unparam exclusion for deleted code is a harmless no-op, so R1 does not depend on it; OR (3) extend the non-source classifier to treat .golangci.yml as non-governable config with a test. Pick one and reflect it in Requirements/Scope/Acceptance."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "area": "complete-gate / adr-divergence",
+      "summary": ".golangci.yml trips adr-divergence-unowned at mindspec complete; spec's exemption claim is factually wrong.",
+      "detail": "internal/validate/divergence.go ValidateDivergence iterates all changed files, skipping only excludedFirstSegments (viz/agentmind/bench) and isProcessArtifact (isDocFile + .beads/ + review/ + reviews/ + mover run-state + vestigial config). isDocFile's rootOperatorDocs allowlist covers AGENTS.md but NOT .golangci.yml, and no OWNERSHIP.yaml claims it, so attributeDomain returns '' and the lane emits an adr-divergence-unowned ERROR. Verified by running the lane in a temp fixture: `file .golangci.yml is not claimed by any OWNERSHIP.yaml for the spec's impacted domains [workflow]`. TestRootOperatorDocsNotUnowned (divergence_test.go:487) explicitly documents this is an allowlist, not an 'any top-level file' rule."
+    },
+    {
+      "severity": "info",
+      "area": "plan-gate ADR coverage",
+      "summary": "ADR coverage + citation-relevance both pass.",
+      "detail": "Impacted domains {workflow, core, execution, context-system}. Cited Accepted ADRs and Domain(s): 0030 {execution,validation,lifecycle,lint}, 0033 {context-system}, 0034 {workflow}, 0035 {workflow,execution,core}, 0036 {workflow,validation,doc-sync,ownership}, 0037 {workflow,execution}. Every impacted domain is covered (core by 0035, context-system by 0033) and every citation intersects >=1 impacted domain -- no adr-coverage-missing / adr-cite-irrelevant."
+    },
+    {
+      "severity": "info",
+      "area": "contract stability",
+      "summary": "Export deletions are dead and contract-safe.",
+      "detail": "MainWorktreePath/IsMainWorktree are a self-contained cluster; FindActiveBeadForEpic and doctor.Run are wrappers whose live callers use FindActiveBeadForEpicWithCache / RunWithOptions; SpecIsApproved's only hit is a comment in instruct.go. All in internal/ (unimportable) or repo-specific cmd/plugins. Module is a CLI, so no external library consumer."
+    },
+    {
+      "severity": "nit",
+      "area": "dead-code deletion (R1)",
+      "summary": "Deleting validate.SpecIsApproved leaves a dangling comment reference.",
+      "detail": "internal/instruct/instruct.go:102 names validate.SpecIsApproved in a comment. Not a compile error, but the impl should update that comment when deleting the function to avoid a dangling doc reference (analogous to the guardrails cross-ref this spec is fixing)."
+    },
+    {
+      "severity": "info",
+      "area": "complete-gate / freshness (R6/R7)",
+      "summary": "Post-close children freshness is preserved.",
+      "detail": "queryAllChildren (complete.go:884) is the per-status fanout; phase.fetchChildren (cache.go:213) is the single comma-joined uncached query. New exported phase.FetchChildren delegates to it; only the immutable spec->epic lookup (phase.FindEpicBySpecID at 228/716/781) is hoisted, and children stay uncached, so R6/R7 do not stale the post-close read."
+    }
+  ]
+}

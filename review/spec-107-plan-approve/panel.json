@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "107-cleanup-deadcode-dry-wave1",
+  "target": "spec/107-cleanup-deadcode-dry-wave1",
+  "round": 3,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "07eb467e2017e31bcc187d57f3b3c52fcb74705a"
+}

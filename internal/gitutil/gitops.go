@@ -209,32 +209,6 @@ func DeleteBranch(name string) error {
 	return nil
 }
 
-// MainWorktreePath returns the path of the main (non-linked) worktree.
-func MainWorktreePath() (string, error) {
-	cmd := execCommand("git", "worktree", "list", "--porcelain")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("listing worktrees: %w", err)
-	}
-
-	// The first "worktree <path>" line is always the main worktree.
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "worktree ") {
-			return strings.TrimPrefix(line, "worktree "), nil
-		}
-	}
-	return "", fmt.Errorf("no worktree found in git output")
-}
-
-// IsMainWorktree returns true if the given path is the main (non-linked) worktree.
-func IsMainWorktree(path string) (bool, error) {
-	mainPath, err := MainWorktreePath()
-	if err != nil {
-		return false, err
-	}
-	return path == mainPath, nil
-}
-
 // HasRemote returns true if at least one git remote is configured.
 func HasRemote() bool {
 	cmd := execCommand("git", "remote")

@@ -120,7 +120,7 @@ func (c *Cache) FindEpic(epicID string) (*EpicInfo, error) {
 // memoized per epicID. The status set covers built-ins (open, in_progress,
 // blocked, closed) plus project custom statuses, matching advanceState.
 // Callers that only want a subset (e.g. in_progress for
-// FindActiveBeadForEpic) filter the returned slice in-process.
+// FindActiveBeadForEpicWithCache) filter the returned slice in-process.
 func (c *Cache) GetChildren(epicID string) ([]ChildInfo, error) {
 	if c == nil {
 		return fetchChildren(epicID)
@@ -173,6 +173,18 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		c.mu.Unlock()
 	}
 	return "", fmt.Errorf("no epic found for spec %s", specID)
+}
+
+// FetchChildren returns all children (any status) of an epic via a single
+// uncached `bd list --parent <epicID> --status=<AllStatuses> -n 0` call — the
+// exact query Cache.GetChildren memoizes, but WITHOUT memoization so a caller
+// that must observe bd state mutated mid-invocation always reads fresh. This is
+// the exported seam complete.Run uses for its post-close children read (the
+// state advance runs after `bd close` mutates the child set, so a memoized read
+// would be stale). Callers that want per-invocation memoization must use
+// Cache.GetChildren instead.
+func FetchChildren(epicID string) ([]ChildInfo, error) {
+	return fetchChildren(epicID)
 }
 
 // --- Package-private bd-touching helpers ---

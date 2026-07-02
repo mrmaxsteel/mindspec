@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "All four round-2 falsifiability asks are addressed in the rewritten Verification commands. Bead 3 now guards both new test selectors with explicit function-existence checks and PASS-line greps, so missing tests cannot false-pass through go test's no-match behavior. Bead 2 now separately proves the codex symlink refusal test exists/runs and adds one PASS-line Verification for each per-agent full-equality managed-doc test. Bead 4's guardrail check extracts the Bead-loop guardrails section body, requires it non-empty, and greps fences only inside that body. I also parsed work_chunks and found no duplicate key_file_paths across beads. The plan is gate-forward and falsifiable enough for plan approval.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:320-321",
+      "issue": "B3 Verification commands now include anchored function-existence checks plus PASS-line greps for TestRun_CompletePerfPairSubprocessBudget and TestFetchChildren, closing the no-tests-to-run false-pass mode."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:273",
+      "issue": "B2 now verifies TestRunCodex_RefusesSymlinkedAGENTSmd specifically, with a function-existence guard and a matching PASS-line grep."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:274-276",
+      "issue": "B2 now has explicit per-agent full-equality managed-doc Verifications for Claude, Codex, and Copilot, each using the function-existence plus PASS-line pattern."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:358",
+      "issue": "B4 fence checking is scoped to the extracted Bead-loop guardrails section body and requires that section body to be non-empty."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:1",
+      "issue": "Parsed work_chunks key_file_paths show no duplicate touched paths across the four beads; the bead-unique doc-target fix holds."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:273-276,320-321",
+      "issue": "Every newly named test in the plan uses the required PASS-line pattern: TestRunCodex_RefusesSymlinkedAGENTSmd, TestManagedDocContent_Claude, TestManagedDocContent_Codex, TestManagedDocContent_Copilot, TestRun_CompletePerfPairSubprocessBudget, and TestFetchChildren."
+    }
+  ]
+}

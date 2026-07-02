@@ -34,12 +34,23 @@ func SetMergeMetadataForTest(fn MergeMetadataFunc) func() {
 // epic exists yet (pre-approve-spec), return (false, nil).
 //
 // Idempotent: a second call on a migrated epic returns (false, nil).
+//
+// Constructs a fresh cache; hot-path callers (e.g. complete.Run, which resolves
+// the same epic again downstream) should use EnsureMigratedWithCache to share
+// the one `bd list --type=epic` lookup.
 func EnsureMigrated(specID string) (bool, error) {
-	epicID, err := FindEpicBySpecID(specID)
+	return EnsureMigratedWithCache(NewCache(), specID)
+}
+
+// EnsureMigratedWithCache is the cache-aware variant of EnsureMigrated. The
+// spec→epic resolution and every epic read route through the supplied cache,
+// so a caller that also resolves the epic elsewhere in the same invocation
+// pays for at most one `bd list --type=epic` (spec 107 wave 1).
+func EnsureMigratedWithCache(c *Cache, specID string) (bool, error) {
+	epicID, err := FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
 		return false, nil // nothing to migrate
 	}
-	c := NewCache()
 	if storedPhase := readStoredPhaseWithCache(c, epicID); storedPhase != "" {
 		return false, nil // already migrated or post-080 native
 	}

@@ -29,7 +29,6 @@ var (
 	closeBeadFn             = bead.Close
 	worktreeListFn          = bead.WorktreeList
 	runBDFn                 = bead.RunBD
-	listJSONFn              = bead.ListJSON
 	resolveTargetFn         = resolve.ResolveTarget
 	findLocalRootFn         = defaultFindLocalRoot
 	fetchBeadByIDFn         = next.FetchBeadByID
@@ -215,19 +214,30 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, fmt.Errorf("resolving active spec: %w", err)
 	}
 
+	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
+	// the life of this call, so resolve it ONCE through a shared cache and
+	// thread that cache through the migration, the impl-only guard, and the
+	// post-close state advance. This collapses the four throwaway
+	// `phase.NewCache()` + `bd list --type=epic` lookups (migrate, guard,
+	// phase-sync, advanceState) down to at most one `bd list --type=epic`. The
+	// post-close children read is deliberately NOT memoized here — advanceState
+	// re-issues it via the uncached phase.FetchChildren so it observes the
+	// child set `bd close` mutated mid-run.
+	epicCache := phase.NewCache()
+
 	// 1.25. Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on
 	// first lifecycle command. Must precede the phase-dependent guard
 	// below (and the eventual phase.DerivePhaseFromChildren call in
 	// advanceState) so legacy epics get their mindspec_phase metadata
 	// before any phase read. No-op when already migrated or no epic.
-	if _, err := phase.EnsureMigrated(specID); err != nil {
+	if _, err := phase.EnsureMigratedWithCache(epicCache, specID); err != nil {
 		return nil, err
 	}
 
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
-	epicID, epicErr := phase.FindEpicBySpecID(specID)
+	epicID, epicErr := phase.FindEpicBySpecIDWithCache(epicCache, specID)
 	if epicErr == nil && epicID != "" {
-		epicPhase, phaseErr := phase.DerivePhase(epicID)
+		epicPhase, phaseErr := phase.DerivePhaseWithCache(epicCache, epicID)
 		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
 			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", beadID, specID, epicPhase)
 		}
@@ -703,19 +713,19 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		writePanelAuditMetadata(beadID, panelReg, advisoryOut)
 	}
 
-	// 6. Advance state
-	nextMode, nextBead := advanceState(root, specID)
+	// 6. Advance state. advanceState re-reads the post-close child set fresh
+	// (phase.FetchChildren) against the epic resolved once above.
+	nextMode, nextBead := advanceState(epicID)
 	result.NextMode = nextMode
 	result.NextBead = nextBead
 	result.NextSpec = specID
 
 	// 6.5. Sync stored phase (Spec 080): keep epic mindspec_phase in sync
 	// so that DerivePhase (metadata-first) returns the correct phase for
-	// downstream commands like `mindspec impl approve`.
-	if nextMode != "" {
-		if eid, findErr := phase.FindEpicBySpecID(specID); findErr == nil && eid != "" {
-			_ = completeMergeMetadataFn(eid, map[string]interface{}{"mindspec_phase": nextMode})
-		}
+	// downstream commands like `mindspec impl approve`. Reuses the epicID
+	// resolved once at the top (no extra `bd list --type=epic`).
+	if nextMode != "" && epicID != "" {
+		_ = completeMergeMetadataFn(epicID, map[string]interface{}{"mindspec_phase": nextMode})
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -773,17 +783,17 @@ func FormatResult(r *Result) string {
 // If phase derives to implement, a `bd ready` call resolves a specific next
 // bead; otherwise nextBead stays empty and the caller prints the right
 // guidance for plan / review / idle.
-func advanceState(root, specID string) (mode, nextBead string) {
-	if specID == "" {
+//
+// epicID is the spec's epic, resolved once by Run and passed in ("" when no
+// epic exists → idle). The child set is re-read FRESH via phase.FetchChildren
+// (a single all-status `bd list --parent` call, uncached) so it reflects the
+// `bd close` this run just performed rather than a memoized pre-close view.
+func advanceState(epicID string) (mode, nextBead string) {
+	if epicID == "" {
 		return state.ModeIdle, ""
 	}
 
-	epicID, err := phase.FindEpicBySpecID(specID)
-	if err != nil || epicID == "" {
-		return state.ModeIdle, ""
-	}
-
-	children := queryAllChildren(root, epicID)
+	children, _ := phase.FetchChildren(epicID)
 	derivedPhase := phase.DerivePhaseFromChildren(children)
 
 	if derivedPhase == state.ModeImplement {
@@ -873,33 +883,4 @@ func joinResultErrorMessages(r *validate.Result) string {
 		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
 	}
 	return strings.Join(msgs, "; ")
-}
-
-// queryAllChildren pulls child beads under an epic across every status bd
-// recognizes — built-in (open, in_progress, blocked, closed) plus every
-// custom status declared in <root>/.beads/config.yaml. Reading the custom
-// set at runtime means new statuses added later (or different per project)
-// are picked up without touching this code. Mirrors phase.queryChildren
-// (package-private there).
-func queryAllChildren(root, epicID string) []phase.ChildInfo {
-	statuses := bead.AllStatuses(root)
-	var all []phase.ChildInfo
-	seen := map[string]bool{}
-	for _, status := range statuses {
-		out, err := listJSONFn("--parent", epicID, "--status="+status)
-		if err != nil {
-			continue
-		}
-		var batch []phase.ChildInfo
-		if json.Unmarshal(out, &batch) != nil {
-			continue
-		}
-		for _, c := range batch {
-			if !seen[c.ID] {
-				seen[c.ID] = true
-				all = append(all, c)
-			}
-		}
-	}
-	return all
 }

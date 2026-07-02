@@ -72,3 +72,13 @@ precondition + PR review.
 2. `withWorkingDir` wraps all worktree remove + branch delete operations.
 3. `Executor` implementations are stateless — all state comes from the caller or the git repo.
 4. `MockExecutor` records all calls for assertion in tests.
+
+## Dead-code sweep — spec 107 wave 1 (2026-07-02)
+
+Bead `mindspec-oexu.1` removed confirmed-dead execution-domain symbols
+(zero live callers):
+
+- `internal/gitutil/gitops.go`: `MainWorktreePath` + `IsMainWorktree`.
+- `internal/harness`: `filterEnv` (`agent.go`; the live `filterEnvPrefix` is
+  retained) and the unused assertion helpers `assertCommandUsedFlag` +
+  `assertCleanWorktree` (`asserts.go`).

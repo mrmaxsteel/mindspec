@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Plan-vs-spec fidelity is clean. All 15 R1 dead-code clusters are owned exactly once: B1 owns 13 (hook cluster, gitutil pair, embed pair, layout With*, hook.go no-op, doctor.Run, validate 4-shim, contextpack pair, next.findRoot, recording.DefaultCodexConfigPath, harness trio, panel skipHumanHint, state.go flags); setup.hasManagedBlock rides B2 s3 and phase.FindActiveBeadForEpic rides B3 s4, and B1 s4 explicitly excludes both plus internal/trace and .golangci.yml. Every requirement maps: R2/R3/R4->B2, R5/R6->B3, R7/R8->B4, R9 via per-bead AC9. Every AC1-AC9 is bead-attributed (AC1 split B1+B2+B3, full-clean at final review; correct). ADR set (0030/0033/0034/0035/0036/0037) matches spec Touchpoints exactly. Five R7 fences and the complete.go:223/228/716/781 reuse sites match verbatim. No cross-bead file overlap justifies depends_on:[]. The only addition beyond spec text is the dangling-comment fixes (panel R3 nit) in internal/instruct/instruct.go + validate/plan.go; verified internal/instruct/** is claimed by workflow OWNERSHIP (impacted domain), so no adr-divergence-unowned risk. Nothing dropped, nothing out-of-scope invented.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "R1 symbol-by-symbol coverage",
+      "note": "Cross-checked spec R1's 15 clusters against B1/B2/B3 Steps. All present, none duplicated, none missing. Riders correctly relocated: setup.hasManagedBlock->B2 s3 (claude.go:555), phase.FindActiveBeadForEpic->B3 s4 (derive.go:713), with B1 s4 naming both as do-not-touch. trace.Event.MarshalJSON correctly excluded (R1 exclusion + B1 deadcode verification carve-out)."
+    },
+    {
+      "area": "Explicit exclusions honored",
+      "note": "internal/trace and .golangci.yml both named as deferred in B1 s4 and in the B1 deadcode verification line; no bead touches them. .golangci.yml stale findRoot carve-out left inert per spec Out-of-Scope. Deprecated-but-live APIs (RenderBeadContext, harness/lint/specgate guards) untouched."
+    },
+    {
+      "area": "AC->bead mapping",
+      "note": "Plan's provenance table (AC1-AC9) is complete and correct. AC1 correctly split across B1+B2(hasManagedBlock)+B3(FindActiveBeadForEpic) with full-clean deferred to final review, matching the wave's incremental nature. R4 correctly noted as having no standalone AC, verified inside B2."
+    },
+    {
+      "area": "ownership consistency of plan-added file",
+      "note": "Plan adds internal/instruct/instruct.go to B1 (not in spec's Impacted-Domains example list) for a comment fix. Verified .mindspec/domains/workflow/OWNERSHIP.yaml claims internal/instruct/**, an impacted domain -> safe, consistent with spec's 'only AGENTS.md is outside every glob' invariant (AGENTS.md is outside globs but doc-classified; instruct is inside workflow's glob)."
+    },
+    {
+      "area": "verbatim spec detail fidelity",
+      "note": "ADR citations, the five guardrail fences, complete.go reuse sites (223/228/716/781), queryAllChildren range (884-905), fetchChildren range (cache.go:213-230), and spec_init RunE dedup (20-61 reusing spec.go:30-71) all match the spec verbatim. phase.FetchChildren wrapper shape matches the RESOLVED open question."
+    }
+  ]
+}

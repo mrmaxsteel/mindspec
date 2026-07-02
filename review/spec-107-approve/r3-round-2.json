@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Gate-forwardness lens, round 2. Both my round-1 asks are ADDRESSED at 18d7ea3f. Ask 1 (false claim): the Impacted-Domains note (l.30), ADR-0036 touchpoint (l.37), and Open-Question-1 (l.98) all now state the correct rule verified in code — divergence.go skips only isProcessArtifact (isDocFile + .beads/ + review/ + reviews/ + mover run-state + vestigial config), attributing every other changed file regardless of Go-source-ness; .golangci.yml matches none of those and no OWNERSHIP glob, so it would trip adr-divergence-unowned. Ask 2 (gate failure): resolved via option (b) — the three stale unparam carve-out removals are deferred to wave 2, .golangci.yml scrubbed from In Scope, requirements renumbered 1-9; the deferral is sound because inert unparam exclusions match nothing (harmless). Re-verified: with .golangci.yml gone, the only unowned In-Scope path is AGENTS.md, which isDocFile classifies via the exact-name rootOperatorDocs allowlist (CLAUDE/AGENTS/README/BENCH-MOVED) — so it is skipped, never attributed. All other paths map to workflow/core/execution/context-system globs. Plan-gate coverage survived: six Accepted ADRs cover all four impacted domains, each citation intersects >=1.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "round-1 ask 1 — false divergence claim",
+      "summary": "ADDRESSED: the '.golangci.yml invisible because not Go source' error is corrected to the true isDocFile/isProcessArtifact rule.",
+      "detail": "Spec l.30/l.37/l.98 now read 'Divergence attributes every changed non-doc file regardless of Go-source-ness, so an unowned path is safe only if isDocFile classifies it as documentation', and explicitly distinguish AGENTS.md (in rootOperatorDocs -> safe) from .golangci.yml (NOT in rootOperatorDocs, no OWNERSHIP glob -> trips adr-divergence-unowned). Verified against internal/validate/divergence.go:180-218 (attribution loop skips only isProcessArtifact) + isProcessArtifact l.292-299 + isDocFile docsync.go:393-411 with rootOperatorDocs exact-name map l.380-385. Claim now factually matches the code."
+    },
+    {
+      "severity": "info",
+      "area": "round-1 ask 2 — .golangci.yml gate failure resolution",
+      "summary": "ADDRESSED via option (b): carve-out removals deferred to wave 2; requirements renumbered 1-9; .golangci.yml out of In Scope.",
+      "detail": "Out of Scope l.65-66 defers the three stale unparam carve-outs on the same trace precedent, with the correct rationale (non-doc, unowned -> would trip the gate) and the explicit instruction not to remove them even though R1 makes the findRoot entry inert. Deferral is safe: golangci-lint unparam exclude-rules that reference removed code match nothing and are silent no-ops, so R1 (which deletes next.findRoot) does not depend on the carve-out removal, and no gate fires from the .golangci.yml side."
+    },
+    {
+      "severity": "info",
+      "area": "complete/impl-approve — divergence attribution walk",
+      "summary": "Every renumbered In-Scope path attributes cleanly; AGENTS.md is the sole unowned path and is doc-classified.",
+      "detail": "Walked In Scope (spec l.55-59) against .mindspec/domains/*/OWNERSHIP.yaml: workflow owns internal/{complete,next,validate,doctor,hook,setup,panel,layout}/**, cmd/**, plugins/mindspec/**; core owns internal/{phase,recording}/**; execution owns internal/{gitutil,safeio,harness}/**; context-system owns internal/contextpack/**. All R1-R8 targets (incl. the new internal/setup/symlink_refusal_test.go and cmd/mindspec/{spec,spec_init}.go) fall under an owned glob. The only non-owned touched path is AGENTS.md, which rides rootOperatorDocs (exact name) -> isProcessArtifact -> skipped in the divergence loop. grep confirms .golangci.yml appears in no OWNERSHIP.yaml (correctly kept out of scope). No other non-doc, non-owned path remains."
+    },
+    {
+      "severity": "info",
+      "area": "plan-gate ADR coverage (survived renumbering)",
+      "summary": "Six cited Accepted ADRs cover all four impacted domains; no adr-coverage-missing / adr-cite-irrelevant.",
+      "detail": "Verified live: ADR-0030 (execution,validation,lifecycle,lint), 0033 (context-system), 0034 (workflow), 0035 (workflow,execution,core), 0036 (workflow,validation,doc-sync,ownership), 0037 (workflow,execution) — all Status: Accepted. Impacted {workflow,core,execution,context-system}: workflow<-0034/0035/0036/0037, core<-0035, execution<-0030/0035/0037, context-system<-0033. Every citation intersects >=1 impacted domain. Renumbering touched Requirements/ACs only, not the ADR Touchpoints, so this coverage is unchanged from round 1."
+    },
+    {
+      "severity": "nit",
+      "area": "dead-code deletion (R1) — implementation note",
+      "summary": "Round-1 nit still stands: deleting validate.SpecIsApproved should also update the dangling comment at internal/instruct/instruct.go:102.",
+      "detail": "Not a spec blocker and not a compile error — an implementation-time cleanup so R1's deletion does not leave a dangling doc reference (ironic given R7 fixes exactly such a dangling cross-ref). Carry into the plan/impl, not a reason to hold approval."
+    }
+  ]
+}

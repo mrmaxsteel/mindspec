@@ -51,3 +51,12 @@ Check current mode with `/spec-status`. If unclear:
 - No approved spec? You're in Spec Mode.
 - Approved spec but no approved plan? You're in Plan Mode.
 - Both approved + active bead? You're in Implementation Mode.
+
+## Maintenance Notes
+
+- **2026-07-02 (spec 107 wave 1):** The hidden `spec init` alias
+  (`cmd/mindspec/spec_init.go`) was de-duplicated to reuse `specCreateCmd.RunE`
+  instead of carrying a byte-identical copy of the create flow, so future
+  `spec create` changes propagate to the alias automatically. Behavior of
+  `mindspec spec init` is unchanged; the alias still registers its own `--title`
+  flag.

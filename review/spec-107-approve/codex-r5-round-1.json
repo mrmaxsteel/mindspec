@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.72,
+  "rationale": "Most ACs are strong: R1/AC1 (deadcode -test), R2/AC2 (golangci-lint), R4/AC4 (named refusal test), R8/AC7 (grep -c), R10/AC9 (go test) are real, discriminating pass/fail checks that fail today and pass after. Two falsifiability defects block approval. (1) AC5: `internal/complete` and `internal/phase` each own a distinct `listJSONFn`. After R6, the `--parent` subprocess is issued by `phase.fetchChildren`, so complete's `listJSONFn` `--parent` count drops to ZERO; the assertion must count phase's `listJSONFn` via the exported `phase.SetListJSONForTest`. Wording is ambiguous and a naive read fails. (2) R3/AC3 'byte-identical to today for all three agents' has no comparator: setup tests are `strings.Contains`-based; no golden pins produced managed-doc bytes, so a whitespace/ordering regression in the extracted helper passes every named proof. Codex gap (codex.go:68,79,96 plain os writes) is confirmed real. Both are clarity/proof fixes, not design flaws.",
+  "concrete_changes_required": [
+    "AC5: specify that the one `bd list --parent` subprocess is asserted by counting `internal/phase`'s `listJSONFn` (via the exported `phase.SetListJSONForTest` seam), NOT `internal/complete`'s. Note that after R6 replaces `queryAllChildren` with `phase.FetchChildren`, complete's own `listJSONFn` is no longer called for the children query (its `--parent` count becomes zero), and existing complete_test stubs (`stubChildrenByStatus`) that install complete's `listJSONFn` must be re-pointed at phase's seam.",
+    "R3/AC3: make 'byte-identical' falsifiable. Either (a) add a proof that pins the produced managed-block content for a non-symlinked target per agent (golden file or within-test before/after capture across the extraction) and cite it in Validation Proofs, or (b) soften the claim to what the existing `strings.Contains`-based setup tests actually verify (same managed-block markers/content), since no current test discriminates byte identity."
+  ],
+  "findings": [
+    {
+      "id": "AC5-listJSONFn-seam-ambiguity",
+      "severity": "moderate",
+      "requirement": "AC5 / R6",
+      "detail": "Two package-level `listJSONFn` vars exist: complete.go:32 and derive.go:19. Post-R6 the children query routes through phase.FetchChildren -> phase.fetchChildren (cache.go:221) using phase's listJSONFn (already one comma-joined call). complete's listJSONFn `--parent` count becomes 0, so 'exactly one ... asserted via the listJSONFn call count' must target phase's seam (SetListJSONForTest, exported at derive.go:33-38). Assertable, but wording is ambiguous.",
+      "assertable": true
+    },
+    {
+      "id": "R3-byte-identical-no-comparator",
+      "severity": "moderate",
+      "requirement": "R3 / AC3",
+      "detail": "'Externally observable setup output ... byte-identical to today for all three agents' has no named comparator. internal/setup tests assert via strings.Contains; the only exact-equality checks (codex_test.go:135, claude_test.go:620,982) cover config-idempotency and user-authored preservation, not the produced managed-doc bytes. An extraction that shifts a trailing newline or block order would pass all Validation Proofs. Codex gap itself is real (codex.go:68,79,96 use plain os.WriteFile/os.OpenFile).",
+      "assertable": false
+    },
+    {
+      "id": "AC6-freshness-property-untied",
+      "severity": "minor",
+      "requirement": "AC6 / R7",
+      "detail": "'the post-close children query still reflects bd state mutated mid-run' is a real freshness invariant but is not bound to a named test. Recommend citing a test that mutates bd after close and asserts the children read reflects it, so the 'stays fresh' guarantee is discriminating rather than asserted by inspection.",
+      "assertable": true
+    }
+  ]
+}

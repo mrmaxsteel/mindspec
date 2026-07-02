@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.93,
+  "rationale": "The bead cut and AC ownership are substantively sound: AC1 is intentionally split across B1/B2/B3 without conflict, AC2-AC4 map to B2, AC5-AC6 to B3, AC7-AC8 to B4, and AC9 is a shared per-bead gate. The requested B3 seams are real: phase.SetListJSONForTest is exported at internal/phase/derive.go:34 and stubChildrenByStatus is at internal/complete/complete_test.go:535. However, the plan fails this lens because several Verification checkboxes are not directly runnable pass/fail commands. Some are prose assertions, some use grep in ways where the desired condition is not encoded in the exit status, and B4's help-output unchanged check names no comparison command or golden test. These need to be rewritten before approval so implementers and the gate can execute them mechanically.",
+  "concrete_changes_required": [
+    "Rewrite each Verification '- [ ]' item that currently depends on prose interpretation into a concrete shell command whose exit status is the pass/fail result.",
+    "For Bead 3, replace the prose-only subprocess-count Verification item at plan.md:261 with a named `go test ... -run ...` command or equivalent command that asserts exactly one `bd list --parent`, at most one `bd list --type=epic`, and mid-run freshness on the phase seam.",
+    "For Bead 4, replace the grep/prose checks at plan.md:291-294 with commands that encode the required predicates, including all five guardrail fences, real CLAUDE.md cross-reference resolution, no duplicated RunE body, and unchanged `spec init --help` via a test or explicit diff command.",
+    "For grep-negative checks such as plan.md:222, use an inverted shell predicate like `! grep ...` or a focused script so the desired no-match result exits 0."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:261",
+      "issue": "Verification item is prose, not a runnable pass/fail command. It describes the required B3 subprocess-count assertions but cannot be executed as written."
+    },
+    {
+      "severity": "blocking",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:291-294",
+      "issue": "Bead 4 Verification items use grep plus prose expectations and an unspecified help-output comparison. They do not encode all required predicates as runnable pass/fail commands."
+    },
+    {
+      "severity": "major",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:222",
+      "issue": "The desired result is no grep matches, but the listed command exits nonzero on success unless inverted or wrapped. As written it is not a reliable pass/fail command."
+    },
+    {
+      "severity": "major",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:184,186,260,262",
+      "issue": "Several Verification bullets pair commands with prose-only expected-output filters. They should be tightened into commands or named tests that fail automatically when disallowed findings or references remain."
+    }
+  ]
+}
