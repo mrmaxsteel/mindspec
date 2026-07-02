@@ -1,39 +1,50 @@
 ---
-status: Draft
-spec_id: 109-orchestration-config-substrate
-version: "1"
 adr_citations:
-  - ADR-0037
-  - ADR-0035
-  - ADR-0034
-  - ADR-0039
+    - ADR-0037
+    - ADR-0035
+    - ADR-0034
+    - ADR-0039
+approved_at: "2026-07-02T21:57:34Z"
+approved_by: user
+bead_ids:
+    - mindspec-dov0.1
+    - mindspec-dov0.2
+    - mindspec-dov0.3
+    - mindspec-dov0.4
+spec_id: 109-orchestration-config-substrate
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-  - id: 2
-    depends_on: [1]
-    key_file_paths:
-      - internal/config/config.go
-      - internal/config/config_test.go
-      - .mindspec/domains/core/interfaces.md
-  - id: 3
-    depends_on: [1]
-    key_file_paths:
-      - internal/panel/panel.go
-      - internal/panel/gate.go
-      - internal/panel/panel_test.go
-      - .mindspec/domains/workflow/architecture.md
-  - id: 4
-    depends_on: [2, 3]
-    key_file_paths:
-      - cmd/mindspec/config.go
-      - cmd/mindspec/config_test.go
-      - internal/complete/panel_advisory.go
-      - internal/complete/panel_advisory_test.go
-      - .mindspec/domains/workflow/interfaces.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+    - depends_on:
+        - 1
+      id: 2
+      key_file_paths:
+        - internal/config/config.go
+        - internal/config/config_test.go
+        - .mindspec/domains/core/interfaces.md
+    - depends_on:
+        - 1
+      id: 3
+      key_file_paths:
+        - internal/panel/panel.go
+        - internal/panel/gate.go
+        - internal/panel/panel_test.go
+        - .mindspec/domains/workflow/architecture.md
+    - depends_on:
+        - 2
+        - 3
+      id: 4
+      key_file_paths:
+        - cmd/mindspec/config.go
+        - cmd/mindspec/config_test.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/panel_advisory_test.go
+        - .mindspec/domains/workflow/interfaces.md
 ---
 # Plan: 109-orchestration-config-substrate
 
