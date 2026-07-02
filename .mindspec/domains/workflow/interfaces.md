@@ -82,3 +82,16 @@ func WorktreeList() ([]WorktreeListEntry, error)
 | `/ms-spec-approve` | Request Spec -> Plan transition |
 | `/ms-plan-approve` | Request Plan -> Implementation transition |
 | `/ms-impl-approve` | Request Implementation -> Done transition |
+
+## Maintenance Notes
+
+- **2026-07-02 (spec 107 wave 1):** `mindspec complete`'s children/epic bd
+  fan-out was collapsed. The post-close state advance (`internal/complete`
+  `advanceState`) now reads children through the new exported
+  `phase.FetchChildren(epicID)` seam — a single uncached `bd list --parent`
+  query — replacing the old per-status `queryAllChildren` loop (~5 subprocesses).
+  `complete.Run` also resolves the immutable spec→epic mapping ONCE through a
+  shared `phase.Cache` (threaded via `phase.EnsureMigratedWithCache` /
+  `phase.FindEpicBySpecIDWithCache` / `phase.DerivePhaseWithCache`), so a run
+  issues at most one `bd list --type=epic` while the post-close children read
+  stays fresh. Gate-failure error/`recovery:` lines are unchanged (ADR-0035).

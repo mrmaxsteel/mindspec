@@ -40,3 +40,14 @@ The `doctor` command validates:
 - **Glossary links**: broken link detection for glossary targets
 - **Beads hygiene**: `.beads/` exists, durable state present (`issues.jsonl`, `config.yaml`, `metadata.json`), no runtime artifacts (`bd.sock`, `*.db`, locks) tracked by git
   - Exits non-zero if runtime artifacts are git-tracked
+
+## Maintenance Notes
+
+- **2026-07-02 (spec 107 wave 1):** `internal/phase` gained the exported
+  `FetchChildren(epicID)` wrapper — the uncached single-call children query
+  (delegating to the package-private `fetchChildren`) that `mindspec complete`
+  uses for its fresh post-close read; the memoized `Cache.GetChildren` path is
+  unchanged. `EnsureMigratedWithCache` was added so a caller resolving the same
+  epic elsewhere shares one `bd list --type=epic` lookup. The dead non-cache
+  `FindActiveBeadForEpic` wrapper was removed (`FindActiveBeadForEpicWithCache`
+  remains the live path).
