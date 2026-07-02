@@ -49,3 +49,7 @@ Mode system is implemented. Beads is the single state store (ADR-0023) — no fi
 - **Executor commits** (`approve spec`, `approve plan`, `approve impl`, `complete`) refresh the JSONL via `bd export` before `git add -A`, so every mindspec-driven commit carries current beads state. In projects without a Dolt remote, this makes `git push` the off-machine durability guarantee.
 
 Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.
+
+## Cleanup notes
+
+- **2026-07-02 (spec 107 wave 1, mindspec-oexu.2):** Unified the three `internal/setup` managed-doc writers. `ensureClaudeMD`, `ensureAgentsMD`, and `ensureCopilotInstructions` now route through one shared `ensureManagedDoc` helper whose every create/update/append goes through `safeio.WriteFileNoSymlink` / `safeio.OpenAppendNoSymlink`. This closes the symlink-safety gap in `codex.go` (its managed `AGENTS.md` writes previously used bare `os.WriteFile`/`os.OpenFile`, which followed a planted symlink). The now-dead `hasManagedBlock` helper was removed (its presence check is folded into `ensureManagedDoc`), and `chainBeadsSetup`/`chainBeadsSetupCodex` were folded into one agent-parameterized `chainBeadsSetup`.
