@@ -1,8 +1,10 @@
 package doctor
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -171,7 +173,10 @@ func TestDeadManifest(t *testing.T) {
 		touchFile(t, root, ".beads/cache/zfoo/leak.go")
 
 		glob := []string{"**/zfoo/**"}
-		if manifestResolvesAny(root, glob) {
+		// The exclusion now lives in enumerateWorkspaceFiles (the single
+		// per-check walk); the excluded-tree files must never enter the
+		// cached list, so the glob resolves to nothing.
+		if manifestResolvesAny(enumerateWorkspaceFiles(root), glob) {
 			t.Fatal("manifestResolvesAny must be false when leading-** matches live only under .worktrees/.git/.beads (exclusion masks them)")
 		}
 
@@ -179,10 +184,98 @@ func TestDeadManifest(t *testing.T) {
 		// proving the glob/walk actually find matches (non-vacuous) and
 		// that the exclusion — not the glob — is what suppressed the above.
 		touchFile(t, root, "src/zfoo/live.go")
-		if !manifestResolvesAny(root, glob) {
+		if !manifestResolvesAny(enumerateWorkspaceFiles(root), glob) {
 			t.Fatal("manifestResolvesAny must be true once a live file matches outside the excluded trees")
 		}
 	})
+}
+
+// TestOwnershipCheckWalksTreeOnce is the spec 108 Req 9 seam proof. It
+// asserts BOTH halves of AC 14: (a) the dead-manifest check enumerates the
+// workspace tree exactly once per ownership check regardless of domain
+// count (the former code walked once per non-empty domain), counted via
+// the walkWorkspaceFn seam; and (b) the full per-domain Report set — check
+// name + status — is unchanged across a populated, an empty-stub, and a
+// dead-manifest fixture domain.
+func TestOwnershipCheckWalksTreeOnce(t *testing.T) {
+	// Three domains exercising all three dead-manifest outcomes: apop is
+	// populated (a matching file exists → no Warn), bstub is an empty stub
+	// (paths: [] → "(empty)" Warn), cdead is a live glob with no matching
+	// file (→ suspect-glob Warn). Paths are distinct literals so no
+	// cross-domain hygiene Warn fires.
+	root := t.TempDir()
+	writeManifest(t, root, "apop", "paths:\n  - internal/apop/**\n")
+	touchFile(t, root, "internal/apop/x.go")
+	writeManifest(t, root, "bstub", "paths: []\n")
+	writeManifest(t, root, "cdead", "paths:\n  - internal/cdead/**\n")
+
+	// Count walkWorkspaceFn invocations across one ownership check.
+	orig := walkWorkspaceFn
+	t.Cleanup(func() { walkWorkspaceFn = orig })
+	var walks int
+	walkWorkspaceFn = func(dir string, fn fs.WalkDirFunc) error {
+		walks++
+		return orig(dir, fn)
+	}
+
+	r := &Report{}
+	checkOwnershipManifests(r, root)
+
+	// (a) Walk-once half: three domains, exactly one tree walk.
+	if walks != 1 {
+		t.Fatalf("expected the workspace tree walked exactly once per ownership check, got %d walks over 3 domains", walks)
+	}
+
+	// (b) Identical-report half: the full per-domain Report set (name +
+	// status) matches the expected dead-manifest outcomes — bstub and cdead
+	// each fire exactly one dead-manifest Warn, apop is silent, and no
+	// hygiene Warn fires.
+	type nameStatus struct {
+		name   string
+		status Status
+	}
+	got := make([]nameStatus, 0, len(r.Checks))
+	for _, c := range r.Checks {
+		got = append(got, nameStatus{c.Name, c.Status})
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i].name < got[j].name })
+	want := []nameStatus{
+		{manifestCheckName("bstub"), Warn},
+		{manifestCheckName("cdead"), Warn},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Report set mismatch: got %d checks %v, want %d %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Report[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	// Lock the identical-report content: populated is silent, empty stub
+	// reports "(empty)", dead glob names its suspect, and none blocks.
+	if c := manifestWarn(r, "apop"); c != nil {
+		t.Errorf("populated domain must not fire a dead-manifest Warn, got %q", c.Message)
+	}
+	if c := manifestWarn(r, "bstub"); c == nil || !strings.Contains(c.Message, "(empty)") {
+		t.Errorf("empty-stub domain must fire a dead-manifest Warn naming (empty), got %v", c)
+	}
+	if c := manifestWarn(r, "cdead"); c == nil || !strings.Contains(c.Message, "internal/cdead/**") {
+		t.Errorf("dead-manifest domain must fire a Warn naming its suspect glob, got %v", c)
+	}
+	if r.HasFailures() {
+		t.Error("dead-manifest Warns must remain advisory (HasFailures should be false)")
+	}
+
+	// Walk count is a function of the check, not the domain count: a
+	// single-domain fixture also walks exactly once.
+	walks = 0
+	single := t.TempDir()
+	writeManifest(t, single, "solo", "paths:\n  - internal/solo/**\n")
+	checkOwnershipManifests(&Report{}, single)
+	if walks != 1 {
+		t.Fatalf("expected exactly one walk for a single-domain check, got %d", walks)
+	}
 }
 
 // TestIsStrictSubpath is the MUT-A regression: the redundant-subpath
