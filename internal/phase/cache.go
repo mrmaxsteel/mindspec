@@ -175,6 +175,18 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 	return "", fmt.Errorf("no epic found for spec %s", specID)
 }
 
+// FetchChildren returns all children (any status) of an epic via a single
+// uncached `bd list --parent <epicID> --status=<AllStatuses> -n 0` call — the
+// exact query Cache.GetChildren memoizes, but WITHOUT memoization so a caller
+// that must observe bd state mutated mid-invocation always reads fresh. This is
+// the exported seam complete.Run uses for its post-close children read (the
+// state advance runs after `bd close` mutates the child set, so a memoized read
+// would be stale). Callers that want per-invocation memoization must use
+// Cache.GetChildren instead.
+func FetchChildren(epicID string) ([]ChildInfo, error) {
+	return fetchChildren(epicID)
+}
+
 // --- Package-private bd-touching helpers ---
 //
 // These are the single source of truth for bd invocations used by the cache

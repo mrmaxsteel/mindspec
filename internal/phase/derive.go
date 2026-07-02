@@ -37,6 +37,16 @@ func SetListJSONForTest(fn RunBDFunc) func() {
 	return func() { listJSONFn = orig }
 }
 
+// ListJSONForTest returns the currently installed ListJSON stub. Test-only:
+// it lets a helper in another package COMPOSE onto the existing stub —
+// handling the `bd list` queries it cares about (e.g. `--parent` children)
+// while delegating the rest (e.g. `--type=epic` epic resolution) back to the
+// stub already installed. The complete children query and its spec→epic
+// resolution now share this single seam (spec 107 wave 1).
+func ListJSONForTest() RunBDFunc {
+	return listJSONFn
+}
+
 // EpicInfo represents a beads epic with spec metadata.
 type EpicInfo struct {
 	ID        string                 `json:"id"`
@@ -706,15 +716,9 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 	return "", "", fmt.Errorf("no epic found for bead %s", beadID)
 }
 
-// FindActiveBeadForEpic returns the ID of an in_progress bead under the given epic, or "".
-// Returns "" if zero or multiple beads are in_progress (ambiguous — caller should
-// fall back to the spec worktree). Constructs a fresh cache; hot-path callers
-// should use FindActiveBeadForEpicWithCache.
-func FindActiveBeadForEpic(epicID string) string {
-	return FindActiveBeadForEpicWithCache(NewCache(), epicID)
-}
-
-// FindActiveBeadForEpicWithCache is the cache-aware variant of FindActiveBeadForEpic.
+// FindActiveBeadForEpicWithCache returns the ID of an in_progress bead under the
+// given epic, or "". Returns "" if zero or multiple beads are in_progress
+// (ambiguous — caller should fall back to the spec worktree).
 // Routes through cache.GetChildren (single all-status `bd list --parent` call) and
 // filters to in_progress in-process, so it shares its bd call with DerivePhase.
 func FindActiveBeadForEpicWithCache(c *Cache, epicID string) string {

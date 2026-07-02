@@ -129,6 +129,65 @@ func TestCache_GetChildren_IncludesBlockedChild(t *testing.T) {
 	}
 }
 
+// TestFetchChildren covers the exported uncached wrapper (spec 107 wave 1,
+// mindspec-oexu.3). It must (1) issue exactly one comma-joined
+// `bd list --parent <epic> --status=<AllStatuses breadth>` call carrying the
+// epic ID and the status breadth, and (2) NOT memoize — a second call re-issues
+// the query and reflects bd state mutated between calls. This is the freshness
+// contract complete.Run's post-close children read depends on (Cache.GetChildren
+// is the memoizing counterpart, guarded by TestCache_GetChildren_MemoizesPerEpic).
+func TestFetchChildren(t *testing.T) {
+	calls := 0
+	current := `[{"id":"b1","title":"bead1","status":"in_progress","issue_type":"task"}]`
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		calls++
+		var sawEpic, sawStatus bool
+		for i, a := range args {
+			if a == "--parent" && i+1 < len(args) && args[i+1] == "epic-x" {
+				sawEpic = true
+			}
+			if strings.HasPrefix(a, "--status=") {
+				sawStatus = true
+				if !strings.Contains(a, "blocked") {
+					t.Errorf("--status arg %q must cover the AllStatuses breadth (blocked)", a)
+				}
+			}
+		}
+		if !sawEpic {
+			t.Errorf("FetchChildren must issue `bd list --parent epic-x`, got args %v", args)
+		}
+		if !sawStatus {
+			t.Errorf("FetchChildren must pass a --status= breadth arg, got args %v", args)
+		}
+		return []byte(current), nil
+	})
+	defer restore()
+
+	kids, err := FetchChildren("epic-x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(kids) != 1 || kids[0].ID != "b1" || kids[0].Status != "in_progress" {
+		t.Fatalf("unexpected children: %+v", kids)
+	}
+	if calls != 1 {
+		t.Errorf("FetchChildren must issue exactly one bd list --parent call, got %d", calls)
+	}
+
+	// Uncached: after bd state changes, a second call re-reads it fresh.
+	current = `[{"id":"b1","title":"bead1","status":"closed","issue_type":"task"}]`
+	kids2, err := FetchChildren("epic-x")
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if len(kids2) != 1 || kids2[0].Status != "closed" {
+		t.Errorf("FetchChildren must re-read fresh (uncached), got %+v", kids2)
+	}
+	if calls != 2 {
+		t.Errorf("second FetchChildren must re-issue the query (uncached), total calls = %d, want 2", calls)
+	}
+}
+
 func TestCache_FindEpic_MemoizesPerID(t *testing.T) {
 	calls := 0
 	restore := SetRunBDForTest(func(args ...string) ([]byte, error) {
