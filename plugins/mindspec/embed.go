@@ -43,28 +43,3 @@ func SkillFiles() map[string]string {
 	})
 	return out
 }
-
-// SkillNames returns the embedded plugin skill names in lexical order.
-// Useful for tests and for surfaces (like CLAUDE.md generation) that want a
-// deterministic listing.
-func SkillNames() []string {
-	m := SkillFiles()
-	names := make([]string, 0, len(m))
-	for k := range m {
-		names = append(names, k)
-	}
-	// embed.FS WalkDir returns entries in lexical order already, but build the
-	// slice deterministically regardless of map iteration order.
-	sortStrings(names)
-	return names
-}
-
-// sortStrings is a tiny stand-in for sort.Strings to avoid pulling sort into
-// this single-call surface. Insertion sort on N=8 is fine.
-func sortStrings(a []string) {
-	for i := 1; i < len(a); i++ {
-		for j := i; j > 0 && a[j-1] > a[j]; j-- {
-			a[j-1], a[j] = a[j], a[j-1]
-		}
-	}
-}

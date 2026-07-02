@@ -71,12 +71,7 @@ type Options struct {
 	DryRunMigration bool
 }
 
-// Run executes all doctor checks against the given project root.
-func Run(root string) *Report {
-	return RunWithOptions(root, Options{})
-}
-
-// RunWithOptions is Run's full-surface variant.
+// RunWithOptions executes all doctor checks against the given project root.
 func RunWithOptions(root string, opts Options) *Report {
 	r := &Report{}
 	if opts.DryRunMigration {

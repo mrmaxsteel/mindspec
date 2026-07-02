@@ -625,27 +625,11 @@ const (
 // Walker failures (cycle, too-long chain) cause the Superseded path to
 // be treated as not-covering. This wrapper SWALLOWS walker errors —
 // callers that need diagnostic propagation (e.g. plan-time
-// checkADRCoverage) must use IsDomainCoveredCtx or coverageOf instead.
+// checkADRCoverage) must use coverageOf instead.
 // The wrapper is retained for Bead 2 / divergence consumers that only
 // need the bool predicate.
 func IsDomainCovered(store adr.Store, citations []ADRCitation, domain string) bool {
 	cov, _ := coverageOf(nil, store, citations, domain)
-	return cov != notCovered
-}
-
-// IsDomainCoveredCtx is the diagnostic-emitting variant of
-// IsDomainCovered: walker errors (adr-supersede-cycle,
-// adr-supersede-chain-too-long, adr-supersede-chain-broken) are emitted
-// via r.AddError before the function returns false. This is the
-// variant callers use so structural ADR-graph failures surface to the
-// user rather than being silently treated as "not covered".
-//
-// Spec 087 Bead 1 (Rev 1 fixup): added to address the unanimous
-// reviewer concern that walker errors were swallowed in the original
-// IsDomainCovered implementation, hiding cycle / too-long failures
-// behind the generic adr-coverage-missing error.
-func IsDomainCoveredCtx(r *Result, store adr.Store, citations []ADRCitation, domain string) bool {
-	cov, _ := coverageOf(r, store, citations, domain)
 	return cov != notCovered
 }
 

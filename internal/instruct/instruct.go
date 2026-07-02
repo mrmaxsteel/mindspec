@@ -98,9 +98,9 @@ func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Contex
 		ctx.SpecGoal = readSpecGoal(root, mc.ActiveSpec)
 	}
 
-	// Check plan approval status in plan mode. Case-insensitive match aligns
-	// with validate.SpecIsApproved (ARCH-6 / mindspec-npd2): status: approved
-	// (lowercase) now counts as approved.
+	// Check plan approval status in plan mode. Case-insensitive match (via
+	// strings.EqualFold on the frontmatter status; ARCH-6 / mindspec-npd2):
+	// status: approved (lowercase) now counts as approved.
 	if mc.Mode == state.ModePlan && mc.ActiveSpec != "" {
 		if specDir, err := workspace.SpecDir(root, mc.ActiveSpec); err == nil {
 			planPath := filepath.Join(specDir, "plan.md")
