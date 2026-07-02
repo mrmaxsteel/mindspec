@@ -1,46 +1,58 @@
 ---
-status: Draft
-spec_id: 108-cleanup-frontmatter-perf-wave2
-version: "1"
 adr_citations:
-  - id: ADR-0036
-    sections: [Ownership Discovery, attributeDomain, LoadOwnershipAtRef]
-  - id: ADR-0032
-    sections: [Semantic ADR Coverage Gates]
-  - id: ADR-0033
-    sections: [Deterministic Context Pack Budgeting]
+    - id: ADR-0036
+      sections:
+        - Ownership Discovery
+        - attributeDomain
+        - LoadOwnershipAtRef
+    - id: ADR-0032
+      sections:
+        - Semantic ADR Coverage Gates
+    - id: ADR-0033
+      sections:
+        - Deterministic Context Pack Budgeting
+approved_at: "2026-07-02T15:05:24Z"
+approved_by: user
+bead_ids:
+    - mindspec-wpjv.1
+    - mindspec-wpjv.2
+    - mindspec-wpjv.3
+    - mindspec-wpjv.4
+spec_id: 108-cleanup-frontmatter-perf-wave2
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - .mindspec/domains/workflow/OWNERSHIP.yaml
-      - internal/trace/event.go
-      - .golangci.yml
-      - .mindspec/domains/workflow/architecture.md
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/approve/plan.go
-      - internal/approve/spec.go
-      - internal/approve/impl.go
-      - internal/contextpack/budgeter.go
-      - internal/validate/plan.go
-      - internal/validate/state.go
-      - .mindspec/domains/workflow/overview.md
-      - .mindspec/domains/context-system/architecture.md
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/validate/divergence.go
-      - internal/validate/docsync.go
-      - internal/validate/ownership_resolve.go
-      - internal/validate/ownership.go
-      - .mindspec/domains/workflow/interfaces.md
-  - id: 4
-    depends_on: []
-    key_file_paths:
-      - internal/doctor/ownership.go
-      - .mindspec/domains/workflow/runbook.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - .mindspec/domains/workflow/OWNERSHIP.yaml
+        - internal/trace/event.go
+        - .golangci.yml
+        - .mindspec/domains/workflow/architecture.md
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/approve/plan.go
+        - internal/approve/spec.go
+        - internal/approve/impl.go
+        - internal/contextpack/budgeter.go
+        - internal/validate/plan.go
+        - internal/validate/state.go
+        - .mindspec/domains/workflow/overview.md
+        - .mindspec/domains/context-system/architecture.md
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/validate/divergence.go
+        - internal/validate/docsync.go
+        - internal/validate/ownership_resolve.go
+        - internal/validate/ownership.go
+        - .mindspec/domains/workflow/interfaces.md
+    - depends_on: []
+      id: 4
+      key_file_paths:
+        - internal/doctor/ownership.go
+        - .mindspec/domains/workflow/runbook.md
 ---
 # Plan: 108-cleanup-frontmatter-perf-wave2
 
