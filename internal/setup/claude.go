@@ -485,7 +485,7 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 // BEGIN/END block or to append a fresh one. EVERY write and append routes
 // through safeio so a symlink planted at relPath is refused (ErrSymlinkRefused)
 // rather than followed. The managed-block-presence check is folded in here,
-// which is why the standalone hasManagedBlock helper is gone.
+// so no standalone helper is needed to detect an existing BEGIN/END block.
 func ensureManagedDoc(root, relPath, fullContent, appendBlock string, check bool, r *Result) error {
 	absPath := filepath.Join(root, relPath)
 
