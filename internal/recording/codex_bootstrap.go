@@ -18,11 +18,6 @@ type CodexOTLPResult struct {
 	ExpectedEndpoint string
 }
 
-// DefaultCodexConfigPath returns the default Codex config location under a home directory.
-func DefaultCodexConfigPath(homeDir string) string {
-	return filepath.Join(homeDir, ".codex", "config.toml")
-}
-
 // EnsureCodexOTLP configures Codex OTEL settings for AgentMind OTLP ingestion.
 //
 // The function is idempotent and preserves unrelated TOML sections/keys.

@@ -99,32 +99,6 @@ func assertCommandContains(t *testing.T, events []ActionEvent, command, substr s
 	t.Errorf("command %q with arg containing %q was not found with exit code 0 in events", command, substr)
 }
 
-// assertCommandUsedFlag checks that a successful command invocation included the
-// expected verb (e.g. "complete") and a flag with the given prefix (e.g. "--spec").
-func assertCommandUsedFlag(t *testing.T, events []ActionEvent, command, verb, flagPrefix string) {
-	t.Helper()
-	for _, e := range events {
-		if e.Command != command || e.ExitCode != 0 {
-			continue
-		}
-		args := eventArgs(e)
-		hasVerb := false
-		hasFlag := false
-		for _, arg := range args {
-			if arg == verb {
-				hasVerb = true
-			}
-			if strings.HasPrefix(arg, flagPrefix) {
-				hasFlag = true
-			}
-		}
-		if hasVerb && hasFlag {
-			return
-		}
-	}
-	t.Errorf("command %q did not run successfully with verb %q and flag prefix %q", command, verb, flagPrefix)
-}
-
 // eventArgs returns args from both the Args map and ArgsList slice.
 func eventArgs(e ActionEvent) []string {
 	args := flatArgs(e.Args)
@@ -289,13 +263,6 @@ func assertEventCWDContains(t *testing.T, events []ActionEvent, substr string) {
 		}
 	}
 	t.Errorf("no event had CWD containing %q", substr)
-}
-
-func assertCleanWorktree(t *testing.T, sandbox *Sandbox) {
-	t.Helper()
-	if !sandbox.GitStatusClean() {
-		t.Error("expected clean working tree, but found uncommitted changes")
-	}
 }
 
 func assertHasBranches(t *testing.T, sandbox *Sandbox, prefix string) {

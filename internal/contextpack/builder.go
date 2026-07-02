@@ -1,7 +1,6 @@
 package contextpack
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -30,15 +29,6 @@ func ExtractSection(content, heading string) string {
 	}
 
 	return strings.TrimSpace(strings.Join(result, "\n"))
-}
-
-// readFileContent reads a file and returns its content, or empty string on error.
-func readFileContent(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }
 
 func relPath(root, p string) string {

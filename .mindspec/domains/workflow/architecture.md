@@ -154,3 +154,27 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   `internal/doctor` `movedTreeRootDocs` — so the link-repair edits the flatten
   makes to `README.md`/`BENCH-MOVED.md` classify as docs and likewise do not
   trip `adr-divergence-unowned`.
+
+## Dead-code sweep — spec 107 wave 1 (2026-07-02)
+
+Bead `mindspec-oexu.1` removed the following confirmed-dead workflow-domain
+symbols (zero live callers, `deadcode -test`-clean):
+
+- `internal/hook/helpers.go`: `hasPathPrefix`, `stripEnvPrefixes`,
+  `parseEnvPrefixes`, `isEnvVarName`, `getCwd` (kept the live `dirExists`).
+- `internal/next/beads.go`: `findRoot` (unused workspace-root probe; the live
+  `cmd/mindspec` `findRoot` is a separate function that stays).
+- `internal/doctor/doctor.go`: the thin `Run` wrapper (all callers use
+  `RunWithOptions`).
+- `internal/validate`: `SpecStatusFromBytes` + `SpecIsApproved`
+  (`frontmatter.go`), `IsDomainCoveredCtx` (`plan.go`), and the `BeadID`
+  re-export (`specid.go`); the dangling comment references to the removed
+  helpers were repaired in `internal/instruct/instruct.go` and
+  `internal/validate/plan.go`.
+- `internal/panel/gate.go`: the unused `skipHumanHint` const.
+- `internal/layout/mover.go`: `Mover.WithPlan`/`WithRules`/`WithRootDocs`
+  (never-called chaining setters).
+- `plugins/mindspec/embed.go`: `SkillNames` + its `sortStrings` helper.
+- `cmd/mindspec`: the no-op `SetUsageTemplate` line in `hook.go` (a
+  `strings.Replace` of a string with itself) and the `--mode`/`--spec`/`--bead`
+  flags registered on the deprecated no-op `state set` command.

@@ -57,3 +57,11 @@ across the flatten.
 3. Input provenance must be recorded for every included section.
 4. Output provenance (AC → bead verification mapping) should be present in every plan.
 4. Glossary targets use relative paths from project root.
+
+## Dead-code sweep — spec 107 wave 1 (2026-07-02)
+
+Bead `mindspec-oexu.1` removed confirmed-dead context-system-domain symbols:
+
+- `internal/contextpack`: `NewADRStore` (`adr.go`; callers construct the store
+  via `adr.NewFileStore` / use `adr.Store` directly) and `readFileContent`
+  (`builder.go`).

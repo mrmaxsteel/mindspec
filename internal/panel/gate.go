@@ -62,13 +62,6 @@ func RawMergeFence(beadID string) string {
 		beadID)
 }
 
-// skipHumanHint is the Block-message tail that tells the agent the hatch is
-// human-only (Spec 093 Req 13a, HC-7). It deliberately does NOT print the
-// MINDSPEC_SKIP_PANEL variable — a blocked LLM's highest-probability next
-// action is pasting a suggested prefix.
-const skipHumanHint = "\nSkipping the panel requires a human: a user must set the skip variable in " +
-	"their own environment before launching the session — see /ms-panel-tally § Escape hatch"
-
 // GateFacts is the fully-resolved, I/O-free input to PanelGateDecision. Every
 // field is gathered by a caller's I/O layer (env, fs scan, git) — via
 // ResolveGateFacts and the GateIO seam — so the decision itself is a pure

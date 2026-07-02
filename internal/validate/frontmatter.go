@@ -2,7 +2,6 @@ package validate
 
 import (
 	"path/filepath"
-	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -37,18 +36,4 @@ func SpecStatusAt(specDir string) string {
 
 func specStatusFromPath(path string) string {
 	return frontmatter.StatusFromPath(path)
-}
-
-// SpecStatusFromBytes parses the YAML frontmatter of already-loaded spec.md
-// bytes and returns the status field. Empty string on any parse failure.
-//
-// Delegates to internal/frontmatter (ARCH-6 / mindspec-npd2).
-func SpecStatusFromBytes(data []byte) string {
-	return frontmatter.Status(data)
-}
-
-// SpecIsApproved reports whether a spec.md's YAML frontmatter has status
-// set to Approved (case-insensitive). Convenience wrapper over SpecStatus.
-func SpecIsApproved(root, specID string) bool {
-	return strings.EqualFold(SpecStatus(root, specID), "Approved")
 }

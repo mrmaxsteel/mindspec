@@ -120,24 +120,6 @@ func ClaudeCodeAvailable() bool {
 	return cmd.Run() == nil
 }
 
-// filterEnv removes environment variables matching any of the given keys.
-func filterEnv(env []string, keys ...string) []string {
-	out := make([]string, 0, len(env))
-	for _, e := range env {
-		skip := false
-		for _, k := range keys {
-			if strings.HasPrefix(e, k+"=") {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 // filterEnvPrefix removes environment variables whose name starts with any of
 // the given prefixes (e.g. "CLAUDE_CODE_" matches CLAUDE_CODE_SSE_PORT=...).
 func filterEnvPrefix(env []string, prefixes ...string) []string {

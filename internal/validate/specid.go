@@ -20,11 +20,6 @@ func ADRID(id string) error {
 	return idvalidate.ADRID(id)
 }
 
-// BeadID re-exports idvalidate.BeadID for convenience at validate package call sites.
-func BeadID(id string) error {
-	return idvalidate.BeadID(id)
-}
-
 // DomainName re-exports idvalidate.DomainName for convenience at validate package call sites.
 func DomainName(name string) error {
 	return idvalidate.DomainName(name)

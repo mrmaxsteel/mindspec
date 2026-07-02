@@ -150,22 +150,6 @@ func NewMover(git GitOps, root, runID string) *Mover {
 	}
 }
 
-// WithPlan overrides the static move plan (the symmetric flatten + dogfood
-// eviction groups). The default already covers all of spec-106's static moves;
-// this is the cheap injection point Bead 4/5 (or a future caller migrating a
-// non-canonical tree) can use to customize the set. Returns the Mover for
-// chaining.
-func (m *Mover) WithPlan(plan []MoveGroup) *Mover { m.plan = plan; return m }
-
-// WithRules overrides the base finite-pattern rewrite rules. The run-time
-// review-co-location rules are still appended on top of whatever base is set.
-// Returns the Mover for chaining.
-func (m *Mover) WithRules(rules []RewriteRule) *Mover { m.rules = rules; return m }
-
-// WithRootDocs overrides the repo-root docs the rewriter touches. Returns the
-// Mover for chaining.
-func (m *Mover) WithRootDocs(docs []string) *Mover { m.rootDocs = docs; return m }
-
 // Run drives (or resumes) the migration to completion. It is idempotent:
 // re-running on an already-flat tree is a no-op. A pre-publish operational
 // failure hard-resets to the pre-run ref; a simulated crash leaves partial
