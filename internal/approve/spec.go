@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -267,24 +268,18 @@ None
 `, specID, specID)
 }
 
-func splitFrontmatter(content string) (frontmatter string, body string, hasFrontmatter bool) {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+// splitFrontmatter locates the leading YAML frontmatter block via the
+// canonical internal/frontmatter.Parse (ARCH-6). It returns the raw block, the
+// exact post-fence body bytes, and whether a well-formed block was found. A
+// space-padded fence reads as no-frontmatter, matching every other migrated
+// reader. The returned block is only ever yaml.Unmarshal-ed by callers, so the
+// trailing newline Parse preserves on it is immaterial.
+func splitFrontmatter(content string) (fm string, body string, hasFrontmatter bool) {
+	block, bodyOffset, ok := frontmatter.Parse([]byte(content))
+	if !ok {
 		return "", content, false
 	}
-
-	fmEnd := -1
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "---" {
-			fmEnd = i
-			break
-		}
-	}
-	if fmEnd == -1 {
-		return "", content, false
-	}
-
-	return strings.Join(lines[1:fmEnd], "\n"), strings.Join(lines[fmEnd+1:], "\n"), true
+	return string(block), content[bodyOffset:], true
 }
 
 // parseSpecID extracts spec_num and spec_title from a spec ID like "060-eliminate-focus-lifecycle".

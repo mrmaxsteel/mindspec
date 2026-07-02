@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -436,27 +437,25 @@ func readBeadStatus(id string) (string, error) {
 	return strings.ToLower(strings.TrimSpace(payload[0].Status)), nil
 }
 
-// readPlanBeadIDs reads bead_ids from the plan.md YAML frontmatter.
+// readPlanBeadIDs reads bead_ids from the plan.md YAML frontmatter. The block
+// is located via the canonical internal/frontmatter.Parse (ARCH-6) rather than
+// a hand-rolled `\n---` substring scan, so only a whole-line `---` fence closes
+// the block and a space-padded fence reads as no-frontmatter.
 func readPlanBeadIDs(planPath string) ([]string, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		return nil, err
 	}
 
-	content := string(data)
-	if !strings.HasPrefix(content, "---\n") {
+	block, _, ok := frontmatter.Parse(data)
+	if !ok {
 		return nil, fmt.Errorf("no frontmatter found")
 	}
-	end := strings.Index(content[4:], "\n---")
-	if end < 0 {
-		return nil, fmt.Errorf("no frontmatter end marker")
-	}
-	fmContent := content[4 : 4+end]
 
 	var fm struct {
 		BeadIDs []string `yaml:"bead_ids"`
 	}
-	if err := yaml.Unmarshal([]byte(fmContent), &fm); err != nil {
+	if err := yaml.Unmarshal(block, &fm); err != nil {
 		return nil, fmt.Errorf("parsing plan frontmatter: %w", err)
 	}
 	if len(fm.BeadIDs) == 0 {
