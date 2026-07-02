@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens: verified at reviewed SHA 474a3809. All 31 key_file_paths exist. Every Bead-Steps symbol and line reference resolves in-tree: B1 (hook helpers incl. getCwd:68 var + kept dirExists:9; findRoot:53; doctor.Run:75; skipHumanHint:69; layout With* 158/163/167; SkillNames:50/sortStrings:64; validate 46/52/647/24; dangling comments instruct:102 & plan.go:628; gitutil 213/230; harness 124/104/294; DefaultCodexConfigPath:22; contextpack 11/36; SetUsageTemplate:191 confirmed a Replace of a string with itself; state flags 142-144). B2 safeio WriteFileNoSymlink/OpenAppendNoSymlink, hasManagedBlock:555, three ensure* helpers, codex os.WriteFile/OpenFile 68/79/96, chainBeads pair; new codex refusal test correctly absent. B3 fetchChildren:213, FetchChildren absent (to add), GetChildren:124, queryAllChildren:884, FindActiveBeadForEpic:713+WithCache:720, stubChildrenByStatus:535, SetListJSONForTest:34. B4 spec.go/spec_init.go RunE byte-identical 42-line bodies, CLAUDE.md:43 xref, AGENTS.md guardrails section confirmed missing. No missing pin.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "location": "plan.md Bead 3 step 3 (complete.go:223,228,716,781)",
+      "note": "Wording nuance, not a pin miss. The four spec->epic sites are literally phase.EnsureMigrated (223) and phase.FindEpicBySpecID (228/716/781); the throwaway phase.NewCache() the plan cites is constructed inside those helpers (derive.go:526 FindEpicBySpecID -> NewCache(); migrate.go EnsureMigrated -> FindEpicBySpecID + its own NewCache()). Line refs and described behavior (fresh cache + bd list --type=epic per call) are accurate; the literal token at those lines is not phase.NewCache(). No change required."
+    },
+    {
+      "severity": "info",
+      "location": "plan.md Bead 3 (phase.FetchChildren) and Bead 2 (TestRunCodex_RefusesSymlinkedAGENTSmd)",
+      "note": "Correctly absent at reviewed SHA - these are net-new symbols the beads add. phase.fetchChildren:213 (delegate target) and the existing claude/copilot refusal tests (17/94) that the codex test mirrors all exist."
+    }
+  ]
+}

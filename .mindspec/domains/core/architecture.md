@@ -86,3 +86,10 @@ spec-092 gate hardening:
 `internal/workspace.ContextLine(dir, checkedPath)` renders the
 fixed-format worktree-context line that guard failures emit
 immediately before their final `recovery:` line (spec 092 Req 8).
+
+## Dead-code sweep — spec 107 wave 1 (2026-07-02)
+
+Bead `mindspec-oexu.1` removed a confirmed-dead core-domain symbol:
+
+- `internal/recording/codex_bootstrap.go`: `DefaultCodexConfigPath`
+  (no live callers).

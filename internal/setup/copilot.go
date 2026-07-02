@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
 // RunCopilot sets up GitHub Copilot integration at root.
@@ -40,63 +37,11 @@ func RunCopilot(root string, check bool) (*Result, error) {
 	return r, nil
 }
 
-// ensureCopilotInstructions creates or appends MindSpec block to copilot-instructions.md.
+// ensureCopilotInstructions creates or appends the MindSpec block to
+// .github/copilot-instructions.md via the shared ensureManagedDoc helper, so the
+// managed write goes through safeio and refuses symlinked targets.
 func ensureCopilotInstructions(root string, check bool, r *Result) error {
-	relPath := filepath.Join(".github", "copilot-instructions.md")
-	absPath := filepath.Join(root, relPath)
-
-	if fileExists(absPath) {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", relPath, err)
-		}
-		content := string(data)
-		if strings.Contains(content, mindspecMarkerBegin) {
-			updated := replaceManagedBlock(content, copilotInstructionsAppendBlock)
-			if updated == content {
-				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
-				return nil
-			}
-			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
-			if !check {
-				if err := safeio.WriteFileNoSymlink(absPath, []byte(updated), 0o644); err != nil {
-					return fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		} else if strings.Contains(content, mindspecMarkerLegacy) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
-			return nil
-		} else {
-			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-			if !check {
-				block := "\n" + mindspecMarkerBegin + "\n" + copilotInstructionsAppendBlock + mindspecMarkerEnd + "\n"
-				f, err := safeio.OpenAppendNoSymlink(absPath, 0o644)
-				if err != nil {
-					return fmt.Errorf("opening %s: %w", relPath, err)
-				}
-				_, writeErr := f.WriteString(block)
-				closeErr := f.Close()
-				if writeErr != nil {
-					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-				}
-				if closeErr != nil {
-					return fmt.Errorf("closing %s: %w", relPath, closeErr)
-				}
-			}
-		}
-	} else {
-		r.Created = append(r.Created, relPath)
-		if !check {
-			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-				return fmt.Errorf("creating dir for %s: %w", relPath, err)
-			}
-			if err := safeio.WriteFileNoSymlink(absPath, []byte(copilotInstructionsFull), 0o644); err != nil {
-				return fmt.Errorf("writing %s: %w", relPath, err)
-			}
-		}
-	}
-
-	return nil
+	return ensureManagedDoc(root, filepath.Join(".github", "copilot-instructions.md"), copilotInstructionsFull, copilotInstructionsAppendBlock, check, r)
 }
 
 // ensureCopilotHooks creates .github/hooks/mindspec.json and helper scripts.

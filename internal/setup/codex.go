@@ -2,10 +2,7 @@ package setup
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
 )
@@ -36,7 +33,7 @@ func RunCodex(root string, check bool) (*Result, error) {
 
 	// 4. Optionally chain bd setup codex
 	if !check {
-		chainBeadsSetupCodex(root, r)
+		chainBeadsSetup(root, "codex", r)
 	}
 
 	// 5. Surface .beads/config.yaml drift via the shared helper so RunClaude,
@@ -46,81 +43,11 @@ func RunCodex(root string, check bool) (*Result, error) {
 	return r, nil
 }
 
-// ensureAgentsMD creates or appends MindSpec block to AGENTS.md.
+// ensureAgentsMD creates or appends the MindSpec block to AGENTS.md. It routes
+// through the shared ensureManagedDoc helper so every write (including the
+// managed AGENTS.md document) goes through safeio and refuses symlinked targets.
 func ensureAgentsMD(root string, check bool, r *Result) error {
-	relPath := "AGENTS.md"
-	absPath := filepath.Join(root, relPath)
-
-	if fileExists(absPath) {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", relPath, err)
-		}
-		content := string(data)
-		if strings.Contains(content, mindspecMarkerBegin) {
-			updated := replaceManagedBlock(content, agentsMDAppendBlock)
-			if updated == content {
-				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
-				return nil
-			}
-			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
-			if !check {
-				if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
-					return fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		} else if strings.Contains(content, mindspecMarkerLegacy) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
-			return nil
-		} else {
-			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-			if !check {
-				block := "\n" + mindspecMarkerBegin + "\n" + agentsMDAppendBlock + mindspecMarkerEnd + "\n"
-				f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
-				if err != nil {
-					return fmt.Errorf("opening %s: %w", relPath, err)
-				}
-				_, writeErr := f.WriteString(block)
-				closeErr := f.Close()
-				if writeErr != nil {
-					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-				}
-				if closeErr != nil {
-					return fmt.Errorf("closing %s: %w", relPath, closeErr)
-				}
-			}
-		}
-	} else {
-		r.Created = append(r.Created, relPath)
-		if !check {
-			if err := os.WriteFile(absPath, []byte(agentsMDFull), 0o644); err != nil {
-				return fmt.Errorf("writing %s: %w", relPath, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// chainBeadsSetupCodex runs bd setup codex if beads is installed. See the
-// note on chainBeadsSetup — cmd.Dir must be pinned to the caller's root so
-// bd doesn't scaffold integration files into whatever CWD the process
-// happened to inherit (notably, package source dirs under `go test`).
-func chainBeadsSetupCodex(root string, r *Result) {
-	bdPath, err := exec.LookPath("bd")
-	if err != nil {
-		return
-	}
-
-	cmd := exec.Command(bdPath, "setup", "codex")
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	r.BeadsRan = true
-	if err != nil {
-		r.BeadsMsg = fmt.Sprintf("warning: %v", err)
-	} else if len(out) > 0 {
-		r.BeadsMsg = strings.TrimSpace(string(out))
-	}
+	return ensureManagedDoc(root, "AGENTS.md", agentsMDFull, agentsMDAppendBlock, check, r)
 }
 
 // agentsMDManagedBlock is the canonical content placed between BEGIN/END markers.

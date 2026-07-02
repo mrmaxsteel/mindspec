@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Re-verified at 93143d92. The whole diff vs 474a3809 is exactly the addendum's A/B/C: per-bead domain-doc Step + doc-sync Verification checkbox, Verification items rewritten as exit-status commands, and Testing-Strategy/AC-map notes on the complete-time gate. None of it altered requirement or AC ownership: R1->B1(+riders B2/B3), R2/R3/R4->B2, R5/R6->B3, R7/R8->B4, R9 via per-bead AC9 are all unchanged; the AC1-AC9->bead assignments in the provenance table are byte-identical in ownership. Every source-touching Step survives (B3 merged the FindActiveBeadForEpic deletion into step 3 but did not drop it). Scope is not expanded: I confirmed internal/validate/docsync.go exists with checkInternalPackages + rootOperatorDocs (AGENTS.md is a root operator doc, matching the plan's 'AGENTS.md does not count' claim), so the dated cleanup notes are a mechanical gate requirement, not new feature scope, and they touch only the spec's four impacted domains (all four architecture.md exist). B2 dropping internal/safeio from its file set + the call-only assertion is a fidelity improvement (correctly yields B2->workflow-only). My round-1 APPROVE holds.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "round-2 delta is scope-neutral",
+      "note": "git diff 474a3809..93143d92 on plan.md = only (A) doc-note Steps + doc-sync checkboxes, (B) Verification rewritten as shell exit-status commands, (C) Testing-Strategy 'two completion bars' + AC-map/ADR-0036 doc-sync notes. No source Step added/removed, no AC re-assigned, no requirement dropped. Deferred paths (internal/trace, .golangci.yml) still named do-not-touch in B1 s4."
+    },
+    {
+      "area": "doc notes are a mechanical gate, not new scope",
+      "note": "Confirmed internal/validate/docsync.go:459 checkInternalPackages raises 'internal-docs' unless a doc under .mindspec/domains/<domain>/ changes per touched source domain; rootOperatorDocs (docsync.go:380) includes AGENTS.md, so the plan's 'AGENTS.md does not count for the workflow domain' is accurate. All four architecture.md exist. Dated cleanup notes are process-record updates required to clear an existing gate -> not scope beyond the spec."
+    },
+    {
+      "area": "per-bead domain derivation matches source set",
+      "note": "B1 source spans workflow(hook/next/doctor/validate/panel/layout/instruct, cmd, plugins)+execution(gitutil/harness)+core(recording)+context-system(contextpack) -> all four docs. B2 source strictly internal/setup/** with safeio call-only -> workflow only (round-2 removed internal/safeio/safeopen.go from B2 key_file_paths + added the explicit 'do NOT modify safeio' fence: a fidelity improvement). B3 complete(workflow)+phase(core) -> two docs. B4 cmd/** (AGENTS.md excluded) -> workflow. Frontmatter key_file_paths match each derivation."
+    },
+    {
+      "area": "shared workflow doc vs depends_on:[] (observation, cross-lane)",
+      "note": "All four beads now append to .mindspec/domains/workflow/architecture.md, so it is a cross-bead doc-file touch. Provenance was honestly narrowed 'no cross-bead file overlap' -> 'no cross-bead SOURCE overlap', which stays true. Logical independence (depends_on:[]) holds since no bead's correctness depends on another's dated note; the only residue is trivial end-of-file append merges resolved by the sequential bead-cycle. Not a spec-fidelity block; flagging for R6/R2 sequencing awareness."
+    },
+    {
+      "area": "verbatim detail fidelity preserved",
+      "note": "Five guardrail fences, complete.go reuse sites (223/228/716/781), queryAllChildren (884-905), fetchChildren (cache.go:213-230), phase.FetchChildren wrapper, spec_init RunE dedup (now citing spec.go:29-73), and the ADR set (0030/0033/0034/0035/0036/0037) are unchanged and still match the spec. Wording tweaks to Steps are cosmetic (e.g. B2 s3 dropped an AC1-slice parenthetical) with no behavioral or ownership effect."
+    }
+  ]
+}

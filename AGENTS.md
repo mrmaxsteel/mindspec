@@ -133,6 +133,29 @@ Workflow packages call `executor.Executor` methods. They MUST NOT import `intern
 
 See `.mindspec/domains/execution/` and `.mindspec/domains/workflow/` for full documentation.
 
+## Bead-loop guardrails (mindspec)
+
+These are the canonical orchestrator rules and subagent prompt fences for the
+single-bead lifecycle. The `/ms-*` skills and `CLAUDE.md` reference this section
+rather than re-stating the fences, so it is the single source of truth. Violating
+any one fence fails the bead.
+
+- **Only the cycle runs `mindspec complete`.** No subagent runs `mindspec complete`,
+  `bd close`, or any other lifecycle command. The orchestrating cycle runs `mindspec
+  complete` for a bead, and only after that bead's **panel gate** has passed
+  (ADR-0037).
+- **Never a raw `git merge bead/<id>`.** Bead branches land only through the cycle's
+  completion path; an orchestrator or subagent must never run a bare `git merge
+  bead/<id>` (or otherwise merge a bead branch by hand).
+- **Exactly one `git push` at end-of-spec.** Subagents never push. The spec is pushed
+  once, by the orchestrator, after the whole spec is done — not per bead.
+- **Subagents make exactly one commit.** Each implementation subagent produces
+  exactly one commit on its bead branch — no extra commits, no post-handoff amends,
+  no push, no merge.
+- **Tests must PASS before completion.** A bead's full `go test ./...` and its
+  Verification commands must PASS before the bead is committed and before the cycle
+  completes it; never commit or complete on a red suite.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

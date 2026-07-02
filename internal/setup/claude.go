@@ -174,7 +174,7 @@ func RunClaude(root string, check bool) (*Result, error) {
 
 	// 5. Optionally chain bd setup claude
 	if !check {
-		chainBeadsSetup(root, r)
+		chainBeadsSetup(root, "claude", r)
 	}
 
 	// 6. Surface .beads/config.yaml drift. Runs after chainBeadsSetup so
@@ -472,56 +472,73 @@ func removeStaleMindspecEntries(hooks map[string]any, wanted map[string][]map[st
 	return removedAny
 }
 
-// ensureClaudeMD creates or appends MindSpec block to CLAUDE.md.
+// ensureClaudeMD creates or appends the MindSpec block to CLAUDE.md.
 func ensureClaudeMD(root string, check bool, r *Result) error {
-	relPath := "CLAUDE.md"
+	return ensureManagedDoc(root, "CLAUDE.md", claudeMDFull, claudeMDAppendBlock, check, r)
+}
+
+// ensureManagedDoc creates or refreshes a MindSpec-managed markdown document at
+// root/relPath. It is the single write path shared by ensureClaudeMD (CLAUDE.md),
+// ensureAgentsMD (AGENTS.md), and ensureCopilotInstructions
+// (.github/copilot-instructions.md): fullContent is written verbatim when the
+// file is absent, appendBlock is the managed body used to replace an existing
+// BEGIN/END block or to append a fresh one. EVERY write and append routes
+// through safeio so a symlink planted at relPath is refused (ErrSymlinkRefused)
+// rather than followed. The managed-block-presence check is folded in here,
+// so no standalone helper is needed to detect an existing BEGIN/END block.
+func ensureManagedDoc(root, relPath, fullContent, appendBlock string, check bool, r *Result) error {
 	absPath := filepath.Join(root, relPath)
 
-	if fileExists(absPath) {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", relPath, err)
-		}
-		content := string(data)
-		if strings.Contains(content, mindspecMarkerBegin) {
-			// Has BEGIN/END markers — replace managed block in place.
-			updated := replaceManagedBlock(content, claudeMDAppendBlock)
-			if updated == content {
-				r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
-				return nil
-			}
-			r.Created = append(r.Created, relPath+" (updated MindSpec block)")
-			if !check {
-				if err := safeio.WriteFileNoSymlink(absPath, []byte(updated), 0o644); err != nil {
-					return fmt.Errorf("writing %s: %w", relPath, err)
-				}
-			}
-		} else if strings.Contains(content, mindspecMarkerLegacy) {
-			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
-			return nil
-		} else {
-			r.Created = append(r.Created, relPath+" (appended MindSpec block)")
-			if !check {
-				block := "\n" + mindspecMarkerBegin + "\n" + claudeMDAppendBlock + mindspecMarkerEnd + "\n"
-				f, err := safeio.OpenAppendNoSymlink(absPath, 0o644)
-				if err != nil {
-					return fmt.Errorf("opening %s: %w", relPath, err)
-				}
-				_, writeErr := f.WriteString(block)
-				closeErr := f.Close()
-				if writeErr != nil {
-					return fmt.Errorf("writing to %s: %w", relPath, writeErr)
-				}
-				if closeErr != nil {
-					return fmt.Errorf("closing %s: %w", relPath, closeErr)
-				}
-			}
-		}
-	} else {
+	if !fileExists(absPath) {
 		r.Created = append(r.Created, relPath)
 		if !check {
-			if err := safeio.WriteFileNoSymlink(absPath, []byte(claudeMDFull), 0o644); err != nil {
+			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+				return fmt.Errorf("creating dir for %s: %w", relPath, err)
+			}
+			if err := safeio.WriteFileNoSymlink(absPath, []byte(fullContent), 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", relPath, err)
+			}
+		}
+		return nil
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", relPath, err)
+	}
+	content := string(data)
+
+	switch {
+	case strings.Contains(content, mindspecMarkerBegin):
+		// Has BEGIN/END markers — replace managed block in place.
+		updated := replaceManagedBlock(content, appendBlock)
+		if updated == content {
+			r.Skipped = append(r.Skipped, relPath+" (MindSpec block present)")
+			return nil
+		}
+		r.Created = append(r.Created, relPath+" (updated MindSpec block)")
+		if !check {
+			if err := safeio.WriteFileNoSymlink(absPath, []byte(updated), 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", relPath, err)
+			}
+		}
+	case strings.Contains(content, mindspecMarkerLegacy):
+		r.Skipped = append(r.Skipped, relPath+" (MindSpec block present — legacy marker)")
+	default:
+		r.Created = append(r.Created, relPath+" (appended MindSpec block)")
+		if !check {
+			block := "\n" + mindspecMarkerBegin + "\n" + appendBlock + mindspecMarkerEnd + "\n"
+			f, err := safeio.OpenAppendNoSymlink(absPath, 0o644)
+			if err != nil {
+				return fmt.Errorf("opening %s: %w", relPath, err)
+			}
+			_, writeErr := f.WriteString(block)
+			closeErr := f.Close()
+			if writeErr != nil {
+				return fmt.Errorf("writing to %s: %w", relPath, writeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("closing %s: %w", relPath, closeErr)
 			}
 		}
 	}
@@ -529,17 +546,18 @@ func ensureClaudeMD(root string, check bool, r *Result) error {
 	return nil
 }
 
-// chainBeadsSetup runs bd setup claude if beads is installed. The bd
-// subprocess inherits the caller's CWD unless we pin it — without cmd.Dir,
-// test processes (whose CWD is the package source directory) cause bd to
-// scaffold .claude/settings.json and CLAUDE.md into the repo's source tree.
-func chainBeadsSetup(root string, r *Result) {
+// chainBeadsSetup runs `bd setup <agent>` if beads is installed, sharing one
+// body across the claude and codex entry points (they differ only by the agent
+// identifier). The bd subprocess inherits the caller's CWD unless we pin it —
+// without cmd.Dir, test processes (whose CWD is the package source directory)
+// cause bd to scaffold integration files into the repo's source tree.
+func chainBeadsSetup(root, agent string, r *Result) {
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
 		return
 	}
 
-	cmd := exec.Command(bdPath, "setup", "claude")
+	cmd := exec.Command(bdPath, "setup", agent)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	r.BeadsRan = true
@@ -548,12 +566,6 @@ func chainBeadsSetup(root string, r *Result) {
 	} else if len(out) > 0 {
 		r.BeadsMsg = strings.TrimSpace(string(out))
 	}
-}
-
-// hasManagedBlock returns true if the content contains either the new BEGIN/END
-// markers or the legacy single marker.
-func hasManagedBlock(content string) bool {
-	return strings.Contains(content, mindspecMarkerBegin) || strings.Contains(content, mindspecMarkerLegacy)
 }
 
 // replaceManagedBlock replaces the content between BEGIN and END markers.

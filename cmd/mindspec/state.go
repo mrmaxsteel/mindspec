@@ -139,10 +139,6 @@ var stateWriteSessionCmd = &cobra.Command{
 }
 
 func init() {
-	stateSetCmd.Flags().String("mode", "", "Mode to set (idle, spec, plan, implement)")
-	stateSetCmd.Flags().String("spec", "", "Active spec ID (required for spec, plan, implement modes)")
-	stateSetCmd.Flags().String("bead", "", "Active bead ID (required for implement mode)")
-
 	stateShowCmd.Flags().String("spec", "", "Target spec ID (auto-detected if exactly one active spec)")
 
 	stateWriteSessionCmd.Flags().String("source", "", "Session source from SessionStart hook (startup, clear, resume, compact)")

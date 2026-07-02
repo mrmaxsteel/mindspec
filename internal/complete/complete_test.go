@@ -82,7 +82,6 @@ func saveAndRestore(t *testing.T) {
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
-	origListJSON := listJSONFn
 	origResolveTarget := resolveTargetFn
 	origFindLocalRoot := findLocalRootFn
 	origFetchBeadByID := fetchBeadByIDFn
@@ -101,7 +100,6 @@ func saveAndRestore(t *testing.T) {
 		closeBeadFn = origClose
 		worktreeListFn = origWtList
 		runBDFn = origRunBD
-		listJSONFn = origListJSON
 		resolveTargetFn = origResolveTarget
 		findLocalRootFn = origFindLocalRoot
 		fetchBeadByIDFn = origFetchBeadByID
@@ -124,6 +122,18 @@ func saveAndRestore(t *testing.T) {
 	})
 	t.Cleanup(restorePhaseMerge)
 
+	// Spec 107 wave 1 (mindspec-oexu.3): the post-close children read now runs
+	// through internal/phase (phase.FetchChildren), and the spec→epic resolution
+	// shares the same phase list-JSON seam. Default it to an empty result so a
+	// Run test that reaches advanceState without an explicit phase stub stays
+	// hermetic (no `bd` shell-out); stubPhaseEpic / stubChildrenByStatus / the
+	// perf-budget test override it and restore back to this default (LIFO),
+	// while this cleanup restores the production seam.
+	restorePhaseList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restorePhaseList)
+
 	// Default stubs
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
@@ -135,7 +145,6 @@ func saveAndRestore(t *testing.T) {
 	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
 		return next.BeadInfo{ID: id, Status: "closed"}, nil
 	}
-	listJSONFn = func(args ...string) ([]byte, error) { return []byte("[]"), nil }
 	// Spec 086 Bead 3: keep metadata + git-identity reads inert by
 	// default so the existing tests don't shell out to bd or git.
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
@@ -217,6 +226,20 @@ func setupTempRoot(t *testing.T) string {
 	tmp := t.TempDir()
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 	return tmp
+}
+
+// chdirIntoRoot points the process cwd at root for the test. Spec 107 wave 1
+// (mindspec-oexu.3): advanceState now re-reads children via phase.FetchChildren,
+// which derives the child-status breadth (bead.AllStatuses) from the cwd project
+// root — mirroring complete.Run, which chdir's to the repo root before advancing
+// state. The direct advanceState tests chdir into their fixture root so a custom
+// status declared in the fixture's .beads/config.yaml is honored. saveAndRestore
+// registers the cwd-restoring cleanup.
+func chdirIntoRoot(t *testing.T, root string) {
+	t.Helper()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir into fixture root: %v", err)
+	}
 }
 
 // stubPhaseEpic stubs phase functions so FindEpicBySpecID returns epicID
@@ -527,13 +550,33 @@ func TestRun_NoWorktree(t *testing.T) {
 	}
 }
 
-// stubChildrenByStatus installs a listJSONFn that returns children keyed by
-// status. PERF-1: the cache now issues a single `--status=open,in_progress,closed`
-// bd call and filters in-process, so this stub returns the union of all
-// requested-status buckets (each stamped with its bucket's status) in one shot.
-// Any status not in the map contributes no items.
+// stubChildrenByStatus installs a phase-seam listJSON stub that returns children
+// keyed by status. Spec 107 wave 1 (mindspec-oexu.3): the children query now runs
+// through internal/phase (complete.advanceState → phase.FetchChildren, and the
+// impl-only guard → phase.DerivePhase), so this stubs phase.SetListJSONForTest
+// rather than complete's own seam. It COMPOSES onto whatever phase stub is already
+// installed (typically stubPhaseEpic): `--parent` children queries are served
+// here, and every other query (`--type=epic` epic resolution, `bd show`) is
+// delegated back to the previous stub so both concerns share the one seam. The
+// query is a single `--status=<comma-joined>` call, so the stub returns the union
+// of all requested-status buckets (each stamped with its bucket's status); any
+// status not in the map contributes no items. Callers pair this with stubPhaseEpic,
+// whose t.Cleanup restores the seam to the saveAndRestore default.
 func stubChildrenByStatus(byStatus map[string][]bead.BeadInfo) {
-	listJSONFn = func(args ...string) ([]byte, error) {
+	prev := phase.ListJSONForTest()
+	phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		isParent := false
+		for _, a := range args {
+			if a == "--parent" {
+				isParent = true
+				break
+			}
+		}
+		if !isParent {
+			// Epic resolution (--type=epic) and other queries stay with the
+			// stub stubPhaseEpic installed.
+			return prev(args...)
+		}
 		statuses := []string{}
 		for _, a := range args {
 			const prefix = "--status="
@@ -562,7 +605,7 @@ func stubChildrenByStatus(byStatus map[string][]bead.BeadInfo) {
 			}
 		}
 		return json.Marshal(out)
-	}
+	})
 }
 
 // writeBeadsCustomStatus creates .beads/config.yaml under root with the
@@ -605,7 +648,8 @@ func TestAdvanceState_NextReady(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, nextBead := advanceState("epic-123")
 	if mode != state.ModeImplement {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
 	}
@@ -632,7 +676,8 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, nextBead := advanceState("epic-123")
 	if mode != state.ModePlan {
 		t.Errorf("mode: got %q, want %q", mode, state.ModePlan)
 	}
@@ -659,7 +704,8 @@ func TestAdvanceState_AllDone(t *testing.T) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, nextBead := advanceState("epic-123")
 	if mode != state.ModeReview {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeReview)
 	}
@@ -693,7 +739,8 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, nextBead := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, nextBead := advanceState("epic-123")
 	if mode != state.ModeImplement {
 		t.Errorf("in_progress bead must hold phase in implement: got %q, want %q (not review)", mode, state.ModeImplement)
 	}
@@ -727,7 +774,8 @@ func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
 		return nil, fmt.Errorf("unexpected")
 	}
 
-	mode, _ := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, _ := advanceState("epic-123")
 	if mode == state.ModeReview {
 		t.Errorf("custom-status child must prevent review flip: got %q", mode)
 	}
@@ -754,7 +802,8 @@ func TestAdvanceState_UndeclaredCustomStatusIsNotIterated(t *testing.T) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
-	mode, _ := advanceState(root, "001-test-spec")
+	chdirIntoRoot(t, root)
+	mode, _ := advanceState("epic-123")
 	// Only the `closed` bead is seen → all closed → review.
 	if mode != state.ModeReview {
 		t.Errorf("undeclared custom status must not be iterated: got mode %q, want %q", mode, state.ModeReview)
@@ -765,18 +814,124 @@ func TestAdvanceState_NoEpic(t *testing.T) {
 	saveAndRestore(t)
 
 	setupTempRoot(t)
-	// No epic found for spec → idle (ADR-0023: no lifecycle.yaml needed).
-	restore := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		return []byte("[]"), nil // no epics
-	})
-	t.Cleanup(restore)
-
-	mode, nextBead := advanceState("", "test")
+	// Empty epicID (spec→epic resolution found nothing) → idle. Spec 107 wave 1:
+	// advanceState now takes the epicID resolved once by Run; "" short-circuits
+	// to idle without any bd query (ADR-0023: no lifecycle.yaml needed).
+	mode, nextBead := advanceState("")
 	if mode != state.ModeIdle {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeIdle)
 	}
 	if nextBead != "" {
 		t.Errorf("nextBead should be empty, got %q", nextBead)
+	}
+}
+
+// TestRun_CompletePerfPairSubprocessBudget is the spec 107 wave 1
+// (mindspec-oexu.3) perf-pair contract at the Run level. It drives a full
+// complete over a single phase list-JSON seam that serves BOTH the spec→epic
+// resolution (`--type=epic`) and the children query (`--parent`), and asserts:
+//
+//   - AC5: exactly ONE `bd list --parent` for the post-close children query
+//     (was ~5 per-status calls in the old queryAllChildren loop).
+//   - AC6: the immutable spec→epic mapping is resolved once — at most one
+//     `bd list --type=epic` across the whole run (migrate + guard + phase-sync +
+//     advanceState previously each built a throwaway cache).
+//   - Freshness: the post-close read reflects bd state mutated MID-RUN. The
+//     stub flips to an all-closed child set inside closeBeadFn; a memoized /
+//     pre-close read would derive implement, so review proves the read is fresh.
+func TestRun_CompletePerfPairSubprocessBudget(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	const specID = "107-perf"
+	const epicID = "epic-107"
+
+	resolveTargetFn = func(r, flag string) (string, error) { return specID, nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+
+	var (
+		closed               bool
+		epicListCalls        int
+		parentCallsPostClose int
+	)
+
+	// Mid-run mutation: from the close onward, the epic's child set is
+	// all-closed. The post-close children read must observe this (review),
+	// not the pre-close in_progress view (implement).
+	closeBeadFn = func(ids ...string) error {
+		closed = true
+		return nil
+	}
+
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		isEpic, isParent := false, false
+		for _, a := range args {
+			switch a {
+			case "--type=epic":
+				isEpic = true
+			case "--parent":
+				isParent = true
+			}
+		}
+		switch {
+		case isEpic:
+			epicListCalls++
+			return json.Marshal([]phase.EpicInfo{{
+				ID: epicID, Title: "[SPEC " + specID + "] Perf", Status: "open", IssueType: "epic",
+				Metadata: map[string]interface{}{"spec_num": float64(107), "spec_title": "perf"},
+			}})
+		case isParent:
+			if closed {
+				parentCallsPostClose++
+				return json.Marshal([]phase.ChildInfo{
+					{ID: "b1", Title: "[IMPL 107-perf.1] Done", Status: "closed", IssueType: "task"},
+				})
+			}
+			return json.Marshal([]phase.ChildInfo{
+				{ID: "b1", Title: "[IMPL 107-perf.1] WIP", Status: "in_progress", IssueType: "task"},
+			})
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+
+	// bd show for the epic (FindEpic → stored-phase read): no mindspec_phase,
+	// so derivation falls through to the child set.
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "show" {
+			return json.Marshal([]phase.EpicInfo{{ID: epicID, Status: "open"}})
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	// advanceState issues `bd ready` only in implement; the post-close phase
+	// derives review, so this is defensive.
+	runBDFn = func(args ...string) ([]byte, error) {
+		return json.Marshal([]bead.BeadInfo{})
+	}
+
+	result, err := Run(root, "b1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !closed {
+		t.Fatal("closeBeadFn was never invoked — the mid-run mutation never fired")
+	}
+	// AC5: exactly one bd list --parent for the post-close children query.
+	if parentCallsPostClose != 1 {
+		t.Errorf("post-close children query must issue exactly one `bd list --parent`, got %d", parentCallsPostClose)
+	}
+	// AC6: spec→epic resolved once — at most one bd list --type=epic.
+	if epicListCalls > 1 {
+		t.Errorf("spec→epic resolution must issue at most one `bd list --type=epic`, got %d", epicListCalls)
+	}
+	// Freshness: the post-close read reflected the mid-run all-closed mutation.
+	if result.NextMode != state.ModeReview {
+		t.Errorf("post-close children read must reflect bd state mutated mid-run (want %q), got %q", state.ModeReview, result.NextMode)
 	}
 }
 
@@ -2309,18 +2464,11 @@ func TestRun_FromInsideBeadWorktree_PhaseIntegrity(t *testing.T) {
 	resolveTargetFn = func(r, flag string) (string, error) { return specID, nil }
 	closeBeadFn = func(ids ...string) error { return nil }
 
-	// queryAllChildren channel (complete package seam): one closed
-	// child → review. Also cwd-sensitive.
-	listJSONFn = cwdSensitive(func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--status=closed" {
-				return json.Marshal([]phase.ChildInfo{{
-					ID: "bead-doom", Title: "[" + specID + "] doomed", Status: "closed",
-				}})
-			}
-		}
-		return []byte("[]"), nil
-	})
+	// Spec 107 wave 1 (mindspec-oexu.3): advanceState's post-close children read
+	// now runs through phase.FetchChildren on the phase seam stubbed above
+	// (cwdSensitive review → one closed child), so there is no separate complete
+	// package seam to stub. The runBD seam still fails from a deleted cwd like
+	// real bd.
 	runBDFn = cwdSensitive(func(args ...string) ([]byte, error) { return []byte("[]"), nil })
 
 	// Bead worktree on disk; the process is invoked from INSIDE it.

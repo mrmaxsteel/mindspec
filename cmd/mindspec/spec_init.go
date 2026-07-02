@@ -1,13 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/mrmaxsteel/mindspec/internal/spec"
-	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -17,50 +10,13 @@ var specInitCmd = &cobra.Command{
 	Long:   `Alias for 'mindspec spec create'. Use 'mindspec spec create' instead.`,
 	Hidden: true,
 	Args:   cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		specID := args[0]
-		if err := validate.SpecID(specID); err != nil {
-			return err
-		}
-		title, _ := cmd.Flags().GetString("title")
-
-		root, err := findRoot()
-		if err != nil {
-			return err
-		}
-
-		exec := newExecutor(root)
-		result, err := spec.Run(root, specID, title, exec)
-		if err != nil {
-			return err
-		}
-
-		specDir, err := workspace.SpecDir(root, specID)
-		if err != nil {
-			return err
-		}
-		specPath := filepath.Join(specDir, "spec.md")
-		relPath, err := filepath.Rel(root, specPath)
-		if err != nil {
-			relPath = specPath
-		}
-		fmt.Printf("Spec initialized: %s\n", filepath.ToSlash(relPath))
-
-		if result.WorktreePath != "" {
-			fmt.Printf("Worktree: %s (branch: %s)\n", result.WorktreePath, result.SpecBranch)
-			fmt.Printf("\n  cd %s\n\n", result.WorktreePath)
-		} else {
-			fmt.Println()
-		}
-
-		if err := emitInstruct(root); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
-		}
-
-		return nil
-	},
+	// RunE is wired in init() to reuse specCreateCmd.RunE so future
+	// spec-create changes propagate to this hidden alias automatically.
 }
 
 func init() {
+	specInitCmd.RunE = specCreateCmd.RunE
+	// The shared RunE reads cmd.Flags().GetString("title"); cobra passes the
+	// invoked command, so the alias must register its own --title flag.
 	specInitCmd.Flags().String("title", "", "Spec title (derived from slug if omitted)")
 }

@@ -1,0 +1,52 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens, round 2: re-verified every pin the edit touched at 18d7ea3f. (1) phase.SetListJSONForTest EXISTS exactly — exported at internal/phase/derive.go:34 (func SetListJSONForTest(fn RunBDFunc) func()) and already consumed cross-package by internal/complete/complete_test.go:231,2304, so R5's re-point target is real and reachable. (2) stubChildrenByStatus EXISTS at internal/complete/complete_test.go:535 (doc 530) and today installs a complete-package listJSONFn at :536 — exactly the seam R5 says must be re-pointed. (3) rootOperatorDocs at internal/validate/docsync.go:380 holds exactly {CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md} — the spec's Impacted-Domains/Open-Questions claim is now verbatim-accurate. (4) review/spec-107-approve/source-report.md exists (13448 bytes) — the re-pointed citation resolves. Renumbering is clean: all in-spec R-refs use 1-9 (R1 dead-code, R2-R4 setup, R5-R6 complete, R7 guardrails, R8 specInit); no dangling old numbers, no removed-carve-out ref, no R10+. Supporting pins still hold: complete.go:889 per-status loop, epic-resolution at 223/228/716/781. My round-1 APPROVE holds; the sole prior nit (../../adr link path) is unchanged and non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "claim": "phase.SetListJSONForTest exists in internal/phase (exact name).",
+      "verification": "internal/phase/derive.go:34 `func SetListJSONForTest(fn RunBDFunc) func()` (exported), doc at :33. Consumed cross-package already by internal/complete/complete_test.go:231 and :2304, plus ~40 other test sites. R5/AC seam pin is accurate and reachable.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "stubChildrenByStatus exists at internal/complete/complete_test.go:535 and today installs a complete-package listJSONFn.",
+      "verification": "Function def at complete_test.go:535 (doc comment 530-534). Body at :536 assigns `listJSONFn = func(args ...string)...` — the complete-package seam. R5's 'must be re-pointed at phase.SetListJSONForTest' premise is exactly right.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "isDocFile's rootOperatorDocs allowlist is exactly {CLAUDE.md, AGENTS.md, README.md, BENCH-MOVED.md}.",
+      "verification": "internal/validate/docsync.go:380 `var rootOperatorDocs = map[string]struct{}{ \"CLAUDE.md\":{}, \"AGENTS.md\":{}, \"README.md\":{}, \"BENCH-MOVED.md\":{} }` — exactly four entries, matching the spec verbatim. isDocFile consults it at :399. (Round-1 R2 had noted only AGENTS.md; spec now correctly lists the full set.)",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "review/spec-107-approve/source-report.md exists (re-pointed citation).",
+      "verification": "ls shows review/spec-107-approve/source-report.md, 13448 bytes. The spec's Goal/Background citations resolve.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "Renumbered R-references (1-9) are internally consistent with no dangling old numbers.",
+      "verification": "All in-spec R-refs: R1=dead-code (51,56,66), R2-R4=setup managed-block/symlink/chainBeads (57), R5 & R5-R6=complete perf (58,79,99), R7=guardrails/AGENTS.md (10,30,59,98), R8=specInit dedup (10,59). Each maps to its matching Requirement heading. No reference to the removed carve-out requirement, no R10+, no stale numbering.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "Supporting complete-package pins unchanged since round 1.",
+      "verification": "complete.go:889 still `listJSONFn(\"--parent\", epicID, \"--status=\"+status)` inside queryAllChildren's per-status loop (R5 target). Spec->epic sites: 223 phase.EnsureMigrated, 228/716/781 phase.FindEpicBySpecID (R6 targets) — all present at cited lines.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "low",
+      "claim": "ADR Touchpoint markdown links resolve to real files.",
+      "verification": "Unchanged from round 1: links use ../../adr/ resolving to nonexistent .mindspec/docs/adr/ (ADRs live flat at .mindspec/adr/). Matches repo template convention and validate_test.go fixtures; spec-approve ADR coverage resolves by ADR ID, not link path, so the gate passes. Cosmetic, non-blocking.",
+      "result": "MINOR_DISCREPANCY",
+      "hard_block": false
+    }
+  ]
+}

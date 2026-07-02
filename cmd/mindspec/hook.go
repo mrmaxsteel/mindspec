@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/hook"
@@ -188,5 +187,4 @@ func isDoltServerMode(root string) bool {
 func init() {
 	hookCmd.Flags().Bool("list", false, "List available hook names")
 	hookCmd.Flags().StringVar(&hookFormat, "format", "", "Override protocol auto-detection (claude or copilot)")
-	hookCmd.SetUsageTemplate(strings.Replace(hookCmd.UsageTemplate(), "{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}", "{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}", 1))
 }

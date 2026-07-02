@@ -1,0 +1,57 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "My three round-2 blockers are addressed. The Bead 1 deadcode command now writes analyzer stdout/stderr to temp files and explicitly checks the `go run ... deadcode` exit status before the inverted grep, so tool failure cannot be read as success. The named-new-test verifications now combine an anchored `func TestName` grep with `go test -v -run 'TestName$' | grep -q '--- PASS: TestName'`, so absent or non-running tests fail. The codex symlink refusal check targets `TestRunCodex_RefusesSymlinkedAGENTSmd` specifically, not the broader pre-existing refusal tests. `mindspec validate plan 107-cleanup-deadcode-dry-wave1` exits 0 with one advisory WARN. Parsed `work_chunks` are contiguous ids 1..4 and all `depends_on` arrays are empty. Gate-forwardness and falsifiability are sufficient for plan approval.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "area": "deadcode verification",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "The Bead 1 command captures deadcode output, checks `test $? -eq 0 || { cat \"$err\"; exit 1; }`, then performs the inverted grep against the captured stdout.",
+      "impact": "A deadcode tool failure now fails the checkbox instead of false-passing on empty analyzer output."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "area": "named new test verification",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "Required new tests in Beads 2 and 3 use `grep -rq 'func TestName' ... && go test ... -v -run 'TestName$' | grep -q -- '--- PASS: TestName'`.",
+      "impact": "If the required test is absent, renamed, or not executed, the verification exits non-zero."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "area": "codex symlink refusal verification",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "The Bead 2 symlink check targets `TestRunCodex_RefusesSymlinkedAGENTSmd` with both a function-existence grep and a PASS-line check.",
+      "impact": "The checkbox now proves the new codex-specific refusal test runs, rather than passing via existing claude/copilot refusal tests."
+    },
+    {
+      "status": "OK",
+      "severity": "info",
+      "area": "plan validation",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "`mindspec validate plan 107-cleanup-deadcode-dry-wave1` exits 0. Output reports one WARN: `decomposition-scope-redundancy: scope redundancy R=0.04 below threshold 0.15 with 4 beads`.",
+      "impact": "No validator errors block the plan gate."
+    },
+    {
+      "status": "OK",
+      "severity": "info",
+      "area": "work_chunks frontmatter",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "Parsed work chunk ids are 1, 2, 3, 4; each chunk has `depends_on: []`.",
+      "impact": "The requested independent four-bead shape is present."
+    },
+    {
+      "status": "ADVISORY",
+      "severity": "low",
+      "area": "shell rigor",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "PASS-line test commands rely on pipeline exit status from the final `grep`, which is appropriate for the stated false-pass mode.",
+      "impact": "No gate blocker; future plans could use `set -o pipefail` wrappers for broader diagnostics, but these commands are falsifiable for missing tests."
+    }
+  ]
+}

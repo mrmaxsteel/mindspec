@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Plan-forward decomposability lens. The 10 requirements cut cleanly into 4 beads inside the 3-5 target (B1 dead-code+lint carve-outs R1-R2, B2 setup unification+symlink test+chainBeads fold R3-R5, B3 complete/phase perf pair R6-R7, B4 guardrails+alias dedup R8-R9; R10 is the cross-cutting green-suite AC). Every decomposition metric in checkDecompositionQuality is advisory (AddWarning only, never gating) and this cut passes them all: 4<=MaxBeads(6); if deletions ride in their owning beads all four are depends_on:[] so parallelism=1.0>=0.25 and chain depth=1<=3; setup/phase co-touch keeps R_scope inside the healthy 0.15-0.50 band. Each requirement maps to concrete per-bead Steps/Verification/Acceptance-Criteria that checkBeadSection accepts, and the work_chunks id/depends_on/key_file_paths wiring is trivially expressible from the enumerated file lists. No unimplementable-in-one-commit bead. Findings below are plan-shaping notes for the plan author, not spec-approve blockers -- the spec correctly enumerates requirements without prescribing (or mis-prescribing) the cut.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "advisory",
+      "area": "decomposition / bead ownership",
+      "finding": "R1's deletion of setup.hasManagedBlock lands in internal/setup/claude.go:555 -- the exact file B2's managed-block unification (ensureManagedDoc extraction, R3) rewrites. Lumping this deletion into a monolithic dead-code bead creates a same-file collision with the setup bead and forces a serial B2-after-B1 ordering. Plan author should assign the hasManagedBlock deletion to the setup bead so that bead owns all internal/setup edits and can be declared independent (depends_on: []). This is the cleaner cut and raises parallelism.",
+      "hard_block": false
+    },
+    {
+      "severity": "advisory",
+      "area": "decomposition / bead ownership",
+      "finding": "R1's deletion of phase.FindActiveBeadForEpic is in internal/phase/derive.go:713 while B3's new phase.FetchChildren wrapper (R6) lands in internal/phase/cache.go:213 -- same package, DIFFERENT file, so no textual merge conflict; package-level co-touch is fine and in fact desirable per the 0.15-0.50 overlap band. Optionally fold this deletion into the phase/complete bead for ownership tidiness, but lower priority than the setup case since there is no same-file overlap.",
+      "hard_block": false
+    },
+    {
+      "severity": "advisory",
+      "area": "bead sizing",
+      "finding": "B2 folds R3+R4+R5 (extract ensureManagedDoc, route all three writers through safeio, add codex symlink-refusal path + TestRunCodex_RefusesSymlinkedAGENTSmd, fold chainBeadsSetup/chainBeadsSetupCodex) -- roughly seven steps, right at the StepsCount>7 advisory-warning boundary in checkBeadSection. Keeping R3-R5 in one bead is nonetheless the correct call per plan-mode heuristic #6 (tool-grouping / multi-file refactor stays together); just flag it as the heaviest bead. Not a defect.",
+      "hard_block": false
+    },
+    {
+      "severity": "advisory",
+      "area": "dead-code scoping (adjacent to lens)",
+      "finding": "R1 names FindActiveBeadForEpic but a sibling FindActiveBeadForEpicWithCache exists at internal/phase/derive.go:720. Plan author should confirm the WithCache variant is either live or separately handled so the R1 dead-code bead does not leave a dangling/newly-dead symbol. Minor; belongs to the dead-code verification lens, noted here only because it surfaced while checking phase overlap.",
+      "hard_block": false
+    }
+  ]
+}

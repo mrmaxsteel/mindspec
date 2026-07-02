@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.6,
+  "rationale": "Report-fidelity lens. The substantive transcription is faithful and complete: R1 lists all 16 report §1 deletion targets verbatim (keeps live dirExists, defers only trace.Event.MarshalJSON with a stated reason); R2 matches the three stale .golangci.yml carve-outs; R3-R5 match DRY #1 (setup unification + codex symlink fix + chainBeads fold); R6-R7 match Perf #2+#3/DRY #5 and even preserve the report's 'keep post-close children fresh' caveat. Wave-2 Out-of-Scope deferrals cover every remaining DRY and Perf item plus the explicit non-findings, consistent with §4 ranking. Two defects in my lane block a clean approve: (1) the Goal's evidence citation `review/repo-review-2026-07-02.md` does not exist anywhere in the repo (the report lives only at review/spec-107-approve/source-report.md) — the spec's own 'no dangling documentation reference' goal is violated by its sole source pointer; (2) the Goal says 'four items from §4 order 1-3' but only three are from §4 — guardrails (R8) is an addition and spec-init dedup (R9) is pulled forward from DRY #10. Both are one-line fixes; scope itself is sound.",
+  "concrete_changes_required": [
+    "Fix the evidence-source citation in the Goal (spec.md line 10): `review/repo-review-2026-07-02.md` does not exist. Point it at the actual report path `review/spec-107-approve/source-report.md` (or track the report at the cited path). Verified: `find . -name 'repo-review*'` returns nothing and neither review path is git-tracked.",
+    "Correct the Goal's attribution: it states 'the four ... items from ... §4, order 1-3', but §4 order 1-3 supplies only three items (dead-code, setup unification, complete perf pair). Note explicitly that the guardrails restoration (R8) is a documentation-integrity fix beyond the report and that spec-init alias dedup (R9) is the spec-init portion of DRY #10 pulled forward — so readers don't expect all four in §4."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "evidence citation",
+      "detail": "Goal cites `review/repo-review-2026-07-02.md §4, order 1-3` as the source of scope, but that file does not exist in the worktree or on main; the report is present only at `review/spec-107-approve/source-report.md` (untracked). The spec's sole evidence pointer is a dangling reference — ironic given the spec's stated goal of 'no dangling documentation reference'. Content transcribed from the report is nonetheless accurate."
+    },
+    {
+      "severity": "low",
+      "area": "scope attribution",
+      "detail": "Goal frames all four wave-1 items as coming from '§4, order 1-3', but only three do. Guardrails restoration (R8) has no source in the report at all (it is a disclosed documentation-integrity addition); spec-init alias dedup (R9) derives from DRY #10 (medium-impact, not in §4 order 1-3), with the remainder of DRY #10 correctly deferred to wave 2. Background and Requirements sections disclose all of this accurately; only the Goal's one-line summary is imprecise."
+    },
+    {
+      "severity": "info",
+      "area": "transcription completeness",
+      "detail": "Positive: R1's dead-code enumeration matches report §1 one-for-one (hook cluster keeping dirExists; gitutil MainWorktreePath/IsMainWorktree; embed SkillNames/sortStrings; layout Mover.With*; hook.go SetUsageTemplate; doctor.Run; phase.FindActiveBeadForEpic; validate SpecStatusFromBytes/SpecIsApproved/IsDomainCoveredCtx/BeadID; contextpack NewADRStore/readFileContent; next.findRoot; recording.DefaultCodexConfigPath; setup.hasManagedBlock; harness filterEnv/assertCommandUsedFlag/assertCleanWorktree; panel skipHumanHint; state.go flags). trace.Event.MarshalJSON is the only §1 item deferred, with an explicit adr-divergence-unowned rationale. No invented deletions."
+    },
+    {
+      "severity": "info",
+      "area": "wave-2 deferral consistency",
+      "detail": "Out-of-Scope deferrals are complete and consistent with the report ranking: DRY #2,3,4,6,7,8,9,#10-remainder,11,12-18 and Perf #1,4,5,6,7 all deferred; DRY #1/#5 and Perf #2/#3 correctly retained in wave 1; explicit non-findings (RenderBeadContext no-budget path, harness/lint/specgate) correctly excluded from deletion. No wave-1 item leaks a deferred concern and no deferred item is silently dropped."
+    }
+  ]
+}
