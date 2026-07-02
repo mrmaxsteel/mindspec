@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -47,10 +46,4 @@ func (e Event) WithTokens(tokens int) Event {
 func (e Event) WithData(data map[string]any) Event {
 	e.Data = data
 	return e
-}
-
-// MarshalJSON produces compact JSON for NDJSON output.
-func (e Event) MarshalJSON() ([]byte, error) {
-	type Alias Event
-	return json.Marshal(Alias(e))
 }

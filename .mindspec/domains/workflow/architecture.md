@@ -178,3 +178,28 @@ symbols (zero live callers, `deadcode -test`-clean):
 - `cmd/mindspec`: the no-op `SetUsageTemplate` line in `hook.go` (a
   `strings.Replace` of a string with itself) and the `--mode`/`--spec`/`--bead`
   flags registered on the deprecated no-op `state set` command.
+
+## Ownership claims + carve-out cleanup — spec 108 wave 2 (2026-07-02)
+
+Bead `mindspec-wpjv.1` brought two previously-unowned repo paths under the
+workflow domain by adding them to `.mindspec/domains/workflow/OWNERSHIP.yaml`'s
+`paths:` list, so `validate.attributeDomain` now resolves both to `"workflow"`
+and neither trips `adr-divergence-unowned` when edited:
+
+- `internal/trace/**` — the NDJSON tracer behind the `mindspec trace`
+  subcommand. The owner-facing CLI (`cmd/**`) and two of the package's three
+  importers (`cmd/mindspec`, `internal/instruct`) are workflow; the third
+  (`internal/bead`) is an event-emitting consumer. Workflow already owned the
+  trace command, so it now owns the package behind it.
+- `.golangci.yml` — repo lint config, a sibling of the other workflow-owned
+  repo-tooling paths (`scripts/bd-jsonl-merge-driver.sh`, `cmd/**`,
+  `plugins/mindspec/**`, `.claude/skills/**`).
+
+With those claims in place, this bead also deleted the dead
+`trace.Event.MarshalJSON` (an aliased no-op marshaler byte-identical to Go's
+default struct marshaling — proven unchanged by `TestEventNDJSONGolden`) and
+removed the three stale `unparam` carve-outs in `.golangci.yml`
+(`internal/brownfield/plan.go`, `internal/contextpack/builder.go` `isNeighbor`,
+`internal/next/beads.go` `findRoot` — all matching nothing on the tree after
+the wave-1 `findRoot` deletion), keeping the live `internal/validate/state.go`
+`validateReviewMode` carve-out. `golangci-lint run ./...` stays clean.
