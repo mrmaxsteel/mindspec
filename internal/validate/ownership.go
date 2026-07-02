@@ -274,6 +274,68 @@ func loadOwnershipForRef(exec executor.Executor, root, ownerRef, domain string) 
 	return LoadOwnershipAtRef(exec, ownerRef, domain)
 }
 
+// loadOwnershipForRefFn is the package-level seam through which every
+// hoisted per-domain manifest load routes (spec 108 R7). It defaults to
+// loadOwnershipForRef; the per-run ownershipCache reads through it, so a
+// test can swap it for a counter and assert that a multi-file gate run
+// loads each domain's manifest a number of times that is a function of
+// domain count only — independent of the number of changed files.
+var loadOwnershipForRefFn = loadOwnershipForRef
+
+// ownershipCache memoizes per-domain Ownership loads within a single gate
+// run so each candidate domain's OWNERSHIP.yaml is read from disk (and, at
+// a ref, git-show'd up to three times in LoadOwnershipAtRef) AT MOST ONCE,
+// regardless of how many changed files are attributed against it (spec 108
+// R7). It generalizes the "load every manifest once, attribute in memory"
+// pattern checkUnclaimedSource already uses (docsync.go) to the three
+// per-(file × domain) attribution sites (ValidateDivergence,
+// checkInternalPackages, normalizeImpactedDomains). Loads route through
+// the loadOwnershipForRefFn seam so a test can count them.
+//
+// Both the success AND the error outcome are memoized: a broken manifest
+// is read once and then re-surfaces the SAME (nil, err) on every
+// subsequent lookup. This is byte-identical to the pre-cache behavior,
+// where attributeDomain re-loaded the manifest per file and re-emitted the
+// same per-file attribution error each time — the cache changes the number
+// of reads, never the diagnostics.
+//
+// A cache is scoped to ONE gate-run call; it is never shared across runs,
+// so it holds no cross-run staleness. Access is single-threaded within a
+// run (the file loops are sequential), so the plain map needs no
+// synchronization.
+type ownershipCache struct {
+	exec     executor.Executor
+	root     string
+	ownerRef string
+	entries  map[string]ownershipCacheEntry
+}
+
+type ownershipCacheEntry struct {
+	own *Ownership
+	err error
+}
+
+func newOwnershipCache(exec executor.Executor, root, ownerRef string) *ownershipCache {
+	return &ownershipCache{
+		exec:     exec,
+		root:     root,
+		ownerRef: ownerRef,
+		entries:  map[string]ownershipCacheEntry{},
+	}
+}
+
+// get returns the domain's Ownership, loading (and memoizing) it through
+// the loadOwnershipForRefFn seam on first request and returning the
+// memoized outcome thereafter.
+func (c *ownershipCache) get(domain string) (*Ownership, error) {
+	if e, ok := c.entries[domain]; ok {
+		return e.own, e.err
+	}
+	o, err := loadOwnershipForRefFn(c.exec, c.root, c.ownerRef, domain)
+	c.entries[domain] = ownershipCacheEntry{own: o, err: err}
+	return o, err
+}
+
 // checkExcludedSegment returns an error when entry's first path
 // segment is in excludedFirstSegments.
 func checkExcludedSegment(entry string) error {
@@ -297,8 +359,20 @@ func checkExcludedSegment(entry string) error {
 // (`mindspec validate docs` CLI). exec is the executor backing the ref
 // read; it is unused (and may be nil) when ownerRef == "".
 func attributeDomain(exec executor.Executor, root, ownerRef, sourcePath string, domains []string) (string, *Ownership, error) {
+	return attributeDomainCached(newOwnershipCache(exec, root, ownerRef), sourcePath, domains)
+}
+
+// attributeDomainCached is attributeDomain over a caller-supplied
+// ownershipCache, so a gate that attributes many files reuses ONE per-run
+// cache instead of re-loading every domain's manifest per file (spec 108
+// R7). Semantics are identical to attributeDomain: iterate domains in the
+// given (caller-sorted) order, return the FIRST whose Paths match minus
+// Exclude, or ("", nil, nil) when none claims the file; a load error
+// propagates exactly as before. attributeDomain itself is now the
+// single-file convenience wrapper that allocates a one-shot cache.
+func attributeDomainCached(cache *ownershipCache, sourcePath string, domains []string) (string, *Ownership, error) {
 	for _, d := range domains {
-		o, err := loadOwnershipForRef(exec, root, ownerRef, d)
+		o, err := cache.get(d)
 		if err != nil {
 			return "", nil, err
 		}

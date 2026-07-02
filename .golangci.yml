@@ -74,18 +74,6 @@ linters:
           - misspell
         text: 'cancelled'
       # unparam: Parameters kept for API consistency / future use
-      - path: 'internal/brownfield/plan\.go'
-        linters:
-          - unparam
-        text: 'buildMigrationPlan'
-      - path: 'internal/contextpack/builder\.go'
-        linters:
-          - unparam
-        text: 'isNeighbor'
-      - path: 'internal/next/beads\.go'
-        linters:
-          - unparam
-        text: 'findRoot'
       - path: 'internal/validate/state\.go'
         linters:
           - unparam

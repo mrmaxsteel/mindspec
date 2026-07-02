@@ -95,3 +95,19 @@ func WorktreeList() ([]WorktreeListEntry, error)
   `phase.FindEpicBySpecIDWithCache` / `phase.DerivePhaseWithCache`), so a run
   issues at most one `bd list --type=epic` while the post-close children read
   stays fresh. Gate-failure error/`recovery:` lines are unchanged (ADR-0035).
+- **2026-07-02 (spec 108 wave 2, bead wpjv.3):** `internal/validate` grew two
+  per-run caching seams that cut redundant reads without changing a single
+  emitted diagnostic (ADR-0036/ADR-0032 contracts intact). (1) An in-memory
+  `ownershipCache` (keyed by domain, routed through the `loadOwnershipForRefFn`
+  seam) loads each candidate domain's `OWNERSHIP.yaml` at most once per
+  `ValidateDivergence`, `checkInternalPackages`, and `normalizeImpactedDomains`
+  run — replacing the old per-`(file × domain)` `attributeDomain` re-load, and
+  with it the up-to-three `git show` subprocesses per domain in
+  `LoadOwnershipAtRef`. `attributeDomain` is now a one-shot wrapper over the
+  shared-cache `attributeDomainCached`. (2) A `memoStore` decorator (validate-
+  local, `internal/adr` untouched) wraps the store from the `adrStoreForSpecFn`
+  seam so `coverageOf` / `hasAcceptedCitation` / `checkADRCitations` read each
+  distinct cited ADR from disk at most once per run instead of
+  `O(domains × citations)` times. Both seams are countable, and a golden
+  diagnostics fixture pins byte-identical `(code, message)` output pre/post
+  caching.

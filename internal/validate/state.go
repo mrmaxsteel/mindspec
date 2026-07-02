@@ -1,7 +1,6 @@
 package validate
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -66,8 +65,11 @@ func validateSpecMode(root string, s *state.Focus) []Warning {
 		return warnings
 	}
 
-	// Check if spec is already approved (drift: state says spec mode but spec is approved)
-	if status := readSpecApprovalStatus(specPath); status == "APPROVED" {
+	// Check if spec is already approved (drift: state says spec mode but spec is
+	// approved). The declared status comes from the YAML frontmatter `status:`
+	// field via SpecStatusAt (spec 108 R6 — one approval source of truth),
+	// compared case-insensitively, not the `## Approval` prose.
+	if strings.EqualFold(SpecStatusAt(specDir), "Approved") {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
 			Message: fmt.Sprintf("State says spec mode but spec %s is already APPROVED. Consider: mindspec state set --mode=plan --spec=%s", s.ActiveSpec, s.ActiveSpec),
@@ -107,11 +109,13 @@ func validatePlanMode(root string, s *state.Focus) []Warning {
 		})
 		return warnings
 	}
-	specPath := filepath.Join(specDir, "spec.md")
-	if status := readSpecApprovalStatus(specPath); status != "APPROVED" {
+	// Approval status is read from the YAML frontmatter `status:` field via
+	// SpecStatusAt (spec 108 R6 — one approval source of truth), compared
+	// case-insensitively, not the `## Approval` prose.
+	if status := SpecStatusAt(specDir); !strings.EqualFold(status, "Approved") {
 		warnings = append(warnings, Warning{
 			Field:   "mode",
-			Message: fmt.Sprintf("State says plan mode but spec %s has status %q (expected APPROVED)", s.ActiveSpec, status),
+			Message: fmt.Sprintf("State says plan mode but spec %s has status %q (expected Approved)", s.ActiveSpec, status),
 		})
 	}
 
@@ -183,35 +187,6 @@ func validateReviewMode(root string, s *state.Focus) []Warning {
 	}
 
 	return warnings
-}
-
-// readSpecApprovalStatus extracts the Status field from the Approval section of a spec.
-func readSpecApprovalStatus(specPath string) string {
-	f, err := os.Open(specPath)
-	if err != nil {
-		return "unknown"
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inApproval := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "## Approval") {
-			inApproval = true
-			continue
-		}
-		if inApproval && strings.HasPrefix(line, "## ") {
-			break
-		}
-		if inApproval && strings.Contains(line, "**Status**:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-	return "unknown"
 }
 
 // checkBeadStatus calls `bd show <bead> --json` via bead.RunBD (shared tracing)

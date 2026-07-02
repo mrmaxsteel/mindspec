@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "108-cleanup-frontmatter-perf-wave2",
+  "target": "spec/108-cleanup-frontmatter-perf-wave2",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "8b9453596bfc7bce9faaed70e804798919d51908"
+}

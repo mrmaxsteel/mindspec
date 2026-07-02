@@ -13,7 +13,7 @@ func TestCrossValidate_SpecMode_OK(t *testing.T) {
 	tmp := t.TempDir()
 	os.MkdirAll(filepath.Join(tmp, "docs", "specs", "004-instruct"), 0755)
 	os.WriteFile(filepath.Join(tmp, "docs", "specs", "004-instruct", "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: DRAFT\n"), 0644)
+		[]byte("---\nstatus: Draft\n---\n# Spec\n"), 0644)
 
 	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
@@ -28,7 +28,7 @@ func TestCrossValidate_SpecMode_PlanExistsSkippedGate(t *testing.T) {
 	specDir := filepath.Join(tmp, "docs", "specs", "004-instruct")
 	os.MkdirAll(specDir, 0755)
 	os.WriteFile(filepath.Join(specDir, "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: DRAFT\n"), 0644)
+		[]byte("---\nstatus: Draft\n---\n# Spec\n"), 0644)
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
@@ -61,7 +61,7 @@ func TestCrossValidate_SpecMode_AlreadyApproved(t *testing.T) {
 	tmp := t.TempDir()
 	os.MkdirAll(filepath.Join(tmp, "docs", "specs", "004-instruct"), 0755)
 	os.WriteFile(filepath.Join(tmp, "docs", "specs", "004-instruct", "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"), 0644)
+		[]byte("---\nstatus: Approved\n---\n# Spec\n"), 0644)
 
 	s := &state.Focus{Mode: state.ModeSpec, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
@@ -107,7 +107,7 @@ func TestCrossValidate_PlanMode_OK(t *testing.T) {
 	specDir := filepath.Join(tmp, "docs", "specs", "004-instruct")
 	os.MkdirAll(specDir, 0755)
 	os.WriteFile(filepath.Join(specDir, "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"), 0644)
+		[]byte("---\nstatus: Approved\n---\n# Spec\n"), 0644)
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
@@ -124,7 +124,7 @@ func TestCrossValidate_PlanMode_SpecNotApproved(t *testing.T) {
 	specDir := filepath.Join(tmp, "docs", "specs", "004-instruct")
 	os.MkdirAll(specDir, 0755)
 	os.WriteFile(filepath.Join(specDir, "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: DRAFT\n"), 0644)
+		[]byte("---\nstatus: Draft\n---\n# Spec\n"), 0644)
 	os.WriteFile(filepath.Join(specDir, "plan.md"),
 		[]byte("---\nstatus: Draft\n---\n# Plan\n"), 0644)
 
@@ -141,7 +141,7 @@ func TestCrossValidate_PlanMode_NoPlan(t *testing.T) {
 	specDir := filepath.Join(tmp, "docs", "specs", "004-instruct")
 	os.MkdirAll(specDir, 0755)
 	os.WriteFile(filepath.Join(specDir, "spec.md"),
-		[]byte("# Spec\n\n## Approval\n\n- **Status**: APPROVED\n"), 0644)
+		[]byte("---\nstatus: Approved\n---\n# Spec\n"), 0644)
 
 	s := &state.Focus{Mode: state.ModePlan, ActiveSpec: "004-instruct"}
 	warnings := CrossValidate(tmp, s)
@@ -179,27 +179,68 @@ func TestCrossValidate_IdleMode(t *testing.T) {
 	}
 }
 
+// TestReadSpecApprovalStatus pins the spec-approval status source after spec
+// 108 R6: the value now comes from the YAML frontmatter `status:` field via
+// SpecStatusAt (the deleted readSpecApprovalStatus prose scan is gone). Case is
+// preserved; the CrossValidate callers compare case-insensitively.
 func TestReadSpecApprovalStatus(t *testing.T) {
-	tmp := t.TempDir()
-
 	tests := []struct {
 		name    string
 		content string
 		want    string
 	}{
-		{"approved", "# Spec\n\n## Approval\n\n- **Status**: APPROVED\n", "APPROVED"},
-		{"draft", "# Spec\n\n## Approval\n\n- **Status**: DRAFT\n", "DRAFT"},
-		{"no approval section", "# Spec\n\n## Goal\n\nSomething\n", "unknown"},
+		{"approved", "---\nstatus: Approved\n---\n# Spec\n", "Approved"},
+		{"draft", "---\nstatus: Draft\n---\n# Spec\n", "Draft"},
+		{"no frontmatter", "# Spec\n\n## Goal\n\nSomething\n", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(tmp, tt.name+".md")
-			os.WriteFile(path, []byte(tt.content), 0644)
-
-			got := readSpecApprovalStatus(path)
+			specDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			got := SpecStatusAt(specDir)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSpecApprovalStatusFromFrontmatter is the spec 108 R6 ZFC-fix proof: when
+// the YAML frontmatter `status:` field and the `## Approval` prose disagree,
+// the frontmatter value decides. The prose scan that previously drove the
+// approval gate (readSpecApprovalStatus) is deleted, so a stale/contradictory
+// `## Approval` block can no longer flip the declared status.
+func TestSpecApprovalStatusFromFrontmatter(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			// Frontmatter says Draft; prose falsely claims APPROVED.
+			name:    "frontmatter draft overrides approved prose",
+			content: "---\nstatus: Draft\n---\n# Spec\n\n## Approval\n\n- **Status**: APPROVED\n",
+			want:    "Draft",
+		},
+		{
+			// Frontmatter says Approved; prose still says DRAFT.
+			name:    "frontmatter approved overrides draft prose",
+			content: "---\nstatus: Approved\n---\n# Spec\n\n## Approval\n\n- **Status**: DRAFT\n",
+			want:    "Approved",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			specDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if got := SpecStatusAt(specDir); got != tt.want {
+				t.Errorf("SpecStatusAt = %q, want %q (frontmatter must decide over prose)", got, tt.want)
 			}
 		})
 	}

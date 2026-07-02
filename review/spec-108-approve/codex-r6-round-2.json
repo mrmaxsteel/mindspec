@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "All three round-1 asks are addressed in commit 8b945359. Ask 1 (cross-spec sequencing): R11 makes spec 107 a HARD prerequisite — 108 may enter Plan Mode only after 107 merges to main AND spec/108 rebases/merges-forward onto post-107 main before plan approve; the merge-resolution order for internal/validate/plan.go is documented (107's IsDomainCoveredCtx deletion lands first, 108's parsePlanFrontmatter migration applies on top), and the findRoot carve-out is reinstated into R3 and made inert by the rebase (with a MUST-verify-absent step). Ask 2 (bead/doc-target): R12 bakes in 3-5 beads, same-diff-or-earlier ownership claims, and bead-unique domain-doc appends across 108's OWN beads, and resolves the 107 doc-file overlap (post-rebase, 108's appends stack cleanly onto 107's rather than collide). Ask 3 (plan.go collision): R11 names it explicitly with both waves' specific changes and a blanket rebase-first resolution. The stated rebase procedure and merge-resolution order are complete enough for planning to execute without improvisation. No gate-blocking gaps remain.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "cross-spec sequencing (ask 1)",
+      "finding": "ADDRESSED. R11 (spec.md:60) is a new hard-prerequisite requirement: plan approve gated on 107 merged-to-main plus a rebase/merge-forward of spec/108 onto post-107 main. It documents the exact resolution for the shared internal/validate/plan.go (107's IsDomainCoveredCtx dead-code deletion lands first; 108's parsePlanFrontmatter migration applies on top) and ties the findRoot inertness (R3, spec.md:44) to the rebase. Tree-verified: spec/107-cleanup-deadcode-dry-wave1 exists locally and on origin (plus pr-107), so 107 is genuinely in-flight and the prerequisite is real, not decorative."
+    },
+    {
+      "severity": "info",
+      "area": "bead decomposition / doc-target constraints (ask 2)",
+      "finding": "ADDRESSED. R12 (spec.md:62) plus R10 (spec.md:58) now carry: 3-5 beads; ownership claims same-diff-or-earlier than any internal/trace/** or .golangci.yml edit; each bead appends one bead-unique paragraph/subsection per touched domain doc; and the 107 overlap is resolved — post-rebase, 108's appends MAY target the same doc FILES 107 appended to because they stack cleanly onto 107's, while remaining unique across 108's own beads. This fully answers my round-1 concern that 108 and 107 both touch the workflow docs + context-system architecture.md; the rebase-first ordering converts a potential collision into a clean append-after."
+    },
+    {
+      "severity": "info",
+      "area": "internal/validate/plan.go collision (ask 3)",
+      "finding": "ADDRESSED, and more robustly than round-1 assumed. R11 calls the collision out by name with both waves' specific edits and resolves it via rebase-first ordering. Tree check confirms plan.go is an even bigger hotspot than flagged: R5's parsePlanFrontmatter (plan.go:266), 107's deleted IsDomainCoveredCtx (plan.go:647), AND all of R8's ADR-memoization targets (checkADRCitations:483, checkADRCoverage:534, hasAcceptedCitation:570, coverageOf:660) live in this one file. The blanket 'rebase onto post-107 main, then apply 108 on top' resolves the entire file regardless of which functions each wave touches, so no per-function merge choreography is needed."
+    },
+    {
+      "severity": "info",
+      "area": "scope-list precision (advisory, non-blocking)",
+      "finding": "The In-Scope list (spec.md:72-73) attributes R7+R8 edits to internal/validate/{ownership.go,divergence.go,docsync.go,ownership_resolve.go}. That is accurate for R7 (ownership-load hoisting) but imprecise for R8: the ADR-coverage functions R8 memoizes (coverageOf/checkADRCoverage/hasAcceptedCitation/checkADRCitations) all live in internal/validate/plan.go, so plan.go carries both R5 and R8 changes, not R5 alone. This does not affect planning correctness — R8 (spec.md:54) names the functions correctly and R11 covers plan.go comprehensively — but a planner may want to note plan.go as an R8 touch-file too. Advisory only; not gate-blocking."
+    }
+  ]
+}

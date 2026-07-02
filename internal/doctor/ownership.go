@@ -23,6 +23,12 @@ var walkExclusions = map[string]struct{}{
 	".beads":     {},
 }
 
+// walkWorkspaceFn is the package-level seam for the single workspace tree
+// enumeration (spec 108 Req 9). It defaults to filepath.WalkDir; tests
+// swap it to count invocations and prove the tree is walked exactly once
+// per ownership check regardless of domain count.
+var walkWorkspaceFn = filepath.WalkDir
+
 // checkOwnershipManifests runs the static-time ownership manifest
 // health checks (spec 091): the dead-manifest Warn (Req 17) for every
 // EXISTING manifest whose paths glob set resolves to zero files, then
@@ -37,6 +43,11 @@ func checkOwnershipManifests(r *Report, root string) {
 	if len(domains) == 0 {
 		return
 	}
+
+	// Enumerate the live workspace file list ONCE per ownership check
+	// (spec 108 Req 9), then test every domain's paths globs against this
+	// cached list instead of re-walking the tree per domain.
+	files := enumerateWorkspaceFiles(root)
 
 	// Per-domain dead-manifest, plus collect loaded paths for the
 	// cross-domain hygiene checks.
@@ -54,10 +65,43 @@ func checkOwnershipManifests(r *Report, root string) {
 			continue
 		}
 		loaded[d] = o
-		checkDeadManifest(r, root, d, o)
+		checkDeadManifest(r, files, d, o)
 	}
 
 	checkHygiene(r, domains, loaded)
+}
+
+// enumerateWorkspaceFiles walks the workspace tree ONCE via the
+// walkWorkspaceFn seam and returns every non-directory file path relative
+// to root (slash-separated). The walk skips the walkExclusions trees
+// (.git/, .worktrees/, .beads/, V2-6) so a stray match inside those trees
+// cannot mask a dead manifest. The result is consumed by every domain's
+// dead-manifest check within a single ownership check, replacing the
+// former per-domain full walk.
+func enumerateWorkspaceFiles(root string) []string {
+	var files []string
+	_ = walkWorkspaceFn(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // tolerate unreadable entries; keep walking
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if _, skip := walkExclusions[rel]; skip {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	return files
 }
 
 // canonicalDomains returns the lexicographically-sorted domain
@@ -92,12 +136,12 @@ func manifestCheckName(domain string) string {
 // (one state, one Warn). An empty stub (paths: []) trivially resolves
 // to zero files and DOES fire, with the suspect glob reported as
 // "(empty)".
-func checkDeadManifest(r *Report, root, domain string, o *validate.Ownership) {
+func checkDeadManifest(r *Report, files []string, domain string, o *validate.Ownership) {
 	if o.Source() == "missing" {
 		return // covered by the Req 21 missing-OWNERSHIP Warn
 	}
 
-	if manifestResolvesAny(root, o.Paths) {
+	if manifestResolvesAny(files, o.Paths) {
 		return
 	}
 
@@ -114,42 +158,21 @@ func checkDeadManifest(r *Report, root, domain string, o *validate.Ownership) {
 }
 
 // manifestResolvesAny reports whether any of the manifest's paths globs
-// matches at least one file in the live workspace tree. An empty paths
-// set trivially resolves to nothing. The walk skips .git/, .worktrees/,
-// and .beads/ (V2-6) so a stray match inside those trees cannot mask a
-// dead manifest. Matching delegates to the shared validate.GlobMatch.
-func manifestResolvesAny(root string, paths []string) bool {
+// matches at least one file in the pre-enumerated workspace file list
+// (the slash-separated relative paths from enumerateWorkspaceFiles, which
+// already excludes the .git/, .worktrees/, and .beads/ trees per V2-6). An
+// empty paths set trivially resolves to nothing. Matching delegates to the
+// shared validate.GlobMatch.
+func manifestResolvesAny(files, paths []string) bool {
 	if len(paths) == 0 {
 		return false
 	}
-
-	found := false
-	stop := fmt.Errorf("matched")
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // tolerate unreadable entries; keep walking
-		}
-		rel, relErr := filepath.Rel(root, p)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == "." {
-			return nil
-		}
-		if d.IsDir() {
-			if _, skip := walkExclusions[rel]; skip {
-				return fs.SkipDir
-			}
-			return nil
-		}
+	for _, rel := range files {
 		if matchesAnyGlob(paths, rel) {
-			found = true
-			return stop
+			return true
 		}
-		return nil
-	})
-	return found
+	}
+	return false
 }
 
 // matchesAnyGlob reports whether rel matches at least one pattern,
