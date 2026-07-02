@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "My round-1 blocking ask is ADDRESSED. R3 now states the load-bearing claim precisely: 'removing the findRoot exclusion while findRoot remains in the tree makes golangci-lint run report internal/next/beads.go:53: findRoot - result 1 (error) is always nil' — matching the exact diagnostic I reproduced in round 1 (beads.go:53:26 ... unparam). The parenthetical now correctly characterizes --no-config as bypassing ALL exclusions rather than removing this one, which was my precise objection; the false 'reproducible via --no-config' framing is gone. The fix also reinstated the findRoot carve-out removal, conditioned on the R11 107-prerequisite rebase, and that conditioning is stated accurately: I verified findRoot exists on the current branch base (internal/next/beads.go:53) and is genuinely dead in package next (unexported, zero callers in-package; the cmd/mindspec findRoot calls bind to the separate root.go:167 definition), so 107's dead-code sweep deleting it is plausible and the post-rebase removal is inert. R3/R11/AC(line 97) are internally consistent on 'evaluated post-R11 rebase when findRoot no longer exists'. No gate-blocking issues remain.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "addressed",
+      "file": ".mindspec/specs/108-cleanup-frontmatter-perf-wave2/spec.md",
+      "line": 44,
+      "title": "R4 round-1 ask ADDRESSED: findRoot/unparam proof restated precisely",
+      "details": "Round-1 asked to correct the non-reproducible '--no-config' proof. R3 now takes the restatement option I offered: 'removing the findRoot exclusion while findRoot remains in the tree makes golangci-lint run report internal/next/beads.go:53: findRoot - result 1 (error) is always nil'. This matches the empirical output I obtained in round 1 with a config that removes only the findRoot exclusion (internal/next/beads.go:53:26: findRoot - result 1 (error) is always nil (unparam)). The '--no-config' reference is retained but now honestly framed as 'bypasses ALL exclusions rather than removing this one', so it is no longer presented as a targeted carve-out probe. The false factual claim is gone."
+    },
+    {
+      "severity": "verified",
+      "file": "internal/next/beads.go",
+      "line": 53,
+      "title": "107-prerequisite conditioning empirically accurate",
+      "details": "grep confirms findRoot exists on the current branch base at internal/next/beads.go:53. It is dead in package next: unexported with zero in-package callers. The 26 'findRoot()' call sites live in cmd/mindspec/**.go (package main) and bind to the distinct cmd/mindspec/root.go:167 definition, not this one. That deadness is exactly what 107's dead-code sweep removes, so the spec's 'once 107 (which deletes findRoot) is in 108's base, findRoot no longer exists ... removal is inert' (R3), the R11 statement, and the lint AC 'evaluated post-R11 rebase' (line 97) are consistent and accurate."
+    },
+    {
+      "severity": "advisory",
+      "file": ".mindspec/specs/108-cleanup-frontmatter-perf-wave2/spec.md",
+      "line": 44,
+      "title": "Non-blocking: the literal reproduction is the config-minus-findRoot-exclusion probe",
+      "details": "The strictly reproducible command for the quoted diagnostic is a .golangci.yml with only the findRoot exclusion removed (which I ran in round 1), not '--no-config' (which errored 'no go files to analyze' in this worktree and bypasses everything). The spec's current wording no longer claims '--no-config' reproduces it, so this is advisory only — the load-bearing sentence is now the restated claim, which is empirically true. No change required for approval."
+    }
+  ]
+}

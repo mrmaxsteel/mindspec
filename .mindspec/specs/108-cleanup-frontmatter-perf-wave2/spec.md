@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-02T09:04:40Z"
+approved_by: panel:spec-108-approve round-2 (6/6 APPROVE; R1-R3 claude, R4-R6 claude-sub, codex walled)
+status: Approved
 ---
 # Spec 108-cleanup-frontmatter-perf-wave2: Cleanup wave 2: frontmatter unification, validation perf caching, deferred trace/golangci ownership
 
@@ -127,7 +127,7 @@ _All open questions are resolved; the resolutions are folded into the requiremen
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: panel:spec-108-approve round-2 (6/6 APPROVE; R1-R3 claude, R4-R6 claude-sub, codex walled)
+- **Approval Date**: 2026-07-02
+- **Notes**: Approved via mindspec approve spec
