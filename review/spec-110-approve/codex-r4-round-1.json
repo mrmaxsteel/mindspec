@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "Most empirical claims check out in this tree: panel.Scan supports both review/ and reviews/ roots; PanelGateDecision and ResolveGateFacts exist in internal/panel/gate.go; ApproveSpec calls validate.ValidateSpec; normalizeImpactedDomains has the pinned severity semantics, including bare-name tolerance; and `mindspec validate spec 110-panel-verbs-parser-parity` passes with only the expected lifecycle-binding warning. However R2 contains a false current-tree premise: it says the `instruct --panel-state` PanelStateEntry renderer already wraps PanelGateDecision/ResolveGateFacts. It does not; PanelStateEntry.verdict is a separate decision reproduction. Because R2 allows verify to reuse that renderer, the spec can accidentally preserve the very second decision implementation it is trying to remove.",
+  "concrete_changes_required": [
+    "Revise R2 to remove the claim that `instruct --panel-state` PanelStateEntry already wraps `panel.ResolveGateFacts`/`panel.PanelGateDecision`, or explicitly require first refactoring that renderer to do so before `panel verify` may reuse it.",
+    "Add an acceptance criterion or falsifier that fails if `panel verify` obtains its PASS/BLOCK preview from `PanelStateEntry.verdict` or any other duplicate decision logic instead of `panel.PanelGateDecision`."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "location": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:47",
+      "summary": "R2 permits reuse of an instruct renderer under a false premise.",
+      "evidence": "The spec says `PanelStateEntry` already wraps `panel.ResolveGateFacts`/`panel.PanelGateDecision`. In this tree, `internal/instruct/panelstate.go:87` defines `PanelStateEntry.verdict`, which manually mirrors the decision matrix through stale SHA, incomplete, reject/hard_block, and threshold branches instead of calling `internal/panel/gate.go:131` `PanelGateDecision`."
+    },
+    {
+      "severity": "info",
+      "location": "validation",
+      "summary": "Requested validation command passes.",
+      "evidence": "`mindspec validate spec 110-panel-verbs-parser-parity` returned one non-gating warning: `lifecycle-binding: spec has no beads epic; run spec approve to create one`."
+    }
+  ]
+}

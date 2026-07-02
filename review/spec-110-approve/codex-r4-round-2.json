@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Both round-1 asks are ADDRESSED and the empirical premise is confirmed against this tree. Confirmed: internal/instruct/panelstate.go:87 PanelStateEntry.verdict() manually reimplements the decision matrix (its own RoundMismatch, staleness/BranchMissing, incomplete, reject/hard_block, threshold branches) and does NOT call panel.PanelGateDecision. Ask-1 (ADDRESSED): R2 (spec.md:51) no longer claims the renderer already wraps the single home; it states the true current state verbatim ('it does NOT call PanelGateDecision') and REQUIRES the refactor FIRST — the section header 'Ratchet the pre-existing duplicate onto the single home first' plus 'PanelStateEntry.verdict() is refactored to delegate to panel.ResolveGateFacts + panel.PanelGateDecision ... the second copy is deleted', mirrored in Scope (spec.md:70). Ask-2 (ADDRESSED): R2's falsifier fails if verify's PASS/BLOCK 'comes from anything but panel.PanelGateDecision (a surviving PanelStateEntry.verdict() matrix or any new copy)', and three ACs pin it: TestPanelStateVerdict_DelegatesToPanelGateDecision (old reproduction is gone), TestPanelVerify_MatchesGateAndWritesNothing, and the contract-pin TestPanelVerbs_DecisionIsPanelGateDecision (any second copy breaks the test). No residual asks.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "location": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:51",
+      "summary": "Round-1 false-premise corrected and refactor-first requirement added (ASK-1 ADDRESSED).",
+      "evidence": "R2 now reads: 'Today internal/instruct's PanelStateEntry.verdict() is a separate read-only reproduction of the decision matrix — it does NOT call PanelGateDecision ... As part of the verify work, PanelStateEntry.verdict() is refactored to delegate to panel.ResolveGateFacts + panel.PanelGateDecision, so instruct --panel-state and panel verify both render the ONE decision function and the second copy is deleted.' This matches the tree: panelstate.go:87 verdict() branches on RoundMismatch/BranchMissing/LiveBranchSHA/Complete()/Rejects/threshold locally, never calling internal/panel/gate.go PanelGateDecision."
+    },
+    {
+      "severity": "info",
+      "location": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:98",
+      "summary": "Preview-source falsifier + AC added (ASK-2 ADDRESSED).",
+      "evidence": "AC TestPanelStateVerdict_DelegatesToPanelGateDecision asserts 'the old PanelStateEntry.verdict() reproduction is gone'; R2 falsifier fails if the preview 'comes from anything but panel.PanelGateDecision (a surviving PanelStateEntry.verdict() matrix or any new copy)'; the contract-pin AC TestPanelVerbs_DecisionIsPanelGateDecision breaks if any decision branch is copied into a CLI adapter — covering 'any other duplicate decision logic'."
+    }
+  ]
+}

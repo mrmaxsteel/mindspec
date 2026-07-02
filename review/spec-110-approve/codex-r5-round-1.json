@@ -1,0 +1,47 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The severity-parity AC pair is present and runnable: path-like zero-owner rejection with impacted-domains-resolve, bare-name-no-manifest tolerance, plus real-domain pass. The tally exit-code contract is also runnable, including Allow=0, Block=non-zero, recovery line, and printed decision matching PanelGateDecision. The round/SHA co-bump is mostly falsifiable through create tests that require a re-resolved SHA on round 2 and preserved prior verdict files. However, the spec does not satisfy the requested every-falsified-if coverage matrix: R4's schema-doc absence/constant contradiction has no runnable AC, and R7a's PanelGateDecision input/output stability has no runnable AC that would fail if the function contract changed while call sites/tests were updated. Those gaps leave approval criteria partly prose-only.",
+  "concrete_changes_required": [
+    "Add a runnable AC for R4 that fails when the workflow domain schema documentation is absent or contradicts panel.FileName, the verdict-file round base/pattern, or panel.ConsolidatedName.",
+    "Add a runnable AC for R7a that pins the PanelGateDecision function contract sufficiently to fail if its inputs/outputs are added, removed, or semantically moved into the CLI adapters."
+  ],
+  "findings": [
+    {
+      "id": "R5-F1",
+      "severity": "blocking",
+      "requirement": "R4",
+      "evidence": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:51 requires schema doc presence and agreement with panel constants, but the AC list at lines 88-96 has no command checking the workflow doc or comparing documented names/patterns to constants.",
+      "impact": "The falsified-if clause for absent or contradictory portability-contract docs is not covered by a runnable acceptance criterion."
+    },
+    {
+      "id": "R5-F2",
+      "severity": "blocking",
+      "requirement": "R7a",
+      "evidence": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:57 says the spec is falsified if PanelGateDecision gains or loses an input, but the ACs only check verify/tally outcomes against the function and package build/tests.",
+      "impact": "An implementation could change the PanelGateDecision contract and update all call sites/tests; the listed ACs would not necessarily detect the boundary violation."
+    },
+    {
+      "id": "R5-N1",
+      "severity": "non_blocking",
+      "requirement": "R1",
+      "evidence": "The ACs at lines 88-89 require a single panel.json write in the leaf writer and a round-2 create with a freshly re-resolved SHA plus preserved round-1 verdicts.",
+      "impact": "This is adequate for the round/SHA co-bump unless the panel-create path can bypass the tested writer. If that seam exists during planning, make the command test assert the writer path is mandatory or inject a write counter/failure."
+    },
+    {
+      "id": "R5-PASS-SEVERITY-PARITY",
+      "severity": "pass",
+      "requirement": "R5",
+      "evidence": "The AC at line 92 covers path-like zero-owner rejection under impacted-domains-resolve, bare-name-no-manifest tolerance, and real-domain pass.",
+      "impact": "The grill's severity-parity pair is present and runnable."
+    },
+    {
+      "id": "R5-PASS-TALLY-EXIT",
+      "severity": "pass",
+      "requirement": "R3",
+      "evidence": "The AC at line 91 covers passing exit 0, blocking non-zero, final recovery line via guard.HasFinalRecoveryLine, and printed decision equality with PanelGateDecision.",
+      "impact": "The tally exit-code contract is testable."
+    }
+  ]
+}

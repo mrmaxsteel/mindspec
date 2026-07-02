@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-02T21:51:09Z"
+approved_by: user
+status: Approved
 ---
 # Spec 110-panel-verbs-parser-parity: Panel lifecycle verbs (create/verify/tally) as the agent-neutral contract + spec-approve parser parity
 
@@ -125,7 +125,7 @@ _All open questions are resolved; every resolution is folded into the Requiremen
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-02
+- **Notes**: Approved via mindspec approve spec
