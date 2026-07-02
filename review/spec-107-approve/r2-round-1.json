@@ -1,0 +1,58 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Codebase-pin lens: verified every file/symbol/line-number claim against the live tree. deadcode -test confirms all named R1 functions are unreachable at the cited locations (getCwd is a dead `var getCwd = os.Getwd` alias with zero refs, not a func, hence absent from deadcode but genuinely dead). codex.go:68/79/96 use plain os.WriteFile/os.OpenFile while claude.go (495/506/523) and copilot.go (62/73/93) route through safeio — the symlink gap is real, and no codex refusal test exists (claude/copilot ones do at symlink_refusal_test.go:17/94). complete.go:884-905 queryAllChildren per-status loop and phase cache.go:213-230 fetchChildren single comma-joined call are exactly as described; complete.go:223/228/716/781 each resolve spec->epic via a throwaway NewCache issuing `bd list --type=epic`. The three .golangci.yml carve-outs exist (77-88) with targets gone/dead; AGENTS.md truly lacks the guardrails section (CLAUDE.md:43 dangles); spec.go:30-71 and spec_init.go:20-61 RunE are byte-identical. All six ADRs exist (Accepted) with Domain lines matching verbatim, covering all four impacted domains. Only defect: ADR links use ../../adr/ (resolves to nonexistent .mindspec/docs/adr/; ADRs live at flat .mindspec/adr/) — cosmetic, non-blocking (coverage resolves by ID, not link path).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "claim": "All ~25 named dead functions/clusters exist at cited locations with no live callers.",
+      "verification": "deadcode -test ./cmd/... ./internal/... ./plugins/... reports exactly 24 unreachable funcs matching R1 (contextpack NewADRStore/readFileContent, doctor.Run, gitutil MainWorktreePath/IsMainWorktree, harness filterEnv/assertCommandUsedFlag/assertCleanWorktree, hook hasPathPrefix/stripEnvPrefixes/parseEnvPrefixes/isEnvVarName, layout Mover.WithPlan/WithRules/WithRootDocs, next.findRoot, phase.FindActiveBeadForEpic, recording.DefaultCodexConfigPath, setup.hasManagedBlock@claude.go:555, validate SpecStatusFromBytes/SpecIsApproved/IsDomainCoveredCtx/BeadID, plugins SkillNames/sortStrings). getCwd is `var getCwd = os.Getwd` at hook/helpers.go:68 with zero callers — a dead var (not func), correctly slated for deletion though the spec labels it a 'function'.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "codex.go:68,79,96 use plain os.WriteFile/os.OpenFile; claude.go/copilot.go use safeio at equivalent managed-block sites.",
+      "verification": "codex.go:68 os.WriteFile, :79 os.OpenFile, :96 os.WriteFile (all for AGENTS.md). claude.go:495/523 safeio.WriteFileNoSymlink, :506 safeio.OpenAppendNoSymlink. copilot.go:62/93 safeio.WriteFileNoSymlink, :73 safeio.OpenAppendNoSymlink. The symlink-safety gap for codex is real.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "Claude and Copilot symlink-refusal tests exist; codex lacks one.",
+      "verification": "symlink_refusal_test.go:17 TestRunClaude_RefusesSymlinkedCLAUDEmd, :94 TestRunCopilot_RefusesSymlinkedInstructions (plus :54 Settings). No TestRunCodex_* present — R4 adds it.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "complete.go:884-905 per-status queryAllChildren loop; phase cache.go:213-230 single comma-joined fetchChildren; complete.go:223/228/716/781 throwaway epic lookups.",
+      "verification": "queryAllChildren@884-905 loops bead.AllStatuses calling listJSONFn per status. fetchChildren@213-230 does one `--status=<comma-joined>` listJSONFn call. Lines 223=phase.EnsureMigrated, 228/716/781=phase.FindEpicBySpecID; both construct fresh NewCache() -> fetchAllEpics `bd list --type=epic` (cache.go:48/188, derive.go:525, migrate.go:37). No exported phase.FetchChildren exists yet (R6 adds it).",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "Three stale .golangci.yml unparam carve-outs exist and their targets are gone/dead.",
+      "verification": ".golangci.yml:77-88 lists brownfield/plan.go (buildMigrationPlan), contextpack/builder.go (isNeighbor), next/beads.go (findRoot). internal/brownfield/ absent; isNeighbor absent; next/beads.go:53 findRoot present but deadcode-dead (deleted in R1). The 4th carve-out validateReviewMode (state.go:175, live) is correctly left out of scope.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "AGENTS.md lacks '## Bead-loop guardrails (mindspec)'; CLAUDE.md:43 dangle-references it; spec.go/spec_init.go RunE byte-identical.",
+      "verification": "AGENTS.md headers stop at Guidance/Build&Test/MindSpec/Beads/Session Completion/Architecture/Landing-the-Plane; grep for the section returns nothing. CLAUDE.md:43 'See **AGENTS.md § Bead-loop guardrails (mindspec)**'. spec.go RunE (30-71) and spec_init.go RunE (20-61) are verbatim identical.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "info",
+      "claim": "Six cited ADRs exist with the exact Domain lines quoted.",
+      "verification": ".mindspec/adr/ADR-0030 (execution,validation,lifecycle,lint), 0033 (context-system), 0034 (workflow), 0035 (workflow,execution,core), 0036 (workflow,validation,doc-sync,ownership), 0037 (workflow,execution) — all Status: Accepted, all Domain lines match spec verbatim. Impacted domains workflow/execution/core/context-system are each covered.",
+      "result": "CONFIRMED"
+    },
+    {
+      "severity": "low",
+      "claim": "ADR Touchpoint markdown links resolve to real files.",
+      "verification": "Spec at .mindspec/docs/specs/107.../spec.md links [ADR-XXXX](../../adr/ADR-XXXX.md), resolving to .mindspec/docs/adr/ which does NOT exist; the ADRs live at flat .mindspec/adr/ (needs ../../../adr/). Clickable links are broken. NON-BLOCKING: this matches the repo's template convention and validate_test.go fixtures (../../adr/), and spec-approve ADR coverage resolves by ADR ID against the FileStore, not by link path, so the gate still passes. Reflects a repo layout inconsistency (post-106 flatten put specs under docs/specs but ADRs at flat .mindspec/adr). Worth a one-line path fix but does not gate approval.",
+      "result": "MINOR_DISCREPANCY",
+      "hard_block": false
+    }
+  ]
+}

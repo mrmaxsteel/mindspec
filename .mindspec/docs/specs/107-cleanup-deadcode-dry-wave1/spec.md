@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-02T06:47:57Z"
+approved_by: panel:spec-107-approve round-2 (6/6 APPROVE; R1-R3 claude, R4-R6 codex)
+status: Approved
 ---
 # Spec 107-cleanup-deadcode-dry-wave1: Cleanup wave 1: dead-code sweep, setup managed-block unification (safeio), complete perf pair, guardrails restoration
 
@@ -100,7 +100,7 @@ _All open questions are resolved; both resolutions are folded into the requireme
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: panel:spec-107-approve round-2 (6/6 APPROVE; R1-R3 claude, R4-R6 codex)
+- **Approval Date**: 2026-07-02
+- **Notes**: Approved via mindspec approve spec
