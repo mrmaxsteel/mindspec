@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-02T16:29:19Z"
+approved_by: user
+status: Approved
 ---
 # Spec 109-orchestration-config-substrate: Orchestration config substrate + the gate/config/instruct/skill layering ratchet (ADR-0040)
 
@@ -117,7 +117,7 @@ _All open questions are resolved; every resolution is folded into the Requiremen
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-02
+- **Notes**: Approved via mindspec approve spec
