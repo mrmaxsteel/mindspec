@@ -27,10 +27,12 @@ work_chunks:
       - internal/panel/panel_test.go
       - .mindspec/domains/workflow/architecture.md
   - id: 4
-    depends_on: [2]
+    depends_on: [2, 3]
     key_file_paths:
       - cmd/mindspec/config.go
       - cmd/mindspec/config_test.go
+      - internal/complete/panel_advisory.go
+      - internal/complete/panel_advisory_test.go
       - .mindspec/domains/workflow/interfaces.md
 ---
 # Plan: 109-orchestration-config-substrate
@@ -94,11 +96,13 @@ ADR-0034's ceremony collapse) — so it lands **Accepted**, not Proposed (spec O
 Question, resolved), and needs no supersede flow. It is **not** listed in this
 plan's `adr_citations` because it does not exist on disk at `mindspec validate
 plan` / `mindspec plan approve` time (Bead 1 creates it); citing it would fail the
-`adr-cite-missing` gate. The plan's mechanical ADR-divergence coverage for the
-later source beads is supplied by the existing citations (ADR-0035 / ADR-0039 both
-carry `core, workflow`); Bead 1 landing first makes ADR-0040 an additional
-`core, workflow` coverage source and the architectural anchor present before any
-source bead lands (see Testing Strategy → dependency shape).
+`adr-cite-missing` gate. **The mechanical complete-time ADR-divergence coverage
+for the later source beads is supplied entirely by ADR-0035 and ADR-0039 (both
+carry `core, workflow`); ADR-0040 is the in-tree architectural anchor landed by
+Bead 1 — citable by later specs, but not load-bearing for this plan's
+`adr_citations` and not required to satisfy any coverage gate here.** Bead 1
+landing first ensures that anchor is present before any source bead lands (see
+Testing Strategy → dependency shape).
 
 ## Testing Strategy
 
@@ -131,14 +135,20 @@ of prompting. No new external dependency, no network access.
 
 **Dependency shape (decomposition).** Four beads. Bead 1 (docs) has no deps.
 Beads 2 (`internal/config`) and 3 (`internal/panel`) depend only on Bead 1 — a
-package-disjoint pair that runs in parallel after the ADR anchor lands. Bead 4
-(`cmd/mindspec`) depends on Bead 2 because `renderConfig` reads the new
-`config.Panel/Models/Loop/Runner` fields Bead 2 adds — a **real compile-time
-dependency**, not merely an ordering wish; Bead 1 is transitively guaranteed
-before Bead 4 via Bead 2. Longest chain is 3 nodes (1 → 2 → 4), at the advisory
-`max_chain_depth` threshold, not over it; parallelism ratio is 0.25, at the
-advisory floor. Beads 2 and 3 are genuinely independent (disjoint packages,
-no shared produced state), so no false edge is added between them.
+package-disjoint pair that runs in parallel after the ADR anchor lands; Bead 3
+stays a pure leaf (no dependency on Bead 2). Bead 4 (`cmd/mindspec` +
+`internal/complete`, the workflow-side consumers) depends on **both** Bead 2 and
+Bead 3: `renderConfig` reads the new `config.Panel/Models/Loop/Runner` fields
+Bead 2 adds (a **real compile-time dependency**, not merely an ordering wish),
+and the two caller-side note surfaces call `panel.ReviewerCountNote` (Bead 3)
+with `cfg.PanelExpectedReviewers()` (Bead 2). Bead 1 is transitively guaranteed
+before Bead 4 via either parent. Longest chain is 3 nodes (1 → 2 → 4 and
+1 → 3 → 4), at the advisory `max_chain_depth` threshold, not over it; parallelism
+ratio is 0.25, at the advisory floor. Beads 2 and 3 are genuinely independent
+(disjoint packages, no shared produced state), so no false edge is added between
+them — grouping both caller-side renderings into Bead 4 (rather than splitting the
+complete-gate wiring into Bead 3) keeps the leaf helper's definition and its two
+consumers cleanly separated and preserves the 2‖3 parallelism.
 
 ## Bead 1: ADR-0040 (Accepted) + the ADR-0037 amendment note
 
@@ -179,14 +189,14 @@ no shared produced state), so no false edge is added between them.
 6. Run the content-anchor greps to confirm every required label/phrase is present.
 
 **Verification**
-- [ ] `F=.mindspec/adr/ADR-0040-orchestration-layering-ratchet.md; grep -q 'Status: Accepted' "$F" && grep -q 'L1' "$F" && grep -q 'L2' "$F" && grep -q 'L3' "$F" && grep -q 'L4' "$F" && grep -q 'never casually up' "$F" && grep -q 'artifact + CLI contract' "$F"` exits `0`
+- [ ] `F=.mindspec/adr/ADR-0040-orchestration-layering-ratchet.md; grep -Eq '^- \*\*Status\*\*: Accepted' "$F" && grep -q 'L1' "$F" && grep -q 'L2' "$F" && grep -q 'L3' "$F" && grep -q 'L4' "$F" && grep -q 'never casually up' "$F" && grep -q 'artifact + CLI contract' "$F"` exits `0`. The Status anchor uses a bolding-tolerant regex because the repo header format is `- **Status**: Accepted` (the literal `Status: Accepted` substring is absent from that line). The spec AC's `grep -q 'Status: Accepted'` is the same intent — a bolding-tolerant "Status is Accepted" check — and is interpreted that way; the approved spec is **not** edited (forward-only lifecycle, ADR-0023).
 - [ ] `grep -qiE 'Domain\(s\).*\bcore\b.*\bworkflow\b' .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md` exits `0` (Domain line covers both impacted domains)
 - [ ] `grep -q 'approve_threshold' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` exits `0` (amendment note present)
 - [ ] `git show --name-only --format= HEAD | grep -qE '\.go$'` returns **non-zero** — the bead commit touches no Go source, so `mindspec complete`'s doc-sync gate is **vacuous** (no domain source changed → no domain doc required; the `.mindspec/adr/**` edits are doc-classified and carry themselves)
 - [ ] `go build ./...` exits `0` (tree integrity; ADR docs do not affect the build)
 
 **Acceptance Criteria**
-- [ ] ADR-0040 lands `Status: Accepted` and carries all four layer labels (L1–L4), the ratchet-direction phrase `never casually up`, and the portability phrase `artifact + CLI contract` (spec AC "ADR-0040 lands Accepted…" — R1 content falsifications made runnable)
+- [ ] ADR-0040 lands Accepted (`- **Status**: Accepted`, matched bolding-tolerantly) and carries all four layer labels (L1–L4), the ratchet-direction phrase `never casually up`, and the portability phrase `artifact + CLI contract` (spec AC "ADR-0040 lands Accepted…" — R1 content falsifications made runnable)
 - [ ] The ADR-0037 amendment note recording the optional `approve_threshold` field is present (spec Validation Proof `grep -q 'approve_threshold' …ADR-0037…`)
 
 **Depends on**
@@ -288,40 +298,71 @@ Bead 1
 **Depends on**
 Bead 1
 
-## Bead 4: cmd/mindspec — read-only `config show` + renderConfig
+## Bead 4: cmd/mindspec + internal/complete — read-only `config show` + renderConfig + caller-side ReviewerCountNote rendering
+
+This bead lands both **caller-side** surfaces R8 names for `panel.ReviewerCountNote`
+(defined in Bead 3): `mindspec config show` and the in-binary complete-gate
+advisory. Both are the *workflow-side callers*; neither is `PanelGateDecision`
+(which stays a config-free leaf), and neither changes any `Allow`/`Block`. Both
+packages touched (`cmd/mindspec`, `internal/complete`) are the **workflow** domain.
 
 **Steps**
 1. Add `cmd/mindspec/config.go`: a `config` command with a read-only `show`
    subcommand that resolves the repo root, calls `config.Load(root)`, prints
-   `renderConfig(cfg)` to stdout, exits `0`, and writes nothing.
+   `renderConfig(cfg)` to stdout, exits `0`, and writes nothing; register the
+   command (with its `show` subcommand) on the root command.
 2. Implement `renderConfig(*config.Config) (string, error)` rendering the
    `panel:` (reviewers, `approve_threshold`), `models:`, `loop:`, and top-level
    `runner:` keys alongside the pre-existing config, and annotating the
    `models`/`loop`/`runner` blocks as **"declared, not yet enforced"** so a reader
    is never misled that a configured `gate_authority` or `runner` changes behavior
-   in this release.
-3. Register the `config` command (with its `show` subcommand) on the root command.
-4. Add `TestConfigShow_EmitsPanelModelsLoop` to `cmd/mindspec/config_test.go`
-   asserting `renderConfig(DefaultConfig())` output contains the panel reviewers,
-   `approve_threshold: n-1`, an (empty) `models` block, `loop` with `enabled: false`,
-   `runner: claude-code-skills`, and the "declared, not yet enforced" annotation on
-   the `models`/`loop`/`runner` blocks.
-5. Document the new read-only `config` / `config show` CLI surface in
-   `.mindspec/domains/workflow/interfaces.md` (doc-sync for the workflow source
-   edit; a different workflow doc than Bead 3's `architecture.md`).
+   in this release. `renderConfig` stays **pure** over `*config.Config` (no panel
+   scan, no fs) so it is exercised without a process (R9).
+3. Caller-side note in `config show` (R8): after `renderConfig`, the `show`
+   command handler scans registered panels (`panel.Scan` / `panel.ForBead` over the
+   repo's review roots) and, for a registered panel whose recorded
+   `expected_reviewers` differs from `cfg.PanelExpectedReviewers()`, appends
+   `panel.ReviewerCountNote(recorded, cfg.PanelExpectedReviewers())` (an empty
+   string appends nothing — the common no-panel case). The scan/append lives in the
+   command handler, NOT in `renderConfig`; the command still writes no file.
+4. Caller-side note in the complete gate (R8): in `internal/complete`'s panel
+   advisory path (`panel_advisory.go` — the live `panelGate` surface reached from
+   `complete.go`, which already holds the matched `panelReg` and a loaded `cfg`),
+   compute `panel.ReviewerCountNote(panelReg.Panel.ExpectedReviewers, cfg.PanelExpectedReviewers())`
+   and print it to the advisory writer when non-empty — **advisory only**;
+   `panel.PanelGateDecision` is not touched and the gate's `Allow`/`Block` is
+   unchanged (a legitimately smaller substituted quorum is surfaced, never
+   false-blocked).
+5. Add tests: `TestConfigShow_EmitsPanelModelsLoop` (asserts `renderConfig(DefaultConfig())`
+   output contains the panel reviewers, `approve_threshold: n-1`, an empty `models`
+   block, `loop` with `enabled: false`, `runner: claude-code-skills`, and the
+   "declared, not yet enforced" annotation) and `TestConfigShow_ReviewerCountNoteWhenPanelDiffers`
+   (a registered panel with a differing `expected_reviewers` → output contains the
+   note) in `cmd/mindspec/config_test.go`; and `TestPanelAdvisory_ReviewerCountNote`
+   (a recorded `expected_reviewers` differing from the config default → the advisory
+   writer receives the note AND the gate decision is unchanged) in
+   `internal/complete/panel_advisory_test.go`, using the existing `panelScanFn` /
+   `panelTallyFn` / `panelAdvisoryOut` seams.
+6. Document the read-only `config` / `config show` CLI surface **and** the
+   complete-time reviewer-count advisory in `.mindspec/domains/workflow/interfaces.md`
+   (doc-sync for the workflow source edits in both `cmd/mindspec` and
+   `internal/complete`; a different workflow doc than Bead 3's `architecture.md`).
 
 **Verification**
 - [ ] `go test ./cmd/mindspec -v -run 'TestConfigShow_EmitsPanelModelsLoop$' | grep -q -- '--- PASS: TestConfigShow_EmitsPanelModelsLoop'`
-- [ ] `go test ./cmd/mindspec` exits `0` (whole package green, existing tests included)
-- [ ] `go build ./... && go run ./cmd/mindspec config show >/dev/null && [ -z "$(git status --porcelain)" ]` exits `0` (surfacing command mutates no file — read-only)
+- [ ] `go test ./cmd/mindspec -v -run 'TestConfigShow_ReviewerCountNoteWhenPanelDiffers$' | grep -q -- '--- PASS: TestConfigShow_ReviewerCountNoteWhenPanelDiffers'`
+- [ ] `go test ./internal/complete -v -run 'TestPanelAdvisory_ReviewerCountNote$' | grep -q -- '--- PASS: TestPanelAdvisory_ReviewerCountNote'`
+- [ ] `go test ./cmd/mindspec ./internal/complete` exits `0` (both packages green, existing tests included — proving the complete-gate `Allow`/`Block` is unchanged)
+- [ ] `go build ./... && go run ./cmd/mindspec config show >/dev/null && [ -z "$(git status --porcelain)" ]` exits `0` (surfacing command mutates no file — read-only, even when a panel is scanned)
 - [ ] `git show --name-only HEAD | grep -qxF '.mindspec/domains/workflow/interfaces.md'` (doc-sync)
 
 **Acceptance Criteria**
 - [ ] `renderConfig(DefaultConfig())` output contains the `panel` reviewers, `approve_threshold: n-1`, an empty `models` block, `loop` with `enabled: false`, `runner: claude-code-skills`, and the "declared, not yet enforced" annotation on the `models`/`loop`/`runner` blocks (spec AC6)
 - [ ] `mindspec config show` on a repo with no `.mindspec/config.yaml` prints the effective defaults, exits `0`, and leaves `git status` clean (spec Validation Proof — read-only)
+- [ ] Both caller-side surfaces (`config show` and the complete-gate advisory) render `panel.ReviewerCountNote` — empty when the recorded `expected_reviewers` equals the config default, a non-empty advisory when they differ — with no change to any `Allow`/`Block` (spec R8 caller-side note requirement)
 
 **Depends on**
-Bead 2
+Bead 2, Bead 3
 
 ## Provenance
 
@@ -335,6 +376,7 @@ Bead 2
 | AC6 — `config show` emits panel/models/loop/runner + not-yet-enforced annotation (`TestConfigShow_EmitsPanelModelsLoop`) | Bead 4 verification (PASS-line grep) |
 | AC7 — populated config round-trips through `Load` (`TestLoad_PopulatedConfigRoundTrips`) | Bead 2 verification (PASS-line grep) |
 | AC8 — ADR-0040 lands Accepted with L1–L4, `never casually up`, `artifact + CLI contract` | Bead 1 verification (content-anchor grep) |
-| AC9 — tree builds + touched packages green (`go build ./...` + `go test ./internal/config/... ./internal/panel/... ./cmd/mindspec/...`) | Beads 2/3/4 `go build ./...` + per-package `go test`; full `go test ./...` regression at plan time and pre-`/ms-impl-approve` (Testing Strategy) |
+| AC9 — tree builds + touched packages green (`go build ./...` + `go test ./internal/config/... ./internal/panel/... ./cmd/mindspec/... ./internal/complete/...`) | Beads 2/3/4 `go build ./...` + per-package `go test` (incl. `./internal/complete` in Bead 4); full `go test ./...` regression at plan time and pre-`/ms-impl-approve` (Testing Strategy) |
+| R8 — caller-side `ReviewerCountNote` rendering (`config show` + complete-gate advisory), no `Allow`/`Block` change | Bead 4 verification (`TestConfigShow_ReviewerCountNoteWhenPanelDiffers` + `TestPanelAdvisory_ReviewerCountNote` PASS greps; `go test ./cmd/mindspec ./internal/complete` green proving decision unchanged) |
 | Leaf invariant — `internal/panel` imports no `internal/config` | Bead 3 verification (`go list -deps … | grep -q internal/config` non-zero) |
 | ADR-0037 amendment note present | Bead 1 verification (`grep -q 'approve_threshold' …ADR-0037…`) |
