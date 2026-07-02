@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -266,39 +267,18 @@ func checkPlanApprovalGateConsistency(r *Result, specID string, fm *PlanFrontmat
 }
 
 // parsePlanFrontmatter extracts and parses YAML frontmatter from plan content.
+// The block is located via the canonical internal/frontmatter.Parse (ARCH-6),
+// so a space-padded fence reads as no-frontmatter (the deliberate strictness
+// tightening in spec 108 R5). YAML ignores `#` comment lines natively, so no
+// manual comment filtering is needed.
 func parsePlanFrontmatter(content string) (*PlanFrontmatter, error) {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, fmt.Errorf("no frontmatter found (expected leading ---)")
+	block, _, ok := frontmatter.Parse([]byte(content))
+	if !ok {
+		return nil, fmt.Errorf("no frontmatter found (expected leading --- and closing ---)")
 	}
-
-	var fmLines []string
-	found := false
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			found = true
-			break
-		}
-		fmLines = append(fmLines, line)
-	}
-
-	if !found {
-		return nil, fmt.Errorf("unclosed frontmatter (missing closing ---)")
-	}
-
-	// Filter out commented lines (# prefix)
-	var activeFmLines []string
-	for _, line := range fmLines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
-			activeFmLines = append(activeFmLines, line)
-		}
-	}
-
-	fmContent := strings.Join(activeFmLines, "\n")
 
 	var fm PlanFrontmatter
-	if err := yaml.Unmarshal([]byte(fmContent), &fm); err != nil {
+	if err := yaml.Unmarshal(block, &fm); err != nil {
 		return nil, err
 	}
 

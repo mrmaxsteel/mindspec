@@ -50,6 +50,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/tokenize"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
@@ -577,24 +578,16 @@ func extractSpecSections(body string) (string, string) {
 
 // parseCitedADRs extracts ADR ids from a plan.md frontmatter
 // adr_citations list. Returns the ids (e.g. "ADR-0033") in source
-// order; caller sorts.
+// order; caller sorts. The block is located via the canonical
+// internal/frontmatter.Parse (ARCH-6); YAML ignores `#` comment lines
+// natively so no manual comment filtering is needed.
 func parseCitedADRs(planBody string) ([]string, error) {
-	lines := strings.Split(planBody, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+	block, _, ok := frontmatter.Parse([]byte(planBody))
+	if !ok {
 		return nil, nil
 	}
-	var fm []string
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		// drop comment lines
-		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
-			fm = append(fm, line)
-		}
-	}
 	var pf planFrontmatter
-	if err := yaml.Unmarshal([]byte(strings.Join(fm, "\n")), &pf); err != nil {
+	if err := yaml.Unmarshal(block, &pf); err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(pf.ADRCitations))
@@ -612,22 +605,13 @@ func parseCitedADRs(planBody string) ([]string, error) {
 // plus all lines until the next heading of the same or shallower
 // level. If no heading matches, returns the entire plan body.
 func extractPlanBeadSection(planBody, beadID, title string) string {
-	// Strip frontmatter.
+	// Strip frontmatter via the canonical internal/frontmatter.Parse (ARCH-6):
+	// on a well-formed block the post-fence bytes are byte-identical to the
+	// prior hand-rolled split/join strip; a space-padded fence now reads as
+	// no-frontmatter and the whole body is scanned.
 	body := planBody
-	if strings.HasPrefix(strings.TrimSpace(body), "---") {
-		lines := strings.Split(body, "\n")
-		if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
-			end := -1
-			for i, line := range lines[1:] {
-				if strings.TrimSpace(line) == "---" {
-					end = i + 1
-					break
-				}
-			}
-			if end > 0 {
-				body = strings.Join(lines[end+1:], "\n")
-			}
-		}
+	if _, bodyOffset, ok := frontmatter.Parse([]byte(planBody)); ok {
+		body = planBody[bodyOffset:]
 	}
 
 	lines := strings.Split(body, "\n")
