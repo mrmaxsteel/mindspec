@@ -29,10 +29,10 @@ func diagCachingFixture(t *testing.T) (root, specDir string, mock *executor.Mock
 	writeManifest(t, root, "billing", "paths:\n  - internal/billing/**\n")
 	mock = &executor.MockExecutor{
 		ChangedFilesResult: []string{
-			"internal/payments/charge.go",  // owned + Accepted-covered → silent
-			"internal/search/query.go",     // owned + uncovered
-			"internal/billing/invoice.go",  // owned + Proposed-only
-			"internal/unclaimed/x.go",      // unowned
+			"internal/payments/charge.go", // owned + Accepted-covered → silent
+			"internal/search/query.go",    // owned + uncovered
+			"internal/billing/invoice.go", // owned + Proposed-only
+			"internal/unclaimed/x.go",     // unowned
 		},
 	}
 	return root, specDir, mock

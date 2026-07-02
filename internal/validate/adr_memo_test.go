@@ -24,7 +24,9 @@ func (c *countingADRStore) Search(q string) ([]adr.ADR, error)        { return c
 func (c *countingADRStore) Create(title string, opts adr.CreateOpts) (string, error) {
 	return c.inner.Create(title, opts)
 }
-func (c *countingADRStore) Supersede(oldID, newID string) error { return c.inner.Supersede(oldID, newID) }
+func (c *countingADRStore) Supersede(oldID, newID string) error {
+	return c.inner.Supersede(oldID, newID)
+}
 
 // TestADRParsedOncePerValidationRun proves spec 108 R8: with the memoizing
 // decorator in place, each distinct cited ADR is read from the underlying
