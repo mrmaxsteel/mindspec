@@ -37,14 +37,18 @@ work_chunks:
       - internal/instruct/instruct.go
       - cmd/mindspec/hook.go
       - cmd/mindspec/state.go
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/execution/architecture.md
+      - .mindspec/domains/core/architecture.md
+      - .mindspec/domains/context-system/architecture.md
   - id: 2
     depends_on: []
     key_file_paths:
       - internal/setup/claude.go
       - internal/setup/codex.go
       - internal/setup/copilot.go
-      - internal/safeio/safeopen.go
       - internal/setup/symlink_refusal_test.go
+      - .mindspec/domains/workflow/architecture.md
   - id: 3
     depends_on: []
     key_file_paths:
@@ -52,12 +56,15 @@ work_chunks:
       - internal/complete/complete_test.go
       - internal/phase/cache.go
       - internal/phase/derive.go
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/core/architecture.md
   - id: 4
     depends_on: []
     key_file_paths:
       - AGENTS.md
       - cmd/mindspec/spec.go
       - cmd/mindspec/spec_init.go
+      - .mindspec/domains/workflow/architecture.md
 ---
 # Plan: 107-cleanup-deadcode-dry-wave1
 
@@ -107,8 +114,11 @@ count, an optimization). No divergence is proposed.
   as documentation, so divergence never attributes it as source. The two other
   report-flagged unowned paths (`internal/trace`, `.golangci.yml`) are deliberately
   deferred to wave 2 precisely because they would trip `adr-divergence-unowned`.
-  **Fit: adhered** — the sweep introduces no domain-unclaimed source change and no
-  new doc-sync drift.
+  This ADR's attribution rules are also what make the per-bead doc-sync obligation
+  concrete (see Testing Strategy): the complete-time gate requires a changed doc
+  under `.mindspec/domains/<domain>/` for every domain a bead's source touches.
+  **Fit: adhered** — the sweep introduces no domain-unclaimed source change, and
+  each bead pairs its source edits with the required domain-doc note.
 
 - **ADR-0037 — Panel Gate as Enforced Contract** (workflow, execution). The
   restored `## Bead-loop guardrails (mindspec)` section (R7) is the human-readable
@@ -124,30 +134,45 @@ the test approach is "prove nothing changed" plus three targeted new tests. Shar
 infrastructure is the existing per-package Go test suites and the `phase`/`complete`
 list-JSON seams (`phase.SetListJSONForTest`); no new harness is introduced.
 
-- **Bead 1 (dead-code sweep)** adds no tests — it is pure subtraction. Correctness is
-  proved negatively: `deadcode -test` over `./cmd/... ./internal/... ./plugins/...`
-  reports zero findings (modulo the intentional `internal/harness` LLM-eval seams,
-  the deferred `internal/trace/event.go` finding, and the two symbols owned by
-  Beads 2 and 3 until those merge), `go build ./...` succeeds, and `go test ./...`
-  stays green — no live caller referenced any removed symbol, and no comment names a
-  deleted one.
-- **Bead 2 (setup managed-block unification)** adds two tests: the per-agent
-  full-equality managed-doc content assertion (claude/codex/copilot, equality not
-  `strings.Contains`) proving the `ensureManagedDoc` extraction is byte-identical to
-  today, and `TestRunCodex_RefusesSymlinkedAGENTSmd` mirroring the existing claude
-  and copilot refusal tests. The existing `internal/setup` idempotency/refusal suite
-  must stay green (the `chainBeads*` fold preserves each agent's output).
-- **Bead 3 (complete perf pair)** re-points `stubChildrenByStatus` at the
-  `internal/phase` seam and adds subprocess-count assertions: exactly one
-  `bd list --parent` for the children query and at most one `bd list --type=epic` for
-  the spec→epic lookup, with the child set and the mid-run-fresh post-close read
-  both unchanged. The existing `internal/complete` and `internal/phase` suites stay
-  green.
-- **Bead 4 (guardrails + alias dedup)** verifies the `AGENTS.md` section exists and
-  resolves the `CLAUDE.md` cross-reference (grep), and that `spec init` behavior is
-  unchanged after the alias reuses `specCreateCmd`'s `RunE` (`go test ./cmd/...` plus
-  a `--help` spot check).
-- **Whole-suite gate**: every bead ends with `go test ./...` green (spec AC9).
+**Two independent completion bars per bead.** A bead is done only when BOTH hold, and
+each Verification block below encodes both as commands whose exit status is the
+pass/fail:
+
+1. **Green suite** — `go test ./...` exits 0 (all existing tests, plus this bead's new
+   tests, pass).
+2. **A diff that clears the complete-time doc-sync gate** — `mindspec complete` runs
+   `checkInternalPackages` (`internal/validate/docsync.go`), which raises a blocking
+   `internal-docs` error unless the bead's diff changes at least one doc under
+   `.mindspec/domains/<domain>/` for EVERY domain whose non-test `.go` source the
+   bead touches. Editing `AGENTS.md` does NOT satisfy the workflow domain (it is a
+   root operator doc, not a domain doc). A green `go test ./...` alone therefore does
+   NOT imply `mindspec complete` will pass — each bead must also append a dated
+   cleanup note to the `architecture.md` of every domain it edits source in.
+
+Each bead's touched domains were derived by walking its file list against the four
+`.mindspec/domains/*/OWNERSHIP.yaml` globs:
+
+- **Bead 1** touches source in all four domains — workflow
+  (`internal/{hook,next,doctor,validate,panel,layout,instruct}`, `cmd/mindspec/**`,
+  `plugins/mindspec/**`), execution (`internal/{gitutil,harness}`), core
+  (`internal/recording`), context-system (`internal/contextpack`) — so it must touch
+  all four domain docs. Adds no tests (pure subtraction); correctness proved by a
+  clean `deadcode -test`, `go build`, and `go test ./...`.
+- **Bead 2** touches source only under `internal/setup/**` (workflow). It routes
+  through the EXISTING `internal/safeio` helpers WITHOUT modifying them, so execution
+  is not touched and only the workflow domain doc is required. Adds the per-agent
+  full-equality managed-doc content test (claude/codex/copilot) and
+  `TestRunCodex_RefusesSymlinkedAGENTSmd`; existing setup suite stays green.
+- **Bead 3** touches `internal/complete/**` (workflow) and `internal/phase/**` (core)
+  → workflow + core domain docs. Re-points `stubChildrenByStatus` at the
+  `internal/phase` seam and adds `TestRun_CompletePerfPairSubprocessBudget`
+  (`internal/complete`) and `TestFetchChildren` (`internal/phase`).
+- **Bead 4** touches `cmd/mindspec/**` (workflow) → workflow domain doc; `AGENTS.md`
+  is edited too but does not count toward the gate. Verified by grep on `AGENTS.md`
+  and `CLAUDE.md` plus `go test ./cmd/...`.
+
+`_test.go` files are not source (`isSourceFile` excludes them), so a bead's added or
+edited tests create no additional domain-doc obligation on their own.
 
 ## Bead 1: Dead-code sweep
 
@@ -177,14 +202,19 @@ list-JSON seams (`phase.SetListJSONForTest`); no new harness is introduced.
    (`state.go:142-144`). Do NOT touch `setup.hasManagedBlock` (Bead 2),
    `phase.FindActiveBeadForEpic` (Bead 3), `internal/trace`, or `.golangci.yml`
    (both deferred to wave 2 — deleting there would trip `adr-divergence-unowned`).
-5. Run the deadcode analyzer, build, and full test suite to confirm the sweep is
+5. Append a dated wave-1 cleanup note recording the removed symbols to the
+   `architecture.md` of every domain this bead edits source in — all four:
+   `.mindspec/domains/{workflow,execution,core,context-system}/architecture.md`
+   (required to clear the complete-time doc-sync gate; AGENTS.md does not count).
+6. Run the deadcode analyzer, build, and full test suite to confirm the sweep is
    clean and no live caller broke.
 
 **Verification**
-- [ ] `go run golang.org/x/tools/cmd/deadcode@latest -test ./cmd/... ./internal/... ./plugins/...` reports zero findings outside the `internal/harness` LLM-eval seams, the deferred `internal/trace/event.go` `Event.MarshalJSON` finding, and the two symbols owned by later beads (`setup.hasManagedBlock`, `phase.FindActiveBeadForEpic`)
-- [ ] `go build ./...` succeeds
-- [ ] `grep -rn "SpecIsApproved\|SpecStatusFromBytes\|IsDomainCoveredCtx\|BeadID(" internal cmd plugins --include='*.go'` shows no reference (comment or code) to a symbol deleted in this bead
-- [ ] `go test ./...` passes
+- [ ] `go build ./...` exits 0
+- [ ] `go test ./...` exits 0
+- [ ] Dead code clean except the allowed seams: `! (go run golang.org/x/tools/cmd/deadcode@latest -test ./cmd/... ./internal/... ./plugins/... | grep -vE 'internal/harness/|internal/trace/event\.go|hasManagedBlock|FindActiveBeadForEpic' | grep -q .)` exits 0
+- [ ] No dangling reference to a symbol deleted in this bead: `! grep -rnE 'SpecIsApproved|SpecStatusFromBytes|IsDomainCoveredCtx' internal cmd plugins --include='*.go'` exits 0
+- [ ] Doc-sync — this bead's single commit touches a doc under each of its four domains: `for d in workflow execution core context-system; do git show --name-only --format= HEAD | grep -qE "^\.mindspec/domains/$d/" || exit 1; done` exits 0
 
 **Acceptance Criteria**
 - [ ] The `deadcode -test` sweep is clean for every symbol this bead removes (spec AC1; the remaining `setup.hasManagedBlock` and `phase.FindActiveBeadForEpic` clear once Beads 2 and 3 merge, and the full-clean AC1 is confirmed at final review)
@@ -197,32 +227,35 @@ list-JSON seams (`phase.SetListJSONForTest`); no new harness is introduced.
 **Steps**
 1. Extract one `ensureManagedDoc`-style helper (carrying root, relative path, full
    file content, append block, and the managed-block check) whose every write/append
-   routes through `safeio.WriteFileNoSymlink` / `safeio.OpenAppendNoSymlink`
-   (`internal/safeio/safeopen.go`), folding the managed-block-presence logic in so
-   `setup.hasManagedBlock` (`claude.go:555`) is no longer needed.
+   routes through the EXISTING `safeio.WriteFileNoSymlink` /
+   `safeio.OpenAppendNoSymlink` (do NOT modify `internal/safeio` — it is only
+   called, keeping this bead's source strictly under `internal/setup/**`), folding
+   the managed-block-presence logic in so `setup.hasManagedBlock` (`claude.go:555`)
+   is no longer needed.
 2. Re-point `ensureClaudeMD` (`claude.go`), `ensureAgentsMD` (`codex.go`), and
    `ensureCopilotInstructions` (`copilot.go`) to call the shared helper; remove the
    plain `os.WriteFile`/`os.OpenFile` calls in `codex.go:68,79,96` so the managed
    `AGENTS.md` document is written only through `safeio` (closing the symlink gap).
-3. Delete `setup.hasManagedBlock`, now dead after step 1 (satisfies the wave's AC1
-   slice for this file).
+3. Delete `setup.hasManagedBlock`, now dead after step 1.
 4. Fold `chainBeadsSetup` (`claude.go:536`) and `chainBeadsSetupCodex`
    (`codex.go:109`) — which differ only by the agent identifier string — into one
    parameterized helper, preserving each agent's current chained-setup output.
 5. Add `TestRunCodex_RefusesSymlinkedAGENTSmd` to
-   `internal/setup/symlink_refusal_test.go`, mirroring
-   `TestRunClaude_RefusesSymlinkedCLAUDEmd` and
-   `TestRunCopilot_RefusesSymlinkedInstructions`.
-6. Add a per-agent test asserting the produced managed-doc content for a
+   `internal/setup/symlink_refusal_test.go` (mirroring the claude/copilot refusal
+   tests) plus a per-agent test asserting the produced managed-doc content for a
    non-symlinked target equals the expected block-constant-derived string in full
-   (equality, not `strings.Contains`) for claude, codex, and copilot; run the setup
-   suite.
+   (equality, not `strings.Contains`) for claude, codex, and copilot.
+6. Append a dated wave-1 note (setup managed-block unified through `safeio`;
+   `hasManagedBlock` removed) to `.mindspec/domains/workflow/architecture.md` — the
+   only domain this bead edits source in — to clear the complete-time doc-sync gate.
+7. Run the setup suite and the full suite.
 
 **Verification**
-- [ ] `grep -nE "os\.(WriteFile|OpenFile)" internal/setup/codex.go` returns no line for the managed `AGENTS.md` document (all writes go through `safeio` via the shared helper)
-- [ ] `go test ./internal/setup/... -run RefusesSymlinked` passes (claude, codex, copilot all refuse a symlinked target)
-- [ ] `go test ./internal/setup/...` passes, including the new per-agent full-equality managed-doc content test
-- [ ] `go test ./...` passes
+- [ ] `go test ./internal/setup/...` exits 0 (existing suite plus the new refusal and per-agent equality tests)
+- [ ] Refusal tests pass for all three agents: `go test ./internal/setup/... -run RefusesSymlinked -count=1` exits 0
+- [ ] No plain file write remains in codex production code (managed `AGENTS.md` goes through `safeio` only): `! grep -nE 'os\.(WriteFile|OpenFile)' internal/setup/codex.go` exits 0
+- [ ] `go test ./...` exits 0
+- [ ] Doc-sync — this bead's single commit touches the workflow domain doc: `git show --name-only --format= HEAD | grep -qE '^\.mindspec/domains/workflow/'` exits 0
 
 **Acceptance Criteria**
 - [ ] `internal/setup/codex.go` contains no `os.WriteFile`/`os.OpenFile` call for the managed `AGENTS.md` document; all three agents write the managed block via `safeio` through the shared helper (spec AC2)
@@ -246,21 +279,28 @@ list-JSON seams (`phase.SetListJSONForTest`); no new harness is introduced.
 3. Resolve the immutable spec→epic mapping once near the top of `complete.Run` and
    reuse it at `complete.go:223,228,716,781` (each currently builds a throwaway
    `phase.NewCache()` + `bd list --type=epic`); keep the post-close children query
-   re-issued after `complete` mutates bd mid-run.
-4. Delete `phase.FindActiveBeadForEpic` (`derive.go:713`), superseded by
-   `FindActiveBeadForEpicWithCache` (satisfies the wave's AC1 slice for this symbol).
-5. Re-point `complete`'s test stubs: `stubChildrenByStatus` (`complete_test.go:535`,
+   re-issued after `complete` mutates bd mid-run. Delete `phase.FindActiveBeadForEpic`
+   (`derive.go:713`), superseded by `FindActiveBeadForEpicWithCache`.
+4. Re-point `complete`'s test stubs: `stubChildrenByStatus` (`complete_test.go:535`,
    today installs a `complete`-package `listJSONFn`) installs `phase.SetListJSONForTest`
    instead, since the children query now runs through `internal/phase`.
-6. Add subprocess-count assertions — one `bd list --parent` for the children query
-   (counted on `phase`'s `listJSONFn` seam), at most one `bd list --type=epic` for
-   the spec→epic lookup, child set unchanged — and run the complete + phase suites.
+5. Add `TestRun_CompletePerfPairSubprocessBudget` (`internal/complete`) asserting, on
+   `phase`'s `listJSONFn` seam, exactly one `bd list --parent`, at most one
+   `bd list --type=epic`, and that the post-close children read reflects bd state
+   mutated mid-run; add `TestFetchChildren` (`internal/phase`) covering the wrapper.
+6. Append a dated wave-1 note (`complete` children/epic fan-out collapsed;
+   `phase.FetchChildren` added, `FindActiveBeadForEpic` removed) to BOTH
+   `.mindspec/domains/workflow/architecture.md` and
+   `.mindspec/domains/core/architecture.md` — the two domains this bead edits source
+   in — to clear the complete-time doc-sync gate; then run the suites.
 
 **Verification**
-- [ ] `go test ./internal/complete/... ./internal/phase/...` passes with the re-pointed stubs and the new subprocess-count assertions green
-- [ ] the children-query count asserted on `phase`'s `listJSONFn` seam (via `phase.SetListJSONForTest`) equals one `bd list --parent`, and the spec→epic lookup issues at most one `bd list --type=epic`, with the post-close read still reflecting mid-run bd state
-- [ ] `go run golang.org/x/tools/cmd/deadcode@latest -test ./internal/phase/...` shows `phase.FindActiveBeadForEpic` is gone
-- [ ] `go test ./...` passes
+- [ ] Subprocess budget + freshness proved: `go test ./internal/complete/... -run TestRun_CompletePerfPairSubprocessBudget -count=1` exits 0 (asserts one `bd list --parent`, at most one `bd list --type=epic`, and mid-run-fresh post-close read on the `phase` seam)
+- [ ] Phase wrapper covered: `go test ./internal/phase/... -run TestFetchChildren -count=1` exits 0
+- [ ] Full complete + phase suites green with the re-pointed stubs: `go test ./internal/complete/... ./internal/phase/...` exits 0
+- [ ] Dead symbol removed: `! grep -rn 'FindActiveBeadForEpic(' internal cmd --include='*.go'` exits 0
+- [ ] `go test ./...` exits 0
+- [ ] Doc-sync — this bead's single commit touches both the workflow and core domain docs: `for d in workflow core; do git show --name-only --format= HEAD | grep -qE "^\.mindspec/domains/$d/" || exit 1; done` exits 0
 
 **Acceptance Criteria**
 - [ ] `mindspec complete` issues exactly one `bd list --parent` subprocess for the children query (was ~5), asserted on `phase`'s seam; the `stubChildrenByStatus` stub is re-pointed at `phase.SetListJSONForTest` (spec AC5)
@@ -273,25 +313,30 @@ list-JSON seams (`phase.SetListJSONForTest`); no new harness is introduced.
 
 **Steps**
 1. Add a `## Bead-loop guardrails (mindspec)` section to `AGENTS.md` carrying the
-   five canonical fences that `CLAUDE.md:43` and the `ms-*` skills point at: (1) only
-   the cycle runs `mindspec complete`, and only after the panel gate passes; (2) never
-   a raw `git merge bead/<id>`; (3) exactly one `git push` at end-of-spec; (4)
-   subagents make exactly one commit; (5) tests must PASS before completion.
+   five canonical fences, each with the grep-able substring the Verification checks
+   for: (1) only the cycle runs `mindspec complete`, and only after the `panel gate`
+   passes; (2) never a raw `git merge bead/<id>`; (3) exactly one `git push` at
+   end-of-spec; (4) subagents make `exactly one commit`; (5) `tests must PASS` before
+   completion.
 2. Confirm the `CLAUDE.md:43` cross-reference ("See AGENTS.md § Bead-loop guardrails
    (mindspec)") now resolves to the real, non-empty section.
-3. Change `specInitCmd` (`cmd/mindspec/spec_init.go:20-61`) to reuse
-   `specCreateCmd`'s `RunE` (`cmd/mindspec/spec.go:30-71`) instead of carrying the
-   byte-identical 42-line copy, so future spec-create changes propagate to the hidden
-   `spec init` alias automatically.
-4. Spot-check that `mindspec spec init` behavior (help text, flag surface, output) is
-   unchanged after the reuse.
+3. Change `specInitCmd` (`cmd/mindspec/spec_init.go`) to reuse `specCreateCmd`'s
+   `RunE` (`cmd/mindspec/spec.go:29-73`) instead of carrying the byte-identical
+   42-line copy, removing the inline `spec.Run(...)` body (and any now-unused
+   imports) so future spec-create changes propagate to the hidden `spec init` alias
+   automatically; `mindspec spec init` behavior stays unchanged.
+4. Append a dated wave-1 note (`spec init` alias de-duplicated to reuse
+   `specCreateCmd.RunE`) to `.mindspec/domains/workflow/architecture.md` — the only
+   domain this bead edits source in (`cmd/**`) — to clear the complete-time doc-sync
+   gate (`AGENTS.md` is a root operator doc and does not count).
 5. Run `go build ./...` and the `cmd` test suite.
 
 **Verification**
-- [ ] `grep -c "## Bead-loop guardrails (mindspec)" AGENTS.md` returns ≥ 1 and the section is non-empty with all five canonical fences
-- [ ] `grep -n "Bead-loop guardrails (mindspec)" CLAUDE.md` cross-reference resolves to the new `AGENTS.md` section
-- [ ] `grep -n "specCreateCmd" cmd/mindspec/spec_init.go` shows `specInitCmd` reusing `specCreateCmd`'s `RunE` (no duplicated 42-line body)
-- [ ] `go build ./... && go test ./cmd/...` pass; `mindspec spec init --help` output is unchanged
+- [ ] Section present with all five fences: `grep -qF '## Bead-loop guardrails (mindspec)' AGENTS.md && for s in 'mindspec complete' 'panel gate' 'git merge bead/' 'git push' 'exactly one commit' 'tests must PASS'; do grep -Fqi "$s" AGENTS.md || exit 1; done` exits 0
+- [ ] CLAUDE.md cross-reference resolves to the section: `grep -qF 'AGENTS.md § Bead-loop guardrails (mindspec)' CLAUDE.md && grep -qF '## Bead-loop guardrails (mindspec)' AGENTS.md` exits 0
+- [ ] Alias reuses create's RunE and the duplicated body is gone: `grep -q 'specCreateCmd.RunE' cmd/mindspec/spec_init.go && ! grep -q 'spec.Run(' cmd/mindspec/spec_init.go` exits 0
+- [ ] Build + cmd suite green (spec-init behavior unchanged): `go build ./... && go test ./cmd/...` exits 0
+- [ ] Doc-sync — this bead's single commit touches the workflow domain doc: `git show --name-only --format= HEAD | grep -qE '^\.mindspec/domains/workflow/'` exits 0
 
 **Acceptance Criteria**
 - [ ] `AGENTS.md` contains a non-empty `## Bead-loop guardrails (mindspec)` section carrying all five canonical fences, and the `CLAUDE.md` cross-reference resolves to it (spec AC7)
@@ -310,8 +355,20 @@ scopes wave 1 of the 2026-07-02 repo review, whose panel-local tracked copy is
 a documentation-integrity fix beyond the report) and R8 (the spec-init slice of DRY
 #10 pulled forward).
 
+**Plan-panel round 1.** 4 APPROVE / 2 REQUEST_CHANGES. This revision applies the
+consolidated fix list: (R3) each bead now updates the domain `architecture.md` for
+every domain whose source it touches, so the complete-time doc-sync gate
+(`checkInternalPackages`) is satisfiable per bead — the per-bead domain sets were
+re-derived by walking each file list against the four
+`.mindspec/domains/*/OWNERSHIP.yaml` globs (Bead 1 → all four; Bead 2 → workflow;
+Bead 3 → workflow+core; Bead 4 → workflow); and (R5) every Verification item is now
+a shell command whose exit status is the pass/fail, including the Bead 3
+subprocess-count assertion (`TestRun_CompletePerfPairSubprocessBudget`), the Bead 4
+guardrail-fence / cross-reference / dedup checks, and inverted grep-negative
+predicates (`! grep …`) for the no-match cases.
+
 **Bead cut.** Four independent beads, ownership-aligned per panel R6 so every
-deletion rides the bead that owns the file (no cross-bead file overlap → no
+deletion rides the bead that owns the file (no cross-bead source overlap → no
 dependency edges; all four `work_chunks` declare `depends_on: []`). Panel R3's nit
 (fix dangling comment references when deleting `validate.SpecIsApproved` /
 `IsDomainCoveredCtx`) is folded into Bead 1 step 2. Panel R5's stub re-point and R6's
@@ -322,15 +379,18 @@ spec→epic hoist are Bead 3.
 | Spec Acceptance Criterion | Verified By |
 |---|---|
 | AC1 — `deadcode -test` zero findings (modulo harness seams + deferred `internal/trace`) | Bead 1 (bulk sweep) + Bead 2 (`setup.hasManagedBlock`) + Bead 3 (`phase.FindActiveBeadForEpic`); full-clean confirmed at final review |
-| AC2 — `codex.go` writes managed `AGENTS.md` only via `safeio` (all three agents through the shared helper) | Bead 2 verification (grep + setup suite) |
+| AC2 — `codex.go` writes managed `AGENTS.md` only via `safeio` (all three agents through the shared helper) | Bead 2 verification (negative grep + setup suite) |
 | AC3 — per-agent full-equality managed-doc content test (claude/codex/copilot) | Bead 2 verification (`go test ./internal/setup/...`) |
 | AC4 — `mindspec setup codex` refuses a symlinked `AGENTS.md`; `TestRunCodex_RefusesSymlinkedAGENTSmd` passes | Bead 2 verification (`-run RefusesSymlinked`) |
-| AC5 — `complete` issues exactly one `bd list --parent`; `stubChildrenByStatus` re-pointed at `phase.SetListJSONForTest` | Bead 3 verification (subprocess-count assertion on the phase seam) |
-| AC6 — `complete.Run` resolves spec→epic once (≤1 `bd list --type=epic`); post-close children query stays fresh | Bead 3 verification (subprocess-count + mid-run freshness assertions) |
-| AC7 — `AGENTS.md` has a non-empty `## Bead-loop guardrails (mindspec)` section (five fences); `CLAUDE.md` xref resolves | Bead 4 verification (`grep -c` + xref check) |
-| AC8 — `spec_init.go` no longer duplicates the 42-line `RunE`; `specInitCmd` reuses `specCreateCmd.RunE`; behavior unchanged | Bead 4 verification (grep + `--help` spot check) |
+| AC5 — `complete` issues exactly one `bd list --parent`; `stubChildrenByStatus` re-pointed at `phase.SetListJSONForTest` | Bead 3 verification (`TestRun_CompletePerfPairSubprocessBudget`) |
+| AC6 — `complete.Run` resolves spec→epic once (≤1 `bd list --type=epic`); post-close children query stays fresh | Bead 3 verification (`TestRun_CompletePerfPairSubprocessBudget`) |
+| AC7 — `AGENTS.md` has a non-empty `## Bead-loop guardrails (mindspec)` section (five fences); `CLAUDE.md` xref resolves | Bead 4 verification (grep fences + xref) |
+| AC8 — `spec_init.go` no longer duplicates the 42-line `RunE`; `specInitCmd` reuses `specCreateCmd.RunE`; behavior unchanged | Bead 4 verification (grep reuse / body-gone + `go test ./cmd/...`) |
 | AC9 — `go test ./...` passes | Every bead (each ends on a green full suite) |
 
 Requirement R4 (fold `chainBeadsSetup`/`chainBeadsSetupCodex`) has no standalone spec
 AC and is verified inside Bead 2 (the setup suite stays green with each agent's
-chained-setup output preserved).
+chained-setup output preserved). Beyond the spec ACs, every bead also carries a
+**doc-sync** Verification checkbox asserting its single commit touches the required
+domain `architecture.md`(s) — the second completion bar the `mindspec complete` gate
+enforces (see Testing Strategy).
