@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "All four R5 round-1 asks are ADDRESSED, verified against spec text at 8b945359 and the worktree tree. (1) R9 now names the package-level seam walkWorkspaceFn = filepath.WalkDir, cites the exact current call site (ownership.go:128, confirmed), and AC12 counts its invocations while also asserting the full per-domain doctor Report set is unchanged. (2) Every previously-unproven byte-identical claim now carries a proof: ADR + ownership diagnostics via TestValidateDiagnosticsByteIdenticalAfterCaching (full ordered (code,message) set from ValidateDivergence + checkADRCoverage vs committed golden); doctor output via the AC12 Report comparison; contextpack via TestContextPackDeterministic + TestContextPackFlatVsCanonicalByteIdentical — I confirmed BOTH exist in the worktree and both invoke BuildBead(\"bead-fixture\",…), which transitively exercises parseCitedADRs (budgeter.go:196) and extractPlanBeadSection (budgeter.go:220). (3) R7 names all three hoisting sites (ValidateDivergence, checkInternalPackages docsync.go:459, normalizeImpactedDomains ownership_resolve.go:72 — all confirmed) with a per-site seam-counting AC. (4) AC5 now greps validateReviewMode remains. No gate-blocking gaps remain.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "R5.1 doctor walk seam — ADDRESSED",
+      "detail": "R9 specifies a package-level seam `walkWorkspaceFn = filepath.WalkDir`, cites the exact current call `filepath.WalkDir(root, …)` at ownership.go:128 (verified present, alongside walkExclusions and manifestResolvesAny), and AC12 counts walkWorkspaceFn invocations to prove exactly one walk per check regardless of domain count. This is precisely the specifiable seam my round-1 ask required."
+    },
+    {
+      "severity": "info",
+      "area": "R5.2 byte-identical proof coverage — ADDRESSED",
+      "detail": "ADR-validation and ownership-attribution diagnostics: TestValidateDiagnosticsByteIdenticalAfterCaching asserts the full ordered (code,message) set from ValidateDivergence and checkADRCoverage vs a committed golden (shared R7/R8 proof). Doctor ownership-check output: AC12 asserts the full per-domain Report set (check code + status) across populated, empty-stub, and dead-manifest fixtures. Contextpack budgeting (the R5.2(iii) item I was told to verify): the spec cites TestContextPackDeterministic (budgeter_test.go:174) and TestContextPackFlatVsCanonicalByteIdentical (budgeter_layout_test.go:44) — BOTH exist in the worktree and both call BuildBead(\"bead-fixture\",…), which runs parseCitedADRs and extractPlanBeadSection, confirming the transitive-coverage claim."
+    },
+    {
+      "severity": "info",
+      "area": "R5.3 R7 all three call sites — ADDRESSED",
+      "detail": "R7 now hoists loading in ValidateDivergence (divergence.go:87), checkInternalPackages (docsync.go:459), and normalizeImpactedDomains (ownership_resolve.go:72) — all three confirmed present — each with its own seam-counting AC (TestDivergenceOwnershipLoadedPerDomainNotPerFile, TestCheckInternalPackagesOwnershipLoadedPerDomainNotPerFile, TestNormalizeImpactedDomainsOwnershipLoadedPerDomain). loadOwnershipForRef (ownership.go:270) and the checkUnclaimedSource pattern (docsync.go:204) exist as cited."
+    },
+    {
+      "severity": "info",
+      "area": "R5.4 carve-out AC — ADDRESSED",
+      "detail": "AC5 now removes all three stale carve-outs (brownfield/plan, isNeighbor, findRoot) AND additionally asserts `grep -q 'validateReviewMode' .golangci.yml` to prove the live carve-out is retained, matching R3's parenthetical requirement."
+    },
+    {
+      "severity": "advisory",
+      "area": "R7 identical-outcomes golden scope (non-blocking)",
+      "detail": "TestValidateDiagnosticsByteIdenticalAfterCaching golden captures ValidateDivergence and checkADRCoverage output; checkInternalPackages and normalizeImpactedDomains are proven load-hoisted by their seam-count tests and functionally covered by the full ./... suite rather than a dedicated golden. Acceptable — these are load-frequency refactors, not logic changes — but implementers should keep any existing checkInternalPackages/normalizeImpactedDomains diagnostic tests green as the de facto identical-outcomes guard. Advisory only; not a gate blocker."
+    }
+  ]
+}

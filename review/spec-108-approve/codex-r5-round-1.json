@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "The spec is close, and most ACs are runnable with PASS-line checks for named new tests. However, the falsifiability bar is not met for all claimed behavior. The doctor walk-count AC requires an exact WalkDir count, but current code calls filepath.WalkDir directly and the spec does not say to add an injectable walk/list seam. Several byte-identical claims are broader than the golden tests required: only trace NDJSON and the two approve writes have explicit golden proofs, while validate ADR diagnostics, ownership attribution diagnostics, doctor warn/pass output, and contextpack budgeting are claimed unchanged without equivalent golden/fixture-output ACs. R7 also names three ownership-load hoisting call sites, but the AC only proves the divergence path. These gaps leave implementers room to satisfy the listed commands while missing specified invariants.",
+  "concrete_changes_required": [
+    "Specify the doctor walk-count seam explicitly, for example a package-level walk/list function or helper whose calls can be counted in TestOwnershipCheckWalksTreeOnce, or change the AC to a runnable proof that does not require an absent seam.",
+    "Add acceptance criteria or narrow the claims so every byte-identical behavior promise has a golden/fixture-output proof, especially ADR validation diagnostics, ownership attribution diagnostics, doctor ownership check output, and contextpack budgeting output.",
+    "Expand the ownership-load perf ACs to cover all R7 call sites named in the requirement: ValidateDivergence, checkInternalPackages, and normalizeImpactedDomains, or scope R7 down to the single tested path.",
+    "Fix the carve-out AC command to assert validateReviewMode remains as well as findRoot, matching the parenthetical requirement text."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "area": "AC12 / R9 doctor walk-count proof",
+      "detail": "internal/doctor/ownership.go calls filepath.WalkDir directly inside manifestResolvesAny. The spec requires a walk-counting seam test proving exactly one workspace walk, but it neither identifies an existing seam nor instructs implementers to add one."
+    },
+    {
+      "severity": "blocking",
+      "area": "Byte-identical proof coverage",
+      "detail": "R2 and R4 have golden-test ACs, but the broader byte-identical claims for ADR validation outcomes, ownership attribution findings/errors, doctor warn/pass results, and contextpack budgeting output lack golden or fixture-output acceptance criteria."
+    },
+    {
+      "severity": "major",
+      "area": "R7 ownership-load hoisting",
+      "detail": "R7 requires hoisting loads in ValidateDivergence, checkInternalPackages, and normalizeImpactedDomains, but the only counting AC is TestDivergenceOwnershipLoadedPerDomainNotPerFile. The other two required hot paths can regress while ACs still pass."
+    },
+    {
+      "severity": "minor",
+      "area": "AC5 carve-out command",
+      "detail": "The AC text says the live findRoot carve-out and validateReviewMode carve-out remain untouched, but the command only greps for findRoot after removing brownfield/plan and isNeighbor."
+    }
+  ]
+}

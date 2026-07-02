@@ -521,12 +521,16 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		return
 	}
 
+	// Spec 108 R7: attribute every source file against a single per-run
+	// OWNERSHIP cache so each domain's manifest is loaded once, not once
+	// per (file × domain).
+	ownCache := newOwnershipCache(exec, root, ownerRef)
 	for _, f := range source {
 		// Only consider files that could plausibly be owned by a
 		// domain. attributeDomain returns "" when nothing matches —
 		// in that case the file is silently skipped (it is not the
 		// internal-docs lane's job to police unmapped trees).
-		domain, o, derr := attributeDomain(exec, root, ownerRef, f, domains)
+		domain, o, derr := attributeDomainCached(ownCache, f, domains)
 		if derr != nil {
 			r.AddError("internal-docs", fmt.Sprintf("attributing %s: %v", f, derr))
 			continue

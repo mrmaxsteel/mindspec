@@ -332,6 +332,30 @@ func TestParsePlanFrontmatter_WithComments(t *testing.T) {
 	}
 }
 
+// TestPlanFrontmatterFenceStrictnessTightened proves the spec 108 R5 fence
+// strictness tightening: after migrating parsePlanFrontmatter onto
+// frontmatter.Parse, a space-padded `---` fence — which the retired TrimSpace
+// scan accepted — is now treated as no-frontmatter, matching the canonical
+// frontmatter.Parse TrimRight("\r\n") semantics.
+func TestPlanFrontmatterFenceStrictnessTightened(t *testing.T) {
+	// Leading + trailing spaces on the opening fence: the old TrimSpace scan
+	// parsed this as frontmatter; the canonical Parse rejects it.
+	spacePadded := "  ---  \nstatus: Draft\nspec_id: \"005\"\n---\n\n# Plan\n"
+	if _, err := parsePlanFrontmatter(spacePadded); err == nil {
+		t.Fatalf("expected a no-frontmatter error for a space-padded opening fence, got nil")
+	}
+
+	// Control: an exact `---` fence still parses cleanly.
+	tight := "---\nstatus: Draft\nspec_id: \"005\"\n---\n\n# Plan\n"
+	fm, err := parsePlanFrontmatter(tight)
+	if err != nil {
+		t.Fatalf("exact fence must still parse: %v", err)
+	}
+	if fm.Status != "Draft" {
+		t.Errorf("expected status Draft, got %q", fm.Status)
+	}
+}
+
 func TestParseBeadSections(t *testing.T) {
 	content := `---
 status: Draft

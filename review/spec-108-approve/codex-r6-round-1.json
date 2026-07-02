@@ -1,0 +1,28 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.88,
+  "rationale": "The work is plausibly decomposable into four independent beads, but the spec is not approval-ready under the requested cross-spec lens. It treats wave 1 as effectively landed while spec 107 is still mid-flight, and its sequencing notes only cover trace/.golangci ownership plus findRoot. They do not require a post-107 rebase/order before 108 planning/implementation, despite 107 deleting IsDomainCoveredCtx in internal/validate/plan.go while 108 rewrites parsePlanFrontmatter and likely touches ADR coverage code for memoization in the same file. 108 also requires workflow domain-doc touches in multiple beads, while 107's approved plan already appends to workflow architecture/overview/interfaces/runbook.md and context-system architecture.md. R10 says each bead must touch a domain doc, but does not require bead-unique targets or avoid 107's doc targets. That leaves predictable merge/doc-sync friction for parallel beads.",
+  "concrete_changes_required": [
+    "Add an explicit cross-spec sequencing requirement: 108 must be planned/implemented only after rebasing onto completed spec 107, or must declare 107 as a prerequisite and document the exact merge-resolution order for internal/validate/plan.go and the deferred findRoot carve-out.",
+    "Add a bead decomposition/doc-target constraint for 108: 3-5 beads with same-diff-or-earlier ownership claims, and bead-unique domain-doc targets for each touched domain. If 108 can run before 107 lands, require new/non-overlapping domain doc files or otherwise avoid 107's workflow architecture/overview/interfaces/runbook.md and context-system architecture.md appends.",
+    "Call out the internal/validate/plan.go collision explicitly: 107 removes IsDomainCoveredCtx/comment references; 108 changes parsePlanFrontmatter and ADR parsing/memoization nearby. The plan must sequence/rebase so this is handled deliberately rather than left to incidental merge behavior."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "area": "cross-spec sequencing",
+      "finding": "Spec 108's sequencing language is incomplete for a mid-flight 107. It covers trace/.golangci ownership and defers findRoot, but does not require 108 to rebase after 107 before touching internal/validate/plan.go or relying on wave-1 deletions."
+    },
+    {
+      "severity": "blocking",
+      "area": "domain-doc collisions",
+      "finding": "Spec 107's approved plan uses all four workflow docs as bead-unique targets and context-system architecture.md. Spec 108 requires workflow doc touches across multiple beads but does not allocate unique/non-overlapping targets, so parallel implementation is likely to collide in the same doc files."
+    },
+    {
+      "severity": "info",
+      "area": "decomposability",
+      "finding": "A viable 4-bead cut exists: ownership+trace/golangci cleanup, frontmatter consolidation including contextpack, validate ownership/ADR caching, and doctor tree-walk caching. The missing piece is making the ordering and doc-target constraints explicit enough for plan approval."
+    }
+  ]
+}

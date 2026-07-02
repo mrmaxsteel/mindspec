@@ -131,7 +131,10 @@ func ValidateDivergence(
 	// mindspec-ew79: overlay the spec branch's ADR dir (the tree
 	// specDir lives in, e.g. a spec worktree) over the primary
 	// checkout, so spec-introduced ADRs count at bead-complete time.
-	store := adrStoreForSpec(root, specDir)
+	// Spec 108 R8: wrap in the per-run memoizing decorator so the
+	// per-(file × citation) coverageOf loop below reads each distinct
+	// cited ADR from disk at most once.
+	store := newMemoStore(adrStoreForSpecFn(root, specDir))
 
 	// Resolve domain list to consult for attribution. Prefer the
 	// spec's declared impacted-domains; when that's empty (spec has
@@ -176,6 +179,11 @@ func ValidateDivergence(
 		return r, nil
 	}
 
+	// Spec 108 R7: load each candidate domain's OWNERSHIP.yaml at most
+	// once for the whole diff, attributing every changed file against the
+	// shared per-run cache instead of re-loading per (file × domain).
+	ownCache := newOwnershipCache(exec, root, ownerRef)
+
 	var findings []DivergenceFinding
 	for _, path := range changed {
 		if path == "" {
@@ -201,7 +209,7 @@ func ValidateDivergence(
 			continue
 		}
 
-		domain, own, attrErr := attributeDomain(exec, root, ownerRef, path, candidateDomains)
+		domain, own, attrErr := attributeDomainCached(ownCache, path, candidateDomains)
 		if attrErr != nil {
 			r.AddError("adr-divergence-attribute",
 				fmt.Sprintf("attributing %s: %v", path, attrErr))

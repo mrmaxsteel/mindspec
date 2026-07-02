@@ -85,6 +85,11 @@ func normalizeImpactedDomains(exec executor.Executor, root, ownerRef string, ent
 		domainSet[d] = struct{}{}
 	}
 
+	// Spec 108 R7: resolve every path-like entry against a single per-run
+	// OWNERSHIP cache, so each domain's manifest is loaded once for the
+	// whole entry set rather than once per (entry × domain).
+	ownCache := newOwnershipCache(exec, root, ownerRef)
+
 	seen := make(map[string]struct{}, len(entries))
 	appendName := func(name string) {
 		key := strings.ToLower(strings.TrimSpace(name))
@@ -126,7 +131,7 @@ func normalizeImpactedDomains(exec executor.Executor, root, ownerRef string, ent
 		var owners []string
 		var loadErr error
 		for _, d := range domains {
-			o, oerr := loadOwnershipForRef(exec, root, ownerRef, d)
+			o, oerr := ownCache.get(d)
 			if oerr != nil {
 				loadErr = oerr
 				break

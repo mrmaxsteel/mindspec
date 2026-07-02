@@ -60,3 +60,11 @@ Check current mode with `/spec-status`. If unclear:
   `spec create` changes propagate to the alias automatically. Behavior of
   `mindspec spec init` is unchanged; the alias still registers its own `--title`
   flag.
+- **2026-07-02 (spec 108 wave 2, Bead 4):** `mindspec doctor`'s dead-manifest
+  check (`internal/doctor/ownership.go`) now walks the workspace tree **once per
+  ownership check** instead of once per domain. A single enumeration collects the
+  live file list (still skipping `.git/`, `.worktrees/`, and `.beads/`, V2-6), and
+  every domain's `paths:` globs are tested against that cached list. The walk is
+  routed through the package-level `walkWorkspaceFn` seam so a test can count its
+  invocations. Doctor output is unchanged: the same dead-manifest Warn/pass result
+  per domain, just fewer directory walks on the `doctor` hot path.

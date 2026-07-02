@@ -1,0 +1,20 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens: every file/symbol/line pin in the plan's Steps resolves in this post-107 merge-forward tree. All six fence-scan sites exist at cited lines (updatePlanApproval:207, writeBeadIDsToFrontmatter:686, splitFrontmatter:270, readPlanBeadIDs:440, parseCitedADRs:581, extractPlanBeadSection:614, parsePlanFrontmatter:266). validate/state.go readSpecApprovalStatus:189 with callers at :70/:111 (both hold specDir in scope, confirming Bead2 Step3); state_test.go:200 sits inside TestReadSpecApprovalStatus(:182). validate.SpecStatus/SpecStatusAt live (frontmatter.go:21/:33). trace.Event.MarshalJSON:53 + Alias + encoding/json import present. doctor/ownership.go manifestResolvesAny:121, WalkDir(root):128, walkExclusions:20; walkWorkspaceFn correctly absent (new seam). OWNERSHIP.yaml has sibling repo-tooling paths but NOT trace/golangci (correct pre-state). Four doc targets exist. frontmatter.Parse uses TrimRight fence semantics (:83/:93). .golangci.yml has 3 stale carve-outs + live validateReviewMode. R11 precondition holds: findRoot count in internal/next/beads.go is 0. Bead3 validate pins all resolve. Contextpack goldens exist. Disclosed post-approval spec edit is genuinely mechanical (colon placement + marker swap + one blank line; zero prose changed).",
+  "concrete_changes_required": [],
+  "findings": [
+    "All six fence-scan symbols exist at the plan's cited line numbers; spec ranges match (updatePlanApproval 207-268, writeBeadIDsToFrontmatter 686-745, splitFrontmatter 270, readPlanBeadIDs 440, parseCitedADRs 581, extractPlanBeadSection 614, parsePlanFrontmatter 266).",
+    "readSpecApprovalStatus at state.go:189 with the two callers at :70 and :111; verified both have specDir in scope (caller1 derives specPath from specDir at :60; caller2 gets specDir from workspace.SpecDir at :102), so Bead2 Step3's route-through-SpecStatusAt(specDir) is feasible.",
+    "SpecStatusAt(specDir) is the correct specDir-keyed variant; plan Step3 uses it while spec R6 names SpecStatus — both live, no conflict.",
+    "R11 precondition confirmed satisfied in this tree: grep -c findRoot internal/next/beads.go = 0, so the findRoot carve-out removal (Bead1 Step3) is inert as claimed.",
+    "doctor/ownership.go: manifestResolvesAny:121, filepath.WalkDir(root):128, walkExclusions:20 all present; walkWorkspaceFn seam correctly does not yet exist.",
+    "OWNERSHIP.yaml sibling repo-tooling claims (scripts/bd-jsonl-merge-driver.sh, .claude/skills/**, cmd/**, plugins/mindspec/**) present; internal/trace and .golangci.yml correctly absent — matching Bead1's add.",
+    "frontmatter.Parse fence check is strings.TrimRight(line, \"\\r\\n\") (lines 83/93); the TrimSpace calls are field-value extraction only, consistent with the spec's tightening rationale.",
+    "Bead3 validate pins resolve: ValidateDivergence:87, checkInternalPackages:459, normalizeImpactedDomains:72, checkUnclaimedSource states-pattern at ~220-230, loadOwnershipForRef ownership.go:270, LoadOwnershipAtRef ownership.go:164, adrStoreForSpec/coverageOf/hasAcceptedCitation/checkADRCitations/checkADRCoverage all present.",
+    "Contextpack goldens exist: TestContextPackDeterministic (budgeter_test.go:174), TestContextPackFlatVsCanonicalByteIdentical (budgeter_layout_test.go:44).",
+    "Disclosed post-approval spec edit (commit 9a9359ee) is mechanical only: colon placement on the two domain bullets and '-'->'*' markers on three attribution notes plus one blank line; no requirement/AC prose altered.",
+    "Minor/non-blocking: spec R2 cites trace.Event.MarshalJSON at :52-56 but it is at :53-57 (shift of 1); the plan's Bead1 Step2 carries no line number, so the plan itself is accurate."
+  ]
+}

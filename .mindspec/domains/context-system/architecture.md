@@ -65,3 +65,20 @@ Bead `mindspec-oexu.1` removed confirmed-dead context-system-domain symbols:
 - `internal/contextpack`: `NewADRStore` (`adr.go`; callers construct the store
   via `adr.NewFileStore` / use `adr.Store` directly) and `readFileContent`
   (`builder.go`).
+
+## Frontmatter scanner consolidation — spec 108 wave 2 (2026-07-02)
+
+Bead `mindspec-wpjv.2` migrated the budgeter's hand-rolled YAML-frontmatter
+scans onto the canonical `internal/frontmatter` package. In
+`internal/contextpack/budgeter.go`, both `parseCitedADRs` (the plan
+`adr_citations` reader for the ## Cited ADRs tier) and the `extractPlanBeadSection`
+frontmatter strip (the ## Plan tier) now locate the block via
+`frontmatter.Parse` instead of a manual `---` fence walk, and the redundant
+`#`-comment filtering is dropped (YAML ignores comments natively). The
+deterministic `BuildBead` output is unchanged: for well-formed plans the
+post-fence bytes `Parse` returns are byte-identical to the prior split/join
+strip, so `TestContextPackDeterministic` and
+`TestContextPackFlatVsCanonicalByteIdentical` still pass unchanged. The only
+behavior difference — shared with the other migrated readers — is that a
+space-padded `---` fence now reads as no-frontmatter, matching
+`frontmatter.Parse`'s canonical `TrimRight("\r\n")` strictness.
