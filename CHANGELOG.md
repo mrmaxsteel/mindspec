@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Codex symlink protection in `mindspec setup`** — all managed-doc writes for
+  claude, codex, and copilot now route through one shared `safeio`-backed
+  helper; `mindspec setup codex` refuses to write through a symlinked
+  `AGENTS.md` (previously only claude/copilot were protected), with refusal and
+  per-agent full-content-equality tests. (Spec 107)
+- **`AGENTS.md § Bead-loop guardrails (mindspec)`** — the canonical orchestrator
+  fences section that `CLAUDE.md` and the `ms-*` skills reference now exists
+  (the reference was previously dangling). (Spec 107)
+
+### Changed
+- **`mindspec complete` is cheaper** — the children query is a single
+  comma-joined `bd list --parent` call via the new exported
+  `phase.FetchChildren` (was one call per status, ~5), and the immutable
+  spec→epic lookup is resolved once per run (was four throwaway lookups); the
+  post-close children read stays fresh. (Spec 107)
+- **Dead-code sweep (−271 lines)** — ~25 confirmed-dead functions/clusters
+  removed across `internal/{hook,gitutil,layout,doctor,validate,contextpack,
+  next,recording,harness,panel}`, `cmd/mindspec`, and `plugins/mindspec`
+  (verified unreachable even from tests via `deadcode -test`), including the
+  no-op `SetUsageTemplate` in `cmd/mindspec/hook.go` and the dead flags on the
+  deprecated `state set`; the hidden `spec-init` alias now reuses
+  `spec create`'s `RunE` instead of a byte-identical copy. (Spec 107)
+
 ## [0.10.0] - 2026-06-24
 
 A large release headlined by the **flattened `.mindspec/` layout**, plus ten
