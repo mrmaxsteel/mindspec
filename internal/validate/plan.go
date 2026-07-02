@@ -148,8 +148,11 @@ func ValidatePlan(root, specID string) *Result {
 	// lanes. mindspec-ew79: the store overlays the tree SpecDir
 	// actually resolved into (which may be a spec worktree carrying
 	// branch-only ADRs) over the primary checkout, instead of always
-	// reading the primary checkout's ADR dir.
-	store := adrStoreForSpec(root, specDir)
+	// reading the primary checkout's ADR dir. Spec 108 R8: wrap in the
+	// per-run memoizing decorator so checkADRCitations + checkADRCoverage
+	// read each distinct cited ADR from disk at most once across their
+	// O(domains × citations) Get calls.
+	store := newMemoStore(adrStoreForSpecFn(root, specDir))
 
 	// Check ADR citations + fitness (Spec 039)
 	if len(fm.ADRCitations) == 0 {
