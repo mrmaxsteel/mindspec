@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **YAML frontmatter is the single source of approval truth** — the `## Approval`
+  prose scan is gone; spec status comes only from the frontmatter `status:`
+  field (case-insensitive). Hand-rolled frontmatter fence scanners across
+  approve/validate/contextpack were consolidated onto the canonical
+  `internal/frontmatter.Parse`; one deliberate tightening: a space-padded
+  `---` fence is now treated as no-frontmatter everywhere. (Spec 108)
+- **Validation gates are cheaper** — `OWNERSHIP.yaml` manifests load once per
+  gate run (was once per changed-file × domain, including per-domain `git show`
+  fan-out at refs); cited ADRs parse at most once per validation run; doctor's
+  dead-manifest check walks the tree once per check (was once per domain). All
+  proven behavior-identical by golden-diagnostics and seam-count tests. (Spec 108)
+- **`internal/trace/**` and `.golangci.yml` are now workflow-owned** — claimed in
+  OWNERSHIP.yaml; the dead `trace.Event.MarshalJSON` no-op marshaler was removed
+  (NDJSON output golden-proven identical) and three stale lint carve-outs
+  referencing deleted code were dropped. (Spec 108)
+
 ### Added
 - **Codex symlink protection in `mindspec setup`** — all managed-doc writes for
   claude, codex, and copilot now route through one shared `safeio`-backed
