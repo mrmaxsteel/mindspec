@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "All four of my round-1 asks are ADDRESSED at 93143d92. I re-walked every bead's complete file set (source + new domain-doc touches) against the four OWNERSHIP.yaml globs and checkInternalPackages: each bead now includes a changed doc under .mindspec/domains/<domain>/ for EVERY domain whose non-test source it touches, so all four beads clear the complete-time internal-docs hard block with no --allow-doc-skew override. B1: source in workflow+execution+core+context-system, diff touches architecture.md under all four domain dirs. B2: source only under internal/setup/** (workflow); internal/safeio is called not edited (not in file set) so execution is untouched — workflow doc only, correct. B3: internal/complete (workflow) + internal/phase (core), both docs present. B4: cmd/** (workflow) with the workflow doc; AGENTS.md is a rootOperatorDoc (doc, never source) and correctly not counted toward the gate. Built-in classifier is active (no source_globs in config.yaml), so _test.go stays non-source and each architecture.md classifies as a doc via the 'domains' lifecycle subtree and satisfies hasArtifactPrefix(f,\"domains/<domain>\"). Testing Strategy now names the two completion bars (green suite + complete-time doc-sync gate) and the AC map footnotes the doc-sync checkbox. Structural/ADR/ownership approvals from round 1 still hold.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "ask-A-per-bead-docsync-strategy",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Ask A (per-bead doc-sync satisfaction) — ADDRESSED",
+      "detail": "Each bead now pairs its source edits with a domain-doc touch covering every domain the bead changes source in. B1 -> workflow+execution+core+context-system (key_file_paths add architecture.md under all four .mindspec/domains/*/); B2 -> workflow only (internal/setup/**; internal/safeio NOT in the file set, only called, so execution is not a source-touched domain -> no execution doc needed); B3 -> workflow (internal/complete/**) + core (internal/phase/**); B4 -> workflow (cmd/**). Re-walked against OWNERSHIP globs: internal/setup->workflow, internal/safeio->execution (untriggered), internal/complete->workflow, internal/phase->core, internal/recording->core, internal/harness+gitutil->execution, internal/contextpack->context-system, cmd/**+plugins/mindspec/**->workflow. checkInternalPackages requires >=1 doc with hasArtifactPrefix(f,\"domains/<domain>\") per source-touched domain; every bead's diff supplies it. No override needed."
+    },
+    {
+      "id": "ask-B-steps-and-verification-checkbox",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Ask B (preferred fix: Steps item + Verification checkbox updating domain docs) — ADDRESSED",
+      "detail": "The preferred fix (not the --allow-doc-skew alternative) was taken. Each bead adds a Steps item appending a dated wave-1 cleanup note to the relevant architecture.md (B1 step 5, B2 step 6, B3 step 6, B4 step 4) and a runnable doc-sync Verification checkbox asserting its single commit touches the required domain doc(s): B1 loops workflow/execution/core/context-system, B3 loops workflow/core, B2/B4 check workflow. All use `git show --name-only --format= HEAD | grep -qE '^\\.mindspec/domains/<d>/'`, exit-status is pass/fail, runnable as written for a one-commit bead (per the guardrail that subagents make exactly one commit)."
+    },
+    {
+      "id": "docnote-files-classified-as-docs",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Doc-note strategy files (architecture.md appends) classify as docs and satisfy the domain gate — CONFIRMED",
+      "detail": ".mindspec/domains/<domain>/architecture.md is isDocFile()==true via the lifecycleDocSubtrees 'domains' branch (docsync.go:405-409) so it lands in docChanges, and hasArtifactPrefix(f,\"domains/\"+domain)==true (matches the flat .mindspec/domains/<domain>/ prefix, docsync.go:350-366) so it satisfies checkInternalPackages for that domain. All four architecture.md files exist on disk (append, not create — irrelevant to the gate, which only checks membership in the changed set). No source_globs in .mindspec/config.yaml, so the built-in classifier runs and the classification above is not overridden."
+    },
+    {
+      "id": "ask-C-testing-strategy-acknowledges-gate",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Ask C (Testing Strategy + AC map acknowledge the complete-time doc-sync gate) — ADDRESSED",
+      "detail": "Testing Strategy now opens with 'Two independent completion bars per bead' naming (1) green `go test ./...` and (2) a diff that clears the complete-time doc-sync gate, explicitly citing checkInternalPackages / internal/validate/docsync.go and stating a green suite alone does NOT imply `mindspec complete` passes, and that AGENTS.md does not satisfy workflow. The per-bead domain derivation is spelled out. The AC->bead map footer records the doc-sync Verification checkbox as the second completion bar the `mindspec complete` gate enforces. My round-1 concern (green suite treated as sole bead exit) is resolved."
+    },
+    {
+      "id": "cmd-docs-warning-nonblocking-note",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Residual: B1/B4 will emit a non-blocking cmd-docs WARN (not a gate failure)",
+      "detail": "B1 and B4 touch cmd/** without CLAUDE.md/CONVENTIONS.md/user-docs/core-USAGE in the diff, so checkCmdChanges (docsync.go:588-621) emits AddWarning(\"cmd-docs\") — a WARNING, not an AddError, so it does not block `mindspec complete` (the hard block at complete.go:407-415 is errors-only). Outside my round-1 asks and not a blocker; noted only so the tally is aware the complete output will carry a cmd-docs warning line for those two beads. No action required."
+    }
+  ]
+}

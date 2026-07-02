@@ -1,70 +1,83 @@
 ---
-status: Draft
-spec_id: 107-cleanup-deadcode-dry-wave1
-version: "1"
 adr_citations:
-  - id: ADR-0030
-    sections: ["Executor as the git/process I/O boundary"]
-  - id: ADR-0033
-    sections: ["Deterministic context-pack budgeting invariant"]
-  - id: ADR-0034
-    sections: ["Ceremony Collapse — single-bead lifecycle"]
-  - id: ADR-0035
-    sections: ["Agent Error Contract — recovery lines & exit codes"]
-  - id: ADR-0036
-    sections: ["Ownership Discovery — attribution & unowned-path rules"]
-  - id: ADR-0037
-    sections: ["Panel Gate as Enforced Contract"]
+    - id: ADR-0030
+      sections:
+        - Executor as the git/process I/O boundary
+    - id: ADR-0033
+      sections:
+        - Deterministic context-pack budgeting invariant
+    - id: ADR-0034
+      sections:
+        - Ceremony Collapse — single-bead lifecycle
+    - id: ADR-0035
+      sections:
+        - Agent Error Contract — recovery lines & exit codes
+    - id: ADR-0036
+      sections:
+        - Ownership Discovery — attribution & unowned-path rules
+    - id: ADR-0037
+      sections:
+        - Panel Gate as Enforced Contract
+approved_at: "2026-07-02T07:36:43Z"
+approved_by: panel:spec-107-plan-approve round-3 (6/6 APPROVE; R1-R3 claude, R4-R6 codex)
+bead_ids:
+    - mindspec-oexu.1
+    - mindspec-oexu.2
+    - mindspec-oexu.3
+    - mindspec-oexu.4
+spec_id: 107-cleanup-deadcode-dry-wave1
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/hook/helpers.go
-      - internal/gitutil/gitops.go
-      - plugins/mindspec/embed.go
-      - internal/layout/mover.go
-      - internal/doctor/doctor.go
-      - internal/validate/frontmatter.go
-      - internal/validate/plan.go
-      - internal/validate/specid.go
-      - internal/contextpack/adr.go
-      - internal/contextpack/builder.go
-      - internal/next/beads.go
-      - internal/recording/codex_bootstrap.go
-      - internal/harness/agent.go
-      - internal/harness/asserts.go
-      - internal/panel/gate.go
-      - internal/instruct/instruct.go
-      - cmd/mindspec/hook.go
-      - cmd/mindspec/state.go
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/execution/architecture.md
-      - .mindspec/domains/core/architecture.md
-      - .mindspec/domains/context-system/architecture.md
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/setup/claude.go
-      - internal/setup/codex.go
-      - internal/setup/copilot.go
-      - internal/setup/symlink_refusal_test.go
-      - .mindspec/domains/workflow/overview.md
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/complete/complete.go
-      - internal/complete/complete_test.go
-      - internal/phase/cache.go
-      - internal/phase/derive.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/core/overview.md
-  - id: 4
-    depends_on: []
-    key_file_paths:
-      - AGENTS.md
-      - cmd/mindspec/spec.go
-      - cmd/mindspec/spec_init.go
-      - .mindspec/domains/workflow/runbook.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/hook/helpers.go
+        - internal/gitutil/gitops.go
+        - plugins/mindspec/embed.go
+        - internal/layout/mover.go
+        - internal/doctor/doctor.go
+        - internal/validate/frontmatter.go
+        - internal/validate/plan.go
+        - internal/validate/specid.go
+        - internal/contextpack/adr.go
+        - internal/contextpack/builder.go
+        - internal/next/beads.go
+        - internal/recording/codex_bootstrap.go
+        - internal/harness/agent.go
+        - internal/harness/asserts.go
+        - internal/panel/gate.go
+        - internal/instruct/instruct.go
+        - cmd/mindspec/hook.go
+        - cmd/mindspec/state.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/execution/architecture.md
+        - .mindspec/domains/core/architecture.md
+        - .mindspec/domains/context-system/architecture.md
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/setup/claude.go
+        - internal/setup/codex.go
+        - internal/setup/copilot.go
+        - internal/setup/symlink_refusal_test.go
+        - .mindspec/domains/workflow/overview.md
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/complete/complete.go
+        - internal/complete/complete_test.go
+        - internal/phase/cache.go
+        - internal/phase/derive.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/core/overview.md
+    - depends_on: []
+      id: 4
+      key_file_paths:
+        - AGENTS.md
+        - cmd/mindspec/spec.go
+        - cmd/mindspec/spec_init.go
+        - .mindspec/domains/workflow/runbook.md
 ---
 # Plan: 107-cleanup-deadcode-dry-wave1
 

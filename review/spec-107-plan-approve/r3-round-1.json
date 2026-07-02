@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "The plan clears plan-approve cleanly: frontmatter parses (status/spec_id/adr_citations mapping form/work_chunks id+depends_on+key_file_paths); 4 ## Bead sections each with **Steps** (5/6/6/5, in 3-7), **Verification** checkboxes, **Acceptance Criteria**, **Depends on**: None; work_chunks 1-4 align 1:1 with sections, no deps, ValidateWorkChunkAlignment passes. All six ADRs are Accepted and their Domain(s) lines intersect impacted domains (0030 execution, 0033 context-system, 0034 workflow, 0035 workflow/execution/core, 0036 workflow, 0037 workflow/execution) with full coverage of {workflow,core,execution,context-system} and no non-intersecting citation. Every key_file_path attributes under an OWNERSHIP glob; AGENTS.md rides rootOperatorDocs; adr-divergence-unowned stays green. BUT the beads will NOT clear the complete gate: complete.go:407-415 runs ValidateDocsRange (base..beadHead) as a HARD block, and checkInternalPackages requires a doc under .mindspec/domains/<domain>/ for every domain whose source changed. All four beads are code-only (AGENTS.md is a rootOperatorDoc, not under domains/workflow). Every bead hard-fails internal-docs at mindspec complete. The plan is silent on this.",
+  "concrete_changes_required": [
+    "Add a doc-sync satisfaction strategy for each bead so its diff clears the complete-time internal-docs gate (complete.go:407-415, checkInternalPackages in internal/validate/docsync.go). The gate requires, in the SAME bead diff, at least one changed doc under .mindspec/domains/<domain>/ for EVERY domain whose source the bead touches. Per-bead requirement: Bead 1 -> workflow + execution + core + context-system (needs a doc touch under all four domain dirs); Bead 2 -> workflow (execution too if internal/safeio/safeopen.go is edited rather than only called); Bead 3 -> workflow (internal/complete) + core (internal/phase); Bead 4 -> workflow (cmd/**). Note AGENTS.md does NOT satisfy Bead 4's workflow requirement — hasArtifactPrefix(AGENTS.md, \"domains/workflow\") is false.",
+    "Preferred fix: give each bead a Steps item + a Verification checkbox that updates the relevant domain doc(s) (e.g. append a cleanup/refactor note to .mindspec/domains/<domain>/architecture.md or overview.md recording the removed/moved symbols) so the deletion is reflected in domain docs and the gate passes with no override.",
+    "Alternative (if pure-subtraction beads must stay doc-free): the plan must state that the cycle runs `mindspec complete --allow-doc-skew \"<reason>\"` for these beads and record the reason — but the ms-bead-cycle orchestrator runs plain `mindspec complete` and does not thread --allow-doc-skew, so relying on the override requires an explicit plan/orchestration note, not silence.",
+    "Update the Testing Strategy and the AC->bead map to acknowledge the complete-time doc-sync gate (currently only `go test ./...` green is treated as bead exit); the bead subagent's green suite does not imply the orchestrator's `mindspec complete` will pass."
+  ],
+  "findings": [
+    {
+      "id": "docsync-internal-docs-hard-block",
+      "hard_block": true,
+      "severity": "high",
+      "title": "All four beads hard-fail the complete-time doc-sync (internal-docs) gate",
+      "detail": "internal/complete/complete.go:407 runs validate.ValidateDocsRange(root, base, beadHead, beadHead) over each bead's own diff and returns a hard error at :413-415 unless --allow-doc-skew is set. internal/validate/docsync.go checkInternalPackages attributes each changed source file to a domain via OWNERSHIP.yaml and emits a blocking `internal-docs` error for any domain that changed source without a same-diff doc under .mindspec/domains/<domain>/ (hasArtifactPrefix f, \"domains/\"+domain). All four beads are code-only: Bead1 touches workflow/execution/core/context-system source; Bead2 workflow; Bead3 workflow+core; Bead4 workflow (cmd/**). None plans a domains/<domain>/ doc change. The spec's Impacted-Domains note and ADR-0036 discussion address only adr-divergence-unowned (why internal/trace and .golangci.yml are deferred) and never mention the doc-sync internal-docs lane — same class of gate landmine as the round-1 spec catch, on a different gate."
+    },
+    {
+      "id": "frontmatter-and-structure-clean",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Plan-approve structural checks pass",
+      "detail": "parsePlanFrontmatter accepts the mapping-form adr_citations and work_chunks (id/depends_on/key_file_paths); ParseBeadSections yields 4 beads each with **Steps**/**Verification**/**Acceptance Criteria**/**Depends on**; step counts 5/6/6/5 within 3-7; ValidateWorkChunkAlignment passes (4 chunks == 4 sections, ids 1-4 unique, empty deps). status:Draft is correct for the pre-approve plan (039 gates run and ADR Fitness/Testing Strategy/Provenance are all present)."
+    },
+    {
+      "id": "adr-citations-coverage-clean",
+      "hard_block": false,
+      "severity": "info",
+      "title": "ADR citations relevant and coverage complete",
+      "detail": "All six cited ADRs are Accepted. Domain(s) lines: 0030 execution/validation/lifecycle/lint; 0033 context-system; 0034 workflow; 0035 workflow/execution/core; 0036 workflow/validation/doc-sync/ownership; 0037 workflow/execution. Each intersects impacted domains {workflow,core,execution,context-system} (no adr-cite-irrelevant), and every impacted domain is covered by a cited Accepted ADR (workflow<-0034, core<-0035, execution<-0030, context-system<-0033) — no adr-coverage-missing/proposed. contextpack.ParseSpec reads only `- ` bullets under ## Impacted Domains, so the Note: paragraph yields no spurious domain."
+    },
+    {
+      "id": "ownership-attribution-clean",
+      "hard_block": false,
+      "severity": "info",
+      "title": "Every key_file_path attributes under a domain glob; adr-divergence-unowned stays green",
+      "detail": "Bead1: internal/{hook,next,doctor,panel,layout,validate,instruct}->workflow, cmd/**+plugins/mindspec/**->workflow, internal/gitutil+internal/harness->execution, internal/recording->core, internal/contextpack->context-system. Bead2 internal/setup->workflow, internal/safeio->execution, _test.go not source. Bead3 internal/complete->workflow, internal/phase->core. Bead4 cmd/**->workflow, AGENTS.md->rootOperatorDocs (doc, never attributed). No unclaimed non-doc path — the spec's deferral of internal/trace and .golangci.yml holds."
+    }
+  ]
+}

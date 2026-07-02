@@ -1,0 +1,69 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.93,
+  "rationale": "Plan validation exits 0 with zero errors; the only validator output is WARN decomposition-scope-redundancy R=0.12. I parsed the work_chunks frontmatter directly: ids are contiguous 1..4 and all depends_on arrays are empty. However, empirical spot-runs show multiple Verification commands can exit 0 without proving their stated condition. The deadcode command exits 0 even when go run fails before analysis because the failure is swallowed by the negated grep pipeline. The B3 named go test selectors also exit 0 with 'no tests to run', so a missing required test would not fail the checkbox. The same pattern affects the codex symlink-refusal selector if narrowed to the required new test. These are command-quality blockers for round 2 because Verification checkbox exit status is supposed to be pass/fail.",
+  "concrete_changes_required": [
+    "Rewrite the Bead 1 deadcode Verification command so the shell command fails if `go run golang.org/x/tools/cmd/deadcode@latest ...` fails before producing analyzer output, instead of letting the negated grep pipeline turn tool failure into success.",
+    "Rewrite named `go test -run ...` Verification commands for required new tests so they fail when the named test is absent, for example by using exact anchors with `-v` and checking for the corresponding PASS line or another robust existence assertion.",
+    "Make the Bead 2 symlink-refusal Verification command prove the new codex refusal test runs, not only that the pre-existing claude/copilot `RefusesSymlinked` tests pass."
+  ],
+  "findings": [
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "area": "round-1 R4 asks",
+      "location": "review/spec-107-plan-approve/codex-r4-round-1.json",
+      "observed": "R4 round 1 had verdict APPROVE and no concrete_changes_required.",
+      "impact": "No R4-specific round-1 asks remain to track."
+    },
+    {
+      "status": "OK",
+      "severity": "info",
+      "area": "plan validation",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "`mindspec validate plan 107-cleanup-deadcode-dry-wave1` exits 0. Output contains one WARN: decomposition-scope-redundancy R=0.12 below threshold 0.15.",
+      "impact": "Zero validation errors confirmed with the current binary."
+    },
+    {
+      "status": "OK",
+      "severity": "info",
+      "area": "frontmatter",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "Parsed YAML frontmatter directly: work_chunks ids are 1, 2, 3, 4 and each has depends_on: [].",
+      "impact": "The requested independent 1..4 chunk shape is present."
+    },
+    {
+      "status": "NEW_ISSUE",
+      "severity": "high",
+      "area": "verification command",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "The exact Bead 1 deadcode checkbox command exited 0 while `go run golang.org/x/tools/cmd/deadcode@latest ...` failed with DNS resolution failure for proxy.golang.org. The negated grep pipeline treats no stdout as success and hides the analyzer failure.",
+      "impact": "The checkbox can pass without running deadcode, so its exit status is not a reliable pass/fail proof."
+    },
+    {
+      "status": "NEW_ISSUE",
+      "severity": "high",
+      "area": "verification command",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "`go test ./internal/complete/... -run TestRun_CompletePerfPairSubprocessBudget -count=1` and `go test ./internal/phase/... -run TestFetchChildren -count=1` both exited 0 with 'no tests to run' in the current tree.",
+      "impact": "If an implementation omitted either required new test, these Verification commands could still pass."
+    },
+    {
+      "status": "NEW_ISSUE",
+      "severity": "medium",
+      "area": "verification command",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "`go test ./internal/setup/... -run RefusesSymlinked -count=1` exits 0 today by running the existing claude/copilot symlink-refusal tests. A codex-specific selector, `-run TestRunCodex_RefusesSymlinkedAGENTSmd`, exits 0 with '[no tests to run]'.",
+      "impact": "The Bead 2 checkbox does not prove the new codex symlink-refusal test exists or ran."
+    },
+    {
+      "status": "OK",
+      "severity": "info",
+      "area": "spot-run",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md",
+      "observed": "`go build ./...` exits 0 from the worktree root; Go emitted a module cache stat-write warning outside the workspace but did not fail the build.",
+      "impact": "Build command is runnable as written."
+    }
+  ]
+}

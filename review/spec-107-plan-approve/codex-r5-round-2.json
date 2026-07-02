@@ -1,0 +1,56 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.9,
+  "rationale": "Round-1 prose checks were mostly converted to shell predicates, and the AC ownership map is non-conflicting: AC1 is intentionally shared by B1/B2/B3, AC2-AC4 by B2, AC5-AC6 by B3, AC7-AC8 by B4, and AC9 by every bead. The named B3 seams are real: phase.SetListJSONForTest is exported at internal/phase/derive.go:33-34 and stubChildrenByStatus is at internal/complete/complete_test.go:535. However, several rewritten Verification commands still are not falsifiable pass/fail checks. Go test selectors for newly required tests can exit 0 when no test matches; I confirmed that current commands for TestFetchChildren and TestRun_CompletePerfPairSubprocessBudget return ok [no tests to run], and the RefusesSymlinked selector returns 0 today without the required codex test. These need existence assertions or other predicates that fail when the required tests/checks are omitted.",
+  "concrete_changes_required": [
+    "Tighten Bead 3 Verification commands at plan.md:298-299 so they fail if TestRun_CompletePerfPairSubprocessBudget or TestFetchChildren is missing, e.g. prefix with an anchored rg/grep for the test function and use anchored go test selectors.",
+    "Tighten Bead 2 Verification at plan.md:255 so it fails unless the required codex symlink refusal test exists and runs, not merely because existing claude/copilot RefusesSymlinked tests pass.",
+    "Add a falsifiable Bead 2 Verification command for the per-agent full-equality managed-doc tests required by AC3; go test ./internal/setup/... alone can pass if those new tests are omitted.",
+    "Scope the Bead 4 guardrails fence check at plan.md:335 to the Bead-loop guardrails section content, or otherwise make the command fail if the section is present but empty and the substrings only appear elsewhere in AGENTS.md."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "status": "PARTIAL",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:298-299",
+      "issue": "B3 now names runnable go test commands and the real phase seam, but the commands can false-pass if the new tests are not added. I ran both selectors on the current tree and each exited 0 with '[no tests to run]'."
+    },
+    {
+      "severity": "blocking",
+      "status": "NEW_ISSUE",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:255",
+      "issue": "The RefusesSymlinked selector exits 0 today even though TestRunCodex_RefusesSymlinkedAGENTSmd is absent, because existing claude/copilot tests match. It does not mechanically prove AC4."
+    },
+    {
+      "severity": "major",
+      "status": "NEW_ISSUE",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:254,262",
+      "issue": "AC3 requires per-agent full-equality managed-doc tests, but the Verification block only runs the whole setup suite. That can pass if the new equality tests are omitted."
+    },
+    {
+      "severity": "major",
+      "status": "PARTIAL",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:335",
+      "issue": "B4 checks are runnable commands, but the guardrail-fence command greps all of AGENTS.md rather than the restored section, so it does not strictly prove the section carries all five fences."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": ".mindspec/docs/specs/107-cleanup-deadcode-dry-wave1/plan.md:215,216,256,301",
+      "issue": "The grep-negative checks were rewritten with inverted shell predicates, satisfying the round-1 ask for command exit status to encode the no-match condition."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": "internal/phase/derive.go:33",
+      "issue": "phase.SetListJSONForTest exists and is exported; the plan's B3 AC/Verification text names the phase seam rather than the old complete seam."
+    },
+    {
+      "severity": "info",
+      "status": "ADDRESSED",
+      "location": "internal/complete/complete_test.go:535",
+      "issue": "stubChildrenByStatus exists at the required seam location for the planned re-pointing."
+    }
+  ]
+}
