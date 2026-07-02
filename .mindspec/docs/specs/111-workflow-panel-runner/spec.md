@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-02T22:18:07Z"
+approved_by: user
+status: Approved
 ---
 # Spec 111-workflow-panel-runner: Workflow-backed panel runner: the first orchestration adapter behind the panel contracts
 
@@ -148,7 +148,7 @@ _All open questions are resolved; every resolution is folded into the Requiremen
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-02
+- **Notes**: Approved via mindspec approve spec

@@ -1,0 +1,54 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Live probes on commit bd898dfa support approval. `mindspec validate spec 111-workflow-panel-runner` exits 0 with only the expected lifecycle-binding WARN. The embed, setup, ownership, and validator-classifier claims are real in this tree. The remediated spec closes the round-1 gate-integrity gaps without weakening R4's prior approval. The rewritten shell ACs are runnable against normal files; AC4 is intentionally grep-level and should be strengthened in implementation tests for exact allowlist membership, but the spec prose/falsified clauses already bind that requirement.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "round1-r4-asks",
+      "status": "ADDRESSED",
+      "evidence": "Round-1 R4 was an approve with no concrete changes required. The prior empirical claims were rechecked in this tree at bd898dfa and still hold."
+    },
+    {
+      "id": "validate-spec",
+      "status": "PASS",
+      "evidence": "`mindspec validate spec 111-workflow-panel-runner` reported exactly one issue: `[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one`. No errors."
+    },
+    {
+      "id": "workflowfiles-mirror",
+      "status": "PASS",
+      "evidence": "`plugins/mindspec/embed.go` embeds `skills/*/SKILL.md` and exposes `SkillFiles()` via `fs.WalkDir`, `ReadFile`, and map return keyed by skill name. A `//go:embed workflows/*` plus `WorkflowFiles()` mirror is real and mechanically mirrorable."
+    },
+    {
+      "id": "claude-install-chain",
+      "status": "PASS",
+      "evidence": "`internal/setup/claude.go` calls `installSkills(filepath.Join(root, \".claude\", \"skills\"), ..., claudeSkillFiles(), ...)`; `claudeSkillFiles()` delegates to `skillFiles()`, which merges `pluginmindspec.SkillFiles()`. `installSkills` implements create/refresh/skip provenance behavior the workflow-install step can mirror."
+    },
+    {
+      "id": "ownership-claims",
+      "status": "PASS",
+      "evidence": "`.mindspec/domains/workflow/OWNERSHIP.yaml` currently claims `plugins/mindspec/**`, `.claude/skills/**`, and `.agents/skills/**`, but has no `.claude/workflows/**` or broad `.claude/**` claim. The spec's `.claude/workflows/**` claim is genuinely new; the plugin workflow copy needs no new claim."
+    },
+    {
+      "id": "governable-source-classification",
+      "status": "PASS",
+      "evidence": "`isDocFile` only covers docs roots, lifecycle doc subtrees, context map, and root operator docs; `isProcessArtifact` is `isDocFile` plus `.beads/`, `review/`, co-located reviews, mover run-state, and vestigial config drops. `.claude/workflows/ms-panel.js` matches neither, so it is governable source as asserted."
+    },
+    {
+      "id": "ac-allowed-cli-one-liner",
+      "status": "PASS_WITH_ADVISORY",
+      "evidence": "Against normal temp files, the one-liner exits 0 when `ALLOWED_CLI`, all four required command strings, `claude-sub`, and no `mindspec complete` are present; exits 1 when `codex exec` is missing; exits 1 when `mindspec complete` appears even in a comment. Advisory: it also exits 0 with an extra command in the allowlist, so it tests required-string presence and complete-string absence, not exact four-command membership."
+    },
+    {
+      "id": "ac-codex-log-one-liner",
+      "status": "PASS_WITH_ADVISORY",
+      "evidence": "`grep -qF '.codex.log' .claude/workflows/ms-panel.js` is runnable and checks for the audit-artifact marker. As a grep AC it proves presence of the marker, not runtime persistence; the spec's manual proof covers the end-to-end behavior."
+    },
+    {
+      "id": "round2-deviations",
+      "status": "ACCEPTED",
+      "evidence": "A: numbering `3b` preserves round references and is readable. B: the stricter `mindspec complete` nowhere ban is runnable and comment-proof by design, with the exact-allowlist caveat noted above. C: decoupling the untracked research document makes the rationale self-contained and is sufficient."
+    }
+  ]
+}

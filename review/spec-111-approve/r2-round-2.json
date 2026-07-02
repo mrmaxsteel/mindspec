@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Codebase-pin lens, round 2: the remediation (bd898dfa, spec.md only) introduced zero ungrounded pins and broke none of my round-1 verifications. Re-verified live: PanelGateDecision (gate.go:131), SkillFiles (embed.go:25), installSkills (skills.go:105, called claude.go:159), workflow OWNERSHIP.yaml still lacks .claude/workflows/** (R9 claim still needed, as stated), ADR-0034/35/36/37 all present with the cited sections — ADR-0037 §8 contains the exact 'plain reviewable files' phrase R3b extends. New pins all grounded: the .codex.log path <spec-dir>/reviews/<slug>/ matches spec 110's ADR-0039/manual-proof contract dir where verdicts land, and verdictFileRE (tally.go:33, anchored \\.json$) cannot misparse a .codex.log as a verdict; the new AC greps 'After a halt' (tally SKILL.md:83) and 'Escape hatch' (:102) resolve; the rewritten AC4 one-liner is valid shell (fixture-tested exit 0). Research doc verified genuinely absent from tree and all history, exactly as the decoupled Background now honestly states. mindspec validate: exit 0, only the known lifecycle-binding WARN. Deviations A/B/C all sound from this lens. I had no round-1 asks to close.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "summary": "Round-1 asks: I filed none (approve, no asks) — nothing to mark. My three round-1 info findings carry over unchanged and remain plan-time notes: (1) 'Consolidate' is Step 4 inside ## Steps, not a top-level section — the AC's bare grep still passes (SKILL.md:47); (2) current substitution contract writes reviewer_id 'R<slot> claude-sub' (ms-panel-run SKILL.md:183) vs the spec's '<slot> claude-sub' shorthand; (3) embed glob shape (skills/*/SKILL.md nested vs workflows/* flat) is a plan-time detail.",
+      "location": ".mindspec/docs/specs/111-workflow-panel-runner/spec.md"
+    },
+    {
+      "severity": "info",
+      "summary": "New R3b pin verified: spec 110 places the panel dir at <spec-dir>/reviews/<slug> (ADR-0039 touchpoint + manual proof, 110 spec.md:41,111) with <slot>-round-<N>.json verdicts (110 R4, :55); the .codex.log lands in the same dir and is structurally invisible to the scanner (verdictFileRE requires .json suffix, internal/panel/tally.go:33), so the audit artifact cannot corrupt round derivation or present as a malformed verdict.",
+      "location": "internal/panel/tally.go:33; .mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md (110 worktree)"
+    },
+    {
+      "severity": "info",
+      "summary": "Deviation A (requirement numbered 3b): sound — every cross-reference pin I verified in round 1 (R4/R8/R9, the AC-to-requirement mapping) stays valid; 8 internal 'R3b' references are consistent. Renumbering would have invalidated the round-1 audit trail.",
+      "location": "spec.md R3b"
+    },
+    {
+      "severity": "info",
+      "summary": "Deviation B (ALLOWED_CLI allowlist, stricter than asked): no groundedness risk — ALLOWED_CLI is a new artifact the spec mandates, not a pin on existing code. The AC one-liner (grep -q ALLOWED_CLI + for-loop of four grep -qF + ! grep -qF 'mindspec complete') is valid POSIX shell, verified against a conforming fixture (exit 0). Positive greps being satisfied by the declaration itself is the stated design and is honest about what a static grep can prove.",
+      "location": "spec.md R5 + Acceptance Criteria"
+    },
+    {
+      "severity": "info",
+      "summary": "Deviation C (decouple, don't commit): the right fix from this lens. project-docs/research/loop-engineering-adaptation.md is confirmed absent from the working tree and from all git history (project-docs/research/ contains only scaling-agent-systems.md), and the spec now says exactly that ('a working document not committed with this spec'), with the two rationales restated self-contained and all quoted section numbers removed (no residual '§3.x'/'research §' citations anywhere in the spec).",
+      "location": "spec.md Background"
+    },
+    {
+      "severity": "info",
+      "summary": "Pre-existing, NOT a remediation regression: the ADR touchpoint markdown links use ../../adr/... which from .mindspec/docs/specs/111-.../ resolves to the nonexistent .mindspec/docs/adr/; the ADRs live at .mindspec/adr/. Identical in the round-1 commit (2448b8ab) and shared by spec 110's spec.md; mindspec validate passes regardless (exit 0, only the expected lifecycle-binding WARN). Cosmetic link-path quirk of the post-106 layout, fixable any time.",
+      "location": "spec.md ADR Touchpoints; .mindspec/adr/"
+    }
+  ]
+}
