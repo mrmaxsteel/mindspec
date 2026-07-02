@@ -88,6 +88,105 @@ func TestRunClaude_RefusesSymlinkedSettings(t *testing.T) {
 	}
 }
 
+// TestRunCodex_RefusesSymlinkedAGENTSmd plants a symlink at <root>/AGENTS.md
+// pointing at a decoy file and asserts RunCodex refuses to write through it.
+// This closes the pre-mindspec-oexu.2 gap where ensureAgentsMD used a bare
+// os.OpenFile(O_APPEND)/os.WriteFile that would have followed the symlink and
+// written the managed block onto the decoy's content; the write now routes
+// through the shared ensureManagedDoc helper backed by safeio.
+func TestRunCodex_RefusesSymlinkedAGENTSmd(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	decoyDir := t.TempDir()
+	decoy := filepath.Join(decoyDir, "decoy.md")
+	const original = "do-not-touch\n"
+	if err := os.WriteFile(decoy, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed decoy: %v", err)
+	}
+
+	link := filepath.Join(root, "AGENTS.md")
+	if err := os.Symlink(decoy, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	_, err := RunCodex(root, false)
+	if err == nil {
+		t.Fatal("RunCodex returned nil error; want ErrSymlinkRefused")
+	}
+	if !errors.Is(err, safeio.ErrSymlinkRefused) {
+		t.Fatalf("RunCodex err = %v; want errors.Is(err, safeio.ErrSymlinkRefused)", err)
+	}
+
+	got, err := os.ReadFile(decoy)
+	if err != nil {
+		t.Fatalf("read decoy: %v", err)
+	}
+	if string(got) != original {
+		t.Errorf("decoy modified through symlink: got %q, want %q", string(got), original)
+	}
+}
+
+// TestManagedDocContent_Claude asserts that a fresh (non-symlinked) CLAUDE.md
+// written through the shared ensureManagedDoc helper is byte-for-byte equal to
+// the block-constant-derived claudeMDFull, proving the extraction kept the
+// produced document identical.
+func TestManagedDocContent_Claude(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	r := &Result{}
+	if err := ensureClaudeMD(root, false, r); err != nil {
+		t.Fatalf("ensureClaudeMD: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if string(got) != claudeMDFull {
+		t.Errorf("CLAUDE.md content mismatch:\n got: %q\nwant: %q", string(got), claudeMDFull)
+	}
+}
+
+// TestManagedDocContent_Codex asserts that a fresh (non-symlinked) AGENTS.md
+// equals the block-constant-derived agentsMDFull in full.
+func TestManagedDocContent_Codex(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	r := &Result{}
+	if err := ensureAgentsMD(root, false, r); err != nil {
+		t.Fatalf("ensureAgentsMD: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != agentsMDFull {
+		t.Errorf("AGENTS.md content mismatch:\n got: %q\nwant: %q", string(got), agentsMDFull)
+	}
+}
+
+// TestManagedDocContent_Copilot asserts that a fresh (non-symlinked)
+// .github/copilot-instructions.md equals the block-constant-derived
+// copilotInstructionsFull in full.
+func TestManagedDocContent_Copilot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	r := &Result{}
+	if err := ensureCopilotInstructions(root, false, r); err != nil {
+		t.Fatalf("ensureCopilotInstructions: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, ".github", "copilot-instructions.md"))
+	if err != nil {
+		t.Fatalf("read copilot-instructions.md: %v", err)
+	}
+	if string(got) != copilotInstructionsFull {
+		t.Errorf("copilot-instructions.md content mismatch:\n got: %q\nwant: %q", string(got), copilotInstructionsFull)
+	}
+}
+
 // TestRunCopilot_RefusesSymlinkedInstructions plants a symlink at
 // <root>/.github/copilot-instructions.md pointing at a decoy and asserts
 // RunCopilot refuses to follow it.

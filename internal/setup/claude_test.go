@@ -786,7 +786,7 @@ func TestChainBeadsSetup_UsesRootAsCWD(t *testing.T) {
 
 	root := t.TempDir()
 	r := &Result{}
-	chainBeadsSetup(root, r)
+	chainBeadsSetup(root, "claude", r)
 
 	if !r.BeadsRan {
 		t.Fatal("expected BeadsRan=true")
@@ -801,7 +801,7 @@ func TestChainBeadsSetupCodex_UsesRootAsCWD(t *testing.T) {
 
 	root := t.TempDir()
 	r := &Result{}
-	chainBeadsSetupCodex(root, r)
+	chainBeadsSetup(root, "codex", r)
 
 	if !r.BeadsRan {
 		t.Fatal("expected BeadsRan=true")
