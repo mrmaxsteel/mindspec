@@ -68,6 +68,7 @@ var CommandTokens = map[string]struct{}{
 	"bead":      {},
 	"cleanup":   {},
 	"complete":  {},
+	"config":    {}, // spec 109 R9: read-only `config show`
 	"context":   {},
 	"doctor":    {},
 	"domain":    {},

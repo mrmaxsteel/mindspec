@@ -214,6 +214,25 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 	return matched, nil
 }
 
+// reviewerCountAdvisory prints the caller-side panel.ReviewerCountNote
+// advisory (spec 109 R8) for the panel matched by panelGate, IFF its
+// recorded expected_reviewers differs from configDefault (the current
+// panel.PanelExpectedReviewers() config default). It is advisory only:
+// panelGate has ALREADY computed the Allow/Block decision by the time
+// complete.Run calls this (immediately after the panelGate call, step
+// 2.25) — this cannot alter that decision, it only appends a line to the
+// SAME writer panelGate's own Warn messages use. reg is read-only here; a
+// nil registration (no matched panel — the common case) or a malformed one
+// (Err != nil, no ExpectedReviewers to compare) prints nothing.
+func reviewerCountAdvisory(reg *panel.Registration, configDefault int, w io.Writer) {
+	if reg == nil || reg.Err != nil || w == nil {
+		return
+	}
+	if note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault); note != "" {
+		fmt.Fprintf(w, "panel advisory: %s\n", note)
+	}
+}
+
 // panelGateRoots returns the directories the authoritative panel gate scans,
 // chosen by the project's docs layout (Spec 106 Bead 4, AC13). panel.Scan globs
 // BOTH the repo-root `review/` and the co-located `reviews/` segment under each

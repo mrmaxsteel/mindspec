@@ -132,6 +132,53 @@ func TestWritePanelAuditMetadata_Abandoned(t *testing.T) {
 	}
 }
 
+// TestPanelAdvisory_ReviewerCountNote: a panel whose recorded
+// expected_reviewers differs from the config default produces a non-empty
+// advisory on the writer (spec 109 R8), and the panelGate Allow/Block
+// decision is unaffected by whether the note is computed at all — the two
+// calls are independent (reviewerCountAdvisory takes no GateFacts and
+// cannot influence panel.PanelGateDecision). panelGateEnabled is passed
+// false so the decision itself needs no git-dependent fact resolution,
+// isolating this test to the note wiring.
+func TestPanelAdvisory_ReviewerCountNote(t *testing.T) {
+	root := t.TempDir()
+	writePanel(t, root, "109-bd04", panel.Panel{
+		BeadID: bp("mindspec-bd04"), Spec: "109", Round: 1, ExpectedReviewers: 6,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+	})
+
+	reg, err := panelGate("mindspec-bd04", []string{root}, "", false, nil)
+	if err != nil {
+		t.Fatalf("panelGate returned an error; decision must be unaffected by the advisory: %v", err)
+	}
+	if reg == nil {
+		t.Fatal("expected a matched registration")
+	}
+
+	var noteBuf bytes.Buffer
+	reviewerCountAdvisory(reg, 4, &noteBuf) // configDefault=4, recorded=6
+	out := noteBuf.String()
+	if !strings.Contains(out, "recorded 6") || !strings.Contains(out, "config default is 4") {
+		t.Errorf("expected a reviewer-count note (recorded 6 vs default 4), got %q", out)
+	}
+
+	// Matching config default -> no note (the common case, including every
+	// no-panel and unchanged-config-default call site).
+	var quietBuf bytes.Buffer
+	reviewerCountAdvisory(reg, 6, &quietBuf)
+	if quietBuf.Len() != 0 {
+		t.Errorf("expected no note when counts match, got %q", quietBuf.String())
+	}
+
+	// nil registration (no matched panel) -> no note, no panic.
+	var nilBuf bytes.Buffer
+	reviewerCountAdvisory(nil, 4, &nilBuf)
+	if nilBuf.Len() != 0 {
+		t.Errorf("expected no note for a nil registration, got %q", nilBuf.String())
+	}
+}
+
 // TestWritePanelAuditMetadata_NoPanel_NoWrite: nil registration → no
 // metadata write at all (no skip, no abandon).
 func TestWritePanelAuditMetadata_NoPanel_NoWrite(t *testing.T) {
