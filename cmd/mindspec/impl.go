@@ -153,6 +153,19 @@ func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID strin
 			fmt.Fprintf(stdout, "\nBranch pushed to remote. Create a PR to merge into main:\n")
 			fmt.Fprintf(stdout, "  gh pr create --head %s --base main --title \"[SPEC %s] <title>\" --body \"<description>\"\n", result.SpecBranch, specID)
 		}
+		if result.FinalizeBranch != "" {
+			// Bug wu7t: %s (result.SpecBranch) was already merged into main
+			// before this ran, so the epic-close JSONL export commit could
+			// not ride it — it landed instead on a fresh from-main branch,
+			// already pushed. Until a PR from that branch merges, main's
+			// committed .beads/issues.jsonl is stale and the bd post-merge
+			// hook will keep reverting the epic-close/bead-done state in
+			// Dolt on every subsequent merge/FF.
+			fmt.Fprintf(stdout, "\nNOTE: %s was already merged into main, so the epic-close JSONL export landed on a separate branch instead: %s (already pushed).\n", result.SpecBranch, result.FinalizeBranch)
+			fmt.Fprintf(stdout, "Open and merge a PR from %s into main:\n", result.FinalizeBranch)
+			fmt.Fprintf(stdout, "  gh pr create --head %s --base main --title \"chore(beads): finalize epic for spec %s\" --body \"<description>\"\n", result.FinalizeBranch, specID)
+			fmt.Fprintf(stdout, "Until that PR merges, main's committed .beads/issues.jsonl is STALE: the bd post-merge hook will keep reverting the epic-close/bead-done state in Dolt on every subsequent merge/FF.\n")
+		}
 	}
 	fmt.Fprintln(stdout)
 

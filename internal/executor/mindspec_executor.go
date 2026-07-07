@@ -20,10 +20,15 @@ import (
 // orchestration logic without requiring `bd` on PATH. The default
 // implementation shells out to `bd worktree` via the bead package.
 //
-// This is the only DI seam on MindspecExecutor. Git, config, and exec are
-// called directly (see ARCH-11): they are either trivially testable against a
-// real temp git repo, or — in the case of `bead.Export` — covered by an
-// integration-style test gated on `bd` being on PATH.
+// Git, config, and exec are otherwise called directly (see ARCH-11): they
+// are either trivially testable against a real temp git repo, or — in the
+// case of `bead.Export` — covered by an integration-style test gated on
+// `bd` being on PATH. Bug wu7t's orphaned-spec-branch finalize path
+// (finalizeOrphanedSpecBranch, below) is the one exception: it needs a
+// REAL, assertable export commit on a throwaway from-main worktree without
+// requiring bd/Dolt in the test environment, so commitWithExport's export
+// step is routed through the package-level execBeadExportFn var instead —
+// the same implXxxFn seam convention internal/approve/impl.go uses.
 type WorktreeOps interface {
 	Create(name, branch string) error
 	Remove(name string) error
@@ -348,6 +353,21 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
 	}
 
+	// Bug wu7t: capture the spec branch tip BEFORE any finalize-time
+	// auto-commits land on it (the "chore: commit remaining spec
+	// artifacts" commit right below, and any bead-branch auto-merges
+	// further down). This is the checkpoint the remote/pr path re-checks
+	// against origin/main (see the "Push to remote" block) to tell a live
+	// spec branch — still carrying an unmerged implementation PR — from a
+	// dead one whose PR already merged. Best-effort: a resolve failure
+	// here just disables the protected-main detection and falls through
+	// to today's behavior (push the spec branch, nothing else).
+	preFinalizeTip, tipErr := gitutil.RevParseRef(g.Root, specBranch)
+	if tipErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve pre-finalize tip of %s: %v\n", specBranch, tipErr)
+		preFinalizeTip = ""
+	}
+
 	// Auto-commit any remaining spec artifacts.
 	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
@@ -412,6 +432,53 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	// Push to remote if available.
 	if gitutil.HasRemote() {
 		result.MergeStrategy = "pr"
+
+		// Bug wu7t: on a protected main, the epic-close JSONL export
+		// commit above cannot land directly on main — normally it rides
+		// the spec branch to a PR. But if the IMPLEMENTATION PR already
+		// merged the spec branch's bead work into main (the common case:
+		// a spec branch is a one-shot PR carrier, spec 101), the spec
+		// branch is now a DEAD carrier — nobody reviews or merges a
+		// second PR off an already-merged branch — so this finalize
+		// commit never reaches main. main's committed
+		// .beads/issues.jsonl then stays stale (epic open / last bead
+		// in_progress), and the bd post-merge hook silently reverts the
+		// closes in Dolt on every subsequent merge/FF (observed live on
+		// spec 106).
+		//
+		// Detect the already-merged case by checking whether
+		// preFinalizeTip (the spec branch's tip captured BEFORE this
+		// run's own auto-commits, above) is already an ancestor of
+		// origin/main. `git fetch origin main` is best-effort: any
+		// failure (offline, auth, no remote reachable) falls back to
+		// today's behavior with a warning — mirroring
+		// specBranchBase()'s fallback discipline, a fetch/detect error
+		// here is never a hard `impl approve` failure.
+		orphaned := false
+		if preFinalizeTip != "" {
+			if fetchErr := withWorkingDir(g.Root, func() error {
+				return gitutil.FetchRemoteBranch("origin", "main")
+			}); fetchErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not fetch origin/main to check protected-main finalize state: %v\n", fetchErr)
+			} else if isAnc, ancErr := gitutil.IsAncestor(g.Root, preFinalizeTip, "origin/main"); ancErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not determine whether %s was already merged into origin/main: %v\n", specBranch, ancErr)
+			} else {
+				orphaned = isAnc
+			}
+		}
+
+		if orphaned {
+			branchName, finErr := g.finalizeOrphanedSpecBranch(cfg, epicID, specID)
+			if finErr != nil {
+				return result, finErr
+			}
+			result.FinalizeBranch = branchName
+		}
+
+		// Still push the spec branch — harmless in the orphaned case
+		// (preserves the existing contract that FinalizeEpic always
+		// pushes it) and the unchanged behavior on the normal,
+		// not-yet-merged path.
 		if err := gitutil.PushBranch(specBranch); err != nil {
 			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
 		}
@@ -487,6 +554,61 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	}
 
 	return result, nil
+}
+
+// finalizeOrphanedSpecBranch is bug wu7t's protected-main recovery: when
+// FinalizeEpic's caller (the "Push to remote" block above) determines the
+// spec branch is a dead PR carrier — its pre-finalize tip is already an
+// ancestor of origin/main — the epic-close JSONL export commit needs a
+// FRESH from-main carrier instead. It creates workspace.FinalizeBranch(specID)
+// (e.g. "chore/finalize-<specID>") from origin/main in a TEMPORARY worktree,
+// refreshes .beads/issues.jsonl via the same commitWithExport helper every
+// other finalize commit uses, commits it there, and pushes the branch. Any
+// stale local branch of the same name from a prior failed/retried run is
+// deleted first so CreateBranch never collides. The temporary worktree is
+// always removed before returning, success or failure, so it never leaks
+// into `mindspec doctor` or `bd worktree list`. Returns the branch name on
+// success; the local branch itself is intentionally left behind (harmless —
+// same as the spec branch, which also survives locally after a "pr" push).
+func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (string, error) {
+	choreBranch := workspace.FinalizeBranch(specID)
+	wtPath := workspace.FinalizeWorktreePath(g.Root, cfg, specID)
+
+	if err := withWorkingDir(g.Root, func() error {
+		if gitutil.BranchExists(choreBranch) {
+			if err := gitutil.DeleteBranch(choreBranch); err != nil {
+				return fmt.Errorf("clearing stale local branch %s: %w", choreBranch, err)
+			}
+		}
+		return gitutil.CreateBranch(choreBranch, "origin/main")
+	}); err != nil {
+		return "", fmt.Errorf("creating %s from origin/main: %w", choreBranch, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
+		return "", fmt.Errorf("creating worktrees directory for %s: %w", choreBranch, err)
+	}
+	if err := gitutil.WorktreeAdd(g.Root, wtPath, choreBranch); err != nil {
+		return "", fmt.Errorf("creating temporary worktree for %s: %w", choreBranch, err)
+	}
+	defer func() {
+		if err := gitutil.WorktreeRemoveForce(g.Root, wtPath); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove temporary finalize worktree %s: %v\n", wtPath, err)
+		}
+	}()
+
+	commitMsg := fmt.Sprintf("chore(beads): finalize epic %s for spec %s", epicID, specID)
+	if err := g.commitWithExport(wtPath, commitMsg); err != nil {
+		return "", fmt.Errorf("committing finalize export on %s: %w", choreBranch, err)
+	}
+
+	if err := withWorkingDir(g.Root, func() error {
+		return gitutil.PushBranch(choreBranch)
+	}); err != nil {
+		return "", fmt.Errorf("pushing %s: %w", choreBranch, err)
+	}
+
+	return choreBranch, nil
 }
 
 // Cleanup removes stale workspaces and branches for a spec.
@@ -780,11 +902,18 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if exportDir == "" {
 		exportDir = g.Root
 	}
-	if err := bead.Export(exportDir); err != nil {
+	if err := execBeadExportFn(exportDir); err != nil {
 		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
 	}
 	return gitutil.CommitAll(path, msg)
 }
+
+// execBeadExportFn is the bead-export step commitWithExport calls before
+// every mindspec-driven commit. Defaults to bead.Export (production
+// behavior is unchanged). See the WorktreeOps doc comment above for why
+// this seam exists: bug wu7t's finalizeOrphanedSpecBranch test needs a
+// deterministic, bd-free export stub.
+var execBeadExportFn = bead.Export
 
 // resolveAnchorRoot returns the spec worktree path if it exists, otherwise
 // the main repo root. Bead worktrees are anchored under the spec worktree.

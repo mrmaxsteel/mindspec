@@ -236,6 +236,30 @@ func FetchRemote(remote string) error {
 	return nil
 }
 
+// FetchRemoteBranch runs `git fetch <remote> <branch>` from the current
+// working directory — a NARROWER fetch than FetchRemote's `git fetch
+// <remote>` (which pulls every branch). Bug wu7t's protected-main finalize
+// check (MindspecExecutor.FinalizeEpic) only needs origin/main's tip current
+// before comparing ancestry, so this avoids paying for a full multi-branch
+// fetch on every `impl approve`. Same GIT_TERMINAL_PROMPT=0 fast-fail
+// (noPrompt) and SEC-5 RejectOptionLike argv hygiene as FetchRemote; a
+// non-zero exit (offline, auth failure, missing remote/branch) surfaces as
+// an error so the caller can fall back rather than hard-failing.
+func FetchRemoteBranch(remote, branch string) error {
+	if err := rejectOptionLike(remote); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(branch); err != nil {
+		return err
+	}
+	cmd := noPrompt(execCommand("git", "fetch", remote, branch))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("fetching %s %s: %s", remote, branch, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // DetectDefaultBranch returns the default branch name of remote (e.g. "main",
 // "develop") WITHOUT hardcoding (Spec 101 R4). It tries the cheap cached
 // `git symbolic-ref refs/remotes/<remote>/HEAD` first; if that output is empty
