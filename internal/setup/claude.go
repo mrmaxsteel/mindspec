@@ -634,6 +634,12 @@ managed-by: mindspec
 5. As soon as the spec is scaffolded, automatically run the ms-spec-grill skill
    to grill the author — this auto-invoke is the DEFAULT and fires unless the
    author explicitly opts out. Do NOT merely reference ms-spec-grill; invoke it.
+   **Headless guard**: if this session is headless/non-interactive (no human
+   available to answer one-at-a-time — e.g. running under an orchestrator,
+   ` + "`ms-spec-autopilot`" + `, or a test harness), do NOT enter the grill
+   loop. Instead add ` + "`- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.`" + `
+   to the spec's Open Questions section and proceed. Interactive sessions
+   still grill by default.
 `,
 
 		"ms-spec-approve": `---

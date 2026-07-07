@@ -343,6 +343,91 @@ func TestInstallSkills_RefreshesPre106Snapshot(t *testing.T) {
 	}
 }
 
+// TestInstallSkills_RefreshesPreHeadlessGuardSnapshot covers the headless-guard
+// propagation (mindspec-0uur): an existing install carries the PRIOR canonical
+// ms-spec-create body — step 5 auto-invokes ms-spec-grill unconditionally,
+// with no headless guard — recorded byte-exact in
+// historical_skills/ms-spec-create.pre0uur.md. installSkills must recognize it
+// as a shipped snapshot and refresh it in place to the new canonical (which
+// adds the headless guard), NOT leave it as user-modified.
+func TestInstallSkills_RefreshesPreHeadlessGuardSnapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	// The pre-guard canonical bytes live in
+	// historical_skills/ms-spec-create.pre0uur.md and still auto-invoke the
+	// grill unconditionally.
+	var preGuard string
+	for _, v := range previouslyShippedSkills()["ms-spec-create"] {
+		if strings.Contains(v, "ms-spec-grill") && !strings.Contains(v, "Headless guard") {
+			preGuard = v
+			break
+		}
+	}
+	if preGuard == "" {
+		t.Fatal("expected a historical ms-spec-create snapshot carrying the grill auto-invoke without the headless guard")
+	}
+	writeExisting(t, skillsDir, "ms-spec-create", preGuard)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := lifecycleSkillFiles()["ms-spec-create"]
+	got := readSkill(t, skillsDir, "ms-spec-create")
+	if got != canonical {
+		t.Errorf("pre-guard ms-spec-create snapshot not refreshed to canonical content;\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "Headless guard") {
+		t.Errorf("refreshed ms-spec-create must carry the headless guard; got:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-create", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-create; got %v", r.Refreshed)
+	}
+}
+
+// TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot mirrors the above
+// for the ms-spec-grill plugin skill itself (mindspec-0uur point 2): the
+// grill's own guard is defense-in-depth for the case where ms-spec-grill is
+// invoked directly in a headless session. An install carrying the PRIOR
+// canonical ms-spec-grill body — no headless guard near the cardinal rule —
+// recorded byte-exact in historical_skills/ms-spec-grill.pre0uur.md must
+// refresh in place to the guarded canonical.
+func TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	var preGuard string
+	for _, v := range previouslyShippedSkills()["ms-spec-grill"] {
+		if !strings.Contains(v, "Headless guard") {
+			preGuard = v
+			break
+		}
+	}
+	if preGuard == "" {
+		t.Fatal("expected a historical ms-spec-grill snapshot without the headless guard")
+	}
+	writeExisting(t, skillsDir, "ms-spec-grill", preGuard)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := claudeSkillFiles()["ms-spec-grill"]
+	got := readSkill(t, skillsDir, "ms-spec-grill")
+	if got != canonical {
+		t.Errorf("pre-guard ms-spec-grill snapshot not refreshed to canonical content")
+	}
+	if !strings.Contains(got, "grill deferred: headless session") {
+		t.Errorf("refreshed ms-spec-grill must carry the headless-guard deferral marker; got:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-grill", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-grill; got %v", r.Refreshed)
+	}
+}
+
 // TestInstallSkills_LeavesUserModified covers HC-6: a user-modified skill file
 // (matching neither the canonical nor any shipped snapshot) is left untouched
 // with a notice.
