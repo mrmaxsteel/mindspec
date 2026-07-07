@@ -141,6 +141,35 @@ A malformed verdict JSON counts as **missing** and is named in the
 block; any REJECT or `"hard_block": true` blocks regardless of vote
 count (the lola-f4a8 artifact-gate rule, mechanized).
 
+> **Amendment (2026-07-07, spec 109 — ADR-0040):** `internal/panel.Panel`
+> gains one new **optional** recorded field, `approve_threshold`
+> (`json:"approve_threshold,omitempty"`). This is a genuine **extension**
+> of this section's rule — not a relocation, and not a claim that the
+> rule is semantically unchanged: an absent field remains what every
+> pre-existing `panel.json` (every one that omits the field) resolves
+> to, byte-identical `N − 1`. When the field IS recorded, `"n-1"`
+> (case-insensitive) re-states that default, and an in-range integer
+> OVERRIDES the `N − 1` default for that panel
+> only. Interpretation stays **single-homed** in the same place named
+> above, `internal/panel.Panel.ApproveThreshold` — no second
+> interpreter is introduced, and `internal/config`'s
+> `PanelApproveThresholdExpr()` resolver (spec 109) returns the raw,
+> unresolved expression precisely so resolution cannot happen anywhere
+> else. §6 (fail-open without a panel, fail-closed with one) and §8
+> (the trust boundary) are **unchanged** by this extension: a recorded
+> `approve_threshold` is exactly as agent-writable, and exactly as
+> non-adversarial-only in its threat model, as every other
+> `panel.json` field named in §8. The out-of-range/unparseable
+> fallback (a recorded `0`, a negative value, or a value greater than
+> `expected_reviewers` all resolve to `N − 1`, never to `0`) is a
+> record-side defense that composes with, and does not replace, the
+> pre-existing gate-side guard `threshold > 0` — the two are
+> deliberately redundant. See **ADR-0040** for the layering this
+> extension instantiates (config, spec 109's `panel:` block, supplies
+> only the *creation-time default*; the recorded field on the per-round
+> `panel.json` is what the gate actually reads, preserving "identical
+> decision over identical facts").
+
 ### 4. Staleness: `reviewed_head_sha` must match the live ref
 
 An APPROVE attaches to a commit, not a bead. If the target ref no
