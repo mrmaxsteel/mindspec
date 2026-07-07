@@ -343,29 +343,31 @@ func TestInstallSkills_RefreshesPre106Snapshot(t *testing.T) {
 	}
 }
 
-// TestInstallSkills_RefreshesPreHeadlessGuardSnapshot covers the headless-guard
-// propagation (mindspec-0uur): an existing install carries the PRIOR canonical
-// ms-spec-create body — step 5 auto-invokes ms-spec-grill unconditionally,
-// with no headless guard — recorded byte-exact in
+// TestInstallSkills_RefreshesPreHeadlessGuardSnapshot covers the session-
+// disposition propagation (mindspec-0uur): an existing install carries the
+// PRIOR canonical ms-spec-create body — step 5 auto-invokes ms-spec-grill
+// unconditionally, with no disposition guard — recorded byte-exact in
 // historical_skills/ms-spec-create.pre0uur.md. installSkills must recognize it
 // as a shipped snapshot and refresh it in place to the new canonical (which
-// adds the headless guard), NOT leave it as user-modified.
+// adds the three-mode session disposition), NOT leave it as user-modified.
 func TestInstallSkills_RefreshesPreHeadlessGuardSnapshot(t *testing.T) {
 	root := t.TempDir()
 	skillsDir := filepath.Join(root, ".claude", "skills")
 
 	// The pre-guard canonical bytes live in
-	// historical_skills/ms-spec-create.pre0uur.md and still auto-invoke the
-	// grill unconditionally.
+	// historical_skills/ms-spec-create.pre0uur.md: flat `.mindspec/specs/`
+	// path, the grill auto-invoke, but no session disposition. (The pre106
+	// snapshot still says `docs/specs/`; the marker-less variant of the
+	// current canonical carries the disposition — both are excluded.)
 	var preGuard string
 	for _, v := range previouslyShippedSkills()["ms-spec-create"] {
-		if strings.Contains(v, "ms-spec-grill") && !strings.Contains(v, "Headless guard") {
+		if strings.Contains(v, "ms-spec-grill") && strings.Contains(v, ".mindspec/specs/") && !strings.Contains(v, "Session disposition") {
 			preGuard = v
 			break
 		}
 	}
 	if preGuard == "" {
-		t.Fatal("expected a historical ms-spec-create snapshot carrying the grill auto-invoke without the headless guard")
+		t.Fatal("expected a historical ms-spec-create snapshot carrying the grill auto-invoke without the session disposition")
 	}
 	writeExisting(t, skillsDir, "ms-spec-create", preGuard)
 
@@ -379,8 +381,8 @@ func TestInstallSkills_RefreshesPreHeadlessGuardSnapshot(t *testing.T) {
 	if got != canonical {
 		t.Errorf("pre-guard ms-spec-create snapshot not refreshed to canonical content;\ngot:\n%s", got)
 	}
-	if !strings.Contains(got, "Headless guard") {
-		t.Errorf("refreshed ms-spec-create must carry the headless guard; got:\n%s", got)
+	if !strings.Contains(got, "Session disposition") {
+		t.Errorf("refreshed ms-spec-create must carry the session disposition; got:\n%s", got)
 	}
 	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-create", "SKILL.md")) {
 		t.Errorf("Refreshed should record ms-spec-create; got %v", r.Refreshed)
@@ -389,24 +391,29 @@ func TestInstallSkills_RefreshesPreHeadlessGuardSnapshot(t *testing.T) {
 
 // TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot mirrors the above
 // for the ms-spec-grill plugin skill itself (mindspec-0uur point 2): the
-// grill's own guard is defense-in-depth for the case where ms-spec-grill is
-// invoked directly in a headless session. An install carrying the PRIOR
-// canonical ms-spec-grill body — no headless guard near the cardinal rule —
-// recorded byte-exact in historical_skills/ms-spec-grill.pre0uur.md must
-// refresh in place to the guarded canonical.
+// grill's own disposition check is defense-in-depth for the case where
+// ms-spec-grill is invoked directly in a headless session. An install carrying
+// the PRIOR canonical ms-spec-grill body — no session disposition before the
+// cardinal rule — recorded byte-exact in
+// historical_skills/ms-spec-grill.pre0uur.md must refresh in place to the
+// guarded canonical.
 func TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot(t *testing.T) {
 	root := t.TempDir()
 	skillsDir := filepath.Join(root, ".claude", "skills")
 
+	// The pre-guard canonical bytes live in
+	// historical_skills/ms-spec-grill.pre0uur.md: flat `.mindspec/domains/`
+	// paths, no session disposition. (The pre106 snapshot still says
+	// `.mindspec/docs/domains/` — excluded.)
 	var preGuard string
 	for _, v := range previouslyShippedSkills()["ms-spec-grill"] {
-		if !strings.Contains(v, "Headless guard") {
+		if strings.Contains(v, ".mindspec/domains/") && !strings.Contains(v, "Session disposition") {
 			preGuard = v
 			break
 		}
 	}
 	if preGuard == "" {
-		t.Fatal("expected a historical ms-spec-grill snapshot without the headless guard")
+		t.Fatal("expected a historical ms-spec-grill snapshot without the session disposition")
 	}
 	writeExisting(t, skillsDir, "ms-spec-grill", preGuard)
 
@@ -421,10 +428,86 @@ func TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot(t *testing.T) {
 		t.Errorf("pre-guard ms-spec-grill snapshot not refreshed to canonical content")
 	}
 	if !strings.Contains(got, "grill deferred: headless session") {
-		t.Errorf("refreshed ms-spec-grill must carry the headless-guard deferral marker; got:\n%s", got)
+		t.Errorf("refreshed ms-spec-grill must carry the bare-headless deferral marker; got:\n%s", got)
 	}
 	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-grill", "SKILL.md")) {
 		t.Errorf("Refreshed should record ms-spec-grill; got %v", r.Refreshed)
+	}
+}
+
+// TestInstallSkills_RefreshesPreClauseApproveSnapshot covers the ms-spec-approve
+// resolution-clause propagation (mindspec-0uur fix round, Group 2): an existing
+// install carries the PRIOR canonical ms-spec-approve body — no step-4
+// marker-resolution clause — recorded byte-exact in
+// historical_skills/ms-spec-approve.pre0uur.md. installSkills must refresh it
+// in place to the new canonical carrying the clause.
+func TestInstallSkills_RefreshesPreClauseApproveSnapshot(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".claude", "skills")
+
+	var prior string
+	for _, v := range previouslyShippedSkills()["ms-spec-approve"] {
+		if strings.Contains(v, "managed-by: mindspec") && !strings.Contains(v, "grill deferred") {
+			prior = v
+			break
+		}
+	}
+	if prior == "" {
+		t.Fatal("expected a historical ms-spec-approve snapshot carrying the managed-by marker without the grill-deferred resolution clause")
+	}
+	writeExisting(t, skillsDir, "ms-spec-approve", prior)
+
+	r := &Result{}
+	if err := installSkills(skillsDir, filepath.Join(".claude", "skills"), claudeSkillFiles(), false, r); err != nil {
+		t.Fatalf("installSkills: %v", err)
+	}
+
+	canonical := lifecycleSkillFiles()["ms-spec-approve"]
+	got := readSkill(t, skillsDir, "ms-spec-approve")
+	if got != canonical {
+		t.Errorf("pre-clause ms-spec-approve snapshot not refreshed to canonical content;\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "grill deferred: headless session") {
+		t.Errorf("refreshed ms-spec-approve must carry the marker-resolution clause; got:\n%s", got)
+	}
+	if !containsPath(r.Refreshed, filepath.Join(".claude", "skills", "ms-spec-approve", "SKILL.md")) {
+		t.Errorf("Refreshed should record ms-spec-approve; got %v", r.Refreshed)
+	}
+}
+
+// Pinned fragments of the three-mode session disposition (mindspec-0uur fix
+// round, Group 3/4b): the mode-test criteria, the self-answer contract, and the
+// bare-headless deferral marker must appear BYTE-IDENTICALLY in the canonical
+// ms-spec-create text (lifecycleSkillFiles) and the ms-spec-grill plugin
+// SKILL.md, so the two guards cannot drift apart.
+const (
+	dispositionCriteria = "Is a human available to answer one-at-a-time questions? If not, is there an explicit instruction to proceed non-interactively (e.g. a harness prompt, a batch evaluation, an autopilot run that says to proceed)?"
+	selfAnswerContract  = "answer each question with the best repo-grounded default, apply the resulting spec fix, and record `- [x] grill (self-answered, headless): <question> → <default taken>` in Open Questions"
+	deferralMarkerLine  = "- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval."
+)
+
+// TestGrillDisposition_TextConsistency pins the disposition fragments across
+// the two guard sites, and pins that the ms-spec-approve canonical documents
+// the resolution path for the same marker (Group 2).
+func TestGrillDisposition_TextConsistency(t *testing.T) {
+	create := lifecycleSkillFiles()["ms-spec-create"]
+	grill := skillFiles()["ms-spec-grill"]
+
+	for _, tc := range []struct{ name, fragment string }{
+		{"mode-test criteria", dispositionCriteria},
+		{"self-answer contract", selfAnswerContract},
+		{"deferral marker", deferralMarkerLine},
+	} {
+		if !strings.Contains(create, tc.fragment) {
+			t.Errorf("canonical ms-spec-create is missing the %s fragment verbatim:\n%s", tc.name, tc.fragment)
+		}
+		if !strings.Contains(grill, tc.fragment) {
+			t.Errorf("ms-spec-grill SKILL.md is missing the %s fragment verbatim:\n%s", tc.name, tc.fragment)
+		}
+	}
+
+	if !strings.Contains(lifecycleSkillFiles()["ms-spec-approve"], "grill deferred: headless session") {
+		t.Error("canonical ms-spec-approve must document the resolution path for the `grill deferred: headless session` marker")
 	}
 }
 

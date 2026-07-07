@@ -13,9 +13,8 @@ managed-by: mindspec
 5. As soon as the spec is scaffolded, automatically run the ms-spec-grill skill
    to grill the author — this auto-invoke is the DEFAULT and fires unless the
    author explicitly opts out. Do NOT merely reference ms-spec-grill; invoke it.
-   **Headless guard**: if this session is headless/non-interactive (no human
-   available to answer one-at-a-time — e.g. running under an orchestrator,
-   `ms-spec-autopilot`, or a test harness), do NOT enter the grill
-   loop. Instead add `- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.`
-   to the spec's Open Questions section and proceed. Interactive sessions
-   still grill by default.
+   **Session disposition** (identical to ms-spec-grill's): decide the mode with two tests, in order:
+   Is a human available to answer one-at-a-time questions? If not, is there an explicit instruction to proceed non-interactively (e.g. a harness prompt, a batch evaluation, an autopilot run that says to proceed)?
+   - Interactive — a human can answer: grill one question at a time.
+   - Instructed non-interactive — self-answer mode: run the full grill analysis; answer each question with the best repo-grounded default, apply the resulting spec fix, and record `- [x] grill (self-answered, headless): <question> → <default taken>` in Open Questions.
+   - Bare headless — no human AND no such instruction: do NOT enter the grill loop; add `- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.` to the spec's Open Questions section and proceed — the unchecked marker deliberately blocks approval until it is resolved.
