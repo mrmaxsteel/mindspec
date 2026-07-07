@@ -1,16 +1,19 @@
 # MindSpec
 
+[![Release](https://img.shields.io/github/v/release/mrmaxsteel/mindspec)](https://github.com/mrmaxsteel/mindspec/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **An opinionated loop-engineering framework for AI coding agents.**
 
 Spec-driven development, research-backed planning, architecture guardrails, and adversarial review panels — so agents can build resilient software semi-autonomously, with the engineering discipline enforced by code instead of prose.
 
 ---
 
-AI coding agents are phenomenal executors and unreliable engineers. Left to themselves they drift from intent, steamroll architecture decisions, skip documentation, and let a "small feature" become a three-subsystem refactor. The usual answer is to watch them more closely. MindSpec's answer is to engineer the loop instead.
+> "The new default is that you are not writing the code directly 99% of the time, you are orchestrating agents who do and acting as oversight." — Andrej Karpathy, on why "vibe coding" grew up into *agentic engineering*
 
-> "Loop engineering means replacing yourself as the person who prompts the agent. You design the system that does it instead." — Addy Osmani
+MindSpec is a framework for that oversight. AI coding agents are phenomenal executors and unreliable engineers: left to themselves they drift from intent, steamroll architecture decisions, skip documentation, and let a "small feature" become a three-subsystem refactor. The usual answer is to watch them more closely. MindSpec's answer is to engineer the loop instead.
 
-Prompt engineering optimizes a single instruction. Harness engineering optimizes a single session. **Loop engineering** builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where every gate is a validation in a Go binary that exits non-zero, not an instruction the model might ignore.
+Prompt engineering optimizes a single instruction. Harness engineering optimizes a single session. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where every gate is a validation in a Go binary that exits non-zero, not an instruction the model might ignore.
 
 An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it.
 
@@ -51,7 +54,11 @@ State never lives in the context window. The lifecycle phase is derived from the
 
 ## Beads: a work graph your agent can actually use
 
-MindSpec tracks work in [Beads](https://github.com/gastownhall/beads) — a git-native issue tracker that lives in your repo and needs no external service. This is not an incidental choice; it's what makes the loop possible.
+MindSpec tracks work in [Beads](https://github.com/gastownhall/beads) — a git-native issue tracker that lives in your repo and needs no external service. In its creator's words:
+
+> "…a magical 4-dimensional graph-based git-backed fairy-dusted issue-tracker database, designed to let coding agents track all your work and never get lost again." — Steve Yegge, announcing Beads
+
+This is not an incidental choice; it's what makes the loop possible.
 
 Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
 
@@ -117,9 +124,9 @@ loop:
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
 
-Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated. The handoff log records every panel-substituted decision with its vote, so your review moves from per-decision to per-batch — it doesn't disappear. `mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
+Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated. And because a loop that runs unattended also makes its mistakes unattended, the handoff log records every panel-substituted decision with its vote — your review moves from per-decision to per-batch, it doesn't disappear. `mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
 
-> "A loop running unattended is also a loop making mistakes unattended." — Addy Osmani, on verification debt. The governance profile exists so that debt is bounded, visible, and yours to review — not compounding silently.
+The level-by-level walkthrough — prerequisites, halt conditions, recovery, and the handoff review workflow — is in the [autonomy guide](project-docs/user/guides/autonomy.md).
 
 ## Architecture guardrails
 
@@ -213,6 +220,10 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | Full workflow with Claude Code | [Claude Code guide](project-docs/user/guides/claude-code.md) |
 | Full workflow with Codex | [Codex guide](project-docs/user/guides/codex.md) |
 | Full workflow with Copilot | [Copilot guide](project-docs/user/guides/copilot.md) |
+| Climbing the autonomy ladder (autopilot → governed → scheduled) | [Autonomy guide](project-docs/user/guides/autonomy.md) |
+| Onboarding an existing codebase | [Brownfield guide](project-docs/user/guides/brownfield.md) |
+| Configuring and running review panels | [Review panels guide](project-docs/user/guides/review-panels.md) |
+| Contributing to MindSpec | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | The decomposition research behind the plan gate | [scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md) |
 | Loop engineering: design notes and the maturity ladder | [loop-engineering-adaptation.md](project-docs/research/loop-engineering-adaptation.md) |
 | Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
