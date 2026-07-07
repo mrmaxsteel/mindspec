@@ -113,6 +113,30 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   co-located `reviews/` ONLY, and a leftover root `review/` panel no
   longer drives the gate. A sub-threshold panel in EITHER honored
   location blocks `complete`.
+- **Recorded `approve_threshold` extension + leaf-safe reviewer-count
+  advisory (Spec 109, ADR-0037 §3 amendment / ADR-0040).**
+  `internal/panel.Panel` gains one new optional field,
+  `ApproveThresholdExpr` (`json:"approve_threshold,omitempty"`).
+  `(Panel).ApproveThreshold()` stays the SOLE interpreter (no second
+  interpreter anywhere): absent/empty and `"n-1"` (case-insensitive) both
+  resolve to `ExpectedReviewers − 1`; an integer string in
+  `[1, ExpectedReviewers]` overrides the default for that panel only;
+  an out-of-range integer (`0`, negative, `> N`) or any other
+  unparseable value falls back to `ExpectedReviewers − 1` — a recorded
+  `0` can never yield a free-pass threshold of `0`. That record-side
+  fallback composes with, and does not replace, the pre-existing
+  gate-side guard `threshold > 0` in `internal/panel/gate.go`'s
+  `PanelGateDecision` (10) — the two defenses are deliberately
+  redundant. `internal/panel` remains a dependency-clean leaf: it
+  imports no `internal/config`, and `internal/config`'s
+  `PanelApproveThresholdExpr()` resolver returns the raw, unresolved
+  expression precisely so resolution stays single-homed here. The new
+  pure, config-free helper `panel.ReviewerCountNote(recorded,
+  configDefault int) string` gives the two caller-side surfaces (`mindspec
+  config show`, the complete-gate advisory) an advisory line when a
+  panel's recorded `expected_reviewers` differs from the config
+  default; it returns `""` on a match and is never consulted by
+  `PanelGateDecision`, so no `Allow`/`Block` outcome changes.
 - **Doctor layout detection (Spec 106).** `mindspec doctor` reports the
   detected docs layout (reusing `workspace.DetectLayout`), emits a
   `would-migrate-layout` Warn when a canonical/legacy tree would flatten

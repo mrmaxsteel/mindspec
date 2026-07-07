@@ -25,6 +25,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // FileName is the registration file's basename inside a panel
@@ -64,20 +66,69 @@ type Panel struct {
 	// audit write (Spec 093 Reqs 12/13e) surface the reason and can
 	// complain when it is empty.
 	AbandonReason string `json:"abandon_reason,omitempty"`
+
+	// ApproveThresholdExpr is an optional recorded override of the N−1
+	// threshold (ADR-0037 §3, amended 2026-07-07 spec 109/ADR-0040). Absent
+	// or empty means "use the N−1 default" — byte-identical to every
+	// pre-existing panel.json, which omits this field entirely. See
+	// ApproveThreshold, the sole interpreter of this expression.
+	ApproveThresholdExpr string `json:"approve_threshold,omitempty"`
 }
 
-// ApproveThreshold is the single home of the N−1 threshold rule
-// (Spec 093 DQ5, ADR-0037): with N expected reviewers the panel
-// passes on N−1 APPROVEs (one dissent tolerated) — 5-of-6 for the
-// default panel. Consumers must use this method rather than
-// hardcoding a second copy of the literal 6 (or 5).
-// A non-positive ExpectedReviewers yields 0 (malformed registration;
-// callers should surface it rather than treat it as a free pass).
+// ApproveThreshold is the single home of the panel-approval threshold rule
+// (Spec 093 DQ5, ADR-0037 §3, amended 2026-07-07 spec 109/ADR-0040): with N
+// expected reviewers the default is N−1 (one dissent tolerated) — 5-of-6 for
+// the default panel. Consumers must use this method rather than hardcoding a
+// second copy of the literal 6 (or 5).
+//
+// The optional recorded ApproveThresholdExpr can override that default FOR
+// THIS PANEL ONLY: absent/empty and "n-1" (case-insensitive) both resolve to
+// the N−1 default; an integer string in [1, N] resolves to that integer;
+// anything else — an out-of-range integer (0, negative, or > N) or any other
+// unparseable value — falls back to N−1, so a recorded 0 never yields a
+// free-pass threshold of 0. This is the SOLE interpreter of the expression;
+// no consumer re-parses ApproveThresholdExpr or hardcodes a second copy of
+// this rule (internal/config's PanelApproveThresholdExpr resolver returns
+// the raw, unresolved expression precisely so resolution happens only here).
+//
+// A non-positive ExpectedReviewers yields 0 regardless of the recorded
+// expression (malformed registration; callers should surface it rather than
+// treat it as a free pass).
 func (p Panel) ApproveThreshold() int {
 	if p.ExpectedReviewers <= 0 {
 		return 0
 	}
-	return p.ExpectedReviewers - 1
+	fallback := p.ExpectedReviewers - 1
+	expr := strings.TrimSpace(p.ApproveThresholdExpr)
+	if expr == "" || strings.EqualFold(expr, "n-1") {
+		return fallback
+	}
+	n, err := strconv.Atoi(expr)
+	if err != nil || n < 1 || n > p.ExpectedReviewers {
+		return fallback
+	}
+	return n
+}
+
+// ReviewerCountNote returns a pure, config-free advisory string for a
+// caller-side surface (`mindspec config show`, the complete-gate advisory —
+// spec 109 R8) noting when a panel's recorded reviewer count differs from
+// the config's current default. It returns "" when recorded and
+// configDefault match (the common case, including every no-panel and
+// unchanged-config-default call site — nothing to say).
+//
+// This helper is advisory only: it never factors into PanelGateDecision (the
+// gate's Allow/Block is computed from the recorded panel.json alone) and it
+// takes no *config.Config — internal/panel stays a config-free leaf. The
+// caller resolves configDefault (e.g. via internal/config's
+// PanelExpectedReviewers) and passes it in as a plain int.
+func ReviewerCountNote(recorded, configDefault int) string {
+	if recorded == configDefault {
+		return ""
+	}
+	return fmt.Sprintf(
+		"panel recorded %d expected reviewer(s); current config default is %d — the panel's recorded count governs its own gate decision",
+		recorded, configDefault)
 }
 
 // IsBead reports whether the panel targets a bead (BeadID non-null
