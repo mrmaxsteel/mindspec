@@ -157,13 +157,41 @@ func ClaimBead(id string) error {
 	return nil
 }
 
-// FetchBeadByID retrieves a single bead by its ID via bd show --json.
+// FetchBeadByID retrieves a single bead by its ID via bd show --json. This is
+// a SESSION read — it does not distinguish committed Dolt state from
+// in-session/uncommitted state. See FetchBeadAsOf for the committed-state
+// read (bead mindspec-uopd).
 func FetchBeadByID(id string) (BeadInfo, error) {
 	out, err := runBDFn("show", id, "--json")
 	if err != nil {
 		return BeadInfo{}, fmt.Errorf("bd show %s failed: %w", id, err)
 	}
+	return parseBeadShowJSON(out, id)
+}
 
+// FetchBeadAsOf retrieves a single bead as it existed at a specific commit
+// hash or branch via `bd show <id> --as-of <ref> --json` (bd >= 1.0.4; bead
+// mindspec-uopd). Unlike FetchBeadByID, this reads COMMITTED Dolt state —
+// bd's embedded engine auto-commits every write, so `--as-of HEAD` is a true
+// post-commit re-read distinct from the in-session `bd show`.
+//
+// Callers on an older bd that predates the --as-of flag get a bd CLI error
+// (`unknown flag: --as-of`) wrapped into the returned error's chain via
+// fmt.Errorf's %w; use bead.IsUnsupportedFlagError(err, "as-of") to detect
+// that case and fall back to FetchBeadByID (see
+// internal/complete.defaultVerifyCommitted).
+func FetchBeadAsOf(id, ref string) (BeadInfo, error) {
+	out, err := runBDFn("show", id, "--as-of", ref, "--json")
+	if err != nil {
+		return BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w", id, ref, err)
+	}
+	return parseBeadShowJSON(out, id)
+}
+
+// parseBeadShowJSON parses the output of `bd show <id> [--as-of <ref>]
+// --json`, which is either a single-element JSON array or (older bd) a bare
+// JSON object. Shared by FetchBeadByID and FetchBeadAsOf.
+func parseBeadShowJSON(out []byte, id string) (BeadInfo, error) {
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" {
 		return BeadInfo{}, fmt.Errorf("bd show %s returned empty output", id)
