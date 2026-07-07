@@ -433,6 +433,16 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 	if gitutil.HasRemote() {
 		result.MergeStrategy = "pr"
 
+		// Push the spec branch FIRST, unconditionally — the baseline
+		// contract every "pr" finalize has always had. Bug wu7t panel
+		// round 1 (Group 3): the wu7t chore-branch flow below runs AFTER
+		// this push, so a failure anywhere in the orphan path still
+		// surfaces as an error but can never cost the operator the
+		// baseline spec-branch push.
+		if err := gitutil.PushBranch(specBranch); err != nil {
+			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
+		}
+
 		// Bug wu7t: on a protected main, the epic-close JSONL export
 		// commit above cannot land directly on main — normally it rides
 		// the spec branch to a PR. But if the IMPLEMENTATION PR already
@@ -454,6 +464,17 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 		// today's behavior with a warning — mirroring
 		// specBranchBase()'s fallback discipline, a fetch/detect error
 		// here is never a hard `impl approve` failure.
+		//
+		// Known blind spot (panel round 1, Group 5): the IsAncestor
+		// probe assumes the impl PR landed as a merge commit, FF, or
+		// rebase — anything that preserves the spec branch's commit
+		// SHAs in origin/main's history. A SQUASH-merged impl PR
+		// discards those SHAs, so preFinalizeTip is NOT an ancestor,
+		// detection misses, and the pre-fix behavior recurs (finalize
+		// commit stranded on the dead spec branch). This repo's
+		// workflow merges spec PRs with merge commits; a
+		// squash-tolerant detection (e.g. content-based JSONL
+		// comparison) is a deferred follow-up, not this fix.
 		orphaned := false
 		if preFinalizeTip != "" {
 			if fetchErr := withWorkingDir(g.Root, func() error {
@@ -473,14 +494,6 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 				return result, finErr
 			}
 			result.FinalizeBranch = branchName
-		}
-
-		// Still push the spec branch — harmless in the orphaned case
-		// (preserves the existing contract that FinalizeEpic always
-		// pushes it) and the unchanged behavior on the normal,
-		// not-yet-merged path.
-		if err := gitutil.PushBranch(specBranch); err != nil {
-			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
 		}
 	} else {
 		result.MergeStrategy = "direct"
@@ -563,16 +576,37 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 // FRESH from-main carrier instead. It creates workspace.FinalizeBranch(specID)
 // (e.g. "chore/finalize-<specID>") from origin/main in a TEMPORARY worktree,
 // refreshes .beads/issues.jsonl via the same commitWithExport helper every
-// other finalize commit uses, commits it there, and pushes the branch. Any
-// stale local branch of the same name from a prior failed/retried run is
-// deleted first so CreateBranch never collides. The temporary worktree is
-// always removed before returning, success or failure, so it never leaks
-// into `mindspec doctor` or `bd worktree list`. Returns the branch name on
-// success; the local branch itself is intentionally left behind (harmless —
-// same as the spec branch, which also survives locally after a "pr" push).
+// other finalize commit uses, commits it there, and pushes the branch.
+//
+// The whole flow is RETRY-IDEMPOTENT (panel round 1, Group 1): a crashed or
+// failed prior run may leave behind a temporary worktree (pruned first,
+// before any branch operation — the leftover may still have choreBranch
+// checked out, which would block the branch delete), a stale local branch
+// (deleted and recreated fresh from origin/main), and an already-pushed
+// remote branch (reconciled with a force-with-lease push pinned to the
+// observed remote tip — a plain push would be rejected non-fast-forward,
+// R4's empirical repro). The temporary worktree is always removed before
+// returning, success or failure, so it never leaks into `mindspec doctor`
+// or `bd worktree list`. Returns the branch name on success; the local
+// chore branch is intentionally left behind (harmless — a retry deletes and
+// recreates it; note this differs from the spec branch, which FinalizeEpic's
+// cleanup DELETES locally after pushing).
 func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (string, error) {
 	choreBranch := workspace.FinalizeBranch(specID)
 	wtPath := workspace.FinalizeWorktreePath(g.Root, cfg, specID)
+
+	// Self-heal leftovers from a crashed prior run BEFORE touching the
+	// branch: a leftover temp worktree fails WorktreeAdd below, and one
+	// with choreBranch still checked out also blocks DeleteBranch. All
+	// best-effort — force-remove a registered worktree, fall back to
+	// clearing an unregistered directory, and prune any dangling
+	// registration whose directory is already gone.
+	if _, statErr := os.Stat(wtPath); statErr == nil {
+		if remErr := gitutil.WorktreeRemoveForce(g.Root, wtPath); remErr != nil {
+			_ = os.RemoveAll(wtPath)
+		}
+	}
+	_ = gitutil.WorktreePrune(g.Root)
 
 	if err := withWorkingDir(g.Root, func() error {
 		if gitutil.BranchExists(choreBranch) {
@@ -602,8 +636,22 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", fmt.Errorf("committing finalize export on %s: %w", choreBranch, err)
 	}
 
+	// Retry-idempotent push: ask the REMOTE (not a possibly-stale local
+	// remote-tracking ref) whether the branch already exists there. Absent
+	// → plain push (create). Present (a prior run's push) → overwrite it
+	// with a lease pinned to the exact tip just observed: the branch is
+	// machine-owned and regenerated from live Dolt each run, so replacing
+	// the old machine tip is correct, while the lease still fails loudly
+	// if some OTHER writer moved the tip in between.
 	if err := withWorkingDir(g.Root, func() error {
-		return gitutil.PushBranch(choreBranch)
+		remoteSHA, lsErr := gitutil.RemoteHeadSHA("origin", choreBranch)
+		if lsErr != nil {
+			return fmt.Errorf("checking remote tip of %s: %w", choreBranch, lsErr)
+		}
+		if remoteSHA == "" {
+			return gitutil.PushBranch(choreBranch)
+		}
+		return gitutil.PushBranchForceWithLease(choreBranch, remoteSHA)
 	}); err != nil {
 		return "", fmt.Errorf("pushing %s: %w", choreBranch, err)
 	}

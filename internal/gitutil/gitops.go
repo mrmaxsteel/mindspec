@@ -315,6 +315,62 @@ func PushBranch(branch string) error {
 	return nil
 }
 
+// RemoteHeadSHA returns the SHA of refs/heads/<branch> on remote via
+// `git ls-remote --heads <remote> <branch>`, or "" (nil error) when the
+// branch does not exist on the remote. It queries the REMOTE directly —
+// never the local remote-tracking ref, which can be stale or absent after a
+// crashed run — so bug wu7t's retry-idempotent chore-branch push can pin its
+// force-with-lease expectation to the remote's true current tip. Same
+// GIT_TERMINAL_PROMPT=0 fast-fail and SEC-5 argv hygiene as the other
+// network ops; a non-zero exit (offline, auth failure) is an error, NOT an
+// absent branch.
+func RemoteHeadSHA(remote, branch string) (string, error) {
+	if err := rejectOptionLike(remote); err != nil {
+		return "", err
+	}
+	if err := rejectOptionLike(branch); err != nil {
+		return "", err
+	}
+	cmd := noPrompt(execCommand("git", "ls-remote", "--heads", remote, branch))
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("ls-remote %s %s: %w", remote, branch, err)
+	}
+	// Output: "<sha>\trefs/heads/<branch>\n", or empty when absent.
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", nil
+	}
+	fields := strings.Fields(line)
+	return fields[0], nil
+}
+
+// PushBranchForceWithLease pushes branch to origin with
+// `--force-with-lease=refs/heads/<branch>:<expectedSHA>` — a compare-and-swap
+// push that succeeds only while the remote tip is still exactly expectedSHA.
+// Bug wu7t's chore/finalize-<specID> branch is MACHINE-OWNED (regenerated
+// fresh from origin/main + live Dolt on every run), so a retried
+// `impl approve` must be able to overwrite the remote tip left by a prior
+// run's push (a plain push is rejected non-fast-forward, hard-failing the
+// retry) — but the lease is pinned to the SHA the caller just observed via
+// RemoteHeadSHA, so a tip that moved in between (e.g. a human pushed to the
+// branch) is never silently clobbered.
+func PushBranchForceWithLease(branch, expectedSHA string) error {
+	if err := rejectOptionLike(branch); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(expectedSHA); err != nil {
+		return err
+	}
+	lease := "--force-with-lease=refs/heads/" + branch + ":" + expectedSHA
+	cmd := noPrompt(execCommand("git", "push", lease, "-u", "origin", branch))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("pushing %s (lease %s): %s", branch, expectedSHA, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // EnsureGitignoreEntry adds an entry to .gitignore if not already present.
 func EnsureGitignoreEntry(root, entry string) error {
 	gitignorePath := root + "/.gitignore"

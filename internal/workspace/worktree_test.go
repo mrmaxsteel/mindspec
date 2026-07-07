@@ -47,6 +47,22 @@ func TestBeadWorktreeName(t *testing.T) {
 	}
 }
 
+func TestFinalizeBranch(t *testing.T) {
+	got := FinalizeBranch("053-foo")
+	want := "chore/finalize-053-foo"
+	if got != want {
+		t.Errorf("FinalizeBranch = %q, want %q", got, want)
+	}
+}
+
+func TestFinalizeWorktreeName(t *testing.T) {
+	got := FinalizeWorktreeName("053-foo")
+	want := "worktree-finalize-053-foo"
+	if got != want {
+		t.Errorf("FinalizeWorktreeName = %q, want %q", got, want)
+	}
+}
+
 func TestSpecWorktreePath(t *testing.T) {
 	got := SpecWorktreePath("/project", config.DefaultConfig(), "053-foo")
 	want := filepath.Join("/project", ".worktrees", "worktree-spec-053-foo")
@@ -61,6 +77,24 @@ func TestBeadWorktreePath(t *testing.T) {
 	want := filepath.Join(specWT, ".worktrees", "worktree-mindspec-mol-07lst")
 	if got != want {
 		t.Errorf("BeadWorktreePath = %q, want %q", got, want)
+	}
+}
+
+func TestFinalizeWorktreePath(t *testing.T) {
+	got := FinalizeWorktreePath("/project", config.DefaultConfig(), "053-foo")
+	want := filepath.Join("/project", ".worktrees", "worktree-finalize-053-foo")
+	if got != want {
+		t.Errorf("FinalizeWorktreePath = %q, want %q", got, want)
+	}
+}
+
+func TestFinalizeWorktreePath_HonorsCustomWorktreeRoot(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = ".trees"
+	got := FinalizeWorktreePath("/project", cfg, "053-foo")
+	want := filepath.Join("/project", ".trees", "worktree-finalize-053-foo")
+	if got != want {
+		t.Errorf("FinalizeWorktreePath with custom root = %q, want %q", got, want)
 	}
 }
 

@@ -149,7 +149,13 @@ func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID strin
 		if result.DiffStat != "" {
 			fmt.Fprintf(stdout, "\n%s\n", result.DiffStat)
 		}
-		if result.Pushed {
+		// Bug wu7t panel round 1 (Group 2): the two PR instructions are
+		// mutually exclusive. FinalizeBranch set means the spec branch
+		// was ALREADY merged — telling the operator to open a spec-branch
+		// PR would point them at a dead carrier, contradicting the NOTE
+		// below. So the spec-branch instruction prints only on the
+		// normal (FinalizeBranch == "") path.
+		if result.Pushed && result.FinalizeBranch == "" {
 			fmt.Fprintf(stdout, "\nBranch pushed to remote. Create a PR to merge into main:\n")
 			fmt.Fprintf(stdout, "  gh pr create --head %s --base main --title \"[SPEC %s] <title>\" --body \"<description>\"\n", result.SpecBranch, specID)
 		}
