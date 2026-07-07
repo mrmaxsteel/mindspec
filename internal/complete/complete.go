@@ -356,9 +356,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		advisoryOut = os.Stderr
 	}
 	// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
-	// copy here for the enforcement.panel_gate toggle (default true).
+	// copy here for the enforcement.panel_gate toggle (default true) AND
+	// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
+	// advisory below compares against. gateCfgErr is deliberately non-fatal
+	// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
+	// true default on a load error) — the advisory below is simply skipped
+	// on that same error, never blocking the gate.
+	gateCfg, gateCfgErr := config.Load(root)
 	panelGateEnabled := true
-	if gateCfg, gateCfgErr := config.Load(root); gateCfgErr == nil {
+	if gateCfgErr == nil {
 		panelGateEnabled = gateCfg.Enforcement.PanelGate
 	}
 	// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
@@ -369,6 +375,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	panelReg, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
 	if panelGateErr != nil {
 		return nil, panelGateErr
+	}
+	// Caller-side panel.ReviewerCountNote advisory (spec 109 R8): the
+	// Allow/Block decision above is already final; this only surfaces a
+	// legitimately smaller/larger substituted reviewer quorum, never
+	// altering it.
+	if gateCfgErr == nil {
+		reviewerCountAdvisory(panelReg, gateCfg.PanelExpectedReviewers(), advisoryOut)
 	}
 
 	// 2.5. Auto-commit if commit message provided (via Executor)

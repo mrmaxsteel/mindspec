@@ -78,6 +78,15 @@ func Run(root string) *Report        // execute all checks
 
 Other domains register subcommands via cobra in `cmd/mindspec/`. Core owns the top-level `mindspec` command group.
 
+Registering a NEW top-level command also requires adding its name to
+`internal/redact.CommandTokens` (`internal/redact/redact.go`), the
+closed-set enum `RedactEvent` checks before letting a friction/success
+journal event carry a `Command` value — an unregistered command's events
+are silently DROPPED, not merely unredacted. `TestRedactEnum_NoCobraDrift`
+(`cmd/mindspec/redact_enum_drift_test.go`) walks the real cobra tree and
+fails on drift, catching a missed registration at test time rather than
+silently at runtime (spec 109 Bead 4 hit this adding `config`).
+
 ### Config
 
 ```go
