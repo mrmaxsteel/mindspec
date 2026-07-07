@@ -22,8 +22,18 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 > `recording/`). The in-binary `mindspec complete` gate scans
 > `<spec-dir>/reviews/*/panel.json` on a flat tree — the old repo-root `review`
 > directory no longer drives the gate. `<spec-slug>` is the full spec directory
-> name (e.g. `106-layout-flatten`); for a `pr`/`commit` target with no owning spec,
-> use the spec the work belongs to.
+> name (e.g. `106-layout-flatten`); for a `pr`/`commit` target that belongs to a
+> spec, use that spec's dir.
+>
+> **Ad-hoc reviews (no owning spec).** A review not tied to any spec's lifecycle —
+> a repo-wide review, a pre-release review, a design/proposal review, or a
+> standalone bug-fix — writes its panel dir to **`<repo>/.mindspec/reviews/<panel-slug>/`**
+> (a top-level sibling of `.mindspec/specs/`), never under a spec dir and never to
+> the old repo-root `review/`. For an ad-hoc panel, substitute
+> `.mindspec/reviews/<panel-slug>` for `<spec-dir>/reviews/<panel-slug>` everywhere
+> in the steps below. These panels are stored artifacts only — they are NOT scanned
+> by the `mindspec complete` gate (which is spec-lifecycle-scoped), so no `panel.json`
+> of theirs ever gates a merge.
 
 ## Step 0 — create panel dir + BRIEF + panel.json
 
