@@ -98,6 +98,13 @@ type ImplResult struct {
 	CommitCount int
 	DiffStat    string
 	Pushed      bool // true if branch was pushed to remote
+
+	// FinalizeBranch is bug wu7t's protected-main finalize carrier: set to
+	// the chore/finalize-<specID> branch name when the spec branch was
+	// already merged into main before this ran (see
+	// executor.FinalizeResult.FinalizeBranch); empty on the normal,
+	// not-yet-merged path.
+	FinalizeBranch string
 }
 
 // ApproveImpl transitions from review mode to idle, completing the spec lifecycle.
@@ -410,6 +417,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	result.CommitCount = fr.CommitCount
 	result.DiffStat = fr.DiffStat
 	result.Pushed = (fr.MergeStrategy == "pr")
+	result.FinalizeBranch = fr.FinalizeBranch
 
 	// Stop recording (best-effort — before transitioning to idle)
 	if err := recording.StopRecording(root, specID); err != nil {

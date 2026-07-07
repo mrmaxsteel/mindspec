@@ -165,4 +165,16 @@ type FinalizeResult struct {
 	CommitCount   int    // Number of commits merged
 	DiffStat      string // Short diffstat summary
 	PRURL         string // Pull request URL (empty for direct merge)
+
+	// FinalizeBranch is bug wu7t's protected-main finalize carrier: the
+	// name of a chore/finalize-<specID> branch (empty when unused) that
+	// carries the epic-close JSONL export commit when the spec branch was
+	// ALREADY merged into origin/main before `impl approve` ran (the
+	// common already-merged-implementation-PR case — a spec branch is a
+	// one-shot PR carrier, spec 101, so a second PR off it never gets
+	// reviewed). When non-empty, main's committed .beads/issues.jsonl is
+	// STALE until a PR from this branch merges — the bd post-merge hook
+	// will keep reverting the epic-close/bead-done state in Dolt on every
+	// merge/FF until then. Always empty on the no-remote "direct" path.
+	FinalizeBranch string
 }

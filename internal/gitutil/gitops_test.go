@@ -1088,6 +1088,81 @@ func TestFetchRemote_RunsFetch(t *testing.T) {
 	}
 }
 
+// TestFetchRemoteBranch_RunsNarrowFetch asserts FetchRemoteBranch shells out
+// to the NARROW `git fetch <remote> <branch>` (bug wu7t's protected-main
+// finalize check — not FetchRemote's full multi-branch fetch) and surfaces a
+// non-zero exit (offline / missing remote ref) as an error, which the
+// executor funnels into its warn-and-fall-back path.
+func TestFetchRemoteBranch_RunsNarrowFetch(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := FetchRemoteBranch("origin", "main"); err != nil {
+		t.Fatalf("FetchRemoteBranch: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "fetch", "origin", "main")
+
+	swapExec(t, "fatal: couldn't find remote ref main", 1)
+	if err := FetchRemoteBranch("origin", "main"); err == nil {
+		t.Fatal("FetchRemoteBranch: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestRemoteHeadSHA_ParsesLsRemote pins bug wu7t's three-way remote-state
+// probe: a present branch yields its SHA (first ls-remote field), an ABSENT
+// branch yields "" with a NIL error (empty output, zero exit), and a git
+// failure (offline / auth) is an ERROR — never conflated with absence,
+// which would downgrade the lease push to a plain (rejectable) push.
+func TestRemoteHeadSHA_ParsesLsRemote(t *testing.T) {
+	calls := swapExec(t, "abc123\trefs/heads/chore/finalize-077-x\n", 0)
+	sha, err := RemoteHeadSHA("origin", "chore/finalize-077-x")
+	if err != nil {
+		t.Fatalf("RemoteHeadSHA: unexpected error: %v", err)
+	}
+	if sha != "abc123" {
+		t.Errorf("sha = %q, want %q", sha, "abc123")
+	}
+	assertArgs(t, (*calls)[0].args, "ls-remote", "--heads", "origin", "chore/finalize-077-x")
+
+	// Absent branch: empty output with a zero exit → "" and nil error.
+	swapExec(t, "", 0)
+	sha, err = RemoteHeadSHA("origin", "chore/finalize-077-x")
+	if err != nil {
+		t.Fatalf("RemoteHeadSHA on absent branch: unexpected error: %v", err)
+	}
+	if sha != "" {
+		t.Errorf("absent branch sha = %q, want empty", sha)
+	}
+
+	// Git failure is an error, NOT an absent branch.
+	swapExec(t, "", 128)
+	if _, err := RemoteHeadSHA("origin", "chore/finalize-077-x"); err == nil {
+		t.Fatal("RemoteHeadSHA: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestPushBranchForceWithLease_ArgvAndLease pins the compare-and-swap push
+// bug wu7t's retried chore-branch flow uses: the lease names the exact
+// refs/heads/<branch>:<expectedSHA> pair, and a failed lease (the remote
+// tip moved under us) surfaces as an error rather than clobbering it.
+func TestPushBranchForceWithLease_ArgvAndLease(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := PushBranchForceWithLease("chore/finalize-077-x", "abc123"); err != nil {
+		t.Fatalf("PushBranchForceWithLease: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args,
+		"push", "--force-with-lease=refs/heads/chore/finalize-077-x:abc123", "-u", "origin", "chore/finalize-077-x")
+
+	swapExec(t, "stale info", 1)
+	if err := PushBranchForceWithLease("chore/finalize-077-x", "abc123"); err == nil {
+		t.Fatal("PushBranchForceWithLease: expected error on a failed lease, got nil")
+	}
+}
+
 // TestDefaultBranch_DetectedFromSymbolicRef proves the default branch is
 // DETECTED from `git symbolic-ref refs/remotes/origin/HEAD` — and is NOT
 // hardcoded `main`: a NON-main remote HEAD (develop) is returned verbatim.
