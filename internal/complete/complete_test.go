@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -85,6 +87,7 @@ func saveAndRestore(t *testing.T) {
 	origResolveTarget := resolveTargetFn
 	origFindLocalRoot := findLocalRootFn
 	origFetchBeadByID := fetchBeadByIDFn
+	origFetchBeadAsOf := fetchBeadAsOfFn
 	origMergeMeta := completeMergeMetadataFn
 	origGitEmail := gitUserEmailFn
 	origCheckDirty := checkDirtyTreeFn
@@ -103,6 +106,7 @@ func saveAndRestore(t *testing.T) {
 		resolveTargetFn = origResolveTarget
 		findLocalRootFn = origFindLocalRoot
 		fetchBeadByIDFn = origFetchBeadByID
+		fetchBeadAsOfFn = origFetchBeadAsOf
 		completeMergeMetadataFn = origMergeMeta
 		gitUserEmailFn = origGitEmail
 		checkDirtyTreeFn = origCheckDirty
@@ -1486,6 +1490,205 @@ func TestDoltCommitFnDefaultsToBeadDoltCommit(t *testing.T) {
 func TestVerifyCommittedFnDefaultsToDefault(t *testing.T) {
 	if reflect.ValueOf(verifyCommittedFn).Pointer() != reflect.ValueOf(defaultVerifyCommitted).Pointer() {
 		t.Fatal("verifyCommittedFn must default to defaultVerifyCommitted (spec 098 Req 2, mindspec-9n2h)")
+	}
+}
+
+// TestFetchBeadAsOfFnDefaultsToNextFetchBeadAsOf pins the production
+// binding of the committed-state read seam introduced by bead mindspec-uopd.
+func TestFetchBeadAsOfFnDefaultsToNextFetchBeadAsOf(t *testing.T) {
+	if reflect.ValueOf(fetchBeadAsOfFn).Pointer() != reflect.ValueOf(next.FetchBeadAsOf).Pointer() {
+		t.Fatal("fetchBeadAsOfFn must default to next.FetchBeadAsOf (bead mindspec-uopd)")
+	}
+}
+
+// fakeBDExitError synthesizes a genuine *exec.ExitError whose Stderr field
+// carries stderrMsg, mirroring what os/exec.Cmd.Output() produces when a
+// real `bd` subprocess exits non-zero (the same code path RunBD/tracedOutput
+// uses in production). Building a REAL *exec.ExitError — rather than a
+// hand-rolled fake — exercises bead.IsUnsupportedFlagError's errors.As
+// type-switch exactly as it runs against a real bd failure.
+func fakeBDExitError(t *testing.T, stderrMsg string) error {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", `printf '%s' "$FAKE_BD_STDERR" 1>&2; exit 1`)
+	cmd.Env = append(os.Environ(), "FAKE_BD_STDERR="+stderrMsg)
+	_, err := cmd.Output()
+	if err == nil {
+		t.Fatal("fakeBDExitError: expected the synthetic command to fail")
+	}
+	return err
+}
+
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// whatever fn wrote to it. Used to assert on the mindspec-uopd graceful-
+// degradation warning line without depending on a test-only writer seam
+// (defaultVerifyCommitted intentionally writes straight to os.Stderr, like
+// the neighboring HC-3 self-heal line at step 3 of Run).
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = origStderr
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("reading captured stderr: %v", err)
+	}
+	return buf.String()
+}
+
+// TestDefaultVerifyCommitted table-drives the four mindspec-uopd cases: the
+// committed-state (--as-of HEAD) read is now the PRIMARY verifier, with a
+// graceful fallback to the pre-existing same-read path (fetchBeadByIDFn)
+// only when the --as-of invocation fails with bd's unknown-flag signature
+// (an older, pre-1.0.4 bd). A hard read failure or a not-closed status in
+// EITHER path must still error — this is a direct unit test of
+// defaultVerifyCommitted, not routed through Run/verifyCommittedFn (every
+// Run-level test swaps verifyCommittedFn wholesale and never exercises this
+// function's internals).
+func TestDefaultVerifyCommitted(t *testing.T) {
+	origAsOf := fetchBeadAsOfFn
+	origFetch := fetchBeadByIDFn
+	t.Cleanup(func() {
+		fetchBeadAsOfFn = origAsOf
+		fetchBeadByIDFn = origFetch
+	})
+
+	const downgradeMarker = "event=complete.committed_read_downgraded"
+
+	tests := []struct {
+		name           string
+		asOfFn         func(id, ref string) (next.BeadInfo, error)
+		sameReadFn     func(id string) (next.BeadInfo, error)
+		wantErr        bool
+		wantErrSubstr  string
+		wantDowngraded bool
+	}{
+		{
+			// (a) --as-of read shows closed → pass. The same-read fallback
+			// must NEVER be consulted when --as-of itself succeeds.
+			name: "as-of read closed passes without fallback",
+			asOfFn: func(id, ref string) (next.BeadInfo, error) {
+				if ref != "HEAD" {
+					t.Errorf("as-of ref = %q, want %q", ref, "HEAD")
+				}
+				return next.BeadInfo{ID: id, Status: "closed"}, nil
+			},
+			sameReadFn: func(id string) (next.BeadInfo, error) {
+				t.Fatal("same-read fallback must not run when --as-of succeeds")
+				return next.BeadInfo{}, nil
+			},
+			wantErr: false,
+		},
+		{
+			// (b) --as-of read shows open → error. A definitive committed
+			// read of "not closed" is a real failure, not a fallback trigger.
+			name: "as-of read open errors without fallback",
+			asOfFn: func(id, ref string) (next.BeadInfo, error) {
+				return next.BeadInfo{ID: id, Status: "in_progress"}, nil
+			},
+			sameReadFn: func(id string) (next.BeadInfo, error) {
+				t.Fatal("same-read fallback must not run on a definitive as-of read")
+				return next.BeadInfo{}, nil
+			},
+			wantErr:       true,
+			wantErrSubstr: `status "in_progress" (not closed)`,
+		},
+		{
+			// (c) --as-of unsupported (older bd) → falls back to the
+			// same-read path, which shows closed → pass, with the
+			// downgrade warning logged.
+			name: "as-of unsupported falls back to closed same-read",
+			asOfFn: func(id, ref string) (next.BeadInfo, error) {
+				return next.BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w",
+					id, ref, fakeBDExitError(t, "Error: unknown flag: --as-of\n"))
+			},
+			sameReadFn: func(id string) (next.BeadInfo, error) {
+				return next.BeadInfo{ID: id, Status: "closed"}, nil
+			},
+			wantErr:        false,
+			wantDowngraded: true,
+		},
+		{
+			// (d) --as-of unsupported AND the same-read fallback shows
+			// not-closed → error (never proceed on an unverified close in
+			// either path).
+			name: "as-of unsupported and fallback not-closed errors",
+			asOfFn: func(id, ref string) (next.BeadInfo, error) {
+				return next.BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w",
+					id, ref, fakeBDExitError(t, "Error: unknown flag: --as-of\n"))
+			},
+			sameReadFn: func(id string) (next.BeadInfo, error) {
+				return next.BeadInfo{ID: id, Status: "open"}, nil
+			},
+			wantErr:        true,
+			wantErrSubstr:  `status "open" (not closed)`,
+			wantDowngraded: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fetchBeadAsOfFn = tc.asOfFn
+			fetchBeadByIDFn = tc.sameReadFn
+
+			var err error
+			stderrOut := captureStderr(t, func() {
+				err = defaultVerifyCommitted("bead-uopd-1")
+			})
+
+			if tc.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+			if tc.wantErrSubstr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErrSubstr)) {
+				t.Errorf("error = %v, want substring %q", err, tc.wantErrSubstr)
+			}
+			if tc.wantDowngraded && !strings.Contains(stderrOut, downgradeMarker) {
+				t.Errorf("expected a committed-read-downgraded warning on stderr, got: %q", stderrOut)
+			}
+			if !tc.wantDowngraded && strings.Contains(stderrOut, downgradeMarker) {
+				t.Errorf("did not expect a committed-read-downgraded warning on stderr, got: %q", stderrOut)
+			}
+		})
+	}
+}
+
+// TestDefaultVerifyCommitted_AsOfHardReadFailureNeverFallsBack pins that a
+// genuine --as-of read error (bead not found, Dolt lock contention, ...) —
+// as opposed to bd's specific unknown-flag signature — is NEVER treated as
+// an unsupported-flag signal. Falling back here would mask a real read
+// failure behind the weaker same-read path.
+func TestDefaultVerifyCommitted_AsOfHardReadFailureNeverFallsBack(t *testing.T) {
+	origAsOf := fetchBeadAsOfFn
+	origFetch := fetchBeadByIDFn
+	t.Cleanup(func() {
+		fetchBeadAsOfFn = origAsOf
+		fetchBeadByIDFn = origFetch
+	})
+
+	fetchBeadAsOfFn = func(id, ref string) (next.BeadInfo, error) {
+		return next.BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w",
+			id, ref, fakeBDExitError(t, "Error: dolt: database is locked\n"))
+	}
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		t.Fatal("same-read fallback must not run on a genuine (non-unknown-flag) as-of read error")
+		return next.BeadInfo{}, nil
+	}
+
+	err := defaultVerifyCommitted("bead-uopd-2")
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "committed-state re-read (--as-of HEAD) failed") {
+		t.Errorf("error should name the failed --as-of read, got: %v", err)
 	}
 }
 
