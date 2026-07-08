@@ -86,6 +86,14 @@ func WorktreeList() ([]WorktreeListEntry, error)
 
 ## Maintenance Notes
 
+- **2026-07-08 (spec 112 Bead 1, per-gate panel config — the pointerization
+  ride-along):** `internal/config.Reviewer.Count` became a pointer
+  (`*int`, spec 112 R1) so an absent `count` is distinguishable from an
+  explicit `count: 0`. `cmd/mindspec/config.go`'s `renderConfig` (the sole
+  out-of-package `Reviewer.Count` reader) now renders reviewer counts
+  through the exported `(Reviewer).CountValue()` accessor instead of the
+  raw field — an absent `count` renders as its default, `1`. No other
+  workflow-domain behavior changes in this bead.
 - **2026-07-07 (spec 109 Bead 4, orchestration config substrate — R8/R9):**
   `cmd/mindspec/config.go` adds a read-only `config` command with a `show`
   subcommand: it loads the effective config via `config.Load`, renders it

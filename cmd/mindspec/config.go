@@ -146,7 +146,11 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintln(&b, "  reviewers:")
 	for _, r := range cfg.Panel.Reviewers {
 		fmt.Fprintf(&b, "    - family: %s\n", escapeConfigValue(r.Family))
-		fmt.Fprintf(&b, "      count: %d\n", r.Count)
+		// CountValue(), not the raw *int Count field: spec 112 pointerized
+		// Count so an absent count (nil, default 1) is distinguishable from
+		// an explicit `count: 0`; %d on the pointer itself would compile
+		// (go vet included) but print the address, not the count.
+		fmt.Fprintf(&b, "      count: %d\n", r.CountValue())
 	}
 	// PanelApproveThresholdExpr is the RAW approve_threshold expression,
 	// rendered verbatim (no trim/normalize) — its resolver contract is
