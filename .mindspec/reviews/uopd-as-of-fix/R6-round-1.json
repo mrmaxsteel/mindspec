@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Reviewed strictly for INTEGRATION. (1) `next.FetchBeadByID` callers — `cmd/mindspec/release.go:174`, `cmd/mindspec/next.go:349`, and `internal/complete`'s `fetchBeadByIDFn` seam — are all behavior-identical after the `parseBeadShowJSON` extraction: the array/object branch logic and every error-message format string are unchanged (confirmed by diff and by `go test ./internal/next/... ./cmd/mindspec/... ./internal/complete/...` passing). (2) `internal/bead.IsUnsupportedFlagError` is the correct home: the package doc comment explicitly claims 'Helpers here own the os/exec type-switches... See ADR-0030', and ADR-0030 decision #1 states enforcement packages route bd through `internal/bead`. The `(err error, flag string)` signature is generic — a future `--append-notes` probe reuses it verbatim with no changes. (3) The `event=complete.committed_read_downgraded bead=%s reason=%q` line matches the `event=<ns>.<name> key=value` convention used at `complete.go:390`, `repair.go:95`, `migrate.go:65`, `impl.go:331`; the `%q` quoting for a multi-word `reason` value is a sensible, non-breaking extension (no prior event line carries a spaced value). (4) Spec-109 Bead 4 (unclaimed) will touch `internal/complete/complete.go` around the `panelReg`/`cfg` advisory line (~369) and `panel_advisory.go` — a disjoint region from this fix's edits (var block ~28-46, `defaultVerifyCommitted`/`verifyCommittedSameRead` ~106-160). No functional collision, low mechanical merge risk. `go vet`, `gofmt`, and the ADR-0030 boundary lint (`internal/lint`) all pass clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "FetchBeadByID callers unaffected by the parseBeadShowJSON extraction",
+      "detail": "cmd/mindspec/release.go:174 (defaultActiveBead) and cmd/mindspec/next.go:349 (runEmitOnly) both call next.FetchBeadByID and only consume the returned BeadInfo/error via their own wrapping (e.g. `fmt.Errorf(\"fetching bead %s: %w\", ...)`); parseBeadShowJSON's array/object dispatch and every error string (`bd show %s failed`, `bd show %s returned empty output`, `parsing bead %s JSON`, `bead %s not found`) are byte-identical to the pre-refactor inline body. `go test ./internal/next/... ./cmd/mindspec/...` both pass in the review worktree, including the untouched TestFetchBeadByID_ArrayResponse/_SingleObjectResponse/_NotFound/_EmptyArray suite that transitively exercises parseBeadShowJSON."
+    },
+    {
+      "severity": "info",
+      "title": "IsUnsupportedFlagError correctly placed and reusable per ADR-0030",
+      "detail": "internal/bead's package doc comment (bdcli.go:1-6) states the package exists so 'callers stay free of process-I/O concerns' and cites ADR-0030; the ADR's decision #1 says enforcement packages route bd through internal/bead specifically (not Executor). IsUnsupportedFlagError(err error, flag string) takes the flag name as a parameter (with TrimPrefix(flag, \"--\") normalization), so a future flag-capability probe (e.g. --append-notes) calls it directly with no API changes — confirmed only one call site exists today (internal/complete/complete.go:128), as expected for a fresh probe."
+    },
+    {
+      "severity": "info",
+      "title": "Downgrade log line matches the codebase's event=<ns>.<name> convention",
+      "detail": "Grepped all `event=` stderr lines in the tree: complete.go:390 (event=complete.artifact_synced paths=%s), repair.go:95, migrate.go:65, impl.go:331 (which explicitly names the 'event=<ns>.<name> key=value convention' in its own comment). The new line (event=complete.committed_read_downgraded bead=%s reason=%q) fits this pattern; %q on `reason` is a reasonable choice since it's the first event line carrying a multi-word value, and improves rather than harms parseability."
+    },
+    {
+      "severity": "info",
+      "title": "No functional collision with spec-109 Bead 4 (unclaimed)",
+      "detail": "109's plan.md Bead 4 touches internal/complete/panel_advisory.go, panel_advisory_test.go, and complete.go around the panelReg/cfg advisory note (~line 369-371, per the plan's own reference to 'complete.go, which already holds the matched panelReg and a loaded cfg'). This fix's edits are confined to the var block (~28-46) and defaultVerifyCommitted/verifyCommittedSameRead (~106-160), a disjoint region. Both branches touching internal/complete/complete.go is worth noting for whoever lands 109 later, but there is no line-level overlap and no shared symbol between the two changes."
+    },
+    {
+      "severity": "low",
+      "title": "next.FetchBeadAsOf has no direct unit test at its own package layer",
+      "detail": "internal/next/next_test.go has 4 direct tests for FetchBeadByID (array/object/not-found/empty-array) exercising runBDFn faking at the next package boundary, but no equivalent for the new FetchBeadAsOf (arg-building `[\"show\", id, \"--as-of\", ref, \"--json\"]`, error-wrap format). The new complete_test.go tests fake fetchBeadAsOfFn entirely, bypassing the real function body; TestFetchBeadAsOfFnDefaultsToNextFetchBeadAsOf only pins the function pointer, not behavior. The shared parsing logic (parseBeadShowJSON) IS covered transitively via FetchBeadByID's tests, so this is a minor coverage gap, not a correctness risk — a future direct caller of next.FetchBeadAsOf (bypassing internal/complete's seam) has no regression net at the next package layer. Non-blocking; suggest a follow-up test mirroring the FetchBeadByID suite if next.FetchBeadAsOf gains other callers."
+    }
+  ]
+}

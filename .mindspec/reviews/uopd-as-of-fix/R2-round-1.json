@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "CODEBASE-PIN lens fully satisfied. Every named file/function/test exists as claimed: bead.IsUnsupportedFlagError (bdcli.go:102), next.FetchBeadAsOf + parseBeadShowJSON refactor (beads.go:183/194) with FetchBeadByID preserved (164), complete.defaultVerifyCommitted + verifyCommittedSameRead + fetchBeadAsOfFn seam (complete.go:125/146/40). `go test -count=1 ./internal/complete/... ./internal/next/... ./internal/bead/...` all PASS (fresh, uncached: 3.1s/25.1s/4.9s). `go vet ./...` exits 0 with no output. `gofmt -l` on all four touched files is empty (clean). Commit is exactly one ahead of main (d7f5c67a; `git rev-list --count main..HEAD`=1) and the worktree is clean. New tests run green and exercise the real errors.As chain via a genuine *exec.ExitError. Empirically confirmed against the installed bd 1.1.0: `bd show --as-of` is a real flag ('Show issue as it existed at a specific commit hash or branch (requires Dolt)'), `--as-of HEAD --json` returns a parseable single-element array with a status field, and the unknown-flag stderr is exactly `Error: unknown flag: --<flag>`, matching IsUnsupportedFlagError's detection.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "existence",
+      "detail": "All claimed symbols present: IsUnsupportedFlagError, FetchBeadAsOf, parseBeadShowJSON, defaultVerifyCommitted, verifyCommittedSameRead, fetchBeadAsOfFn seam; FetchBeadByID retained. Verified by grep on the four files.",
+      "severity": "info"
+    },
+    {
+      "area": "tests-green",
+      "detail": "go test -count=1 on internal/complete, internal/next, internal/bead all PASS (fresh, not cached). New tests TestDefaultVerifyCommitted (4 subcases: as-of closed passes, as-of open errors, unsupported->closed same-read, unsupported+not-closed errors), TestDefaultVerifyCommitted_AsOfHardReadFailureNeverFallsBack, and TestFetchBeadAsOfFnDefaultsToNextFetchBeadAsOf all PASS under -v.",
+      "severity": "info"
+    },
+    {
+      "area": "vet-fmt",
+      "detail": "go vet ./... exits 0, no diagnostics. gofmt -l on internal/bead/bdcli.go, internal/complete/complete.go, internal/complete/complete_test.go, internal/next/beads.go prints nothing (all formatted).",
+      "severity": "info"
+    },
+    {
+      "area": "commit-shape",
+      "detail": "Branch fix/uopd-as-of-committed-read is exactly one commit ahead of main (d7f5c67a). git status --porcelain is empty (clean worktree).",
+      "severity": "info"
+    },
+    {
+      "area": "as-of-semantics-empirical",
+      "detail": "Installed bd 1.1.0 confirms the --as-of flag exists and reads committed Dolt state; `bd show mindspec-uopd --as-of HEAD --json` returned a valid single-element JSON array with status 'in_progress' (parseBeadShowJSON handles the array form). Unknown-flag signature `Error: unknown flag: --<flag>` matches IsUnsupportedFlagError's dual-substring check exactly, so the narrow-downgrade classification is grounded in real bd output.",
+      "severity": "info"
+    }
+  ]
+}

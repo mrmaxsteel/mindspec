@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Mechanism is sound and well-tested: no file-level overlap with fix/uopd-as-of-committed-read (touches internal/bead, internal/complete, internal/next; this fix touches internal/executor, internal/approve, internal/workspace, internal/gitutil, cmd/mindspec/impl.go) or with spec-109 Bead 4 (adds a new cmd/mindspec/config.go and touches internal/complete/panel_advisory.go, not impl.go). Naming helpers (FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath) mirror the SpecBranch/SpecWorktreeName/SpecWorktreePath convention exactly. The new 'warning: ...' logging matches the codebase's dominant style (event= is reserved for a handful of specific asserted lifecycle events, not a blanket convention). Build and full test suite pass cleanly in the review worktree. One concrete integration defect: in cmd/mindspec/impl.go's implApproveTail, the pre-existing 'Branch pushed to remote. Create a PR...' block (gated on result.Pushed) and the new FinalizeBranch NOTE block are siblings inside the same `if result.SpecBranch != \"\"` scope, and both fire together whenever FinalizeBranch is set (Pushed is always true once MergeStrategy==\"pr\", set unconditionally before the orphan check). The operator gets two competing PR instructions in the exact already-merged scenario this bug targets — one asking them to open a PR from a spec branch that (in the typical case) is already an ancestor of main and would be a no-op/confusing PR. Also worth noting for the record (not a required change): nothing in doctor/instruct surfaces the stale-JSONL state if the operator ignores the NOTE — the printed line is the only signal.",
+  "concrete_changes_required": [
+    "cmd/mindspec/impl.go implApproveTail: when result.FinalizeBranch != \"\", suppress or reword the preceding 'Branch pushed to remote. Create a PR to merge into main' block for result.SpecBranch (e.g. gate it on `result.Pushed && result.FinalizeBranch == \"\"`, or replace it with a line clarifying the spec branch itself needs no further PR since its content is already on main) so the operator isn't given two competing 'create a PR' instructions — one of them essentially a no-op — in the already-merged case."
+  ],
+  "findings": [
+    {
+      "severity": "should-fix",
+      "area": "cmd/mindspec/impl.go implApproveTail",
+      "description": "The FinalizeBranch NOTE block is a sibling of the existing `if result.Pushed { ...create a PR... }` block inside `if result.SpecBranch != \"\" { }`. Since result.Pushed == (fr.MergeStrategy == \"pr\") and MergeStrategy is set to \"pr\" unconditionally before the orphan check runs, both blocks print together whenever FinalizeBranch is non-empty. The operator sees 'Create a PR to merge into main' for the (typically already-merged, no-op) spec branch immediately followed by a NOTE explaining that same branch was already merged and a different branch needs the PR. This directly undercuts the 'actionable NOTE' goal of the fix in exactly the scenario it targets. No test in cmd/mindspec/*_test.go or internal/approve/*_test.go exercises implApproveTail/ImplResult with FinalizeBranch set, so this composition bug is untested."
+    },
+    {
+      "severity": "info",
+      "area": "operator-detection / follow-on surfaces",
+      "description": "Confirmed via grep that no other surface (internal/doctor, mindspec instruct) currently checks for an outstanding chore/finalize-<specID> branch or compares main's .beads/issues.jsonl freshness against origin. If the operator misses/ignores the one-time stdout NOTE, there is no other point in the workflow that resurfaces the staleness. Not required for this fix (BRIEF scope), but worth a follow-up bead for a persistent check (e.g. `mindspec doctor` flagging an unmerged chore/finalize-* branch on the remote)."
+    },
+    {
+      "severity": "none",
+      "area": "sibling branch / spec-109 collision check",
+      "description": "git diff --stat confirms fix/uopd-as-of-committed-read only touches internal/bead/bdcli.go, internal/complete/complete.go(+test), internal/next/beads.go — disjoint from this diff's files. bdcli.go's new IsUnsupportedFlagError is purely additive and does not touch bead.Export (which this fix's execBeadExportFn seam wraps), so merge order is safe either way. spec-109's plan.md Bead 4 adds a new cmd/mindspec/config.go and touches internal/complete/panel_advisory.go + complete.go — does not touch cmd/mindspec/impl.go or any file in internal/executor, so no region overlap with this fix's NOTE insertion or FinalizeEpic changes."
+    },
+    {
+      "severity": "none",
+      "area": "naming/logging hygiene",
+      "description": "FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath in internal/workspace/worktree.go match the existing SpecBranch/SpecWorktreeName/SpecWorktreePath signatures and doc-comment style exactly — no drift. New warning logging ('warning: could not fetch...', 'warning: could not resolve pre-finalize tip...') matches the dominant fmt.Fprintf(os.Stderr, \"warning: ...\") style used throughout internal/executor, internal/spec, internal/cleanup, cmd/mindspec — the event=<ns>.<name> convention is reserved for a small set of specifically-asserted lifecycle events (phase_reconciled, cwd_restore_failed, artifact_synced) and is not required here."
+    }
+  ]
+}

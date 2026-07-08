@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Group-3 reorder (spec-branch push moved to first/unconditional, ahead of the orphan flow) preserves every ordering contract in my lens, and no round-2 hunk touches the direct path or ApproveImpl. (a) closes-in-Dolt still precede FinalizeEpic: round-2 delta touches NO file under internal/approve; ApproveImpl's documented order (5 epic close, 6 phase=done, 8 exec.FinalizeEpic) is byte-identical to round 1 — closes land before the terminal mutation, unchanged. (b) both finalize-carrying pushes precede cleanup: PushBranch(specBranch) and the chore push inside finalizeOrphanedSpecBranch both sit inside the HasRemote block, strictly before guardMergeLayout and the cleanup withWorkingDir block that removes worktrees/deletes the spec branch. (c) go test ./internal/approve -run TestApproveImplCallOrder PASS; full executor/gitutil/workspace/approve/cmd suites PASS. (e) guardMergeLayout coverage identical — 3 sites (:299,:399,:511), the direct-spec->main gate untouched; orphan path builds fresh from origin/main so needs no guard. (f) direct path byte-identical: every mindspec_executor.go hunk lives in the HasRemote/pr block or finalizeOrphanedSpecBranch; the no-remote else-branch, its guard, and the cleanup direct-merge are untouched. (d)+(g): my round-1 low is IMPROVED and the self-heal is collision-safe (details in findings). No blocking issues.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-a",
+      "severity": "info",
+      "title": "(a) Closes-in-Dolt still precede FinalizeEpic — ApproveImpl untouched in round 2",
+      "detail": "The round-2 delta (6f558bd6..6cf718c9) touches cmd/mindspec/impl.go (+test), internal/executor/mindspec_executor.go (+test), internal/gitutil/gitops.go (+test), internal/workspace/worktree_test.go — NOT internal/approve/impl.go. ApproveImpl is byte-identical to round 1, whose documented mutation order I verified: implRunBDCombinedFn(\"close\", epicID) EPIC CLOSE (step 5) and phase=done (step 6) run before exec.FinalizeEpic TERMINAL MUTATION (step 8). Dolt therefore contains the closes at export time; the temp-worktree finalize commit routes through commitWithExport(wtPath)->execBeadExportFn which re-reads live Dolt, so it necessarily carries the closes. Contract unchanged."
+    },
+    {
+      "id": "R3-b",
+      "severity": "info",
+      "title": "(b) Both finalize-carrying pushes precede the cleanup block",
+      "detail": "In the reordered pr path: gitutil.PushBranch(specBranch) is the first statement of the HasRemote block; finalizeOrphanedSpecBranch (which pushes the chore branch, plain or force-with-lease) runs in the orphaned sub-block that follows. BOTH pushes complete inside the `if gitutil.HasRemote()` block, which closes before the guardMergeLayout gate and the cleanup withWorkingDir block (remove bead/spec worktrees, delete spec branch). Non-orphaned case: spec-branch push carries the finalize; orphaned case: chore-branch push carries it. In every case the finalize-carrying push is landed before any worktree removal or branch deletion — a cleanup failure cannot un-land it. Confirmed."
+    },
+    {
+      "id": "R3-c",
+      "severity": "info",
+      "title": "(c) TestApproveImplCallOrder still passes",
+      "detail": "The AST-anchored ordering test lives in internal/approve, which the round-2 delta does not touch. Ran it in the worktree at 6cf718c9: `go test ./internal/approve -run TestApproveImplCallOrder` PASS. Full suites also green: executor 10.4s, gitutil 2.4s, workspace 0.4s, approve 8.1s, cmd/mindspec 16.2s — all ok."
+    },
+    {
+      "id": "R3-d",
+      "severity": "low",
+      "title": "(d) Round-1 low (NOTE lost on spec push after orphan push) RESOLVED by the reorder",
+      "detail": "My round-1 R3-6: in the round-1 ordering the orphan flow pushed the chore branch and set result.FinalizeBranch, THEN PushBranch(specBranch) ran; a spec-push failure after a successful orphan push returned (result, err), ApproveImpl mapped it to (nil, err), and implApproveTail's NOTE never printed. The Group-3 reorder makes the spec-branch push FIRST and unconditional, so it can no longer fail AFTER the orphan push — a spec-push failure now aborts before any chore branch is created (nothing to lose a NOTE for), and the orphan push is the last push on the path. That exact window is closed. A residual analogous window remains (cleanup block failing after a successful orphan push also drops the one-time NOTE) but it is PRE-EXISTING (present identically in round 1, cleanup always followed the orphan push) and UNCHANGED by the reorder — and it is now more retry-safe than ever, since the round-2 force-with-lease push makes a re-run converge idempotently. Non-blocking; optional future improvement is to surface FinalizeBranch on that error path."
+    },
+    {
+      "id": "R3-e",
+      "severity": "info",
+      "title": "(e) guardMergeLayout coverage unchanged",
+      "detail": "Three call sites at the fix commit: bead->spec CompleteBead (:299), FinalizeEpic bead->spec auto-merge (:399), direct spec->main gated on MergeStrategy==\\\"direct\\\" (:511). None are in the round-2 delta. The reorder is entirely within the HasRemote/pr block, which never local-merges into main; the orphan path builds a fresh branch from origin/main and commits an export-only delta (its layout equals origin/main's), so it neither needs nor bypasses a guard. Coverage identical to round 1."
+    },
+    {
+      "id": "R3-f",
+      "severity": "info",
+      "title": "(f) Direct (no-remote) path byte-identical after the reorder",
+      "detail": "Read every round-2 hunk of mindspec_executor.go: (1) new PushBranch(specBranch) prologue inside HasRemote; (2) squash blind-spot comment; (3) removal of the trailing \\\"Still push the spec branch\\\" block; (4) finalizeOrphanedSpecBranch self-heal + force-with-lease push. All live in the HasRemote/pr block or the orphan helper (reached only on the orphaned pr path). The `else { MergeStrategy = \\\"direct\\\" }` branch, the `if MergeStrategy==\\\"direct\\\"` guard gate, the cleanup direct-merge (gitutil.MergeBranch + directMergeConflictFailure), and the preFinalizeTip capture are untouched. Direct path unchanged from round 1; the round-1 direct-path TestFinalizeEpic_* suite remains green."
+    },
+    {
+      "id": "R3-g",
+      "severity": "info",
+      "title": "(g) Self-heal block cannot remove a NON-finalize worktree — path/name collision analysis",
+      "detail": "The self-heal acts on wtPath = workspace.FinalizeWorktreePath(root, cfg, specID) = <root>/<WorktreeRoot>/worktree-finalize-<specID> — a fully-qualified, specID-scoped path (never empty/root; guarded by os.Stat first). WorktreeRemoveForce runs `git worktree remove --force <wtPath>` (that ONE path only) and os.RemoveAll(wtPath) deletes that ONE directory only — no glob, no prefix scan. Namespace is disjoint by construction: FinalizeWorktreePrefix=\\\"worktree-finalize-\\\" vs SpecWorktreePrefix=\\\"worktree-spec-\\\" vs BeadWorktreePrefix=\\\"worktree-\\\" (bead names are worktree-<beadID>; bead IDs like <specID>.<n>/mindspec-xxxx never begin \\\"finalize-\\\"), and git permits only one worktree per path, so an identical-basename collision would require an identical absolute path — impossible for a live spec/bead worktree. WorktreePrune(root) is the only repo-wide op: `git worktree prune` reaps only admin entries whose working directory is ALREADY MISSING; it never removes a worktree whose directory still exists. Verdict: the block can only remove the finalize worktree at its own deterministic path plus already-dead registrations — never a live non-finalize worktree. Self-heal-tests (LeftoverTempWorktreeSelfHeals, RetryConverges) pass."
+    }
+  ]
+}

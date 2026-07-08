@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R2 claude",
+  "recommended_fix": "enforce + teach: keep ADR-0032 short-tag identifiers, fix only the error message to teach the contract; migrate lola to durable disjoint short-tag domains. Reject (a) and (b); (c) transitional stopgap at most.",
+  "zfc_verdict": "COMPLIANT",
+  "confidence": 0.86,
+  "rationale": "ADR-0032 sub-decision 1 is Accepted and unambiguous: the domain identifier is the OWNERSHIP dir short-tag, used identically in spec Impacted Domains, OWNERSHIP location, and ADR `Domain(s)`; path-like identifiers were EXPLICITLY REJECTED as ambiguous. lola's ADRs carry path-like (`api/app/lola/`) and tuple (`api (lola, tools)`) `Domain(s)` literals plus a per-spec `spec056` OWNERSHIP dir - precisely the rejected alternative plus the domain-as-spec anti-pattern. The validator's case-folded exact set intersection does exactly what ADR-0032 mandates; `mindspec-6ou2` is therefore NOT a gate-logic bug but lola violating the contract, with only a poor, non-teaching error message at genuine fault. Fix (a) path-overlap and fix (b) `:: spec` both REVERSE sub-decision 1: (a) would force heuristic parsing of free-form ADR `Domain(s)` strings (a direct ADR-0036 ZFC violation) and re-admit the rejected ambiguity; (b) bakes in per-spec aliases ADR-0032 forbade. Spec 100 already drew the correct asymmetric line - resolve the SPEC side from declared globs, keep the ADR side canonical - and must stay as shipped; extending resolution to the ADR side is exactly what to avoid. mindspec's own ADRs and specs are uniformly short-tag-consistent; only lola diverged, strengthening enforce-over-accommodate.",
+  "adr_action": "No amend/supersede that REVERSES ADR-0032 sub-decision 1 - it stands and is reinforced. At most a small CLARIFYING (non-reversing) amendment to ADR-0032 stating (i) the gate's error message MUST teach the short-tag contract at point-of-use, and (ii) ADR `Domain(s)` lines MUST use the same short-tag set the spec/OWNERSHIP use - symmetric to spec 100's spec-side amendment, which deliberately resolved only the SPEC side. Spec 100's path->name resolution is reconciled by leaving it UNTOUCHED: the asymmetry (resolve the author's spec-side path to a dir-name; require the canonical short-tag on the ADR side) is intentional and ZFC-clean. Fixes (a)/(b) would each require an ADR-0032 SUPERSEDE plus reopening spec 100 - both rejected.",
+  "findings": [
+    {
+      "severity": "high",
+      "area": "governance/ADR-0032",
+      "issue": "Fix (a) path-overlap and fix (b) `:: spec` both reverse ADR-0032 sub-decision 1 (Accepted), which rejected path-like identifiers as ambiguous and forbade aliases/hierarchy. They legitimize lola's contract violation rather than enforce the contract."
+    },
+    {
+      "severity": "high",
+      "area": "zfc/ADR-0036",
+      "issue": "Fix (a) requires resolving the ADR `Domain(s)` side through OWNERSHIP. Those literals are free-form (`api (lola, tools)`); glob-resolving them means heuristically parsing free-form strings - the exact ZFC violation ADR-0036 forbids. Path-overlap only stays ZFC-clean on the spec side (declared globs); it cannot be symmetrically extended to the ADR side without smuggling cognition."
+    },
+    {
+      "severity": "medium",
+      "area": "diagnosis/root-cause",
+      "issue": "`mindspec-6ou2` is not fundamentally a gate-logic bug. lola violates ADR-0032: path-like + tuple ADR `Domain(s)` lines, a per-spec `spec056` OWNERSHIP dir (domain-as-spec anti-pattern), and a catch-all/empty-stub manifest (an ADR-0036 anti-pattern and a latent multi-owner hard-error trap). The validator correctly refuses; the only genuine mindspec fault is a non-teaching error message."
+    },
+    {
+      "severity": "medium",
+      "area": "ergonomics/error-message",
+      "issue": "The `impacted-domains-resolve` / `adr-cite-irrelevant` / `adr-coverage-missing` errors do not teach the short-tag contract: they don't say that ADR `Domain(s)` and Impacted Domains must use the SAME short-tag dir-name set, nor name the remedy. This is the real fixable defect under enforce+teach."
+    },
+    {
+      "severity": "low",
+      "area": "internal-consistency",
+      "issue": "Spot-check confirms mindspec's OWN repo is fully ADR-0032-consistent: every `.mindspec/adr/*.md` `Domain(s)` line is short-tags (workflow, validation, adr, core, execution, ...) and specs 099/100/102 Impacted Domains use short-tags. Only lola diverged - strengthening enforce over accommodate."
+    },
+    {
+      "severity": "low",
+      "area": "parser/ergonomics",
+      "issue": "Repro item #1 (backtick-wrapped paths in Impacted Domains parsed as literal path) is a small independent ParseSpec ergonomics nicety, not the governance issue; stripping markdown backticks/bold is a legit minor mindspec fix but does not change the verdict and must not be conflated with reversing ADR-0032."
+    }
+  ],
+  "fixes_assessed": {
+    "a": "reject - reverses ADR-0032 sub-decision 1 (re-admits rejected path-like ambiguity) AND, to resolve the ADR side, forces heuristic parsing of free-form `Domain(s)` strings = ADR-0036 ZFC violation; would also require superseding 0032 and reopening spec 100.",
+    "b": "reject - `:: spec` is a per-spec alias/umbrella layer ADR-0032 explicitly forbade (no aliases/hierarchy); it bakes in the domain-as-spec anti-pattern and still doesn't reconcile the ADR `Domain(s)` literal side.",
+    "c": "stopgap - error->warning does not reverse 0032's identifier decision but guts the F1 enforcement that was the point of ADR-0032; acceptable only as a time-boxed migration warning while lola adopts short-tags, never as the permanent fix."
+  }
+}

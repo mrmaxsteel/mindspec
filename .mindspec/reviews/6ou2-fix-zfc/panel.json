@@ -1,0 +1,9 @@
+{
+  "bead_id": "mindspec-6ou2",
+  "spec": "6ou2-fix-direction",
+  "target": "design/mindspec-side-fix-for-6ou2",
+  "round": 1,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "design-review-no-code",
+  "note": "ZFC-aware DESIGN panel on the mindspec-side fix direction for bead 6ou2 (plan-approve ADR-domain literal-string intersection). Primary lens ADR-0036 ZFC; central tension vs ADR-0032 short-tag identifiers."
+}

@@ -1,0 +1,35 @@
+{
+  "reviewer_id": "R5 codex",
+  "recommended_fix": "enforce+teach: reject non-short-tag ADR Domain(s), keep spec100 spec-side normalization only as compatibility/deprecation debt",
+  "zfc_verdict": "COMPLIANT",
+  "confidence": 0.86,
+  "rationale": "Ship a validator rule at the ADR semantic-gate point of use: every cited ADR Domain(s) token must be a short-tag identifier, not a path, tuple, parenthesized qualifier, backtick path, or prose label. Then existing exact case-folded intersection remains the canonical check. This is ZFC-clean because it validates declared structured data and teaches the operator what to declare; it does not infer ownership from free-form strings. The ideal error says: cited ADR ADR-NNNN has invalid Domain(s) entry \"api (lola, tools)\"; ADR-0032 requires domain short-tags used identically in spec Impacted Domains, .mindspec/domains/<tag>/OWNERSHIP.yaml, and ADR Domain(s). Use a durable tag such as lola-api, add/maintain its OWNERSHIP paths, and cite that same tag; do not use paths or tuples. Symmetric ADR-side normalization only works after this rule, at which point it is a no-op for valid tags; allowing clean paths extends spec100's accommodation and should not be the 6ou2 fix. Spec100 was useful compatibility but directionally softens ADR-0032; do not extend it to ADRs, and consider warning then removing path-like Impacted Domains.",
+  "adr_action": "No ADR-0036 amendment. Amend ADR-0032 to clarify that spec100 normalization is spec-side compatibility only, ADR Domain(s) remain short-tag-only, and path-like Impacted Domains should be deprecated or explicitly time-boxed.",
+  "findings": [
+    {
+      "severity": "high",
+      "area": "ADR-0032 contract",
+      "issue": "Fix (a) path-overlap reverses the accepted short-tag/exact-intersection model; tuple ADR domains are contract violations, not inputs to support."
+    },
+    {
+      "severity": "high",
+      "area": "ADR-0036 ZFC",
+      "issue": "Resolving ADR Domain(s) like \"api (lola, tools)\" requires parsing semantic prose, which smuggles framework cognition into a gate that should only check declared structured data."
+    },
+    {
+      "severity": "medium",
+      "area": "migration",
+      "issue": "Mindspec's own ADRs use short-tags and are not broken by syntax enforcement; lola must migrate to durable domain tags and OWNERSHIP manifests rather than spec-number or path-shaped domains."
+    },
+    {
+      "severity": "medium",
+      "area": "spec100",
+      "issue": "Spec-side path-to-name normalization should be narrowed or deprecated rather than mirrored on ADRs; extending it makes path-like identifiers a second domain language."
+    }
+  ],
+  "fixes_assessed": {
+    "a": "reject: path-overlap/free-form ADR-side resolution contradicts ADR-0032; tuple parsing is a ZFC violation even if declared globs themselves are deterministic.",
+    "b": "reject: :: spec creates an alias/umbrella hierarchy and preserves domain-as-spec naming, bypassing the durable short-tag contract.",
+    "c": "stopgap: warning-only is acceptable only as a short migration/deprecation window for existing path-like ADR domains, not as the steady-state fix."
+  }
+}

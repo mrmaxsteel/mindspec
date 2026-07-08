@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Regression/non-breaking lens clears. Ask #5 test asserts both READ and WRITE byte-identity for canonical AND legacy: it uses an EXISTING spec id (mkTree creates docs/specs/<id>), so SpecDir hits the legacy tier and ADRFilePath is keyed on the docs-root, both returning legacy paths; it writes plan.md + ADR-0007 through the resolvers, re-resolves unchanged, reads back byte-identical, and asserts DetectLayout stays canonical/legacy with no flat lifecycle children created. The B1 caveat (brand-NEW spec id in a legacy tree defaults to .mindspec/docs canonical) is accurate, pre-existing (Req 15 SpecDir write-default, locked by TestSpecDir_WorktreeAware_DefaultsToCanonical), NOT introduced by #160 (workspace.go untouched), and the test deliberately sidesteps it via existing artifacts — so 'do-nothing upgrader isn't broken' is genuinely proven for existing content. FIX 1/2/3 are scoped to the opt-in migrate path: classifyRefs is byte-identical when RemoteDefault=\"\"/Allowlist=nil/Force=false; CheckMovedTreeLinks is consumed only by the mover (LinksReport has no production caller); IsResumable/FindResumableRun are additive. movedTreeRootDocs fully removed, no dangling refs. Merge guard (executor/layout_guard.go) and resolver untouched; --force relaxes only the pre-flight scan, not the merge-time fingerprint guard.",
+  "asks_status": {
+    "4": "ADDRESSED",
+    "5": "ADDRESSED"
+  },
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/workspace/workspace.go (SpecDir default)",
+      "issue": "A brand-NEW spec id in a legacy docs/ tree resolves to the canonical .mindspec/docs default, so a legacy project creating its first new spec post-upgrade would sprout a .mindspec/docs/ tree (which DetectLayout then classifies canonical, not legacy). This is pre-existing Req-15 write-default behavior shipped with the spec-106 resolver, NOT introduced by PR #160, and the new test correctly avoids relying on it by asserting on existing artifacts. Existing legacy content is read/written byte-identically. Noted as a known forward-nudge, not a blocker."
+    },
+    {
+      "severity": "info",
+      "area": "internal/doctor/links.go (link-lane widening)",
+      "issue": "CheckMovedTreeLinks now sweeps every repo-root *.md. Confirmed non-recursive (os.ReadDir, dirs skipped) so it does NOT descend into frozen snapshots (docs_archive/, historical_skills/), and its only production consumer is the migrate mover's gate — LinksReport has no wired caller — so non-migrating projects are unaffected. No regression."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 delta introduces no regressions in my lens and strictly improves bead fidelity. The three-mode disposition now honors bead-0uur intent literally: instructed-non-interactive self-answer records a CHECKED `- [x] grill (self-answered, headless): ... → <default>` line (the bead's 'recorded default') and resolves the template placeholder → approve passes, restoring PR #155 behavior as the product path; bare-headless keeps the unchecked marker I praised, now correctly scoped to the no-instruction case only. Spec-105 principles intact: guard stays in the skill/prompt layer (ADR-0019), binary untouched, judgment-based (no env-var signal). My round-1 standout property (marker hard-blocks approve) is preserved AND strengthened — new TestValidateSpec_GrillDeferredMarkerBlocks pins the exact marker to SevError; TestGrillDisposition_TextConsistency pins the three fragments byte-identically across create/grill + the approve clause. Deviation D sound: the new ms-spec-approve.pre0uur.md is BYTE-EXACT to the pre-change runtime canonical (verified by reconstruction), NOT the stale dogfood bytes; the stale mirrors (no managed-by, `mindspec approve spec`) were genuinely pre-092 and syncing them to canonical is consistent with round-1 deviation B. Suites pass (setup, validate). Mirrors byte-identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "positive",
+      "area": "bead intent — three-mode disposition",
+      "detail": "The convergent round-1 defect (binary guard hard-blocked the headless approve flow, contradicting the bead's 'auto-defer with a recorded default, rather than blocking') is resolved. Mode 2 (instructed non-interactive → self-answer) runs the full grill analysis, records a CHECKED `- [x] grill (self-answered, headless): <q> → <default>` line, and the completion contract resolves the pre-existing template placeholder — so a fully headless spec-create→approve now PASSES validate (checkOpenQuestions only ERRORs on unchecked `- [ ]`). Mode 3 (bare headless, no instruction) keeps the unchecked deferral marker as the fail-safe. This is a strict improvement and literally satisfies the bead's 'recorded default'."
+    },
+    {
+      "severity": "positive",
+      "area": "no-regression — marker auditability (my round-1 standout)",
+      "detail": "The property I praised in round 1 — a headless-deferred grill CANNOT silently reach Plan Mode — is preserved and hardened. The bare-headless marker is still an unchecked Open Questions item that checkOpenQuestions hard-ERRORs on and ApproveSpec aborts on. New TestValidateSpec_GrillDeferredMarkerBlocks unit-pins the exact marker line at SevError (backstop stays blocking by design). Group-2 adds a documented resolution path in ms-spec-approve step 4 (interactive re-grill, or check the box citing a PASSED spec panel), which also partially closes my round-1 residual note about an agent flipping [ ]→[x] without justification — the orchestrated path now requires a panel citation."
+    },
+    {
+      "severity": "positive",
+      "area": "no-regression — text-consistency pinning",
+      "detail": "TestGrillDisposition_TextConsistency pins the mode-test criteria, the self-answer contract, and the deferral-marker line byte-identically across the canonical ms-spec-create (lifecycleSkillFiles) and the ms-spec-grill plugin SKILL.md, plus asserts the ms-spec-approve canonical references the marker. This mechanizes the create/grill drift check I did by hand in round 1 across the now-three surfaces. Verified: plugin==.claude==.agents for ms-spec-grill; .claude==.agents for ms-spec-create and ms-spec-approve, all post-change (34c787d3)."
+    },
+    {
+      "severity": "positive",
+      "area": "deviation D — snapshot byte-exactness (my/R3 lens)",
+      "detail": "Verified the new internal/setup/historical_skills/ms-spec-approve.pre0uur.md is BYTE-EXACT to the pre-change (24af2fdb) runtime canonical lifecycleSkillFiles()[\"ms-spec-approve\"] via literal reconstruction (empty diff). It captures the pre-change CANONICAL (managed-by: mindspec + `mindspec spec approve`, no clause) — the bytes a real install carrying the shipped canonical would have — so auto-refresh will correctly match and refresh those installs. TestInstallSkills_RefreshesPreClauseApproveSnapshot exercises exactly this. The create/grill .pre0uur snapshots are untouched in the round-2 delta (empty diff). No near-miss."
+    },
+    {
+      "severity": "minor",
+      "area": "deviation D — stale-mirror sync scope (non-blocking)",
+      "detail": "Confirmed deviation D's premise: pre-fix .claude/.agents ms-spec-approve mirrors were genuinely stale (no `managed-by: mindspec`; `mindspec approve spec <id>` deprecated arg order — the 799d marker-less/pre-092 class). The author synced them fully to canonical (managed-by + arg-order fix + the new clause) rather than patching the clause into stale text. This bundles an arg-order/managed-by hygiene fix into the 0uur commit (R6's separate-commit question). I judge it acceptable, not blocking: the fix must edit these exact files anyway to add the step-4 clause, and shipping them clause-added-but-arg-order-wrong would be internally inconsistent doc text; it is consistent with round-1 deviation B (mirrors kept in lockstep). Optional: mention the bundled arg-order sync in the PR body for provenance."
+    },
+    {
+      "severity": "positive",
+      "area": "spec-105 principles + suites",
+      "detail": "The three-mode guard stays entirely in the skill/prompt layer with the binary untouched (ADR-0019 boundary; 105 R8/AC9 non-TTY principle). Round-1's ambiguous 'invoked by an orchestrator' trigger (which R5 flagged, since 'orchestrator' also names interactive top-level sessions) is removed; the mode test now anchors on human-availability then explicit-instruction — more operational than round 1, so decidability improved, not regressed. Self-answer mode restores 105's headless grill value (PR #155 behavior) as the product path. `go test ./internal/setup/... ./internal/validate/...` both PASS in the worktree (setup 1.74s, validate 12.96s), including the three new tests."
+    }
+  ]
+}
