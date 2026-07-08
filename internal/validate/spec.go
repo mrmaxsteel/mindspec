@@ -1,9 +1,11 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -59,6 +61,14 @@ func ValidateSpec(root, specID string) *Result {
 			r.AddError("section-empty", fmt.Sprintf("section has no content or only placeholder text: ## %s", name))
 		}
 	}
+
+	// Spec 110 R5/R6: fold the plan-approve parser-parity checks into
+	// spec-approve, at the identical code/severity the plan gate already
+	// uses (ADR-0037 single-source-of-truth boundary). R7c keeps
+	// Accepted-status, domain-intersection, and coverage evaluation
+	// plan-approve-only — these two checks are existence/resolution only.
+	checkImpactedDomainsResolutionParity(r, root, specDir)
+	checkADRTouchpointsExist(r, root, specDir, sections)
 
 	// Check In Scope and Out of Scope subsections
 	checkScopeSubsections(r, sections)
@@ -189,6 +199,80 @@ func checkAcceptanceCriteria(r *Result, sections map[string]string) {
 	// allowlist. Enforcing an English phrasebook ("works correctly", "is fast")
 	// in Go code is a ZFC violation and fails silently for any synonym,
 	// translation, or domain-specific term the author didn't anticipate.
+}
+
+// checkImpactedDomainsResolutionParity implements spec 110 R5: it folds the
+// plan-approve Impacted-Domains resolution check into spec-approve, making
+// the IDENTICAL call plan.go's ValidatePlan (plan.go:142-146) makes — same
+// `loadImpactedDomains` extraction, same `normalizeImpactedDomains(nil, root,
+// "", impacted)` working-tree resolution, same `impacted-domains-resolve`
+// error code. A path-like zero/multi-owner entry fails here exactly as it
+// would fail at plan-approve; a bare-name-no-manifest entry that
+// normalizeImpactedDomains keeps verbatim (Rule 2, no error) still passes —
+// spec-approve adds no stricter rule than plan-approve already enforces.
+// Spec-approve does not consume the normalized domain set further (no
+// coverage/citation gates run here — R7c keeps those plan-approve-only), so
+// only the resolver's own errors are surfaced.
+func checkImpactedDomainsResolutionParity(r *Result, root, specDir string) {
+	impacted, impErr := loadImpactedDomains(specDir)
+	if impErr != nil && !os.IsNotExist(errors.Unwrap(impErr)) {
+		// Mirrors plan.go's treatment of a PARSE error (spec.md present but
+		// malformed). Unreachable in practice here because ValidateSpec has
+		// already confirmed spec.md is readable before this check runs.
+		r.AddError("impacted-domains-load", impErr.Error())
+	}
+	_, normErrs := normalizeImpactedDomains(nil, root, "", impacted)
+	for _, e := range normErrs {
+		r.AddError("impacted-domains-resolve", e)
+	}
+}
+
+// adrTouchpointLinkRe matches an anchored markdown link to an ADR inside the
+// `## ADR Touchpoints` section, in both the bare-ID anchor form
+// (`[ADR-0031](../../adr/ADR-0031.md)`) and the filename-form anchor the
+// repo's merged specs actually write
+// (`[ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md)`). The
+// `[^\]]*` tail consumes any filename-slug characters between the 4-digit ID
+// and the closing `]`, so either link shape is captured under group 1 as the
+// bare `ADR-NNNN` ID. A bare-prose `ADR-####` mention with no `[...](...)`
+// anchor at all never matches.
+var adrTouchpointLinkRe = regexp.MustCompile(`\[(ADR-\d{4})[^\]]*\]\([^)]+\)`)
+
+// checkADRTouchpointsExist implements spec 110 R6: verify that every ADR
+// referenced by an anchored markdown link in the spec's `## ADR Touchpoints`
+// section EXISTS, resolved against the SAME `adr.Store` the plan-time
+// citation gate (checkADRCitations, plan.go:156) reads
+// (`newMemoStore(adrStoreForSpecFn(root, specDir))`). This is an
+// existence-only check, modeled on `adr-cite-missing`'s existence-only
+// shape but under a distinct code (`adr-touchpoint-missing`) since it
+// checks the spec's touchpoints prose, not the plan's frontmatter
+// citations (spec 097 R2 boundary). It deliberately emits no
+// `adr-coverage-*` or `adr-cite-irrelevant` diagnostic — Accepted-status,
+// domain-intersection, and coverage evaluation stay at plan-approve (R7c /
+// ADR-0032).
+func checkADRTouchpointsExist(r *Result, root, specDir string, sections map[string]string) {
+	body, exists := sections["ADR Touchpoints"]
+	if !exists {
+		return // already flagged by the required-section check above
+	}
+
+	matches := adrTouchpointLinkRe.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return
+	}
+
+	store := newMemoStore(adrStoreForSpecFn(root, specDir))
+	seen := make(map[string]struct{}, len(matches))
+	for _, m := range matches {
+		id := m[1]
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, err := store.Get(id); err != nil {
+			r.AddError("adr-touchpoint-missing", fmt.Sprintf("ADR Touchpoints references %s, which does not exist; fix the typo/reference or run `mindspec adr list` to find the correct ID", id))
+		}
+	}
 }
 
 // checkLifecycleBinding checks if the spec has a corresponding beads epic.
