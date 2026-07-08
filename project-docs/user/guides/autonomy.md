@@ -53,20 +53,23 @@ Level 2 is where gate authority itself is delegated — a scoped grant, written 
 
 ```yaml
 # .mindspec/config.yaml
+panel:
+  reviewers: [{family: claude, count: 3}, {family: codex, count: 3}]
+  approve_threshold: "n-1"
 loop:
   enabled: true
-  gate_authority:
-    spec_approve:  panel      # panel | human
+  gate_authority:              # who may pass each gate unattended: panel | human
+    spec_approve:  panel
     plan_approve:  panel
     bead_merge:    panel
     impl_approve:  panel
-    panel_skip:    human      # not configurable to panel — see below
-  panel_quorum: {reviewers: 6, approve_threshold: n-1}
+    # there is no panel_skip key — skipping the verifier is never delegable,
+    # and the loader refuses any config that tries to add one
   halt:
     max_rounds_per_bead: 3
     max_consecutive_impl_failures: 2
     panel_deadlock_rounds: 2
-    on_reject: halt
+    on_reject: halt            # the only accepted value — a REJECT always halts
   budget: {max_beads_per_wake: 4}
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
