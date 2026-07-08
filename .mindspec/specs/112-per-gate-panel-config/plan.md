@@ -5,8 +5,14 @@ adr_citations:
     - ADR-0035
     - ADR-0034
     - ADR-0039
+approved_at: "2026-07-08T10:15:08Z"
+approved_by: user
+bead_ids:
+    - mindspec-lma4.1
+    - mindspec-lma4.2
+    - mindspec-lma4.3
 spec_id: 112-per-gate-panel-config
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []
