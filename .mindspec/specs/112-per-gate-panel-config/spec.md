@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-08T08:27:03Z"
+approved_by: user
+status: Approved
 ---
 # Spec 112-per-gate-panel-config: Per-gate panel config — explicit models, first-class lenses, and model-level substitution on top of 109's `panel:` block
 
@@ -168,7 +168,7 @@ _All open questions are resolved; every resolution is folded into the Requiremen
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: Drafted 2026-07-07 from decision bead `mindspec-kkcw`. Hard prerequisite before planning: spec 109 merged to `main` and this branch rebased onto it.
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-08
+- **Notes**: Approved via mindspec approve spec
