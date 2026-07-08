@@ -14,7 +14,9 @@ work_chunks:
       key_file_paths:
         - internal/config/config.go
         - internal/config/config_test.go
+        - cmd/mindspec/config.go
         - .mindspec/domains/core/interfaces.md
+        - .mindspec/domains/workflow/interfaces.md
     - depends_on: []
       id: 2
       key_file_paths:
@@ -166,9 +168,10 @@ introduces no new shared-state test. Git-touching tests run with
 
 **Dependency shape (decomposition).** Three beads — under the 3–5 target, with
 the shallowest DAG the spec's compile-time facts allow. Bead 1
-(`internal/config`, R1–R5) and Bead 2 (`internal/panel` + the ADR-0037
-amendment, R6) are package-disjoint with no produced-then-consumed state
-between them: they run in **parallel**. Bead 3 (`internal/complete` +
+(`internal/config` plus the one-line `cmd/mindspec` count-render deref its
+pointerization forces, R1–R5) and Bead 2 (`internal/panel` + the ADR-0037
+amendment, R6) are package- and file-disjoint with no produced-then-consumed
+state between them: they run in **parallel**. Bead 3 (`internal/complete` +
 `cmd/mindspec`, R7–R9) depends on **both**, and both edges are real
 compile-time dependencies, not ordering wishes: its advisory callers and
 render/JSON functions call Bead 1's new resolvers
@@ -187,15 +190,25 @@ small to stand alone and shares both parents with R8/R9, so the three
 surfacing requirements land together as the one consumer bead, exactly as
 109's Bead 4 grouped the same two caller packages.
 
-**Requirement → bead map.** R1–R5 → Bead 1; R6 → Bead 2; R7–R9 → Bead 3.
+**Requirement → bead map.** R1–R5 → Bead 1 (R5's supersession *reporting*
+half — the `substitution.in_force` member — surfaces in Bead 3; Bead 1 lands
+its schema + validation half); R6 → Bead 2; R7–R9 → Bead 3.
 Every spec requirement is delivered; the Provenance table below maps every
 spec acceptance criterion.
 
-## Bead 1: internal/config — gates map, generalized reviewers, substitutes, per-gate refusals, gate-scoped resolvers + deterministic slot expansion, known-model advisory list
+## Bead 1: internal/config — gates map, generalized reviewers, substitutes, per-gate refusals, gate-scoped resolvers + deterministic slot expansion, known-model advisory list; + the one-line cmd/mindspec count-render deref
 
-Delivers R1–R5. All source edits are the **core** domain
-(`internal/config/config.go` + its test file); doc-sync is
-`.mindspec/domains/core/interfaces.md`.
+Delivers R1–R5. The primary source edits are the **core** domain
+(`internal/config/config.go` + its test file); pointerizing `Reviewer.Count`
+additionally forces one mechanical **workflow**-domain edit,
+`cmd/mindspec/config.go` — the sole out-of-package `Reviewer.Count` reader
+(step 1's second half) — so the branch stays green between beads. Doc-sync is
+`.mindspec/domains/core/interfaces.md` (core) plus a one-line note in
+`.mindspec/domains/workflow/interfaces.md` (the per-domain doc-sync gate
+blocks a `cmd/**` source edit — workflow-owned per
+`.mindspec/domains/workflow/OWNERSHIP.yaml` — with no workflow doc in the
+same range; Bead 2 runs in parallel but touches only `architecture.md`, so
+the two root beads stay file-disjoint).
 
 **Steps**
 1. Generalize the `Reviewer` entry (R1): add `Model string \`yaml:"model"\``
@@ -203,15 +216,33 @@ Delivers R1–R5. All source edits are the **core** domain
    validation anywhere in `Load`), and change `Count int` to
    `Count *int \`yaml:"count"\`` so an **absent** count (nil → defaults to 1,
    the R2 monotone relaxation) is distinguishable from an **explicit**
-   `count: 0`/negative (refused, R4). Add unexported accessors
-   `(Reviewer).count() int` (nil → 1) and `(Reviewer).model() string`
+   `count: 0`/negative (refused, R4). Add two value accessors: **exported**
+   `(Reviewer).CountValue() int` (nil → 1; exported because `cmd/mindspec`'s
+   renderer is an out-of-package consumer — the deref below — and Go forbids
+   a `Count()` method beside the `Count` field) and unexported
+   `(Reviewer).model() string`
    (`Model` if non-empty, else `Family` — "model wins for slot expansion");
-   every consumer (validation, resolvers, expansion) resolves through these
-   two accessors so the legacy-`family` and both-keys cases are decided in
-   exactly one place. Update `DefaultConfig()` (pointer counts via a tiny
+   every consumer (validation, resolvers, expansion, and the `cmd/mindspec`
+   renderer) resolves through these two accessors so the legacy-`family` and
+   both-keys cases are decided in exactly one place. Update `DefaultConfig()` (pointer counts via a tiny
    `intp(n int) *int` helper) and the existing global
    `PanelExpectedReviewers()` / `validateOrchestration` reviewer arithmetic to
    the accessors — semantics for every 109-accepted input unchanged (3+3 → 6).
+   Same step, the pointerization's out-of-package half — keep `cmd/mindspec`
+   green: update the sole external `Reviewer.Count` reader,
+   `cmd/mindspec/config.go:149`
+   (`fmt.Fprintf(&b, "      count: %d\n", r.Count)` in `renderConfig`'s
+   panel-reviewers loop), to render `r.CountValue()`. This edit is
+   load-bearing, not cosmetic: `%d` on the new `*int` passes `go build`
+   AND `go vet` but prints the pointer address, breaking the existing 109
+   renderer test `TestConfigShow_EmitsPanelModelsLoop` — without it
+   the branch is red between Bead 1 and Bead 3 while Bead 1's
+   package-scoped gate stays false-green. Scope fence: config.go:149 is the
+   verified ONLY external `Reviewer.Count` consumer
+   (`cmd/mindspec/report.go`'s `r.Count` is an unrelated journal-report
+   struct — do not touch it; `internal/config`'s own uses are this step's).
+   Because `cmd/**` is workflow-owned, this edit rides with the one-line
+   workflow doc note in step 7 to satisfy the per-domain doc-sync gate.
 2. Add the new schema (R1, R5) and its inert companions: `GatePanel` struct
    (`Reviewers []Reviewer \`yaml:"reviewers"\``,
    `ApproveThreshold string \`yaml:"approve_threshold"\``);
@@ -219,10 +250,13 @@ Delivers R1–R5. All source edits are the **core** domain
    `Panel.Note string \`yaml:"note"\`` (inert advisory free-text: parsed,
    echoed by `config show` in Bead 3, never read by any validation or
    resolver); `Substitution.Substitutes map[string]string \`yaml:"substitutes"\``.
-   Declare the gate-key enum **once** as an ordered package-level slice,
-   `panelGateKeys = []string{"spec_approve", "plan_approve", "bead",
-   "final_review", "adhoc"}` — the single source for validation, recovery
-   lines, and Bead 3's enum-order rendering. `DefaultConfig()` leaves `Gates`,
+   Declare the gate-key enum **once** as an ordered **exported**
+   package-level slice,
+   `PanelGateKeys = []string{"spec_approve", "plan_approve", "bead",
+   "final_review", "adhoc"}` — exported because Bead 3's consumers cannot
+   reference an unexported name (`cmd/mindspec` is package `main`,
+   `internal/complete` is another package); it is the single source for
+   validation, recovery lines, and Bead 3's enum-order rendering. `DefaultConfig()` leaves `Gates`,
    `Substitutes`, and `Note` empty (R2: the standing protocol is the
    documented example, never the default), and `loadUncached`'s backfill adds
    **no** backfill for them (absent → empty → global behavior). Pin the R2
@@ -237,7 +271,7 @@ Delivers R1–R5. All source edits are the **core** domain
    design, consumed only by Bead 3's `config show` annotation, referenced
    **nowhere** in `Load`/`validateOrchestration` (R1; ADR-0040).
 3. Add the three gate-scoped resolvers with deterministic slot expansion
-   (R3), each returning an error for a gate name outside `panelGateKeys`
+   (R3), each returning an error for a gate name outside `PanelGateKeys`
    (fail loud on caller typos; recovery line enumerates the five keys):
    `(*Config).PanelGateExpectedReviewers(gate string) (int, error)`,
    `(*Config).PanelGateApproveThresholdExpr(gate string) (string, error)` —
@@ -267,7 +301,7 @@ Delivers R1–R5. All source edits are the **core** domain
    string, isBead bool) (int, bool)` — when `len(Gates) == 0`: return
    `(PanelExpectedReviewers(), true)` (every panel compares against the
    global default exactly as 109 ships it); when gates are configured:
-   a `recordedGate` in `panelGateKeys` → that gate's
+   a `recordedGate` in `PanelGateKeys` → that gate's
    `PanelGateExpectedReviewers` and `true`; empty `recordedGate` with
    `isBead` → the `bead` gate's value and `true`; anything else (non-bead
    with no recorded gate, or any recorded value outside the enum) →
@@ -275,7 +309,7 @@ Delivers R1–R5. All source edits are the **core** domain
    unknown value (R7: no resolver error can surface through the advisory).
 5. Extend `validateOrchestration` with the R4 refusals, each a guard-style
    error with an ADR-0035 recovery line, never a panic:
-   (a) a `gates` key outside `panelGateKeys` — recovery line enumerates all
+   (a) a `gates` key outside `PanelGateKeys` — recovery line enumerates all
    five valid keys AND disambiguates from `loop.gate_authority`'s different
    vocabulary (`bead_merge`/`impl_approve`); (b) a configured gate entry
    setting neither `reviewers` nor `approve_threshold` (both per-field "set"
@@ -327,29 +361,40 @@ Delivers R1–R5. All source edits are the **core** domain
    `author-of-record`; the 9-reviewer worked example expands to exactly the
    pinned assignment; a gate with ≥ 6 lens-less reviewers covers all six
    default lenses and every lens-less `count ≥ 2` entry spans a structural and
-   a sharp lens; two loads of identical config yield identical slot lists);
+   a sharp lens; two loads of identical config yield identical slot lists;
+   fixture ordering is normative for falsifiability: at least one
+   explicitly-lensed entry must PRECEDE lens-less entries at a position
+   where slot-index mod 6 diverges from the cursor value, so a wrong
+   `lens[slot-index % 6]` implementation fails instead of passing every
+   listed assertion);
    plus `TestPanelGateAdvisoryDefault_SelectionRule` (the step-4 helper:
    known-gate / bead-fallback / skip / gates-absent-global rows — the config
    half of R7, ahead of Bead 3's caller-side AC7 test).
-7. Doc-sync (core): document in `.mindspec/domains/core/interfaces.md` the
+7. Doc-sync (core + the step-1 workflow ride-along): document in
+   `.mindspec/domains/core/interfaces.md` the
     `panel.gates`/`note`/`substitutes` schema, the generalized reviewer entry
     (open vocabulary, count default 1, legacy `family`), the R4 refusal
     surface, the three gate-scoped resolvers + `PanelGateAdvisoryDefault`,
     the deterministic slot-expansion contract (interleaved default-lens
     ordering, cursor-start-0, the normative worked example), the known-model
     advisory list, and the operator's standing-protocol YAML from the spec's
-    Goal **reproduced as the documented example** (R2).
+    Goal **reproduced as the documented example** (R2). Also (workflow —
+    required by the step-1 `cmd/**` edit): add a one-line note to
+    `.mindspec/domains/workflow/interfaces.md` recording that `config show`
+    renders reviewer counts through the exported `CountValue()` accessor
+    (an absent `count` renders as its default, `1`).
 
 **Verification**
 - [ ] `go test ./internal/config -v -run 'TestLoad_GatesAbsentByteIdentical109$' | grep -q -- '--- PASS: TestLoad_GatesAbsentByteIdentical109'`
 - [ ] `go test ./internal/config -v -run 'TestLoad_PerGateProtocolRoundTrips$' | grep -q -- '--- PASS: TestLoad_PerGateProtocolRoundTrips'`
 - [ ] `go test ./internal/config -v -run 'TestLoad_RefusesPerGateKnobs$' | grep -q -- '--- PASS: TestLoad_RefusesPerGateKnobs'`
 - [ ] `go test ./internal/config -v -run 'TestPanelGateResolvers_FallbackAndAdhoc$' | grep -q -- '--- PASS: TestPanelGateResolvers_FallbackAndAdhoc'`
-- [ ] `go test ./internal/config -v -run 'TestPanelGateSlots_DeterministicExpansion$' | grep -q -- '--- PASS: TestPanelGateSlots_DeterministicExpansion'`
+- [ ] `go test ./internal/config -v -run 'TestPanelGateSlots_DeterministicExpansion$' | grep -q -- '--- PASS: TestPanelGateSlots_DeterministicExpansion'` (per step 6, the fixture places an explicitly-lensed entry BEFORE lens-less ones where slot-index mod 6 ≠ the cursor value — a wrong `lens[slot-index % 6]` impl must not pass)
 - [ ] `go test ./internal/config -v -run 'TestPanelGateAdvisoryDefault_SelectionRule$' | grep -q -- '--- PASS: TestPanelGateAdvisoryDefault_SelectionRule'`
 - [ ] `go test ./internal/config` exits `0` (whole package green, existing 109 tests included — the R2 identity claim over 109's own test surface)
-- [ ] `/usr/bin/grep -q 'claude-fable-5' .mindspec/domains/core/interfaces.md` exits `0` (the standing-protocol example + known-model seed ids are documented)
-- [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/core/interfaces.md'` (doc-sync: the core source edit carries a core domain-doc edit in the same commit)
+- [ ] `go test ./cmd/mindspec` exits `0` (the cross-package pointerization gate: `TestConfigShow_EmitsPanelModelsLoop` still passes — `%d` on the new `*int` passes `go build` AND `go vet`, so only this test run can falsify a skipped step-1 cmd deref)
+- [ ] `/usr/bin/grep -qF 'fable-window 2026-07, codex-enabled' .mindspec/domains/core/interfaces.md && /usr/bin/grep -q 'claude-fable-5' .mindspec/domains/core/interfaces.md` exits `0` (the `note` line is unique to the Goal's standing-protocol YAML — the known-model seed list alone cannot satisfy it — and the seed ids are documented)
+- [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/core/interfaces.md' && git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/interfaces.md'` (doc-sync: the core edits carry the core domain-doc; the workflow-owned `cmd/mindspec` edit carries the one-line workflow note)
 - [ ] `go build ./...` exits `0`
 
 **Acceptance Criteria**
@@ -358,6 +403,7 @@ Delivers R1–R5. All source edits are the **core** domain
 - [ ] Every R4 refusal errors with a recovery line (unknown gate key naming all five valid keys; empty gate entry; model-less entry; explicit `count <= 0`; per-gate sum `< 2`; per-gate/inherited threshold out of the inheriting gate's resolved range at every adhoc→bead→global link; self-mapping/empty-sided `substitutes`), and an unknown model id alone never errors (spec AC3, R4)
 - [ ] Gate-scoped resolvers walk the per-field chain (own → `bead` for `adhoc` → global → defaults), error on unknown gate names, and return raw threshold expressions only (spec AC4, R3)
 - [ ] Slot expansion is deterministic with the cursor starting at index 0 and the 9-reviewer worked example exactly as pinned; explicit lenses never consume the cursor (spec AC5, R3)
+- [ ] `cmd/mindspec` renders reviewer counts through the exported `CountValue()` accessor and its package tests pass inside this bead's own gate — no cross-bead red window, no `%d`-on-pointer false-green (round-1 panel must-fix 1)
 - [ ] `substitutes` loads as a well-formed one-step map; `claude_sub_on_quota` keeps its 109 meaning while `substitutes` is empty (R5 — supersession *reporting* is Bead 3's surface)
 
 **Depends on**
@@ -395,8 +441,13 @@ exactly the field this bead adds.
    paths.
 3. Append the second **amendment note** to
    `.mindspec/adr/ADR-0037-panel-gate-enforced-contract.md`, dated with the
-   bead-commit date and labeled `spec 112`, placed alongside the 2026-07-07
-   spec-109 note: `panel.json` gains one optional recorded field, `gate` —
+   bead-commit date and labeled `spec 112`, homed under **§1 ("Registration:
+   `panel.json` is the panel's identity" — the schema block)**, where the
+   schema-addition precedents live (`abandon_reason` and the 099/102/106
+   notes sit with the thing they record) — NOT under §3: the 2026-07-07
+   spec-109 note sits in §3 only because it extended the threshold rule,
+   which the decision-inert `gate` field does not. The note's content:
+   `panel.json` gains one optional recorded field, `gate` —
    **decision-inert metadata** in exactly the sense `abandon_reason` is
    (recorded intent for advisory consumers, parse-lenient, never an input to
    `PanelGateDecision` or `ApproveThreshold()`); §§3/6/8 are **untouched**
@@ -412,14 +463,14 @@ exactly the field this bead adds.
 - [ ] `go test ./internal/panel` exits `0` (whole package green, existing tests included)
 - [ ] `go list -deps ./internal/panel | /usr/bin/grep -q internal/config` returns **non-zero** (leaf invariant: `internal/panel` imports no `internal/config` — spec AC11 first half)
 - [ ] `/usr/bin/grep -q 'threshold > 0' internal/panel/gate.go` exits `0` (the third-defense gate guard survives — spec AC11 second half)
-- [ ] `/usr/bin/grep -q 'spec 112' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md && /usr/bin/grep -q 'decision-inert' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` exits `0` and `/usr/bin/grep -c -i 'amendment' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` reports a count higher than on the parent commit (the new note is present alongside 109's — spec Validation Proof)
+- [ ] `/usr/bin/grep -q 'spec 112' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md && /usr/bin/grep -q 'decision-inert' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` exits `0` and `/usr/bin/grep -c -i 'amendment' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` reports a count higher than on the parent commit (the new §1 note is present and 109's §3 note untouched — spec Validation Proof)
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/architecture.md'` (doc-sync)
 - [ ] `go build ./...` exits `0`
 
 **Acceptance Criteria**
 - [ ] The `gate` field's presence, absence, or value changes no `Allow`/`Block` and no threshold; an unexpected value never sets `Registration.Err`; a gate-less legacy `panel.json` parses and decides identically to before (spec AC6, R6)
 - [ ] `internal/panel` remains import-clean of `internal/config` and the `threshold > 0` guard is intact (spec AC11)
-- [ ] The ADR-0037 second amendment note recording `gate` as decision-inert metadata is present, with §§3/6/8 untouched (R6; spec Validation Proof)
+- [ ] The ADR-0037 second amendment note recording `gate` as decision-inert metadata is present under §1's schema block, with §§3/6/8 untouched (R6; spec Validation Proof)
 
 **Depends on**
 None
@@ -440,10 +491,17 @@ writer behavior (spec 110), no runner/dispatch or substitution consumption
    `internal/complete/complete.go` (the `reviewerCountAdvisory(panelReg,
    gateCfg.PanelExpectedReviewers(), advisoryOut)` site, currently
    `complete.go:384`), replace the flat global default with the Bead 1
-   selection helper: `def, ok := gateCfg.PanelGateAdvisoryDefault(
-   panelReg.Panel.Gate, panelReg.Panel.IsBead())`; call
+   selection helper, **guarded on the registration**: only when
+   `panelReg != nil` — `panelGate` returns a nil registration on its
+   fail-open paths (empty bead ID, no registered panel: the common
+   panel-less `mindspec complete`), and the helper's arguments deref it, so
+   an unguarded `panelReg.Panel.Gate` read panics where 109 relied on
+   `reviewerCountAdvisory`'s own nil-check — compute `def, ok :=
+   gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate,
+   panelReg.Panel.IsBead())` and call
    `reviewerCountAdvisory(panelReg, def, advisoryOut)` only when `ok`
-   (the R7 skip carve-out prints nothing). `panel.ReviewerCountNote` and
+   (the R7 skip carve-out prints nothing); a nil registration skips the
+   advisory silently, exactly as 109 does. `panel.ReviewerCountNote` and
    `reviewerCountAdvisory`'s own signature stay unchanged; the gate's
    `Allow`/`Block` (already computed by `panelGate` before this point) is
    untouched. Surfaces may still display a raw recorded `gate` value; only
@@ -456,7 +514,7 @@ writer behavior (spec 110), no runner/dispatch or substitution consumption
    one selection rule homed in `internal/config` — no drift possible.
 3. Extend `renderConfig` (R8), keeping it pure over `*config.Config`: echo a
    set `panel.note` verbatim modulo escaping; render the `gates` map — only
-   configured gates, in `panelGateKeys` **enum declaration order** (never map
+   configured gates, in `PanelGateKeys` **enum declaration order** (never map
    iteration order) — each with its configured entries (`model`/`family`/
    `lens`/`count` as configured), its resolved reviewer sum
    (`PanelGateExpectedReviewers`), and its **raw** threshold expression
@@ -505,7 +563,10 @@ writer behavior (spec 110), no runner/dispatch or substitution consumption
    default yields the note; with `gates:` configured, a non-bead panel with
    no recorded gate yields no note even when its count differs from every
    default; a panel recording an unknown `gate` value yields no note and
-   surfaces no resolver error; with `gates:` absent every panel compares
+   surfaces no resolver error; a **panel-less complete** (nil registration
+   through `panelGate`'s fail-open path) emits no advisory and does not
+   panic, with `gates:` configured AND absent — the step-1 nil-guard case;
+   with `gates:` absent every panel compares
    against the global default exactly as 109; the gate decision is unchanged
    in all cases. `TestConfigShow_GatesSubstitutesAndModelAdvisory` in
    `cmd/mindspec/config_test.go`: gates rendered in enum order with resolved
@@ -513,6 +574,17 @@ writer behavior (spec 110), no runner/dispatch or substitution consumption
    convention, `note` echoed, a made-up model id warns while exit stays `0`,
    and none of the six seeded ids/family strings warns (negative control);
    two renders of one config are byte-identical (deterministic-output pin).
+   `TestConfigShow_ReviewerCountNoteGateAware` in
+   `cmd/mindspec/config_test.go` — the R7 **cmd-side falsification pin**:
+   the existing `TestConfigShow_ReviewerCountNoteWhenPanelDiffers` runs
+   gates-ABSENT, where R7 mandates 109-identical behavior, so it passes
+   whether or not step 2 is wired. Over a temp root with `gates:` configured
+   and registered panels on disk (the full `config show` path, exactly as
+   the existing test drives it): a bead panel whose recorded count matches
+   the configured `bead` gate's default but differs from the global default
+   emits NO note (this case FAILS against unwired 109 code, which compares
+   globally); a genuine mismatch against the panel's own recorded gate's
+   default emits the note; a gate-less non-bead registration emits nothing.
    `TestConfigShowGate_ResolvedJSON`: `--gate bead --json` emits exactly the
    five R9 members matching the R3 resolvers over the same config; the
    `substitution.in_force` member flips per R5 (non-empty map vs empty);
@@ -542,16 +614,17 @@ writer behavior (spec 110), no runner/dispatch or substitution consumption
 - [ ] `go test ./cmd/mindspec -v -run 'TestConfigShow_GatesSubstitutesAndModelAdvisory$' | grep -q -- '--- PASS: TestConfigShow_GatesSubstitutesAndModelAdvisory'`
 - [ ] `go test ./cmd/mindspec -v -run 'TestConfigShowGate_ResolvedJSON$' | grep -q -- '--- PASS: TestConfigShowGate_ResolvedJSON'`
 - [ ] `go test ./cmd/mindspec -v -run 'TestConfigShow_HostileStringsEscaped$' | grep -q -- '--- PASS: TestConfigShow_HostileStringsEscaped'`
+- [ ] `go test ./cmd/mindspec -v -run 'TestConfigShow_ReviewerCountNoteGateAware$' | grep -q -- '--- PASS: TestConfigShow_ReviewerCountNoteGateAware'` (the gates-configured panel-scan case — the only cmd-side proof that fails if step 2's wiring is skipped)
 - [ ] `go test ./cmd/mindspec ./internal/complete` exits `0` (both packages green, existing tests included — proving the complete-gate `Allow`/`Block` is unchanged)
 - [ ] `go build ./... && go run ./cmd/mindspec config show >/dev/null && [ -z "$(git status --porcelain)" ]` exits `0` (read-only, even when panels are scanned — spec Validation Proof)
-- [ ] Protocol-YAML proof (spec Validation Proofs): `go build -o /tmp/ms112 ./cmd/mindspec && T=$(mktemp -d) && mkdir -p "$T/.mindspec"` then write the spec Goal's standing-protocol YAML (the `TestLoad_PerGateProtocolRoundTrips` fixture) to `$T/.mindspec/config.yaml`; `(cd "$T" && /tmp/ms112 config show)` prints all four configured gates with resolved sums 9/9/6/12 and raw threshold expressions plus the substitutes map, exit `0`; `(cd "$T" && /tmp/ms112 config show --gate final_review --json | /usr/bin/grep -c '"slot"')` prints `12` and the same output contains `"approve_threshold": "11"`; `[ "$(cd "$T" && /tmp/ms112 config show --gate adhoc --json | jq -c .slots)" = "$(cd "$T" && /tmp/ms112 config show --gate bead --json | jq -c .slots)" ]` exits `0` (unconfigured `adhoc` ≡ `bead`'s slots)
+- [ ] Protocol-YAML proof (spec Validation Proofs): `go build -o /tmp/ms112 ./cmd/mindspec && T=$(mktemp -d) && mkdir -p "$T/.mindspec"` then write the spec Goal's standing-protocol YAML (the `TestLoad_PerGateProtocolRoundTrips` fixture) to `$T/.mindspec/config.yaml`; `(cd "$T" && /tmp/ms112 config show)` prints all four configured gates with resolved sums 9/9/6/12 and raw threshold expressions plus the substitutes map, exit `0`; `[ "$(cd "$T" && /tmp/ms112 config show --gate final_review --json | jq '.slots | length')" = "12" ]` exits `0` and `[ "$(cd "$T" && /tmp/ms112 config show --gate final_review --json | jq -r '.approve_threshold')" = "11" ]` exits `0` (jq structural checks, not a `grep -c '"slot"'` count or a spaced-substring grep — the plan pins `encoding/json`, whose compact output would FALSE-FAIL both grep forms on a correct impl); `[ "$(cd "$T" && /tmp/ms112 config show --gate adhoc --json | jq -c .slots)" = "$(cd "$T" && /tmp/ms112 config show --gate bead --json | jq -c .slots)" ]` exits `0` (unconfigured `adhoc` ≡ `bead`'s slots)
 - [ ] `/usr/bin/grep -q 'expected_reviewers' .mindspec/domains/workflow/interfaces.md` exits `0` (the R9 `--gate --json` schema is documented in the workflow doc-sync)
 - [ ] `go list -deps ./internal/panel | /usr/bin/grep -q internal/config` returns **non-zero** (spec AC11 re-asserted on the last bead to land)
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/interfaces.md' && git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/architecture.md'` (doc-sync)
 - [ ] `go build ./...` exits `0`
 
 **Acceptance Criteria**
-- [ ] Both `ReviewerCountNote` callers compare against the gate-appropriate default via the single shared selection rule; the skip carve-outs (non-bead no-gate, unknown recorded gate — both only while gates are configured) hold; gates-absent behavior is 109's verbatim; no `Allow`/`Block` changes anywhere (spec AC7, R7)
+- [ ] Both `ReviewerCountNote` callers compare against the gate-appropriate default via the single shared selection rule; the skip carve-outs (non-bead no-gate, unknown recorded gate — both only while gates are configured) hold; a panel-less complete (nil registration) stays advisory-silent and panic-free; gates-absent behavior is 109's verbatim; no `Allow`/`Block` changes anywhere (spec AC7, R7)
 - [ ] `config show` renders gates in enum order and `substitutes` in sorted-key order with the slot-id convention, echoes `note`, and warns on unknown model ids without affecting the exit code — seeded ids and family strings never warn (spec AC8, R8)
 - [ ] `config show --gate <name> --json` emits exactly the five documented members, agreeing with the R3 resolvers, with `substitution.in_force` flipping per R5; unknown `--gate` exits non-zero with the five-key recovery line; the command writes nothing (spec AC9, R8/R9)
 - [ ] Hostile config-controlled strings never reach text output raw and round-trip byte-exactly through the real-encoder `--json` path (spec AC10, R8)
@@ -574,7 +647,7 @@ delivered (R1–R5 → Bead 1, R6 → Bead 2, R7–R9 → Bead 3).
 | AC4 — per-field fallback chain, adhoc→bead, unknown-gate error, raw-expr-only thresholds (`TestPanelGateResolvers_FallbackAndAdhoc`) | Bead 1 verification (PASS-line grep) |
 | AC5 — deterministic slot expansion, cursor-start-0, normative 9-slot worked example (`TestPanelGateSlots_DeterministicExpansion`) | Bead 1 verification (PASS-line grep) |
 | AC6 — recorded `gate` field decision-inert, parse-lenient, legacy-identical (`TestPanel_GateFieldDecisionInert`) | Bead 2 verification (PASS-line grep) |
-| AC7 — gate-aware advisory compare + skip carve-outs + gates-absent 109 identity (`TestPanelAdvisory_GateAwareCompare`) | Bead 3 verification (PASS-line grep; helper rule also pinned by Bead 1's `TestPanelGateAdvisoryDefault_SelectionRule`) |
+| AC7 — gate-aware advisory compare + skip carve-outs + gates-absent 109 identity (`TestPanelAdvisory_GateAwareCompare`) | Bead 3 verification (PASS-line greps — incl. the gates-configured cmd-side `TestConfigShow_ReviewerCountNoteGateAware`; helper rule also pinned by Bead 1's `TestPanelGateAdvisoryDefault_SelectionRule`) |
 | AC8 — gates/substitutes/note rendering, enum + sorted order, known-model warning never flips exit code (`TestConfigShow_GatesSubstitutesAndModelAdvisory`) | Bead 3 verification (PASS-line grep) |
 | AC9 — `--gate --json` members = R9 contract, `in_force` per R5, unknown-gate recovery, read-only (`TestConfigShowGate_ResolvedJSON`) | Bead 3 verification (PASS-line grep) |
 | AC10 — hostile strings escaped in both text paths, byte-exact JSON round-trip (`TestConfigShow_HostileStringsEscaped`) | Bead 3 verification (PASS-line grep) |
@@ -583,5 +656,5 @@ delivered (R1–R5 → Bead 1, R6 → Bead 2, R7–R9 → Bead 3).
 | Validation Proof — `config show` over the Goal YAML: four gates, sums 9/9/6/12, substitutes, exit 0, read-only | Bead 3 verification (protocol-YAML proof + porcelain-clean check) |
 | Validation Proof — `--gate final_review --json` 12 slots / `"11"`; unconfigured `adhoc` slots ≡ `bead` | Bead 3 verification (protocol-YAML proof) |
 | Validation Proof — ADR-0037 second amendment present alongside 109's, `decision-inert` anchored | Bead 2 verification (amendment greps) |
-| R2 — standing protocol ships as the documented example, not `DefaultConfig` | Bead 1 step 7 + `/usr/bin/grep -q 'claude-fable-5' core/interfaces.md` verification; `DefaultConfig` emptiness pinned in AC1 |
+| R2 — standing protocol ships as the documented example, not `DefaultConfig` | Bead 1 step 7 + the `fable-window 2026-07, codex-enabled` note-anchor grep (unique to the Goal YAML — a known-model seed list alone cannot satisfy it); `DefaultConfig` emptiness pinned in AC1 |
 | R9 — `--gate --json` schema + recorded `gate` field documented as additive-only stable contract | Bead 3 verification (`expected_reviewers` doc grep) + Bead 3 step 7 |
