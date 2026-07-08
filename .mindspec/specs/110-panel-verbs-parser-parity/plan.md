@@ -35,6 +35,8 @@ work_chunks:
       key_file_paths:
         - cmd/mindspec/panel.go
         - cmd/mindspec/panel_test.go
+        - cmd/mindspec/root.go
+        - cmd/mindspec/help_golden_test.go
         - .mindspec/domains/workflow/interfaces.md
     - depends_on:
         - 4
@@ -178,20 +180,35 @@ file-membership check uses `/usr/bin/grep -qxF` explicitly.
 **Decision single-home (the anti-drift pin).** The spec's central claim — one
 decision function, no second copy — is falsified by a *dedicated* contract
 test, not merely by the per-verb tests: `TestPanelVerbs_DecisionIsPanelGateDecision`
-(Bead 4) feeds a table of `panel.GateFacts` rows (Allow / Block / Warn) and
-asserts both `panel verify` and `panel tally` render the **identical**
-`panel.PanelGateDecision(facts).Action`, so relocating any decision branch into
-a CLI adapter breaks it; `TestPanelStateVerdict_DelegatesToPanelGateDecision`
-(Bead 3) does the same for `instruct --panel-state` and additionally asserts the
-old `PanelStateEntry.verdict()` matrix is gone. Together they pin R7a.
+(Bead 4) feeds a **branch-complete** table of `panel.GateFacts` rows spanning
+`gate.go` branches (2)-(10) — malformed-registration, round-mismatch,
+stale-SHA, dirty-tree, incomplete, REJECT, hard_block, sub-threshold,
+at-threshold, above-threshold, plus the Warn variants abandoned, missing-ref,
+and transient GitErr — and asserts both `panel verify` and `panel tally`
+render the **identical** `panel.PanelGateDecision(facts).Action`, so
+relocating any decision branch into a CLI adapter breaks it (a 3-row
+Allow/Block/Warn table would be tautological: it would pass even if a CLI
+adapter re-derived Allow/Block from raw verdict counts instead of the real
+decision). `TestPanelStateVerdict_DelegatesToPanelGateDecision` (Bead 3)
+exercises the identical branch set over its own `PanelStateEntry`-shaped
+fixtures (not literally import-shared across the two packages, since Bead 3
+consumes `PanelStateEntry → GateFacts` and Bead 4 consumes `GateFacts`
+directly, but both tables cover the same rows so neither package can regress
+a branch the other catches) and additionally asserts the old
+`PanelStateEntry.verdict()` matrix is gone. Together they pin R7a.
 
 **Leaf invariant.** `internal/panel` must stay import-clean of
-`internal/config` (and of git) through the whole spec. Bead 1 (the only bead
-adding an `internal/panel` symbol) asserts
-`! go list -deps ./internal/panel | grep -q internal/config` exits `0`, and
-Bead 4 (the last bead to land, the caller that resolves config + the target
-SHA and passes them as plain values) re-asserts it. `panel.Create` takes
-plain `int`/`string` arguments; it never sees a `*config.Config`.
+`internal/config` (and of git) through the whole spec. The single-negation
+form `! go list -deps ./internal/panel | grep -q internal/config` is a
+false-green trap: it exits `0` both when the grep correctly finds nothing AND
+when `go list` itself fails (e.g. a build break), so it cannot be trusted to
+mean "config-free." Every gate below therefore uses the two-step form that
+fails the `go list` step independently of the grep:
+`deps=$(go list -deps ./internal/panel) && ! printf '%s\n' "$deps" | grep -q internal/config`.
+Bead 1 (the only bead adding an `internal/panel` symbol) asserts this exits
+`0`, and Bead 4 (the last bead to land, the caller that resolves config + the
+target SHA and passes them as plain values) re-asserts it. `panel.Create`
+takes plain `int`/`string` arguments; it never sees a `*config.Config`.
 
 **Parity is behavior-identical, merely earlier (Bead 2).** The R5/R6 tests
 pin that spec-approve rejects **exactly** what plan-approve/divergence already
@@ -286,18 +303,37 @@ R4's portability-contract documentation both land in
    **atomically with** `panel.json`: define an owned, delimited region
    (`<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`)
    holding **only** the machine-derived fields (slug = `filepath.Base(dir)`,
-   round, branch = `Target`, resolved commit SHA = `ReviewedHeadSHA`). When
-   `BRIEF.md` does not exist (first `create`), write the header region
-   followed by a **stub body** (the skill fills it — the section headings from
-   `ms-panel-run` step 3, left empty). When `BRIEF.md` exists (a re-panel),
-   read it, replace **only** the delimited region in place, and write the file
-   back **byte-for-byte preserving everything after the closing marker** (the
-   skill-authored summary / files-in-scope / prior-round asks / lens). If the
-   markers are absent from an existing BRIEF (legacy), prepend a fresh region
-   and keep the whole existing body below it. `Create` **never** reads, writes,
-   or deletes any `*-round-<N>.json` verdict file — a re-panel leaves prior
-   rounds untouched by construction (it only ever touches `panel.json` and
-   `BRIEF.md`).
+   round, branch = `Target`, resolved commit SHA = `ReviewedHeadSHA`) **plus**
+   a fixed, non-panel-specific "## Your job" / verdict-output boilerplate
+   block (see item below) — the parts of the BRIEF that never vary between
+   panels move into the machine-managed region so the skill only ever
+   authors the panel-specific parts. When `BRIEF.md` does not exist (first
+   `create`), write the header region followed by a **stub body** (the skill
+   fills it — the panel-specific section headings from `ms-panel-run` step 3
+   — summary / files-in-scope / prior-round asks / lens — left empty). When
+   `BRIEF.md` exists (a re-panel), read it, replace **only** the delimited
+   region in place, and write the file back **byte-for-byte preserving
+   everything after the closing marker**, including any CRLF line endings in
+   that preserved body (the replace operates on the byte offsets of the
+   marker strings, never on line-based re-parsing, so CRLF bytes pass through
+   unchanged). If the markers are absent from an existing BRIEF (legacy),
+   prepend a fresh region and keep the whole existing body below it
+   byte-identical. If the markers are present but **ambiguous or corrupt** —
+   an opening marker with no matching closing marker, or more than one
+   opening/closing marker pair — `Create` returns an error and writes
+   **neither** `panel.json` nor `BRIEF.md` (the marker-state validation runs
+   before either file is touched, so a corrupt BRIEF never leaves the two
+   files disagreeing). `Create` **never** reads, writes, or deletes any
+   `*-round-<N>.json` verdict file — a re-panel leaves prior rounds untouched
+   by construction (it only ever touches `panel.json` and `BRIEF.md`).
+   The machine-managed "## Your job" block documents the verdict JSON
+   contract verbatim from the R4 schema doc (added in step 4 below):
+   `reviewer_id`, `verdict` (one of `APPROVE`/`REQUEST_CHANGES`/`REJECT`),
+   `confidence`, `rationale`, `concrete_changes_required`, `findings`, and a
+   **top-level** optional `hard_block` boolean sibling of `verdict` — never a
+   per-finding field — so there is exactly one verdict-JSON instruction in
+   the BRIEF (the stub-written one), not a second one re-authored by the
+   skill (item below, Bead 5).
 3. Add `internal/panel/create_test.go`:
    `TestCreate_WritesRegistrationAtomically` — call `Create` into a `t.TempDir`
    with fixed values; assert the on-disk `panel.json` round-trips
@@ -305,37 +341,86 @@ R4's portability-contract documentation both land in
    `ApproveThresholdExpr`, `ReviewedHeadSHA`, `Round`, `BeadID`, `Spec`,
    `Target` **equal exactly what was passed** and that `panel.json` contains a
    non-empty `reviewed_head_sha` key (the field is never omitted); assert the
-   BRIEF header region carries the same round + SHA; then pre-seed a
+   BRIEF header region carries the same round + SHA and the machine-managed
+   "## Your job" block names the top-level `hard_block` key; then pre-seed a
    skill-authored body, call `Create` again with `Round: 2` and a new SHA, and
    assert (a) `panel.json.round == 2` with the new SHA, (b) the BRIEF header
    shows round 2 + the new SHA, (c) the skill-authored body below the closing
    marker is **byte-identical** to before, and (d) a pre-seeded
    `R1-round-1.json` verdict file is still present and unchanged.
+   `TestCreate_BRIEFMarkerEdgeCases` — a table covering the marker
+   corner cases pinned in step 2: (a) legacy no-marker — a pre-existing
+   `BRIEF.md` with no header markers gets a fresh region prepended and the
+   rest of the file is **byte-identical** to the pre-`Create` content
+   (specified in step 2 but previously untested); (b) marker-only-open — a
+   `BRIEF.md` with `<!-- mindspec:panel-header -->` and no closing marker;
+   (c) duplicated markers — more than one opening/closing pair; (d) a
+   pre-existing body containing CRLF (`\r\n`) line endings is preserved
+   byte-for-byte below the closing marker. Cases (b) and (c) assert `Create`
+   returns a non-nil error and that **neither** `panel.json` nor `BRIEF.md`
+   was written or modified (compare file existence / mtime+content before and
+   after the call).
 4. Add the R4 verdict-file/slot **schema documentation** to
    `.mindspec/domains/workflow/interfaces.md` (a bead-unique region): the
-   agent-neutral panel artifact contract another runner targets — the
-   `panel.json` registration filename (`panel.FileName`), the
+   agent-neutral panel artifact contract another runner targets, using
+   **backtick-quoted example tokens** (not prose paraphrase) so a test can
+   extract them mechanically — the `panel.json` registration filename as a
+   backtick-quoted literal exactly matching `panel.FileName`; the
    `<slot>-round-<N>.json` verdict-file shape with `N ≥ 1` (the
-   `panel.verdictFileRE` pattern, stated with a conforming example like
-   `R1-round-1.json` and the note that `-round-0` is nonconforming), and the
-   `consolidated-round-<N>.md` name (`panel.ConsolidatedName`). Frame it, per
-   ADR-0040's portability principle, as the artifact + CLI contract a runner
-   adapts behind — degraded modes are the runner's concern, not the schema's.
+   `panel.verdictFileRE` pattern), given as backtick-quoted examples
+   including at least one **conforming** filename (e.g. `` `R1-round-1.json` ``)
+   and the doc's own explicitly-labeled **nonconforming** example (e.g.
+   `` `R1-round-0.json` (nonconforming — rejected) ``); and the
+   `consolidated-round-<N>.md` name as a backtick-quoted literal matching
+   `panel.ConsolidatedName(N)` for a stated `N`. The doc also documents the
+   **verdict JSON payload** (not just filenames): the required top-level
+   `verdict` field, one of `APPROVE` / `REQUEST_CHANGES` / `REJECT`
+   (`panel.VerdictApprove`/`VerdictRequestChanges`/`VerdictReject`); the
+   optional top-level `hard_block` boolean, a **sibling of `verdict`, never a
+   per-finding field**; and `reviewer_id`, `confidence`, `rationale`,
+   `concrete_changes_required`, `findings` as reviewer-authored fields the
+   gate decision does **not** consume (`internal/panel`'s `verdictJSON` type
+   parses only `verdict` and `hard_block`; the rest are read presentation-only
+   by `panel tally`'s `concrete_changes_required` aggregation, per R3). Frame
+   it, per ADR-0040's portability principle, as the artifact + CLI contract a
+   runner adapts behind — degraded modes are the runner's concern, not the
+   schema's.
 5. Add `TestPanelSchemaDoc_MatchesConstants` to `internal/panel/create_test.go`:
    read `../../.mindspec/domains/workflow/interfaces.md` (the package test cwd
-   is `internal/panel`, so `../../` is the repo root) and assert the documented
-   registration filename **contains** `panel.FileName`, the documented
-   verdict-file example **matches** `verdictFileRE` (and a `-round-0` example
-   does not), and the documented consolidated name **contains**
-   `ConsolidatedName(1)`. The test fails if the doc later names a pattern the
-   constants reject (wrong round base, wrong extension, wrong consolidated
-   prefix) — so the doc cannot drift from the code.
+   is `internal/panel`, so `../../` is the repo root) and **extract the
+   documented examples from the doc's own text** rather than testing a
+   test-held literal — a regexp over the doc's schema region pulls every
+   backtick-quoted `\S+-round-\d+\.json`-shaped token; for each extracted
+   token EXCEPT the one the doc itself labels "nonconforming" (matched by a
+   `(nonconforming` suffix in the same backtick span's surrounding text),
+   assert it **matches** `verdictFileRE`; assert the doc's labeled
+   nonconforming token does **not** match. Separately extract the
+   backtick-quoted `panel.json`-literal token and assert it **equals**
+   `panel.FileName` exactly (not merely "contains"), and extract the
+   backtick-quoted `consolidated-round-<N>.md`-shaped token and assert it
+   **equals** `panel.ConsolidatedName(N)` for the doc's stated `N`. This binds
+   the test to whatever the doc actually says today — a doc edit that widens
+   or narrows the pattern is caught because the test re-derives its
+   expectation from the doc's own examples, not from a hardcoded mirror of
+   them. The test also pins the **load-bearing parts of the payload
+   contract** documented in step 4: it asserts the doc's text contains each
+   of the three verdict enum literals (`APPROVE`, `REQUEST_CHANGES`,
+   `REJECT`) and the string `hard_block`, and — to catch a doc regression
+   back to the ambiguous "finding-level hard_block" phrasing item 18 removes
+   from the skills — asserts the doc's `hard_block` mention is **not**
+   adjacent to the word "finding" (e.g. no `hard_block` occurrence within the
+   same sentence as "finding"). The test fails if the doc later names a
+   pattern the constants reject (wrong round base, wrong extension, wrong
+   consolidated prefix, a missing enum literal, or reintroduced
+   finding-level `hard_block` wording) — so the doc cannot drift from the
+   code.
 
 **Verification**
 - [ ] `go test ./internal/panel -v -run 'TestCreate_WritesRegistrationAtomically$' | grep -q -- '--- PASS: TestCreate_WritesRegistrationAtomically'`
+- [ ] `go test ./internal/panel -v -run 'TestCreate_BRIEFMarkerEdgeCases$' | grep -q -- '--- PASS: TestCreate_BRIEFMarkerEdgeCases'` (legacy no-marker byte-identical body, marker-only-open/duplicated-marker rejection with neither file written, CRLF preservation)
 - [ ] `go test ./internal/panel -v -run 'TestPanelSchemaDoc_MatchesConstants$' | grep -q -- '--- PASS: TestPanelSchemaDoc_MatchesConstants'`
 - [ ] `go test ./internal/panel` exits `0` (whole package green, existing gate/tally tests included)
-- [ ] `! go list -deps ./internal/panel | grep -q internal/config` exits `0` (the new writer keeps `internal/panel` a config-free leaf — spec AC10 first assertion, R7b)
+- [ ] `deps=$(go list -deps ./internal/panel) && ! printf '%s\n' "$deps" | grep -q internal/config` exits `0` (the new writer keeps `internal/panel` a config-free leaf — spec AC10 first assertion, R7b; the two-step form fails independently if `go list` itself errors, unlike a bare `! go list ... | grep`)
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/interfaces.md'` (doc-sync: the workflow source edit carries the workflow domain-doc region + the R4 schema)
 - [ ] `go build ./...` exits `0`
 
@@ -345,12 +430,16 @@ R4's portability-contract documentation both land in
   write; `reviewed_head_sha` is never omitted (spec AC1, R1)
 - [ ] A re-panel co-bumps `round` + a re-resolved SHA in **both** `panel.json`
   and the BRIEF machine-header in the same operation, leaves prior-round
-  verdict files and the skill-authored BRIEF body untouched (spec AC2 writer
-  half, R1)
-- [ ] The workflow schema doc names a verdict-file pattern, round base, and
-  consolidated-file name **consistent with** `panel.FileName`/`verdictFileRE`/
-  `ConsolidatedName`, enforced by `TestPanelSchemaDoc_MatchesConstants` (spec
-  AC7, R4)
+  verdict files and the skill-authored BRIEF body untouched; a corrupt or
+  ambiguous BRIEF marker state (no closing marker, duplicated markers) fails
+  the call and writes neither file (spec AC2 writer half, R1)
+- [ ] The workflow schema doc names a verdict-file pattern, round base,
+  consolidated-file name, and the verdict JSON payload contract (the
+  `verdict` enum and the top-level `hard_block` field) **consistent with**
+  `panel.FileName`/`verdictFileRE`/`ConsolidatedName`/`VerdictApprove`/
+  `VerdictRequestChanges`/`VerdictReject`, with the test extracting its
+  expectations from the doc's own backtick-quoted examples, enforced by
+  `TestPanelSchemaDoc_MatchesConstants` (spec AC7, R4)
 - [ ] `internal/panel` imports no `internal/config` (spec AC10, R7b)
 
 **Depends on**
@@ -385,12 +474,19 @@ errors — the single-home decision the spec's Open Questions pinned.
    `spec.md` is readable.
 2. Add the **R6 ADR-Touchpoint parity** check to `ValidateSpec`: take the
    `## ADR Touchpoints` section body from the existing `parseSections(content)`
-   map, and extract **only anchored markdown-link references** — every
-   `[ADR-\d{4}](<path>)` occurrence in that section — via a small regexp
-   (`\[(ADR-\d{4})\]\([^)]+\)`). A **bare-prose `ADR-####` mention** (no
-   `[...](...)` anchor) is **not** matched, so 110's own prose mentions of
-   `ADR-0040` (not yet a file at authoring time) and `ADR-0030` inside the
-   ADR-0037 bullet are correctly outside the check. Resolve each extracted ID
+   map, and extract **only anchored markdown-link references** in that
+   section via a regexp widened to the **filename-form** anchor the repo's
+   merged specs actually write
+   (e.g. `[ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md)`,
+   not just the bare `[ADR-0031](...)` form): `` \[(ADR-\d{4})[^\]]*\]\([^)]+\) ``
+   — the `[^\]]*` tail consumes any filename-slug characters between the
+   4-digit ID and the closing `]` so a link written in either form is
+   captured, while a bare `]` immediately after the digits still matches
+   (backward compatible with the non-filename form). A **bare-prose
+   `ADR-####` mention** (no `[...](...)` anchor at all) is **not** matched, so
+   110's own prose mentions of `ADR-0040` (not yet a file at authoring time)
+   and `ADR-0030` inside the ADR-0037 bullet are correctly outside the check.
+   Resolve each extracted ID
    against the **same** store the citation gate uses —
    `newMemoStore(adrStoreForSpecFn(root, specDir))` (identical to
    `plan.go:156` / `divergence.go:137`) — and on a `store.Get(id)` error emit
@@ -406,21 +502,39 @@ errors — the single-home decision the spec's Open Questions pinned.
    `internal/validate/spec_test.go` (a temp spec tree with domain
    `OWNERSHIP.yaml` fixtures): (a) a spec whose `## Impacted Domains` has a
    **path-like zero-owner** bullet fails `ValidateSpec` with the
-   `impacted-domains-resolve` code and a message naming the entry; (b) a spec
-   with a **bare-name-no-manifest** bullet (a plain domain name with no on-disk
-   manifest) **passes** `ValidateSpec` (kept verbatim, no error) — the
-   parity-with-plan-approve pin; (c) a bullet naming a real domain dir passes.
-   Assert by scanning `r.Issues` for the code, not by `FormatText` substring.
+   `impacted-domains-resolve` code **and asserts the matching Issue's
+   Severity is `SevError`** (equivalently, `vr.HasFailures() == true`) — a
+   scan-only assertion on the code passes a mis-severed `AddWarning`
+   implementation, which `ApproveSpec` (blocking only on `SevError`,
+   `spec.go:47-50`) would then silently let through, so the severity itself
+   must be pinned, not just the code string; (b) a spec with a
+   **bare-name-no-manifest** bullet (a plain domain name with no on-disk
+   manifest) **passes** `ValidateSpec` — asserting **both** that no
+   `impacted-domains-resolve` Issue is present **and** `vr.HasFailures() ==
+   false` — the parity-with-plan-approve pin; (c) a bullet naming a real
+   domain dir passes, asserting `vr.HasFailures() == false`. Assert by
+   scanning `r.Issues` for the code and severity, not by `FormatText`
+   substring.
 4. Add `TestValidateSpec_ADRTouchpointExtractionBoundary` to
    `internal/validate/spec_test.go`: (a) a spec whose `## ADR Touchpoints` has
    an **anchored** bullet `- [ADR-9999](../../adr/ADR-9999-x.md): …` (no such
    ADR in the fixture store) fails `ValidateSpec` with `adr-touchpoint-missing`
-   and a recovery hint; (b) a spec with a **bare-prose** `per ADR-9999` mention
-   inside the section (no anchor) does **not** fail; (c) a **110-shaped** spec —
-   anchored links to ADRs present in the fixture store **plus** bare-prose
-   mentions of an absent ADR — passes; and assert **none** of the three adds
-   any Issue whose code begins `adr-coverage` or equals `adr-cite-irrelevant`
-   (coverage/relevance stay plan-approve).
+   and a recovery hint, **asserting the Issue's Severity is `SevError`**
+   (`vr.HasFailures() == true`); (a2) the same case in **filename-form**
+   anchor syntax — `- [ADR-9999-x.md](../../adr/ADR-9999-x.md): …` — likewise
+   fails with `adr-touchpoint-missing` and `SevError`, pinning that the
+   widened step-2 regex still resolves and rejects the filename-form anchor,
+   not just the bare-ID form; (a3) a **filename-form anchor to an ADR that
+   exists** in the fixture store (e.g. `- [ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md): …`)
+   passes, asserting `vr.HasFailures() == false` — proving the widened regex
+   is parity-safe (it does not newly reject a link the narrower regex
+   accepted); (b) a spec with a **bare-prose** `per ADR-9999` mention inside
+   the section (no anchor) does **not** fail, asserting `vr.HasFailures() ==
+   false`; (c) a **110-shaped** spec — anchored links to ADRs present in the
+   fixture store **plus** bare-prose mentions of an absent ADR — passes,
+   asserting `vr.HasFailures() == false`; and assert **none** of the five
+   cases adds any Issue whose code begins `adr-coverage` or equals
+   `adr-cite-irrelevant` (coverage/relevance stay plan-approve).
 5. Doc-sync (workflow): add a bead-unique region to
    `.mindspec/domains/workflow/architecture.md` documenting that `spec approve`
    (via `ValidateSpec`) now runs the two parser-parity checks — the
@@ -435,7 +549,7 @@ errors — the single-home decision the spec's Open Questions pinned.
 - [ ] `go test ./internal/validate -v -run 'TestValidateSpec_ADRTouchpointExtractionBoundary$' | grep -q -- '--- PASS: TestValidateSpec_ADRTouchpointExtractionBoundary'`
 - [ ] `go test ./internal/validate` exits `0` (whole package green — the existing plan-approve `impacted-domains-resolve`/`adr-cite-missing` tests still pass, proving no shared-helper regression)
 - [ ] `go test ./internal/approve` exits `0` (spec-approve inherits the new `ValidateSpec` failures with no `internal/approve` source change — existing approve tests stay green)
-- [ ] `~/.local/bin/mindspec validate spec 110-panel-verbs-parser-parity` exits `0` (110's own spec — anchored touchpoints to existing ADRs, bare-prose ADR-0040/0030, single `workflow` Impacted-Domain — passes the checks it introduces; the self-consistency the spec's R5/R6 falsifications require)
+- [ ] `go build -o /tmp/ms110b2 ./cmd/mindspec && /tmp/ms110b2 validate spec 110-panel-verbs-parser-parity` exits `0` (110's own spec — anchored touchpoints to existing ADRs, bare-prose ADR-0040/0030, single `workflow` Impacted-Domain — passes the checks it introduces; the self-consistency the spec's R5/R6 falsifications require. Built fresh from THIS bead's source, not the pre-installed `~/.local/bin/mindspec` — the installed binary predates B2's `ValidateSpec` changes and cannot fail on them)
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/architecture.md'` (doc-sync)
 - [ ] `go build ./...` exits `0`
 
@@ -468,11 +582,26 @@ exist on `main` (spec 099), not on any 110 bead.
 1. Refactor `PanelStateEntry.verdict()` in `internal/instruct/panelstate.go` to
    **stop reproducing** the decision matrix and instead build `panel.GateFacts`
    and return the mapped outcome of `panel.PanelGateDecision(facts)`. Map
-   `panel.Allow → GatePass`, `panel.Warn → GateWarn`, `panel.Block → GateBlock`,
-   and use the `Decision.Message` as the one-line reason. Delete the abandoned/
-   round-mismatch/staleness/incomplete/REJECT/threshold branches — the second
-   copy — entirely; the enum (`GatePass`/`GateBlock`/`GateWarn`) and `gateLabel`
-   stay (still used by `renderPanelState`).
+   `panel.Allow → GatePass`, `panel.Warn → GateWarn`, `panel.Block → GateBlock`.
+   **`Decision.Message` is empty on both Allow branches** (`gate.go:142` — no
+   registered panel — and `:258` — threshold met); every Warn and Block branch
+   sets a non-empty `Message` (verified against every `gate.go` return site).
+   So: for a Warn or Block outcome, use `Decision.Message` verbatim as the
+   one-line reason; for an Allow outcome, synthesize the reason **locally**
+   from the already-available tally fields, reusing today's exact wording so
+   the two existing `TestPanelStateEntry_Verdict` rows that pin an Allow
+   reason keep passing unchanged: `fmt.Sprintf("%d/%d APPROVE — meets
+   threshold %d/%d; \`mindspec complete\` would proceed", r.Approves, n,
+   thr, n)` where `n := p.ExpectedReviewers` and `thr := p.ApproveThreshold()`
+   — this produces `"5/6 APPROVE — meets threshold 5/6; ..."` for
+   `at_threshold_fresh` (contains `wantReason` `"meets threshold 5/6"`) and
+   `"6/6 APPROVE — meets threshold 5/6; ..."` for `above_threshold_fresh`
+   (contains `wantReason` `"6/6 APPROVE"`) — both rows need **no** test-file
+   edit. Delete the abandoned/round-mismatch/staleness/incomplete/
+   REJECT/threshold **branches that independently computed a Block/Warn
+   outcome** — the second copy — entirely; the enum
+   (`GatePass`/`GateBlock`/`GateWarn`) and `gateLabel` stay (still used by
+   `renderPanelState`).
 2. Source the facts through `panel.ResolveGateFacts` for the **bead-panel**
    staleness path, honoring R2's "over `panel.ResolveGateFacts`": in
    `gatherPanelState`, for a bead panel wire a `panel.GateIO` whose `RevParse`
@@ -490,13 +619,34 @@ exist on `main` (spec 099), not on any 110 bead.
    in `gatherPanelState` accordingly (all consumers are inside
    `internal/instruct`).
 3. Add `TestPanelStateVerdict_DelegatesToPanelGateDecision` to
-   `internal/instruct/panelstate_test.go`: over a table of fabricated facts
-   spanning the decision surface — fresh/stale bead panel, incomplete,
-   REJECT/hard_block, abandoned, sub-/at-threshold, and a non-bead panel —
-   assert the mapped `verdict()` outcome equals `mapAction(panel.PanelGateDecision(facts).Action)`
-   for the identical facts, so any surviving independent branch diverges and
-   fails; additionally assert (structurally) that `verdict()` no longer carries
-   its own threshold/staleness logic (it delegates). Keep the existing
+   `internal/instruct/panelstate_test.go`: over a **branch-complete** table of
+   fabricated facts spanning the decision surface — fresh bead panel,
+   stale-SHA bead panel, round-mismatch, **malformed registration**
+   (`Tally.PanelErr` set / `Tally.Panel == nil`), incomplete, REJECT,
+   hard_block, sub-threshold, at-threshold, above-threshold, abandoned,
+   **missing-ref** (`BranchMissing: true`), and a non-bead panel — assert the
+   mapped `verdict()` outcome equals
+   `mapAction(panel.PanelGateDecision(facts).Action)` for the identical
+   facts, so any surviving independent branch diverges and fails. (A
+   dedicated **transient-GitErr** Warn row is Bead-4-only: `panelstate.go`
+   builds `GateFacts` from a `BranchSHAResolver`'s `(sha string, exists
+   bool)` return, which has no third "transient error" state to inject —
+   only the CLI verbs' `GateIO.RevParse` seam can produce `GateFacts.GitErr`
+   — so this bead's table covers `MissingRef` but not `GitErr`.) Replace the
+   vague "assert structurally that `verdict()` no longer carries its own
+   logic" with a **concrete, falsifiable** check: read `panelstate.go`'s own
+   source text (`os.ReadFile("panelstate.go")`, relative to the test's
+   package dir) and assert it (a) contains the literal substring
+   `panel.PanelGateDecision(` (delegation is present) and (b) does **not**
+   contain any of the four message literals the pre-refactor local branches
+   hardcoded verbatim — `"out of date vs verdict files"`, `"commits landed
+   after review"`, `"finish /ms-panel-run or tally first"`, `"REJECT or
+   hard_block is recorded"` — each existed only in the now-deleted branches;
+   after the refactor these strings live solely in `gate.go`'s `Decision.Message`
+   and are relayed, not reconstructed, so their disappearance from
+   `panelstate.go`'s source text is a true signal the local copy is gone
+   (their *runtime* appearance in a rendered reason is unaffected, since that
+   now flows through `Decision.Message`). Keep the existing
    `renderPanelState`/`gatherPanelState` tests green (the rendered block shape
    is unchanged; only the verdict source moved).
 4. Doc-sync (workflow): add a bead-unique region to
@@ -535,7 +685,22 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
 **Steps**
 1. Add `cmd/mindspec/panel.go` with a `panel` parent cobra command and the
    `create` subcommand: `panel create <slug> --spec <id> --target <ref>
-   [--bead <id>] [--round N]`. It `findRoot()`s, `config.Load(root)`s, and
+   [--bead <id>] [--round N]`. **Before any `filepath.Join`**, all three
+   subcommands (`create`/`verify`/`tally`) validate their `<slug>` positional
+   argument through one shared `validatePanelSlug(slug string) error`:
+   reject empty, `.`, `..`, any occurrence of `/` or `\`, an absolute path,
+   and any control character (including `\n`/`\r`/NUL) — returning a
+   `guard.NewFailure` naming the rejected slug, never reaching
+   `filepath.Join`. This closes both the path-traversal class (a slug like
+   `../../etc` escaping the panel-directory root) and the terminal-injection
+   class (the spec-109-final-G2 finding): a slug or a `--bead`/`--target`
+   flag value containing a control byte must never reach a rendered message
+   or a `guard.NewFailure` recovery line, where an embedded newline could
+   forge a fake `recovery:` line. `create` therefore additionally rejects a
+   `--bead`/`--target` value containing a control character through the same
+   validator before it is ever written to `panel.json` or interpolated into
+   `RawMergeFence`/`Decision.Message` (which `tally`'s Block path renders
+   verbatim, ADR-0035). `create` `findRoot()`s, `config.Load(root)`s, and
    resolves `expected_reviewers` via `cfg.PanelExpectedReviewers()` and the raw
    threshold via `cfg.PanelApproveThresholdExpr()` (the 109 resolvers,
    read-only); resolves the panel **directory** layout-aware — reuse the same
@@ -550,8 +715,15 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
    — the single write that co-bumps `panel.json` + the BRIEF header. Document
    in the command help that a `--bead <id>` panel expects `--target bead/<id>`
    and that a divergent `--target` can only **fail safe** (a stale-SHA
-   false-BLOCK at gate time, never a false-PASS).
-2. Add the `verify` subcommand: `panel verify <slug>` — `findRoot()`,
+   false-BLOCK at gate time, never a false-PASS). Add
+   `TestPanelCreate_RejectsUnsafeSlugAndControlBytes` to `panel_test.go`:
+   table cases for an empty slug, `.`, `..`, `../../etc` (traversal), a slug
+   containing `\n`, and a `--bead`/`--target` value containing `\n` — each
+   asserts `create` returns a non-nil error naming the offending value and
+   writes **no** file (no `panel.json`, no `BRIEF.md`, no directory created
+   under the traversal target).
+2. Add the `verify` subcommand: `panel verify <slug>` — `validatePanelSlug(slug)`
+   (step 1's shared validator) before anything else, then `findRoot()`,
    `panel.Scan(configShowReviewRoots(root)...)` and match the registration
    whose `Slug() == slug` (a slug-not-found is a clear error with a recovery
    hint, **not** a panic and **not** a silent pass). Resolve gate facts exactly
@@ -566,8 +738,9 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
    (naming malformed files), `reviewed_head_sha` vs live tip (staleness), and a
    PASS/BLOCK preview line derived from `d.Action`. `verify` **writes nothing**
    and exits `0` (a read-only report is not a gate).
-3. Add the `tally` subcommand: `panel tally <slug>` — resolve the registration
-   + facts as in step 2, and render via a **pure**
+3. Add the `tally` subcommand: `panel tally <slug>` — `validatePanelSlug(slug)`
+   first, then resolve the registration + facts as in step 2, and render via a
+   **pure**
    `renderPanelTally(res *panel.Result, facts panel.GateFacts, changes
    []slotChanges) (body string, d panel.Decision)` that prints (a) the per-slot
    verdict table (slot, verdict, hard_block from `res.Verdicts`), (b) the
@@ -579,12 +752,41 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
    and, for the REQUEST_CHANGES/REJECT ones, re-decoding
    `filepath.Join(reg.Dir, v.File)` for its `concrete_changes_required` array
    (the panel `verdictJSON` strips that field, so `tally` reads it itself); this
-   read **never** feeds the decision. Exit `0` on `d.Action == panel.Allow`;
-   on a Block return `guard.NewFailure(d.Message, fmt.Sprintf("re-run the panel
-   (mindspec panel create %s --round <N+1> …), then mindspec complete <bead>",
-   slug))` — the body keeps `PanelGateDecision`'s raw-`git merge` fence and the
-   final line is a `recovery:` command, so it passes
-   `guard.HasFinalRecoveryLine` and exits non-zero.
+   read **never** feeds the decision. **Decode policy for this second-pass
+   read** (never affects `PanelGateDecision` or the exit code, since the exit
+   code is decided in the paragraph below from `d.Action` alone): if the file
+   fails to re-parse, or its `concrete_changes_required` key is absent, or its
+   JSON type is not an array of strings, `tally` attributes **zero** items to
+   that slot and prints one advisory line naming the slot and the decode
+   failure — never fatal, never silently dropped. Any entry string containing
+   a newline or control byte is rendered with those bytes escaped (e.g.
+   `\n`/`\uXXXX`) rather than passed through raw, so a REQUEST_CHANGES author
+   cannot inject extra lines into the aggregated output (the same control-byte
+   discipline as step 1's slug validation). `TestPanelTally_AggregatesConcreteChangesRequired`
+   (step 4) seeds one REQUEST_CHANGES verdict file with a known
+   `concrete_changes_required` string and asserts `panel tally`'s printed
+   output contains that string attributed to its slot — the file-read path
+   this aggregation exercises is otherwise never touched by any other test
+   (the pure renderer's other tests pass pre-built `[]slotChanges`, not real
+   files).
+   **RunE exit-code derivation (the single home, not re-derived).** The `tally`
+   `RunE` computes its exit purely from `d.Action` — the same `panel.Decision`
+   `renderPanelTally` already returns — via one small helper,
+   `tallyExitAction(d panel.Decision, slug string) error`: `panel.Allow` →
+   `nil` (exit `0`); `panel.Warn` → print the advisory (`d.Message`) to stderr
+   and return `nil` (exit `0`, non-blocking — parity with
+   `internal/complete.panelGate`'s Warn handling, `panel_advisory.go:204-212`,
+   which likewise treats Warn as advisory-only and never blocks); `panel.Block`
+   → `guard.NewFailure(d.Message, fmt.Sprintf("re-run the panel (mindspec
+   panel create %s --round <N+1> …), then mindspec complete <bead>", slug))` —
+   the body keeps `PanelGateDecision`'s raw-`git merge` fence and the final
+   line is a `recovery:` command, so it passes `guard.HasFinalRecoveryLine`
+   and exits non-zero. `RunE` **must not** read `res.Approves`/`res.Rejects`/
+   any other raw tally field to decide the exit — only `d.Action` — so a
+   regression that re-derives Allow/Block from the raw counts (passing every
+   planned gate yet exiting `0` on a stale-SHA or hard_block Block, the
+   lola-f4a8 class) is caught by step 4's expanded exit-code test, not left to
+   the contract test alone.
 4. Add the tests to `cmd/mindspec/panel_test.go`:
    `TestPanelCreate_StampsResolversAndCoBumpsRoundSHA` — over a temp root with a
    config fixture and `revParseForPanelFn` stubbed to a fixed SHA, run `panel
@@ -598,31 +800,80 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
    `renderPanelVerify`'s action equals `panel.PanelGateDecision(facts).Action`,
    and running the real `verify` over a temp panel dir mutates no file
    (compare a dir snapshot / `git status` before-after).
-   `TestPanelTally_ExitCodeTracksDecision` — a passing panel yields exit `0`; a
-   blocking (sub-threshold) panel yields a non-zero error whose message passes
-   `guard.HasFinalRecoveryLine`; the printed decision equals
-   `panel.PanelGateDecision`'s.
+   `TestPanelTally_ExitCodeTracksDecision` — exercised through the real
+   `tallyExitAction` helper (not just the pure renderer), over rows that
+   include: a passing (at/above-threshold) panel → exit `0`; a **stale-SHA**
+   panel whose `Approves` alone would satisfy the threshold (via the
+   `revParseForPanelFn`-equivalent seam returning a SHA that differs from
+   `panel.json`'s `reviewed_head_sha`) → non-zero with
+   `guard.HasFinalRecoveryLine`; a **hard_block** panel whose `Approves` alone
+   would satisfy the threshold → non-zero with `guard.HasFinalRecoveryLine`
+   (these two rows are the ones a naive `res.Approves >= threshold`
+   reimplementation would wrongly pass); a **sub-threshold** panel → non-zero
+   with `guard.HasFinalRecoveryLine`; an **abandoned** panel → exit `0` with
+   the advisory message printed (Warn parity, no recovery line required). The
+   printed decision in every row equals `panel.PanelGateDecision`'s.
+   `TestPanelTally_AggregatesConcreteChangesRequired` — seeds a
+   REQUEST_CHANGES verdict file with a known `concrete_changes_required`
+   entry and asserts it renders in `tally`'s output attributed to its slot
+   (the file-read decode path, per step 3).
    `TestPanelVerbs_DecisionIsPanelGateDecision` — the R7a contract pin: over a
-   table of `panel.GateFacts` rows (Allow/Block/Warn), **both**
-   `renderPanelVerify` and `renderPanelTally` render the **identical** Action
-   `panel.PanelGateDecision(facts)` returns, so relocating any decision branch
-   into a CLI adapter breaks the test.
+   **branch-complete** table of `panel.GateFacts` rows spanning `gate.go`
+   branches (2)-(10) — malformed-registration, round-mismatch, stale-SHA,
+   dirty-tree, incomplete, REJECT, hard_block, sub-threshold, at-threshold,
+   above-threshold, plus the Warn variants abandoned, missing-ref, and
+   transient GitErr (the one row Bead 3's table cannot express, since
+   `BranchSHAResolver` has no transient-error state — see Bead 3 step 3) —
+   **both** `renderPanelVerify` and `renderPanelTally` render the **identical**
+   Action `panel.PanelGateDecision(facts)` returns, so relocating any
+   decision branch into a CLI adapter breaks the test (a 3-row
+   Allow/Block/Warn table would not: it would still pass a CLI adapter that
+   re-derives Allow/Block from raw counts instead of the real decision).
 5. Doc-sync (workflow): add a bead-unique region to
    `.mindspec/domains/workflow/interfaces.md` documenting the `mindspec panel
-   create | verify | tally` CLI surface — the flags, the round+SHA co-bump
-   invariant `create` owns, `verify`'s read-only/exit-0 contract, and `tally`'s
-   exit-code-tracks-decision + ADR-0035 recovery-line-on-Block behavior — as
-   the agent-neutral CLI half of the ADR-0040 contract (the artifact half is
-   Bead 1's schema region in the same file).
+   create | verify | tally` CLI surface — the flags, the shared slug
+   validator's rejection rules, the round+SHA co-bump invariant `create`
+   owns, `verify`'s read-only/exit-0 contract, and `tally`'s
+   exit-code-tracks-decision (including the Warn-is-exit-0 case) +
+   ADR-0035 recovery-line-on-Block behavior — as the agent-neutral CLI half
+   of the ADR-0040 contract (the artifact half is Bead 1's schema region in
+   the same file). Because this appends to the **same** `interfaces.md` file
+   Bead 1's `TestPanelSchemaDoc_MatchesConstants` reads, re-run
+   `go test ./internal/panel -v -run 'TestPanelSchemaDoc_MatchesConstants$'`
+   after this doc-sync edit as a drift check (Bead 4's edit is additive to a
+   different region of the same file, but the test reads the whole file, so
+   confirming it still passes catches an accidental region collision).
 
 **Verification**
 - [ ] `go test ./cmd/mindspec -v -run 'TestPanelCreate_StampsResolversAndCoBumpsRoundSHA$' | grep -q -- '--- PASS: TestPanelCreate_StampsResolversAndCoBumpsRoundSHA'`
+- [ ] `go test ./cmd/mindspec -v -run 'TestPanelCreate_RejectsUnsafeSlugAndControlBytes$' | grep -q -- '--- PASS: TestPanelCreate_RejectsUnsafeSlugAndControlBytes'`
 - [ ] `go test ./cmd/mindspec -v -run 'TestPanelVerify_MatchesGateAndWritesNothing$' | grep -q -- '--- PASS: TestPanelVerify_MatchesGateAndWritesNothing'`
 - [ ] `go test ./cmd/mindspec -v -run 'TestPanelTally_ExitCodeTracksDecision$' | grep -q -- '--- PASS: TestPanelTally_ExitCodeTracksDecision'`
+- [ ] `go test ./cmd/mindspec -v -run 'TestPanelTally_AggregatesConcreteChangesRequired$' | grep -q -- '--- PASS: TestPanelTally_AggregatesConcreteChangesRequired'`
 - [ ] `go test ./cmd/mindspec -v -run 'TestPanelVerbs_DecisionIsPanelGateDecision$' | grep -q -- '--- PASS: TestPanelVerbs_DecisionIsPanelGateDecision'`
 - [ ] `go test ./cmd/mindspec` exits `0` (whole package green, existing help/config tests included)
-- [ ] `! go list -deps ./internal/panel | grep -q internal/config` exits `0` (leaf invariant re-asserted on the last bead to land — the caller resolves config + SHA and passes plain values; spec AC10, R7b)
-- [ ] Manual e2e (spec Validation Proof): `go build -o /tmp/ms110 ./cmd/mindspec`; in a spec worktree, `/tmp/ms110 panel create demo --spec <id> --target bead/<id> --bead <id>` writes `<spec-dir>/reviews/demo/{panel.json,BRIEF.md}` with a captured `reviewed_head_sha`; `/tmp/ms110 panel verify demo` prints the completeness/staleness report, exit `0`, `git status` clean; `/tmp/ms110 panel tally demo` on a sub-threshold panel exits non-zero with a re-panel recovery line (`… | grep -q '^recovery: '`)
+- [ ] `go test ./internal/panel -v -run 'TestPanelSchemaDoc_MatchesConstants$' | grep -q -- '--- PASS: TestPanelSchemaDoc_MatchesConstants'` (re-run after this bead's doc-sync appends to the same `interfaces.md` file Bead 1's test reads)
+- [ ] `deps=$(go list -deps ./internal/panel) && ! printf '%s\n' "$deps" | grep -q internal/config` exits `0` (leaf invariant re-asserted on the last bead to land — the caller resolves config + SHA and passes plain values; spec AC10, R7b)
+- [ ] Manual e2e (spec Validation Proof), run **in order** in a scratch spec
+  worktree:
+  1. `go build -o /tmp/ms110 ./cmd/mindspec`.
+  2. `/tmp/ms110 panel create demo --spec <id> --target bead/<id> --bead
+     <id>` writes `<spec-dir>/reviews/demo/{panel.json,BRIEF.md}` with a
+     captured `reviewed_head_sha`. This step itself dirties the tree (new
+     files), so record the post-`create` state: `git status --porcelain >
+     /tmp/before.txt`.
+  3. `/tmp/ms110 panel verify demo` prints the completeness/staleness report
+     and exits `0`; `git status --porcelain > /tmp/after.txt`; `diff -q
+     /tmp/before.txt /tmp/after.txt` exits `0` — proving `verify` adds **no
+     new** dirt on top of what `create` already produced (the actual
+     "writes nothing" claim; a raw "clean tree" check would be false the
+     moment `create` runs, since `create` is expected to write files).
+  4. Seed `demo`'s round 1 with `expected_reviewers` verdict files whose
+     APPROVE count is exactly one **below** `ApproveThreshold()` (e.g. for
+     the default 6 reviewers / N−1=5 threshold, write 4 `*-round-1.json`
+     files as `APPROVE` and 2 as `REQUEST_CHANGES`, so `4 < 5`) —
+     `/tmp/ms110 panel tally demo` on this sub-threshold panel exits
+     non-zero with a final recovery line (`… | grep -q '^recovery: '`).
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/interfaces.md'` (doc-sync)
 - [ ] `go build ./...` exits `0`
 
@@ -630,15 +881,20 @@ merges, so its `interfaces.md` region appends on top of Bead 1's schema doc.
 - [ ] `panel create` stamps `expected_reviewers`/`approve_threshold` from the
   109 config resolvers and `reviewed_head_sha` from the target ref; a second
   `create --round 2` co-bumps round + SHA in both `panel.json` and the BRIEF
-  header, leaving prior verdict files and the skill-authored body untouched
-  (spec AC2, R1)
+  header, leaving prior verdict files and the skill-authored body untouched;
+  an unsafe slug (traversal, control bytes) or a control-byte `--bead`/
+  `--target` value is rejected before any `filepath.Join` or write (spec AC2,
+  R1)
 - [ ] `panel verify`'s PASS/BLOCK equals `panel.PanelGateDecision`'s Action and
   the command writes no file (spec AC3, R2)
 - [ ] `panel tally` exits `0` on Allow / non-zero on Block with a final
-  recovery line, and its printed decision equals `panel.PanelGateDecision`'s
-  (spec AC4, R3)
+  recovery line / exits `0` with the advisory printed on Warn (parity with
+  `internal/complete`'s non-blocking Warn), and its printed decision equals
+  `panel.PanelGateDecision`'s; the exit code is derived from `d.Action` alone,
+  never re-derived from raw verdict counts (spec AC4, R3)
 - [ ] Both verbs render the identical `panel.PanelGateDecision(facts)` Action
-  over a `GateFacts` table — no second decision copy (spec AC5, R7a)
+  over a branch-complete `GateFacts` table spanning gate.go branches
+  (2)-(10) — no second decision copy (spec AC5, R7a)
 - [ ] `internal/panel` remains config-free with the caller passing plain values
   (spec AC10, R7b)
 
@@ -663,7 +919,20 @@ reference verbs that exist, and the R8 grep gate asserts those references.
    BRIEF composition to **filling the stub** `create` wrote (the skill authors
    the summary / files-in-scope / prior-round asks / lens **below** the
    machine-managed header). The `"reviewed_head_sha"` hand-typed schema key
-   must no longer appear in step 0.
+   must no longer appear in step 0. The step-3 BRIEF template's **"## Your
+   job" / verdict-output instructions block** (today: `reviewer_id`,
+   `verdict`, `confidence`, `rationale`, `concrete_changes_required`,
+   `findings`, with the line "An artifact-gate finding may set `"hard_block":
+   true`") is **removed from the skill-authored template entirely** — Bead 1's
+   stub now writes this block once, machine-managed, inside the same
+   delimited header region as the round/SHA fields (Bead 1 step 2), so there
+   is exactly **one** verdict-JSON instruction per BRIEF, not a
+   skill-re-authored second one that could drift from it. This also retires
+   the ambiguous "an artifact-gate finding may set `hard_block: true`"
+   phrasing — `hard_block` is a **top-level** key on the verdict object
+   (`internal/panel`'s `verdictJSON.HardBlock`), a sibling of `verdict`, never
+   a field nested inside an individual `findings` entry; the stub's
+   machine-written instruction states this explicitly (Bead 1 step 2/step 4).
 2. **Keep** `ms-panel-run`'s **Launch the panel**, **Codex failure detection**,
    **Working directory matters**, **Slot lens defaults**, and **Anti-patterns**
    sections (runner-specific launch orchestration + lens judgment = L4). Update
@@ -690,8 +959,8 @@ reference verbs that exist, and the R8 grep gate asserts those references.
    defaults) retained in the skills.
 
 **Verification**
-- [ ] `S=plugins/mindspec/skills; ! grep -q '| Condition | Action |' "$S/ms-panel-tally/SKILL.md" && grep -q 'mindspec panel tally' "$S/ms-panel-tally/SKILL.md" && grep -q '## Artifact gates' "$S/ms-panel-tally/SKILL.md" && ! grep -q '"reviewed_head_sha"' "$S/ms-panel-run/SKILL.md" && grep -q 'mindspec panel create' "$S/ms-panel-run/SKILL.md" && grep -q 'Slot lens defaults' "$S/ms-panel-run/SKILL.md"` exits `0` (spec AC11, R8 — plugins copy)
-- [ ] `S=.claude/skills; ! grep -q '| Condition | Action |' "$S/ms-panel-tally/SKILL.md" && grep -q 'mindspec panel tally' "$S/ms-panel-tally/SKILL.md" && ! grep -q '"reviewed_head_sha"' "$S/ms-panel-run/SKILL.md" && grep -q 'mindspec panel create' "$S/ms-panel-run/SKILL.md"` exits `0` (the `.claude` mirror is edited identically — no drift between the two copies)
+- [ ] `S=plugins/mindspec/skills; ! grep -q '| Condition | Action |' "$S/ms-panel-tally/SKILL.md" && grep -q 'mindspec panel tally' "$S/ms-panel-tally/SKILL.md" && grep -q '## Artifact gates' "$S/ms-panel-tally/SKILL.md" && ! grep -q '"reviewed_head_sha"' "$S/ms-panel-run/SKILL.md" && ! grep -q 'artifact-gate finding may set' "$S/ms-panel-run/SKILL.md" && grep -q 'mindspec panel create' "$S/ms-panel-run/SKILL.md" && grep -q 'Slot lens defaults' "$S/ms-panel-run/SKILL.md"` exits `0` (spec AC11, R8 — plugins copy; the `artifact-gate finding may set` grep confirms the ambiguous finding-level `hard_block` phrasing item 18 retires does not survive)
+- [ ] `S=.claude/skills; ! grep -q '| Condition | Action |' "$S/ms-panel-tally/SKILL.md" && grep -q 'mindspec panel tally' "$S/ms-panel-tally/SKILL.md" && ! grep -q '"reviewed_head_sha"' "$S/ms-panel-run/SKILL.md" && ! grep -q 'artifact-gate finding may set' "$S/ms-panel-run/SKILL.md" && grep -q 'mindspec panel create' "$S/ms-panel-run/SKILL.md"` exits `0` (the `.claude` mirror is edited identically — no drift between the two copies)
 - [ ] `diff -q plugins/mindspec/skills/ms-panel-run/SKILL.md .claude/skills/ms-panel-run/SKILL.md && diff -q plugins/mindspec/skills/ms-panel-tally/SKILL.md .claude/skills/ms-panel-tally/SKILL.md` exits `0` (the mirrors stay byte-identical, as they are today)
 - [ ] `git show --name-only HEAD | /usr/bin/grep -qxF '.mindspec/domains/workflow/runbook.md'` (doc-sync)
 - [ ] `go build ./...` exits `0` (no code touched — the tree still builds)
@@ -758,16 +1027,16 @@ every requirement R1–R8 is delivered.
 | AC1 — `TestCreate_WritesRegistrationAtomically`: leaf writer records the fields in one `panel.json` write | Bead 1 verification (PASS-line grep) |
 | AC2 — `TestPanelCreate_StampsResolversAndCoBumpsRoundSHA`: create stamps 109 resolvers + target SHA, `--round 2` co-bumps panel.json + BRIEF header, prior verdicts + skill body untouched | Bead 4 verification (PASS-line grep); writer mechanism proven in Bead 1 (`TestCreate_WritesRegistrationAtomically`) |
 | AC3 — `TestPanelVerify_MatchesGateAndWritesNothing`: verify's PASS/BLOCK = `PanelGateDecision` Action, mutates nothing | Bead 4 verification (PASS-line grep) |
-| AC4 — `TestPanelTally_ExitCodeTracksDecision`: exit 0 on Allow / non-zero + final recovery line on Block, printed decision = `PanelGateDecision` | Bead 4 verification (PASS-line grep) |
-| AC5 — `TestPanelVerbs_DecisionIsPanelGateDecision`: both verbs render the identical `PanelGateDecision(facts)` Action over a facts table (R7a) | Bead 4 verification (PASS-line grep) |
-| AC6 — `TestPanelStateVerdict_DelegatesToPanelGateDecision`: `instruct --panel-state` verdict = `PanelGateDecision`, old matrix gone (R2) | Bead 3 verification (PASS-line grep) |
-| AC7 — `TestPanelSchemaDoc_MatchesConstants`: workflow schema doc consistent with `FileName`/`verdictFileRE`/`ConsolidatedName` (R4) | Bead 1 verification (PASS-line grep) |
+| AC4 — `TestPanelTally_ExitCodeTracksDecision` (incl. stale-SHA/hard_block/Warn rows) + `TestPanelTally_AggregatesConcreteChangesRequired`: exit 0 on Allow / non-zero + final recovery line on Block / exit 0 with advisory on Warn, exit derived from `d.Action` alone, printed decision = `PanelGateDecision`, `concrete_changes_required` attributed to slot | Bead 4 verification (PASS-line grep) |
+| AC5 — `TestPanelVerbs_DecisionIsPanelGateDecision`: both verbs render the identical `PanelGateDecision(facts)` Action over a **branch-complete** `GateFacts` table spanning gate.go branches (2)-(10) (R7a) | Bead 4 verification (PASS-line grep) |
+| AC6 — `TestPanelStateVerdict_DelegatesToPanelGateDecision`: `instruct --panel-state` verdict = `PanelGateDecision` over a branch-complete facts table (incl. round-mismatch, malformed-registration, missing-ref), old matrix gone (verified by source-text absence of its message literals, R2) | Bead 3 verification (PASS-line grep) |
+| AC7 — `TestPanelSchemaDoc_MatchesConstants`: workflow schema doc's own backtick-quoted examples extracted and checked against `FileName`/`verdictFileRE`/`ConsolidatedName`, plus the verdict-payload contract (`verdict` enum, top-level `hard_block`) (R4) | Bead 1 verification (PASS-line grep); re-run after Bead 4's doc-sync appends to the same file |
 | AC8 — `TestValidateSpec_ImpactedDomainSeverityMatchesPlanApprove`: path-like/ambiguous error, bare-name tolerated, real-dir passes (R5) | Bead 2 verification (PASS-line grep) |
 | AC9 — `TestValidateSpec_ADRTouchpointExtractionBoundary`: anchored-missing fails, bare-prose ignored, 110-shaped passes, no coverage diagnostic (R6) | Bead 2 verification (PASS-line grep) |
-| AC10 — `! go list -deps ./internal/panel | grep internal/config`: config-free leaf (R7b) | Bead 1 verification (asserted) + Bead 4 verification (re-asserted on the last bead to land) |
-| AC11 — skills grep: decision-matrix table + hand-typed `panel.json` gone, verbs referenced, judgment sections survive (R8) | Bead 5 verification (plugins + `.claude` mirror greps + byte-identical `diff`) |
+| AC10 — `deps=$(go list -deps ./internal/panel) && ! printf '%s\n' "$deps" | grep -q internal/config`: config-free leaf, two-step form so a `go list` failure cannot false-green the check (R7b) | Bead 1 verification (asserted) + Bead 4 verification (re-asserted on the last bead to land) |
+| AC11 — skills grep: decision-matrix table + hand-typed `panel.json` gone, ambiguous finding-level `hard_block` phrasing gone, verbs referenced, judgment sections survive (R8) | Bead 5 verification (plugins + `.claude` mirror greps + byte-identical `diff`) |
 | AC12 — tree builds, touched packages fully green | every bead's `go build ./...` + per-package `go test`; full `go test ./...` regression at plan time and pre-`/ms-impl-approve` (Testing Strategy) |
-| Validation Proof — `panel create` writes panel.json+BRIEF with captured SHA; `verify` report exit 0 git-clean; `tally` sub-threshold exits non-zero with re-panel recovery line | Bead 4 verification (manual e2e) |
+| Validation Proof — `panel create` writes panel.json+BRIEF with captured SHA (rejecting an unsafe slug/control-byte flag first); `verify` adds no NEW dirt on top of `create`'s own writes (before/after `git status` diff); `tally` on a seeded sub-threshold round exits non-zero with a re-panel recovery line | Bead 4 verification (manual e2e, run in order) |
 | Validation Proof — mechanized prose gone from both skills | Bead 5 verification (skills greps) |
 | Validation Proof — whole tree builds | every bead's `go build ./...` |
 | R7c — `spec approve` emits no `adr-coverage-missing`; plan-level coverage stays plan-approve | Bead 2 verification (`TestValidateSpec_ADRTouchpointExtractionBoundary` no-coverage-diagnostic assertion) |
