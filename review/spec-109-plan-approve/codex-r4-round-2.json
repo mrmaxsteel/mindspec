@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "Re-verified at d53c5939. `mindspec validate plan 109-orchestration-config-substrate` exits 0 with only the expected R=0.06 decomposition-scope-redundancy advisory. work_chunks parse into contiguous ids 1-4 with the round-2 dependency shape: B4 now depends_on [2,3] (was [2]) and its key_file_paths gained internal/complete/panel_advisory.go + _test.go; key_file_paths stay disjoint. The added B4->B3 edge is a genuine compile-time dependency — B4 step 3/4 call panel.ReviewerCountNote (B3) with cfg.PanelExpectedReviewers() (B2), so it is correctly not a false ordering edge. The R8 wiring is grounded in real code: internal/complete/panel_advisory.go exists with the exact panelScanFn/panelTallyFn/panelAdvisoryOut seams (L28-30) and complete.go holds panelReg + advisoryOut. Changed-command spot-runs pass: `go test ./cmd/mindspec ./internal/complete` both green; the round-2 bolding-tolerant Status regex `^- \\*\\*Status\\*\\*: Accepted` matches the repo's actual ADR header (the old literal `Status: Accepted` grep would have falsely failed). Pins hold: leaf invariant 0 config deps, gate.go:257 `threshold > 0`, ApproveThreshold at panel.go:76. My round-1 predecessor APPROVED; round-2 fixes strengthen the plan without introducing risk.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Validator matches the brief: exit 0, only decomposition-scope-redundancy R=0.06 advisory.",
+    "Round-2 dependency shape verified: B4 depends_on [2,3], key_file_paths added internal/complete/panel_advisory.go + panel_advisory_test.go; ids contiguous 1-4, key_file_paths disjoint. The B4->B3 edge is a real compile-time dependency (B4 calls panel.ReviewerCountNote defined by B3), not a false ordering edge.",
+    "R8 caller-side wiring bead placement is grounded: internal/complete/panel_advisory.go exists with the named panelScanFn/panelTallyFn/panelAdvisoryOut seams (lines 28-30) and complete.go holds panelReg (line 319) + advisoryOut (line 304); ExpectedReviewers is a real panel.Registration field.",
+    "Changed verification cmd spot-run #1: `go test ./cmd/mindspec ./internal/complete` — both packages green (proving the current complete-gate Allow/Block baseline is intact before B4 lands).",
+    "Changed verification cmd spot-run #2: round-2's bolding-tolerant Status regex matches the repo's real `- **Status**: Accepted` header; the round-1 literal `grep -q 'Status: Accepted'` would have false-failed, so this fix corrects a genuine content-falsification.",
+    "Load-bearing pins re-verified at d53c5939: leaf invariant `go list -deps ./internal/panel | grep -c internal/config` = 0, gate.go:257 retains `threshold > 0`, ApproveThreshold single-homed at panel.go:76, internal/config target files present."
+  ]
+}

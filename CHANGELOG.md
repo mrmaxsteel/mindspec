@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Orchestration config substrate (ADR-0040)** — `.mindspec/config.yaml`
+  gains `panel:` (reviewer mix, approve-threshold expression,
+  quota-substitution policy), `models:` (phase→model tiering), and `loop:`
+  (governance skeleton: gate authority, halt conditions, budget, context
+  policy) blocks, plus a top-level `runner:` adapter selector — all parsed,
+  defaulted, validated, and surfaced by the new read-only `mindspec config
+  show` (which quote-escapes any control bytes or embedded newlines in a
+  config-controlled value before it reaches stdout). `panel:` seeds a fresh
+  `panel.json`'s creation-time defaults; the gate's Allow/Block decision
+  stays a pure function of the recorded `panel.json`. `models:`, `loop:`,
+  and `runner:` are declared and validated now; in-binary enforcement is
+  deferred to later specs. (Spec 109)
+
 ### Changed
 - **YAML frontmatter is the single source of approval truth** — the `## Approval`
   prose scan is gone; spec status comes only from the frontmatter `status:`
