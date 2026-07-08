@@ -13,9 +13,9 @@ Spec-driven development, research-backed planning, architecture guardrails, and 
 
 MindSpec is a framework for that oversight. AI coding agents are phenomenal executors and unreliable engineers: left to themselves they drift from intent, steamroll architecture decisions, skip documentation, and let a "small feature" become a three-subsystem refactor. The usual answer is to watch them more closely. MindSpec's answer is to engineer the loop instead.
 
-Prompt engineering optimizes a single instruction. Harness engineering optimizes a single session. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where every gate is a validation in a Go binary that exits non-zero, not an instruction the model might ignore.
+Prompt engineering optimizes one instruction; context engineering one window; harness engineering one run. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where every gate is a validation in a Go binary that exits non-zero, not an instruction the model might ignore.
 
-An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it.
+An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it — and it's the conclusion production-scale loops have converged on independently: Stripe merges over a thousand machine-written pull requests a week on the rule that anything deterministic never goes to a probabilistic model. Reliability comes from the quality of the constraints, not the size of the model.
 
 ```
  idea ─▶ SPEC ══gate══▶ PLAN ══gate══▶ IMPLEMENT ═══════▶ FINAL REVIEW ══gate══▶ main
@@ -95,7 +95,7 @@ The full decision framework lives in [project-docs/research/scaling-agent-system
 
 > "I don't prompt Claude anymore. I have loops running… My job is to write loops." — Boris Cherny, creator of Claude Code
 
-Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip and hope.
+Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip and hope. Each rung is earned: a loop qualifies to run more agents by first proving it can stop a single bad one.
 
 | Level | Trigger | Gate authority |
 |:------|:--------|:---------------|
@@ -126,7 +126,18 @@ loop:
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
 
-Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated. And because a loop that runs unattended also makes its mistakes unattended, the handoff log records every panel-substituted decision with its vote — your review moves from per-decision to per-batch, it doesn't disappear. `mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
+Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated.
+
+An unattended loop accrues four costs, and all four are silent while it runs — verification debt, comprehension rot, cognitive surrender, and token blowout. Each gets a structural guard here, not advice:
+
+| Cost | The guard |
+|:-----|:----------|
+| **Verification debt** | every merge is panel-verified; a REJECT halts the track and is never auto-fixed |
+| **Comprehension rot** | the handoff log records every delegated decision with its vote — your review moves per-batch, it doesn't disappear |
+| **Cognitive surrender** | the non-delegable gates keep one door permanently human; the loop can execute, but it cannot decide |
+| **Token blowout** | budget ceilings are a precondition for unattended running, not a reaction to the first surprising bill |
+
+`mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
 
 The level-by-level walkthrough — prerequisites, halt conditions, recovery, and the handoff review workflow — is in the [autonomy guide](project-docs/user/guides/autonomy.md).
 
