@@ -2,9 +2,11 @@
 
 ## Citation
 
-Kim, S., Shen, Y., Saphra, N., & Rush, A. M. (2025). *Towards a Science of Scaling Agent Systems*. arXiv:2512.08296.
+Kim, Y., et al. (2025). *Towards a Science of Scaling Agent Systems*. arXiv:2512.08296 (v3, revised 2026-04-08).
 
-Evaluated 180 configurations of multi-agent systems across 5 architectures and 4 benchmarks.
+v3 evaluates 260 configurations spanning six agentic benchmarks, five canonical architectures, and three LLM families.
+
+> **Revision caveat (2026-07-08):** the findings and thresholds below were derived from the paper's v1 (180 configurations, 5 architectures, 4 benchmarks; different author list). v3 substantially expanded the study; the thresholds encoded in the plan gate have not yet been re-validated against it — tracked as a follow-up bead.
 
 ## Key Findings
 
