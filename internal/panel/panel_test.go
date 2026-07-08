@@ -173,6 +173,110 @@ func TestApproveThreshold(t *testing.T) {
 	}
 }
 
+// TestApproveThreshold_InterpretsRecordedExpr (Spec 109 AC4, ADR-0037 §3
+// amendment): ApproveThreshold is the SOLE interpreter of the recorded
+// ApproveThresholdExpr. Absent/empty and "n-1" (case-insensitive) both
+// resolve to N−1; an in-range integer string overrides it; anything else —
+// out-of-range integer or unparseable — falls back to N−1, so a recorded 0
+// never yields a free-pass threshold of 0.
+func TestApproveThreshold_InterpretsRecordedExpr(t *testing.T) {
+	cases := []struct {
+		name     string
+		expected int
+		expr     string
+		want     int
+	}{
+		{"absent field → N-1", 6, "", 5},
+		{"lowercase n-1 → N-1", 6, "n-1", 5},
+		{"uppercase N-1 → N-1", 6, "N-1", 5},
+		{"mixed-case whitespace n-1 → N-1", 6, "  N-1  ", 5},
+		{"in-range integer overrides", 6, "3", 3},
+		{"integer at lower bound 1", 6, "1", 1},
+		{"integer at upper bound N", 6, "6", 6},
+		{"recorded 0 falls back to N-1, never a free pass", 6, "0", 5},
+		{"negative integer falls back to N-1", 6, "-1", 5},
+		{"integer above N falls back to N-1", 6, "7", 5},
+		{"unparseable value falls back to N-1", 6, "banana", 5},
+		{"in-range integer, smaller panel", 3, "2", 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := Panel{ExpectedReviewers: c.expected, ApproveThresholdExpr: c.expr}
+			if got := p.ApproveThreshold(); got != c.want {
+				t.Errorf("ApproveThreshold(expected=%d, expr=%q) = %d, want %d", c.expected, c.expr, got, c.want)
+			}
+		})
+	}
+}
+
+// TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision (Spec 109 AC5):
+// (a) PanelGateDecision over fixed GateFacts returns the same Allow/Block
+// regardless of any "config default" — demonstrated by varying the value fed
+// only to the unrelated, config-free ReviewerCountNote helper and confirming
+// PanelGateDecision, recomputed on the identical facts, never changes (its
+// signature carries no config input at all).
+// (b) ReviewerCountNote returns "" on a match and a non-empty advisory on a
+// mismatch.
+// (c) A panel whose resolved threshold is 0 (ExpectedReviewers=1, absent
+// ApproveThresholdExpr) still returns Block, pinning the gate-side
+// `threshold > 0` guard (gate.go) as a defense that survives independently
+// of the record-side N−1 fallback.
+func TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision(t *testing.T) {
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	p := &Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
+	// 5 APPROVE + 1 neutral dissent = 6/6 present (Complete()), 5/6 APPROVE
+	// meets the N-1 threshold — mirrors the existing "threshold met" row in
+	// panel_decision_test.go.
+	r := result(p, 5, 0, 1, nil, nil)
+	r.Verdicts = append(r.Verdicts,
+		Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+	facts := GateFacts{
+		BeadID:  "mindspec-bd01",
+		Reg:     regn("/wt/review/slug"),
+		Res:     r,
+		HeadSHA: sha,
+	}
+
+	want := PanelGateDecision(facts)
+	if want.Action != Allow {
+		t.Fatalf("precondition: expected Allow with 5/6 approves, got %+v", want)
+	}
+
+	for _, configDefault := range []int{3, 6, 10} {
+		note := ReviewerCountNote(p.ExpectedReviewers, configDefault)
+		if configDefault == p.ExpectedReviewers && note != "" {
+			t.Errorf("ReviewerCountNote(%d, %d) = %q, want empty on match", p.ExpectedReviewers, configDefault, note)
+		}
+		if configDefault != p.ExpectedReviewers && note == "" {
+			t.Errorf("ReviewerCountNote(%d, %d) = empty, want non-empty on mismatch", p.ExpectedReviewers, configDefault)
+		}
+
+		got := PanelGateDecision(facts)
+		if got != want {
+			t.Errorf("PanelGateDecision changed after ReviewerCountNote(_, %d): got %+v, want %+v", configDefault, got, want)
+		}
+	}
+
+	// (c) resolved-threshold-0 pin.
+	p0 := &Panel{BeadID: ptr("mindspec-y1"), Round: 1, ExpectedReviewers: 1}
+	if th := p0.ApproveThreshold(); th != 0 {
+		t.Fatalf("precondition: ApproveThreshold() = %d, want 0", th)
+	}
+	// Approves=1 so the SINGLE expected reviewer's verdict makes the round
+	// Complete() and the decision reaches branch (10) — the threshold check
+	// itself, not the earlier "incomplete" short-circuit — where
+	// threshold=0 must still Block per gate.go's `threshold > 0` guard.
+	facts0 := GateFacts{
+		BeadID: "mindspec-y1",
+		Reg:    regn("/wt/review/y-slug"),
+		Res:    result(p0, 1, 0, 1, nil, nil),
+	}
+	got0 := PanelGateDecision(facts0)
+	if got0.Action != Block {
+		t.Fatalf("resolved-0-threshold panel must Block (pins gate.go's threshold>0 guard), got %+v", got0)
+	}
+}
+
 func TestPanel_AbandonedFieldsParse(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "review/dead/panel.json", `{

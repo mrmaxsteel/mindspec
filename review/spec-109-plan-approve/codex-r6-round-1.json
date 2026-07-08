@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The B1-first shape is mostly sound: structured work_chunks make B2/B3 depend on B1 and B4 depend on B2, and existing ADR-0035/0039 citations cover core+workflow for complete-time divergence. Per-bead doc-sync targets exist and are bead-unique. However, the plan is not fully gate-forward against the approved spec: spec R8 requires the reviewer-count advisory to be rendered by the gate caller, including complete-gate wiring, but B3 only adds/tests the helper in internal/panel and no bead touches the caller. Also, the plan says ADR-0040 becomes an additional coverage source, but it is not in adr_citations, and the gate reads only structured plan citations. Existing citations cover the gate, but the prose is mechanically misleading.",
+  "concrete_changes_required": [
+    "Add a bead step, key_file_paths entry, verification, and workflow doc-sync for caller-side ReviewerCountNote rendering in the complete-gate path, or explicitly revise the approved spec/scope if that requirement is intentionally deferred. If the caller needs Config.PanelExpectedReviewers(), encode the required B2 dependency.",
+    "Clarify the ADR-0040 coverage language in plan.md: either describe ADR-0040 as an in-tree architectural anchor only while ADR-0035/ADR-0039 provide mechanical complete-time coverage, or add a supported mechanism that makes ADR-0040 part of structured adr_citations only after it exists."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 260,
+      "issue": "B3 adds ReviewerCountNote and tests the helper, but no bead renders the advisory from the gate caller. The approved spec at spec.md:56 requires caller-side rendering, including complete-gate wiring, so a one-commit implementer following B3 alone would leave R8 incomplete."
+    },
+    {
+      "severity": "blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 99,
+      "issue": "The plan states Bead 1 makes ADR-0040 an additional core/workflow coverage source, but ADR-divergence uses structured adr_citations and ADR-0040 is deliberately absent from that list. B2-B4 still have core/workflow coverage through ADR-0035/ADR-0039, but the plan's mechanical claim should be corrected before approval."
+    },
+    {
+      "severity": "non_blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 10,
+      "issue": "Dependency and doc-sync shape otherwise checks out: B1 precedes source beads, B2 carries core/interfaces.md, B3 carries workflow/architecture.md, and B4 carries workflow/interfaces.md. `mindspec validate plan 109-orchestration-config-substrate` exits 0 with only the expected low-redundancy warning."
+    }
+  ]
+}

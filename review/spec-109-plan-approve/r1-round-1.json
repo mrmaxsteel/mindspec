@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "approve",
+  "confidence": "high",
+  "rationale": "Plan-vs-spec fidelity holds. All 10 requirements are owned by exactly one bead with no drops or inventions: R1 (ADR-0040 Accepted + ADR-0037 amendment) -> Bead 1; R2/R3/R4/R5/R6/R10 (config schema, defaults, refusals incl. threshold bounds + reviewer floor + runner enum, resolvers) -> Bead 2; R7/R8 (recorded-threshold interpreter, config-free ReviewerCountNote, gate.go:257 third-defense pin) -> Bead 3; R9 (read-only config show + renderConfig + inert annotation) -> Bead 4. All six round-1 additions are present and pinned (reviewer floor, gate.go:257 'threshold > 0' grep, handoff_log default, 'declared, not yet enforced' annotation, TestLoad_PopulatedConfigRoundTrips, ADR content-anchor greps). I verified the pin targets are real: gate.go:257 carries the exact clause, ApproveThreshold is the sole home at panel.go:76, panel imports no config. Out-of-Scope is respected: no panel.json writer (deferred to 110), no loop/models enforcement, no runner adapter dispatch (111), no skill edits, no instruct-gen. adr_citations correctly omit ADR-0040 (created, not on disk) with a sound coverage argument. One advisory: R8's 'note rendered by the caller (config show / complete-gate wiring)' clause is neither wired nor explicitly deferred.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "advisory",
+      "requirement": "R8",
+      "summary": "ReviewerCountNote is built + unit-tested (Bead 3) but never wired into a caller, and the plan does not explicitly defer that wiring.",
+      "detail": "Spec R8 states the advisory note 'is rendered by the gate's caller (the workflow-side surface -- mindspec config show and the in-binary complete-gate wiring)'. The plan lands the pure helper panel.ReviewerCountNote and unit-tests it in Bead 3 (AC5), but no bead calls it from config show (Bead 4 renderConfig makes no mention of it) or from the complete-gate. This is consistent with the spec's *falsifiable* surface (no AC tests caller-rendering; the Falsified-if clause for R8 covers only decision-invariance, leaf-cleanliness, and resolved-0-Blocks -- all delivered), and config show cannot coherently render the note anyway since a defaults-only surface has no recorded panel.json to compare against. But the plan is silent on the clause rather than accounting for it: it should either add an explicit step wiring the note into the complete-gate caller, or state plainly that 109 lands only the pure tested helper and live rendering is deferred (like the R6 writer deferral to 110). Non-blocking: the falsifiable core of R8 is fully covered and Out-of-Scope is respected.",
+      "recommendation": "Add one sentence to Bead 3 (or the Scope note) explicitly deferring live rendering of ReviewerCountNote to the 110 tally/complete-gate consumer, mirroring the writer deferral, so the R8 caller-rendering clause is honestly accounted for."
+    },
+    {
+      "severity": "info",
+      "requirement": "R3",
+      "summary": "The five documented models phases (implement/review/authoring/grill/final_review) are exercised only by the round-trip test, not enumerated in plan prose.",
+      "detail": "Bead 2 Step 1 describes Models as a free-form 'map[string]string keyed by phase' and the AC7 round-trip test asserts 'all five models phases set'. Since R3 explicitly forbids validating values against a closed set and the phases are documentation not code-enforced, this is correct at plan altitude -- flagged only so the tally sees the phase names live in the round-trip fixture + core/interfaces.md doc-sync, not in an enum."
+    }
+  ]
+}
