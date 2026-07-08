@@ -87,6 +87,27 @@ func BeadExists(id string) (bool, error) {
 	return false, err
 }
 
+// IsUnsupportedFlagError reports whether err (returned by RunBD/RunBDCombined,
+// possibly wrapped by a caller with fmt.Errorf's %w) indicates the installed
+// bd binary does not recognize flag — e.g. an older bd invoked with a flag
+// introduced in a later release (bead mindspec-uopd: `bd show --as-of`,
+// added in bd 1.0.4, is not understood by pre-1.0.4 binaries). bd's cobra
+// CLI reports this as `Error: unknown flag: --<flag>` on stderr with a
+// non-zero exit, captured by os/exec as *exec.ExitError.Stderr. The check is
+// intentionally conservative — it requires BOTH "unknown flag" and the flag
+// name in the stderr text — so a genuine bd/Dolt failure (missing bead,
+// lock contention, network) is never misclassified as an unsupported flag.
+// The os/exec type-switch is confined here per this package's doc comment
+// (callers stay free of process-I/O concerns).
+func IsUnsupportedFlagError(err error, flag string) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	stderr := strings.ToLower(string(exitErr.Stderr))
+	return strings.Contains(stderr, "unknown flag") && strings.Contains(stderr, strings.ToLower(strings.TrimPrefix(flag, "--")))
+}
+
 // RunBDCombined executes a bd command and returns combined stdout+stderr.
 // Use for commands that don't return JSON where stderr output is useful.
 func RunBDCombined(args ...string) ([]byte, error) {

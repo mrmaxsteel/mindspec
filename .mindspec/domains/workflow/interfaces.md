@@ -72,6 +72,7 @@ func WorktreeList() ([]WorktreeListEntry, error)
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
+| `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
 
 ## Agent Skills
 
@@ -85,6 +86,31 @@ func WorktreeList() ([]WorktreeListEntry, error)
 
 ## Maintenance Notes
 
+- **2026-07-07 (spec 109 Bead 4, orchestration config substrate — R8/R9):**
+  `cmd/mindspec/config.go` adds a read-only `config` command with a `show`
+  subcommand: it loads the effective config via `config.Load`, renders it
+  through the pure `renderConfig(*config.Config) (string, error)` (no fs, no
+  panel scan — testable without a process), and prints it to stdout. The
+  `models:`, `loop:`, and `runner:` blocks are annotated "declared, not yet
+  enforced" in the rendered output; `panel:` is not, since it already drives
+  a fresh panel.json's creation-time defaults today. `renderConfig` sorts
+  `Loop.GateAuthority`'s map keys before rendering (a map iterated directly
+  would make the command's output nondeterministic) and renders
+  `PanelApproveThresholdExpr()` verbatim (no trim/normalize — the resolver's
+  contract is "exactly as configured").
+  Two caller-side surfaces render the leaf-safe `panel.ReviewerCountNote`
+  advisory (Bead 3) when a registered panel's recorded `expected_reviewers`
+  differs from `cfg.PanelExpectedReviewers()` — never altering any gate
+  `Allow`/`Block`: (1) `config show`'s command handler
+  (`reviewerCountNotesFor` in `cmd/mindspec/config.go`) scans every
+  registered panel across the repo root and every spec's own directory
+  (`configShowReviewRoots`, since `config show` has no bead/spec context
+  to scope the scan the way the complete-gate does) and appends one note
+  line per differing panel; (2) `internal/complete`'s authoritative panel
+  gate (`panelGate`, `panel_advisory.go`) — reached from `complete.Run`
+  step 2.25, AFTER the gate's own Allow/Block decision — prints the same
+  note via the new `reviewerCountAdvisory` helper to the advisory writer
+  when the matched panel's recorded count differs from the config default.
 - **2026-07-02 (spec 107 wave 1):** `mindspec complete`'s children/epic bd
   fan-out was collapsed. The post-close state advance (`internal/complete`
   `advanceState`) now reads children through the new exported
@@ -95,3 +121,19 @@ func WorktreeList() ([]WorktreeListEntry, error)
   `phase.FindEpicBySpecIDWithCache` / `phase.DerivePhaseWithCache`), so a run
   issues at most one `bd list --type=epic` while the post-close children read
   stays fresh. Gate-failure error/`recovery:` lines are unchanged (ADR-0035).
+- **2026-07-02 (spec 108 wave 2, bead wpjv.3):** `internal/validate` grew two
+  per-run caching seams that cut redundant reads without changing a single
+  emitted diagnostic (ADR-0036/ADR-0032 contracts intact). (1) An in-memory
+  `ownershipCache` (keyed by domain, routed through the `loadOwnershipForRefFn`
+  seam) loads each candidate domain's `OWNERSHIP.yaml` at most once per
+  `ValidateDivergence`, `checkInternalPackages`, and `normalizeImpactedDomains`
+  run — replacing the old per-`(file × domain)` `attributeDomain` re-load, and
+  with it the up-to-three `git show` subprocesses per domain in
+  `LoadOwnershipAtRef`. `attributeDomain` is now a one-shot wrapper over the
+  shared-cache `attributeDomainCached`. (2) A `memoStore` decorator (validate-
+  local, `internal/adr` untouched) wraps the store from the `adrStoreForSpecFn`
+  seam so `coverageOf` / `hasAcceptedCitation` / `checkADRCitations` read each
+  distinct cited ADR from disk at most once per run instead of
+  `O(domains × citations)` times. Both seams are countable, and a golden
+  diagnostics fixture pins byte-identical `(code, message)` output pre/post
+  caching.

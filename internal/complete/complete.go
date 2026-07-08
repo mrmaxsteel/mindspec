@@ -26,12 +26,18 @@ import (
 
 // Package-level function variables for testability.
 var (
-	closeBeadFn             = bead.Close
-	worktreeListFn          = bead.WorktreeList
-	runBDFn                 = bead.RunBD
-	resolveTargetFn         = resolve.ResolveTarget
-	findLocalRootFn         = defaultFindLocalRoot
-	fetchBeadByIDFn         = next.FetchBeadByID
+	closeBeadFn     = bead.Close
+	worktreeListFn  = bead.WorktreeList
+	runBDFn         = bead.RunBD
+	resolveTargetFn = resolve.ResolveTarget
+	findLocalRootFn = defaultFindLocalRoot
+	fetchBeadByIDFn = next.FetchBeadByID
+	// fetchBeadAsOfFn is the committed-state read seam (bead mindspec-uopd):
+	// `bd show <id> --as-of HEAD --json` (bd >= 1.0.4). See the
+	// defaultVerifyCommitted doc comment for how this is used and how it
+	// degrades on an older bd. Tests swap this to simulate an
+	// unsupported-flag response or a definitive closed/open committed read.
+	fetchBeadAsOfFn         = next.FetchBeadAsOf
 	findEpicForBeadFn       = phase.FindEpicForBead
 	completeMergeMetadataFn = bead.MergeMetadata
 	gitUserEmailFn          = bead.GitUserEmail
@@ -63,18 +69,30 @@ var (
 	// bead.DoltCommit). verifyCommittedFn performs the post-commit
 	// verification re-read.
 	//
-	// HONESTY-CLAUSE (spec 098 Req 2, step 6): the verify-first probe found
-	// that `bd` runs in EMBEDDED auto-commit mode — every write (including
-	// `bd close`) auto-commits, `bd dolt commit` after a close is a
-	// clean-working-set no-op ("Nothing to commit"), and `bd` exposes NO
-	// committed-state read distinct from `bd show` (`bd dolt status` reports
-	// the Dolt ENGINE status, not a working-set diff). So verifyCommittedFn
-	// is scoped to detection-via-the-same-read (it reuses fetchBeadByIDFn,
-	// the `bd show --json` path): the FORCED `bd dolt commit` makes the close
-	// durable, and on a doltCommit FAILURE or a committed-read that shows
-	// not-closed/errors, complete errors recoverably and never proceeds. The
-	// residual durability-read gap is tracked upstream as
-	// mindspec-098-bd-committed-read.
+	// HONESTY-CLAUSE (spec 098 Req 2, step 6; closed by bead mindspec-uopd):
+	// the original verify-first probe found that `bd` runs in EMBEDDED
+	// auto-commit mode — every write (including `bd close`) auto-commits,
+	// `bd dolt commit` after a close is a clean-working-set no-op ("Nothing
+	// to commit"), and at the time `bd` exposed NO committed-state read
+	// distinct from `bd show` (`bd dolt status` reports the Dolt ENGINE
+	// status, not a working-set diff), so verifyCommittedFn was scoped to
+	// detection-via-the-same-read.
+	//
+	// bd >= 1.0.4 closes that gap: `bd show <id> --as-of HEAD --json`
+	// ("Show issue as it existed at a specific commit hash or branch")
+	// reads COMMITTED Dolt state, which — because bd auto-commits every
+	// write — is a genuine committed-state re-read distinct from the
+	// in-session `bd show`. defaultVerifyCommitted now verifies via
+	// fetchBeadAsOfFn (the `--as-of HEAD` path) FIRST. Only when that
+	// invocation fails with bd's `unknown flag: --as-of` signature (an
+	// older, pre-1.0.4 bd that does not recognize the flag —
+	// bead.IsUnsupportedFlagError) does it gracefully degrade to the
+	// original same-read fallback (fetchBeadByIDFn, the `bd show --json`
+	// path), logging a one-line warning that verification was downgraded.
+	// A hard read failure or a not-closed status in EITHER path still
+	// errors — complete never proceeds on an unverified close, on the
+	// FORCED `bd dolt commit` (durability), and on a committed-read that
+	// shows not-closed/errors it errors recoverably.
 	doltCommitFn      = bead.DoltCommit
 	verifyCommittedFn = defaultVerifyCommitted
 	// findOrphanedClosedBeadsFn detects sibling lifecycle beads closed via a
@@ -86,14 +104,46 @@ var (
 )
 
 // defaultVerifyCommitted is the production committed-state verifier for the
-// spec 098 Req 2 post-close durability gate. Per the honesty-clause (no
-// committed-state read distinct from `bd show` exists in bd's embedded
-// auto-commit mode), it re-reads the bead via fetchBeadByIDFn (the
-// `bd show --json` path) AFTER the forced `bd dolt commit` and returns an
-// error unless the bead reads back closed. A read error or a not-closed
-// status both surface as an error so the caller keeps the worktree and never
-// proceeds on an unverified close.
+// spec 098 Req 2 post-close durability gate. Per the HONESTY-CLAUSE above,
+// it re-reads the bead AFTER the forced `bd dolt commit` via fetchBeadAsOfFn
+// (the `bd show --as-of HEAD --json` committed-state path, bd >= 1.0.4,
+// bead mindspec-uopd) and returns an error unless the bead reads back
+// closed.
+//
+// Graceful degradation: when the --as-of invocation itself fails with bd's
+// `unknown flag: --as-of` signature (bead.IsUnsupportedFlagError) — an
+// older, pre-1.0.4 bd binary that does not recognize the flag — this falls
+// back to the same-read path (fetchBeadByIDFn, `bd show --json`) and logs a
+// one-line warning that the committed-state read is unavailable and
+// verification is downgraded. Any OTHER --as-of failure (bead not found,
+// Dolt lock contention, ...) is a genuine read error, not an
+// unsupported-flag signal, and is never treated as a fallback trigger.
+//
+// A hard read failure or a not-closed status in EITHER path surfaces as an
+// error so the caller keeps the worktree and never proceeds on an
+// unverified close.
 func defaultVerifyCommitted(beadID string) error {
+	info, err := fetchBeadAsOfFn(beadID, "HEAD")
+	if err != nil {
+		if bead.IsUnsupportedFlagError(err, "as-of") {
+			fmt.Fprintf(os.Stderr,
+				"event=complete.committed_read_downgraded bead=%s reason=%q\n",
+				beadID, "bd show --as-of unsupported by installed bd (bd < 1.0.4) — falling back to same-read verification (bd show)")
+			return verifyCommittedSameRead(beadID)
+		}
+		return fmt.Errorf("committed-state re-read (--as-of HEAD) failed: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(info.Status), "closed") {
+		return fmt.Errorf("committed-state re-read (--as-of HEAD) shows status %q (not closed)", strings.TrimSpace(info.Status))
+	}
+	return nil
+}
+
+// verifyCommittedSameRead is the pre-mindspec-uopd fallback verifier: a
+// same-read re-check via fetchBeadByIDFn (`bd show --json`, no committed-
+// state distinction). Used only when fetchBeadAsOfFn reports the --as-of
+// flag is unsupported by the installed bd.
+func verifyCommittedSameRead(beadID string) error {
 	info, err := fetchBeadByIDFn(beadID)
 	if err != nil {
 		return fmt.Errorf("committed-state re-read failed: %w", err)
@@ -306,9 +356,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		advisoryOut = os.Stderr
 	}
 	// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
-	// copy here for the enforcement.panel_gate toggle (default true).
+	// copy here for the enforcement.panel_gate toggle (default true) AND
+	// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
+	// advisory below compares against. gateCfgErr is deliberately non-fatal
+	// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
+	// true default on a load error) — the advisory below is simply skipped
+	// on that same error, never blocking the gate.
+	gateCfg, gateCfgErr := config.Load(root)
 	panelGateEnabled := true
-	if gateCfg, gateCfgErr := config.Load(root); gateCfgErr == nil {
+	if gateCfgErr == nil {
 		panelGateEnabled = gateCfg.Enforcement.PanelGate
 	}
 	// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
@@ -319,6 +375,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	panelReg, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
 	if panelGateErr != nil {
 		return nil, panelGateErr
+	}
+	// Caller-side panel.ReviewerCountNote advisory (spec 109 R8): the
+	// Allow/Block decision above is already final; this only surfaces a
+	// legitimately smaller/larger substituted reviewer quorum, never
+	// altering it.
+	if gateCfgErr == nil {
+		reviewerCountAdvisory(panelReg, gateCfg.PanelExpectedReviewers(), advisoryOut)
 	}
 
 	// 2.5. Auto-commit if commit message provided (via Executor)

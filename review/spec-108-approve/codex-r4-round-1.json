@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.87,
+  "rationale": "Most source-grounded claims checked out: brownfield is absent, isNeighbor is absent, Event.MarshalJSON exists at the claimed line, all six fence-scan sites exist at the claimed files/lines, frontmatter.Parse uses TrimRight-only fence semantics, trace imports are cmd/mindspec, internal/instruct, tests, and internal/bead rather than recording/otel, and the validate/doctor perf hotspots are present. mindspec validate reports only lifecycle-binding. One empirical proof is inaccurate as written: the requested/quoted no-config unparam command does not produce the findRoot diagnostic in this worktree, and the repo-config variant exits clean because the findRoot exclusion still suppresses it. The underlying concern is real only after removing that exclusion from config, which then produces the expected unparam finding. The spec should not carry a non-reproducible command as factual proof.",
+  "concrete_changes_required": [
+    "Correct the findRoot/unparam proof in R3 and Out of Scope: replace the quoted command with a reproducible probe that removes or bypasses only the findRoot exclusion, or restate the claim as 'removing the findRoot exclusion while findRoot remains makes golangci-lint report findRoot - result 1 (error) is always nil.'"
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "file": ".mindspec/specs/108-cleanup-frontmatter-perf-wave2/spec.md",
+      "line": 76,
+      "title": "findRoot unparam proof command is not reproducible as written",
+      "details": "Running `golangci-lint run --no-config --default=none --enable=unparam ./internal/next/...` exited 5 with `no go files to analyze`; running the spec's repo-config variant `golangci-lint run --enable=unparam ./internal/next/...` exited 0 because `.golangci.yml` still excludes findRoot. A process-substituted config with only the findRoot exclusion removed did produce `internal/next/beads.go:53:26: findRoot - result 1 (error) is always nil (unparam)`, so the substantive deferral is valid but the documented empirical command is false."
+    },
+    {
+      "severity": "verified",
+      "file": "internal/trace/event.go",
+      "line": 53,
+      "title": "Trace dead-symbol and import-graph claims verified",
+      "details": "`func (e Event) MarshalJSON` is present at line 53. Import search found internal/trace imported by cmd/mindspec/root.go, cmd/mindspec/trace.go, cmd/mindspec/trace_test.go, internal/instruct/run.go, and internal/bead/bdcli.go; internal/recording and internal/otel do not import trace."
+    },
+    {
+      "severity": "verified",
+      "file": "internal/frontmatter/frontmatter.go",
+      "line": 83,
+      "title": "Frontmatter consolidation targets and canonical fence semantics verified",
+      "details": "The six named manual fence-scan sites exist at the claimed files and lines. `frontmatter.Parse` compares fences after `strings.TrimRight(..., \"\\r\\n\")`, confirming the stated TrimRight semantics and the planned strictness tightening."
+    }
+  ]
+}

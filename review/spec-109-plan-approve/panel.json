@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "109-orchestration-config-substrate",
+  "target": "spec/109-orchestration-config-substrate",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "d53c5939ad4f4618cb74c90925f9019154abf1cc"
+}

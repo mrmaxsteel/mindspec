@@ -21,6 +21,17 @@ const (
 	BeadBranchPrefix   = "bead/"
 	SpecWorktreePrefix = "worktree-spec-"
 	BeadWorktreePrefix = "worktree-"
+
+	// FinalizeBranchPrefix names bug wu7t's protected-main finalize
+	// carrier: when a spec branch is already merged into main before
+	// `impl approve` runs (the common already-merged-implementation-PR
+	// case), the epic-close JSONL export commit rides a FRESH from-main
+	// branch instead of the dead spec branch. See
+	// MindspecExecutor.FinalizeEpic.
+	FinalizeBranchPrefix = "chore/finalize-"
+	// FinalizeWorktreePrefix names the TEMPORARY worktree used to commit
+	// onto FinalizeBranchPrefix; removed before FinalizeEpic returns.
+	FinalizeWorktreePrefix = "worktree-finalize-"
 )
 
 // SpecBranch returns the canonical branch name for a spec.
@@ -38,6 +49,15 @@ func SpecWorktreeName(specID string) string { return SpecWorktreePrefix + specID
 // BeadWorktreeName returns the directory basename for a bead worktree
 // (e.g. "worktree-mindspec-c8q0"). Pure naming convention.
 func BeadWorktreeName(beadID string) string { return BeadWorktreePrefix + beadID }
+
+// FinalizeBranch returns bug wu7t's from-main finalize-carrier branch name
+// for a spec (e.g. "chore/finalize-053-foo"). Pure naming convention.
+func FinalizeBranch(specID string) string { return FinalizeBranchPrefix + specID }
+
+// FinalizeWorktreeName returns the directory basename for bug wu7t's
+// TEMPORARY finalize worktree (e.g. "worktree-finalize-053-foo"). Pure
+// naming convention.
+func FinalizeWorktreeName(specID string) string { return FinalizeWorktreePrefix + specID }
 
 // WorktreesDir returns the absolute worktrees-root directory path under
 // root, honoring cfg.WorktreeRoot. If cfg is nil the default config is
@@ -69,4 +89,11 @@ func SpecWorktreePath(root string, cfg *config.Config, specID string) string {
 // used.
 func BeadWorktreePath(specWorktree string, cfg *config.Config, beadID string) string {
 	return filepath.Join(WorktreesDir(specWorktree, cfg), BeadWorktreeName(beadID))
+}
+
+// FinalizeWorktreePath returns the absolute path to bug wu7t's TEMPORARY
+// finalize worktree under root, honoring cfg.WorktreeRoot. If cfg is nil
+// the default config is used.
+func FinalizeWorktreePath(root string, cfg *config.Config, specID string) string {
+	return filepath.Join(WorktreesDir(root, cfg), FinalizeWorktreeName(specID))
 }

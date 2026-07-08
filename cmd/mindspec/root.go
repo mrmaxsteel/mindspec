@@ -218,6 +218,7 @@ func init() {
 	rootCmd.AddCommand(approveCmd) // hidden backward-compat alias
 	rootCmd.AddCommand(beadCmd)
 	rootCmd.AddCommand(completeCmd)
+	rootCmd.AddCommand(configCmd) // spec 109 R9: read-only `config show`
 	rootCmd.AddCommand(contextCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(doctorCmd)

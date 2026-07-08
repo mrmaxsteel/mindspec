@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.87,
+  "rationale": "The plan is mostly falsifiable: every new test has an anchored PASS-line grep, and the spec ACs map to Bead 1 (ADR anchors), Bead 2 (config defaults/refusals/resolvers/populated round-trip), Bead 3 (recorded threshold/decision invariance/ReviewerCountNote/third-defense pin), or Bead 4 (config show). However, the ADR-0040 status verification is not runnable against the ADR format the plan itself requires and the repo already uses. A correct Bead 1 implementation using the standard `- **Status**: Accepted` header would fail the literal `grep -q 'Status: Accepted'` command, leaving AC8 falsely red despite compliant content.",
+  "concrete_changes_required": [
+    "Fix the ADR-0040 status content-anchor command in the plan (and, if editing approved AC text is permitted, the mirrored spec AC) so it matches the repository's standard `- **Status**: Accepted` header, for example with a regex that allows Markdown bolding around `Status`."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 182,
+      "summary": "ADR-0040 status grep rejects the standard ADR header",
+      "details": "Bead 1 step 1 says to use the standard ADR header, and existing ADRs use `- **Status**: Accepted`. The verification command greps for the literal substring `Status: Accepted`, which does not occur in `Status**: Accepted`. This makes the AC8 verifier non-falsifiable for the intended compliant output.",
+      "required_change": "Replace the literal status grep with a Markdown-tolerant pattern such as `grep -qE 'Status(\\*\\*)?: Accepted|Status\\*\\*: Accepted' \"$F\"`, or otherwise align the command with the exact ADR header that Bead 1 must write."
+    },
+    {
+      "id": "MATRIX",
+      "severity": "informational",
+      "summary": "Spec AC ownership matrix",
+      "details": "AC1/AC2/AC3/AC7 are owned by Bead 2 PASS-line tests; AC4/AC5 plus ReviewerCountNote and third-defense pinning are owned by Bead 3 PASS-line tests and `threshold > 0` grep; AC6 is owned by Bead 4 PASS-line test plus read-only command; AC8 is owned by Bead 1 content-anchor greps but currently has the status-grep defect; AC9 is covered by the per-bead build/package checks plus the stated full-suite regression."
+    }
+  ]
+}

@@ -15,9 +15,11 @@ paths:
   - internal/bootstrap/**
   - internal/adr/**
   - internal/layout/**
+  - internal/trace/**
   - cmd/**
   - plugins/mindspec/**
   - .claude/skills/**
   - .agents/skills/**
   - scripts/bd-jsonl-merge-driver.sh
+  - .golangci.yml
   - .mindspec/domains/workflow/OWNERSHIP.yaml

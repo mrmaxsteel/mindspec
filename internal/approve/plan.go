@@ -19,8 +19,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
-
-	"gopkg.in/yaml.v3"
 )
 
 // planRunBDCombinedFn is a package-level variable for testability.
@@ -203,68 +201,22 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	return result, nil
 }
 
-// updatePlanApproval reads a plan file and updates YAML frontmatter with approval fields.
+// updatePlanApproval reads a plan file and updates YAML frontmatter with
+// approval fields. The mutate-rewrite mechanics live in mutateFrontmatterFile
+// (shared with writeBeadIDsToFrontmatter); this function only supplies the
+// approval-field mutation.
 func updatePlanApproval(planPath, approvedBy string) error {
-	data, err := os.ReadFile(planPath)
-	if err != nil {
-		return fmt.Errorf("reading plan: %w", err)
-	}
+	return updatePlanApprovalAt(planPath, approvedBy, time.Now().UTC())
+}
 
-	content := string(data)
-	lines := strings.Split(content, "\n")
-
-	// Find frontmatter boundaries
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return fmt.Errorf("no frontmatter found")
-	}
-
-	fmEndIdx := -1
-	for i, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			fmEndIdx = i + 1
-			break
-		}
-	}
-	if fmEndIdx == -1 {
-		return fmt.Errorf("unclosed frontmatter")
-	}
-
-	// Extract and parse frontmatter
-	fmLines := lines[1:fmEndIdx]
-	var activeFmLines []string
-	for _, line := range fmLines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
-			activeFmLines = append(activeFmLines, line)
-		}
-	}
-
-	fmContent := strings.Join(activeFmLines, "\n")
-	var fmMap map[string]interface{}
-	if err := yaml.Unmarshal([]byte(fmContent), &fmMap); err != nil {
-		return fmt.Errorf("parsing frontmatter: %w", err)
-	}
-	if fmMap == nil {
-		fmMap = make(map[string]interface{})
-	}
-
-	// Update approval fields
-	now := time.Now().UTC()
-	fmMap["status"] = "Approved"
-	fmMap["approved_at"] = now.Format(time.RFC3339)
-	fmMap["approved_by"] = approvedBy
-
-	// Re-marshal
-	newFm, err := yaml.Marshal(fmMap)
-	if err != nil {
-		return fmt.Errorf("marshaling frontmatter: %w", err)
-	}
-
-	// Splice back
-	body := strings.Join(lines[fmEndIdx+1:], "\n")
-	output := "---\n" + strings.TrimRight(string(newFm), "\n") + "\n---\n" + body
-
-	return os.WriteFile(planPath, []byte(output), 0644)
+// updatePlanApprovalAt is updatePlanApproval with an injected clock so the
+// byte-identical golden test can pin approved_at deterministically.
+func updatePlanApprovalAt(planPath, approvedBy string, now time.Time) error {
+	return mutateFrontmatterFile(planPath, func(fmMap map[string]interface{}) {
+		fmMap["status"] = "Approved"
+		fmMap["approved_at"] = now.Format(time.RFC3339)
+		fmMap["approved_by"] = approvedBy
+	})
 }
 
 // createImplementationBeads parses plan.md for ## Bead sections, creates child
@@ -682,66 +634,19 @@ func readFileOrEmpty(path string) string {
 	return string(data)
 }
 
-// writeBeadIDsToFrontmatter adds the bead_ids list to the plan's YAML frontmatter.
+// writeBeadIDsToFrontmatter adds the bead_ids list to the plan's YAML
+// frontmatter. Mechanics are shared with updatePlanApproval via
+// mutateFrontmatterFile; only the bead_ids mutation is supplied here.
 func writeBeadIDsToFrontmatter(planPath string, beadIDs []string) error {
-	data, err := os.ReadFile(planPath)
-	if err != nil {
-		return fmt.Errorf("reading plan: %w", err)
-	}
-
-	content := string(data)
-	lines := strings.Split(content, "\n")
-
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return fmt.Errorf("no frontmatter found")
-	}
-
-	fmEndIdx := -1
-	for i, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			fmEndIdx = i + 1
-			break
+	return mutateFrontmatterFile(planPath, func(fmMap map[string]interface{}) {
+		// Convert []string to []interface{} for YAML (mirrors the historical
+		// write so the marshaled bytes stay identical).
+		ids := make([]interface{}, len(beadIDs))
+		for i, id := range beadIDs {
+			ids[i] = id
 		}
-	}
-	if fmEndIdx == -1 {
-		return fmt.Errorf("unclosed frontmatter")
-	}
-
-	// Extract and parse frontmatter
-	fmLines := lines[1:fmEndIdx]
-	var activeFmLines []string
-	for _, line := range fmLines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
-			activeFmLines = append(activeFmLines, line)
-		}
-	}
-
-	fmContent := strings.Join(activeFmLines, "\n")
-	var fmMap map[string]interface{}
-	if err := yaml.Unmarshal([]byte(fmContent), &fmMap); err != nil {
-		return fmt.Errorf("parsing frontmatter: %w", err)
-	}
-	if fmMap == nil {
-		fmMap = make(map[string]interface{})
-	}
-
-	// Convert []string to []interface{} for YAML
-	ids := make([]interface{}, len(beadIDs))
-	for i, id := range beadIDs {
-		ids[i] = id
-	}
-	fmMap["bead_ids"] = ids
-
-	newFm, err := yaml.Marshal(fmMap)
-	if err != nil {
-		return fmt.Errorf("marshaling frontmatter: %w", err)
-	}
-
-	body := strings.Join(lines[fmEndIdx+1:], "\n")
-	output := "---\n" + strings.TrimRight(string(newFm), "\n") + "\n---\n" + body
-
-	return os.WriteFile(planPath, []byte(output), 0644)
+		fmMap["bead_ids"] = ids
+	})
 }
 
 // CreateBeadsFromPlan is a recovery function that creates implementation beads

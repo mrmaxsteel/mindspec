@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -182,6 +183,84 @@ Do something useful.
 	}
 	if !found {
 		t.Error("expected open-question issue")
+	}
+}
+
+// TestValidateSpec_GrillDeferredMarkerBlocks pins the mindspec-0uur backstop
+// contract: the ms-spec-grill bare-headless deferral marker is an UNCHECKED
+// open question, and checkOpenQuestions must hard-ERROR on it — the deferral
+// deliberately blocks spec approval until a human (or a documented panel-cited
+// resolution, per ms-spec-approve) resolves it. Weakening this to a warning
+// would let an ungrilled spec through the approve gate silently.
+func TestValidateSpec_GrillDeferredMarkerBlocks(t *testing.T) {
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, "docs", "specs", "999-test")
+	os.MkdirAll(specDir, 0755)
+
+	// The exact marker line the ms-spec-create/ms-spec-grill session
+	// disposition writes in a bare-headless session.
+	const marker = "- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval."
+
+	spec := `# Spec 999: Test
+
+## Goal
+
+Do something useful.
+
+## Impacted Domains
+
+- **core**: something
+
+## ADR Touchpoints
+
+- [ADR-0001](../../adr/ADR-0001.md): relevant
+
+## Requirements
+
+1. First requirement
+2. Second requirement
+
+## Scope
+
+### In Scope
+- something
+
+### Out of Scope
+- something else
+
+## Acceptance Criteria
+
+- [ ] First criterion
+- [ ] Second criterion
+- [ ] Third criterion
+
+## Open Questions
+
+` + marker + `
+
+## Approval
+
+- **Status**: DRAFT
+`
+	os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0644)
+
+	r := ValidateSpec(tmp, "999-test")
+	if !r.HasFailures() {
+		t.Error("expected the unchecked grill-deferred marker to fail validation")
+	}
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Name == "open-question" && strings.Contains(issue.Message, "grill deferred: headless session") {
+			if issue.Severity != SevError {
+				t.Errorf("grill-deferred marker must be ERROR severity, got %v", issue.Severity)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected an open-question ERROR carrying the grill-deferred marker text")
 	}
 }
 
