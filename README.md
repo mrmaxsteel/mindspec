@@ -13,9 +13,9 @@ Spec-driven development, research-backed planning, architecture guardrails, and 
 
 MindSpec is a framework for that oversight. AI coding agents are phenomenal executors and unreliable engineers: left to themselves they drift from intent, steamroll architecture decisions, skip documentation, and let a "small feature" become a three-subsystem refactor. The usual answer is to watch them more closely. MindSpec's answer is to engineer the loop instead.
 
-Prompt engineering optimizes one instruction; context engineering one window; harness engineering one run. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where every gate is a validation in a Go binary that exits non-zero, not an instruction the model might ignore.
+Prompt engineering optimizes one instruction; context engineering one window; harness engineering one run. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where **every gate is a validation in a Go binary that exits non-zero**, not an instruction the model might ignore.
 
-An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it — and it's the conclusion production-scale loops have converged on independently: Stripe merges over a thousand machine-written pull requests a week on the rule that anything deterministic never goes to a probabilistic model. Reliability comes from the quality of the constraints, not the size of the model.
+An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it — and it's the conclusion production-scale loops have converged on independently: Stripe ships [over 1,300 machine-written pull requests a week](https://www.infoq.com/news/2026/03/stripe-autonomous-coding-agents/) — every one human-reviewed, none human-written — on the rule that anything deterministic never goes to a probabilistic model. Reliability comes from the quality of the constraints, not the size of the model.
 
 ```
  idea ─▶ SPEC ══gate══▶ PLAN ══gate══▶ IMPLEMENT ═══════▶ FINAL REVIEW ══gate══▶ main
@@ -27,12 +27,14 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
                                          • merge gate enforced in the binary
 ```
 
+**[Quickstart](#quickstart) · [The autonomy ladder](#the-autonomy-ladder) · [Documentation](#documentation)**
+
 ## What you get
 
 - **Specs that survive contact with an agent** — every spec is interrogated by an adversarial grill agent until each requirement is concrete, falsifiable, and grounded in the actual repo. Vague verbs, contradictions, and untestable claims don't make it past the first gate.
-- **Research-backed planning** — decomposition quality is the #1 predictor of agent success. Plans are validated against published thresholds for bead count, scope overlap, and dependency-chain depth (see [Planning](#planning-is-research-backed)).
+- **Research-backed planning** — decomposition quality is among the strongest predictors of agent success. Plans are validated against published thresholds for bead count, scope overlap, and dependency-chain depth (see [Planning](#planning-is-research-backed)).
 - **A work graph, not a chat history** — work items live in [Beads](https://github.com/gastownhall/beads), a git-native issue tracker. Each bead is a self-contained work packet a fresh agent can pick up with zero session history.
-- **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A six-reviewer panel with six distinct lenses across two model families is the verifier; the decision matrix is a pure function in the binary.
+- **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A six-reviewer panel with six distinct lenses across two model families is the verifier; the tally is code, not conversation.
 - **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
 - **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
 - **An autonomy ladder, not an autonomy switch** — run interactively, run a supervised autopilot, or grant a governed unattended loop with named halt conditions, budget ceilings, and a handoff log. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
@@ -79,13 +81,13 @@ Verdicts persist as JSON alongside the spec, so every merge carries its review h
 
 ## Planning is research-backed
 
-Task decomposition quality is the strongest predictor of agent execution success. MindSpec's plan gate encodes the thresholds from *Towards a Science of Scaling Agent Systems* (Kim, Shen, Saphra & Rush, 2025 — [arXiv:2512.08296](https://arxiv.org/abs/2512.08296); 180 multi-agent configurations across 5 architectures and 4 benchmarks):
+Task decomposition quality is one of the strongest predictors of agent execution success. MindSpec's plan gate encodes thresholds derived from *Towards a Science of Scaling Agent Systems* (Kim et al., 2025 — [arXiv:2512.08296](https://arxiv.org/abs/2512.08296), v3 2026: 260 configurations across six agentic benchmarks, five architectures, and three LLM families):
 
 | Signal | Threshold | Why |
 |:-------|:----------|:----|
 | Beads per plan | 3–5 (>6 needs justification) | Coordination overhead grows super-linearly with agent count |
 | Scope overlap between beads | ~0.41 optimal; >0.50 flagged | Moderate overlap gives shared context; high overlap means duplicated work |
-| Dependency chain depth | ≤3 | Serial chains degrade multi-agent performance by 39–70% |
+| Dependency chain depth | ≤3 | Serial chains degraded performance 39–70% in benchmarked tasks |
 | Tool-heavy operations | kept in one bead | Fragmenting tool context across agents costs ~6× efficiency |
 | Trivial beads | folded into neighbors | A rename doesn't justify an agent session |
 
@@ -108,20 +110,23 @@ Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip a
 The governance profile lives in `.mindspec/config.yaml`, and it selects **who holds each gate — never what the evidence is**:
 
 ```yaml
+panel:
+  reviewers: [{family: claude, count: 3}, {family: codex, count: 3}]
+  approve_threshold: "n-1"
 loop:
   enabled: true
-  gate_authority:
-    spec_approve:  panel      # panel | human
+  gate_authority:              # who may pass each gate unattended: panel | human
+    spec_approve:  panel
     plan_approve:  panel
     bead_merge:    panel
     impl_approve:  panel
-    panel_skip:    human      # not delegable — a loop never self-authorizes skipping its verifier
-  panel_quorum: {reviewers: 6, approve_threshold: n-1}
+    # there is no panel_skip key — skipping the verifier is never delegable,
+    # and the loader refuses any config that tries to add one
   halt:
     max_rounds_per_bead: 3
     max_consecutive_impl_failures: 2
     panel_deadlock_rounds: 2
-    on_reject: halt           # a REJECT always stops the track
+    on_reject: halt            # the only accepted value — a REJECT always halts
   budget: {max_beads_per_wake: 4}
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
@@ -132,7 +137,7 @@ An unattended loop accrues four costs, and all four are silent while it runs —
 
 | Cost | The guard |
 |:-----|:----------|
-| **Verification debt** | every merge is panel-verified; a REJECT halts the track and is never auto-fixed |
+| **Verification debt** | every merge is panel-verified; rejections stop the line instead of getting quietly patched over |
 | **Comprehension rot** | the handoff log records every delegated decision with its vote — your review moves per-batch, it doesn't disappear |
 | **Cognitive surrender** | the non-delegable gates keep one door permanently human; the loop can execute, but it cannot decide |
 | **Token blowout** | budget ceilings are a precondition for unattended running, not a reaction to the first surprising bill |
@@ -209,7 +214,7 @@ MindSpec is CLI-first and works standalone: every gate, validator, and panel ver
 
 ## Built with itself
 
-MindSpec is fully self-hosted: **every feature since day one has shipped through its own lifecycle** — 100+ specs, 40 architecture decision records, and a review panel verdict trail for every merge, all in this repo. The `.mindspec/` directory here isn't a demo; it's the actual development history.
+MindSpec is fully self-hosted: **every feature since day one has shipped through its own lifecycle** — 100+ specs, 40+ architecture decision records, and, since the panel gate landed, a review-verdict trail carried with every merge — all in this repo. The `.mindspec/` directory here isn't a demo; it's the actual development history.
 
 It is also continuously tested against real agents: a behavioral harness runs live LLM sessions through every lifecycle phase and scores them on forward progress, retries, and wasted turns. The harness's failure taxonomy (skipped gates, shortcut closes, commits to main) doubles as the live monitor set for unattended loops — failures observed in testing become halt conditions in production.
 
@@ -241,7 +246,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | Loop engineering: design notes and the maturity ladder | [loop-engineering-adaptation.md](project-docs/research/loop-engineering-adaptation.md) |
 | Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
 | Complete command reference | [USAGE.md](.mindspec/core/USAGE.md) |
-| Observability (OTEL) | `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver, e.g. [AgentMind](https://github.com/mrmaxsteel/agentmind) |
+| Observability (OTEL + AgentMind) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver |
 | Release history | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Project structure
