@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Both round-1 asks ADDRESSED and verified against the real tree. Ask 1 (caller-side ReviewerCountNote wiring): the rendering landed in the RIGHT bead — Bead 4, the workflow-side caller, not the config-free panel leaf — with the B2+B3 dependency properly encoded (work_chunks Bead 4 depends_on:[2,3], for cfg.PanelExpectedReviewers() and panel.ReviewerCountNote respectively), its own key_file_paths (internal/complete/panel_advisory.go + _test.go), its own Verification (TestConfigShow_ReviewerCountNoteWhenPanelDiffers + TestPanelAdvisory_ReviewerCountNote PASS-greps + `go test ./cmd/mindspec ./internal/complete` proving Allow/Block unchanged), and doc-sync (interfaces.md now covers the complete-time advisory). I confirmed panel_advisory.go, its panelScanFn/panelTallyFn/panelAdvisoryOut seams, panelGate, the held panelReg, a loaded cfg, panel.Panel.ExpectedReviewers, and gate.go:257 `threshold > 0` all exist — the wiring is buildable as written, and internal/complete already imports config+panel so no leaf-invariant breach. Ask 2: ## ADR Fitness now cleanly distinguishes mechanical complete-time coverage (ADR-0035/0039, both core+workflow) from ADR-0040 as an in-tree anchor only, absent from adr_citations and not load-bearing for any gate. Validator exits 0 with only the expected R=0.06 advisory. Dependency prose is internally consistent (chains 1->2->4 and 1->3->4, ratio 0.25, 2||3 parallelism preserved).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "non_blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 328,
+      "issue": "ADDRESSED (Ask 1): caller-side ReviewerCountNote wiring now lives in Bead 4 with depends_on:[2,3], internal/complete/panel_advisory.go(+_test.go) in key_file_paths, two new PASS-grep verifications plus `go test ./cmd/mindspec ./internal/complete` proving Allow/Block unchanged, interfaces.md doc-sync, and an R8 Provenance row. Verified against the tree: panel_advisory.go and its panelScanFn/panelTallyFn/panelAdvisoryOut seams, panelGate, panelReg, loaded cfg, panel.Panel.ExpectedReviewers, and gate.go:257 threshold>0 all exist; internal/complete already imports internal/config+internal/panel, so the config-free leaf (internal/panel) is not touched."
+    },
+    {
+      "severity": "non_blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 99,
+      "issue": "ADDRESSED (Ask 2): ## ADR Fitness now states mechanical complete-time coverage is supplied entirely by ADR-0035/ADR-0039, with ADR-0040 described as the in-tree architectural anchor only — citable by later specs, absent from this plan's adr_citations, and not required for any coverage gate. The prior misleading 'additional coverage source' claim is gone."
+    },
+    {
+      "severity": "non_blocking",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 136,
+      "issue": "Dependency-shape prose is consistent with the new edge: Bead 4 depends on both 2 and 3, longest chains 1->2->4 and 1->3->4 (3 nodes, at advisory max_chain_depth), parallelism ratio 0.25, 2||3 preserved. `mindspec validate plan` exits 0 with only the expected R=0.06 scope-redundancy advisory (intentional disjoint cut)."
+    }
+  ]
+}

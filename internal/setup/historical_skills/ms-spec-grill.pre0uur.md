@@ -13,14 +13,6 @@ This is a NEW single-responsibility skill (see **§ Relationship to ms-spec-crea
 
 > Inspired by Matthew Pocock's [`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md) skill — relentless one-question-at-a-time interrogation grounded in the project's own docs and code. This skill adapts that technique to MindSpec spec authoring.
 
-## Session disposition — decide before asking anything
-
-Never ask questions into the void. Decide the mode with two tests, in order: Is a human available to answer one-at-a-time questions? If not, is there an explicit instruction to proceed non-interactively (e.g. a harness prompt, a batch evaluation, an autopilot run that says to proceed)?
-
-1. **Interactive** — a human can answer: grill as written below, one question at a time.
-2. **Instructed non-interactive** — no human, but an explicit proceed-without-asking instruction exists: **self-answer mode**. Run the full grill analysis; answer each question with the best repo-grounded default, apply the resulting spec fix, and record `- [x] grill (self-answered, headless): <question> → <default taken>` in Open Questions. The completion contract still applies — resolve or explicitly defer every pre-existing Open Question (including the template placeholder) — so `mindspec spec approve` passes.
-3. **Bare headless** — no human AND no such instruction: defer. Add `- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.` to the spec's Open Questions section and return immediately, skipping the rest of this skill. The unchecked marker deliberately blocks `mindspec spec approve` until it is resolved (ms-spec-approve documents the resolution path).
-
 ## Cardinal rule — ask ONE question at a time
 
 Ask **exactly one question at a time**. Never batch. Asking five questions in one message lets the author answer the easy one and ignore the hard four; one question at a time makes every gap inescapable.

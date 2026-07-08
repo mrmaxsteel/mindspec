@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens: every file/symbol/line pin in the bead Steps resolves in this post-108 tree. panel.go:76 is exactly `func (p Panel) ApproveThreshold() int`; gate.go:257 is exactly `if f.Res.Approves >= threshold && threshold > 0` (the `grep -q 'threshold > 0'` pin holds); PanelGateDecision(f GateFacts) is a config-free pure fn at gate.go:131 and internal/panel currently imports no internal/config (leaf invariant holds). config.go DefaultConfig()/Load()/loadUncached() backfill match Bead 2's described extension points; the Panel struct's `omitempty` json tags precedent the new approve_threshold field. All 4 cited ADRs (0037/0035/0034/0039) resolve; ADR-0040 is correctly absent (Bead 1 creates it) and correctly uncited (would trip adr-cite-missing); ADR-0037 §3 single-homes the threshold on Panel.ApproveThreshold and the snake_case `approve_threshold` is absent today, so the amendment grep flips to pass. All three doc targets exist and match OWNERSHIP (config->core, panel+cmd->workflow); beads 3/4 use distinct workflow docs (bead-unique). All 7 new test names are genuinely new; the `$`-anchored -run is load-bearing since existing TestApproveThreshold is a prefix of the new one. cmd config.go is a new file (no collision); command self-registration via own init()+rootCmd.AddCommand is precedented (ownership.go:88, source.go:51). Pinned packages build clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "panel.go:76 ApproveThreshold() int and gate.go:257 `threshold > 0` third-defense clause both present verbatim; PanelGateDecision at gate.go:131 takes GateFacts (no config) — Bead 3/8 pins accurate.",
+    "Leaf invariant currently holds: `go list -deps ./internal/panel` contains no internal/config; the plan preserves it by passing plain ints. Verified live.",
+    "OWNERSHIP.yaml maps internal/config->core (l3), internal/panel->workflow (l14), cmd/**->workflow (l19); doc-sync targets core/interfaces.md, workflow/architecture.md, workflow/interfaces.md all exist and are bead-unique.",
+    "Existing TestApproveThreshold (panel_test.go:157) is a prefix of the new TestApproveThreshold_InterpretsRecordedExpr; the plan's `$`-anchored -run + full-name PASS grep correctly isolates, so its stated anchor discipline is genuinely necessary here.",
+    "Advisory only (not a change-required): Bead 4 key_file_paths omits cmd/mindspec/root.go, which is fine ONLY if the impl self-registers configCmd in config.go's own init() (precedent: ownership.go:88, source.go:51) rather than editing the centralized root.go init(); implementer should follow the self-registration pattern to keep the edit bead-scoped.",
+    "ADR-0037 amendment grep `grep -q 'approve_threshold'` returns non-zero today (only camelCase ApproveThreshold present), so the amendment note is a real, falsifiable delta."
+  ]
+}

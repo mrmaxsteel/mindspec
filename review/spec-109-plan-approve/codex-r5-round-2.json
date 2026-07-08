@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "My single round-1 ask (F1) is ADDRESSED and proven. Bead 1's status content-anchor is now the bolding-tolerant `grep -Eq '^- \\*\\*Status\\*\\*: Accepted'`. Run against the repo's real ADR header format (`.mindspec/adr/ADR-0037-...` line 4, `- **Status**: Accepted`) it exits 0; the old literal `grep -q 'Status: Accepted'` I flagged exits 1 against that same line, confirming both the round-1 defect and its fix. The mirrored spec AC is not edited (forward-only lifecycle, ADR-0023) and the plan documents that the spec grep is interpreted as the same bolding-tolerant intent. Falsifiability re-scan of the changed items passes: every new test keeps an anchored `--- PASS: <Name>` grep; the R8 wiring bead (Bead 4, now depends_on [2,3]) references real seams — `internal/complete/panel_advisory.go` with `panelScanFn`/`panelTallyFn`/`panelAdvisoryOut`, `panelReg` + a loaded `cfg` (config.Load at complete.go:311, before the gate at :319), and `gate.go:257`'s `threshold > 0` clause all exist as described. Dependency shape (1->2->4, 1->3->4, 2‖3 parallel) is sound.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "resolved",
+      "status": "ADDRESSED",
+      "file": ".mindspec/docs/specs/109-orchestration-config-substrate/plan.md",
+      "line": 192,
+      "summary": "ADR-0040 status anchor now tolerates markdown bolding",
+      "details": "Round-1 F1 asked that the Status content-anchor match the repo's `- **Status**: Accepted` header. The plan replaced the literal `grep -q 'Status: Accepted'` with `grep -Eq '^- \\*\\*Status\\*\\*: Accepted'`. Proof run against the real repo header (ADR-0037 line 4): the new regex exits 0; the old literal exits 1. The AC line and Bead 1 step 1/step 5 wording were updated consistently, and the approved spec AC is correctly left un-edited (ADR-0023) with an explicit note that the spec's grep is interpreted as the same bolding-tolerant intent."
+    },
+    {
+      "id": "F2",
+      "severity": "informational",
+      "status": "verified",
+      "summary": "R8 wiring bead placement is well-grounded",
+      "details": "Bead 4's move to depends_on [2,3] and the added `internal/complete/panel_advisory.go` key_file_paths are backed by real code: the named test seams (panelScanFn/panelTallyFn/panelAdvisoryOut) exist, panelReg and config.Load(root) are already on the complete-gate path (complete.go:311/:319), the panel carries ExpectedReviewers, and gate.go:257 holds the `threshold > 0` third-defense clause Bead 3 pins. The advisory-only wiring cannot alter Allow/Block, which the plan's `go test ./cmd/mindspec ./internal/complete` green check pins."
+    }
+  ]
+}

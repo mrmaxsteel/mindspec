@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R4 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Empirical re-probe at 5435f51a. All three fix-round claims the tally cites hold: (B) gate.go:257 is literally `if f.Res.Approves >= threshold && threshold > 0 {` — the third-defense guard R8 pins exists verbatim, and AC line 92 exercises the resolved-0 panel still returning Block. (Lifecycle) `mindspec validate spec 109-orchestration-config-substrate` exits 0 with exactly one issue, the expected [WARN] lifecycle-binding (no epic pre-approve) — no ERRORs. (A) The new refusal/AC surface is real and implementable: `config.Load` (config.go:112 → loadUncached:145) already uses the DefaultConfig()→yaml.Unmarshal→per-field-zero-value-backfill pattern the spec's Req 5 + Impact map (spec.md:65) name as the extension point for the reviewers `count>=1` / `sum>=2` floor and the `[1, sum(reviewers.count)]` threshold bound; refusals AC line 90 asserts each input makes Load error. My round-1 invariants also still hold at this SHA: panel.go:76 ApproveThreshold has the <=0->0 / else N-1 body R7 describes, and `go list -deps ./internal/panel` imports zero internal/config (config-free leaf, R8). Round-1 APPROVE stands; nothing regressed and every cited fix is grounded.",
+  "concrete_changes_required": [],
+  "findings": [
+    "VERIFIED (fix B): internal/panel/gate.go:257 is `if f.Res.Approves >= threshold && threshold > 0 {` — the load-bearing third-defense clause named in R8 and pinned by AC line 92 exists exactly as cited.",
+    "VERIFIED (lifecycle): `mindspec validate spec 109-orchestration-config-substrate` returns exit 0 with only [WARN] lifecycle-binding (no beads epic yet) — the expected pre-approve state, no ERRORs, unchanged from round 1.",
+    "VERIFIED (fix A surface): config.Load (config.go:112) → loadUncached (config.go:145) does `cfg := DefaultConfig(); yaml.Unmarshal(data, cfg)` then per-field zero-value backfill, and errors via `fmt.Errorf(...:%w)`. This is the real, implementable home the spec's Req 5 refusals (reviewers count>=1 / sum>=2, approve_threshold in [1, sum(reviewers.count)]) and Impact-map line (spec.md:65) target; refusals AC line 90 falsifiably requires each bad input to make Load error.",
+    "VERIFIED (fix D): spec.md:52 marks every loop: key INERT until a spec-110+ consumer enforces it, and spec.md:57 requires config show to annotate models:/loop:/runner: as 'declared, not yet enforced' (AC line 93) — the inert-until-consumed annotation ask is present.",
+    "VERIFIED (fix E): loop.handoff_log (default AUTOPILOT-LOG.md) is in Req 4 (spec.md:52) and the zero-config AC (line 88).",
+    "VERIFIED (R7/R8 still hold): panel.go:76 ApproveThreshold returns 0 when ExpectedReviewers<=0 else N-1; `go list -deps ./internal/panel | grep -c internal/config` = 0, so the config-free leaf invariant is intact at 5435f51a.",
+    "SOFT (non-blocking, carried from round 1): R7 and R8 hardcode literal line references panel.go:76 / gate.go:257. Both are exact at this SHA and are paired with method/clause names, so drift before implementation is cosmetic and not gate-blocking."
+  ]
+}
