@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Both my round-1 asks are addressed against the real code. (O1.1) B3 step 1 now cites the exact empty-Allow sites (gate.go:142/258) and pins a locally-synthesized PASS reason whose wording is BYTE-IDENTICAL to today's panelstate.go:153 ('%d/%d APPROVE — meets threshold %d/%d; `mindspec complete` would proceed'), using r.Approves/p.ExpectedReviewers/p.ApproveThreshold() already in scope — and only reachable on the threshold-met Allow, so nil-safe. (O1.2) Verified against the test file: at_threshold_fresh renders '5/6 APPROVE — meets threshold 5/6…' (⊇ wantReason line 99) and above_threshold_fresh renders '6/6 APPROVE — meets threshold 5/6…' (⊇ wantReason line 110); both pass with no test edit, as the plan claims. Spot-check: tallyExitAction mirrors panel_advisory.go:201-212 (Warn→exit0 advisory, Block→guard.NewFailure) and derives exit from d.Action alone; the branch-complete (2)-(10) table and step-3 source-text assertion are falsifiable. No implementability regressions.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "O1.1 — synthesize non-empty PASS reason for empty Allow Message",
+      "disposition": "ADDRESSED",
+      "detail": "Plan B3 step 1 (plan.md:586-604) names both empty-Allow branches (gate.go:142 no-panel, :258 threshold-met — I re-confirmed both are bare Decision{Action: Allow}), routes Warn/Block through Decision.Message verbatim, and synthesizes the Allow reason locally. The specified fmt.Sprintf is byte-identical to the current PASS wording at panelstate.go:153, and uses n/thr/r.Approves that verdict() already has in scope. nil-safe: PanelGateDecision only returns Allow via :258 where f.Res.Panel is guaranteed non-nil (and the r.Panel==nil guard need not be deleted)."
+    },
+    {
+      "item": "O1.2 — reconcile TestPanelStateEntry_Verdict's two GatePass wantReason rows",
+      "disposition": "ADDRESSED",
+      "detail": "Verified against internal/instruct/panelstate_test.go: line 99 wantReason 'meets threshold 5/6' (at_threshold_fresh: 5/6) and line 110 wantReason '6/6 APPROVE' (above_threshold_fresh: 6/6). Synthesized strings '5/6 APPROVE — meets threshold 5/6; …' and '6/6 APPROVE — meets threshold 5/6; …' each contain the respective substring, so both rows pass unchanged exactly as the plan asserts ('both rows need no test-file edit'). The verify command's -run 'PanelState|…' still runs this test and it stays green."
+    },
+    {
+      "item": "Spot-check — B4 tallyExitAction decision-to-exit helper + B3/B4 shared fixture",
+      "disposition": "ADDRESSED",
+      "detail": "tallyExitAction(d, slug) (plan.md:772-789) is implementable and mirrors the verified precedent internal/complete/panel_advisory.go:201-212 (Warn→advisory-to-stderr + nil; Block→guard.NewFailure with recovery line). Exit derives from d.Action alone; the stale-SHA/hard_block rows in TestPanelTally_ExitCodeTracksDecision falsify a raw-count reimplementation. The 'shared fixture' is two independent tables of the exported panel.GateFacts type (no cross-package _test.go import needed); B4's (2)-(10) table is a correct superset adding the transient-GitErr row B3 structurally cannot express (BranchSHAResolver has no third error state). B3 step 3's source-text assertion is sound: the four forbidden literals live only at panelstate.go:115/130/138/146 (the deleted branches) and 'panel.PanelGateDecision(' appears 0× today, so both halves are true signals."
+    }
+  ]
+}

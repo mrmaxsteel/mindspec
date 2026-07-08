@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Attacked the three central claims. R5 holds: normalizeImpactedDomains (ownership_resolve.go:72) matches the claimed severity exactly and the call is identical to plan.go:142, so nothing tolerated today is newly rejected — all merged specs and the harness fixture pass. R7b's go-list assertion satisfies the spec's own falsification. Two attacks landed. (1) R6's regex requires ']' immediately after the 4 digits, but ~10 merged specs (085–094) write anchored touchpoint bullets as [ADR-0031-doc-sync-gate.md](...) inside ## ADR Touchpoints — that in-repo convention is invisible to the check, so an anchored link to a nonexistent ADR in that shape passes spec-approve, triggering R6's falsification clause. Widening is empirically parity-safe: every anchored ID across all specs resolves in the store. (2) R7a's contract test pins only the pure renderers; the RunE exit-code wiring is pinned by two rows any re-derived threshold check also satisfies — a second decision copy there survives every planned gate and exits 0 on a stale-SHA Block. Tally's Warn exit is also unspecified.",
+  "concrete_changes_required": [
+    "Bead 2, step 2 + TestValidateSpec_ADRTouchpointExtractionBoundary: widen the extraction regex from \\[(ADR-\\d{4})\\]\\([^)]+\\) to \\[(ADR-\\d{4})[^\\]]*\\]\\([^)]+\\) so filename-form anchored touchpoint bullets (e.g. [ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md), the convention in specs 085–094: .mindspec/specs/086-doc-sync/spec.md:142, 087:189, 090:81–94, 094:225) are resolved by ID; add a filename-form pair to the test (existing ADR passes, nonexistent fails). Parity-safe today: comm of all anchored IDs in .mindspec/specs/*/spec.md against .mindspec/adr/ is empty.",
+    "Bead 4: close the adapter-layer decision hole R7a leaves. TestPanelVerbs_DecisionIsPanelGateDecision pins renderPanelVerify/renderPanelTally, but the tally RunE's exit-code/guard mapping is exercised only on a passing and a sub-threshold row (plus the manual e2e's sub-threshold row) — a RunE that re-derives Allow/Block from res (approves >= threshold) passes every planned gate yet exits 0 on stale-SHA (the lola-f4a8 class), round-mismatch, and hard_block Blocks. Add Block-for-staleness and hard_block rows to TestPanelTally_ExitCodeTracksDecision (via the GateIO/rev-parse seam), or route the RunE through a single decision-to-exit helper asserted over the same GateFacts table as the contract test; additionally assert the rendered PASS/BLOCK token is derived from d.Action, not recomputed.",
+    "Bead 4, step 3: pin `panel tally`'s exit behavior on d.Action == panel.Warn (abandoned panel, missing ref, transient git error — gate.go legs 3/5/5b). The step's prose is if-Allow/else-Block shaped, and treating Warn as Block would halt orchestration on abandoned panels with a bogus recovery line. Specify Warn → exit 0 with the advisory message printed (parity with internal/complete's non-blocking Warn handling, panel_advisory.go:204–212) and add a Warn row to TestPanelTally_ExitCodeTracksDecision."
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "high",
+      "claim_attacked": "R5/R6 'parity, not stricter' (Bead 2)",
+      "finding": "The R6 extraction regex \\[(ADR-\\d{4})\\]\\([^)]+\\) only matches bracket text that is exactly the bare ID. The repo's dominant historical touchpoint convention (specs 085–094) uses the full filename as bracket text — e.g. .mindspec/specs/086-doc-sync/spec.md:142 `- [ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md)` — inside ## ADR Touchpoints. These anchored bullets are invisible to the check, so a future spec following that convention with a typo'd or deleted ADR sails through spec-approve: exactly the incident class R6 exists to catch, and the spec's falsification clause ('an anchored touchpoint bullet linking a nonexistent ADR passes spec approve') fires. Not 'stricter-than' risk but 'laxer-than-claimed': the check is toothless on a third of real specs. Widening the regex is empirically parity-safe — every anchored ADR ID in every existing spec resolves in the current store (verified by comm against .mindspec/adr/), so no spec validated today newly fails."
+    },
+    {
+      "id": "F1-2",
+      "severity": "high",
+      "claim_attacked": "R7a single-home — is TestPanelVerbs_DecisionIsPanelGateDecision unfakeable?",
+      "finding": "Half unfakeable. The contract test pins the pure renderers across Allow/Block/Warn, so a decision copy inside renderPanelVerify/renderPanelTally cannot survive. But the plan's claim 'relocating any decision branch into a CLI adapter breaks the test' over-reaches: the decision-consuming wiring (tally's exit code + guard.NewFailure, verify's printed line) lives in the cobra RunE outside the renderers. TestPanelTally_ExitCodeTracksDecision covers two rows (pass, sub-threshold Block) on which PanelGateDecision and a naive re-derived threshold check agree; the manual e2e adds only another sub-threshold row. An implementer can therefore ship a RunE that recomputes Allow/Block from res.Verdicts, pass every planned verification, and false-exit-0 on stale-SHA (gate.go:209, the lola-f4a8 pin), round-mismatch, and REJECT/hard_block Blocks — violating R3's falsification ('exit code disagrees with PanelGateDecision's Action') undetected. Bounded blast radius (mindspec complete still enforces), but it is precisely the drift class the spec exists to kill."
+    },
+    {
+      "id": "F1-3",
+      "severity": "medium",
+      "claim_attacked": "Bead 4 step 3 exit-code contract",
+      "finding": "PanelGateDecision has a third action: Warn (abandoned panel, missing ref after merge, transient git error — gate.go legs 3/5/5b). The plan pins exit 0 on Allow and guard failure on Block but never says what tally does on Warn; the natural if/else implementation treats Warn as Block, making tally exit non-zero on an abandoned panel with a misleading re-panel recovery line, which downstream skill prose will read as a halt. internal/complete treats Warn as advisory-and-proceed (panel_advisory.go:204–212). The Warn row in the R7a contract table pins only the rendered Action, not the exit mapping."
+    },
+    {
+      "id": "F1-4",
+      "severity": "low",
+      "claim_attacked": "R7b config-free leaf — go list -deps assertion",
+      "finding": "The assertion matches the spec's own falsification exactly (only internal/config is pinned), and the adjacent `go build ./...` closes the go-list-fails-silently false-green. Residual gap: the plan's stated invariant is 'import-clean of internal/config (and of git)', but git-freeness is never asserted — a Create that imported internal/executor or shelled out via os/exec would pass every listed gate. Cheap hardening (non-blocking, since the spec pins only config): extend the grep to `internal/(config|executor)`. Test-only imports are outside go list -deps but harmless to the leaf invariant."
+    },
+    {
+      "id": "F1-5",
+      "severity": "info",
+      "claim_attacked": "R5 identical-severity claim (attack failed — claim held)",
+      "finding": "Verified against the real resolver: normalizeImpactedDomains (ownership_resolve.go:72) errors only on path-like zero-owner and path-like multi-owner entries; bare names (Rules 1–2) are kept verbatim with no error, and Bead 2's call (nil exec, \"\" ownerRef) is byte-identical to plan.go:142. Since plan-approve already runs this exact call over the spec's own Impacted Domains, any spec that passes plan-approve today passes the new spec-approve check by construction. The single 'must pass ValidateSpec' fixture outside the validate package (internal/harness/scenario_spec_lifecycle.go:143) uses a bare-name domain and a link-free touchpoints section, so it survives Bead 2; no doctor/CI surface sweep-validates old specs."
+    }
+  ]
+}

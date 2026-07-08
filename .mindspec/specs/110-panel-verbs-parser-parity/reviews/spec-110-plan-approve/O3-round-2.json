@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "No regression in the spec-coverage lens. The R1-R8->bead map is unchanged (that section falls outside every diff hunk) and still exact; all 12 ACs + every Validation Proof still trace to a check present in the amended beads, and I confirmed each new test name (TestCreate_BRIEFMarkerEdgeCases, TestPanelCreate_RejectsUnsafeSlugAndControlBytes, TestPanelTally_AggregatesConcreteChangesRequired) is wired into the owning bead's verification. The added hardening stays within remit: slug validation + control-byte escaping harden EXISTING specced behavior (create's dir build, tally's ADR-0035 recovery line) and align with cited ADR-0035, not new capability; the R4 payload-schema doc is within R4's 'agent-neutral surface runners target' intent (documents the existing verdictJSON contract); tally Warn=exit-0 faithfully mirrors the authoritative gate (verified panel_advisory.go:204-212); the filename-form regex widening is a within-R6 correctness fix. All four Non-Goals still hold (the escaping is output-safety, not the forbidden panel-state signing). One edge note below, non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O3-R2-1",
+      "severity": "low",
+      "title": "BRIEF machine-managed region now also holds a fixed verdict-output boilerplate block -- tensions with R1's 'only the machine-derived fields' but is a benign, well-motivated refinement",
+      "detail": "Spec R1 pins the machine-managed BRIEF region to 'a delimited region holding only the machine-derived fields (slug, round, branch, resolved commit SHA)'. The fix (Bead 1 step 2/4, Bead 5 step 1) moves the fixed '## Your job' / verdict-JSON instruction block INTO that region so there is exactly one verdict instruction per BRIEF (verb-owned, not skill-re-authored), retiring the drift risk G3 flagged. This is the closest thing to scope expansion in the delta: the region now holds more than R1's literal four-field enumeration. Judged benign and within intent, not a coverage regression: (1) the added content is fixed/non-panel-specific, so it creates none of the stale-SHA hazard R1's 'only' clause guards; (2) it violates no R1 falsification (skill-authored body summary/files/asks/lens still untouched, round+SHA still co-bump); (3) it serves R4's portability contract and the ADR-0040 mechanize-the-deterministic ratchet; (4) Bead 5 correctly removes the now-duplicate skill instruction. Flagging so the tally can weigh the R1 letter; I do not consider it blocking.",
+      "hard_block": false
+    },
+    {
+      "id": "O3-R2-2",
+      "severity": "info",
+      "title": "R4 payload-schema extension and the strengthened AC7 assertions are within R4's remit, not creep",
+      "detail": "The fix extends the R4 workflow schema doc (and TestPanelSchemaDoc_MatchesConstants) beyond filenames to the verdict PAYLOAD contract: the verdict enum (APPROVE/REQUEST_CHANGES/REJECT), top-level hard_block as a sibling of verdict (never per-finding), and which fields feed the gate vs presentation. Spec R4's heading is naming-focused and its falsification only pins filename/pattern/consolidated-name consistency, but R4's body frames the doc as 'the agent-neutral surface other runners target' -- a runner writing verdict files needs the payload shape. The payload (verdict + hard_block) already exists in panel.verdictJSON; documenting and drift-testing it adds no code behavior, gate, or requirement. AC7's original filename/verdict-file/consolidated checks are all still performed; the enum/hard_block assertions are additive. Within remit.",
+      "hard_block": false
+    },
+    {
+      "id": "O3-R2-3",
+      "severity": "info",
+      "title": "Filename-form regex widening partly addresses my round-1 O3-1 and is parity-safe",
+      "detail": "My round-1 O3-1 noted the R6 extractor matched any anchored [ADR-####](path) link in the section rather than strictly leading '- [...](...):' bullets (benign). The fix (F1.1) widens the regex to `\\[(ADR-\\d{4})[^\\]]*\\]\\([^)]+\\)` to also capture the filename-form anchors merged specs actually write (e.g. [ADR-0031-doc-sync-gate.md](...)), which the narrower form would have MISSED -- a genuine under-coverage fix for R6's 'resolve each anchored touchpoint'. It stays backward-compatible with 110's own bare-ID anchors ([ADR-0037](...)), still ignores bare-prose mentions, and adds test cases (a2 filename-form-missing fails, a3 filename-form-existing passes) pinning parity-safety. My round-1 breadth observation is unchanged and remains benign. No new false-positive risk introduced.",
+      "hard_block": false
+    },
+    {
+      "id": "O3-R2-4",
+      "severity": "info",
+      "title": "tally Warn=exit-0 correctly fills R3's implicit Warn case; grounding verified",
+      "detail": "Spec R3 states exit 0 on Allow / non-zero on Block but is silent on Warn. The fix maps Warn -> exit 0 + advisory to stderr, citing parity with internal/complete's panel_advisory. I verified panel_advisory.go:127-129/204-212: complete treats panel.Warn as non-blocking advisory ('the gate proceeds... advisory only'). Since the spec Goal requires the verbs render 'the same PASS/BLOCK the complete-gate computes', Warn=exit-0 is the faithful (not creeping) interpretation -- a non-zero Warn would DIVERGE from the authoritative gate. The tallyExitAction-derives-from-d.Action-alone discipline plus the stale-SHA/hard_block exit rows strengthen AC4 against the raw-count-reimplementation false-PASS class. Within R3 remit.",
+      "hard_block": false
+    }
+  ]
+}

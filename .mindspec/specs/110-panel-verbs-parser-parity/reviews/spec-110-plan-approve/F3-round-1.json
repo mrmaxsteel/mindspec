@@ -1,0 +1,57 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.83,
+  "rationale": "Test discipline is strong (anchored PASS greps, negative assertions, a dedicated single-home contract test), but four checks can go green with the work wrong. (1) Bead 2's new tests scan r.Issues for the diagnostic code without asserting SevError; ApproveSpec blocks only on HasFailures(), which counts SevError only (internal/validate/validate.go:43-45), so a warning-severity implementation passes every B2 gate while `spec approve` enforces nothing — R5's 'identical severity' contract, unverified. (2) B2's `~/.local/bin/mindspec validate spec 110-…` runs the installed binary, not the bead's build — it cannot fail. (3) B4's R7a contract table ('Allow/Block/Warn') is one row per action; the renderers call PanelGateDecision internally, so only a branch-spanning facts table (gate.go branches 2-10) catches a relocated branch. (4) B3's table omits round-mismatch and malformed-registration — branches the deleted matrix carries. Plus prose-only deliverables: tally's concrete_changes_required re-decode, the legacy-BRIEF path.",
+  "concrete_changes_required": [
+    "Bead 2, steps 3-4: in both new ValidateSpec tests, the failing cases must assert the issue's Severity is SevError (or vr.HasFailures() == true) and the tolerated cases assert !vr.HasFailures() — scanning r.Issues for the code alone passes if the check is added via AddWarning, and ApproveSpec blocks only on SevError (internal/validate/validate.go:43-45), which is exactly R5's 'identical severity' contract going unverified.",
+    "Bead 2, Verification: replace `~/.local/bin/mindspec validate spec 110-panel-verbs-parser-parity` with a branch build, e.g. `go build -o /tmp/ms110b2 ./cmd/mindspec && /tmp/ms110b2 validate spec 110-panel-verbs-parser-parity` (mirroring Bead 4's e2e). The installed binary is not pinned to the bead's code; as written the check passes with B2 unimplemented and cannot fail if the new extraction is too strict — its stated falsification purpose.",
+    "Bead 4, step 4: TestPanelVerbs_DecisionIsPanelGateDecision's facts table must span the decision surface — malformed-registration, round-mismatch, stale-SHA, dirty-tree, incomplete, REJECT/hard_block, sub- and at-threshold, plus the Warn variants (abandoned, missing-ref, transient GitErr) — i.e. gate.go branches (2)-(10), ideally a fixture table shared with Bead 3's test. Since renderPanelVerify/renderPanelTally call PanelGateDecision internally, a 3-row Allow/Block/Warn table is tautological on every untested fact shape and misses a decision branch relocated into an adapter (e.g. verify special-casing incomplete to a friendly exit-0 'PENDING').",
+    "Bead 3, step 3: add round-mismatch and malformed-panel.json (Res.PanelErr) rows — and missing-ref/transient-GitErr Warn rows — to TestPanelStateVerdict_DelegatesToPanelGateDecision's table. The old verdict() matrix has a RoundMismatch branch (internal/instruct/panelstate.go:113) that step 1 explicitly deletes, yet no table row exercises it, so a botched delegation of exactly the deleted branches is uncaught. Also specify a falsifiable mechanism for the 'structurally assert verdict() no longer carries its own threshold/staleness logic' clause (e.g. read panelstate.go in the test and assert the old matrix's distinctive literals are gone and panel.PanelGateDecision is called), or drop the claim from AC6 — as written it is prose that cannot fail.",
+    "Bead 4: cover the tally concrete_changes_required aggregation with a failing check — the pure renderer receives pre-read []slotChanges, so the file re-decode wiring (latest-round REQUEST_CHANGES/REJECT verdicts → re-decode filepath.Join(reg.Dir, v.File)) is exercised by no test and no e2e assertion; if it reads the wrong round or silently drops files, every gate stays green. Extend TestPanelTally_ExitCodeTracksDecision (assert a seeded change string renders, attributed to slot) or add a grep to the manual e2e.",
+    "Bead 1, step 3: add the legacy-BRIEF case (existing BRIEF.md without the delimited markers → fresh region prepended, entire existing body preserved byte-identical) to TestCreate_WritesRegistrationAtomically or a sibling test — step 2 specifies the branch but no test exercises it.",
+    "Bead 1, step 5: pin how TestPanelSchemaDoc_MatchesConstants locates the documented examples — e.g. extract every backtick-quoted `*-round-*.json` token (and the consolidated/registration filenames) from the schema region and assert each conforming example matches verdictFileRE while the doc's explicitly-marked nonconforming `-round-0` example does not. As sketched, 'doc contains panel.FileName' passes on any doc mentioning panel.json, and a `-round-0` literal held in the test (not extracted from the doc) tests the regex, not the doc."
+  ],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "major",
+      "summary": "B2 severity false-green: tests assert diagnostic-code presence in r.Issues but never SevError; HasFailures() counts only SevError (validate.go:43-45), so an AddWarning implementation passes both new tests, `go test ./internal/approve` (existing tests only), and the happy-path validate check — while `spec approve` silently stops enforcing R5/R6. This is the spec's own falsification clause ('identical severity') with no test bound to it."
+    },
+    {
+      "id": "F3-2",
+      "severity": "major",
+      "summary": "B2 stale-binary false-green: `~/.local/bin/mindspec validate spec 110-…` is not pinned to the bead's build; it passes with B2 missing entirely and cannot fail if the extraction over-rejects 110's bare-prose ADR-0040/0030 mentions — the very regression this checkbox exists to catch."
+    },
+    {
+      "id": "F3-3",
+      "severity": "major",
+      "summary": "B4 R7a contract table too coarse: renderPanelVerify/renderPanelTally compute PanelGateDecision internally, so asserting their Action equals PanelGateDecision(facts).Action is tautological except on fact shapes where an adapter adds logic. A 3-row Allow/Block/Warn table leaves gate.go branches (2)-(10) unpinned; the anti-drift pin only holds with a branch-complete table."
+    },
+    {
+      "id": "F3-4",
+      "severity": "moderate",
+      "summary": "B3 delegation table omits round-mismatch (old matrix branch at panelstate.go:113) and malformed-registration, both among the branches step 1 deletes; and the 'structurally assert the matrix is gone' clause names no mechanism that can fail — an identical surviving copy passes the behavioral table."
+    },
+    {
+      "id": "F3-5",
+      "severity": "moderate",
+      "summary": "Delivered by no test: tally's concrete_changes_required file re-decode (renderer takes pre-read changes; wiring untested, e2e doesn't assert it); B1's legacy marker-less BRIEF branch; verify's slug-not-found error path (prose: 'not a panic, not a silent pass'). The first two have specified behavior that can regress green."
+    },
+    {
+      "id": "F3-6",
+      "severity": "minor",
+      "summary": "B1 TestPanelSchemaDoc_MatchesConstants binds to the right symbols (panel.FileName panel.go:34, verdictFileRE tally.go:33, ConsolidatedName tally.go:38) but 'contains panel.FileName' is satisfiable by any mention of panel.json, and the -round-0 negative tests the regex, not the doc, unless the example is extracted from the doc."
+    },
+    {
+      "id": "F3-7",
+      "severity": "minor",
+      "summary": "B5/AC11 claims the Consolidate judgment section survives, but the greps check only '## Artifact gates' and 'Slot lens defaults'; add a Consolidate grep. Otherwise B5's greps are genuinely falsifiable (negative greps on '| Condition | Action |' and '\"reviewed_head_sha\"' fail on a botched trim; diff -q pins the mirrors)."
+    },
+    {
+      "id": "F3-8",
+      "severity": "info",
+      "summary": "Verified sound: per-test anchored PASS greps cannot vacuous-pass (a missing test prints no PASS line); B3's regression pattern 'PanelState|PanelRounds|renderPanel' matches real tests via the PanelState alternate (TestPanelStateEntry_Verdict, TestRenderPanelState_*), though the other two alternates are dead; go list leaf check asserted on first and last bead; B2's no-coverage-diagnostic negative assertion is real and bound to Issue codes."
+    }
+  ]
+}

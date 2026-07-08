@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "B1/B4 give 111 a solid start: stable panel directory creation, round/SHA co-bump, filename patterns, verify read-only exit 0, tally Allow/Block exit behavior, and recovery-line requirements. B5 also preserves the intended judgment kernels while removing duplicated mechanics. The remaining downstream contract gap is the on-disk verdict JSON payload. The plan documents verdict filenames, but not the runner-neutral JSON keys/enums and hard_block placement that non-Claude runners must emit and tally/gate consume. Today that shape is still mostly in BRIEF/skill prose, including an ambiguous finding-level hard_block sentence while panel.Tally reads top-level hard_block. That forces spec 111 to re-read prose or copy code comments.",
+  "concrete_changes_required": [
+    "Expand Bead 1's R4 workflow schema doc and TestPanelSchemaDoc_MatchesConstants to document and pin the verdict JSON payload contract, not just the filename pattern: required top-level verdict enum, top-level hard_block semantics, reviewer_id/confidence/rationale/concrete_changes_required/findings expectations, and which fields feed gate decisions versus tally presentation.",
+    "Ensure Bead 5's trimmed ms-panel-run/BRIEF stub keeps a single non-conflicting verdict JSON instruction that matches that schema, especially top-level hard_block placement; remove or clarify any wording implying nested finding-level hard_block is gate-consumed unless the implementation maps it to the top level."
+  ],
+  "findings": [
+    {
+      "id": "G3-1",
+      "severity": "major",
+      "title": "Verdict JSON payload remains a prose-only contract",
+      "details": "B1 step 4 documents panel.json, <slot>-round-<N>.json, and consolidated-round-<N>.md names, but not the content schema of the verdict JSON files a non-Claude runner must write. B4 then relies on decoding concrete_changes_required, and panel.Tally consumes top-level verdict/hard_block. Without documenting/pinning those fields in the workflow artifact schema, spec 111 cannot implement an agent-neutral runner from the artifact+CLI contract alone.",
+      "hard_block": false
+    },
+    {
+      "id": "G3-2",
+      "severity": "minor",
+      "title": "hard_block placement is ambiguous across skill prose and parser behavior",
+      "details": "Existing ms-panel-run prose says an artifact-gate finding may set hard_block, while internal/panel/tally.go reads hard_block only from the top-level verdict JSON object. B5 keeps Artifact gates and removes mechanics, but the plan does not require this ambiguity to be resolved in the retained BRIEF/stub text. That can make ms-panel-run/ms-panel-tally coherent for humans yet still non-portable for 111's runner.",
+      "hard_block": false
+    }
+  ]
+}

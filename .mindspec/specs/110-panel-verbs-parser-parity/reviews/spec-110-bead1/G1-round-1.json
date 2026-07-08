@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "Scratch overlay probes against internal/panel.Create found the happy-path robustness mostly solid: nested exact markers reject without touching existing panel.json/BRIEF.md, CRLF and CR-only bodies are preserved, large BRIEFs survive repeated re-panels, and verdict files stay untouched. Two hostile marker cases fail: whitespace-mangled marker comments are silently treated as legacy and rewritten, and literal marker text inside a fenced body blocks re-panel because the scanner counts marker strings globally. The new schema doc also says verdict is an enum, but tally.go accepts any non-empty verdict string as a valid verdict and counts it toward completeness. These are contract-level robustness issues for the portable artifact surface, so bead 1 should not pass unchanged.",
+  "concrete_changes_required": [
+    "Make BRIEF marker parsing distinguish real managed-header markers from marker-like text in preserved body content; at minimum, do not let a fenced-code body literal corrupt re-panel.",
+    "Reject whitespace-mangled panel-header marker comments as corrupt without writing either panel.json or BRIEF.md, or document and test the exact-marker-only legacy behavior explicitly if that is intended.",
+    "Align the verdict payload contract with tally.go: either enforce APPROVE/REQUEST_CHANGES/REJECT as the only valid parsed verdicts, or change the schema doc/header contract to state that unknown non-empty verdicts are parsed as present but non-approving/non-rejecting."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "file": "internal/panel/create.go",
+      "line": 186,
+      "issue": "spliceBriefHeader counts exact marker strings across the entire BRIEF. A fenced code block in the skill-authored body containing <!-- mindspec:panel-header --> makes openCount > 1, so Create rejects a valid re-panel even though the managed header itself is well-formed.",
+      "evidence": "Scratch overlay test TestSpec110ProbeCreateRobustness/literal_marker_text_in_fenced_body_does_not_block_repanel failed with found 2 opening and 1 closing."
+    },
+    {
+      "severity": "medium",
+      "file": "internal/panel/create.go",
+      "line": 189,
+      "issue": "Whitespace-mangled marker comments are treated as no markers and trigger the legacy prepend path, writing both panel.json and BRIEF.md around a semantically corrupt existing header.",
+      "evidence": "Scratch overlay test TestSpec110ProbeCreateRobustness/whitespace-mangled_marker_text_is_not_silently_treated_as_legacy showed Create prepending a new managed header above <!-- mindspec:panel-header  -->."
+    },
+    {
+      "severity": "medium",
+      "file": "internal/panel/tally.go",
+      "line": 284,
+      "issue": "The schema doc says verdict is one of APPROVE, REQUEST_CHANGES, REJECT, but Tally only rejects empty verdicts; any other string is accepted into Verdicts and counts toward completeness.",
+      "evidence": ".mindspec/domains/workflow/interfaces.md:87 documents an enum; tally.go:284-293 uppercases any non-empty value and appends it as a parsed Verdict."
+    }
+  ]
+}
