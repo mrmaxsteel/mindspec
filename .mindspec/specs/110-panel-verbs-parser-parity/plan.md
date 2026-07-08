@@ -7,8 +7,16 @@ adr_citations:
     - ADR-0034
     - ADR-0032
     - ADR-0039
+approved_at: "2026-07-08T22:02:01Z"
+approved_by: user
+bead_ids:
+    - mindspec-fbel.1
+    - mindspec-fbel.2
+    - mindspec-fbel.3
+    - mindspec-fbel.4
+    - mindspec-fbel.5
 spec_id: 110-panel-verbs-parser-parity
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []
