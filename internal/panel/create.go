@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -79,6 +80,21 @@ type CreateInput struct {
 // computed in full — including validating any existing BRIEF.md's
 // marker state — before either is touched on disk. Create never reads,
 // writes, or deletes any `<slot>-round-<N>.json` verdict file.
+//
+// panel.json is written as a full-struct overwrite: Create never reads
+// an existing panel.json first (unlike its read-before-splice
+// BRIEF.md handling below). A re-panel of a directory whose panel.json
+// carries a hand-set `abandoned`/`abandon_reason` (the /ms-panel-tally
+// Abandon procedure) therefore CLEARS those fields and revives the
+// panel into an active round — this is the known, intentional
+// behavior of calling Create again, not an oversight
+// (TestCreate_RepanelOfAbandonedPanelRevivesIt pins it).
+//
+// The two writes below (panel.json, then BRIEF.md) are sequential and
+// not crash-atomic as a pair: a process death between them leaves
+// panel.json bumped and BRIEF.md stale. The next Create call recomputes
+// and rewrites both from scratch, so this is a self-healing bound, not
+// a corruption risk — no temp-file+rename is used here.
 //
 // On a first create (no BRIEF.md yet at dir/BRIEF.md), the header is
 // written followed by a fresh briefStubBody for the skill to fill in.
@@ -178,27 +194,113 @@ func renderBriefHeader(slug string, round int, target, sha string) string {
 	return b.String()
 }
 
+// markerLookalikeRE loosely matches a line that RESEMBLES one of the
+// two managed-region markers — the `<!--`/`-->` HTML-comment
+// delimiters bracketing "mindspec:panel-header", optionally prefixed
+// with "/" for the closing form — but tolerates internal whitespace
+// drift (extra spaces, a tab) that keeps it from being an EXACT match
+// of briefHeaderOpen/briefHeaderClose. It exists only to distinguish a
+// mangled marker from genuinely marker-free legacy content (G1.2): a
+// line that matches this pattern without exactly matching either
+// marker constant is a corrupt marker, never legacy body text.
+var markerLookalikeRE = regexp.MustCompile(`^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
+
+// scanNonFenceLines calls fn once per line of s, in file order,
+// skipping every line inside a fenced code block — a region bracketed
+// by lines whose trimmed content starts with "```" (a Markdown fence
+// used, e.g., to quote the header syntax for documentation). offset is
+// the byte offset of the line's first character in s; content is the
+// line with its terminator removed (a trailing "\r" is stripped too,
+// so CRLF files scan the same as LF ones).
+func scanNonFenceLines(s string, fn func(offset int, content string)) {
+	inFence := false
+	start := 0
+	for start <= len(s) {
+		lineEnd := len(s)
+		hasNL := false
+		if i := strings.IndexByte(s[start:], '\n'); i >= 0 {
+			lineEnd = start + i
+			hasNL = true
+		}
+		content := strings.TrimSuffix(s[start:lineEnd], "\r")
+		if strings.HasPrefix(strings.TrimSpace(content), "```") {
+			inFence = !inFence
+		} else if !inFence {
+			fn(start, content)
+		}
+		if !hasNL {
+			break
+		}
+		start = lineEnd + 1
+	}
+}
+
+// findMarkerLines returns the byte offsets of every GENUINE occurrence
+// of marker in s: a line, outside any fenced code block, whose content
+// is EXACTLY marker and nothing else — no leading or trailing text on
+// that line (G1.1). A marker string reproduced inside a fenced code
+// block to document the header syntax, or quoted mid-line in prose or
+// an inline code span, is not genuine and is never counted — this is
+// what lets a BRIEF body quote the marker for documentation without
+// jamming the next re-panel with a false duplicated-markers rejection.
+func findMarkerLines(s, marker string) []int {
+	var offsets []int
+	scanNonFenceLines(s, func(offset int, content string) {
+		if content == marker {
+			offsets = append(offsets, offset)
+		}
+	})
+	return offsets
+}
+
+// hasMarkerLookalike reports whether s contains a line, outside any
+// fenced code block, that resembles a managed-region marker
+// (markerLookalikeRE) without being an exact match — a marker mangled
+// by stray whitespace (G1.2).
+func hasMarkerLookalike(s string) bool {
+	found := false
+	scanNonFenceLines(s, func(_ int, content string) {
+		if found {
+			return
+		}
+		if markerLookalikeRE.MatchString(content) && content != briefHeaderOpen && content != briefHeaderClose {
+			found = true
+		}
+	})
+	return found
+}
+
 // spliceBriefHeader replaces the delimited machine-managed region in
 // an existing BRIEF.md with header, preserving every other byte
 // exactly. It returns an error — writing nothing — when the marker
-// state is ambiguous or corrupt.
+// state is ambiguous or corrupt: more or fewer than one genuine
+// opening/closing marker (findMarkerLines), a closing marker that
+// precedes the opening one, or a marker mangled by stray whitespace
+// where a naive scan would otherwise read the file as marker-free
+// (hasMarkerLookalike, G1.2) — reject-as-corrupt rather than silently
+// prepending a second header alongside the mangled one.
 func spliceBriefHeader(existing, header string) (string, error) {
-	openCount := strings.Count(existing, briefHeaderOpen)
-	closeCount := strings.Count(existing, briefHeaderClose)
+	opens := findMarkerLines(existing, briefHeaderOpen)
+	closes := findMarkerLines(existing, briefHeaderClose)
 
-	if openCount == 0 && closeCount == 0 {
+	if len(opens) == 0 && len(closes) == 0 {
+		if hasMarkerLookalike(existing) {
+			return "", fmt.Errorf(
+				"found a %s/%s marker mangled by stray whitespace, with no exact match — refusing to guess; fix or remove it by hand",
+				briefHeaderOpen, briefHeaderClose)
+		}
 		// Legacy: no markers at all. Prepend a fresh region; the whole
 		// existing file is kept byte-identical below it.
 		return header + "\n\n" + existing, nil
 	}
-	if openCount != 1 || closeCount != 1 {
+	if len(opens) != 1 || len(closes) != 1 {
 		return "", fmt.Errorf(
-			"expected exactly one matching %q/%q pair (or neither), found %d opening and %d closing",
-			briefHeaderOpen, briefHeaderClose, openCount, closeCount)
+			"expected exactly one genuine %q/%q marker pair (or neither), found %d opening and %d closing",
+			briefHeaderOpen, briefHeaderClose, len(opens), len(closes))
 	}
 
-	openIdx := strings.Index(existing, briefHeaderOpen)
-	closeIdx := strings.Index(existing, briefHeaderClose)
+	openIdx := opens[0]
+	closeIdx := closes[0]
 	if closeIdx < openIdx {
 		return "", fmt.Errorf(
 			"closing marker %q precedes opening marker %q", briefHeaderClose, briefHeaderOpen)

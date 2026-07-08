@@ -66,9 +66,22 @@ below reject.
 
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
-exactly one `panel.json` — the literal filename `panel.FileName` —
-written in full by `mindspec panel create` (`panel.Create`, Bead 1) and
-never hand-edited.
+exactly one `panel.json` — the literal filename `panel.FileName`. The
+steady-state intent, from Bead 4 onward, is that `mindspec panel
+create` (`panel.Create`, this bead) is the sole writer, in full; before
+Bead 4 lands that CLI verb, `/ms-panel-run` step 0 hand-authors it
+directly. The one SANCTIONED hand-edit path, in either era, is
+`/ms-panel-tally`'s Abandon procedure, which sets `abandoned` /
+`abandon_reason` by hand — every other field is machine-written once
+Bead 4 lands.
+
+`panel.Create` writes `panel.json` as a full-struct overwrite: it never
+reads the existing file first, unlike its read-before-splice handling
+of `BRIEF.md`'s machine-managed header (Maintenance Notes below). A
+re-panel of an abandoned panel therefore deliberately clears
+`abandoned`/`abandon_reason` and revives it into an active round — this
+is the KNOWN, intentional behavior of calling `Create` again, not an
+oversight (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
 
 **Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
 file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).
@@ -84,16 +97,26 @@ consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
 **Verdict JSON payload.** Every verdict file's top-level shape:
 
-- `verdict` (required): one of `APPROVE`, `REQUEST_CHANGES`, `REJECT`.
+- `verdict` (required): a non-empty string. A reviewer MUST write one
+  of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
+  acts on. `panel.Tally`'s parser (`internal/panel/tally.go`) does not
+  itself enforce this enum: any OTHER non-empty string parses as
+  present (it counts toward `expected_reviewers` completeness) but is
+  neither an APPROVE nor a REJECT, so it can never help reach the
+  approve threshold and never triggers a REJECT halt. An empty or
+  whitespace-only `verdict`, or invalid JSON, is malformed and counts
+  as MISSING, not present.
 - `hard_block` (optional boolean): a top-level sibling of `verdict`.
 
-The gate decision (`panel.PanelGateDecision`) parses only these two
-top-level keys. A reviewer additionally writes `reviewer_id`,
-`confidence`, `rationale`, `concrete_changes_required`, and `findings`
-as context for `mindspec panel tally`'s presentation-only aggregation
-— none of those five feed the gate decision. `hard_block` is read only
-at the top level as a sibling of `verdict`, never nested under any
-other reviewer-authored field.
+`panel.Tally` parses only these two top-level keys from each verdict
+file; `panel.PanelGateDecision` then acts on the resulting tally —
+REJECT/`hard_block` halts the gate, otherwise the APPROVE count is
+checked against the N-1 threshold. A reviewer additionally writes
+`reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`,
+and `findings` as context for `mindspec panel tally`'s
+presentation-only aggregation — none of those five feed the gate
+decision. `hard_block` is read only at the top level as a sibling of
+`verdict`, never nested under any other reviewer-authored field.
 
 Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a
