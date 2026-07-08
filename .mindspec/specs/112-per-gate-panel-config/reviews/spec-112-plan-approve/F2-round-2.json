@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Fix delta is decomposition-clean. Structure/DAG unchanged: 3 beads, B1 and B2 parallel roots, B3 depends on both, chain 2. Bead 1 stays 7 steps — the delta grows step 1/7 prose, adds no step. Merge signal: cmd/mindspec/config.go and workflow/interfaces.md are now each touched by B1+B3 — 2 beads, both riding the serialized B1->B3 edge — and the parallel pair B1||B2 stays fully file-disjoint (B2: internal/panel/*, ADR-0037, workflow/architecture.md); no file reaches 3 beads. Folding the deref into B1 is right: I probed %d-on-*int — passes go build AND go vet, prints the address — so the round-1 shape (deref in B3) left a silently-red window only the now-added `go test ./cmd/mindspec` gate can falsify. Alternatives are all worse: a micro-bead violates trivial-work and deepens the chain to 3; avoiding pointerization re-opens approved design; B2 breaks its leaf invariant. Scope fence verified: config.go:149 is the sole external Reviewer.Count reader. My round-1 R5-map nit was addressed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2R2-1",
+      "severity": "info",
+      "title": "Bead 1 step count and DAG verified unchanged at 2809c8a6",
+      "detail": "Bead 1 has exactly steps 1-7 (delta expanded step 1 with the deref half and step 7 with the workflow doc ride-along; no new step). Frontmatter: B1 depends_on [], B2 depends_on [], B3 depends_on [1,2] — identical to e06c0b76. Longest chain 2, 3 beads, 2/3 roots (0.67 parallelism). All decomposition heuristics still pass."
+    },
+    {
+      "id": "F2R2-2",
+      "severity": "info",
+      "title": "No merge-signal violation from the new B1+B3 file overlaps",
+      "detail": "cmd/mindspec/config.go and .mindspec/domains/workflow/interfaces.md are each now in two beads' key_file_paths (B1 and B3), joining the pre-existing B2+B3 workflow/architecture.md overlap. Every shared file sits on a dependency edge (B1->B3 or B2->B3), so the later bead always starts from a tree containing the earlier edit — no conflict window. The only parallel pair, B1||B2, is fully file-disjoint. Max beads-per-file is 2; the >=3-bead merge-signal threshold is not approached."
+    },
+    {
+      "id": "F2R2-3",
+      "severity": "info",
+      "title": "Empirically confirmed: %d on *int passes build+vet, prints address — the added cmd test gate is the sole falsifier",
+      "detail": "Probe (Go, this machine): fmt.Printf(\"count: %d\", r.Count) with Count *int compiles, passes go vet, and prints e.g. 'count: 33103105024032'. So O1's must-fix was real: without the fold, B1's package-scoped gate stays green while TestConfigShow_EmitsPanelModelsLoop breaks. The fix's `go test ./cmd/mindspec` line in Bead 1 Verification plus the CountValue() deref in step 1 close it atomically."
+    },
+    {
+      "id": "F2R2-4",
+      "severity": "info",
+      "title": "Fold-into-B1 beats all alternatives; scope fence is accurate",
+      "detail": "Alternatives assessed: (a) deref in B3 (round-1 shape) — silent cross-bead red window; (b) micro-bead between B1/B3 — trivial-work violation, chain deepens to 3 (the advisory cap), zero parallelism gain; (c) drop pointerization for a sidecar flag — re-opens a design round 1 approved and *int is the idiomatic absent-vs-explicit-zero discriminator; (d) fold into B2 — breaks B2's only-internal/panel invariant and B1||B2 disjointness. Atomicity principle holds: the bead making the breaking type change owns keeping its consumers green in one commit; the workflow doc-sync cost is paid via the one-line interfaces.md ride-along checked by the commit-scoped grep. Verified config.go:149 is the ONLY external Reviewer.Count consumer (cmd/mindspec/report.go:172,236 r.Count iterates journal.Consolidate() reports; trace.go s.Count is eventStats) — the fence's do-not-touch note is correct."
+    },
+    {
+      "id": "F2R2-5",
+      "severity": "info",
+      "title": "Round-1 F2 nit addressed",
+      "detail": "The Requirement->bead map now states R5's supersession reporting half (substitution.in_force) surfaces in Bead 3 while Bead 1 lands schema+validation — exactly the elision I flagged non-blocking in round 1. Disposition: ADDRESSED."
+    }
+  ]
+}

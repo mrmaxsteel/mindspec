@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.75,
+  "rationale": "Attacked five load-bearing claims with constructed configs, mechanically enumerating the lens rule. (1) Interleaved lens rule: the worked example checks out (cursor 0..8 mod 6 -> Fable{author,empirical,pin}, Opus{adversarial,contract,integration}, GPT{author,empirical,pin}), and both guarantees are theorems: strict S/H alternation with even length covers wraparound, and an entry's slots are contiguous, so every lens-less count>=2 entry spans both classes and >=6 lens-less slots cover all six. Edge cases (count=1 gate refused by the sum<2 floor, single entry, all-explicit, 7+ entries, mixed explicit) all deterministic. WITHSTOOD as mechanism -- but AC5 and every falsification clause are rotation-invariant: an implementation starting the cursor at any index 1..5 passes ALL proofs while contradicting the worked example; cursor start is pinned only by prose. (2) Unconfigured adhoc=bead: withstood as stated, but partially-configured adhoc is ambiguous (per-field chain vs all-or-nothing) and a bead-inherited integer threshold escapes both R4 range refusals -- I constructed a loadable, never-passable adhoc gate. (3) substitutes precedence: withstood; the supersession cliff is documented design. (4) note inertness: withstood. (5) gates-absent=109: withstood in R2's precise scoping. Also: R6's parse-lenient gate values reach R7's error-on-unknown resolver with caller behavior unspecified. Three tightenings; none architectural.",
+  "concrete_changes_required": [
+    "R3/AC5 (lens rule falsifiability): pin the cursor's initial position. AC5's assertions (all-six coverage, both-classes-per-entry, determinism) hold for ANY cursor start over the alternating ordering -- verified by enumeration -- so an implementation starting at index 3 passes every AC and falsification clause yet yields Fable{adversarial,contract-stability,integration}, contradicting R3's worked example. Fix: state the cursor starts at author-of-record (index 0, assign-then-advance) and add the literal 9-slot expected lens sequence [author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration, author-of-record, empirical-prober, codebase-pin] as an AC5 assertion or R3 falsification clause.",
+    "R3/R4 (partial adhoc + inherited-threshold hole): pin whether adhoc's own partial config inherits its missing half per-field from bead's resolved values (the chain's natural reading) or falls to bead only when adhoc is fully unconfigured (AC4's phrasing); the '(inheriting the global reviewers)' parenthetical contradicts the chain for adhoc. Then close the refusal gap: R4's per-gate range check covers a gate's OWN threshold and the cross-field check covers only an 'inherited global integer expression', so config {gates: {bead: {reviewers sum 6, approve_threshold: \"6\"}, adhoc: {reviewers sum 2, no threshold}}} inherits bead's \"6\" into a sum-2 gate -- loadable by the letter of R4 yet unsatisfiable (never-passable), exactly the degenerate class R4 exists to refuse. Extend the cross-field check to ANY inherited integer expression (global or bead-inherited-by-adhoc).",
+    "R7 (unknown recorded gate): specify advisory behavior when panel.json carries a recorded-but-unknown gate value -- constructible today since R6 makes the field parse-lenient and ms-panel-run step 0 hand-writes it (e.g. gate: \"speck_approve\", or \"final\" for \"final_review\"). R7's three buckets cover known-gate, bead-without-gate, and non-bead-without-gate only; the caller would invoke PanelGateExpectedReviewers(unknown) which R3 requires to ERROR, and nothing says whether the caller skips the note, falls back to global, or propagates the error into config show's scan / complete's advisory (which must not flip exit codes or panic per ADR-0035 and R8's exit-0-on-valid-config pin). Suggest: treat unknown like no-recorded-gate (skip when gates: configured, global compare otherwise), optionally surfacing the unexpected value per R6."
+  ],
+  "findings": [
+    {
+      "claim": "R3 interleaved global-cursor lens rule (worked example + coverage + both-classes guarantees)",
+      "status": "withstood (mechanism); refuted (falsifiability of the worked example)",
+      "detail": "Enumerated: 9x(3x3) all-lens-less matches the spec's exact assignment at cursor start 0; >=6 lens-less always covers all six lenses (consecutive cursor values hit all residues mod 6); every lens-less count>=2 entry spans structural+sharp (contiguous slots + strict alternation incl. 5->0 wraparound). Edge cases: single count-1 entry unreachable (R4 sum<2 floor); single count-2 entry gets author+empirical (both classes); all-explicit leaves cursor unconsumed with duplicate lenses legal; 7 count-1 entries cover all six then wrap; explicit-count-5-then-lens-less correctly yields author-of-record. However all ACs/falsifications are rotation-invariant: cursor-start is unpinned by any runnable proof (concrete change 1).",
+      "hard_block": false
+    },
+    {
+      "claim": "R3 unconfigured adhoc = bead's resolved mix",
+      "status": "withstood as stated; adjacent ambiguity refuted as 'fully specified'",
+      "detail": "Fully-unconfigured adhoc is deterministic and AC4/Validation-Proofs test it (byte-identical slots to --gate bead). But adhoc configured with reviewers-only or threshold-only has two defensible readings that differ observably in both resolved values and Load validity, and a bead-inherited integer threshold is checked by neither R4 range refusal (concrete change 2).",
+      "hard_block": false
+    },
+    {
+      "claim": "R5 substitution precedence: substitutes non-empty supersedes claude_sub_on_quota; one-step; global",
+      "status": "withstood",
+      "detail": "Attacks tried: (a) claude_sub_on_quota:true + substitutes:{gpt-5.5: claude-sonnet-5} with legacy family:codex entries -- a walled 'codex' reviewer has no map entry, so a codex wall becomes a runtime HALT where 109 semantics subbed claude; real cliff, but explicitly the documented design ('one policy in force at a time', remedy: map codex->claude), contradicting no falsification clause. Note the Goal example itself has this shape, though its global family list is unreachable (all four gates configured, adhoc->bead). (b) Mutual pair A->B,B->A with both walled -> HALT, correctly declared out of config scope. (c) Self-map/empty-side refused; effective-self-substitution via aliases (codex->gpt-5.5) is unknowable to config by design. Decidable-by-inspection holds: substitutes:{} empty means bool governs.",
+      "hard_block": false
+    },
+    {
+      "claim": "R1/R8 note field inertness",
+      "status": "withstood",
+      "detail": "No construction makes note affect validation or resolver output short of a non-string YAML value (necessarily a type error -- the one permitted check). Control-byte payloads are covered by R8's escaping pin; note is correctly absent from --gate --json resolver output. Two nits for other lenses: AC8's 'echoes verbatim' is pedantically inconsistent with control-byte escaping for a note containing ESC bytes, and no size cap exists (G2's acknowledged-gap territory).",
+      "hard_block": false
+    },
+    {
+      "claim": "R2 gates-absent => 109 byte-identity",
+      "status": "withstood (in the spec's precise scoping)",
+      "detail": "The broad paraphrase 'any gates-absent config behaves as 109' is refutable -- a gates-absent config using generalized {model: gpt-5.5} GLOBAL entries or non-empty substitutes has no 109 counterpart (and substitutes non-empty flips claude_sub_on_quota inert with gates absent) -- but R2's actual claims are correctly scoped to zero-config defaults, 109-era fixtures, resolver outputs, and gate decisions, all of which hold. gates: {} (explicit empty map) vs absent is forced to the len==0 reading by R2's own DefaultConfig-empty-gates falsification plus zero-config-equals-109-advisory-behavior, so the R7 carve-out trigger is self-consistent. Verified against 109's landed R2/R5/R8 text on origin/main.",
+      "hard_block": false
+    },
+    {
+      "claim": "R6 recorded gate field decision-inertness",
+      "status": "withstood",
+      "detail": "A wrong-but-known hand-stamped value (bead panel stamped spec_approve) only skews the advisory, never the decision; garbage values are parse-lenient and cannot set Registration.Err toward fail-open. The one gap this opens is the R7 unknown-value advisory path (concrete change 3), which is a completeness hole in R7, not an inertness violation.",
+      "hard_block": false
+    }
+  ]
+}

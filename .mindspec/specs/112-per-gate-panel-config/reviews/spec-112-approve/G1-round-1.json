@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "The schema is implementable as a conservative extension of 109's internal/config structs: Panel can gain Note/Gates, Reviewer can gain Model/Lens while preserving Family/Count, Substitution can gain Substitutes, and the three gate resolvers return creation-time defaults without importing config into internal/panel or reinterpreting thresholds. The R4 refusal matrix composes cleanly with 109 R5: global reviewers/threshold remain bounded by 109, while per-gate reviewer sums, gate-local thresholds, inherited global integer thresholds, closed gate keys, and substitute map shape add stricter checks only where 109 had no per-gate surface. No model/lens enum validation conflicts with 109's free-form model posture. The main implementation footgun is YAML presence tracking for optional count defaulting to 1 while explicit count <= 0 is refused; this likely needs custom unmarshalling or pointer/raw-node handling, but the spec and ACs make the intended behavior falsifiable.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G1-1",
+      "severity": "note",
+      "hard_block": false,
+      "summary": "Optional count defaulting requires YAML field-presence tracking.",
+      "details": "109 stores Reviewer.Count as int and rejects zero. 112 allows omitted count as 1 but refuses explicit 0/negative. A bead implementer must not rely on the plain zero value after yaml.Unmarshal; use custom unmarshalling, a pointer in an intermediate struct, or yaml.Node inspection."
+    },
+    {
+      "id": "G1-2",
+      "severity": "note",
+      "hard_block": false,
+      "summary": "Resolver signatures are sound and keep threshold interpretation single-homed.",
+      "details": "PanelGateExpectedReviewers and PanelGateReviewerSlots compute sums/slots; PanelGateApproveThresholdExpr returns the raw expression only. This preserves 109's single interpreter in internal/panel.Panel.ApproveThreshold and avoids a config-side decision dependency."
+    },
+    {
+      "id": "G1-3",
+      "severity": "note",
+      "hard_block": false,
+      "summary": "R4 refusals do not conflict with 109 R5 refusals.",
+      "details": "109 still rejects invalid global thresholds, invalid global reviewer counts, and global reviewer sums below 2. 112 adds per-gate equivalents plus inherited-integer threshold checks for gates with different reviewer sums, which closes the per-gate always-pass/unsatisfiable cases without weakening legacy configs."
+    }
+  ]
+}

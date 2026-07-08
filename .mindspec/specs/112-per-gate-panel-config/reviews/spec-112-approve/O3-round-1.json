@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.82,
+  "rationale": "Completeness & scope lens. The load-bearing interleaved global-cursor lens rule (R3) is FULLY deterministic across every BRIEF edge case: count=1 -> lens[0]; single count=9 entry -> all six via idx0-8 mod6; all-explicit-lenses (bead gate) -> cursor never consumed, each slot keeps its lens; more-entries-than-6 -> cursor mod 6 wraps cleanly; <6 reviewers -> partial coverage, correctly NOT over-claimed. Because the ordering alternates structural(0,2,4)/sharp(1,3,5) and 6 is even, alternation survives the modular wrap, so the count>=2 structural+sharp guarantee provably holds and the 9-reviewer worked example reproduces exactly. Resolution chain (gate->adhoc-only-bead->global->builtin), unknown-gate-errors, and the raw-threshold/decision-inert boundaries are complete. Scope/Non-Goals/Out-of-Scope are coherent and the 110(writer)/111(runner+substitution consumption)/113(config layer) boundaries are clean and consistent with 109's precedent. Remaining gaps are polish-level, self-correcting under the ACs, and do not leave the spec incoherent or unimplementable, so I approve with non-blocking recommendations.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "hard_block": false,
+      "severity": "low",
+      "title": "config show map rendering order not pinned deterministic (gates enum order, substitutes sorted)",
+      "detail": "R8/AC8/AC9 render the `gates` and `substitutes` MAPS in `config show` and `--gate --json`. Go map iteration is nondeterministic, so unless the spec pins an order the rendered text/JSON is non-reproducible across runs -- the grep-based AC tests can flake and the `--json` surface that R8/G3 advertise as machine-consumed by 110/111 has an under-specified byte contract. Recommend the spec state that `gates` renders in the R1 enum order and `substitutes` renders sorted by key (and any `--json` slot list is already list-ordered/deterministic). The AC tests would force this anyway, but pinning it in the spec makes the consumer contract explicit. Note: `config show` and 109's Panel surface are not on this branch yet (pre-rebase), so I could not check whether 109 already established a sorted map-render convention that 112 would simply inherit."
+    },
+    {
+      "hard_block": false,
+      "severity": "low",
+      "title": "empty `gates: {}` vs absent gates: R7 skip should key off non-empty (len>0), not key-presence",
+      "detail": "R7 says the non-bead-no-recorded-gate advisory is skipped 'only when gates: is configured'. The word 'configured' is ambiguous for a present-but-empty `gates: {}` map. R2's gates-absent=109 identity should also cover `gates: {}`. Recommend stating the skip triggers on a NON-EMPTY gates map (len(gates) > 0) so an empty map behaves identically to absent -- otherwise an operator who writes a bare `gates:` header could silently lose the global-default advisory."
+    },
+    {
+      "hard_block": false,
+      "severity": "low",
+      "title": "unknown-gate-key R4 recovery line should name the valid enum (disambiguate from loop.gate_authority keys)",
+      "detail": "The Open Questions deliberately diverge panel.gates keys (bead, final_review) from loop.gate_authority's approval-act keys (bead_merge, impl_approve, per 109 R4/ADR-0034). An operator will plausibly reach for bead_merge/impl_approve in panel.gates and hit the R4 unknown-key refusal. The spec requires 'an ADR-0035 recovery line' generically; recommend the unknown-gate-key error explicitly enumerate the five valid keys so the recovery is actionable and the two-vocabulary footgun is self-correcting at Load time."
+    },
+    {
+      "hard_block": false,
+      "severity": "info",
+      "title": "lenient YAML silently drops typo'd optional sub-keys (lens/count/note); load-bearing typos are backstopped",
+      "detail": "Decode is plain yaml.Unmarshal (lenient), so a typo'd optional field key (e.g. `lenss:`, `cont:`) is silently ignored. R4's structural refusals backstop the load-bearing cases (a typo'd reviewers/threshold key -> 'gate sets neither' refusal; a typo'd model key -> 'neither model nor family' refusal), so this is genuinely minor, but a typo'd `lens`/`count` degrades to the default silently. Not worth a strict-decode requirement; flagged only for awareness since the spec is otherwise careful to refuse silent no-ops."
+    },
+    {
+      "hard_block": false,
+      "severity": "info",
+      "title": "cursor initial value (0) is implied by the worked example, not stated as a standalone invariant",
+      "detail": "R3's determinism relies on the global cursor starting at 0 (first lens-less slot -> author-of-record). This is fully pinned by the 9-reviewer worked example and AC5, so an implementer cannot get it wrong, but a one-line 'the cursor is initialized to 0' would make the invariant self-contained rather than example-derived. Trivial."
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-ran the round-1 hostile ESC/BEL/embedded-newline probes against ad56c295 using a /tmp-built binary. Both the unknown panel.gates key and panel.substitution.substitutes self-map now render the hostile identifier quoted in the recovery text: no raw BEL/ESC bytes reached output, and each error produced only one physical recovery line rather than a forged recovery: line. Focused internal/config tests pass. Spot-check of the remaining new refusal messages found only enum-derived gate labels/indexes/counts or config values already rendered with %q; no new raw config-controlled recovery repeat observed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G1.1",
+      "disposition": "ADDRESSED",
+      "summary": "Unknown panel.gates key and substitutes self-map key are escaped with strconv.Quote in recovery text; hostile CLI probes showed no raw BEL/ESC and no forgeable physical recovery line."
+    },
+    {
+      "id": "G1.2",
+      "disposition": "ADDRESSED",
+      "summary": "Regression coverage is present for unknown gate keys with ESC/BEL/newline, and the focused internal/config test run passed."
+    },
+    {
+      "id": "audit-other-six-refusals",
+      "disposition": "ADDRESSED",
+      "summary": "Spot-check found the other six new refusal messages embed only gate enum labels, numeric indexes/counts, or config-controlled values already formatted with %q."
+    }
+  ]
+}

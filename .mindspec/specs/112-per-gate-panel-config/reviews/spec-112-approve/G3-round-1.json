@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "112's internal config surface is mostly coherent: gate resolvers are creation-time only, threshold expressions remain raw, and panel.json.gate is decision-inert. But the downstream contract is not clean enough for the approved 110/111 consumers. Spec 110's approved panel create command has no --gate input and explicitly stamps expected_reviewers/approve_threshold from 109 global resolvers. Spec 111's approved workflow accepts old {family,count} mix + separately composed lenses and substitutes only via claude_sub_on_quota. 112 says those consumers will use/stamp the new surface, but leaves their interface changes out of scope and untested. As written, an implementation following 110/111 can silently keep producing global 6-reviewer panels without gate, while 112 passes its own config tests.",
+  "concrete_changes_required": [
+    "Add an explicit downstream-integration requirement and AC for spec 110's writer: panel create must accept or otherwise receive a known gate, stamp panel.json.gate, and use PanelGateExpectedReviewers/PanelGateApproveThresholdExpr for that gate while preserving a documented legacy path.",
+    "Add an explicit downstream-integration requirement and AC for spec 111/ms-panel-run: it must consume config show --gate <gate> --json or equivalent resolver output as slot/model/lens data, replacing the old {family,count}+lenses contract for per-gate panels.",
+    "Pin the machine JSON shape for config show --gate, especially the effective substitution policy, so 111 can implement substitutes-vs-claude_sub_on_quota precedence without inference."
+  ],
+  "findings": [
+    {
+      "severity": "hard_block",
+      "hard_block": true,
+      "summary": "112 does not define the required 110/111 contract changes that make per-gate config actually consumable.",
+      "detail": "112 R3/R6/R8 state that the spec-110 writer and ms-panel-run consume the new resolvers/config show surface, but 110's approved create signature lacks a gate and is pinned to 109 global resolvers; 111's approved runner is pinned to family/count mix, skill-composed lenses, and claude_sub_on_quota. Without explicit deltas and ACs, the downstream implementation can remain 109-shaped and still not violate 110/111."
+    }
+  ]
+}

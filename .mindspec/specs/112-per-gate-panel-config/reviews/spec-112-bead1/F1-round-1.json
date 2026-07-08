@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Adversarial attack, empirically executed at 68fe576e. (a) Built 5 wrong expandSlots variants in a scratch module and ran the shipped test file against each: per-entry rotation, slot-index-mod-6, cursor-consuming explicit lenses, and cursor-start-at-1 all FAIL TestPanelGateSlots_DeterministicExpansion — the three plan-named wrong implementations are genuinely distinguished, and the double-call DeepEqual would also catch a stateful cursor. One unnamed wrong variant survives the whole suite: explicit-lens slot RESETS the cursor to 0 (mix [lens-less, explicit, lens-less]: correct R3=empirical-prober, variant R3=author-of-record; no fixture has a lens-less slot before an explicit one). Docs pin the correct semantics, so this is a test-robustness gap, not a code bug. No map iteration in the expansion path; 4x repeated runs stable. (b) 24 malformed-config probes: null gate value, whitespace-only thresholds, duplicate YAML gate keys, case-variant keys, empty-family entries, and adhoc-inherited threshold breaches all refuse deterministically with recovery lines. Advisory gaps only: enormous counts load (spec-silent) and whitespace-only substitute sides pass R4h's empty check. (c) Diffed 109's validateOrchestration: TrimSpace/EqualFold identical, no family enum existed; sole load-success delta is the documented count-less relaxation.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "minor",
+      "area": "internal/config/config_test.go (TestPanelGateSlots_DeterministicExpansion)",
+      "summary": "A wrong expandSlots where an explicitly-lensed slot resets the default-lens cursor to 0 passes the ENTIRE shipped suite (empirically verified). Every fixture puts explicit-lens entries first, so no test covers lens-less -> explicit -> lens-less. Distinguishing mix: [{model:a},{model:b,lens:adversarial},{model:c}] must give R3=empirical-prober (reset variant gives author-of-record). Suggest adding that 3-slot fixture; foldable into any later round or bead.",
+      "blocking": false
+    },
+    {
+      "id": "F1-2",
+      "severity": "minor",
+      "area": "internal/config/config.go (validateReviewerEntries)",
+      "summary": "count: 999999999 loads (R4 sets no upper bound — spec-silent, not a violation). Any PanelGateReviewerSlots caller then allocates ~1e9 ReviewerSlots (config-driven OOM for Bead 3's `config show --gate`). Consider a generous sanity ceiling in a later bead; overlaps G1's enormous-counts lens.",
+      "blocking": false
+    },
+    {
+      "id": "F1-3",
+      "severity": "info",
+      "area": "internal/config/config.go (validateGates substitutes check)",
+      "summary": "Whitespace-only substitute sides load: substitutes {\"gpt-5.5\": \" \"} and {\" \": claude} pass the R4h empty check (technically non-empty, so letter-compliant). Thresholds TrimSpace but substitutes don't — a small convention inconsistency, open-vocabulary design makes it low-stakes.",
+      "blocking": false
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "area": "R2 identity (verified, intended edge noted)",
+      "summary": "R2 holds for schema-conformant 109 configs: 109's source already had TrimSpace/EqualFold and no family/model membership check; the count-less relaxation is the only load-success change and is tested. Intended edge: a 109-era config carrying junk under panel.gates/panel.note/substitution.substitutes was silently ignored by 109's lenient yaml decode and is now parsed/refused — that activation is the spec's purpose, not a regression. Positive probes: unquoted approve_threshold: 3 decodes to \"3\" (friendly, same as 109); duplicate gate keys refused by yaml.v3; unknown-key reporting is sorted-deterministic.",
+      "blocking": false
+    }
+  ]
+}

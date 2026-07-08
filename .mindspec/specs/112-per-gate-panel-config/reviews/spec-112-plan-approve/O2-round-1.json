@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "The `## ADR Fitness` section is correct and verified against the real ADRs + landed 109 code. (1) Single-interpreter is genuinely preserved: `PanelGateApproveThresholdExpr` returns RAW (matching config.go's existing `PanelApproveThresholdExpr`, and the `config show`/`--gate --json` `approve_threshold` members stay raw); decision resolution stays single-homed in `internal/panel.Panel.ApproveThreshold` (panel.go:97), exactly as ADR-0037 §3's 2026-07-07 amendment pins. The R4 threshold-bound check is config-time VALIDATION (bounds-check, refuse bad config), not decision-resolution — the same shape 109's `validateOrchestration` already runs, and the ADR blesses the config-refuse / gate-fallback split as 'deliberately redundant'. (2) Leaf invariant holds now (`go list -deps ./internal/panel` shows no internal/config; config imports no panel) and Bead 2 adds only a plain `Gate` field with no new import; the `threshold > 0` guard is verbatim at gate.go:257. (3) ADR-0037 amendment is correctly scoped — the `gate` field is decision-inert (R7 advisory is provably decision-separate: reviewerCountAdvisory runs after panelGate's Allow/Block), so §§3/6/8 rules are untouched. (4) No smuggled divergence: open-vocab models (KnownModels advisory-only, never in Load), global one-step substitution (ADR-0040 §3), ADR-0035 recovery lines, ADR-0023 forward-only omission all sound. Domain coverage {core,workflow} intersects every citation. One non-blocking editorial note (below).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "note",
+      "hard_block": false,
+      "summary": "Bead 2 step 3 places the second ADR-0037 amendment note under §3 ('alongside the 2026-07-07 spec-109 note'), but the repo convention places schema/registration additions under §1 (the 099/102/106 notes and the abandon_reason precedent the plan itself analogizes to all live under §1). The 109 note is under §3 only because it EXTENDED the threshold rule; the 112 gate field extends no rule. This is cosmetic and does not falsify the '§§3/6/8 untouched' claim (the note text disclaims any threshold-rule change), but the implementer should home the new note in §1's schema block, not §3, so a decision-inert metadata field is not filed under the Threshold rule it explicitly does not touch."
+    }
+  ]
+}

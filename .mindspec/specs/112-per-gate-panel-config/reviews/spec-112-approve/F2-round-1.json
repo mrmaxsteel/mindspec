@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Cross-read 112 @825f04c5 against 109's approved spec and its landed code on origin/main (PR #177). The extension is monotone: no clause forces re-opening 109. R2 pins DefaultConfig at 109's exact values (verified: 3+3/\"n-1\"/claude_sub_on_quota=true in config.go) with gates/substitutes empty; the 109 AC7 fixture survives. Leaf invariant holds: internal/panel imports no internal/config on main, 112 adds only a plain recorded Gate string, and AC10 re-pins both the import check and the threshold>0 guard (gate.go:257, verified). Single-interpreter is preserved: all three R3 resolvers return RAW expressions, matching landed PanelApproveThresholdExpr; R4's load-time integer bounds-check follows 109's own validateOrchestration precedent (validation-parse, not resolution). R6 replicates 109 R7's exact extension pattern (optional omitempty field + ADR-0037 amendment note; the 2026-07-07 amendment verified present). R7's advisory carve-out is coherent with R2: both landed call sites confirmed (cmd/mindspec/config.go reviewerCountNotesFor, internal/complete/panel_advisory.go reviewerCountAdvisory), skip fires only when gates: is configured, gates-absent falls back to 109's global compare verbatim. The 9-slot interleaved-lens worked example checks out arithmetically. One monotone compat edge noted in findings; non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "minor",
+      "hard_block": false,
+      "title": "Absent-count legacy entry: the one deliberate gates-absent behavior delta vs 109 is unnamed by R2",
+      "detail": "109's landed Reviewer.Count is a plain int, so a legacy count-less entry ({family: claude} with no count) unmarshals to 0 and 109's Load REFUSES it ('count must be >= 1 (got 0)', internal/config/config.go validateOrchestration). 112 R1 makes count optional-defaulting-to-1 in BOTH the global and per-gate lists, so that same gates-absent config now LOADS with effective count 1. This is a monotone relaxation — every 109-valid config loads under 112 with identical fields, 109's explicit count:0 refusal test still passes via R4's 'explicit non-positive count refused', and the no-always-pass floor is intact (defaulted count >= 1, sum >= 2 retained) — but R2's headline 'behavior identical to 109' and AC1's TestLoad_GatesAbsentByteIdentical109 silently exclude this edge. An implementer writing AC1 too literally could reintroduce the absent-count refusal on the global list and contradict R1 (which the exploded bead-gate example depends on). Suggest R2 name this as the single deliberate gates-absent delta, scoping the identity claim to configs 109 accepts. Implementation implication (G1's lens): distinguishing absent from explicit 0 requires *int or a custom unmarshaler on the reviewer entry."
+    },
+    {
+      "id": "F2-2",
+      "severity": "info",
+      "hard_block": false,
+      "title": "'Global-cursor' terminology overloads 'global'",
+      "detail": "R3's 'global-cursor round-robin' means one cursor across all entries WITHIN one gate's flattened slot list (vs entry-local), not a cursor shared across gates. The walk description ('Walking the flattened slot list in declaration order') plus the 'identical config yields identical slots' falsification make per-gate scope derivable, and the R5-substitution 'map is global, not per-gate' usage means the other thing in the same spec. Cosmetic; a one-word clarification ('per-gate cursor') would remove the only reading ambiguity I found in R3."
+    },
+    {
+      "id": "F2-3",
+      "severity": "info",
+      "hard_block": false,
+      "title": "Confirmed: no 109 falsification clause flips under 112",
+      "detail": "Checked each 109 contract 112 touches: R2 defaults (kept verbatim), R5 refusals (kept; per-gate refusals compose additively and the cross-field inheritance check fires only when gates: is configured, so no 109-era config is newly refused), R6 resolvers (exact semantics kept, gate-scoped resolvers layered beside them), R7 single-home (raw-expression discipline extended, second amendment note follows the landed first one at ADR-0037), R8 leaf/precedence/third-defense (AC10 pins go list -deps and the threshold>0 grep; both verified on main today), R9 read-only config show (unknown --gate exiting non-zero is a new-flag usage error, not a valid-config non-zero exit, so R9's falsification is untouched), R10 runner (not touched). The gates enum (bead/final_review) deliberately not copying loop.gate_authority's keys (bead_merge/impl_approve) is argued in a resolved Open Question and does not modify 109 R4. claude_sub_on_quota keeps its 109 meaning whenever substitutes is empty — i.e. for every 109-era config."
+    }
+  ]
+}
