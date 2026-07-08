@@ -86,20 +86,20 @@ A governed loop's most important behavior is stopping. Every halt is named, logg
 | `max_consecutive_impl_failures` | implementation agents keep failing before even reaching a panel | usually an under-specified bead — send the spec back through the grill |
 | `panel_deadlock_rounds` | the panel can't reach quorum across rounds | a genuine judgment call has surfaced; it's yours |
 | `on_reject` | any reviewer issues REJECT, or a hard-block artifact gate fires | read the rationale; a REJECT is never auto-fixed |
-| CI failure | PR checks fail in a way the executor can't trivially retry | investigate; the merge was never attempted |
-| monitor hit | a live detector fires (skipped gate, shortcut close, commit to main) | treat as a bug in the loop, not the work — file it |
+| CI failure *(level 3+)* | PR checks fail in a way the executor can't trivially retry | investigate; the merge was never attempted |
+| monitor hit *(level 3+)* | a live detector fires (skipped gate, shortcut close, commit to main) | treat as a bug in the loop, not the work — file it |
 
 ### What deliberately stays human
 
 Three things are not delegable at any level, and this is the mechanism that keeps unattended mistakes from compounding rather than a leftover of caution:
 
-1. **Skipping a panel.** `MINDSPEC_SKIP_PANEL` is env-only, human-only, and journaled. A loop must never self-authorize skipping its own verifier.
+1. **Skipping a panel.** `MINDSPEC_SKIP_PANEL` is env-only, human-only, and audited on the bead record. A loop must never self-authorize skipping its own verifier.
 2. **Overriding a REJECT.** `on_reject: halt` is the only accepted value. Auto-fixing a rejection is the definition of verification debt.
 3. **Accepting missing evidence.** A finding that names a missing measurement artifact blocks regardless of votes. Agents can't vote evidence into existence.
 
 ### The handoff log
 
-Every gate decision a panel makes in your place is appended to the handoff log (`.mindspec/loop/AUTOPILOT-LOG.md` by default): the target, the round, the vote, the dissents, and any overrides or halts. Reviewing the log is the level-2 contract — your oversight moves from per-decision to per-batch, but it does not disappear. If reading the log ever surprises you, that's the signal to step back down a level and find out why.
+Every gate decision a panel makes in your place is appended to the handoff log (`.mindspec/loop/AUTOPILOT-LOG.md` in the profile above): the target, the round, the vote, the dissents, and any overrides or halts. Reviewing the log is the level-2 contract — your oversight moves from per-decision to per-batch, but it does not disappear. If reading the log ever surprises you, that's the signal to step back down a level and find out why.
 
 **Stay here until:** governed runs complete or halt cleanly, and the handoff log reads the way you'd have decided yourself.
 

@@ -12,7 +12,8 @@ A panel run produces a directory of artifacts that live in the repo, next to the
 .mindspec/specs/<spec-slug>/reviews/<panel-slug>/
 ├── panel.json                  # the gate's source of truth
 ├── BRIEF.md                    # what reviewers were asked to judge
-├── r1-round-1.json … r6-round-1.json   # one verdict per reviewer per round
+├── <slot>-round-1.json                  # one verdict per reviewer per round
+│                                        # (e.g. R1-round-1.json, codex-r4-round-1.json)
 └── consolidated-round-1.md     # the merged change list, if a fix round is needed
 ```
 
@@ -66,8 +67,8 @@ panel:
                                 # never silently shrinks
 
 models:                          # optional per-phase model selection
-  implement: <model-id>
-  review: <model-id>
+  implement: <model-id>          # phases: implement, review, authoring,
+  review: <model-id>             #         grill, final_review
   final_review: <model-id>
 
 runner: claude-code-skills       # who executes the panel plumbing (see below)
@@ -82,11 +83,12 @@ Two floors are enforced at config load, not left to good intentions: an always-p
 The panel lifecycle is three agent-neutral CLI verbs — the contract any orchestrator can drive:
 
 ```bash
-mindspec panel create <target>   # writes the panel dir, BRIEF, panel.json;
-                                 # pins round, threshold, reviewed_head_sha
-mindspec panel verify            # read-only: completeness + staleness report,
+mindspec panel create <slug> --spec <id> --target <ref> [--bead <id>] [--round N]
+                                 # writes the panel dir, BRIEF, panel.json in one
+                                 # operation; pins round, threshold, reviewed_head_sha
+mindspec panel verify <slug>     # read-only: completeness + staleness report,
                                  # prints the same PASS/BLOCK the gate computes
-mindspec panel tally             # renders the decision from the binary:
+mindspec panel tally <slug>      # renders the decision from the binary:
                                  # verdict table, decision, consolidated changes;
                                  # exit 0 on allow, non-zero (with recovery) on block
 ```
@@ -101,7 +103,7 @@ Whatever the runner, it is an adapter, never a second decision authority: the de
 
 ## Escape hatch
 
-`MINDSPEC_SKIP_PANEL=1` skips the panel gate on a `complete`. It is environment-only (never a flag, never printed in error messages), intended for humans in exceptional circumstances, and every use is recorded to the friction journal. If you find yourself reaching for it twice, the panel configuration — not the gate — is what needs fixing.
+`MINDSPEC_SKIP_PANEL=1` skips the panel gate on a `complete`. It is environment-only (never a flag, never printed in error messages), intended for humans in exceptional circumstances, and every use is recorded as an audit entry on the bead it skipped (`panel_gate_skipped`, with a timestamp). If you find yourself reaching for it twice, the panel configuration — not the gate — is what needs fixing.
 
 ## Cost and when to lighten the panel
 

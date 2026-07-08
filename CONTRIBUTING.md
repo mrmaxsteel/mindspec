@@ -2,7 +2,7 @@
 
 Thanks for your interest in MindSpec! Contributions are welcome — code, docs, bug reports, and real-world friction reports alike.
 
-One thing to know up front: **MindSpec is built with MindSpec.** Every feature in this repo has shipped through the spec → plan → implement → review lifecycle, with panel-review verdicts committed alongside the code (browse `.mindspec/specs/` to see the full history). Contributions ride the same rails, though how much of the lifecycle you touch depends on the size of the change.
+One thing to know up front: **MindSpec is built with MindSpec.** Every feature in this repo has shipped through the spec → plan → implement → review lifecycle — and since the panel gate landed, with panel-review verdicts committed alongside the code (browse `.mindspec/specs/` to see the full history). Contributions ride the same rails, though how much of the lifecycle you touch depends on the size of the change.
 
 ## Bug reports and ideas
 
@@ -14,8 +14,8 @@ If you're a MindSpec user, `mindspec report list` is a goldmine: friction report
 
 Typos, small bugfixes, doc corrections — the standard GitHub flow:
 
-1. Fork and branch: `git checkout -b fix/<short-description>` (never commit to `main`; the repo's hooks will refuse anyway).
-2. Make the change. `make test` must pass; run `golangci-lint run` if you touched Go code.
+1. Fork and branch: `git checkout -b fix/<short-description>` — never commit to `main`. (If you've run `mindspec setup`, the pre-commit hook enforces this.)
+2. Make the change. `make test` (the short suite) must pass; run `golangci-lint run` and `go vet ./...` if you touched Go code.
 3. If you changed behavior under `cmd/` or `internal/`, update the matching docs — doc-sync is a gate in this repo, and PRs that let code and docs drift won't pass review.
 4. Open a PR with a clear description of the defect and the fix. One logical change per PR.
 
@@ -32,8 +32,9 @@ Once a feature is agreed, it goes through the lifecycle: a spec (with falsifiabl
 ```bash
 git clone https://github.com/mrmaxsteel/mindspec
 cd mindspec
-make build      # builds ./bin/mindspec  (requires Go 1.23+)
-make test       # runs all tests
+make build                # builds ./bin/mindspec  (requires Go 1.23+)
+make test                 # runs the short test suite
+./bin/mindspec setup claude   # optional: installs the git hooks + agent skills
 ```
 
 You'll also want the [Beads](https://github.com/gastownhall/beads) CLI (`bd`) on your PATH — the test suite and the lifecycle both use it.

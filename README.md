@@ -278,7 +278,7 @@ your-project/
 
 ```bash
 make build      # Build to ./bin/mindspec
-make test       # Run all tests
+make test       # Run the short test suite
 ```
 
 ## License
