@@ -1149,6 +1149,61 @@ func TestLoad_RefusesPerGateKnobs(t *testing.T) {
 	}
 }
 
+// TestLoad_UnknownGateKeyEscapesControlBytes is the round-1 panel G1.2
+// regression: a hostile `panel.gates` key carrying ESC, BEL, and an
+// embedded newline must not reach the Load refusal text raw. Before the
+// G1.1 fix, the recovery clause repeated the offending key via a bare %s
+// (the message clause already quoted it via %q) — control bytes reached
+// stderr unescaped and the embedded newline split the error into extra
+// physical lines, forging a line that could itself masquerade as a
+// `recovery: ` line.
+func TestLoad_UnknownGateKeyEscapesControlBytes(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	// YAML double-quoted scalar escapes: \a = BEL (0x07), \e = ESC (0x1b),
+	// \n = a literal newline byte in the decoded key — not a raw newline in
+	// this Go source file.
+	content := "panel:\n  gates:\n    \"bad\\a\\e\\nkey\": {}\n"
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("expected Load to refuse the unknown gate key, got nil error")
+	}
+	msg := err.Error()
+
+	if strings.ContainsRune(msg, '\x07') {
+		t.Errorf("error text contains a raw BEL byte: %q", msg)
+	}
+	if strings.ContainsRune(msg, '\x1b') {
+		t.Errorf("error text contains a raw ESC byte: %q", msg)
+	}
+
+	// The embedded newline in the offending key must appear escaped
+	// (literal backslash-n via strconv.Quote), not as a raw newline byte —
+	// otherwise it forges an extra physical line. The only legitimate raw
+	// newline in the whole message is the single message/recovery
+	// separator, so there must be exactly one.
+	if n := strings.Count(msg, "\n"); n != 1 {
+		t.Errorf("error text has %d newlines, want exactly 1 (message/recovery separator only) — an embedded raw newline forged an extra physical line: %q", n, msg)
+	}
+
+	lines := strings.Split(msg, "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, "recovery: ") {
+		t.Errorf("final line does not start with %q, a forged/split recovery line: %q", "recovery: ", last)
+	}
+}
+
 // TestPanelGateResolvers_FallbackAndAdhoc covers spec 112 AC4/R3: a
 // configured gate resolves to its own values; threshold-only and
 // reviewers-only gate entries inherit the missing half per field
@@ -1347,6 +1402,41 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 	}
 	if !reflect.DeepEqual(workedSlots, workedSlots2) {
 		t.Errorf("two resolutions of identical config diverged: %+v vs %+v", workedSlots, workedSlots2)
+	}
+
+	// Cursor-reset-on-explicit fixture (round-1 panel F1-1): lens-less,
+	// explicit, lens-less. A correct impl leaves the cursor at 1 across the
+	// explicit slot, so the second lens-less slot (R3) gets
+	// defaultLenses[1] = empirical-prober; a wrong "reset the cursor to 0
+	// whenever a slot is explicitly lensed" variant would instead give R3
+	// = defaultLenses[0] = author-of-record. The middle entry also sets
+	// both Family and Model (round-1 panel S2) to exercise the "Model
+	// wins" branch of the unexported model() accessor.
+	cursorReset := &Config{Panel: Panel{Gates: map[string]GatePanel{
+		"final_review": {Reviewers: []Reviewer{
+			{Model: "claude-fable-5", Count: intp(1)},
+			{Family: "legacy-family-should-lose", Model: "claude-opus-4-8", Lens: "adversarial", Count: intp(1)},
+			{Model: "claude-sonnet-5", Count: intp(1)},
+		}},
+	}}}
+	crSlots, err := cursorReset.PanelGateReviewerSlots("final_review")
+	if err != nil {
+		t.Fatalf("PanelGateReviewerSlots(cursorReset): %v", err)
+	}
+	if len(crSlots) != 3 {
+		t.Fatalf("cursorReset: expected 3 slots, got %d: %+v", len(crSlots), crSlots)
+	}
+	if crSlots[0].Lens != "author-of-record" {
+		t.Errorf("cursorReset R1 = %q, want author-of-record", crSlots[0].Lens)
+	}
+	if crSlots[1].Lens != "adversarial" {
+		t.Errorf("cursorReset R2 (explicit) = %q, want adversarial", crSlots[1].Lens)
+	}
+	if crSlots[1].Model != "claude-opus-4-8" {
+		t.Errorf("cursorReset R2.Model = %q, want claude-opus-4-8 (Model must win over Family)", crSlots[1].Model)
+	}
+	if crSlots[2].Lens != "empirical-prober" {
+		t.Errorf("cursorReset R3 = %q, want empirical-prober (cursor must NOT reset across an explicitly-lensed slot); a wrong cursor-reset-on-explicit implementation would give author-of-record instead", crSlots[2].Lens)
 	}
 }
 

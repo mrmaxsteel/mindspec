@@ -565,7 +565,13 @@ func validateGates(cfg *Config) error {
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return fmt.Errorf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events\nrecovery: rename panel.gates.%s to one of %s in .mindspec/config.yaml", unknown[0], strings.Join(PanelGateKeys, ", "), unknown[0], strings.Join(PanelGateKeys, ", "))
+		// unknown[0] is an attacker/typo-controlled YAML map key: it is
+		// quoted via %q in the message clause, and MUST be quoted again
+		// (not %s) in the recovery clause below — an unescaped repeat is
+		// exactly the terminal-injection hole a control-byte-carrying key
+		// (ESC/BEL/embedded newline) would otherwise punch through the
+		// guard-recovery line (round-1 panel G1.1).
+		return fmt.Errorf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events\nrecovery: rename the panel.gates key %s to one of %s in .mindspec/config.yaml", unknown[0], strings.Join(PanelGateKeys, ", "), strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", "))
 	}
 
 	for _, gate := range PanelGateKeys {
@@ -621,7 +627,12 @@ func validateGates(cfg *Config) error {
 			return fmt.Errorf("panel.substitution.substitutes has an empty-sided entry (key %q -> value %q): both the unavailable and substitute model ids must be non-empty\nrecovery: fill in both sides of the panel.substitution.substitutes entry, or remove it, in .mindspec/config.yaml", k, v)
 		}
 		if k == v {
-			return fmt.Errorf("panel.substitution.substitutes maps %q to itself: a substitution must name a different model\nrecovery: change panel.substitution.substitutes.%s to a different substitute model id, or remove the self-mapping, in .mindspec/config.yaml", k, k)
+			// k is an attacker/typo-controlled model id (a
+			// substitutes map key): quoted via %q in the message
+			// clause, and MUST be quoted again (not %s) in the
+			// recovery clause — same class of hole as the gate-key
+			// case above (round-1 panel G1.1).
+			return fmt.Errorf("panel.substitution.substitutes maps %q to itself: a substitution must name a different model\nrecovery: change the panel.substitution.substitutes entry for %s to a different substitute model id, or remove the self-mapping, in .mindspec/config.yaml", k, strconv.Quote(k))
 		}
 	}
 
