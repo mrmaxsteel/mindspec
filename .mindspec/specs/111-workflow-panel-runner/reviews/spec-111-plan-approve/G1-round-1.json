@@ -1,0 +1,28 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.91,
+  "rationale": "The automated verification set is mostly runnable and appropriately anchored, but Bead 2 contains a self-contradictory instruction that makes the key AC4 checks fail if implemented literally. The manual live-agents proof also lacks enough deterministic setup to ensure it exercises the branch-built binary and the malformed/quota-wall paths it claims to prove.",
+  "concrete_changes_required": [
+    "Remove the literal string `mindspec complete` from the workflow code snippet/comment in plan.md lines 364-370, or rewrite the snippet so following it can still satisfy the whole-file absence checks at lines 481 and 484.",
+    "Make the Manual e2e setup use the branch-built binary for the workflow's bare `mindspec panel ...` calls, for example by building `/tmp/mindspec` and invoking Claude Code with `PATH=/tmp:$PATH`, or by otherwise specifying an equivalent executable resolution.",
+    "Add deterministic manual-fixture instructions for forcing the malformed-render retry and quota-wall/no-verdict branches, including the exact `/ms-panel` invocation arguments needed to pass slug/spec/target/round/lenses/mix."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "location": ".mindspec/specs/111-workflow-panel-runner/plan.md:364",
+      "finding": "The ALLOWED_CLI snippet instructs implementers to put `mindspec complete` in a workflow comment, while the Bead 2 verification requires that string to appear nowhere in the file. Implementing the snippet literally makes both the AC4 grep and `TestMsPanelWorkflow_AllowedCLIExactSet` fail."
+    },
+    {
+      "severity": "major",
+      "location": ".mindspec/specs/111-workflow-panel-runner/plan.md:491",
+      "finding": "The manual e2e builds `/tmp/ms111`, but the workflow executes bare `mindspec panel ...` commands. Without PATH/symlink setup, the proof can silently exercise a stale installed binary instead of the branch-built binary the plan says all self-checks must use."
+    },
+    {
+      "severity": "major",
+      "location": ".mindspec/specs/111-workflow-panel-runner/plan.md:491",
+      "finding": "The manual e2e says to force malformed JSON and quota-wall branches but does not give a reproducible fixture, trigger, or exact `/ms-panel` argument form. As written, an implementer cannot reliably run the proof or know that the claimed failure paths were exercised."
+    }
+  ]
+}

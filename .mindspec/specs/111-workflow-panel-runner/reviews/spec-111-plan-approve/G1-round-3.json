@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "G1's remaining round-2 ask is addressed. The malformed-once shim now has a real comparison operand: the first stdout payload is verbatim narrative containing exactly one schema-valid verdict object, and run 2 explicitly extracts that embedded object from the persisted .codex.log before canonical JSON comparison. The second payload is the same verdict as a clean standalone object, so the successful reserialize path can compare verdict, hard_block, and concrete_changes_required without relying on string equality. The shapes are consistent with the one-object acceptance rule because surrounding narrative makes the first payload rejected while still decodable for fidelity. I found no new unrunnable command in the 143 added lines.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "ask": "G1.3 malformed-once fidelity operand",
+      "disposition": "ADDRESSED",
+      "finding": "The first payload now embeds one concrete verdict JSON object inside narrative text, and scenario run 2 instructs extracting that embedded object from .codex.log for canonical comparison against the final verdict file."
+    },
+    {
+      "ask": "Payload consistency with exactly-one-object rule",
+      "disposition": "ADDRESSED",
+      "finding": "Step 3 rejects zero objects, multiple objects, or one object plus surrounding narrative. The malformed-once first payload intentionally falls into that rejection path, while the second payload is a clean standalone object for the reserialize success path."
+    },
+    {
+      "ask": "No new unrunnable command in round-2 fix",
+      "disposition": "ADDRESSED",
+      "finding": "I reviewed the added verification/manual-command text and ran diff checks plus plan validation. The new shell lines and manual invocations are runnable/documented in the same style as the surrounding plan; validate plan exits with only the pre-existing advisory decomposition warning."
+    }
+  ]
+}

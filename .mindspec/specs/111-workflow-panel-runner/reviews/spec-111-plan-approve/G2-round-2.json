@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "bf01a21a materially improves the enforcement story: ALLOWED_CLI is now tied to a named builder, codex is read-only, paths derive from panel create, and stdout ambiguity is fail-closed. Two gaps remain load-bearing. The hardening contract does not clearly apply traversal/control-byte validation to target, and scenario 7 only exercises one unsafe slug, not the full shell/path input surface. The parser proof also contradicts itself: malformed-once emits no JSON on first attempt, yet the e2e requires canonical JSON comparison against that first attempt. Those leave the requested injection and value-fidelity guarantees not fully falsifiable.",
+  "concrete_changes_required": [
+    "Extend the Bead 2 input contract so target is explicitly covered for traversal/control-byte rejection or define a separate branch-name-safe grammar with argv-safe quoting/escaping; add e2e cases for target metacharacter/argument injection and control bytes, not only slug traversal.",
+    "Fix the value-fidelity e2e: either make malformed-once emit exactly one schema-valid JSON object wrapped in disallowed narrative so canonical decode can compare gate fields, or remove the impossible first-attempt JSON comparison for the no-JSON case and add a separate narrative-wrapped JSON scenario."
+  ],
+  "findings": [
+    {
+      "ask": "G2.1 buildCommand chokepoint plus positive-enumeration structural test",
+      "disposition": "ADDRESSED",
+      "details": "The plan now specifies buildCommand as the single command-construction chokepoint, requires agent prompts to embed only its return value, rejects verbs outside the exact four-entry ALLOWED_CLI set, pins codex to --sandbox read-only, and strengthens TestMsPanelWorkflow_AllowedCLIExactSet with exact-set plus positive-enumeration checks. That is sufficient for plan approval on this ask."
+    },
+    {
+      "ask": "G2.2 input/path hardening contract plus e2e scenario 7",
+      "disposition": "PARTIAL",
+      "details": "Slug/spec/bead_id/mix family get a clean-single-path-element contract, paths derive from the panel directory reported by panel create, and unsafe slug aborts before registration. But target is only described as rejecting a short shell-metacharacter list/newlines, not traversal/control bytes or argument-separator injection, and scenario 7 proves only ../../etc in slug. The full input surface requested in round 1 is not mechanically covered."
+    },
+    {
+      "ask": "G2.3 exactly-one-JSON-object stdout parsing with fail-closed ambiguity and canonical-decode value fidelity",
+      "disposition": "PARTIAL",
+      "details": "The exactly-one-object rule, narrative/multi-object ambiguity rejection, same-reviewer reserialize-once ladder, and MISSING fail-closed behavior are now specified. However the value-fidelity proof is internally inconsistent: the malformed-once shim emits narrative prose with no JSON on the first invocation, while scenario 2 requires canonical JSON decoding and field comparison against that first attempt. The deterministic parser rule is good; the fidelity verification is not runnable as written."
+    }
+  ]
+}

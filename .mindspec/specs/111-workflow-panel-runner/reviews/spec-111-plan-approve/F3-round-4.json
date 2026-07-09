@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "Item 1 ADDRESSED: malformed-once's first payload is now an exact verbatim narrative-wrapped schema-valid verdict object with canned gate-field values (verdict APPROVE, hard_block false, concrete_changes_required []), and Step 3's rule (\"a single object plus surrounding narrative text all count as not accepted\") provably routes it into the re-prompt ladder; run 2 now states the fidelity check operationally — extract the embedded object from the persisted .codex.log, canonical-decode both operands, compare verdict/hard_block/concrete_changes_required. The check finally has a real first operand and fails on fabrication or re-review. Item 2 ADDRESSED: setup step 3 seeds the scratch config's panel: block per scenario ({claude:2,codex:1}/threshold \"3\" for run 1; single-family count-1/threshold \"1\" for runs 2-7), correctly grounded in 110's cfg.PanelExpectedReviewers() stamping (110 plan 712/802/889) and the zero-config default of 6 — run 1 complete and run 3 MISSING-driven incomplete now discriminate. No regression: 631d7c14..aec82bfd is one hunk confined to Step 1/R2 flag handling; e2e untouched; run 7b's leading-dash target still rejected since target is a guarded user-derived value.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Item 1 (malformed-once payload + run-2 value fidelity): ADDRESSED",
+      "disposition": "ADDRESSED",
+      "detail": "Plan (aec82bfd) gives the exact first-invocation payload — one well-formed verdict JSON object with known canned values wrapped in narrative — and the exact clean second-invocation re-serialize. Verified against Step 3's acceptance rule at plan lines 546-548: 'zero objects, more than one object, or a single object plus surrounding narrative text all count as not accepted', so the first attempt deterministically triggers the re-prompt. Run 2's check is now concrete and falsifiable: 'extract the single embedded JSON object from the .codex.log-persisted first-invocation stdout ... decode it canonically as JSON alongside the final verdict file ... confirm verdict, hard_block, and concrete_changes_required are equal'. The equality has two real operands; a re-review, a fabricated verdict with different values, or a missing .codex.log all fail it. The traceability row and the Validation Proof row were updated consistently."
+    },
+    {
+      "severity": "info",
+      "title": "Item 2 (scratch config panel: mix per scenario): ADDRESSED",
+      "disposition": "ADDRESSED",
+      "detail": "New setup step 3 ('Seed .mindspec/config.yaml's panel: block (round-2 item 4)') states the failure mode verbatim — with no panel: block, expected_reviewers resolves to the zero-config 6 and 'every run's panel verify would read short of 6 and report incomplete regardless of whether the reviewer ladder behaved correctly' — and prescribes the exact YAML: {claude:2,codex:1}+approve_threshold \"3\" matching run 1's 3-slot mix, rewritten to a single {family,count:1}+\"1\" before each of runs 2-7, matching every scenario's mix (runs 2-6 codex:1; run 7 claude:1, which aborts pre-create anyway). Cross-checked against 110's plan: panel create resolves expected_reviewers via cfg.PanelExpectedReviewers() (lines 712, 802, 889) and approve_threshold via PanelApproveThresholdExpr() (line 995 — an expression string, so the quoted \"3\"/\"1\" values are the right type). Run 1's complete/verbatim-preview observable and run 3's MISSING-driven incomplete/Block observable are both discriminating again."
+    },
+    {
+      "severity": "info",
+      "title": "No-regression: round-3 dash-guard reconciliation does not touch the e2e or my items",
+      "disposition": "ADDRESSED",
+      "detail": "631d7c14..aec82bfd is +41/-25 in plan.md only — a single hunk over Step 1's buildCommand and the R2 registration call site (the 42-old/58-new line counts leave exactly 17 context lines, so no second hunk exists). The shim spec, config seeding, scenario runs, Step 6 tests, and ACs are byte-unchanged by it. Coherence spot-checks: run 7b's target '--upload-pack=touch /tmp/pwned;' is still rejected — target is one of the guarded user-derived values under the rescoped guard, and Step 1's branch-name-safe grammar independently rejects the leading dash before buildCommand is ever reached, exactly as run 7's 'no command containing the offending value was ever passed to buildCommand' observable requires. The re-panel round-value change does not affect the e2e (every run uses round: 1)."
+    },
+    {
+      "severity": "info",
+      "title": "Non-blocking nits",
+      "disposition": "NEW_ISSUE",
+      "detail": "(1) The canned gate-field values (APPROVE / hard_block false / concrete_changes_required []) coincide with plausible fabrication defaults, so a workflow that invented a default-shaped verdict could coincidentally pass the value-equality; distinctive values (e.g. REQUEST_CHANGES with one concrete change) would make coincidental equality impossible. Narrowed in practice by the deterministic shim and the separate reviewer_id check; the payload shape is the one my round-2 change-list itself suggested, so this is a hardening suggestion, not a defect. (2) malformed-once still implies per-invocation shim state (a counter file — one line of shell), carried from my round-2 info note. (3) BRIEF-round-4 typo: the pinned SHA is printed as 39 hex chars ('aec82bfd854d...'), dropping the 'e' in aec82bfde854...; the 8-char prefix resolves unambiguously and the worktree HEAD matches. None blocks approval."
+    }
+  ]
+}

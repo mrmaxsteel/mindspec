@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "The fix is substantively strong: the offending literal is gone (the new snippet passes the file-wide grep and the enumeration), the positive enumeration closes every indirection class I named (single-quoted fragments, backtick templates, smuggled non-complete verbs, a second unsandboxed codex exec), and the read-only pin is exact-string-enforced. But the new chokepoint assertion re-introduces round 1's defect class: Steps 1/2/4 prescribe buildCommand(\"mindspec panel create\", ...) call-site literals (plan lines 428/443/535-536) while Step 6's test requires the literal inventory to contain only the four entries inside the ALLOWED_CLI array and 'no other occurrence' (lines 587-591) — the plan's prescribed code fails the plan's prescribed test. Read generously instead (value-equality anywhere), the assertion is vacuous: an exact-match literal concatenated with raw args bypasses buildCommand entirely. Either way 'routes through the chokepoint by construction' does not hold as written. One reconciling edit fixes it.",
+  "concrete_changes_required": [
+    "Reconcile Step 6's chokepoint assertion with Steps 1/2/4's prescribed call sites — as written they contradict (strict reading: the four prescribed call-site literals fail 'no other occurrence outside the array'; generous reading: the assertion is vacuous, since a literal equal to an allowlisted string concatenated with raw args bypasses buildCommand). Pick the strict form and update the call sites to match: destructure named verb constants from the array (e.g. `const [CMD_CREATE, CMD_CODEX, CMD_VERIFY, CMD_TALLY] = ALLOWED_CLI;`), have every buildCommand call pass a constant (buildCommand still asserts set-membership), keep Step 6's no-telltale-literal-outside-the-array assertion, and ADD an identifier-count pin: the token `ALLOWED_CLI` appears exactly a fixed number of times (declaration + the destructuring + buildCommand's membership check), so agent prompts cannot reference the array or its elements directly. Update the Step 1 example prompt and Steps 2/4 accordingly, and soften the 'by construction' claim to name the residual (string surgery on buildCommand results, telltale-free NL paraphrase) with its backstops (bead-diff review of the small file, the e2e transcript check, the read-only codex sandbox).",
+    "One-clause argument-injection guard: the Step 1 hardening rejects shell metacharacters but not flag-shaped values — a slug/target like `--json` (no slash, no metachar, no control byte) passes the stated contract and is parsed as a flag by the CLI, and a flag-shaped value appended after the codex prefix could override `--sandbox read-only` (last-flag-wins). Add: validated values must not begin with `-`, and buildCommand's fixed per-verb templates append no `--sandbox`/`-s` flag after the pinned codex prefix."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "disposition ask 1 — snippet self-contradiction: ADDRESSED, but NEW_ISSUE of the same class",
+      "description": "The prescribed ALLOWED_CLI snippet no longer contains the merge-terminal literal and passes both the file-wide grep and the positive enumeration — the round-1 instance is fixed. However the fix introduces a new prescribed-code-fails-prescribed-check instance: Steps 1/2/4 embed \"mindspec panel create\"/\"mindspec panel verify\"/\"mindspec panel tally\" as call-site string literals (lines 428, 443, 535-536), and Step 6's final assertion (lines 587-591) requires no mindspec-bearing literal outside the array. A Sonnet implementer following Steps 2/4 verbatim watches the Step-6 test fail and must guess which prescription to break; breaking the test-side assertion silently weakens the chokepoint guarantee the plan advertises."
+    },
+    {
+      "severity": "medium",
+      "area": "disposition ask 2 — positive enumeration: PARTIAL",
+      "description": "The literal enumeration genuinely closes the round-1 classes: 'mindspec ' + verb fails (the fragment isn't an exact match), backtick templates fail on raw text, any non-complete lifecycle verb fails set-membership, and a second unsandboxed codex exec fails the codex-literal pass. But the routes-through-buildCommand proof does not hold as specified: under the strict reading it contradicts the call sites (finding above); under the generous value-equality reading, `\"Run: \" + \"mindspec panel verify\" + \" \" + slug` passes every assertion while bypassing buildCommand's hardening entirely, and array-reference assembly (`${ALLOWED_CLI[3]}; git merge ...` — the suffix bears no telltale) slips the enumeration. The identifier-count pin in the required change closes direct array reference; string surgery on buildCommand results remains the acknowledged info-class residual."
+    },
+    {
+      "severity": "low",
+      "area": "disposition ask 3 — codex read-only sandbox: ADDRESSED",
+      "description": "The allowlist entry is the full pinned string 'codex exec --sandbox read-only --skip-git-repo-check', the exact-set test and the codex-literal enumeration pass both enforce it (a second differently-flagged invocation fails), the AC4 grep was updated to the full string, and the plan correctly argues read-only is safe because the wrapper writes both files. Residual one-clause nit folded into required change 2: nothing yet forbids a flag-shaped hardened arg from appending a sandbox override after the pinned prefix."
+    },
+    {
+      "severity": "low",
+      "area": "round-1 low nit (wrapper status contract): sufficiently covered",
+      "description": "The codex PATH-shim scenarios (healthy/malformed-once/malformed-always/multi-object/quota-wall) now give every ladder branch a deterministic induction path, and the one-object stdout rule makes acceptance deterministic. The wall-after-partial-render classification still rests on the wrapper prompt, with the .codex.log audit as the detectability backstop — acceptable at the spec's declared trust boundary; not a required change."
+    },
+    {
+      "severity": "info",
+      "area": "residual limit (unchanged from round 1)",
+      "description": "Static text checks cannot fence a colluding implementer (telltale-free NL paraphrase in a prompt, .replace surgery on allowlisted strings or buildCommand results). The plan should claim containment of accidental and syntactic drift — which the enumeration + chokepoint + identifier pin genuinely deliver once reconciled — with bead-diff review, the e2e transcript, and the read-only sandbox as the backstops for the rest."
+    }
+  ]
+}

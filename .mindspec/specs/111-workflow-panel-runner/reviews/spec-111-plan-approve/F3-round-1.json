@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "The automated layer is unusually falsifiable: anchored '--- PASS:' greps with $-anchored -run, the exact-set test fails on extraction miss (empty set != 4), the 14->15 count pin is real (verified 14 today) and cross-covered by the install test, the inverted 'mindspec complete' grep is existence-guarded, and Bead 1's grep/test both fail pre-claim (verified). Two checks cannot fail when the step is wrong. (1) Bead 3's AC8 clause `grep -q '/ms-panel'` passes TODAY: it substring-matches the pre-existing `/ms-panel-tally` and `/ms-panel-create` references (lines 8/10/62/233), and the line-233 handoff survives 110 Bead 5 — so the 'invokes /ms-panel' claim rests on a dead grep; only 'claude-code-workflow' discriminates. (2) Manual e2e items 2-3 name observables but no induction mechanism — a live codex cannot be made to render malformed JSON or hit a quota wall (twice, both flag values) on demand, so the two central fences' checkboxes can only be skipped or self-certified, and the carry-forward-#2 value-fidelity diff is unexercisable.",
+  "concrete_changes_required": [
+    "Bead 3 verifications 1 and 3 (and the AC8 provenance row): anchor the workflow-invocation grep so it cannot be satisfied by the pre-existing /ms-panel-tally and /ms-panel-create substrings — e.g. `grep -qE '/ms-panel([^-]|$)'` or grep the invocation phrase ('invoke the `/ms-panel` workflow') — in both the plugins and .claude mirror checks. ACs are floors; this is the same strengthening doctrine the plan already applies to AC4.",
+    "Bead 2 Manual e2e: specify the deterministic failure-induction mechanism for items 2 and 3 — e.g. a PATH-shimmed `codex` stub in the scratch repo (the wrapper still execs `codex exec`, ALLOWED_CLI unchanged) that in run A emits a rendered-but-malformed verdict (exercising the single re-prompt + value-fidelity diff, then a still-unparseable variant proving MISSING-not-substituted) and in run B emits the codex usage-limit signal with no verdict rendered; run item 3 twice with `claude_sub_on_quota: true` then `false` toggled in the scratch config.yaml. Without an induction knob, items 2-3 cannot FAIL and the anti-laundering ladder (R3) and substitution branch (R4) are delivered by prose."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "title": "AC8 '/ms-panel' grep is a false green: pre-matches /ms-panel-tally and /ms-panel-create",
+      "detail": "Empirically verified in the worktree: `grep -q '/ms-panel' plugins/mindspec/skills/ms-panel-run/SKILL.md` exits 0 today via lines 8, 10, 62, 233 (`/ms-panel-tally`, `/ms-panel-create`). 110's Bead 5 keeps the line-233 handoff, so the clause stays pre-satisfied at Bead 3 time. An implementer who adds a 'runner:' paragraph containing 'claude-code-workflow' but never adds the workflow invocation passes the whole composite. Fix: word-boundary anchor or invocation-phrase grep in both mirror checks."
+    },
+    {
+      "severity": "major",
+      "title": "Manual e2e items 2-3 have falsifiable observables but no way to induce the failure scenarios",
+      "detail": "'A codex slot forced to render malformed JSON' and 'a slot whose codex hits its usage limit' (both flag values) cannot be produced on demand against a live codex CLI. The observables (same reviewer_id, value-fidelity diff vs .codex.log, no verdict file, claude-sub vs missing) are well-chosen, but with no specified induction knob the checkboxes degrade to unexercised prose — exactly the class the automated gates cannot reach, per the plan's own Testing Strategy. The plan already specifies the scratch repo, fixture mix, and branch-built binary; it stops one step short of the test double that makes items 2-3 runnable."
+    },
+    {
+      "severity": "minor",
+      "title": "AC9's `grep -q 'workflow'` is a single common word",
+      "detail": "Verified currently absent from ms-panel-tally/SKILL.md, and 110's Bead 5 steps do not introduce it, so it is falsifiable today — but any incidental use of the word by 110's implementer kills its discriminating power. Anchoring to a phrase from the required note (e.g. 'pre-rendered' or 'workflow result') would be robust. Advisory."
+    },
+    {
+      "severity": "info",
+      "title": "Doc-sync membership greps pass on a contentless touch; structural string greps are comment-satisfiable — both honestly backstopped",
+      "detail": "`git show --name-only HEAD | grep -qxF <doc>` proves the file was touched, not that a bead-unique region was added (same form 110 used). `.codex.log`/`claude-sub` greps would pass on a comment alone, but the plan explicitly assigns behavior to the Manual e2e (item 1's on-disk files are falsifiable). The AC4 chain's trailing `! grep -qF 'mindspec complete'` is guarded by preceding existence-requiring clauses, so it is not the naked inverted-grep false green. TestWorkflowFiles_EmbedsMsPanel compares the accessor to the embed FS (accessor correctness); embed==on-disk-plugin is a go:embed build-time guarantee, so the 'four copies transitively identical' chain holds, if slightly overstated."
+    },
+    {
+      "severity": "info",
+      "title": "Verified factual pins the plan relies on are accurate",
+      "detail": "internal/setup/claude_test.go asserts len(r.Created)!=14 and len(r2.Skipped)!=14 today; TestSkillInventory_Twelve exists; repoRootForWorkflowManifest + TestWorkflowOwnsTraceAndGolangci + attributeDomain(exec, root, ownerRef, path, domains) all exist as described; the Bead 1 OWNERSHIP grep fails pre-claim and its anchored regex excludes commented lines; workflow today claims only .claude/skills/** so attributeDomain cannot return workflow for the new path without the claim — the test genuinely fails if Bead 1 is skipped."
+    }
+  ]
+}

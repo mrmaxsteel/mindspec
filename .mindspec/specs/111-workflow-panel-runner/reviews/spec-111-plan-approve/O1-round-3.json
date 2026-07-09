@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.8,
+  "rationale": "No regression in my implementability lens; platform claims untouched (the round-3 delta makes zero +/- edits to the schema/pipeline/output-schema prose I approved in round 2). The destructured-const shape `const [CMD_PANEL_CREATE, CMD_CODEX_EXEC, CMD_PANEL_VERIFY, CMD_PANEL_TALLY] = ALLOWED_CLI;` is valid standard JS; all call sites use the identifiers and Step 6's test pins exactly one four-wide binding off ALLOWED_CLI — implementable. The branch-name-safe target grammar + leading-dash argv guard are implementable as written. The seeded `panel:` block is verified against the real internal/config schema for run 1 (family/count keys match the Reviewer struct, approve_threshold is a string field, zero-config default [{claude,3},{codex,3}] and TestLoad_ZeroConfigPanelModelsLoopDefaults both real). One genuine gap I must flag: runs 2-7 seed a single-reviewer panel.reviewers (sum 1), which config.Validate() unconditionally rejects (config.go:400, sum must be >=2). Non-blocking (Manual live-agents proof, contingent on 110's validation), but the 'checked against the real schema' claim is only partially true.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "destructured-const JS shape (CONFIRMED, no regression)",
+      "detail": "plan.md:425-431: `const [CMD_PANEL_CREATE, CMD_CODEX_EXEC, CMD_PANEL_VERIFY, CMD_PANEL_TALLY] = ALLOWED_CLI;` is valid ES array destructuring binding the four identifiers to the four array elements in order. Every buildCommand call site now passes an identifier (CMD_PANEL_CREATE at Step 2, CMD_CODEX_EXEC at Step 3, CMD_PANEL_VERIFY/CMD_PANEL_TALLY at Step 4) rather than a retyped literal. Step 6's test pins 'exactly one destructuring binding of the shape const [ID1,ID2,ID3,ID4] = ALLOWED_CLI; — four identifiers wide, RHS literally ALLOWED_CLI' — a parseable structural assertion a Go test can make over the embedded text. Implementable as written."
+    },
+    {
+      "severity": "info",
+      "area": "branch-name grammar + argv token (CONFIRMED, no regression)",
+      "detail": "plan.md:~443-451: target validated against a branch-name-safe grammar (reject empty, control bytes, leading '-', git check-ref-format constructs `..` `~` `^` `:` `?` `*` `[`, trailing `/` or `.lock`, whitespace) and always passed to buildCommand as its own argv-safe token, plus buildCommand's leading-dash argument-injection guard. Standard, implementable validation; scenarios 7a/7b/7c (slug traversal, target flag-injection+metachar, target control-byte written as \\u0000\\u0007 escapes) are runnable inductions. Not my primary lens (G2's) but no implementability concern."
+    },
+    {
+      "severity": "medium",
+      "area": "seeded panel: block vs config.Validate() sum>=2 guard (NEW_ISSUE — non-blocking, flag for tally/impl)",
+      "detail": "The BRIEF asked me to verify the 'checked against the real internal/config schema' claim. Run 1's block is fully accurate: internal/config Reviewer{Family yaml:family, Count yaml:count} matches the seeded `- family: claude/count: 2` shape (near-identical fixture at config_test.go:525); ApproveThreshold is a string field so `approve_threshold: \"3\"` is correct and in [1,sum=3]; the zero-config default [{claude,3},{codex,3}] and TestLoad_ZeroConfigPanelModelsLoopDefaults (config_test.go:355/365) are real; expected_reviewers defaults to 6 (PanelExpectedReviewers, config.go:428). BUT plan.md:725-727 seeds runs 2-7 with a single-reviewer panel.reviewers (count 1, sum 1) + approve_threshold \"1\". config.Validate() (config.go:400-402) unconditionally rejects total<2 ('panel.reviewers must sum to at least 2 (got 1)'), independent of the threshold. config.Load()/loadUncached (config.go:263) does NOT call Validate(), so whether this bites depends on whether 110's (unmerged) `mindspec panel create`/`verify` validate config; if they do, runs 2-7's e2e setup is un-runnable as written and the R3/R4 behavioral proof for those runs can't be staged. The plan nowhere acknowledges the sum>=2 invariant. Recommend (at Bead 2 impl, 110 in hand): confirm the panel verbs don't call Validate(), OR restage runs 2-7 with a sum>=2 config whose completeness observable still discriminates (e.g. a 2-reviewer expected set where the MISSING/substituted slot is the discriminator). Non-blocking: a Manual live-agents proof detail, not an automated gate, and trivially fixable."
+    },
+    {
+      "severity": "info",
+      "area": "platform claims untouched (CONFIRMED)",
+      "detail": "The round-3 delta (git diff bf01a21a..631d7c14) makes no +/- edit to the schema/pipeline/output-schema prose (verified by grep over the delta). The round-2-approved corrections — schema governs the agent's in-memory return not the on-disk file, pipeline(list,itemFn) as the documented fan-out, no parallel() — are intact. My round-2 APPROVE basis stands."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "The downstream selection/result contract is otherwise unchanged: Bead 3 still dispatches by the 109 runner key, workflow mode still invokes /ms-panel once with the same args, and the workflow result remains verbatim panel verify plus panel tally stdout. The destructured command constants and target grammar are intended as Bead 2 internals. However, the round-2 dash guard regresses that internal path: buildCommand is specified to reject any arg starting with '-', while the prescribed call sites pass fixed option tokens such as --spec and --target through args. Implemented literally, registration cannot run, so no consumed verify/tally result is produced.",
+  "concrete_changes_required": [
+    "In Bead 2, reconcile buildCommand's leading-dash guard with fixed CLI option tokens: either make buildCommand accept structured fixed flags outside the guarded user-value list, or state that the guard applies only to untrusted/user-derived values, then update the examples/tests accordingly."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "title": "Leading-dash guard rejects prescribed fixed flags",
+      "detail": "Plan lines 446-451 say buildCommand rejects any args element beginning with '-', but lines 477-478 prescribe buildCommand(CMD_PANEL_CREATE, slug, \"--spec\", spec, \"--target\", target, ...). Those fixed flags would be rejected before panel create runs, preventing the workflow from returning the unchanged verify/tally result."
+    }
+  ]
+}

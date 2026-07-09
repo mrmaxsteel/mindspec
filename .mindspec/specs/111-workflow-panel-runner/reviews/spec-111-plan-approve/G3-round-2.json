@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 delta does not regress the G3 contract. The runner selection surface remains the 109 `runner:` key: `claude-code-workflow` invokes `/ms-panel`, `claude-code-skills` remains unchanged, and `external` stays a degraded stub. The workflow result shape remains `mindspec panel verify` plus `mindspec panel tally` stdout returned verbatim; no new consumer-facing schema or merge/consolidation behavior is introduced. `buildCommand`, the read-only codex sandbox pin, input hardening, deterministic stdout parsing, and the PATH shim are scoped to the workflow adapter and verification strategy. They do not leak into `ms-panel-run` or `ms-panel-tally` beyond preserving the pre-rendered workflow-result handoff. Degraded modes remain coherent: missing verdicts still block through verify/tally, quota substitution still honors `claude_sub_on_quota`, and hosts without workflow capability continue on the skills path.",
+  "concrete_changes_required": [],
+  "findings": []
+}

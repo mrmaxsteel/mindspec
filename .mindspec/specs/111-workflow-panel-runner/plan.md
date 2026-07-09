@@ -5,8 +5,14 @@ adr_citations:
     - ADR-0036
     - ADR-0035
     - ADR-0034
+approved_at: "2026-07-09T10:31:42Z"
+approved_by: user
+bead_ids:
+    - mindspec-9cyu.1
+    - mindspec-9cyu.2
+    - mindspec-9cyu.3
 spec_id: 111-workflow-panel-runner
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []

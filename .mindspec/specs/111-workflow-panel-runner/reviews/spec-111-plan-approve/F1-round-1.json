@@ -1,0 +1,38 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "The plan defeats its own central fence. Bead 2 step 1's prescribed ALLOWED_CLI snippet contains the literal string `mindspec complete` in its comment, so a faithful implementer fails spec AC4's file-wide `! grep -qF 'mindspec complete'` — the plan hands Bead 2 an artifact that fails its own gate. The exact-set test is otherwise sound (fails closed on extraction miss), but its anti-indirection greps check only double-quoted concatenation and only the verb `complete`: `'mindspec ' + v` and literal `mindspec approve`/`next` prompts sail through, leaving R5's 'every other lifecycle-mutating verb appears nowhere' untested. And `codex exec` — an allowlisted command spawning an agent with shell in a workspace-write sandbox by default — is an indirection path no file grep can see; since the wrapper design means codex never writes, the plan should pin a read-only sandbox. MISSING-not-substituted is acceptably enforced (fail-closed ladder, .codex.log audit, Manual e2e forces both branches) with one contract nit.",
+  "concrete_changes_required": [
+    "Bead 2 step 1: remove the literal string 'mindspec complete' from the ALLOWED_CLI comment block (plan.md ~line 367-368) — reword to e.g. 'the lifecycle-completion verb is intentionally absent'. As written, the plan's prescribed snippet fails spec AC4's `! grep -qF 'mindspec complete'` file-wide check, which the same bead's Verification requires to pass.",
+    "Bead 2 step 6: strengthen TestMsPanelWorkflow_AllowedCLIExactSet from the three-form blacklist (`mindspec ${`, backtick template, `\"mindspec \" +`) to a positive enumeration: scan every occurrence of the token `mindspec` in the workflow file and assert each is immediately followed by ` panel create`, ` panel verify`, or ` panel tally` (comments included, matching AC4's comment-inclusive posture). This closes single-quoted concatenation (`'mindspec ' +`), `.join()` assembly, and — required by R5's falsified clause but currently untested — every non-`complete` lifecycle verb (`mindspec approve`, `mindspec next`, ...) in one check that subsumes the blacklist.",
+    "Bead 2 step 3: pin the codex wrapper's invocation to a read-only sandbox (e.g. `codex exec --sandbox read-only`, alongside the existing `--skip-git-repo-check`). The current skills path runs codex in its default workspace-write sandbox with the repo as workdir; carrying that into the workflow leaves the one allowlisted external agent with shell+write in the repo — an indirection to `mindspec complete` (or arbitrary writes) that no grep over the workflow file can see. The 111 design makes codex write-free by construction, so read-only is a strict tightening; state it in the step and the interfaces.md doc region."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "internal contradiction / AC4",
+      "description": "Plan's own ALLOWED_CLI snippet comment (Bead 2 step 1) contains the literal 'mindspec complete', which spec AC4 and Bead 2's Verification require to appear NOWHERE in the file (not as a command, not as a comment). Implementing the plan as written fails the plan's own gate."
+    },
+    {
+      "severity": "medium",
+      "area": "exact-set test fakeability",
+      "description": "The exact-set extraction itself fails closed (single-quoted or missing elements break the parse and the equality assert), and file-wide `mindspec complete` absence is comment-inclusive — good. But the dynamic-construction blacklist misses `'mindspec ' +` (single quotes), array-join assembly, and string surgery on ALLOWED_CLI elements; and nothing tests R5's broader 'every other lifecycle-mutating verb appears nowhere' — a literal `mindspec approve` in an agent prompt passes every automated check. Positive enumeration of all `mindspec` occurrences closes the class."
+    },
+    {
+      "severity": "medium",
+      "area": "indirection via allowlisted codex exec",
+      "description": "ALLOWED_CLI fences the workflow's agent steps, not codex's own shell. Today's skill runs `codex exec` under the default workspace-write sandbox with the repo as workdir; the plan carries `codex exec` into ALLOWED_CLI without pinning a sandbox mode, so codex itself could exec lifecycle verbs or write files — invisible to every grep and to the exact-set test. Wrapper-writes-everything makes read-only viable and strictly safer."
+    },
+    {
+      "severity": "low",
+      "area": "MISSING-not-substituted enforcement",
+      "description": "The workflow script has no file access, so the quota-wall vs rendered-but-malformed classification rests entirely on the wrapper agent's returned status (LLM judgment); a misclassification would route a rendered verdict into substitution. Mitigated: the persisted .codex.log makes any laundering auditable post-hoc, and the Manual e2e forces both branches. Nit: pin the wrapper's return-status contract (enumerated statuses; `quota_wall` claimable only when the persisted log contains no verdict content) so the script branch is deterministic over a declared contract."
+    },
+    {
+      "severity": "info",
+      "area": "residual limit (acknowledged)",
+      "description": "String-level pinning cannot stop a natural-language paraphrase in an agent prompt ('run the lifecycle completion verb'); the spec accepted grep-structural pinning at spec-approve and the Manual e2e's transcript+git-log check covers behavior on a live run. Noted, not actionable at plan level."
+    }
+  ]
+}
