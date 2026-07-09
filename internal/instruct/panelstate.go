@@ -1,6 +1,7 @@
 package instruct
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,18 +17,17 @@ import (
 
 // Spec 093 Req 14 (open-panel-rounds block) + Req 15 (SessionStart
 // auto-include). This is the human/agent-readable COMPANION to the
-// Bead 4 pre-complete hook gate: B4 BLOCKS `mindspec complete`, B5
-// INFORMS the agent where it stands before attempting it (FINDINGS
-// item 8 — post-compaction panel-state recovery).
+// `mindspec complete` panel gate: the gate BLOCKS, this INFORMS the
+// agent where it stands before attempting it (FINDINGS item 8 —
+// post-compaction panel-state recovery).
 //
-// The decision logic here is a faithful, READ-ONLY reproduction of the
-// Bead 4 decision matrix (Spec 093 Req 11/12): verdict count vs
-// expected, the N−1 APPROVE threshold (computed by the SAME
-// panel.Panel.ApproveThreshold the gate uses), reviewed_head_sha
-// staleness, round/filename mismatch, REJECT/hard_block, abandonment.
-// It renders the gate's would-be verdict ("gate would PASS/BLOCK") so a
-// compacted agent knows whether `mindspec complete` will succeed —
-// without itself making any decision (no exit code, no enforcement).
+// Spec 110 R2 / ADR-0040: the decision itself is no longer a second
+// copy here. verdict() below builds panel.GateFacts and delegates to
+// the SINGLE home, panel.PanelGateDecision — the same function
+// `mindspec complete`'s panel gate (internal/complete) enforces — so
+// this block's "gate would PASS/BLOCK" line can never drift from the
+// real gate's outcome. It still makes its own decision (no exit code,
+// no enforcement); it just no longer reimplements one.
 //
 // Boundary: panel.Tally/Scan are fs-only (zero git). Staleness is a
 // git comparison, so the CALLER resolves each panel's live branch SHA
@@ -72,92 +72,84 @@ type PanelStateEntry struct {
 	BranchMissing bool
 }
 
-// shaPrefix returns the 7-char short form used in Block texts, or the
-// whole string when shorter. Empty in → empty out.
-func shaPrefix(sha string) string {
-	if len(sha) <= 7 {
-		return sha
-	}
-	return sha[:7]
-}
+// errBranchGone is the sentinel gatherPanelState's GateIO.RevParse
+// adapter returns to signal a resolved-missing bead branch. The
+// injected BranchSHAResolver already made the one
+// `git rev-parse bead/<id>` call and reports its outcome as a plain
+// (sha, exists) pair with no error value of its own; the adapter
+// manufactures this error so that result can still flow through the
+// GateIO.IsRefNotFound seam panel.ResolveGateFacts expects (Spec 110
+// R2). It carries no other meaning and must never be returned for
+// anything but a confirmed "branch no longer exists".
+var errBranchGone = errors.New("bead branch no longer exists")
 
-// verdict computes the would-be gate decision and the one-line reason,
-// mirroring the Bead 4 decision matrix (Spec 093 Reqs 11/12) read-only.
-// It assumes e.Tally != nil.
+// verdict computes the would-be gate decision and its one-line reason
+// by delegating to panel.PanelGateDecision — the SAME decision
+// `mindspec complete`'s panel gate enforces (Spec 110 R2, ADR-0040).
+// This function used to be a second, independently-computed copy of
+// that decision matrix (Spec 093 Reqs 11/12); it no longer carries any
+// of that logic itself; it only builds panel.GateFacts from
+// already-resolved fields (e.Tally + e.LiveBranchSHA/e.BranchMissing —
+// gatherPanelState's ONE git call already happened before this entry
+// was built) and maps the resulting panel.Decision.Action onto
+// GatePass/GateWarn/GateBlock. PURE: no git, no fs, no subprocess — it
+// does not call panel.ResolveGateFacts itself (that would re-Tally the
+// directory from disk); that I/O belongs to gatherPanelState. It
+// assumes e.Tally != nil.
 func (e PanelStateEntry) verdict() (PanelGateVerdict, string) {
 	r := e.Tally
 
-	// Unregistered (no panel.json) — fail-open, no gate (HC-4). Should
-	// not appear in the block (Scan only returns registered dirs) but
-	// stay defensive.
-	if r.Panel == nil {
-		if r.PanelErr != nil {
-			return GateBlock, "panel.json present but unreadable — fix or remove it"
-		}
-		return GatePass, "no panel.json — unregistered, gate does not apply"
-	}
-	p := r.Panel
-	n := p.ExpectedReviewers
-	thr := p.ApproveThreshold()
-
-	// Abandoned → Pass with Warn (legitimate exit, audited; Req 12).
-	if p.Abandoned {
-		reason := p.AbandonReason
-		if strings.TrimSpace(reason) == "" {
-			reason = "(no reason recorded — abandon_reason is required)"
-		}
-		return GateWarn, fmt.Sprintf("panel abandoned: %s", reason)
+	reg := panel.Registration{Dir: r.Dir, Err: r.PanelErr}
+	if r.Panel != nil {
+		reg.Panel = *r.Panel
 	}
 
-	// Round / filename-max disagreement → Block (Req 11).
-	if r.RoundMismatch {
-		return GateBlock, fmt.Sprintf(
-			"panel.json round (%d) out of date vs verdict files (round %d) — re-run /ms-panel-run step 0",
-			p.Round, r.LatestRound)
+	facts := panel.GateFacts{Reg: &reg, Res: r}
+	if r.Panel != nil && r.Panel.IsBead() {
+		// Bead panel: the staleness facts (HeadSHA/MissingRef) are the
+		// caller-resolved live branch SHA / branch-missing flag —
+		// gatherPanelState's single git call per bead panel. A
+		// non-bead panel (final-review/PR; BeadID null) leaves these
+		// zero, so PanelGateDecision's staleness leg
+		// (p.ReviewedHeadSHA != "" && f.HeadSHA != "") stays inert —
+		// byte-identical to today's `if p.IsBead()` guard.
+		facts.BeadID = *r.Panel.BeadID
+		facts.HeadSHA = e.LiveBranchSHA
+		facts.MissingRef = e.BranchMissing
 	}
 
-	// reviewed_head_sha staleness (Req 11). Only meaningful for bead
-	// panels whose live branch SHA the caller resolved.
-	if p.IsBead() {
-		switch {
-		case e.BranchMissing:
-			// rerun-after-merge: Pass with Warn, defer to complete.
-			return GateWarn, fmt.Sprintf(
-				"branch bead/%s no longer exists — assuming the merge landed; deferring to `mindspec complete`",
-				*p.BeadID)
-		case e.LiveBranchSHA != "" && e.LiveBranchSHA != p.ReviewedHeadSHA:
-			return GateBlock, fmt.Sprintf(
-				"round %d reviewed %s, branch now at %s — commits landed after review; bump round and re-panel (/ms-panel-run step 0)",
-				r.LatestRound, shaPrefix(p.ReviewedHeadSHA), shaPrefix(e.LiveBranchSHA))
-		}
-	}
-
-	// Incomplete — verdicts below expected (Req 12).
-	if !r.Complete() {
-		return GateBlock, fmt.Sprintf(
-			"round %d incomplete: %d/%d verdicts present (missing %d) — finish /ms-panel-run or tally first",
-			r.LatestRound, len(r.Verdicts), n, r.MissingCount())
-	}
-
-	// REJECT or hard_block → Block (Req 12), takes precedence over the
-	// APPROVE count.
-	if r.Rejects > 0 || len(r.HardBlocks) > 0 {
-		return GateBlock, fmt.Sprintf(
-			"%d/%d APPROVE but a REJECT or hard_block is recorded — halt path, see /ms-panel-tally",
-			r.Approves, n)
-	}
-
-	// Threshold (N−1) met → Pass.
-	if r.Approves >= thr {
+	d := panel.PanelGateDecision(facts)
+	if d.Action == panel.Allow {
+		// Allow carries no Message on either of its branches (gate.go:142
+		// no registered panel, gate.go:258 threshold met); synthesize the
+		// reason locally from the tally fields, reusing today's exact
+		// wording so the pinned Allow-reason rows keep passing unchanged.
+		// By the time PanelGateDecision reaches an Allow, f.Res.Panel is
+		// guaranteed non-nil (a nil Panel Blocks at gate.go's
+		// malformed-registration branch).
+		p := r.Panel
 		return GatePass, fmt.Sprintf(
 			"%d/%d APPROVE — meets threshold %d/%d; `mindspec complete` would proceed",
-			r.Approves, n, thr, n)
+			r.Approves, p.ExpectedReviewers, p.ApproveThreshold(), p.ExpectedReviewers)
 	}
+	return mapGateAction(d.Action), d.Message
+}
 
-	// Short of threshold → Block (Req 12).
-	return GateBlock, fmt.Sprintf(
-		"%d/%d APPROVE — threshold is %d/%d. Run /ms-bead-fix with %s, then re-panel",
-		r.Approves, n, thr, n, panel.ConsolidatedName(r.LatestRound))
+// mapGateAction maps panel.GateAction — the single home's Allow/Warn/Block
+// (Spec 110 R2) — onto this package's PanelGateVerdict (GatePass/GateWarn/
+// GateBlock). panel.Allow is never passed in practice (verdict() handles it
+// above, since only Allow needs a synthesized reason); any other/unknown
+// value falls back to GatePass, matching panel.PanelGateDecision's own
+// iota-zero-is-Allow convention.
+func mapGateAction(a panel.GateAction) PanelGateVerdict {
+	switch a {
+	case panel.Block:
+		return GateBlock
+	case panel.Warn:
+		return GateWarn
+	default:
+		return GatePass
+	}
 }
 
 // renderPanelState formats the open-panel-rounds block (Spec 093
@@ -249,9 +241,14 @@ func HasIncompletePanel(roots ...string) bool {
 // gatherPanelState scans the given roots for registered panels and
 // builds one PanelStateEntry per panel, resolving each bead panel's
 // live branch SHA via resolve. The fs Scan/Tally are zero-git; the only
-// git work is one resolve call per bead panel (Req 14 budget). Returns
-// nil when no panels are registered (zero added cost — the caller
-// appends nothing).
+// git work is one resolve call per bead panel (Req 14 budget). For a
+// bead panel this routes through panel.ResolveGateFacts — the single
+// home (Spec 110 R2) — rather than a second ad hoc Tally+resolve combo,
+// so the tally + staleness facts verdict() consumes are sourced
+// identically to the `mindspec complete` panel gate's own wiring
+// (internal/complete's panelGate/panelAdvisory). Returns nil when no
+// panels are registered (zero added cost — the caller appends
+// nothing).
 func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEntry {
 	regs := panel.Scan(roots...)
 	if len(regs) == 0 {
@@ -259,20 +256,43 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 	}
 	var entries []PanelStateEntry
 	for _, reg := range regs {
+		if reg.Err == nil && reg.Panel.IsBead() && resolve != nil {
+			beadID := *reg.Panel.BeadID
+			scanRoot := panel.PanelDirScanRoot(reg.Dir)
+			// The GateIO adapts the injected BranchSHAResolver's plain
+			// (sha, exists) return into the seam ResolveGateFacts
+			// expects. Worktree always reports absent — instruct has
+			// never done dirty-tree detection (a read-only snapshot),
+			// so that leg (and its `git status --porcelain` cost) stays
+			// inert; Status is therefore never invoked and left nil.
+			facts := panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
+				RevParse: func(string, string) (string, error) {
+					sha, exists := resolve(beadID)
+					if !exists {
+						return "", errBranchGone
+					}
+					return sha, nil
+				},
+				IsRefNotFound: func(err error) bool { return errors.Is(err, errBranchGone) },
+				Worktree:      func() string { return "" },
+			})
+			if facts.Res == nil {
+				continue // directory unreadable, same skip as the plain-Tally path
+			}
+			entries = append(entries, PanelStateEntry{
+				Slug:          reg.Slug(),
+				Tally:         facts.Res,
+				LiveBranchSHA: facts.HeadSHA,
+				BranchMissing: facts.MissingRef,
+			})
+			continue
+		}
+
 		res, err := panel.Tally(reg.Dir)
 		if err != nil {
 			continue
 		}
-		entry := PanelStateEntry{Slug: reg.Slug(), Tally: res}
-		if res.Panel != nil && res.Panel.IsBead() && resolve != nil {
-			sha, exists := resolve(*res.Panel.BeadID)
-			if exists {
-				entry.LiveBranchSHA = sha
-			} else {
-				entry.BranchMissing = true
-			}
-		}
-		entries = append(entries, entry)
+		entries = append(entries, PanelStateEntry{Slug: reg.Slug(), Tally: res})
 	}
 	return entries
 }

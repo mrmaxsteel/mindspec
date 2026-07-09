@@ -805,3 +805,167 @@ func TestRenderJSON_PanelState(t *testing.T) {
 		t.Errorf("panel_state must be omitted when empty\n%s", jsonOut2)
 	}
 }
+
+// factsFor rebuilds the panel.GateFacts verdict() would build for entry,
+// by the SAME recipe (Reg from Tally.Dir/Panel/PanelErr, Res = Tally,
+// BeadID/HeadSHA/MissingRef from LiveBranchSHA/BranchMissing for a bead
+// panel). It exists purely so this test can independently drive
+// panel.PanelGateDecision over facts equivalent to entry's and assert
+// verdict()'s mapped outcome agrees — pinning that verdict() has no
+// surviving branch that diverges from the single home.
+func factsFor(entry PanelStateEntry) panel.GateFacts {
+	r := entry.Tally
+	reg := panel.Registration{Dir: r.Dir, Err: r.PanelErr}
+	if r.Panel != nil {
+		reg.Panel = *r.Panel
+	}
+	facts := panel.GateFacts{Reg: &reg, Res: r}
+	if r.Panel != nil && r.Panel.IsBead() {
+		facts.BeadID = *r.Panel.BeadID
+		facts.HeadSHA = entry.LiveBranchSHA
+		facts.MissingRef = entry.BranchMissing
+	}
+	return facts
+}
+
+// TestPanelStateVerdict_DelegatesToPanelGateDecision is the Spec 110 R2
+// ratchet pin: PanelStateEntry.verdict() used to be a SEPARATE,
+// independently-computed reproduction of the Bead 4 decision matrix (Spec
+// 093 Reqs 11/12) — it never called panel.PanelGateDecision. It now
+// delegates entirely. Over a branch-complete table spanning the decision
+// surface, this asserts verdict()'s mapped gate equals
+// mapGateAction(panel.PanelGateDecision(facts).Action) for the IDENTICAL
+// facts, so any independent branch that creeps back into verdict()
+// (reproducing part of the matrix instead of delegating) diverges and
+// fails here — even if it happened to keep the pinned-reason substrings in
+// TestPanelStateEntry_Verdict passing.
+//
+// A dedicated transient-GitErr row is Bead-4-only: gatherPanelState builds
+// GateFacts from a BranchSHAResolver's (sha string, exists bool) return,
+// which has no third "transient error" state to inject — only the CLI
+// verbs' GateIO.RevParse seam can produce GateFacts.GitErr (see plan.md
+// Bead 3 step 3) — so this table covers MissingRef but not GitErr.
+func TestPanelStateVerdict_DelegatesToPanelGateDecision(t *testing.T) {
+	const beadID = "b.1"
+	const sha = "abc1234"
+
+	cases := []struct {
+		name  string
+		entry PanelStateEntry
+	}{
+		{
+			name:  "fresh_bead_panel",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0), LiveBranchSHA: sha},
+		},
+		{
+			name:  "stale_sha_bead_panel",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0), LiveBranchSHA: "def5678"},
+		},
+		{
+			name: "round_mismatch",
+			entry: func() PanelStateEntry {
+				r := beadPanel(beadID, sha, 2, 6, 6, 0, 0, 0)
+				r.RoundMismatch = true
+				r.Panel.Round = 1 // panel.json lags the filename round
+				return PanelStateEntry{Slug: "p", Tally: r, LiveBranchSHA: sha}
+			}(),
+		},
+		{
+			// Malformed registration: panel.json exists but failed to parse.
+			name:  "malformed_registration_panel_err",
+			entry: PanelStateEntry{Slug: "p", Tally: &panel.Result{Dir: "review/p", PanelErr: fmt.Errorf("boom")}},
+		},
+		{
+			// Malformed registration: no Panel and no PanelErr (the
+			// defensive "should not appear" fs-race shape) — still routed
+			// through PanelGateDecision's registered-but-unreadable branch,
+			// never a locally-computed fail-open.
+			name:  "malformed_registration_nil_panel",
+			entry: PanelStateEntry{Slug: "p", Tally: &panel.Result{Dir: "review/p"}},
+		},
+		{
+			name:  "incomplete",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 3, 0, 0, 0), LiveBranchSHA: sha},
+		},
+		{
+			name:  "reject",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 5, 1, 0, 0), LiveBranchSHA: sha},
+		},
+		{
+			name:  "hard_block",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 6, 0, 1, 0), LiveBranchSHA: sha},
+		},
+		{
+			name:  "sub_threshold",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 4, 0, 0, 2), LiveBranchSHA: sha},
+		},
+		{
+			name:  "at_threshold",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 5, 0, 0, 1), LiveBranchSHA: sha},
+		},
+		{
+			name:  "above_threshold",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0), LiveBranchSHA: sha},
+		},
+		{
+			name: "abandoned",
+			entry: func() PanelStateEntry {
+				r := beadPanel(beadID, sha, 1, 6, 0, 0, 0, 0)
+				r.Panel.Abandoned = true
+				r.Panel.AbandonReason = "max@ — superseded by spec rescope"
+				return PanelStateEntry{Slug: "p", Tally: r, LiveBranchSHA: sha}
+			}(),
+		},
+		{
+			name:  "missing_ref",
+			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0), BranchMissing: true},
+		},
+		{
+			// Non-bead panel (final-review/PR; BeadID null): no bead/<id>
+			// to rev-parse, so the staleness leg must stay inert even
+			// though ReviewedHeadSHA is non-empty.
+			name: "non_bead_panel",
+			entry: func() PanelStateEntry {
+				r := beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0)
+				r.Panel.BeadID = nil
+				return PanelStateEntry{Slug: "p", Tally: r}
+			}(),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotGate, _ := c.entry.verdict()
+			want := mapGateAction(panel.PanelGateDecision(factsFor(c.entry)).Action)
+			if gotGate != want {
+				t.Errorf("verdict() gate = %v, want mapGateAction(PanelGateDecision(facts)) = %v", gotGate, want)
+			}
+		})
+	}
+
+	// Concrete, falsifiable check that the local matrix is actually gone:
+	// panelstate.go's own source text must show the delegation call and
+	// must NOT still carry any of the four message literals the
+	// pre-refactor local branches hardcoded verbatim — those now live
+	// solely in gate.go's Decision.Message and are relayed, not
+	// reconstructed.
+	src, err := os.ReadFile("panelstate.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	if !strings.Contains(text, "panel.PanelGateDecision(") {
+		t.Error("panelstate.go must delegate to panel.PanelGateDecision(...)")
+	}
+	deletedLiterals := []string{
+		"out of date vs verdict files",
+		"commits landed after review",
+		"finish /ms-panel-run or tally first",
+		"REJECT or hard_block is recorded",
+	}
+	for _, lit := range deletedLiterals {
+		if strings.Contains(text, lit) {
+			t.Errorf("panelstate.go must not hardcode the pre-refactor message literal %q — it now lives only in gate.go", lit)
+		}
+	}
+}
