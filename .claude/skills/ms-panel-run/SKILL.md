@@ -9,6 +9,20 @@ Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `pa
 
 Step 0 was previously the separate `/ms-panel-create` skill; it is folded in here so the panel directory, BRIEF, and `panel.json` are always created together — the gate's source of truth (`panel.json`) cannot be forgotten.
 
+## Runner dispatch
+
+Read the effective `runner:` value before doing anything else — it selects **workflow-path** or **skills-path** for the rest of this skill:
+
+```bash
+mindspec config show | grep '^runner:'
+```
+
+- **`claude-code-workflow`** (workflow-path) — compose the slot lenses (§ Slot lens defaults below; the retained judgment step) then invoke the `/ms-panel` workflow **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[], mix}` (`mix` is the resolved `panel:` reviewer mix, spec 109). The workflow performs registration (`mindspec panel create`), reviewer fan-out, the parse-retry/quota-wall-substitution ladder, and the verify/tally-return itself (spec 111 R1–R5) — do not separately walk Step 0 through the Anti-patterns section below on this path; those sections are labelled **claude-code-skills path only** and are superseded here.
+- **`claude-code-skills`** (skills-path — the **default** until the workflow path is proven) — the existing manual launch path runs **unchanged**: Step 0 through the Anti-patterns section below, exactly as written.
+- **`external`** — a documented out-of-scope **stub**: no adapter ships for this runner. The panel runs human/skills-path per ADR-0040 degraded modes.
+
+A host lacking workflow capability (no Claude Code dynamic-workflow support) degrades to the skills path regardless of the configured `runner:` value.
+
 ## Inputs
 
 - `panel-slug` (required) — e.g. `spec-050-bead2` (round 1) or `spec-050-bead2-r2` (round 2).
@@ -81,6 +95,8 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 
 ## Launch the panel
 
+> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), this mechanized launch is superseded by the schema+wrapper mechanism (R3–R4) and the single `/ms-panel` invocation (R6) — do not re-run it when `runner: claude-code-workflow`.
+
 1. **Launch Codex first** (they run 4-10 min vs Claude 1-3 min; start the slow ones first).
 
    For each codex slot R4, R5, R6:
@@ -121,6 +137,8 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 5. **Verify all six JSON files exist** at `<spec-dir>/reviews/<panel-slug>/<slot>-round-<N>.json`.
 
 ## Codex failure detection (deterministic)
+
+> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), this bash-level detection is superseded by the workflow's own schema+wrapper mechanism and parse-retry/quota-wall-substitution ladder (R3–R4) — do not re-state it for `runner: claude-code-workflow`.
 
 A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order.
 
@@ -166,6 +184,8 @@ When deciding whether to retry codex once before substituting: don't. Empiricall
 
 ## Working directory matters
 
+> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), the `/ms-panel` workflow's own codex-wrapper agent step owns its working directory — this is superseded and not restated for `runner: claude-code-workflow`.
+
 Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
 
 **Launch convention**: always `cd <repo>` first so `<spec-dir>/reviews/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
@@ -191,6 +211,8 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 Mix to taste. The point is six distinct lenses, not six clones. For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
 
 ## Anti-patterns
+
+> **`claude-code-skills` path only.** These are codex-specific bash-launch anti-patterns for the manual path; on the workflow path (§ Runner dispatch) they are superseded by the single `/ms-panel` invocation (R6), which owns its own codex-wrapper backgrounding and log handling.
 
 - Don't read `.out` files via `Read` while a codex session is still active — they grow and can overflow context. Wait for the completion notification, then grep targeted strings.
 - Don't run all six reviewers as foreground tool calls — that serialises the panel and wastes 5-10 minutes.

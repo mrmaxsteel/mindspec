@@ -83,3 +83,21 @@ Check current mode with `/spec-status`. If unclear:
   halt-recovery/escape-hatch procedure — are unchanged: the verbs mechanize the
   decision function and the artifact registration, not the human judgment
   layered on top of them.
+- **2026-07-09 (spec 111 Bead 3):** The panel operator procedure now selects
+  its runner via the spec 109 `runner:` config key (`mindspec config show`),
+  read by `/ms-panel-run`'s new **Runner dispatch** section:
+  `claude-code-workflow` composes the slot lenses (§ Slot lens defaults, the
+  retained judgment step) and invokes the `/ms-panel` workflow (spec 111 Bead 2)
+  **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[],
+  mix}`, letting the workflow's own registration + fan-out + verify/tally-return
+  mechanics stand in for the manual **Launch the panel**, **Codex failure
+  detection**, and **Working directory matters** sections (those sections are
+  labelled `claude-code-skills` path only and superseded, not deleted, for the
+  workflow path); `claude-code-skills` retains the hand-driven launch path
+  unchanged as the default runner; `external` is a documented out-of-scope stub
+  (human/skills-path per ADR-0040 degraded modes). `/ms-panel-tally` gained a
+  matching note: on the workflow path the per-slot table and decision arrive
+  pre-rendered in the workflow result, so its own job narrows to consolidation
+  and the merge terminal. Judgment sections in both skills — Slot lens
+  defaults, Consolidate, Artifact gates, After a halt — recovery, and Escape
+  hatch — are retained unchanged on both paths.

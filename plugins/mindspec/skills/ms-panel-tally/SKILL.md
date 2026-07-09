@@ -13,6 +13,10 @@ Run `mindspec panel tally <panel-slug>` for the decision, apply the HARD artifac
 
 - `panel-slug` (required) — passed as `mindspec panel tally <panel-slug>`. The round tallied, the expected-reviewer count, and the approve threshold are all resolved automatically from `panel.json` and the configured panel defaults — nothing else to pass in.
 
+## Workflow-path note
+
+When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) dispatched this panel, the per-slot verdict table and decision below arrive **pre-rendered in the workflow result** — the `/ms-panel` workflow already ran `mindspec panel verify` and `mindspec panel tally` as its last two steps and returned their output verbatim (spec 111 R5). Step 1 below is then just reading that already-produced output rather than re-running the command yourself; this skill's job narrows to Step 2 consolidation and the merge terminal. The judgment sections below — Consolidate, § Artifact gates, § After a halt — recovery, and § Escape hatch — are unchanged on both paths.
+
 ## Steps
 
 1. **Run the tally.**
