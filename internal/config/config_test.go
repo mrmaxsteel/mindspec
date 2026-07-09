@@ -1483,3 +1483,80 @@ func TestPanelGateAdvisoryDefault_SelectionRule(t *testing.T) {
 		t.Errorf("unknown recorded gate (non-bead) should skip: got (%d,%v), want ok=false", got, ok)
 	}
 }
+
+// TestLoad_EmptyStringModel pins the spec 113 R4/OQ2 reconciliation of spec
+// 112's R1-vs-R4 disagreement over {model: "", family: <f>}: resolve-to-
+// family. (a) an explicit empty-string Model alongside a Family loads
+// cleanly and slot-expands to the family string — Reviewer.model() and
+// validateReviewerEntries's comments (config.go) record that this
+// supersedes 112 R4's "or an empty-string `model`" refusal phrase. (b) the
+// neither-set case (empty Model, no Family at all) is unchanged: Load still
+// refuses it via validateReviewerEntries's original branch, naming the
+// offending index and carrying the ADR-0035 recovery line.
+func TestLoad_EmptyStringModel(t *testing.T) {
+	t.Run("empty model with family resolves to family", func(t *testing.T) {
+		ResetCache()
+		defer ResetCache()
+
+		root := t.TempDir()
+		dir := filepath.Join(root, ".mindspec")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := "panel:\n  reviewers:\n    - {model: \"\", family: codex, count: 1}\n    - {family: claude, count: 1}\n"
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(root)
+		if err != nil {
+			t.Fatalf("expected Load to accept {model: \"\", family: codex}, got error: %v", err)
+		}
+
+		slots, err := cfg.PanelGateReviewerSlots("bead")
+		if err != nil {
+			t.Fatalf("PanelGateReviewerSlots: %v", err)
+		}
+		if len(slots) != 2 {
+			t.Fatalf("expected 2 slots, got %d: %+v", len(slots), slots)
+		}
+		if slots[0].Model != "codex" {
+			t.Errorf("slots[0].Model = %q, want %q (empty model must resolve to family)", slots[0].Model, "codex")
+		}
+	})
+
+	t.Run("empty model with no family is still refused", func(t *testing.T) {
+		ResetCache()
+		defer ResetCache()
+
+		root := t.TempDir()
+		dir := filepath.Join(root, ".mindspec")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := "panel:\n  reviewers:\n    - {model: \"\", count: 1}\n    - {family: claude, count: 1}\n"
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := Load(root)
+		if err == nil {
+			t.Fatal("expected Load to refuse {model: \"\"} with no family, got nil error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "panel.reviewers[0]") {
+			t.Errorf("error message missing %q: %v", "panel.reviewers[0]", msg)
+		}
+		// Uniquely pin the neither-set branch: the count-must-be->=1 branch
+		// also emits panel.reviewers[0] + a recovery line, so require the
+		// distinctive neither-set phrase (byte-for-byte from config.go's
+		// validateReviewerEntries) so a fall-through to a different branch
+		// cannot pass this test spuriously.
+		if !strings.Contains(msg, `sets neither "model" nor "family"`) {
+			t.Errorf("error message missing the neither-set phrase %q: %v", `sets neither "model" nor "family"`, msg)
+		}
+		if !strings.Contains(msg, "recovery:") {
+			t.Errorf("error message missing ADR-0035 recovery line: %v", msg)
+		}
+	})
+}
