@@ -108,7 +108,10 @@ function buildCommand(verb, ...values) {
 const CONTROL_BYTE_RE = /[\x00-\x1f\x7f]/;
 
 // The clean-single-path-element contract 110's CLI validators apply: reject
-// empty, ".", "..", "/", "\", and control bytes.
+// empty, ".", "..", "/", "\", control bytes, and whitespace (every value this
+// validator guards ends up as a bare token in a built command line, and a
+// space would word-split it into extra argv tokens even without a
+// shell-metacharacter present).
 function validatePathElement(label, value) {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`invalid ${label}: must be a non-empty string`);
@@ -122,9 +125,17 @@ function validatePathElement(label, value) {
   if (CONTROL_BYTE_RE.test(value)) {
     throw new Error(`invalid ${label}: contains a control byte`);
   }
+  if (/\s/.test(value)) {
+    throw new Error(`invalid ${label}: must not contain whitespace`);
+  }
 }
 
-const SHELL_METACHAR_RE = /[`;|&\n]|\$\(/;
+// The backtick is written as \x60 rather than a literal backtick so a naive
+// quote-scanning guard test over this file's own source (which has no
+// regex-literal awareness) cannot mistake it for the start of a template
+// literal and desync its string-boundary tracking for the remainder of the
+// file — functionally identical match, verified against a literal backtick.
+const SHELL_METACHAR_RE = /[\x60;|&\n]|\$\(/;
 
 function validateShellSafe(label, value) {
   if (SHELL_METACHAR_RE.test(value)) {
@@ -178,6 +189,12 @@ function validateRound(round) {
   }
 }
 
+// The only two reviewer families runSlot (Step 3) knows how to dispatch —
+// enum-checked here, at validateArgs time, so an unrecognized family aborts
+// before Step 2's `panel create` runs rather than surfacing only when
+// runSlot's own `throw` fires after state has already been mutated.
+const VALID_MIX_FAMILIES = new Set(["claude", "codex"]);
+
 function validateMix(mix) {
   if (!Array.isArray(mix) || mix.length === 0) {
     throw new Error("invalid mix: must be a non-empty array");
@@ -191,6 +208,11 @@ function validateMix(mix) {
     // args — but the reviewer family name IS user-derived input and is
     // hardened the same way slug/spec are.
     validatePathElement("mix[].family", entry.family);
+    if (!VALID_MIX_FAMILIES.has(entry.family)) {
+      throw new Error(
+        `invalid mix[].family: must be one of "claude" or "codex", got ${JSON.stringify(entry.family)}`,
+      );
+    }
     if (!Number.isInteger(entry.count) || entry.count < 1) {
       throw new Error("invalid mix[].count: must be a positive integer");
     }
@@ -202,7 +224,9 @@ function validateArgs(a) {
     throw new Error("invalid args: input is missing or not an object");
   }
   validatePathElement("slug", a.slug);
+  validateShellSafe("slug", a.slug);
   validatePathElement("spec", a.spec);
+  validateShellSafe("spec", a.spec);
   validateBeadId(a.bead_id);
   validateTarget(a.target);
   validateRound(a.round);
