@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Scope fence honored. `git show 25ad5ca9 --stat` touches exactly panelstate.go, panelstate_test.go, and workflow/overview.md; zero internal/panel files — PanelGateDecision/ResolveGateFacts/GateFacts/GateIO semantics are untouched, only consumed. The GatePass/GateBlock/GateWarn enum and gateLabel are retained and still consumed by renderPanelState (verdict() at :174, gateLabel(v) at :177), so the markdown render surface of `instruct --panel-state` (the 'gate would PASS/BLOCK' line + reason) is byte-stable; verdict()'s (PanelGateVerdict,string) signature is unchanged. Moving fact I/O from verdict() into gatherPanelState is pure single-home delegation: non-bead panels still fall through the guard to plain panel.Tally (identical entry), and bead panels now route through panel.ResolveGateFacts — the same gatherer internal/complete uses — no observable contract drift beyond the intended consolidation. The nil-Panel→Block change is squarely within R2's remit: adopting PanelGateDecision's malformed-registration (gate.go:2) disposition is inseparable from ratcheting onto the single home, and fail-closed on an advisory-only display line is the safe direction. Doc-sync accurately mirrors the code.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Scope: 3 files changed; internal/panel = 0 files (git show --name-only | grep -c internal/panel/ => 0). Shared decision package untouched.",
+    "Render contract stable: PanelGateVerdict enum + gateLabel retained (panelstate.go:38-49, :198-206) and consumed by renderPanelState:177; verdict() signature unchanged, so --panel-state text output is unaffected for consumers.",
+    "Single-home delegation is clean: verdict() stays pure (builds GateFacts, calls PanelGateDecision, maps Action), while gatherPanelState owns the one git call via panel.ResolveGateFacts + GateIO adapter. Worktree()->\"\" keeps the dirty-tree leg inert; non-bead panels leave HeadSHA/MissingRef zero so the staleness leg stays inert (byte-identical to old `if p.IsBead()` guard).",
+    "verdict()'s fail-open gate.go:(1) path is unreachable here (facts.Reg=&reg, facts.Res=e.Tally both non-nil), so nil-Panel deterministically hits (2) Block — a deliberate, in-scope adoption of the single home's disposition on an advisory-only surface; reachability/safety is R5/R7's remit and is pinned by the malformed_registration_nil_panel test row.",
+    "Doc-sync (workflow/overview.md +1) accurately describes the refactor and stays within the declared instruct+doc fence; no scope creep."
+  ]
+}

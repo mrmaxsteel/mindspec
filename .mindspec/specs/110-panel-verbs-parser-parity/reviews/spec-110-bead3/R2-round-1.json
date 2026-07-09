@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens on 25ad5ca9. Every summary claim ties to real code. `go build ./...` exit 0; `go vet ./internal/instruct/...` exit 0. Both pinned TestPanelStateEntry_Verdict rows (at_threshold_fresh, above_threshold_fresh) PASS. The test-file diff vs parent e32eeaed is +164/-0 — purely additive — and grep for the pinned row names / reason literals in the diff returns nothing, so those rows are byte-identical (no test edited to make green). The new TestPanelStateVerdict_DelegatesToPanelGateDecision exists and PASSES with exactly 14 rows (fresh_bead_panel, stale_sha_bead_panel, round_mismatch, malformed_registration_panel_err, malformed_registration_nil_panel, incomplete, reject, hard_block, sub_threshold, at_threshold, above_threshold, abandoned, missing_ref, non_bead_panel). Its embedded source-text check confirms panelstate.go contains `panel.PanelGateDecision(` and none of the 4 pre-refactor message literals — PASSES. The ONLY failure is TestRun_IdleNoBeads, hitting the 'Multiple Active Specs' branch (110/111/112 active in shared tree) = documented z4ps; the diff touches no run/idle/template file, so it cannot be caused here. Scope fence honored: only panelstate.go, panelstate_test.go, workflow/overview.md; panel package untouched. git status clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... -> exit 0; go vet ./internal/instruct/... -> exit 0.",
+    "TestPanelStateEntry_Verdict/at_threshold_fresh and /above_threshold_fresh both PASS; test-file diff is +164/-0 (additive only), pinned rows and their reason substrings absent from the diff = unaltered.",
+    "TestPanelStateVerdict_DelegatesToPanelGateDecision PASSES with 14 table rows spanning the decision surface (Allow/Warn/Block + malformed_registration_nil_panel, non_bead_panel, missing_ref); asserts verdict() gate == mapGateAction(panel.PanelGateDecision(factsFor(entry)).Action).",
+    "Source-text check (panelstate_test.go:952-970) reads panelstate.go, asserts presence of `panel.PanelGateDecision(` and absence of the 4 deleted literals ('out of date vs verdict files', 'commits landed after review', 'finish /ms-panel-run or tally first', 'REJECT or hard_block is recorded') — PASSES.",
+    "Delegation confirmed in source: panelstate.go builds panel.GateFacts, calls d := panel.PanelGateDecision(facts), Allow synthesizes reason locally, Warn/Block relay d.Message; errBranchGone sentinel adapts BranchSHAResolver into panel.GateIO in gatherPanelState (I/O kept out of pure verdict()).",
+    "Only failing test: TestRun_IdleNoBeads — 'Multiple Active Specs' branch (z4ps env leak). Diff name-list touches no run/idle/template file, so unrelated to this bead.",
+    "Scope fence: git diff e32eeaed..25ad5ca9 = exactly 3 files (panelstate.go +218/-99, panelstate_test.go +164, workflow/overview.md +1); internal/panel untouched. git status clean apart from the review dir."
+  ]
+}
