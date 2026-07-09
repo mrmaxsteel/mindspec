@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "My round-1 driving item is ADDRESSED. The new Allow-branch clause in ms-panel-tally step 1 restores exactly the lost disjunct: a CCR item naming a missing measurement artifact / cost projection / drift report / regression baseline HARD-blocks regardless of vote count AND regardless of the hard_block flag — so the round-1 attack case (5/6 Allow, one RC naming a missing cost_projection.json, no flag set) now halts at the screen instead of merging. It is procedurally positioned BEFORE the merge handoff ('Only once that screen is clear does an Allow hand off'), replacing the previously unconditional Allow-to-merge sentence. It is consistent with § Artifact gates (the screen defers the HARD-vs-soft shape judgment to that section) and contradicts nothing in the binary: it only tightens Allow, never loosens a Block, and its 'binary mechanizes only the hard_block-flag disjunct (gate.go cases 9-10)' claim is accurate. 'Printed even on Allow' is true (collectSlotChanges runs regardless of decision). My minor findings F2 (stale expected-reviewers Inputs bullet) and F3 (confidence not in the tally table) are also fixed, both accurately vs renderPanelTally. Mirrors byte-identical at 17eb5afe.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-F1-artifact-gate-allow-path",
+      "disposition": "ADDRESSED",
+      "note": "The Allow-branch artifact-gate screen is restored with the exact scope of the old matrix row 1's second disjunct, before the merge handoff, flag-independent and vote-count-independent. Verified the supporting claims: gate.go cases 9-10 mechanize only REJECT/hard_block + threshold; the tally prints the aggregated CCR on Allow too."
+    },
+    {
+      "id": "R1-F2-inputs-section-stale",
+      "disposition": "ADDRESSED",
+      "note": "The expected-reviewers input bullet is replaced with an accurate config-stamping note (6 reviewers, N-1 threshold, stamped by panel create)."
+    },
+    {
+      "id": "R1-F3-confidence-surfacing",
+      "disposition": "ADDRESSED",
+      "note": "The 'Don't ignore confidence' anti-pattern now states the printed table carries verdict/hard_block only and directs the operator to read confidence from the <slot>-round-<N>.json files — verified accurate against renderPanelTally."
+    },
+    {
+      "id": "R1-F4-low-approve-escalation",
+      "disposition": "MISSED",
+      "note": "The old '≤2 APPROVE — flag to the user (significant rework)' escalation heuristic remains dropped. I rated it minor/non-driving in round 1 and stand by that: such a panel still Blocks on threshold (fail-safe); only the user-escalation nuance is gone. Not verdict-affecting."
+    },
+    {
+      "id": "R2-scope-check",
+      "disposition": "NEW_ISSUE_NONE",
+      "note": "The delta is additive doc clauses only (5 files, +19/-8): the R6 panel-directory-line fix ('panel directory:' print at cmd/mindspec/panel.go:140 and the non-flat review/<slug> fallback at panel.go:279 both verified real), the runbook now naming all five surviving ms-panel-run sections, and the two nit fixes. No new drift introduced; mirrors byte-identical; no Go files touched."
+    }
+  ]
+}
