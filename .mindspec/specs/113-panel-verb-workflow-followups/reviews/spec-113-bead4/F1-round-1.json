@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Tried to break the test empirically via mutation probes on a /tmp extraction of 954d6ca8. (a) is NOT hollow: mutating expandSlots line 817 `model := r.model()` -> `model := r.Model` (validation still passes, only expansion regresses) goes red on the exact assertion `slots[0].Model = \"\", want \"codex\"` — so the family fallback is pinned at the expansion path itself, not via a side effect; removing model()'s fallback entirely also reds (a) at Load. (b) is NOT hollow: deleting the neither-set branch from validateReviewerEntries makes Load return nil and (b) fatals; tightening (b)'s assertion to the distinctive `sets neither \"model\" nor \"family\"` phrase still passes, proving the error it sees today is the genuine neither-set refusal, not a YAML parse or other branch. len(slots)==2 also blocks default-config leakage. One narrow, non-blocking aliasing: the count-branch error `panel.reviewers[0].count must be >= 1` would also satisfy (b)'s two substrings, but the fixture's count:1 makes that branch unreachable without a second independent bug. Comments match actual behavior; worktree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Mutation probe: subtest (a) detects expansion-path regression independently of validation",
+      "detail": "Changing expandSlots (config.go:817) from r.model() to r.Model — a mutation that leaves Load validation green — fails subtest (a) with `slots[0].Model = \"\", want \"codex\"`. The test pins the fallback where it matters, end-to-end through Load + PanelGateReviewerSlots(\"bead\") -> resolveGateReviewers -> expandSlots."
+    },
+    {
+      "severity": "info",
+      "title": "Mutation probe: subtest (b) detects removal of the neither-set refusal",
+      "detail": "Deleting the r.model()==\"\" branch from validateReviewerEntries (config.go:560-562) makes Load succeed and (b) fails on `expected Load to refuse {model: \"\"} with no family, got nil error`. A /tmp probe that additionally required the distinctive substring `sets neither \"model\" nor \"family\"` still passed, confirming (b) currently fires on the genuine neither-set error, not a parse error or other validation branch."
+    },
+    {
+      "severity": "minor",
+      "title": "Subtest (b) substring pair cannot distinguish neither-set from the count branch (theoretical aliasing, non-blocking)",
+      "detail": "The count error at config.go:564 (`panel.reviewers[0].count must be >= 1 ... recovery: ...`) contains both asserted substrings `panel.reviewers[0]` and `recovery:`. With the fixture's valid count:1 this branch is unreachable, so a spurious green requires two coincident bugs (refusal removed AND count validation corrupted). Optional hardening for a future pass: also assert `sets neither \"model\" nor \"family\"` in (b). Not required for this bead."
+    },
+    {
+      "severity": "info",
+      "title": "Doc comments accurately describe the code",
+      "detail": "model() (config.go:149-154) does fall back to Family on Model==\"\", and validateReviewerEntries only refuses the neither-set case; the two new supersedes comments (config.go:140-148, 550-557) match this exactly. Commit touches only config.go (comments) + config_test.go; Reviewer.Model stays plain string; full ./internal/config suite green; bead worktree git status clean."
+    }
+  ]
+}

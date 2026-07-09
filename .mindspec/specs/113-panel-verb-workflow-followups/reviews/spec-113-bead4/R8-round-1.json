@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Ran everything empirically at 954d6ca8, clean worktree throughout. `go test ./internal/config -run TestLoad_EmptyStringModel -v`: both subtests PASS. `go test ./internal/config`: all 34 subtests green, no FAIL. `go build ./...`: exit 0. `git show --name-only HEAD` lists exactly config.go + config_test.go. Both greps exit 0 (supersedes comment present; `Model  string` field untouched, two spaces). `git diff HEAD~1 HEAD` is +18/+69, all insertions, zero deletions in config.go and all non-comment lines empty — pure comment addition plus a new test, no behavioral edit. Traced subtest (a) through the real path: expandSlots calls r.model() per reviewer, which for {Model:\"\",Family:\"codex\"} returns Family — genuinely resolve-to-family, not hardcoded. Traced subtest (b): only one caller passes label \"panel.reviewers\" to validateReviewerEntries, and with count:1 valid on both entries the only possible error is the neither-set branch (`sets neither \"model\" nor \"family\"` + recovery: line) — no other branch could produce panel.reviewers[0]+recovery: for this input, so the assertion is not spuriously satisfiable. Comments accurately describe the code and cite the 112 R4 supersession. Diff matches plan Bead 4 exactly.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Empirically confirmed both TestLoad_EmptyStringModel subtests exercise real code paths (expandSlots->r.model() for (a); validateReviewerEntries's sole neither-set branch for (b)), not tautological assertions.",
+    "git diff HEAD~1 HEAD is comment-only in config.go (0 non-comment lines changed) and additive-only in config_test.go; existing 112 tests unmodified and passing.",
+    "No way found to make the test pass spuriously: removing resolve-to-family would break subtest (a) via Load error or wrong Model; removing the neither-set refusal would break subtest (b) via nil err."
+  ]
+}

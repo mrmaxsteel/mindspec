@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-r6hk.4",
+  "spec": "113-panel-verb-workflow-followups",
+  "target": "bead/mindspec-r6hk.4",
+  "round": 2,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "c92b3d2650aaef05a4e4750e407ef910afba6ad7"
+}
