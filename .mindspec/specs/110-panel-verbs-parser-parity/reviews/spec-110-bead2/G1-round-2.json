@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Rebuilt commit 2b55d1a7 to /tmp/mindspec-spec110-bead2-g1-r2 using offline caches and reran the corrected R5 oracle. For all 11 round-1 flipped specs, branch `validate spec` rejects and branch `validate plan` rejects with the identical sorted `impacted-domains-resolve` message set, confirming the check moved earlier rather than introducing a new rejection class. I also verified `plan.go` has zero reviewed diff. The ADR digit-boundary fix is empirically good: targeted Go subtests pass, the full ADR touchpoint extraction test passes, and CLI fixtures for `[ADR-12345](...)` and `[ADR-00311](...)` with ADR-0031 present both exit 0 with no `adr-touchpoint-missing`. Focused `go test ./internal/validate ./internal/approve -count=1` passes. No new issue found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "ccr_id": "CCR1",
+      "round1_title": "ValidateSpec introduces pass-to-fail regressions for existing specs",
+      "disposition": "ADDRESSED",
+      "evidence": "Under the corrected R5 oracle, all 11 flipped specs fail `validate plan` with the identical `impacted-domains-resolve` diagnostics already produced by new `validate spec`; impacted counts were 2,1,2,1,1,1,1,3,5,1,2 for specs 038,051,060,071,072,073,080,083,084,085,090 respectively."
+    },
+    {
+      "ccr_id": "CCR2",
+      "round1_title": "Five-digit ADR touchpoint IDs are truncated to four digits",
+      "disposition": "ADDRESSED",
+      "evidence": "The reviewed regex requires a structural non-digit boundary after ADR-####. Targeted subtests and CLI fixtures show `[ADR-12345](...)` no longer reports missing ADR-1234, and `[ADR-00311](...)` does not resolve through existing ADR-0031 or emit a new error."
+    }
+  ]
+}
