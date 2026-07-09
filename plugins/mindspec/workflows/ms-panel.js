@@ -135,7 +135,10 @@ function validatePathElement(label, value) {
 // regex-literal awareness) cannot mistake it for the start of a template
 // literal and desync its string-boundary tracking for the remainder of the
 // file — functionally identical match, verified against a literal backtick.
-const SHELL_METACHAR_RE = /[\x60;|&\n]|\$\(/;
+// spec-113-R2: a bare `$` is folded into the character class (not just the
+// `$(` digraph) so `$HOME`/`${x}`/`$x` variable-expansion can no longer
+// survive validateShellSafe; `$(` is subsumed since it always contains `$`.
+const SHELL_METACHAR_RE = /[\x60;|&\n$]/;
 
 function validateShellSafe(label, value) {
   if (SHELL_METACHAR_RE.test(value)) {
