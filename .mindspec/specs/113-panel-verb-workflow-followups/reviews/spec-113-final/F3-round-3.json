@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Both round-1 findings ADDRESSED in 82b28b2f. F3-2: tallyExitActionNonBead builds the recovery incrementally, appending --target only when target != \"\"; empirically, a malformed panel.json (unreadable registration) now yields `mindspec panel create demo --round <N+1> --spec <id>` with no dangling --target; readable-but-empty target routes to the transient Warn leg (no recovery command at all). F3-1: the function gained a gate param fed from reg.Panel.Gate (value type, safely \"\" when reg.Err != nil), and a live scenario with gate=final_review emits `--target 'spec/113-x' --gate 'final_review'`. Coherence intact: fix is CLI-layer only (zero internal/ diff, verified via commit stat), R1's non-bead exit path and R3's decision-inert Gate compose cleanly, escapeConfigValue+shellQuoteTarget disciplines are documented and non-contradictory (shell strips quotes on paste; gate values are enum-validated at create). go test ./cmd/mindspec ./internal/panel green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "disposition": "ADDRESSED",
+      "note": "tallyExitActionNonBead now takes gate (from reg.Panel.Gate) and appends --gate '<quoted>' only when the panel stamped one; verified live: REJECT on a final_review-gated non-bead panel prints `--gate 'final_review'` in the recovery line. reg.Panel is a value type so the unreadable-registration edge passes gate==\"\" without a nil deref."
+    },
+    {
+      "id": "F3-2",
+      "disposition": "ADDRESSED",
+      "note": "Recovery command built via strings.Builder; --target appended only when non-empty. Verified live: malformed panel.json yields a recovery with neither dangling --target nor --gate. New tests pin the quoting/escaping legs; the empty-target omission itself is scenario-verified but not directly test-pinned (acceptable \u2014 the Block path with empty target is only reachable via unreadable registration)."
+    },
+    {
+      "id": "F3-R2-OBS-1",
+      "severity": "LOW",
+      "disposition": "PRE-EXISTING / advisory only",
+      "note": "Empty-target Warn advisory renders a double space (\"could not verify target  (transient...\") since the %s target is empty in sanitizeNonBeadDecision leg 5b display text. Cosmetic, display-only, not a copyable command, predates 82b28b2f."
+    },
+    {
+      "id": "F3-R2-OBS-2",
+      "severity": "LOW",
+      "disposition": "PRE-EXISTING / out of fix scope",
+      "note": "internal/panel/gate.go evaluates the transient-GitErr Warn leg (line 199) before the Rejects hard-block leg (line 245), so a non-bead panel whose target cannot be rev-parsed tallies PASS(advisory) even with a recorded REJECT. This ordering is the shared decision matrix internal/complete also uses, unchanged by this commit and pinned by earlier-round tests; noting for the record, not blocking."
+    }
+  ],
+  "carried_forward": "round-2 APPROVE carried to round-3: lens unaffected by the round-3 GitErr-escape fix (cmd/mindspec render only, zero internal diff)"
+}

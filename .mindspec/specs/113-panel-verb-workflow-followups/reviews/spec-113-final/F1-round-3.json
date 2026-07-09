@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "All four requirements and every AC land on the branch, verified in code and by running the pins at 12c02de1. AC1: nonBeadTargetRevParse (via the revParseForPanelFn seam) + sanitizeNonBeadDecision + tallyExitActionNonBead deliver truthful non-bead staleness; TestPanelVerify_NonBeadStaleness asserts the recorded target (never bead/) is rev-parsed, BLOCK on advance, no PASS/bead-fragment/complete-advice; TestPanelTally_NonBeadRejectBlocks, _NonBeadStaleBlocks, _NonBeadIncompleteBlocks, _NonBeadMissingTargetRef and TestSanitizeNonBeadDecision cover legs 2-10 from the real templates. Fence holds: zero diff to internal/instruct, internal/complete, gate.go, panel.go; tallyExitAction stays 2-arg. AC2: regex is /[\\x60;|&\\n$]/, strictly monotone ($( contains $); my /tmp node matrix matched all 9 rows; cmp mirrors identical; both floor tests green. AC3: control-byte then enum validation iterating config.PanelGateKeys (no second copy), reject-before-write with five-key recovery + snapshot-tree no-write pin, per-gate resolver stamping, byte-identical-when-omitted, advisory read-through via real config show call site, decision-inertness pinned across all five enum values. AC4: TestLoad_EmptyStringModel passes both legs; superseding comments present. AC-global: build green; all five touched packages pass with -count=1; only TestRun_IdleNoBeads fails, and it fails identically at merge-base 45ae7577 (pre-existing z4ps flake, BRIEF-fenced).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "info",
+      "title": "Skip-env leg message trails an empty bead ID for non-bead panels (cosmetic, not a spec falsifier)",
+      "detail": "internal/panel/gate.go leg (1) renders 'panel gate skipped via MINDSPEC_SKIP_PANEL for %s' with f.BeadID; for a non-bead panel this trails an empty interpolation. It contains no bead/ fragment and no mindspec complete advice, so it is outside R1's falsifiers (which target the bead/<id> slot and complete-gating advice), and internal/panel is fenced this wave. Noting only for a future polish pass; no change required.",
+      "blocking": false
+    },
+    {
+      "id": "F1-2",
+      "severity": "info",
+      "title": "TestRun_IdleNoBeads fails on this machine \u2014 confirmed pre-existing and identical at merge-base",
+      "detail": "go test ./internal/instruct fails only on TestRun_IdleNoBeads (known z4ps/7y4d env-dependent flake). internal/instruct has a zero source diff vs 45ae7577, the rest of the instruct suite passes (-skip run green), and the same single test fails identically in a detached worktree at merge-base 45ae7577. Not attributable to spec 113; per BRIEF, not spec-failing.",
+      "blocking": false
+    }
+  ],
+  "carried_forward": "round-2 APPROVE carried to round-3: lens unaffected by the round-3 GitErr-escape fix (cmd/mindspec render only, zero internal diff)"
+}
