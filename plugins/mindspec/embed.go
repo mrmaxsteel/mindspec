@@ -43,3 +43,27 @@ func SkillFiles() map[string]string {
 	})
 	return out
 }
+
+//go:embed workflows/*
+var workflowsFS embed.FS
+
+// WorkflowFiles returns the embedded Claude Code dynamic workflow scripts
+// (spec 111) keyed by file basename (e.g. "ms-panel.js"). The map is built
+// fresh on each call; callers can mutate the returned map safely. Mirrors
+// SkillFiles(), but flat — a workflow is a single tracked script, not a
+// SKILL.md alongside other per-skill assets.
+func WorkflowFiles() map[string]string {
+	out := make(map[string]string)
+	_ = fs.WalkDir(workflowsFS, "workflows", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, readErr := workflowsFS.ReadFile(p)
+		if readErr != nil {
+			return readErr
+		}
+		out[path.Base(p)] = string(data)
+		return nil
+	})
+	return out
+}
