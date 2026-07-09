@@ -1,0 +1,11 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Enumerated all three bead/-emitting gate.go message templates: RawMergeFence (line 60, appended by legs 2/4/6/8/9/10), leg-5 'references branch bead/%s' (188), leg-5b 'could not verify branch bead/%s' (201). No fourth path. sanitizeNonBeadDecision strips the fence via HasSuffix, replaces leg-5 wholesale (trigger 'references branch bead/,'), and renames leg-5b's 'panel for : '/'could not verify branch bead/' — every reachable leg ends bead/-free with no 'mindspec complete'. Verified unreachable-for-non-bead legs: (0) SkipEnv never set by ResolveGateFacts; (7) dirty skipped since panelBeadWorktreePath('')='' → WorktreeAbsent. Action is NEVER mutated: sanitize takes/returns Decision by value, assigns only d.Message; the test asserts Action equality across all 7 rows. TestSanitizeNonBeadDecision is a REAL table test built from panel.PanelGateDecision over buildResult() beadID=='' facts. Missing-ref test wraps gitutil.ErrRefNotFound via %w, exercising exec.IsRefNotFound=errors.Is. All Sanitize|NonBead tests green.",
+  "concrete_changes_required": [],
+  "findings": [
+    "NON-BLOCKING (test completeness): TestSanitizeNonBeadDecision covers legs 2/5/5b/6/8/9/10 but omits the two other non-bead-reachable Block/Warn legs — (3) abandoned and (4) round-mismatch (all rows use Round==1 so buildResult's RoundMismatch stays false, never firing leg 4). Both are provably leak-free: leg (3) 'panel %s round %d abandoned...' contains no bead/, no fence, no 'mindspec complete' (Warn Action preserved unchanged); leg (4)'s only bead/ is the trailing RawMergeFence(''), removed by the SAME generic HasSuffix strip the covered legs exercise. No correctness gap — the strip mechanism IS tested — so no leak is possible; adding a RoundMismatch:true row and an Abandoned row would close the coverage nit.",
+    "CONFIRMED: no empty-bead interpolation can leak on any reachable leg; Decision.Action is never mutated; missing-ref uses the real gitutil.ErrRefNotFound classification (not a fake sentinel)."
+  ]
+}

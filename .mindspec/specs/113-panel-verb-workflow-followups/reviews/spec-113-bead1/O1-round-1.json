@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Diff matches plan Bead 1 exactly. ZERO-DIFF fence holds: `git show --name-only b641a9fe` = exactly cmd/mindspec/panel.go, cmd/mindspec/panel_test.go, .mindspec/domains/workflow/interfaces.md — no file under internal/panel|instruct|complete. tallyExitAction is UNCHANGED 2-arg (`func tallyExitAction(d panel.Decision, slug string) error`, line 620), body byte-identical, sole test caller `tallyExitAction(d, \"demo\")` (panel_test.go:430) unmodified. The non-bead Block recovery is a separate `tallyExitActionNonBead(d, slug, target)` (line 643) invoked in panelTallyCmd RunE, branched on `reg.Err == nil && reg.Panel.IsBead()` — so no `mindspec complete <bead>` string reaches a non-bead panel. Fact-gathering is the `nonBeadTargetRevParse(reg)` closure routing through the existing `revParseForPanelFn` seam (bead path stays exec.RevParseRef); sanitize lives purely in the render layer (renderPanelVerify/renderPanelTally) gated on non-bead, never mutating d.Action. Test file adds only an import (gitutil) + appended tests; zero deletions, pinned tests intact. Targeted+pinned tests green; `go build ./...` clean; git status clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"severity": "info", "note": "Zero-diff fence verified: only the 3 expected files; no internal/panel|instruct|complete diff."},
+    {"severity": "info", "note": "tallyExitAction 2-arg signature and body byte-identical; caller panel_test.go:430 unmodified; non-bead path isolated in tallyExitActionNonBead."},
+    {"severity": "info", "note": "nonBeadTargetRevParse routes recorded reg.Panel.Target through revParseForPanelFn seam; sanitizeNonBeadDecision applied in render layer only, never touches Decision.Action. All matches plan Bead 1 Half 1/Half 2."}
+  ]
+}

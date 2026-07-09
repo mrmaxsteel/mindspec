@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Ran everything end-to-end at b641a9fe (worktree clean throughout). go build clean; go test ./cmd/mindspec, ./internal/panel, ./internal/complete all PASS (incl. TestPanelTally_ExitCodeTracksDecision, TestPanelVerbs_DecisionIsPanelGateDecision, TestSanitizeNonBeadDecision unmodified/green). internal/instruct fails only the known pre-existing z4ps flake TestRun_IdleNoBeads; the panel-relevant TestPanelStateVerdict_DelegatesToPanelGateDecision (incl. non_bead_panel) passes. git show --name-only HEAD = exactly the 3 declared files, zero internal/panel|instruct|complete diff. In a /tmp scratch repo: built a non-bead panel (--target, no --bead), 6 APPROVEs -> verify=PASS at un-advanced target; advanced the ref by one commit via commit-tree/update-ref (working tree untouched) -> verify now BLOCK with no PASS, no bead/ fragment, honest 'branch now at <sha>' message; tally exits non-zero. Missing-ref: deleted branch -> honest Warn naming the target, no bead/, no mindspec complete line, exit 0 (Warn not Block, correct). Bead-panel path unaffected: same advance -> BLOCK with legitimate bead/<id> merge fence and mindspec complete recovery, byte-consistent with pre-fix design. Empirically drove legs 4 (round-mismatch), 8 (incomplete), 9 (REJECT), 2 (malformed reg) on non-bead panels: no bead/ empty-interpolation leak in any, verify always exit 0, tally exits non-zero exactly on Block. Could not produce a false PASS-after-advance or any bead/ leak.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "area": "test-coverage",
+      "description": "TestSanitizeNonBeadDecision's table (panel_test.go) has explicit rows for legs 2, 5, 5b, 6, 8, 9, 10 but no dedicated row for leg (4) round-mismatch, even though the BRIEF explicitly lists leg 4 as one to verify and sanitizeNonBeadDecision's own comment says 'Legs (2)/(4)/(6)/(8)/(9)/(10): strip the trailing empty-bead fence.' I drove leg 4 empirically end-to-end (non-bead panel, panel.json round 1 vs round-2 verdict files) and confirmed the real binary produces a clean message with no bead/ fragment and no mindspec complete line (BLOCK, tally exit 1) -- so the CODE is correct, this is a test-table coverage gap only, not a functional bug."
+    },
+    {
+      "severity": "low",
+      "area": "cosmetic",
+      "description": "Hand-corrupting a non-bead panel.json to an empty target string (\"\") -- not reachable via the CLI, which requires --target -- produces a degenerate leg (5b) transient-error advisory with a double space ('could not verify target  (transient git error: ...)') due to sanitizeNonBeadDecision's string.Replace leaving an empty interpolation. Correctly stays Warn/fail-open, still names no bead/ fragment, so not a correctness or leak issue -- purely cosmetic on a hand-crafted malformed input outside normal CLI usage."
+    },
+    {
+      "severity": "low",
+      "area": "cosmetic",
+      "description": "Similarly, hand-corrupting panel.json to unparseable JSON (leg 2, malformed registration) on a non-bead panel produces a tally recovery hint 'mindspec panel create malformed --round <N+1> --spec <id> --target' with an empty --target value (reg.Panel is unavailable). Cosmetic only; the Message itself is clean (no bead/ leak, no false PASS)."
+    }
+  ]
+}
