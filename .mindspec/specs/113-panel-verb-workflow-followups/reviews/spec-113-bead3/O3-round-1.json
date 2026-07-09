@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Byte-identity-when-absent lens fully satisfied. Panel.Gate carries `json:\"gate,omitempty\"` (panel.go:91), so an omitted --gate (Gate==\"\") emits NO `gate` key. TestCreate_StampsGate's omitted subtest is a REAL byte comparison: it reconstructs the pre-spec-113 Panel value by hand, marshals it, and asserts `string(data) != string(want)` fails only on true byte drift — not a mere substring check. TestPanelCreate_GateOmittedByteIdentical pins the same at the CLI layer (no gate key + global-resolver expected_reviewers/approve_threshold). All three 112 pins are UNMODIFIED vs merge-base 45ae7577: TestPanel_GateFieldDecisionInert (69 lines), TestPanelVerbs_DecisionIsPanelGateDecision (94), TestPanelTally_ExitCodeTracksDecision (82) all diff-empty and GREEN. No removed line in the scope diff touches any pin body. Decision paths never read Panel.Gate (only config.go:505 reads an unrelated doc.Gate; create.go:78 is a comment). git status clean; reads pinned to d327cdce.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "concern": "omitempty on marshalled gate field",
+      "disposition": "VERIFIED",
+      "evidence": "internal/panel/panel.go:91 `Gate string `json:\"gate,omitempty\"``; Gate==\"\" writes no key."
+    },
+    {
+      "concern": "byte-identical-when-absent actually compares bytes to a pre-113 fixture",
+      "disposition": "VERIFIED",
+      "evidence": "TestCreate_StampsGate (create_test.go:387-420) reconstructs a legacy Panel sans Gate, MarshalIndent, and asserts string equality against Create's output — a true byte compare, plus a `\"gate\"` substring-absence guard. CLI-layer TestPanelCreate_GateOmittedByteIdentical corroborates. Both PASS."
+    },
+    {
+      "concern": "112 pins unmodified + green",
+      "disposition": "VERIFIED",
+      "evidence": "Diffed each pin body against merge-base 45ae7577: all three byte-identical (69/94/82 lines, empty diff). `go test -run GateField|DecisionIsPanelGateDecision|ExitCodeTracksDecision -v` all PASS."
+    },
+    {
+      "concern": "no decision path reads Panel.Gate",
+      "disposition": "VERIFIED",
+      "evidence": "grep of internal/panel + cmd/mindspec + internal/complete finds no Panel.Gate reader on a decision path; TestPanel_GateFieldDecisionInert green."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Mutation-probed a /tmp clone at d327cdce (baseline green). Byte-identity PINNED: dropping omitempty reds TestCreate_StampsGate + TestPanelCreate_GateOmittedByteIdentical. Resolver-to-global mutations (reviewers, threshold) both red TestPanelCreate_GateStampsPerGateDefaults; real binary stamps final_review's 12/\"9\" vs global 6/\"n-1\", ungated output byte-identical with no gate key. No gate bypass: with BOTH the CLI enum check and rejectControlBytes gutted, gateKeyError in the gate-scoped resolvers still rejects before any write (dir snapshot unchanged, control byte %q-escaped) — equivalent mutant, defense-in-depth, not hollow. ONE surviving mutant on the core invariant: an ApproveThreshold mutation keyed to Gate==\"final_review\" passes the ENTIRE 4-package suite, because 112's TestPanel_GateFieldDecisionInert only exercises gates {\"\", \"bead\", \"weird\"} — the inertness pin is hollow for 4 of the 5 enum values this bead's writer now stamps. Minimal additive fix required; code itself is correct (only advisory readers of Panel.Gate exist). Leaf stays config-free; no second enum copy; worktree clean.",
+  "concrete_changes_required": [
+    "Add a NEW test (do not modify 112's TestPanel_GateFieldDecisionInert) — e.g. TestPanel_GateFieldDecisionInert_AllEnumKeys in internal/panel — that loops gate over ALL five enum values (spec_approve, plan_approve, bead, final_review, adhoc) plus \"\" and an unknown value, asserting PanelGateDecision outcome and ApproveThreshold() are identical across all of them. Proof of done: the mutation `if p.Gate == \"final_review\" { return 1 }` at the top of Panel.ApproveThreshold must turn the suite red (today it passes go test ./internal/panel ./cmd/mindspec ./internal/complete ./internal/config in full)."
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "major",
+      "class": "hollow-pin (mutation survives)",
+      "evidence": "In /tmp clone at d327cdce: `if p.Gate == \"final_review\" { return 1 }` inserted at the top of Panel.ApproveThreshold (internal/panel/panel.go:113) → go test ./internal/panel ./cmd/mindspec ./internal/complete ./internal/config ALL PASS. TestPanel_GateFieldDecisionInert (internal/panel/panel_test.go:308) loops only {\"\", \"bead\", \"weird\"}; no test in the suite drives a final_review/spec_approve/plan_approve/adhoc-stamped Panel through ApproveThreshold or PanelGateDecision. The unconditional variant (`if p.Gate != \"\" { return 1 }`) IS caught by the pin, so it is partially real — but this bead makes exactly those four unpinned values CLI-writable, so the decision-inertness invariant is unpinned for the values that now occur in practice."
+    },
+    {
+      "id": "F1-2",
+      "severity": "info",
+      "class": "equivalent mutant (defense-in-depth, no action)",
+      "evidence": "Gutting isValidPanelGateKey (always-true) leaves TestPanelCreate_GateInvalidRejectedBeforeWrite green — but the behavior is preserved, not hollow: cfg.PanelGateExpectedReviewers → gateKeyError (internal/config/config.go:726) independently rejects unknown gates BEFORE panel.Create runs, naming all five keys with an ADR-0035 recovery line. Proven with a real mutant binary (CLI enum check AND rejectControlBytes both gutted): `--gate $'nonsense\\x01EVIL'` → exit 1, control byte %q-escaped in the message, scratch-repo dir snapshot byte-identical (NOTHING written). No validation-after-write path exists."
+    },
+    {
+      "id": "F1-3",
+      "severity": "info",
+      "class": "pins verified real",
+      "evidence": "(a) omitempty removed from Panel.Gate tag → TestCreate_StampsGate AND TestPanelCreate_GateOmittedByteIdentical red (byte-identity pinned at both layers). (b) PanelGateExpectedReviewers(gate)→PanelExpectedReviewers() swap → TestPanelCreate_GateStampsPerGateDefaults + TestPanelCreate_GateAdvisoryReadThrough red; PanelGateApproveThresholdExpr swap → TestPanelCreate_GateStampsPerGateDefaults red (gate-scoped resolution pinned per-field). (c) Real binary: --gate final_review stamps gate + 12 reviewers + threshold \"9\" (config cross-checked), no --gate writes no gate key with global 6/\"n-1\". (d) Static: only readers of Panel.Gate outside tests are the two advisory PanelGateAdvisoryDefault call sites (internal/complete/complete.go:390, cmd/mindspec/config.go:541). (e) go list -deps ./internal/panel has zero internal/config; no non-test \"spec_approve\" literal in cmd/mindspec or internal/panel; 112 pin files untouched by the 5-file diff; unconditional Gate-read mutation caught by TestPanel_GateFieldDecisionInert."
+    }
+  ]
+}

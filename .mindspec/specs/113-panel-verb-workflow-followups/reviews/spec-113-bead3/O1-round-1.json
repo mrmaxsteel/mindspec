@@ -1,0 +1,11 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Author-of-record lens: the d327cdce diff matches the plan's Bead 3 contract point-for-point. (1) CreateInput.Gate added as decision-inert leaf metadata; Create sets p.Gate=in.Gate; internal/panel stays config/git-free (go list -deps grep = 0). (2) --gate registered, rejectControlBytes runs BEFORE the enum check, membership via isValidPanelGateKey iterating config.PanelGateKeys with NO second literal ('spec_approve' grep in cmd+internal/panel non-test = empty); invalid value returns guard.NewFailure naming all five keys before any write. (3) Gate-scoped resolvers (PanelGateExpectedReviewers/ApproveThresholdExpr) used when set, global calls when absent. (4) Decision-inert holds: only PanelGateAdvisoryDefault (advisory) reads Panel.Gate; PanelGateDecision/ApproveThreshold never do. (5) omitempty gives byte-identical-when-absent, pinned by TestCreate_StampsGate's legacy-marshal equality. All named tests (StampsGate, PerGateDefaults, InvalidRejectedBeforeWrite+control-byte, OmittedByteIdentical, AdvisoryReadThrough) real and green; 112 pins unmodified; interfaces.md accurate; scope = exactly 5 files, one commit; build passes.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Non-blocking (informational): plan Bead 3 key_file_paths predicted internal/config/config.go, cmd/mindspec/config.go, cmd/mindspec/config_test.go — none appear in the diff. This is correct, not a gap: the 112 R3 resolvers and reviewerCountNotesFor already exist so no config-package edit is needed, and the advisory read-through test (TestPanelCreate_GateAdvisoryReadThrough) is reasonably placed in panel_test.go. Every functional step 1-6 of plan Bead 3 is captured. Actual scope (5 files) is a subset of the predicted list with no missing behavior.",
+    "Verified decision-inertness empirically via grep: the only readers of the stamped Panel.Gate field are complete.go:390 and cmd/mindspec/config.go:541, both advisory ReviewerCountNote sites through PanelGateAdvisoryDefault. No decision path reads it."
+  ]
+}
