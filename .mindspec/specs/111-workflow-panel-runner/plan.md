@@ -176,7 +176,8 @@ run against a built binary + live agents). Concretely, the Go-testable surface i
   indirection class a pattern blocklist could smuggle past.
 
 **The AC4 exact-set strengthening (spec-approve round-2 carry-forward #1, further
-strengthened by items 2–4 of the plan-panel round-1 fix).** R5's requirement text
+strengthened by items 2–4 of the plan-panel round-1 fix, and by items 2 and 5 of
+the plan-panel round-2 fix).** R5's requirement text
 claims `ALLOWED_CLI` admits *exactly* four commands, but spec AC4 only proves the
 four are **present** and `mindspec complete` is **absent** — a fifth admitted
 command would pass AC4 while falsifying R5. Because ACs are floors, Bead 2 adds
@@ -199,9 +200,17 @@ asserts `buildCommand` (the file's single command-construction chokepoint,
 Bead 2 step 1) is defined exactly once and that the enumeration above finds no
 `mindspec`-/`codex`-bearing literal **outside** the `ALLOWED_CLI` array itself —
 proving command construction routes through that one chokepoint by construction,
-not merely by convention. This strengthens R5 to its full "exactly four"
-guarantee, plus a construction-level command-routing guarantee, without a spec
-edit.
+not merely by convention. **Round-2 items 2 and 5 reconcile this with Bead 2's
+own prescribed call-site code:** every `buildCommand` call site passes one of
+four verb identifiers **destructured** from `ALLOWED_CLI` (Bead 2 step 1), never
+a retyped command-string literal, and the test additionally pins that exactly
+four such identifiers are destructured in one binding — closing both the
+round-1 snippet contradiction (a call-site literal would itself have been an
+"occurrence outside the array") and the exact-match-bypass reading (a call site
+that reused the literal text plus raw concatenation would still equal one of the
+four strings, but is now caught by the occurrence-location assertion regardless
+of textual match). This strengthens R5 to its full "exactly four" guarantee,
+plus a construction-level command-routing guarantee, without a spec edit.
 
 **Per-test proof discipline.** Every new Go test is verified with an anchored
 PASS-line grep so a reviewer sees the specific test pass, not a bare package
@@ -385,9 +394,16 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    built:** validate `slug`, `spec`, `bead_id` (when present), and every
    `mix[].family` against the same clean-single-path-element contract 110's
    CLI validators apply (reject empty, `.`, `..`, `/`, `\`, and control
-   bytes); validate `target` and `bead_id` additionally reject shell
-   metacharacters (`` ` ``, `$(`, `;`, `|`, `&`, newlines) since they flow
-   into a built command line; validate `round` is a positive integer. Any
+   bytes); validate `target` against a **branch-name-safe grammar** (round-2
+   item 3 — reject empty, control bytes, a leading `-`, and any construct
+   `git check-ref-format` disallows: `..`, `~`, `^`, `:`, `?`, `*`, `[`, a
+   trailing `/` or `.lock`, or whitespace) and always pass it to
+   `buildCommand` as its own **argv-safe** token — appended as a single
+   element, never concatenated into a larger string — so no value that
+   survives the grammar check can still widen past one argument; validate
+   `target` and `bead_id` additionally reject shell metacharacters (`` ` ``,
+   `$(`, `;`, `|`, `&`, newlines) since they flow into a built command line;
+   validate `round` is a positive integer. Any
    failure aborts the workflow before Step 2 runs — no agent step, CLI call,
    or file path is constructed from an unvalidated value. The workflow's own
    `slot` ids (`R1`, `R2`, … — generated in Step 3, never user input) are
@@ -409,7 +425,17 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
      "mindspec panel verify",
      "mindspec panel tally",
    ];
+   const [CMD_PANEL_CREATE, CMD_CODEX_EXEC, CMD_PANEL_VERIFY, CMD_PANEL_TALLY] =
+     ALLOWED_CLI;
    ```
+   **(Round-2 item 2 — the destructured verb identifiers.)** Every later step
+   invokes `buildCommand` with one of these four **identifiers**, never by
+   retyping the command string — so the only place any of the four command
+   strings exists as a source-level string literal is this one array
+   declaration; `TestMsPanelWorkflow_AllowedCLIExactSet` (Step 6) pins both the
+   array's exact four-string content and that exactly four verb identifiers
+   are destructured from it in one binding.
+
    The codex entry pins a **read-only** sandbox (no writes, no network side
    effects) — correct because, per Step 3, codex itself never writes a file
    (the wrapper's own `Write` tool does), so `workspace-write` (the codex CLI
@@ -421,27 +447,36 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    chokepoint.** Define one function, alongside `ALLOWED_CLI`, that every
    agent step invokes to obtain the exact string it is told to run: it
    asserts `verb` is one of the four `ALLOWED_CLI` entries (throwing
-   otherwise) and appends only the already-hardened argument values (this
+   otherwise), **rejects any argument in `args` that starts with a leading
+   `-`** (round-2 item 2's argument-injection guard — a hardened-but-dash-
+   prefixed value can never be smuggled in as a flag to the invoked binary),
+   and appends only the remaining already-hardened argument values (this
    step's validation), never free operator text, using a fixed per-verb
    template. No agent step's prompt hand-assembles or narrates a shell
-   command in prose; each embeds only `buildCommand(...)`'s return value
-   (e.g. "Run exactly: `${buildCommand("mindspec panel create", slug, ...)}` —
-   do not modify this command"). This is what makes `ALLOWED_CLI` enforcement
-   structural: a step's runnable command is fully determined by code that can
-   only ever select one of the four prefixes, never by an agent's own
-   interpretation of a looser instruction — and it is what makes the
+   command in prose, and **no call site retypes a command string as a
+   literal** — every call passes one of the four verb identifiers
+   destructured from `ALLOWED_CLI` above; each embeds only
+   `buildCommand(...)`'s return value (e.g. "Run exactly:
+   `${buildCommand(CMD_PANEL_CREATE, slug, ...)}` — do not modify this
+   command"). This is what makes `ALLOWED_CLI` enforcement structural: a
+   step's runnable command is fully determined by code that can only ever
+   select one of the four prefixes, never by an agent's own interpretation of
+   a looser instruction, and never by a call site that reintroduces the
+   command string as its own literal — and it is what makes the
    positive-enumeration test below (Step 6) hold **by construction**, not by
-   accident: since `buildCommand` is the sole assembler of any command
-   string, no `mindspec`- or `codex`-bearing literal can exist anywhere else
-   in the file for that test to miss.
+   accident: since `buildCommand` is the sole assembler of any command string
+   and every caller passes it a verb identifier rather than a literal, no
+   `mindspec`- or `codex`-bearing literal can exist anywhere in the file
+   outside the `ALLOWED_CLI` array declaration itself for that test to miss.
 
    `sha?` is **advisory-only** (an optional BRIEF display hint); the authoritative
    `reviewed_head_sha` is self-resolved by `mindspec panel create` from
    `--target` at write time (110 R1), so the workflow **never** uses `sha?` to
    set the recorded SHA and works when it is omitted.
 2. Registration step (R2): a single `agent()` step that runs
-   `buildCommand("mindspec panel create", slug, "--spec", spec, "--target",
-   target, ...)` (Step 1) — the hardened equivalent of `mindspec panel create
+   `buildCommand(CMD_PANEL_CREATE, slug, "--spec", spec, "--target",
+   target, ...)` (Step 1's destructured identifier, never the literal string)
+   — the hardened equivalent of `mindspec panel create
    <slug> --spec <spec> --target <target> [--bead <bead_id>] [--round
    <round>]` — so `panel.json` (round + `reviewed_head_sha` co-bumped by
    construction, `expected_reviewers` / `approve_threshold` stamped from the 109
@@ -485,7 +520,8 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    - A **codex** slot is a **wrapper agent** whose own `agent()` call also
      carries the `schema` option (over its transcribed-verdict return) and
      that: execs the allowlisted `codex exec --sandbox read-only
-     --skip-git-repo-check` invocation (`buildCommand(...)`, Step 1) with the
+     --skip-git-repo-check` invocation (`buildCommand(CMD_CODEX_EXEC, ...)`,
+     Step 1's destructured identifier) with the
      BRIEF prompt + lens — **read-only**, since codex itself never writes
      (below); **persists codex's unmodified stdout** to
      `<panel-dir>/<slot>-round-<N>.codex.log` (R3b — the string `.codex.log`
@@ -532,8 +568,9 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    workflow never fabricates or silently skips a slot). A code branch driven by
    the wrapper's returned status — **no** human judgment on the workflow path.
    Then the return step (R5): one `agent()` step runs
-   `buildCommand("mindspec panel verify", slug)` and another runs
-   `buildCommand("mindspec panel tally", slug)` (Step 1), and the workflow
+   `buildCommand(CMD_PANEL_VERIFY, slug)` and another runs
+   `buildCommand(CMD_PANEL_TALLY, slug)` (Step 1's destructured identifiers,
+   never the literal strings), and the workflow
    **returns their combined stdout verbatim** (unmodified, not re-rendered or
    paraphrased) as its single structured **result**. The workflow does **not**:
    run `mindspec complete` (the string appears nowhere in the file — not a
@@ -561,12 +598,20 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    non-empty and **equals** the on-disk `workflows/ms-panel.js` read via the
    embed FS — pinning embed == plugin copy) and
    `TestMsPanelWorkflow_AllowedCLIExactSet` (the carry-forward floor-raise, now
-   strengthened per items 2–4 of the plan-panel round-1 fix): extract the
+   strengthened per items 2–4 of the plan-panel round-1 fix and the
+   identifier reconciliation of round-2 item 2): extract the
    `ALLOWED_CLI` array literal from `WorkflowFiles()["ms-panel.js"]`, parse its
    double-quoted string elements, assert the set **equals exactly**
    `{"mindspec panel create","codex exec --sandbox read-only
    --skip-git-repo-check","mindspec panel verify","mindspec panel tally"}`;
-   assert `mindspec complete` is absent from the whole content; then run the
+   assert `mindspec complete` is absent from the whole content; **pin the
+   destructured identifier count** (round-2 item 2): assert the file declares
+   exactly one destructuring binding of the shape `const [ID1, ID2, ID3, ID4]
+   = ALLOWED_CLI;` — four identifiers wide, right-hand side literally
+   `ALLOWED_CLI` (the identifier names themselves are not pinned, only that
+   there are exactly four and the source is the allowlist array) — so every
+   `buildCommand` call site's verb argument is provably a reference to one of
+   these four identifiers, never a retyped literal; then run the
    **positive-enumeration anti-laundering check**, which replaces the prior
    blocklist-of-indirection-patterns approach: extract every double-quoted,
    single-quoted, and backtick-delimited string literal in the file, and for
@@ -587,8 +632,26 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    full inventory of `mindspec`/`codex`-bearing literals contains **only** the
    four `ALLOWED_CLI` entries themselves (inside the array literal) and no
    other occurrence — proving, given `buildCommand` is the file's sole command
-   assembler (Step 1), that every runnable command an agent step is told to
-   run was built from one of the four fixed prefixes. Add
+   assembler and every call site passes it a destructured identifier rather
+   than a literal (Step 1), that every runnable command an agent step is told
+   to run was built from one of the four fixed prefixes.
+
+   **Closing the exact-match bypass (round-2 item 5).** A bare "every
+   `mindspec`-bearing literal equals one of the four allowed strings" check is,
+   on its own, satisfiable by a call site that reuses the literal text
+   directly — e.g. `"mindspec panel create" + " " + rawArg`, bypassing
+   `buildCommand` entirely — because the reused literal trivially equals one
+   of the four exact strings; string equality alone would let it pass. The
+   identifier-count pin above is the mechanism that closes this: since every
+   legitimate call site references a destructured identifier and never
+   retypes the command string, **any** occurrence of the literal text found
+   outside the `ALLOWED_CLI` array declaration is itself a test failure —
+   independent of whether that occurrence happens to match one of the four
+   strings. A bypassing call site of this shape is caught by the
+   occurrence-location assertion, not by string equality, so an exact-literal
+   reuse can no longer masquerade as compliant.
+
+   Add
    `TestClaudeSetup_InstallsWorkflowClaudeTargetOnly` to
    `internal/setup/claude_test.go`: `RunClaude(tmp, false)` writes
    `.claude/workflows/ms-panel.js` **byte-identical** to
@@ -608,7 +671,7 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
 - [ ] `W=.claude/workflows/ms-panel.js; grep -q 'ALLOWED_CLI' "$W" && for c in 'mindspec panel create' 'mindspec panel verify' 'mindspec panel tally' 'codex exec --sandbox read-only --skip-git-repo-check'; do grep -qF "$c" "$W" || exit 1; done && grep -q 'claude-sub' "$W" && ! grep -qF 'mindspec complete' "$W"` exits `0` (spec AC4, R2/R4/R5; the codex entry's `--sandbox read-only` pin is item 4 of the plan-panel round-1 fix)
 - [ ] `grep -qF '.codex.log' .claude/workflows/ms-panel.js` exits `0` (spec AC5, R3b)
 - [ ] `go test ./plugins/mindspec -v -run 'TestWorkflowFiles_EmbedsMsPanel$' | grep -q -- '--- PASS: TestWorkflowFiles_EmbedsMsPanel'` (spec AC6, R8)
-- [ ] `go test ./plugins/mindspec -v -run 'TestMsPanelWorkflow_AllowedCLIExactSet$' | grep -q -- '--- PASS: TestMsPanelWorkflow_AllowedCLIExactSet'` (carry-forward #1/#3, strengthened per items 2–4 of the plan-panel round-1 fix: ALLOWED_CLI is EXACTLY the four commands including the sandboxed codex entry, no `mindspec complete`, a positive enumeration of every `mindspec`-/`codex`-bearing literal in the file matches only the four allowlisted strings, and command construction is proven to route through the single `buildCommand` chokepoint — strengthens AC4 beyond a present/absent grep or a pattern blocklist)
+- [ ] `go test ./plugins/mindspec -v -run 'TestMsPanelWorkflow_AllowedCLIExactSet$' | grep -q -- '--- PASS: TestMsPanelWorkflow_AllowedCLIExactSet'` (carry-forward #1/#3, strengthened per items 2–4 of the plan-panel round-1 fix and items 2/5 of the round-2 fix: ALLOWED_CLI is EXACTLY the four commands including the sandboxed codex entry, no `mindspec complete`, exactly four verb identifiers are destructured from ALLOWED_CLI (round-2 item 2), a positive enumeration of every `mindspec`-/`codex`-bearing literal in the file matches only the four allowlisted strings with zero occurrences outside the array (closing the exact-match bypass, round-2 item 5), and command construction is proven to route through the single `buildCommand` chokepoint — strengthens AC4 beyond a present/absent grep or a pattern blocklist)
 - [ ] `go test ./internal/setup -v -run 'TestClaudeSetup_InstallsWorkflowClaudeTargetOnly$' | grep -q -- '--- PASS: TestClaudeSetup_InstallsWorkflowClaudeTargetOnly'` (spec AC7, R8 — Claude target writes it byte-identical; codex/copilot do not)
 - [ ] `go test ./internal/setup` exits `0` (whole package green — proves the created-count consumer updates [14→15] landed; a skipped update leaves this red)
 - [ ] `go test ./plugins/mindspec` exits `0`
@@ -621,19 +684,63 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
   1. `go build -o /tmp/ms111/mindspec ./cmd/mindspec` — a **directory** containing the branch-built binary (not a single file), so it can be prepended to `PATH`. Every bare `mindspec …` call the workflow's agent steps make must resolve to this build, never the pre-installed `~/.local/bin/mindspec`. Launch the Claude Code session that runs `/ms-panel` with `/tmp/ms111` prepended to `PATH` (e.g. `PATH=/tmp/ms111:$PATH claude`), so every agent-step shell inherits the resolution.
   2. Write a codex PATH-shim: an executable file named `codex` at `/tmp/ms111-shim/codex`, placed **earlier** on `PATH` than the real codex CLI for the scenario runs below (`PATH=/tmp/ms111-shim:/tmp/ms111:$PATH`). The shim reads a scenario name from an env var (`MS111_CODEX_SCENARIO`) and prints one canned stdout payload per scenario:
      - `healthy` — a single valid verdict JSON object matching the 110 shape.
-     - `malformed-once` — narrative prose (no JSON) on its first invocation for a given slot, then a valid single verdict JSON object on the **second** invocation (the re-prompt) — tests the successful-reserialize path.
-     - `malformed-always` — narrative prose (no JSON) on every invocation — tests the fail-to-MISSING path.
+     - `malformed-once` (round-2 item 1 — the exact verbatim payload pair, canonically comparable): on its **first** invocation for a given slot, prints ONE schema-valid verdict JSON object wrapped in disallowed surrounding narrative — exactly:
+       ```
+       Here is my review of the panel.
+
+       {"reviewer_id": "R1 codex", "verdict": "APPROVE", "confidence": 0.9, "rationale": "Looks solid overall.", "concrete_changes_required": [], "findings": [], "hard_block": false}
+
+       Let me know if further changes are needed.
+       ```
+       — rejected by Step 3's "exactly one object" rule (a single object plus surrounding narrative text counts as not accepted), but the embedded object is well-formed and canonically decodable, giving the first attempt a real operand to compare against the re-serialize below (the round-1 text's "narrative prose (no JSON)" framing left no JSON to canonically decode for the value-fidelity check — this is the round-2 fix). On the **second** invocation (the re-prompt), prints the same verdict as a clean, standalone re-serialize with no surrounding text — exactly:
+       ```
+       {"reviewer_id": "R1 codex", "verdict": "APPROVE", "confidence": 0.9, "rationale": "Looks solid overall.", "concrete_changes_required": [], "findings": [], "hard_block": false}
+       ```
+       — tests the successful-reserialize path with a canonically comparable pair.
+     - `malformed-always` — narrative prose (no JSON) on every invocation — tests the fail-to-MISSING path only (no value-fidelity comparison implied; there is nothing to re-serialize).
      - `multi-object` — two concatenated JSON objects on stdout (each individually valid JSON, but not a single unambiguous object) — tests that Step 3's "exactly one object" rule routes this into the parse-failure ladder exactly like non-JSON prose.
      - `quota-wall` — prints the established usage-limit signal (`ERROR: You've hit your usage limit`) with **no** verdict content, on every invocation — tests substitution (R4), never the parse-failure ladder.
+  3. **Seed `.mindspec/config.yaml`'s `panel:` block (round-2 item 4).** The
+     zero-config default (`panel.reviewers: [{claude,3},{codex,3}]`,
+     `internal/config`'s documented `TestLoad_ZeroConfigPanelModelsLoopDefaults`
+     baseline) makes `mindspec panel create`'s config-resolved
+     `expected_reviewers` **6**, independent of whatever `mix` a given
+     `/ms-panel` invocation below actually fans out to — with no `panel:`
+     block set, every run's `panel verify` would read short of 6 and report
+     incomplete regardless of whether the reviewer ladder behaved correctly,
+     so run 1 (which must read **complete** to prove the happy path) and run 3
+     (which must read **incomplete** because of its own MISSING slot, not
+     because of an unrelated count mismatch) can't be told apart. Before run 1,
+     set:
+     ```yaml
+     panel:
+       reviewers:
+         - family: claude
+           count: 2
+         - family: codex
+           count: 1
+       approve_threshold: "3"
+     ```
+     (matching run 1's 3-reviewer `{claude:2,codex:1}` mix exactly). Before
+     each of runs 2–7 (each a 1-reviewer mix), rewrite `panel.reviewers` to a
+     single `{family: <that run's mix family>, count: 1}` entry with
+     `approve_threshold: "1"`, so every run's `expected_reviewers` equals its
+     own `mix` total and each run's completeness observable reflects the
+     ladder's actual behavior on that run, not a config/mix count mismatch. (111
+     reads none of 112's `gates:` config — out of scope per Risks/Sequencing —
+     so no `gates:` block is seeded here.)
 
   **Scenario runs (each a separate `/ms-panel` invocation against a throwaway `--target` — a live codex process can't be forced to switch behavior mid-panel, so each failure mode gets its own slug/round):**
   1. **Happy path + result passthrough (R3, R3b, R5):** `/ms-panel {slug: "ms111-e2e-happy", spec: "<demo-spec-id>", target: "<throwaway-branch>", round: 1, lenses: ["L1","L2","L3"], mix: [{family:"claude",count:2},{family:"codex",count:1}]}` with `MS111_CODEX_SCENARIO=healthy` (or the real codex CLI, PATH-shim absent). Confirm: 3 verdict files land at `<panel-dir>/<slot>-round-1.json`; the codex slot also leaves `<slot>-round-1.codex.log`; the workflow **result** carries the `mindspec panel verify` report + `mindspec panel tally` preview **verbatim** (unmodified CLI stdout), with `mindspec complete` never invoked (confirm via the run transcript + `git log` showing no merge).
-  2. **Parse-failure re-prompt, successful reserialize, with canonical VALUE fidelity (R3 steps 1–2, carry-forward #2 as strengthened by item 6):** `/ms-panel {slug: "ms111-e2e-reserialize", spec: "<demo-spec-id>", target: "<throwaway-branch>", round: 1, lenses: ["L1"], mix: [{family:"codex",count:1}]}` with `MS111_CODEX_SCENARIO=malformed-once`. Confirm the re-emitted verdict keeps the **same** `reviewer_id` (same slot, same family — never `claude-sub`); decode both the `.codex.log`-derived first attempt and the final verdict file **canonically as JSON** (not by string equality — key order and whitespace may differ) and confirm `verdict`, `hard_block`, and `concrete_changes_required` are equal across the two — a re-serialize, not a re-review.
+  2. **Parse-failure re-prompt, successful reserialize, with canonical VALUE fidelity (R3 steps 1–2, carry-forward #2 as strengthened by item 6, payload shapes fixed by round-2 item 1):** `/ms-panel {slug: "ms111-e2e-reserialize", spec: "<demo-spec-id>", target: "<throwaway-branch>", round: 1, lenses: ["L1"], mix: [{family:"codex",count:1}]}` with `MS111_CODEX_SCENARIO=malformed-once`. Confirm the re-emitted verdict keeps the **same** `reviewer_id` (same slot, same family — never `claude-sub`); extract the single embedded JSON object from the `.codex.log`-persisted first-invocation stdout (the narrative-wrapped payload above) and decode it **canonically as JSON** alongside the final verdict file (not by string equality — key order and whitespace may differ), and confirm `verdict`, `hard_block`, and `concrete_changes_required` are equal across the two — a re-serialize, not a re-review.
   3. **Parse-failure to MISSING (R3 step 2):** same shape as run 2 with `slug: "ms111-e2e-missing"` and `MS111_CODEX_SCENARIO=malformed-always`. Confirm **no** verdict file is written for the slot, `mindspec panel verify` reports the panel incomplete, and the gate Blocks.
   4. **Ambiguous multi-object stdout treated as a parse failure (Step 3's one-object rule, item 6):** same shape as run 2 with `slug: "ms111-e2e-multiobject"` and `MS111_CODEX_SCENARIO=multi-object`. Confirm this is **not** silently accepted as the first of the two objects — it is routed into the same re-prompt-once-then-MISSING ladder as `malformed-once`/`malformed-always`.
   5. **Quota-wall substitution, flag true (R4):** same shape as run 2 with `slug: "ms111-e2e-quota-true"` and `MS111_CODEX_SCENARIO=quota-wall`, config `panel.substitution.claude_sub_on_quota: true`. Confirm the slot's verdict shows `reviewer_id: "<slot> claude-sub"`.
   6. **Quota-wall, flag false (R4):** identical to run 5 but `slug: "ms111-e2e-quota-false"` and `claude_sub_on_quota: false`. Confirm the slot is left **missing** — no fabricated verdict, no skip.
-  7. **Input hardening rejects unsafe args before any command runs (item 5):** `/ms-panel {slug: "../../etc", spec: "<demo-spec-id>", target: "<throwaway-branch>", round: 1, lenses: ["L1"], mix: [{family:"claude",count:1}]}`. Confirm the workflow aborts before Step 2's registration call runs — no `panel.json`, no `BRIEF.md`, no directory created under the traversal target (mirrors 110's own slug-validation rejection table) — and that no command containing the offending value was ever passed to `buildCommand`.
+  7. **Input hardening rejects unsafe args before any command runs (item 5; target-specific cases added per round-2 item 3):** run each of the following as a separate invocation and confirm, for every case, that the workflow aborts before Step 2's registration call runs — no `panel.json`, no `BRIEF.md`, no directory created under the traversal target (mirrors 110's own slug-validation rejection table) — and that no command containing the offending value was ever passed to `buildCommand`:
+     - **7a — slug traversal:** `/ms-panel {slug: "../../etc", spec: "<demo-spec-id>", target: "<throwaway-branch>", round: 1, lenses: ["L1"], mix: [{family:"claude",count:1}]}`.
+     - **7b — target argument injection / shell metacharacter:** identical shape with `target: "--upload-pack=touch /tmp/pwned;"` (a leading-dash flag-injection attempt fused with a shell metacharacter, rejected by both the leading-dash and metacharacter clauses of Step 1's hardening).
+     - **7c — target control byte:** identical shape with `target: "main\u0000\u0007"` (an embedded NUL + BEL control-byte pair, written here as escape sequences since raw control bytes cannot be committed to a markdown source file; rejected by the branch-name-safe grammar's control-byte clause).
 
 **Acceptance Criteria**
 - [ ] The workflow exists at both tracked locations byte-identical; it accepts
@@ -660,7 +767,9 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
   `--sandbox read-only` (enforced by `TestMsPanelWorkflow_AllowedCLIExactSet`'s
   exact-set + positive-enumeration assertions, not just present/absent greps);
   every agent step's runnable command is constructed only via the single
-  `buildCommand` chokepoint, never free-form per-step prose; `mindspec complete`
+  `buildCommand` chokepoint, called with a destructured `ALLOWED_CLI` verb
+  identifier — never a retyped literal, never free-form per-step prose
+  (round-2 item 2); `mindspec complete`
   appears nowhere; no consolidation / `consolidated-round-*.md` / `panel.json`
   mutation beyond `create` (spec AC4, R5)
 - [ ] `WorkflowFiles()` embeds the workflow and `mindspec setup` (Claude target)
@@ -836,7 +945,7 @@ checklist. Every spec AC traces to a bead; every requirement R1–R9 is delivere
 | AC1 — both tracked workflow copies present + byte-identical (`diff -q`) (R1, R8) | Bead 2 verification (`diff -q`; embed test [embed == plugin] + install test [installed == embed] make all four copies transitively identical) |
 | AC2 — `.claude/workflows/**` claim present in workflow `OWNERSHIP.yaml` (R9) | Bead 1 verification (anchored `grep -Eq`) |
 | AC3 — `TestWorkflowOwnsClaudeWorkflows`: `attributeDomain` → `"workflow"` for the workflow file (R9) | Bead 1 verification (PASS-line grep) |
-| AC4 — workflow declares `ALLOWED_CLI` with the four commands present (codex sandboxed `read-only`), honors `claude-sub`, and `mindspec complete` appears nowhere (R2, R4, R5) | Bead 2 verification (structural grep) **strengthened** by `TestMsPanelWorkflow_AllowedCLIExactSet` (exactly-four exact-set incl. the sandboxed codex entry + a positive enumeration of every `mindspec`-/`codex`-bearing literal + proof that command construction routes through the single `buildCommand` chokepoint — carry-forwards #1/#3, items 2–4 of the round-1 plan-panel fix) |
+| AC4 — workflow declares `ALLOWED_CLI` with the four commands present (codex sandboxed `read-only`), honors `claude-sub`, and `mindspec complete` appears nowhere (R2, R4, R5) | Bead 2 verification (structural grep) **strengthened** by `TestMsPanelWorkflow_AllowedCLIExactSet` (exactly-four exact-set incl. the sandboxed codex entry + destructured-identifier-count pin + a positive enumeration of every `mindspec`-/`codex`-bearing literal + proof that command construction routes through the single `buildCommand` chokepoint, closing the exact-match-bypass reading — carry-forwards #1/#3, items 2–4 of the round-1 plan-panel fix, items 2/5 of the round-2 plan-panel fix) |
 | AC5 — workflow persists each codex slot's `<slot>-round-<N>.codex.log` (`grep -qF '.codex.log'`) (R3b) | Bead 2 verification (grep) |
 | AC6 — `TestWorkflowFiles_EmbedsMsPanel`: `WorkflowFiles()` returns the embedded workflow (R8) | Bead 2 verification (PASS-line grep) |
 | AC7 — `TestClaudeSetup_InstallsWorkflowClaudeTargetOnly`: Claude setup writes it byte-identical; codex/copilot do not (R8) | Bead 2 verification (PASS-line grep) |
@@ -844,5 +953,5 @@ checklist. Every spec AC traces to a bead; every requirement R1–R9 is delivere
 | AC9 — `ms-panel-tally` notes the workflow-result path; Consolidate / Artifact gates / After a halt / Escape hatch survive (R7) | Bead 3 verification (plugins + `.claude` mirror greps) |
 | AC10 — tree builds + touched packages green (`go build ./... && go test ./internal/validate/... ./internal/setup/... ./plugins/mindspec/...`) | every bead's `go build ./...` + per-package `go test`; full `go test ./...` regression at plan time and pre-`/ms-impl-approve` (Testing Strategy) |
 | Validation Proof — `node --check` on both copies (where a JS toolchain is present) | Bead 2 verification (advisory, `node v25.2.1` present; not a CI gate) |
-| Validation Proof (Manual, live agents) — verdict + `.codex.log` files; parse-failure re-prompt with same `reviewer_id` **and canonical, all-gate-fields value fidelity** (`verdict`/`hard_block`/`concrete_changes_required`, carry-forward #2 as strengthened by item 6); ambiguous multi-object stdout treated as a parse failure; MISSING-not-substituted; quota-wall `claude-sub` vs missing per flag; result carries verify+tally verbatim, `mindspec complete` never invoked; run against a branch-built binary on `PATH` + a codex PATH-shim test double per scenario (R2–R5, R3b; items 5–8 of the round-1 plan-panel fix) | Bead 2 verification (Manual e2e, per-scenario runs) |
+| Validation Proof (Manual, live agents) — verdict + `.codex.log` files; parse-failure re-prompt with same `reviewer_id` **and canonical, all-gate-fields value fidelity** (`verdict`/`hard_block`/`concrete_changes_required`, carry-forward #2 as strengthened by item 6 and given a canonically-comparable narrative-wrapped-JSON payload pair by round-2 item 1); ambiguous multi-object stdout treated as a parse failure; MISSING-not-substituted; quota-wall `claude-sub` vs missing per flag; target metacharacter/argument-injection/control-byte rejection cases (round-2 item 3); result carries verify+tally verbatim, `mindspec complete` never invoked; run against a branch-built binary on `PATH`, a codex PATH-shim test double per scenario, and a scratch config seeded with a matching `panel:` reviewer mix so completeness observables discriminate correctly (round-2 item 4) (R2–R5, R3b; items 5–8 of the round-1 plan-panel fix; items 1, 3, 4 of the round-2 plan-panel fix) | Bead 2 verification (Manual e2e, per-scenario runs) |
 | Structural workflow proof — calls the verbs, never mutates the lifecycle | Bead 2 verification (AC4 grep + `TestMsPanelWorkflow_AllowedCLIExactSet`) |
