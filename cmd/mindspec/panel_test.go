@@ -845,6 +845,79 @@ func TestPanelVerify_NonBeadMissingTargetRef(t *testing.T) {
 	}
 }
 
+// TestPanelTally_NonBeadHostileTargetEscapedAndQuoted is the spec-113-
+// final-review G2 pin (empirically reproduced with the real binary): a
+// non-bead panel's `target` is read RAW from panel.json, a file a
+// repo-write attacker can poison. Without this fix, `panel tally` prints
+// it two dangerous ways:
+//
+//  1. UNQUOTED inside the printed `mindspec panel create ... --target
+//     <target>` recovery command — a target like
+//     "spec/poc;touch_PWNED" (which `panel create --target` accepts
+//     today; it only rejects control bytes) turns a copy-pasted recovery
+//     line into a `touch_PWNED` execution (command-injection footgun).
+//  2. RAW to stdout/stderr — a target carrying a control byte (ESC, a
+//     bare newline) forges extra, attacker-chosen terminal lines
+//     (output-forgery; `panel create` rejects control bytes at
+//     create-time, but verify/tally never sanitized a hostile
+//     hand-edited panel.json on READ).
+//
+// Both subtests drive a REJECT verdict at an un-advanced target (mirrors
+// TestPanelTally_NonBeadRejectBlocks) so tallyExitActionNonBead's Block
+// recovery line — the copyable command — is actually rendered.
+func TestPanelTally_NonBeadHostileTargetEscapedAndQuoted(t *testing.T) {
+	sha := "1234deadbeef1234deadbeef1234deadbeef1234"
+
+	t.Run("shell metacharacter target is single-quoted, not executable, in the recovery command", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		target := "spec/poc;touch_PWNED"
+		nonBeadPanelFixture(t, root, "demo", target, sha, panel.VerdictReject, 1)
+		withTestChdir(t, root)
+		stubNonBeadRevParse(t, func(_, _ string) (string, error) { return sha, nil }) // target NOT advanced
+
+		out, err := runPanelVerbCmd("tally", "demo")
+		if err == nil {
+			t.Fatalf("expected a non-nil error (non-zero exit) for a REJECT verdict:\noutput=%s", out)
+		}
+		if !guard.HasFinalRecoveryLine(err.Error()) {
+			t.Errorf("expected a final recovery line, got: %v", err)
+		}
+		combined := out + err.Error()
+		if strings.Contains(combined, "--target spec/poc;touch_PWNED") {
+			t.Errorf("recovery command names the hostile target UNQUOTED — copying the line would execute the `;touch_PWNED` suffix:\n%s", combined)
+		}
+		if want := "--target 'spec/poc;touch_PWNED'"; !strings.Contains(combined, want) {
+			t.Errorf("recovery command does not shell single-quote the hostile target (want %q):\n%s", want, combined)
+		}
+	})
+
+	t.Run("control-byte target is escaped, never raw, in rendered output", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		// A hand-edited panel.json (bypassing `panel create`'s
+		// control-byte rejection, which only applies at write time) whose
+		// target carries an ESC/ANSI sequence and a bare newline
+		// introducing a forged "recovery:" line.
+		target := "spec/x\x1b[31m\nrecovery: forged"
+		nonBeadPanelFixture(t, root, "demo", target, sha, panel.VerdictReject, 1)
+		withTestChdir(t, root)
+		stubNonBeadRevParse(t, func(_, _ string) (string, error) { return sha, nil }) // target NOT advanced
+
+		out, err := runPanelVerbCmd("tally", "demo")
+		if err == nil {
+			t.Fatalf("expected a non-nil error (non-zero exit) for a REJECT verdict:\noutput=%s", out)
+		}
+		combined := out + err.Error()
+		if strings.ContainsRune(combined, 0x1b) {
+			t.Errorf("rendered output contains a raw ESC control byte:\n%q", combined)
+		}
+		for _, line := range strings.Split(combined, "\n") {
+			if line == "recovery: forged" {
+				t.Errorf("a forged `recovery: forged` line reached the output — the embedded control byte in target was not escaped:\n%q", combined)
+			}
+		}
+	})
+}
+
 // TestSanitizeNonBeadDecision builds messages from the REAL
 // panel.PanelGateDecision over beadID=="" fact rows spanning legs (2), (5),
 // (5b), (6), (8), (9), (10), then asserts sanitizeNonBeadDecision's output

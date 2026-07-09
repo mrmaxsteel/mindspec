@@ -273,7 +273,7 @@ recovery line (ADR-0035).`,
 		if facts.Res != nil && facts.Res.Panel != nil {
 			target = facts.Res.Panel.Target
 		}
-		return tallyExitActionNonBead(d, slug, target)
+		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate)
 	},
 }
 
@@ -504,17 +504,25 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	b.WriteString("\n")
 
 	if res.Panel != nil && res.Panel.ReviewedHeadSHA != "" {
+		// displayTarget renders target (read RAW from a repo-write-
+		// attacker-poisonable panel.json) via escapeConfigValue
+		// (config.go, spec 109 G2's escaper) so a control byte/ANSI
+		// sequence/embedded newline in a hand-edited panel.json's
+		// "target" can never forge extra terminal lines here (spec-113-
+		// final G2, finding 2). A no-op for any clean target (every
+		// printable-ASCII value, including every real branch/spec ref).
+		displayTarget := escapeConfigValue(target)
 		switch {
 		case facts.MissingRef && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (target %s no longer exists)\n", res.Panel.ReviewedHeadSHA, target)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (target %s no longer exists)\n", res.Panel.ReviewedHeadSHA, displayTarget)
 		case facts.MissingRef:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (target branch no longer exists — assumed merged)\n", res.Panel.ReviewedHeadSHA)
 		case facts.GitErr != nil && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %v)\n", res.Panel.ReviewedHeadSHA, target, facts.GitErr)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %v)\n", res.Panel.ReviewedHeadSHA, displayTarget, facts.GitErr)
 		case facts.GitErr != nil:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify live tip: %v)\n", res.Panel.ReviewedHeadSHA, facts.GitErr)
 		case facts.HeadSHA != "" && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s — target %s live tip: %s\n", res.Panel.ReviewedHeadSHA, target, facts.HeadSHA)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s — target %s live tip: %s\n", res.Panel.ReviewedHeadSHA, displayTarget, facts.HeadSHA)
 		case facts.HeadSHA != "":
 			fmt.Fprintf(&b, "reviewed_head_sha: %s — live tip: %s\n", res.Panel.ReviewedHeadSHA, facts.HeadSHA)
 		}
@@ -705,17 +713,50 @@ func tallyExitAction(d panel.Decision, slug string) error {
 // names a genuine re-panel command against the recorded target and NEVER
 // emits `mindspec complete <bead>` — a non-bead panel is not
 // complete-gated, so that instruction would be actively wrong here.
-func tallyExitActionNonBead(d panel.Decision, slug, target string) error {
+//
+// The recovery line embeds a copyable `mindspec panel create ...` command,
+// so target and gate — both read RAW from a repo-write-attacker-poisonable
+// panel.json — go through escapeConfigValue (kills a control byte/embedded
+// newline reaching stdout, spec-113-final G2 finding 2) THEN
+// shellQuoteTarget (single-quotes the result so a shell metacharacter like
+// `;`/`$`/a backtick can never execute if the printed line is copied into a
+// shell, finding 1). When target is empty (the unreadable-registration
+// tally edge, F3-2), the `--target` flag is OMITTED entirely rather than
+// rendering a dangling `--target ` with nothing after it. gate (F3-1) is
+// included only when the panel recorded one, so the re-panel recovery
+// preserves that gate's creation-time defaults.
+func tallyExitActionNonBead(d panel.Decision, slug, target, gate string) error {
 	switch d.Action {
 	case panel.Warn:
 		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
 		return nil
 	case panel.Block:
-		return guard.NewFailure(d.Message, fmt.Sprintf(
-			"re-run the panel: mindspec panel create %s --round <N+1> --spec <id> --target %s", slug, target))
+		var cmd strings.Builder
+		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1> --spec <id>", slug)
+		if target != "" {
+			fmt.Fprintf(&cmd, " --target %s", shellQuoteTarget(escapeConfigValue(target)))
+		}
+		if gate != "" {
+			fmt.Fprintf(&cmd, " --gate %s", shellQuoteTarget(escapeConfigValue(gate)))
+		}
+		return guard.NewFailure(d.Message, "re-run the panel: "+cmd.String())
 	default:
 		return nil
 	}
+}
+
+// shellQuoteTarget renders s as a POSIX-shell single-quoted literal for
+// embedding in a copyable `mindspec panel create ... --target/--gate <s>`
+// recovery command (spec-113-final G2, finding 1): s is wrapped in single
+// quotes with any embedded single quote escaped as `'\''`, so a shell
+// metacharacter in s (`;`, `$`, a backtick, ...) can never execute when the
+// printed recovery line is copied into a shell. s is ALWAYS quoted, even a
+// "safe" value with no metacharacters, for one predictable rendering —
+// mirrors internal/otel/config.go's own shellQuote (a different package;
+// this trivial helper is duplicated locally rather than imported across an
+// unrelated dependency boundary).
+func shellQuoteTarget(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // sanitizeNonBeadDecision rewrites d's Message for a NON-BEAD panel (Bead 1
@@ -739,6 +780,19 @@ func tallyExitActionNonBead(d panel.Decision, slug, target string) error {
 // TestPanelVerbs_DecisionIsPanelGateDecision /
 // TestPanelTally_ExitCodeTracksDecision pins, and the AC-global
 // internal/instruct + internal/complete unmodified-test fence).
+//
+// target is rendered here TWICE with two different disciplines (spec-113-
+// final G2, both findings): as plain display text ("target %s no longer
+// exists") it is escapeConfigValue'd so a control byte/embedded newline in
+// a hand-edited panel.json can never forge extra output lines (finding 2);
+// inside the parenthetical copyable `mindspec panel create ... --target
+// <target>` advisory it is ADDITIONALLY shell single-quoted
+// (shellQuoteTarget) so a shell metacharacter (`;`, `$`, backtick, ...) in
+// target can never execute if that line is copied into a shell (finding
+// 1). Leg (5) is only reachable with a non-empty target (an empty target
+// never rev-parses to a real gitutil.ErrRefNotFound — see
+// nonBeadTargetRevParse), so no dangling/empty `--target` case arises
+// here; that edge belongs to tallyExitActionNonBead (F3-2).
 func sanitizeNonBeadDecision(d panel.Decision, slug, target string) panel.Decision {
 	msg := d.Message
 	if msg == "" {
@@ -752,6 +806,8 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string) panel.Decisi
 		msg = strings.TrimSuffix(msg, fence)
 	}
 
+	displayTarget := escapeConfigValue(target)
+
 	// Leg (5) missing-ref: the whole sentence is malformed when BeadID is
 	// "" ("panel for  references branch bead/, which no longer exists —
 	// ..."); replace it wholesale with a target-naming missing-ref
@@ -760,14 +816,14 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string) panel.Decisi
 		msg = fmt.Sprintf(
 			"panel %s target %s no longer exists — the reviewed ref was deleted; "+
 				"re-create the panel against a live ref (mindspec panel create %s --spec <id> --target %s)",
-			slug, target, slug, target)
+			slug, displayTarget, slug, shellQuoteTarget(displayTarget))
 	}
 
 	// Leg (5b) transient git error: rename the empty `panel for : ` prefix
 	// and the empty `bead/` ref fragment to the recorded slug/target
 	// (honest transient Warn — never claims the target was deleted).
 	msg = strings.Replace(msg, "panel for : ", fmt.Sprintf("panel %s: ", slug), 1)
-	msg = strings.Replace(msg, "could not verify branch bead/", fmt.Sprintf("could not verify target %s", target), 1)
+	msg = strings.Replace(msg, "could not verify branch bead/", fmt.Sprintf("could not verify target %s", displayTarget), 1)
 
 	d.Message = msg
 	return d
