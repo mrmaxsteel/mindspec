@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "R7a single-home HOLDS. Every subcommand's decision routes through panel.PanelGateDecision(facts): renderPanelVerify (panel.go:341) and renderPanelTally (panel.go:451) each call it once; tallyExitAction (panel.go:520) switches on d.Action ALONE. No re-implemented tally/threshold/staleness matrix exists in the CLI. The presentation-only reads (res.Approves/Rejects/threshold at panel.go:477-481, the reviewed_head_sha display branches at 357-362) are display strings that never feed the decision or exit code. The pin TestPanelVerbs_DecisionIsPanelGateDecision genuinely falsifies: its oracle is panel.PanelGateDecision(tc.facts).Action over a branch-complete 13-row table (branches 2-10 + Warn variants malformed/abandoned/missing-ref/GitErr/stale/dirty/incomplete/REJECT/hard_block/sub-at-above-threshold); any relocated decision branch drifts a row and breaks it. Scope-fence CLEAN: `git show 75ae9c6a --stat` = exactly the 5 named files; internal/panel + internal/config untouched; leaf invariant `go list -deps ./internal/panel | grep internal/config` = empty (0). redact +3 (panel/tally/verify) is the exact minimum the cobra drift guard (redact_enum_drift_test.go, walks live rootCmd) requires — `create` already present — genuine requirement, not creep. cmd/mindspec package green.",
+  "concrete_changes_required": [],
+  "findings": [
+    "R7a single-home: sole decision source is panel.PanelGateDecision, called in renderPanelVerify/renderPanelTally; tallyExitAction derives exit purely from d.Action, never raw counts (panel.go:520-531).",
+    "Presentation-only counts (Approves/Rejects/threshold, panel.go:477-481) and staleness display (357-362) do not influence the decision path — verified no independent allow/block logic.",
+    "Pin test oracle = PanelGateDecision over a branch-complete GateFacts table; falsifying against any adapter-relocated branch. Passes (go test -run TestPanelVerbs_DecisionIsPanelGateDecision).",
+    "Scope-fence: 5-file diff only; internal/panel and internal/config not modified; leaf-invariant deps check empty.",
+    "redact enum +3 = drift-guard requirement for the new panel/create/verify/tally cobra nodes; create pre-existed in SubcommandTokens so only 3 tokens added. Minimal, not scope creep."
+  ]
+}
