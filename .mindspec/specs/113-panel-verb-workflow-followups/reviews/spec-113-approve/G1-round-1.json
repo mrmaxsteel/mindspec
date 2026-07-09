@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.96,
+  "rationale": "APPROVE. At SHA 0b82c1d29151e3a87e498c08622865c1deb0149e, every load-bearing premise I checked is grounded in the real tree. R1 is real: non-bead panels leave beadID empty, ResolveGateFacts rev-parses bead/, and the missing-ref message renders bead/<empty>; verify/tally treat Warn as non-blocking advisory. R2 is real: the regex blocks $( but not bare $, and the plugin and .claude workflow copies are byte-identical. R3 is genuinely deferred writer-side stamping: panel create has no --gate, CreateInput has no Gate, but Panel.Gate and the gate-scoped config resolvers/advisory selector already exist and are decision-inert. R4 is real: Model is a plain string, model() falls back to Family, and validation refuses only the combined empty identity. The workflow/core domain ownership and all linked ADR files resolve. The proposed fixes are bounded and feasible.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1",
+      "status": "grounded",
+      "evidence": "cmd/mindspec/panel.go:303-309 populates beadID only when reg.Panel.IsBead(); internal/panel/gate.go:372 rev-parses \"bead/\"+beadID; gate.go:186-189 renders \"references branch bead/%s\". cmd/mindspec/panel.go:376 and :494 show Warn becomes PASS/advisory output, and tally Warn exits 0 by the command contract."
+    },
+    {
+      "id": "R2",
+      "status": "grounded",
+      "evidence": "plugins/mindspec/workflows/ms-panel.js:78 builds a shell command string; :138 defines SHELL_METACHAR_RE as /[\\x60;|&\\n]|\\$\\(/, which matches $( but not $HOME/${x}/$x. cmp of plugins/mindspec/workflows/ms-panel.js and .claude/workflows/ms-panel.js at the pinned SHA exits 0."
+    },
+    {
+      "id": "R3",
+      "status": "grounded",
+      "evidence": "cmd/mindspec/panel.go:210-214 registers spec/target/bead/round flags only. internal/panel/create.go:51-74 has no Gate in CreateInput and create.go:119-127 does not stamp Gate. internal/panel/panel.go:77-91 defines decision-inert Panel.Gate. internal/config/config.go exposes PanelGateKeys, PanelGateExpectedReviewers, PanelGateApproveThresholdExpr, and PanelGateAdvisoryDefault."
+    },
+    {
+      "id": "R4",
+      "status": "grounded",
+      "evidence": "internal/config/config.go:115-117 uses plain string fields for Family and Model; config.go:139-144 returns Model if non-empty else Family; config.go:540-550 refuses only r.model()==\"\". Therefore {model:\"\", family:\"codex\"} resolves to codex, while {model:\"\"} with no family is refused."
+    },
+    {
+      "id": "domains-adrs",
+      "status": "grounded",
+      "evidence": ".mindspec/domains/workflow/OWNERSHIP.yaml and .mindspec/domains/core/OWNERSHIP.yaml exist at the pinned SHA and own the cited paths. Linked ADR-0030, ADR-0034, ADR-0035, ADR-0037, and ADR-0040 files all exist under .mindspec/adr/."
+    }
+  ]
+}

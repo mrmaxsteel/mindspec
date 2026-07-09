@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounded every factual claim against the tree at 0b82c1d2; essentially all hold exactly. R1: resolvePanelGateFacts (cmd/mindspec/panel.go:302) sets beadID only under IsBead() (line 304); gate.go:372 rev-parses \"bead/\"+beadID; live `git rev-parse --verify --quiet 'bead/^{commit}'` exits 1; RevParseRef maps exit-1 to ErrRefNotFound; leg (5) at gate.go:186-189 carries the exact malformed message and returns before legs (6)/(8)-(10); verify renders 'PASS (advisory: ...)' and tally's Warn path exits 0. Fences real: ForBead requires IsBead (panel.go:233-243), instruct/panelstate.go:108-119 leaves non-bead staleness zero. R2: SHELL_METACHAR_RE = /[\\x60;|&\\n]|\\$\\(/ at exactly line 138 (matches $( not bare $); buildCommand template at line 78; mirrors cmp-identical; both floor tests exist. R3: no --gate flag today; CLI stamps global defaults (panel.go:130-131); CreateInput lacks Gate; Panel.Gate at panel.go:91; PanelGateKeys config.go:101; resolvers at 750/766/777; advisory call sites at complete.go:390 and config.go:541; 112's Out-of-Scope line 115 contains the quoted deferral. R4: Reviewer.model() falls back to Family, so {model:\"\",family} is accepted, contradicting 112 R4's text — exactly as claimed. Domains, ADRs, and all four beads verified. One minor overstatement noted below; not verdict-affecting.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "requirement": "R1 (Background)",
+      "note": "Background claims 'the CLI verbs can never Block on a non-bead panel'. Slightly overbroad: legs (2) unreadable-panel.json (gate.go:149-153) and (4) round-mismatch (gate.go:174-178) precede leg (5) and require no git, so a non-bead panel with a malformed panel.json or a round mismatch CAN Block today. The substantive claim — staleness/incomplete/REJECT/threshold legs (6)/(8)-(10) unreachable for non-bead panels because leg (5) always fires first — is verified accurate. Optional wording tighten at plan time; no requirement text depends on the overbroad phrasing."
+    },
+    {
+      "severity": "info",
+      "requirement": "R1",
+      "note": "Verified live: `git rev-parse --verify --quiet 'bead/^{commit}'` exits 1 in this repo, and internal/gitutil/gitops.go RevParseRef (func at ~530; exit-1 branch ~542) maps it to ErrRefNotFound, so facts.MissingRef is always true for non-bead panels — the bug is real and observable, not theoretical."
+    },
+    {
+      "severity": "info",
+      "requirement": "R2",
+      "note": "BRIEF cites ms-panel.js '~127' for SHELL_METACHAR_RE but the spec itself says line ~138, which is exact (plugins/mindspec/workflows/ms-panel.js:138). The spec under review is correct; the discrepancy is in the BRIEF only."
+    },
+    {
+      "severity": "info",
+      "requirement": "R4",
+      "note": "The 112 R1-vs-R4 contradiction is verbatim in .mindspec/specs/112-*/spec.md (R1 line 86: 'an entry with family and no model is valid and resolves its model to the family string'; R4 line 92: refuses 'a reviewer entry with neither model nor family, or an empty-string model'). Code sides with R1: Reviewer.model() (config.go:~139-144) returns Family when Model==\"\", and validateReviewerEntries only refuses model()==\"\". Resolve-to-family matches the shipped behavior."
+    },
+    {
+      "severity": "info",
+      "requirement": "Impacted Domains / ADR Touchpoints",
+      "note": "workflow OWNERSHIP.yaml covers internal/panel/**, cmd/**, plugins/mindspec/**; core OWNERSHIP.yaml covers internal/config/**. All five anchored ADR links (0030/0034/0035/0037/0040) resolve under .mindspec/adr/. The 'no dedicated config-validation ADR exists' prose claim holds. All four beads (4d9m P2 bug, lczt P3 bug, zw81 P3 feature, cthj P3 task) exist and match."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "All four proposed resolutions are feasible against the pinned code. R1 can feed non-bead target SHA facts into the existing PanelGateDecision order to make stale targets Block and unmask incomplete/REJECT/threshold legs; message cleanup is render/fact-label work, not a matrix change, and complete/instruct can remain bead-only. R3 fits the existing leaf writer: CreateInput can take a plain Gate string, omitempty preserves byte-identical absent output, and gate-scoped defaults already exist in config. R4 matches the current string-field reality and can be pinned by comment plus tests. R2 is a monotone workflow hardening under MindSpec naming/ref conventions.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1",
+      "disposition": "APPROVE",
+      "detail": "resolve-from-target composes with existing legs; keep complete and instruct on current bead-only fact gathering and limit behavior changes to panel verify/tally."
+    },
+    {
+      "id": "R3",
+      "disposition": "APPROVE",
+      "detail": "--gate stamping can be added via cmd validation plus CreateInput.Gate without making PanelGateDecision or ApproveThreshold read Panel.Gate."
+    },
+    {
+      "id": "R4",
+      "disposition": "APPROVE",
+      "detail": "No struct/unmarshal change is needed; model:\"\" plus family falls through to family, while model:\"\" without family still fails validateReviewerEntries."
+    },
+    {
+      "id": "R2",
+      "disposition": "APPROVE",
+      "detail": "Rejecting bare $ is monotone for slug/spec/bead and MindSpec-generated target refs; the mirror update and existing workflow tests are sufficient pins."
+    }
+  ]
+}
