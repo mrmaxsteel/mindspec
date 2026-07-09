@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "The four fixes compose without contradiction. R1 and R3 coexist cleanly in cmd/mindspec/panel.go via disjoint functions (R3: create RunE + isValidPanelGateKey; R1: tally exit routing, resolvePanelGateFacts, renderers, sanitizeNonBeadDecision, tallyExitActionNonBead); no shared logic is modified by both. R1's zero-internal-diff fence holds NET: git diff 45ae7577..12c02de1 over internal/panel|instruct|complete shows only create.go's +13 (R3's decision-inert CreateInput.Gate plumb) plus test files — gate.go, instruct, complete are zero-diff, tallyExitAction stays 2-arg byte-identical. R3's decision-inertness is re-pinned across all five enum values; R2 is strictly monotone ($( subsumed by bare $), mirrors byte-identical; R4 pins existing behavior, superseding one 112 phrase exactly as scoped. interfaces.md matches shipped behavior. Tests: cmd/mindspec, internal/panel, internal/config, internal/complete, plugins/mindspec all green; internal/instruct fails only TestRun_IdleNoBeads, which I confirmed fails identically at merge-base 45ae7577 (known flake z4ps/7y4d, unrelated). Two minor advisory-text seams noted below — decision-inert, none an enumerated falsifier.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "minor",
+      "title": "R1/R3 composition seam: non-bead recovery advice drops --gate",
+      "detail": "tallyExitActionNonBead's Block recovery (cmd/mindspec/panel.go:715) and sanitizeNonBeadDecision's missing-ref re-create advice (panel.go:762) suggest `mindspec panel create <slug> ... --target <t>` without `--gate`. Following that advice on a gate-stamped panel (e.g. final_review) re-creates it with no gate key and global defaults, silently dropping R3's per-gate expected_reviewers/approve_threshold and the advisory read-through. Advisory-text-only and decision-inert; not among R1's or R3's falsifiers. Suggest a followup appending the recorded gate to the suggested command when Panel.Gate is set."
+    },
+    {
+      "id": "F3-2",
+      "severity": "minor",
+      "title": "Unreadable-registration tally edge renders an empty --target interpolation",
+      "detail": "When reg.Err != nil, panel tally routes to tallyExitActionNonBead with target \"\" (facts.Res.Panel nil), so the Block recovery renders `--target ` with an empty interpolation. Cosmetic, only on an already-corrupt panel.json, and strictly better than the pre-113 path which advised `mindspec complete <bead>` for the same unknowable panel. Could special-case an empty target to `--target <ref>` placeholder text in a followup."
+    },
+    {
+      "id": "F3-3",
+      "severity": "info",
+      "title": "Known-flake confirmation",
+      "detail": "internal/instruct TestRun_IdleNoBeads fails on the branch AND identically at merge-base 45ae7577 (verified in a throwaway /tmp worktree); env-dependent pre-existing flake z4ps/7y4d, not a spec-113 regression. All other AC-global packages pass."
+    }
+  ]
+}

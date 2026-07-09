@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.94,
+  "rationale": "R2 is sound: every slug/spec/target/bead_id value reaching buildCommand is validated first, and $/${}/`/;/|/&/newline/$(...) payloads are rejected. R3 --gate rejects invalid/control-byte values before any write. However R1 still has a recovery-command escaping hole: non-bead target is rendered raw into panel verify/tally text and tally's recovery command. This is not live execution, so not REJECT, but it is a copyable command-injection footgun and control-byte output-forgery path.",
+  "concrete_changes_required": [
+    "Escape or quote non-bead panel target values whenever rendering command text, especially sanitizeNonBeadDecision and tallyExitActionNonBead recovery strings.",
+    "Either reject shell metacharacters in panel create --target for values later rendered as shell commands, or render recovery as argv-safe/non-copyable text with explicit quoting.",
+    "Sanitize control bytes from panel.json target on read before verify/tally output, matching the create-time --target discipline."
+  ],
+  "findings": [
+    "Empirical real-binary repro in /tmp/ms-g2-panel-probe: created review/demo/panel.json with target \"spec/poc;touch_PWNED\" and a REJECT verdict. `mindspec panel tally demo` exited 1 and stderr contained `recovery: re-run the panel: mindspec panel create demo --round <N+1> --spec <id> --target spec/poc;touch_PWNED`. No file executed/created during tally, but copying the recovery command would execute the suffix in a shell.",
+    "The same printable metachar target is CLI-reachable: in /tmp/ms-g2-create-metachar, `mindspec panel create createpoc --spec s --target 'spec/poc;touch_PWNED'` exited 0 and wrote that target into panel.json and BRIEF.md.",
+    "A hand-written control-byte target `spec/good\\nrecovery: forged` reaches verify/tally output raw, forging additional lines inside the target and recovery command text. `panel create --target` correctly rejects this before write, but verify/tally do not sanitize hostile panel.json content.",
+    "R2 checked with a Node VM harness over `git show 12c02de1:plugins/mindspec/workflows/ms-panel.js`: $HOME, ${x}, backtick, semicolon, pipe, ampersand, newline, and $(...) were rejected for slug/spec/target/bead_id before any buildCommand call.",
+    "R3 checked with /tmp snapshot: `panel create gatebad --spec s --target t --gate $'final_review\\nEVIL'` exited 1, emitted the control-character recovery, and before/after tree contents remained only .mindspec."
+  ]
+}

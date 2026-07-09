@@ -1,0 +1,54 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.88,
+  "rationale": "Merge to the available origin/main is clean and the diff shape matches the intended spec-113 surface: four fixes, tests, docs, bead export, and tracked lifecycle review artifacts. The touched package suite passes. However, impl-approve readiness is blocked: the tracked bead export still has mindspec-r6hk.3 in_progress and the epic open in implement phase. The required aggregate go test ./... run also did not finish green; it timed out in bd-dependent packages because bd cannot open its embedded Dolt LOCK in this sandbox, not in the known TestRun_IdleNoBeads flake. This branch is therefore not finalization-ready yet.",
+  "concrete_changes_required": [
+    "Complete/close mindspec-r6hk.3 through the normal lifecycle so all four r6hk beads are closed and the epic advances out of implement/review-blocking state.",
+    "Rerun go test ./... in an environment where bd can open its embedded Dolt database and record a green result, with only the documented TestRun_IdleNoBeads flake allowed."
+  ],
+  "findings": [
+    {
+      "id": "G3-1",
+      "severity": "blocking",
+      "category": "impl-approve-readiness",
+      "disposition": "REQUEST_CHANGES",
+      "detail": ".beads/issues.jsonl at 12c02de1 reports mindspec-r6hk.3 status=in_progress, closed_at=null, and the epic mindspec-r6hk status=open with metadata.mindspec_phase=implement. The brief requires all four beads closed and no in_progress bead lingering before impl approve."
+    },
+    {
+      "id": "G3-2",
+      "severity": "blocking",
+      "category": "aggregate-suite",
+      "disposition": "REQUEST_CHANGES",
+      "detail": "go build ./... exited 0, but go test ./... exited 1 after 10m timeouts in internal/harness, internal/instruct, and internal/validate. The timed goroutines were waiting on bd/agent subprocesses; direct bd show/list also fails here with openat LOCK: operation not permitted. This is not the known TestRun_IdleNoBeads flake."
+    },
+    {
+      "id": "G3-3",
+      "severity": "none",
+      "category": "merge",
+      "disposition": "APPROVE",
+      "detail": "git merge-tree $(git merge-base HEAD origin/main) HEAD origin/main produced no output. Local origin/main equals merge-base 45ae7577, so no conflicting files or post-base main changes were present in this clone."
+    },
+    {
+      "id": "G3-4",
+      "severity": "none",
+      "category": "scope",
+      "disposition": "APPROVE",
+      "detail": "The 45ae7577..12c02de1 diff is limited to the expected spec-113 code/test/docs surface, .beads lifecycle state, and tracked review artifacts. The non-review code paths are cmd/mindspec, internal/config, internal/panel create/tests, and the ms-panel workflow mirror/tests."
+    },
+    {
+      "id": "G3-5",
+      "severity": "none",
+      "category": "review-artifacts",
+      "disposition": "APPROVE",
+      "detail": "Committed review files under .mindspec/specs/113-panel-verb-workflow-followups/reviews are lifecycle artifacts consistent with the house policy. The current spec-113-final directory was already untracked before this verdict write."
+    },
+    {
+      "id": "G3-6",
+      "severity": "none",
+      "category": "touched-tests",
+      "disposition": "APPROVE",
+      "detail": "Scoped touched-package run passed: go test ./cmd/mindspec ./internal/panel ./internal/config ./plugins/mindspec. The .claude and plugin ms-panel.js copies are byte-identical."
+    }
+  ]
+}
