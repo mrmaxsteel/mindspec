@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Attacked all five axes empirically. (1) Breadth: GlobMatch is segment-based, so `.claude/workflows/**` cannot match `.claude/workflowsX` or any sibling (`workflows` vs `workflowsX` fails filepath.Match); it claims only the workflows subtree, mirroring the adjacent `.claude/skills/**` precedent, and does NOT re-claim `plugins/mindspec/workflows/**` (already under `plugins/mindspec/**`). (2) Narrowness: Bead 2's targets are `.claude/workflows/ms-panel.js` (this claim), the plugin copy (plugins/mindspec/**), and installer wiring (internal/setup/**) — all owned; no gap. (3) Falsifiability PROVEN: git-archived 68c87106 to /tmp, removed the claim line, `TestWorkflowOwnsClaudeWorkflows` FAILED on both assertions (owner \"\" and nil Ownership); restored tree passes. (4) The /tmp failure also proves repoRootForWorkflowManifest reads the manifest of the tree under test (deepest walk-up match), not a fixture or a hardcoded path — correct even in this nested-worktree layout. (5) No double-claim: workflow is the only domain touching `.claude/**`; all other domains claim only `internal/...` globs. Build + full internal/validate package green. Doc-sync note is accurate.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Falsifiability proof: in a /tmp copy of commit 68c87106 with the `- .claude/workflows/**` line removed, TestWorkflowOwnsClaudeWorkflows fails: attributeDomain(\".claude/workflows/ms-panel.js\") = \"\" and nil Ownership. Test is not vacuous.",
+    "Glob semantics verified against internal/validate/ownership.go GlobMatch: segment-split matching means `.claude/workflows/**` matches ms-panel.js and any nested descendant, matches the directory itself (trailing-/** special case), and cannot match `.claude/workflowsX/...`.",
+    "Classification verified: isDocFile (docsync.go:393) false — no docs/, .mindspec/, project-docs/, or root-operator-doc prefix; isProcessArtifact (divergence.go:300) false — not .beads/, review/, co-located reviews, mover run-state, or vestigial config. So ms-panel.js is governable source and the claim is genuinely required before Bead 2.",
+    "No ownership ambiguity: grep across all four domains' OWNERSHIP.yaml shows workflow is the sole claimant of any `.claude/**` path; context-system/core/execution claim only internal/** subtrees.",
+    "INFORMATIONAL (no change required): the test passes domains=[\"workflow\"] only, so it pins the claim's presence but would not detect a hypothetical future double-claim by another domain — that is the ownership-lint's job, not this attribution test's, and no double-claim exists today.",
+    "INFORMATIONAL (no change required): repoRootForWorkflowManifest stops at the deepest manifest walking up; in this nested-worktree layout that is the bead worktree's own live OWNERSHIP.yaml, empirically confirmed by the /tmp falsification run reading the modified copy.",
+    "go build ./... and go test ./internal/validate/... both pass at 68c87106 (22.4s, ok)."
+  ]
+}
