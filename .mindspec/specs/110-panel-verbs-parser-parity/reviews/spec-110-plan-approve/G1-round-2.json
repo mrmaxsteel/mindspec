@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Both G1 round-1 runnability objections are addressed at 943cc310. The Bead 4 manual e2e now records git status after create and diffs it after verify, proving verify adds no new dirt instead of requiring a clean tree after create's expected writes. It also defines a reproducible sub-threshold tally setup by seeding expected reviewer verdict files with approve count one below ApproveThreshold. The leaf invariant now uses the two-step go-list form in the testing strategy, Bead 1, Bead 4, and the coverage map, so go list failures cannot false-green behind a negated grep. Spot-checking the new and changed verification checkboxes found no new unrunnable command.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "round_1_item": "Rewrite the Bead-4 manual e2e into explicit commands that either commit/snapshot the files created by panel create before running verify, or compare git status before/after verify, and include the exact sub-threshold verdict setup before tally.",
+      "disposition": "ADDRESSED",
+      "location": ".mindspec/specs/110-panel-verbs-parser-parity/plan.md:857",
+      "detail": "The e2e is now ordered: build the branch binary, create the panel, capture post-create git status to /tmp/before.txt, run verify, capture /tmp/after.txt, and diff the two files. The sub-threshold tally setup now specifies expected reviewer verdict files with APPROVE count exactly one below ApproveThreshold, including the default 4 APPROVE / 2 REQUEST_CHANGES example for a 5-of-6 threshold."
+    },
+    {
+      "round_1_item": "Replace the leaf assertion with a form that fails when go list fails, for example `deps=$(go list -deps ./internal/panel) && ! printf '%s\\n' \"$deps\" | grep -q internal/config`, or an equivalent two-step check.",
+      "disposition": "ADDRESSED",
+      "location": ".mindspec/specs/110-panel-verbs-parser-parity/plan.md:423",
+      "detail": "The plan explains the false-green trap and uses `deps=$(go list -deps ./internal/panel) && ! printf '%s\\n' \"$deps\" | grep -q internal/config` in Bead 1, Bead 4, and the acceptance coverage map. A failing go list now fails the command before grep is evaluated."
+    },
+    {
+      "round_1_item": "Sanity-check new or changed verification checkboxes for newly unrunnable commands.",
+      "disposition": "ADDRESSED",
+      "location": ".mindspec/specs/110-panel-verbs-parser-parity/plan.md:419",
+      "detail": "Spot-checked the changed verification checkboxes, including the new BRIEF marker test, branch-built validate self-check, Bead 4 PASS-line greps, two-step go-list assertions, skills greps, mirror diff, and manual e2e. No new unrunnable verification command was found."
+    }
+  ]
+}

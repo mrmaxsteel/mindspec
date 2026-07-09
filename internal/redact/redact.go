@@ -80,6 +80,7 @@ var CommandTokens = map[string]struct{}{
 	"next":      {},
 	"otel":      {},
 	"ownership": {},
+	"panel":     {}, // spec 110 R1/R2/R3: `panel create|verify|tally`
 	"plan":      {},
 	"record":    {},
 	"release":   {}, // spec 101 bead 3cj0.2: `mindspec release <bead-id>` verb
@@ -150,7 +151,9 @@ var SubcommandTokens = map[string]struct{}{
 	"start":            {},
 	"status":           {},
 	"summary":          {},
+	"tally":            {}, // panel tally
 	"validate":         {},
+	"verify":           {}, // panel verify
 	"worktree":         {},
 	"write-session":    {},
 	"zsh":              {}, // completion zsh (cobra built-in)

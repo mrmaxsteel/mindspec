@@ -1,0 +1,62 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "All seven round-1 asks are addressed with verified substance, not just text: SevError/HasFailures() pinned on every failing AND tolerated case; the B2 self-check builds the branch binary; the B4 contract table genuinely spans gate.go branches (2)-(10) — I re-enumerated gate.go and every branch malformed-reg through above-threshold has a row, and the omitted (0)/(1) have no verb rendering surface; B3 gains round-mismatch/PanelErr/missing-ref rows with an honest, wiring-verified GitErr exclusion, and the structural assertion is now falsifiable — all four message literals exist exactly once in today's panelstate.go, and the existing test rows pin gate-compatible substrings ('halt path'), so delegation keeps them green as claimed; CCR aggregation and BRIEF-marker edge cases have dedicated tests; the schema-doc test extracts the doc's own backtick tokens. Residual minors, non-blocking: drive the stale-SHA/hard_block exit rows through the command entry, not only tallyExitAction; Consolidate still un-grepped in B5.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-R1-1",
+      "disposition": "ADDRESSED",
+      "summary": "SevError pins (round-1 item 1): B2 steps 3-4 now assert Severity==SevError / vr.HasFailures()==true on every failing case and vr.HasFailures()==false on every tolerated/passing case, with the AddWarning false-green rationale stated inline. The new filename-form cases (a2/a3) carry the same severity assertions."
+    },
+    {
+      "id": "F3-R1-2",
+      "disposition": "ADDRESSED",
+      "summary": "Branch-build self-check (item 2): B2's verification is now `go build -o /tmp/ms110b2 ./cmd/mindspec && /tmp/ms110b2 validate spec 110-…`, with an explicit note that the installed binary predates B2 and cannot fail on it."
+    },
+    {
+      "id": "F3-R1-3",
+      "disposition": "ADDRESSED",
+      "summary": "Branch-complete contract table (item 3): verified against gate.go — the enumerated rows (malformed-registration, round-mismatch, stale-SHA, dirty-tree, incomplete, REJECT, hard_block, sub/at/above-threshold, abandoned, missing-ref, transient GitErr) cover branches (2)-(10) exactly. Omitting (0) SkipEnv and (1) fail-open is sound: verify/tally error on slug-not-found before facts exist (Reg is never nil through the verbs) and SkipEnv is the complete-time env hatch. The tautology rationale is now stated in the plan itself."
+    },
+    {
+      "id": "F3-R1-4",
+      "disposition": "ADDRESSED",
+      "summary": "B3 rows + structural assertion (item 4): round-mismatch, malformed-registration (PanelErr/Panel nil), and missing-ref rows added; the GitErr exclusion is justified and I verified it — instruct's BranchSHAResolver returns (sha, exists) with no transient-error state, so GateFacts.GitErr is unreachable from panelstate wiring, and B4's table carries that row. The structural check is now concrete and falsifiable: I confirmed all four message literals occur exactly once in today's internal/instruct/panelstate.go (so the negative assertion fails pre-refactor and can only pass after the branches are deleted), and three also live in gate.go for runtime relay. Nit: the fourth literal ('REJECT or hard_block is recorded') has no gate.go counterpart (gate says 'HARD block / REJECT recorded'), so the plan's 'these strings live solely in gate.go' is imprecise for that one — harmless, since the existing reject_recorded/hard_block test rows pin 'halt path', which gate.go's message contains, keeping them green under delegation exactly as the plan claims."
+    },
+    {
+      "id": "F3-R1-5",
+      "disposition": "ADDRESSED",
+      "summary": "Tally CCR aggregation (item 5): TestPanelTally_AggregatesConcreteChangesRequired seeds a real REQUEST_CHANGES verdict file and asserts the string renders attributed to slot — the plan notes this is the only test exercising the file-read decode path. The decode policy (malformed payload → zero items + advisory line, never touching decision or exit) plus control-byte escaping closes the silent-drop and injection edges."
+    },
+    {
+      "id": "F3-R1-6",
+      "disposition": "ADDRESSED",
+      "summary": "Legacy-BRIEF coverage (item 6): TestCreate_BRIEFMarkerEdgeCases covers legacy no-marker (byte-identical body), marker-only-open and duplicated markers (error, neither panel.json nor BRIEF.md written — checked by before/after existence+content), and CRLF byte-pass-through. Exceeds the ask."
+    },
+    {
+      "id": "F3-R1-7",
+      "disposition": "ADDRESSED",
+      "summary": "Doc-extracted schema test (item 7): TestPanelSchemaDoc_MatchesConstants now extracts backtick-quoted `*-round-N.json` tokens from the doc's own text, asserts conforming ones match verdictFileRE and the doc's labeled nonconforming `-round-0` example does not, and asserts exact equality (not 'contains') for the panel.json and consolidated-name literals. The added payload-contract pins reference real constants (VerdictApprove/VerdictRequestChanges/VerdictReject, tally.go:19-21). The extraction regex correctly skips the `<slot>-round-<N>` placeholder (no digits) and consolidated-round-N.md (.md)."
+    },
+    {
+      "id": "F3-R2-1",
+      "disposition": "NEW_ISSUE",
+      "severity": "minor",
+      "summary": "Non-blocking: TestPanelTally_ExitCodeTracksDecision is 'exercised through the real tallyExitAction helper' — if the discriminating rows (stale-SHA and hard_block with threshold-satisfying Approves) call the helper directly rather than driving the cobra command, a RunE that bypasses the helper and re-derives exit from raw counts stays green (the e2e's sub-threshold row blocks under both derivations, so it cannot discriminate). The seam-stub setup described suggests command-level execution and AC4 pins the constraint in prose; recommend the bead implement those two rows through the command entrypoint. Not blocking: the single-helper design plus the explicit 'RunE must not read raw tally fields' instruction makes the residual drift window narrow."
+    },
+    {
+      "id": "F3-R2-2",
+      "disposition": "NEW_ISSUE",
+      "severity": "minor",
+      "summary": "Carried from round-1 F3-7 (was a finding, not a required change): B5's greps still do not check the Consolidate section survives (AC11 claims it; only '## Artifact gates' and 'Slot lens defaults' are grepped). The verify slug-not-found error path likewise remains prose-only. Both are one-line additions a bead can absorb; neither gates the plan."
+    },
+    {
+      "id": "F3-R2-3",
+      "disposition": "ADDRESSED",
+      "severity": "info",
+      "summary": "Fix-delta claims spot-verified beyond my own asks: the two-step `deps=$(go list …) && ! printf … | grep` form genuinely closes the go-list-failure false-green in the old single-negation leaf check; the rewritten e2e's before/after `git status --porcelain` diff is falsifiable (a raw clean-tree check would have been false the moment create ran) and the sub-threshold seeding (4 APPROVE / 2 RC vs threshold 5) hits gate branch (10); the Warn-parity citation is accurate (internal/complete/panel_advisory.go:204-212 treats Warn as advisory-only, non-blocking); TestPanelSchemaDoc re-runs after Bead 4's same-file doc append."
+    }
+  ]
+}

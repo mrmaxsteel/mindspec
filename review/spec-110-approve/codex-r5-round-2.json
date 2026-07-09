@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "R5 claude-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Both round-1 asks are ADDRESSED with runnable ACs that genuinely fail under the named drifts. R5-F1 (R4): the new TestPanelSchemaDoc_MatchesConstants (spec.md:99) reads the workflow schema doc and asserts consistency with panel.FileName, panel.verdictFileRE, and panel.ConsolidatedName(N), failing on a -round-0 verdict file, wrong extension, or wrong consolidated prefix; absence fails via the doc-read. R5-F2 (R7a): the new TestPanelVerbs_DecisionIsPanelGateDecision (spec.md:97) drives a table of panel.GateFacts (Allow/Block/Warn) and pins both verify and tally to the identical Action panel.PanelGateDecision returns, so relocating any decision branch into a CLI adapter breaks the test; input/output signature changes break the call site at compile time and R7a's falsified-if backstops the signature constraint. Full-set re-scan: the two additive ACs sit in distinct packages (cmd/mindspec, internal/panel), collide with nothing, and every requirement R1-R8 now carries a runnable AC. No regressions from the fix round. Spec is approval-ready.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R2-F1",
+      "severity": "resolved",
+      "requirement": "R4",
+      "evidence": "spec.md:99 adds TestPanelSchemaDoc_MatchesConstants — reads the workflow panel-schema doc and asserts the registration filename, verdict-file example, and consolidated-file name are consistent with panel.FileName, panel.verdictFileRE, panel.ConsolidatedName(N), failing on a -round-0 verdict file, a wrong extension, or a different consolidated prefix.",
+      "impact": "The round-1 gap (falsified-if for absent/contradictory portability-contract docs had no runnable AC) is closed. Genuinely failing under schema-doc contradicting panel.FileName / round pattern / ConsolidatedName; absence covered by the doc-read."
+    },
+    {
+      "id": "R5-R2-F2",
+      "severity": "resolved",
+      "requirement": "R7a",
+      "evidence": "spec.md:97 adds TestPanelVerbs_DecisionIsPanelGateDecision — over a table of panel.GateFacts rows (Allow/Block/Warn), both panel verify and panel tally must render the identical Action panel.PanelGateDecision(facts) returns; relocating a decision branch into a CLI adapter breaks the test.",
+      "impact": "The round-1 gap (PanelGateDecision contract could move into adapters undetected) is closed as far as an acceptance test can. Decision logic moved into an adapter diverges the verb from the pure function and fails the test; a signature add/remove breaks the table call site / .Action read at compile time; R7a's falsified-if (spec.md:61) pins the input gain/loss at review."
+    },
+    {
+      "id": "R5-R2-N1",
+      "severity": "non_blocking",
+      "requirement": "R4",
+      "evidence": "spec.md:99 phrases the absence case implicitly ('a test reads the workflow panel-schema doc') rather than naming a doc-absent assertion.",
+      "impact": "Adequate — a read of a missing doc fails the test — but the plan could make the doc-present precondition explicit in the test for clarity. Not blocking."
+    },
+    {
+      "id": "R5-R2-PASS-REGRESSION-SCAN",
+      "severity": "pass",
+      "requirement": "R1-R8",
+      "evidence": "AC set at spec.md:93-104: the two new ACs (97 cmd/mindspec, 99 internal/panel) are additive, in distinct packages, and every requirement R1-R8 now maps to a runnable AC; the create/verify/tally/instruct/severity/touchpoint/leaf/skill ACs are unchanged.",
+      "impact": "No regressions introduced by the fix round; the earlier grill-pinned severity-parity and tally-exit ACs remain intact."
+    }
+  ]
+}

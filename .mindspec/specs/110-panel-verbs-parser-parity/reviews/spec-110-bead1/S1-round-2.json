@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-ran the round-1 empirical probe suite plus new round-2 cases against c9f54530, using a fresh scratch Go module built strictly under /tmp (copied internal/panel source at the pinned SHA, no worktree writes; worktree git status confirmed clean before/after, scratch directory removed afterward). All 30 assertions passed. Round-1 regressions: none -- first create, re-panel co-bump (round+sha move together in both files), pre-seeded skill body and pre-seeded R1-round-1.json verdict file survive byte- and mtime-identical, and both corrupt-marker cases (open-only on a fresh dir, and duplicated-pair after a real valid round 1) still error while leaving panel.json and BRIEF.md byte-identical and mtime-unchanged. New round-2 behavior verified directly: (1) my round-1 minor finding is fixed -- a body that fence-quotes the marker syntax now re-panels CLEANLY, co-bumps round/sha, and preserves the fenced block byte-for-byte (was: false-reject in r1). (2) Both whitespace-mangled variants (doubled internal spaces, tabs) now REJECT as corrupt with neither panel.json created nor BRIEF.md bytes/mtime touched, matching the claimed fix. Bonus observation (not a regression, informational only): an INDENTED marker pair (leading whitespace before column 0, otherwise exact) is classified as legacy rather than lookalike-corrupt, since markerLookalikeRE anchors `^<!--` with no leading-whitespace tolerance -- Create prepends a fresh valid header and the dead indented marker text survives untouched as body. Benign (no divergence, no data loss, no false rejection) but adjacent to the whitespace-mangling fix's intent; worth a follow-up note if it matters, not a blocker.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "disposition": "ADDRESSED",
+      "description": "Round-1 S1 minor finding (fence-quoted marker text in the skill-authored body false-rejecting the next re-panel) is fixed: empirically confirmed clean re-panel with byte-identical preservation of the fenced block, plus correct round/sha co-bump."
+    },
+    {
+      "severity": "info",
+      "description": "Non-blocking bonus observation from adversarial probing: a marker line indented with leading whitespace (not at column 0) is neither an exact marker match nor caught by markerLookalikeRE (which requires the line to start immediately with `<!--`), so it's classified as legacy body text rather than corrupt. Behavior observed is safe (fresh valid header prepended, dead text preserved byte-for-byte, no rejection, no divergence) -- flagging only for awareness, not requesting a change."
+    }
+  ]
+}

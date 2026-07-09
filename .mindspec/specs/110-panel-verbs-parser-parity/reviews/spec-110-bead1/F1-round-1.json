@@ -1,0 +1,41 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "Adversarial probing (scratch module copying internal/panel, plus running the real TestPanelSchemaDoc logic against edited docs) confirms the writer's core claims: byte-preservation held under BOM, abutting markers with no newlines, CRLF, and no-trailing-newline inputs; every corrupt-marker path fails closed with both files byte-identical (content+mtime verified); verdict files are untouched on legacy/success/corrupt paths; the package has zero module-internal deps (stdlib only). But the R4 drift guard is disproven by construction: editing the schema section to name `registration.json` as the registration file still passes, because panelJSONTokenRE scans the WHOLE doc and matches the `panel.json` backticks this same commit adds to Maintenance Notes — plan step 5 explicitly says 'a regexp over the doc's schema region', which was not implemented. Two further prose-drift edits (round base 0; hard_block 'any nesting depth', dodging the 'finding' proxy) also pass, though those are design-inherent to token pinning. Separately proven: a failed BRIEF write (EACCES) leaves panel.json bumped to round 2 while BRIEF says round 1 — outside the contracted corrupt-marker AC, error surfaced, downstream gate fails closed, so hardening only.",
+  "concrete_changes_required": [
+    "Scope TestPanelSchemaDoc_MatchesConstants' extraction to the '### Panel Artifact Schema' section (slice the doc between that heading and the next heading of the same or higher level) before applying panelJSONTokenRE/roundFileTokenRE/consolidatedTokenRE and the enum/hard_block contains-checks, per plan step 5's 'a regexp over the doc's schema region'. As written, the `panel.json` pin is satisfiable by the Maintenance Notes backticks added in this same commit: a doc edit renaming the registration file to `registration.json` inside the normative schema section keeps the test green (demonstrated by running the test, path-parameterized, against the edited doc)."
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "medium",
+      "title": "Schema-doc drift test false-green: whole-file token scan instead of schema-region scan",
+      "detail": "Ran the actual test (docPath parameterized) against a doc whose Panel Artifact Schema section claims the registration file is `registration.json`; test PASSES because `panel.json` remains backticked in the commit's own Maintenance Notes entry. Plan step 5 says the regexp runs 'over the doc's schema region'. Section-scoping defeats the attack: with no `panel.json` token in the section, the test t.Fatals. Code-to-doc direction (renaming panel.FileName) is still caught either way."
+    },
+    {
+      "id": "F1-2",
+      "severity": "low",
+      "title": "Prose drift passes the doc test (design-inherent); commit message overclaims",
+      "detail": "Two more wrong-doc edits pass as written: (a) 'with `N` starting at 1' -> 'starting at 0' (examples/labels untouched); (b) hard_block bullet -> 'may appear at any nesting depth' plus rewriting the 'read only at the top level' sentence — no occurrence of the word 'finding', so the sentence-proxy misses it, and the contains-checks still hold. Token pinning cannot pin prose, so this is a limit of the plan's design, but the commit message's 'the doc cannot silently drift from the code' overclaims. Section-scoping (F1-1) shrinks but does not eliminate this surface; no further change required."
+    },
+    {
+      "id": "F1-3",
+      "severity": "low",
+      "title": "Partial state on BRIEF write failure: panel.json bumped, BRIEF stale",
+      "detail": "With BRIEF.md chmod 0400 after round 1, Create(round 2) errors on the BRIEF write AFTER panel.json is already rewritten: panel.json shows round 2/new SHA, BRIEF header shows round 1/old SHA (proven in scratch). The contracted AC only requires neither-file-written for corrupt MARKER states (which holds — validation precedes all writes, MkdirAll included), the error is surfaced, and a swallowed error still fails closed downstream on round mismatch. Suggested hardening, not required: write BRIEF.md first and the gate-authoritative panel.json last, so an I/O failure never leaves the registration ahead of the BRIEF; the comment 'both writes happen unconditionally together' is not strictly true under I/O failure."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "title": "Byte-preservation, verdict-file safety, and leaf-safety survived all attacks",
+      "detail": "Verified: UTF-8 BOM legacy body byte-identical (BOM ends up mid-file, cosmetic); markers abutting text with no newlines and a no-trailing-newline CRLF suffix spliced with exact byte preservation; empty-but-existing BRIEF takes the legacy path (header + '\\n\\n', no stub — contract-consistent, worth knowing for Bead 5); verdict files (incl. a REJECT/hard_block one) byte-identical across legacy/re-panel/corrupt paths; go test ./internal/panel green at 17a2ed28 with git status clean; go list -deps shows stdlib-only (no internal/config, no os/exec, no git)."
+    },
+    {
+      "id": "F1-5",
+      "severity": "info",
+      "title": "Marker text in inputs wedges the NEXT Create (fails closed, never corrupts)",
+      "detail": "A Target containing the close-marker literal is accepted at write time and the resulting BRIEF wedges every subsequent Create with the corrupt-marker error (theoretical: git refnames cannot contain spaces, so a real branch name cannot embed the marker). Likewise a skill-authored body quoting the marker strings inside a code fence makes the next re-panel fail closed. Both are recoverable by hand-edit and never silently mis-splice; no change required."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "reviewer_id": "R5 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Type/seam correctness holds. mapGateAction is exhaustive over GateAction (Block/Warn/default→GatePass matching PanelGateDecision's iota-zero-is-Allow convention); it's only invoked for non-Allow in practice since verdict() intercepts Allow first. errBranchGone+errors.Is is a correct sentinel seam; Worktree()->\"\" reliably sets WorktreeAbsent=true (confirmed in gate.go's ResolveGateFacts, returns before Status is called). Traced panel.Scan/Tally: Scan only yields dirs where panel.json exists, and Tally leaves Panel/PanelErr both nil only if a fresh os.Stat misses the file — so the nil/nil path is reachable solely via a TOCTOU race between Scan and gatherPanelState's re-Tally, a race window that existed identically pre-refactor (old code also re-called Tally). Block is the correct/conservative direction for an advisory-only display line; the new test row correctly pins routing through PanelGateDecision rather than a local special case. Ran the full instruct+panel suite: only the documented pre-existing TestRun_IdleNoBeads (z4ps) fails, identically to parent commit; all pinned rows and the 14-row delegation table pass.",
+  "concrete_changes_required": [],
+  "findings": [
+    "gatherPanelState's `if facts.Res == nil { continue }` guard (panelstate.go:279) is unreachable dead code — ResolveGateFacts sets f.Res on every return path (success, Tally-error, and every short-circuit) before returning, so Res is never nil. Harmless (matches the analogous plain-Tally path's error-continue in spirit) but worth a comment fix or removal in a follow-up; not a correctness issue and not blocking.",
+    "The BranchSHAResolver->GateIO.RevParse adapter has no way to surface GateFacts.GitErr (transient error) since BranchSHAResolver's (sha, exists) shape collapses any git failure into exists=false -> errBranchGone -> MissingRef. This is a pre-existing limitation of the unchanged run.go liveBranchSHA/BranchSHAResolver interface (not touched by this bead) and is explicitly called out and excluded by the new test's own comment (Bead-4-only, CLI verbs get the GitErr leg) — flagging for awareness only, in scope for a later bead per the panel package's own Bead-4 CLI-verbs plan, not this one."
+  ]
+}

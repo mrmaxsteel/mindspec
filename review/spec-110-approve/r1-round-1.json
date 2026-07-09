@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "approve",
+  "confidence": "high",
+  "rationale": "Design-fidelity lens: the spec mechanizes the agreed panel lifecycle with nothing invented or dropped. I verified the load-bearing anchors against the tree. R5's parity claim is exact: plan.go:141 already makes the identical normalizeImpactedDomains(nil, root, \"\", impacted) call under the impacted-domains-resolve code, and Rule 2 bare-name tolerance (ownership_resolve.go:113-119) is real, so \"identical resolver, identical severity, merely earlier\" holds and no bare-name spec that passes plan-approve today fails the new check. R6 keys on ADR ID against the same adr.Store, existence-only, with the honest boundary (coverage/intersection/Accepted-status stay plan-approve) reinforced in R7c/Scope/Non-Goals. The create/verify/tally split is faithful: atomic round+SHA co-bump (R1) with sharp falsification; verify reuses PanelGateDecision/ResolveGateFacts with no second interpreter (R2); tally's exit is a pure function of PanelGateDecision with the mechanical concrete_changes union in-binary and semantic dedup/ranking left in the skill (R3/R8). Panel constants (FileName, verdictFileRE, ConsolidatedName) confirmed. ADR-0040 correctly referenced-not-cited (verified absent from base until 109 merges) and the 109 resolvers correctly consumed-not-defined; sequencing (108+109 hard prereqs, plan-approve deferred) is honest. R8 skill-dedup targets exist today so those falsifications are non-vacuous. Ready for approval.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "title": "ADR Touchpoint links use ../../adr/ but the spec is staged at .mindspec/docs/specs/110/, from which that resolves to a nonexistent .mindspec/docs/adr/",
+      "detail": "The spec's `## ADR Touchpoints` markdown links (`[ADR-0037](../../adr/ADR-0037-...md)`) follow the legacy `.mindspec/specs/<id>/` convention used by all 100+ existing specs, where `../../adr/` correctly resolves to `.mindspec/adr/`. But 110 (and 107) currently live at `.mindspec/docs/specs/<id>/`, from which `../../adr/` points at a nonexistent `.mindspec/docs/adr/` (canonical-location correct would be `../../../adr/`). This is NOT a design defect and NOT a blocker: (a) it matches every legacy spec's link form and is correct for the canonical `.mindspec/specs/` home; (b) R6 keys on the ADR ID (`ADR-0037`) resolved against `adr.Store` (reads `.mindspec/adr/`), not on the markdown link path, so the dangling relative link does not trip R6 or any parity check; (c) the docs/specs-vs-specs location split is a workspace/create-tooling matter outside 110's scope. Requiring a change here would actually diverge from convention and break once the spec lands at its canonical path. Surfaced as an observation only — no change required for spec-approve."
+    },
+    {
+      "severity": "info",
+      "title": "R2 `verify` exits 0 even on a BLOCK preview — intentional and internally consistent",
+      "detail": "verify always exits 0 (\"a read-only report is not itself a gate\") while tally's exit tracks PanelGateDecision. The asymmetry is deliberate and clearly stated; the design keeps mindspec complete as the sole authoritative enforcer (Non-Goals) and makes tally's non-zero a reporting convenience, not a second enforcement point (R7a). No fidelity concern; noting so the tally reviewer sees it is by design."
+    }
+  ]
+}

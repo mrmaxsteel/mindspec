@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Both outcomes verified against every R1-R8 falsification clause at 2da52b09. Outcome 1: panel create/verify/tally are thin adapters over internal/panel; gate.go, internal/complete, internal/approve have ZERO diff vs merge-base (R7a inputs/outputs unchanged), and the single decision home is real across all four consumers -- verify/tally call PanelGateDecision via ResolveGateFacts, instruct's PanelStateEntry.verdict() matrix is deleted and delegates (diff-confirmed; only surviving ApproveThreshold uses are message rendering, not decisions). Outcome 2: checkImpactedDomainsResolutionParity uses loadImpactedDomains (contextpack.ParseSpec) + normalizeImpactedDomains(nil, root, \"\") under the identical impacted-domains-resolve code; touchpoint check uses the same newMemoStore(adrStoreForSpecFn) seam as plan.go:156/divergence.go:137, anchored-links-only. I ran all 13 ACs green: build, config-free leaf (go list -deps clean), all 9 named tests PASS, R8 greps pass on plugins AND .claude mirrors. Self-referential probe: built binary validates spec 110 itself clean -- its bare-prose ADR-0040 mentions correctly not resolved, per R6's own falsification clause. verdict()'s Allow-branch p dereference is safe (gate.go:149 Blocks on nil Panel before any Allow). Falsification-clause tests are genuine (bare-name tolerated, bare-prose passes, 110-shaped spec passes, no adr-coverage-* leak, marker-corruption rejected).",
+  "concrete_changes_required": [],
+  "findings": [
+    "R1 crash-atomicity is honestly bounded: panel.json and BRIEF.md are computed fully before either write, co-bump holds by construction (same Panel value), but the two writes are sequential and self-healing rather than temp-file+rename atomic -- documented in create.go and acceptable per the spec's 'by construction' wording.",
+    "Instruct refactor changes one unreachable defensive path: a Tally with nil Panel and nil PanelErr (impossible via panel.Scan, which only returns dirs with panel.json) previously returned GatePass 'unregistered', now Blocks via gate.go's malformed-registration branch. Not a behavior change on any reachable input.",
+    "R6 emits a distinct adr-touchpoint-missing code (not adr-cite-missing); the spec pins a code only for R5 and calls R6 'modeled on adr-cite-missing's shape', so this is compliant and arguably clearer.",
+    "R5 empirically behavior-identical-merely-earlier: only normalizeImpactedDomains' own returned errors are surfaced (path-like zero-owner fails, bare-name-no-manifest passes, real dir passes -- all three pinned by subtests)."
+  ]
+}

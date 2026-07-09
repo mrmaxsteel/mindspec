@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "Spot-checked the load-bearing tests by reverting the implementation in a /tmp throwaway clone at 2da52b09. Confirmed genuinely falsifiable (fail on revert): instruct/panelstate_test.go's TestPanelStateVerdict_DelegatesToPanelGateDecision (both a build-time catch and a source-literal catch), cmd/mindspec panel_test.go's TestPanelTally_ExitCodeTracksDecision, and validate/spec_test.go's R5 impacted-domains-resolve parity test. internal/panel/create_test.go's co-bump/BRIEF-splice tests and the schema-doc-drift test (which ships its own adversarial self-test proving section-scoping) also read as solid. Found one real gap: TestPanelCreate_RejectsUnsafeSlugAndControlBytes (cmd/mindspec/panel_test.go) never resets the panelCreateCmd's global --bead cobra flag between t.Run subtests; --bead is only appended to args when tc.bead!=\"\". Once the 'newline in --bead' row sets it to a value containing a real newline, that value persists across Execute() calls. I deleted the entire rejectControlBytes(\"--target\", target) call in panel.go and reran -run TestPanelCreate_RejectsUnsafeSlugAndControlBytes -count=1: all 10 subtests still passed, because 'newline_in_--target' and 'C1_CSI_in_--target' were rejected for the wrong reason (the stale leaked --bead value), not by the --target check under test. Production code is correct (rejectControlBytes IS called for slug/--bead/--target), but this test would not catch a real regression removing the --target (or a later slug) control-byte check.",
+  "concrete_changes_required": [
+    "Fix cmd/mindspec/panel_test.go's TestPanelCreate_RejectsUnsafeSlugAndControlBytes to not leak --bead flag state across subtests -- always pass --bead explicitly (even as an empty/benign value) each iteration, or reset panelCreateCmd's flags to defaults in a per-subtest t.Cleanup, or construct a fresh cobra command per subtest -- so the --target and later slug rows are demonstrably attributable to the mechanism under test, not a stale flag from an earlier row. Verify by re-running the same revert-and-confirm-fail spot-check I did (remove rejectControlBytes(\"--target\", ...) and confirm the test now fails)."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "test-quality",
+      "description": "cmd/mindspec/panel_test.go TestPanelCreate_RejectsUnsafeSlugAndControlBytes: stale global cobra --bead flag value from the 'newline in --bead' subtest leaks into subsequent subtests that don't pass --bead explicitly ('newline in --target', 'C1 CSI in slug', and would affect any later no-bead row), masking a complete removal of the --target control-byte check. Empirically confirmed by deleting rejectControlBytes(\"--target\", target) in cmd/mindspec/panel.go and observing the full test still passes 10/10 (go test -run TestPanelCreate_RejectsUnsafeSlugAndControlBytes -count=1).",
+      "hard_block": false
+    },
+    {
+      "severity": "info",
+      "area": "test-quality",
+      "description": "Verified as genuinely falsifiable via revert-and-confirm-fail: TestPanelStateVerdict_DelegatesToPanelGateDecision (internal/instruct/panelstate_test.go) -- both reverting to the pre-110 hardcoded matrix (build failure: undefined mapGateAction) and reintroducing a single forbidden message-literal comment (explicit source-text check fails) correctly fail the test. TestPanelTally_ExitCodeTracksDecision (cmd/mindspec/panel_test.go) fails when tallyExitAction is neutered to always return nil. TestValidateSpec_ImpactedDomainSeverityMatchesPlanApprove's path-like-zero-owner-fails subtest (internal/validate/spec_test.go) fails when the impacted-domains-resolve error surfacing is stripped out of checkImpactedDomainsResolutionParity.",
+      "hard_block": false
+    }
+  ]
+}

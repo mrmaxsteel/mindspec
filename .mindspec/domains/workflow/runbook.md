@@ -68,3 +68,18 @@ Check current mode with `/spec-status`. If unclear:
   routed through the package-level `walkWorkspaceFn` seam so a test can count its
   invocations. Doctor output is unchanged: the same dead-manifest Warn/pass result
   per domain, just fewer directory walks on the `doctor` hot path.
+- **2026-07-09 (spec 110 Bead 5):** The panel operator procedure is now
+  mechanized behind `mindspec panel create|verify|tally` (spec 110 Bead 4) — a
+  thin CLI layer over `internal/panel`'s single-home writer + `PanelGateDecision`.
+  `/ms-panel-run` Step 0 registers (or re-panels) with one `panel create` call
+  instead of a hand-typed `panel.json` schema and a skill-re-authored
+  verdict-JSON template; `/ms-panel-tally` renders its decision and the
+  aggregated `concrete_changes_required` with one `panel tally` call instead of
+  a hand-tabulated decision matrix. The judgment sections both skills retain —
+  `/ms-panel-run`'s **Launch the panel**, **Codex failure detection**,
+  **Working directory matters**, **Slot lens defaults**, and
+  **Anti-patterns**; `/ms-panel-tally`'s **Artifact gates** (the HARD-vs-soft `hard_block`
+  judgment), **Consolidate** (semantic dedup + criticality ranking), and
+  halt-recovery/escape-hatch procedure — are unchanged: the verbs mechanize the
+  decision function and the artifact registration, not the human judgment
+  layered on top of them.

@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Author-of-record: 75ae9c6a delivers exactly Bead 4's prescribed steps against the plan's key_file_paths, no missing step and no unrequested scope. Step 1: panel create + validatePanelSlug/rejectControlBytes (pre-filepath.Join) + layout-aware panelDirFor (workspace.DetectLayout+SpecDir, parity with complete.panelGateRoots) + the revParseForPanelFn seam verbatim to plan + config-resolver stamping (PanelExpectedReviewers/PanelApproveThresholdExpr) + TestPanelCreate_RejectsUnsafeSlugAndControlBytes. Step 2: verify + pure renderPanelVerify. Step 3: tally + renderPanelTally + collectSlotChanges (escaped) + tallyExitAction (exit from d.Action alone). Step 4: all 6 named acceptance tests present; the R7a TestPanelVerbs_DecisionIsPanelGateDecision table is branch-complete (13 rows incl. transient-GitErr). Step 5: interfaces.md Panel CLI Verb Tree region present; schema-drift test still green; leaf invariant re-asserted config-free. redact.go +3 is the confirmed drift-guard enum requirement, not creep. cmd/mindspec green.",
+  "concrete_changes_required": [],
+  "findings": [
+    "help_golden_test.go is a listed Bead-4 key_file_path but is correctly UNTOUCHED: that gate does not enumerate top-level commands (it only asserts --help omits banned observability tokens and otel lists exactly setup+status), and 'panel' is not banned — adding panelCmd cannot break it, package tests are green. Not an under-delivery; key_file_paths are anticipated-touch, not mandatory.",
+    "Two seams not named verbatim in the plan — panelWorktreeListFn (bead.WorktreeList) and tallyWarnOut (io.Writer) — are necessary faithful mirrors of internal/complete.panelGate's Worktree/dirty-tree wiring and its panelAdvisoryOut Warn seam, needed for the GateIO.Worktree closure and to test the Warn advisory path. Implementation-level necessities, not scope creep.",
+    "redact.go +3 (panel/tally/verify into CommandTokens/SubcommandTokens) confirmed as the redact_enum_drift_test.go closed-set requirement for any new cobra command — a documented companion, not unrequested scope.",
+    "Round+SHA co-bump, re-panel body/prior-verdict preservation, stale-SHA/hard_block fail-safe exit rows, and the aggregation decode path are all exercised by the delivered tests, matching the plan's step-4 acceptance shape."
+  ]
+}

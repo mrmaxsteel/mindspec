@@ -137,6 +137,27 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   panel's recorded `expected_reviewers` differs from the config
   default; it returns `""` on a match and is never consulted by
   `PanelGateDecision`, so no `Allow`/`Block` outcome changes.
+- **Spec-approve parser parity (Spec 110 Bead 2, R5/R6).** `spec approve`
+  (via `internal/approve.ApproveSpec`, which hard-fails on
+  `validate.ValidateSpec`'s `vr.HasFailures()`) now inherits two
+  plan-approve parser-parity checks folded directly into `ValidateSpec` —
+  no `internal/approve` source change was needed since the gate was
+  already `ValidateSpec`-shaped. **R5**: the `## Impacted Domains` entries
+  are resolved through the identical
+  `normalizeImpactedDomains(nil, root, "", impacted)` call
+  `internal/validate/plan.go` makes, emitting the same
+  `impacted-domains-resolve` `SevError` for a path-like zero/multi-owner
+  entry; a bare-name-no-manifest entry that plan-approve tolerates today
+  still passes — no stricter rule than plan-approve. **R6**: anchored
+  `## ADR Touchpoints` markdown links (both the bare-ID form
+  `[ADR-0031](...)` and the filename-form `[ADR-0031-doc-sync-gate.md](...)`)
+  are resolved for EXISTENCE ONLY against the same
+  `newMemoStore(adrStoreForSpecFn(root, specDir))` the plan-time citation
+  gate reads, emitting `adr-touchpoint-missing` on a dangling reference; a
+  bare-prose `ADR-####` mention with no `[...](...)` anchor is never
+  matched. Deliberately out of scope at spec-approve (R7c, ADR-0032):
+  Accepted-status, domain-intersection (`adr-cite-irrelevant`), and
+  coverage (`adr-coverage-*`) evaluation all stay plan-approve-only.
 - **Recorded `gate` field, decision-inert (Spec 112, ADR-0037 §1
   amendment).** `internal/panel.Panel` gains one new optional field,
   `Gate` (`json:"gate,omitempty"`) — the gate mix

@@ -227,6 +227,7 @@ func init() {
 	rootCmd.AddCommand(instructCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(nextCmd)
+	rootCmd.AddCommand(panelCmd) // spec 110 R1/R2/R3: `panel create|verify|tally`
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(releaseCmd) // Spec 101 R2: reverse a claim
 	rootCmd.AddCommand(repairCmd)

@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "G1 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Built the branch binary (2da52b09) and attacked panel create/verify/tally in an absolute /tmp scratch git repo (no relative .mindspec/ writes). Path-traversal: '../../etc', '..', '.', '/tmp/.../evil', 'foo/../../bar' all REJECTED by validatePanelSlug before any filepath.Join (exit 1, no dir written); a URL-encoded '..%2f..%2fetc' slug is safe by construction since it's a literal segment name, not a path separator. Control-byte injection: C0 (ESC 0x1b, BEL 0x07), C1 (U+009B CSI via UTF-8 0xC2 0x9B), DEL (0x7f), and an embedded-newline forged 'recovery:' line were all rejected via rejectControlBytes on slug/--bead/--target, confirmed with cat -v (no raw control byte in output/panel.json/BRIEF.md, no files written). A raw NUL byte in the shell argument was silently truncated by the OS/exec argv boundary before the process saw it (C strings can't carry embedded NUL in argv) -- not a program vulnerability, just documenting the OS constraint. Happy path: create stamped expected_reviewers=6/approve_threshold='n-1'/reviewed_head_sha correctly, --round N co-bumped round+reviewed_head_sha together (verified against live target tip once I removed a same-named tag/branch collision from my own scratch setup -- ambiguous-refname was a test artifact, not an app bug); verify wrote zero files and always exited 0 (PASS and BLOCK previews both); tally's exit code correctly tracked Decision.Action (0 for 5/6 PASS, 1 for 4/6 BLOCK after flipping a verdict to REJECT). Leaf check: `go list -deps ./internal/panel | grep -c internal/config` == 0. No traversal escape, no raw control byte reaching any artifact, decision logic behaved as documented. Full diff review of cross-bead composition (F2/O1/O2) is outside this lens; my empirical surface is clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "internal/panel/create.go + cmd/mindspec/panel.go validatePanelSlug/rejectControlBytes",
+      "detail": "Path-traversal slugs (../../etc, .., ., absolute paths, foo/../../bar) rejected before filepath.Join; no directory escaped the panel root (diffed /tmp tree before/after, confirmed empty diff outside review/<slug>).",
+      "severity": "info"
+    },
+    {
+      "area": "cmd/mindspec/panel.go rejectControlBytes",
+      "detail": "C0 (ESC, BEL, embedded newline), C1 (U+009B via UTF-8), and DEL(0x7f) all rejected in slug, --bead, and --target with a clean error message and no forged recovery: line; verified via cat -v on stdout/stderr and by grepping created files (none written on rejection).",
+      "severity": "info"
+    },
+    {
+      "area": "shell/exec argv boundary",
+      "detail": "A literal NUL byte embedded in a shell argument is truncated by the OS before execve delivers argv to the process (C-string argv semantics) -- rejectControlBytes never sees it because it can't arrive. Not exploitable through the CLI surface; noting for completeness since C0 was in scope.",
+      "severity": "info"
+    },
+    {
+      "area": "panel create --round re-panel",
+      "detail": "round and reviewed_head_sha co-bump in the same write, confirmed against the live target tip; prior verdict files and BRIEF skill-authored body untouched across re-panel.",
+      "severity": "info"
+    },
+    {
+      "area": "panel verify / panel tally",
+      "detail": "verify writes zero files in both PASS and BLOCK scenarios and always exits 0 (read-only preview, confirmed via git status/dir listing diff). tally's exit code tracked Decision.Action: 0 for a 5/6-APPROVE PASS, non-zero for a 4/6 BLOCK after one verdict flipped to REJECT.",
+      "severity": "info"
+    },
+    {
+      "area": "go list -deps ./internal/panel",
+      "detail": "grep -c internal/config returned 0 -- config-free leaf invariant holds.",
+      "severity": "info"
+    }
+  ]
+}

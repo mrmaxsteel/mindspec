@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "The plan is directionally sound, but it leaves real robustness gaps in the security-sensitive seams under this lens. `panel create <slug>` flows directly into a joined filesystem path and later into recovery/output text without a single-path-element/control-character constraint or tests. The BRIEF rewrite contract covers the happy path and no-marker legacy path, but not corrupt/partial marker states or CRLF preservation. Tally re-decodes verdict JSON for `concrete_changes_required` without a stated malformed-field policy, leaving room for a presentation read to fail or confuse while the gate decision sees the verdict as valid.",
+  "concrete_changes_required": [
+    "Constrain `panel create <slug>` at the CLI boundary to a single clean path element: reject empty, `.`, `..`, slash/backslash-containing, absolute, and control-character slugs before any `filepath.Join`; add tests for traversal and control/newline slug rejection.",
+    "Specify and test BRIEF header rewrite behavior for legacy no-marker, marker-only-open, duplicated markers, and CRLF input. Corrupt/ambiguous marker states should fail without touching `panel.json` or `BRIEF.md`, or be deterministically repaired with body preservation explicitly tested.",
+    "Add output/recovery safety tests for user-controlled strings that new panel verbs render, especially slug in `guard.NewFailure` recovery commands and command output. Values with newlines/ANSI/control bytes must be rejected or escaped before reaching terminal output or recovery lines.",
+    "Define and test `panel tally`'s second-pass decode policy for `concrete_changes_required`: wrong type, malformed JSON despite a parsed verdict, omitted field, and huge/string-with-newlines entries must not affect `PanelGateDecision` or confuse the exit code; they should be reported or escaped deterministically."
+  ],
+  "findings": [
+    {
+      "id": "G2-1",
+      "severity": "high",
+      "title": "`panel create` does not constrain slug before path join or recovery rendering",
+      "detail": "Bead 4 builds flat paths as `<spec-dir>/reviews/<slug>` and Bead 1 derives the header slug with `filepath.Base(dir)`, but no step or acceptance test requires slug validation. A slug such as `../x`, `a/b`, or one containing newlines/control bytes can write outside the intended review leaf, create a panel the scanner will not see, or reach `guard.NewFailure` recovery text. Existing ADR code validates path-bearing IDs before joins; this plan needs the same boundary for panel slugs."
+    },
+    {
+      "id": "G2-2",
+      "severity": "medium",
+      "title": "BRIEF machine-header rewrite edge cases are underspecified and undertested",
+      "detail": "The plan handles a missing BRIEF, a normal delimited region, and says no-marker legacy BRIEFs get a prepended region, but the listed tests do not pin legacy no-marker and do not cover marker-only-open, duplicated markers, closing-before-opening, or CRLF input. Those are the cases most likely to clobber reviewer-authored body text or leave a stale duplicate machine header."
+    },
+    {
+      "id": "G2-3",
+      "severity": "medium",
+      "title": "`concrete_changes_required` re-decode lacks a malformed-field contract",
+      "detail": "The decision path parses only verdict and hard_block, then `panel tally` re-opens the same latest-round files to read `concrete_changes_required` for presentation. Because the plan does not state what happens when that second decode sees a wrong type, missing field, control-byte text, duplicate/conflicting JSON keys, or read error, an implementation can accidentally make presentation parsing alter command success or print confusing terminal content while the gate verdict remains valid."
+    }
+  ]
+}
