@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-fbel.5",
+  "spec": "110-panel-verbs-parser-parity",
+  "target": "bead/mindspec-fbel.5",
+  "round": 2,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "17eb5afe8fc6da7616f4617765539d57d266f2fc"
+}
