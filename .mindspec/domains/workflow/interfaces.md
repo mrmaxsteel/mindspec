@@ -166,29 +166,50 @@ stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
 reads to learn the panel directory without re-deriving the layout
 logic above.
 
-**`mindspec panel verify <slug>`** is a READ-ONLY completeness/
-staleness report: verdicts present vs `expected_reviewers`, per-slot
-parse status (malformed files named), `reviewed_head_sha` vs the live
-target tip, and a PASS/BLOCK preview computed by
-`panel.PanelGateDecision` over facts gathered by
+**`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
+ALWAYS exits `0` — it is a report, never a gate. It prints verdicts
+present vs `expected_reviewers`, per-slot parse status (malformed files
+named), `reviewed_head_sha` vs the live target tip, and a PASS/BLOCK
+preview computed by `panel.PanelGateDecision` over facts gathered by
 `panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
-gate enforces. It writes no file and always exits `0` (a read-only
-report is not itself a gate).
+gate enforces.
 
-**`mindspec panel tally <slug>`** prints the per-slot verdict table
-(slot, verdict, `hard_block`), the aggregate APPROVE/REQUEST_CHANGES/
-REJECT counts + the resolved threshold, the `panel.PanelGateDecision`
-decision, and the aggregated `concrete_changes_required` — read
-presentation-only from each REQUEST_CHANGES/REJECT verdict file (a
-re-parse failure, an absent key, or a non-array-of-strings type
-attributes zero items to that slot with an advisory note, never fatal;
-this second-pass read never feeds the decision). The exit code is
-derived from the decision's `Action` ALONE — never re-derived from raw
-verdict counts (`res.Approves` etc.): `Allow` -> `0`; `Warn` -> `0` with
-the advisory printed (non-blocking, parity with `internal/complete`'s
-Warn handling); `Block` -> non-zero, carrying `PanelGateDecision`'s
-raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
-(`guard.HasFinalRecoveryLine`).
+**`mindspec panel tally <slug>`** is ADVISORY-BUT-BLOCK-CAPABLE: its
+exit code tracks the `panel.PanelGateDecision` decision alone, and is
+non-zero on `Block`. Do not describe `verify`/`tally` as both
+"read-only/advisory" — `verify` never blocks; `tally` can. `tally`
+prints the per-slot verdict table (slot, verdict, `hard_block`), the
+aggregate APPROVE/REQUEST_CHANGES/REJECT counts + the resolved
+threshold, the `panel.PanelGateDecision` decision, and the aggregated
+`concrete_changes_required` — read presentation-only from each
+REQUEST_CHANGES/REJECT verdict file (a re-parse failure, an absent key,
+or a non-array-of-strings type attributes zero items to that slot with
+an advisory note, never fatal; this second-pass read never feeds the
+decision). The exit code is derived from the decision's `Action` ALONE
+— never re-derived from raw verdict counts (`res.Approves` etc.):
+`Allow` -> `0`; `Warn` -> `0` with the advisory printed (non-blocking,
+parity with `internal/complete`'s Warn handling); `Block` -> non-zero,
+carrying `PanelGateDecision`'s raw-`git merge` fence plus a genuine
+ADR-0035 `recovery:` line (`guard.HasFinalRecoveryLine`).
+
+**Non-bead staleness (spec 113 R1).** For a non-bead panel (`bead_id`
+null), `panel verify`/`panel tally` resolve staleness from the panel's
+RECORDED `panel.json.target` — rev-parsed in `cmd/mindspec` via the
+same `revParseForPanelFn` seam `panel create` uses to capture
+`reviewed_head_sha` at write time — fed through the SAME
+`panel.PanelGateDecision` legs a bead panel uses (internal/panel takes
+a zero-byte diff). Previously the CLI left `beadID` empty for a
+non-bead panel and `panel.ResolveGateFacts` rev-parsed the literal,
+always-absent ref `bead/`, so every non-bead panel short-circuited at
+the missing-ref leg with a malformed `references branch bead/` message
+and reported PASS even after its target advanced past
+`reviewed_head_sha`, or with a REJECT verdict on file. The fix un-shadows
+staleness and the incomplete/REJECT/threshold legs for non-bead panels;
+a `sanitizeNonBeadDecision` CLI-layer rewrite (never touching
+`Decision.Action`) replaces the empty-bead-interpolation fragments and
+the empty `git merge bead/` fence with target-naming text, and never
+emits a `mindspec complete <bead>` recovery line for a panel that is not
+complete-gated.
 
 ## Consumed Interfaces
 
@@ -209,8 +230,8 @@ raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
 | `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1) |
-| `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing (spec 110 R2) |
-| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; exit code tracks the decision alone (spec 110 R3) |
+| `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
+| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
 
 ## Agent Skills
