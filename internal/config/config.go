@@ -136,6 +136,16 @@ func (r Reviewer) CountValue() int {
 // expansion and validation: Model if set, else the legacy Family string —
 // "model wins" when an entry sets both. Returns "" only when neither is
 // set, which Load refuses (R4c).
+//
+// {model: "", family: <f>} is VALID and resolves to the family string: an
+// empty-string Model falls back to Family exactly like an absent Model,
+// because the typed `string` field cannot distinguish "absent" from
+// "explicit empty" without a `*string`/custom UnmarshalYAML rework that
+// buys no operator benefit. This supersedes spec 112 R4's "or an
+// empty-string `model`" refusal phrasing (spec 113 R4/OQ2, resolved:
+// resolve-to-family) — 112 R1 already blessed family-fallback, and 112's
+// own AC never tested the empty-string-with-family case. Only the
+// neither-set case (validateReviewerEntries below) is still refused.
 func (r Reviewer) model() string {
 	if r.Model != "" {
 		return r.Model
@@ -537,6 +547,14 @@ func validateOrchestration(cfg *Config) error {
 // non-positive `count` — to reviewers, a global or per-gate list. label
 // identifies the offending list in the error/recovery text (e.g.
 // "panel.reviewers" or "panel.gates.bead.reviewers").
+//
+// {model: "", family: <f>} is NOT refused here: r.model() (above) resolves
+// an empty-string Model to Family, so this branch only fires on the
+// neither-set case (both Model and Family empty). This supersedes spec 112
+// R4's "or an empty-string `model`" phrase, which listed the empty-string-
+// with-family case among the refusals — spec 113 R4/OQ2 reconciles that
+// against 112 R1's family-fallback text as resolve-to-family; see
+// TestLoad_EmptyStringModel for the pin.
 func validateReviewerEntries(reviewers []Reviewer, label string) error {
 	for i, r := range reviewers {
 		if r.model() == "" {
