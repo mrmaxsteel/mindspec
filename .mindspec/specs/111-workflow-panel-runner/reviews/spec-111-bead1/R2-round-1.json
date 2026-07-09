@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Codebase-pin: every claim verified against commit 68c87106. `go build ./...` exits 0. `go test ./internal/validate/... -run 'TestWorkflowOwnsClaudeWorkflows|Ownership' -v` PASSES incl. the new test; full `internal/validate/...` (uncached, count=1) is green. The OWNERSHIP claim `- .claude/workflows/**` is real at OWNERSHIP.yaml line 22, adjacent to `.claude/skills/**` (line 21). The `repoRootForWorkflowManifest(t)` helper exists at ownership_wave2_test.go:15 and walks to the LIVE repo root, so the test reads the committed manifest. Classification pinned by reading the fns: isDocFile (docsync.go:393) and isProcessArtifact (divergence.go:300) both return false for `.claude/workflows/ms-panel.js` -> governable source. Falsifiability proven EMPIRICALLY: with the claim stripped from a /tmp manifest copy, attributeDomain resolves owner=\"\" (unowned -> adr-divergence-unowned); with it, \"workflow\". No over-reach: none of the other 25 globs match the path; plugins/mindspec/** correctly not re-claimed. The 2 known pre-existing failures (harness, instruct z4ps) are outside internal/validate; the diff touches neither package. git status clean; scratch removed.",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... -> exit 0.",
+    "TestWorkflowOwnsClaudeWorkflows PASS; full internal/validate suite green (ok 0.277s, count=1).",
+    "OWNERSHIP.yaml line 22: `- .claude/workflows/**`, adjacent to `.claude/skills/**` (line 21) — real and correctly placed.",
+    "repoRootForWorkflowManifest(t) helper present (ownership_wave2_test.go:15), walks to live repo root — test is anchored on the committed manifest, not a fixture.",
+    "isDocFile(.claude/workflows/ms-panel.js)=false and isProcessArtifact(...)=false (read fn bodies) — path is governable source; matches R9 AC.",
+    "Empirical non-vacuity: attributeDomain against a manifest with the claim removed returns owner=\"\" (would trip adr-divergence-unowned); the new test would fail without the claim.",
+    "No over/under-reach: `.claude/workflows/**` is the only new glob matching the target; plugins/mindspec/workflows/** already covered by plugins/mindspec/**, not redundantly re-claimed.",
+    "Pre-existing failures (internal/harness timeout, internal/instruct z4ps) are outside internal/validate; the 3-file diff touches neither package.",
+    "git status clean after review; /tmp scratch and temp probe test removed."
+  ]
+}

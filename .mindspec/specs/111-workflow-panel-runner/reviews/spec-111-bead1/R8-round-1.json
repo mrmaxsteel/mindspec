@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Empirical checks all pass. go build ./... clean; go test ./internal/validate/... and ./internal/doctor/... both ok (TestWorkflowOwnsClaudeWorkflows PASS in isolation too). Grepped every domain's OWNERSHIP.yaml: only workflow claims any .claude/** path (skills, workflows) — no double-claim. Read isDocFile/isProcessArtifact (docsync.go:393, divergence.go:300): .claude/workflows/ms-panel.js hits none of their prefixes (docs/, .mindspec/, project-docs/, rootOperatorDocs, /reviews/, .beads/, mover-run-state, vestigial-config) — confirmed GOVERNABLE SOURCE per spec, matching the claim's rationale. Built the CLI and ran `mindspec doctor` against the live repo: all 4 domain manifests report [OK], no domain-overlap/redundant-subpath/duplicate-entry/dead-manifest warnings anywhere — the new claim introduces no drift. Traced GlobMatch by hand for '.claude/workflows/**': matches ms-panel.js (trailing-** segment logic) and correctly rejects a hypothetical '.claude/workflowsX/...' sibling (filepath.Match segment mismatch, no accidental prefix bleed). Test genuinely pins the claim (asserts owner==\"workflow\"; would fail without the added path).",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... — clean",
+    "go test ./internal/validate/... -run TestWorkflowOwnsClaudeWorkflows -v — PASS",
+    "go test ./internal/validate/... and ./internal/doctor/... — both ok",
+    "grep '.claude' across all .mindspec/domains/*/OWNERSHIP.yaml — only workflow domain claims .claude/** (skills, workflows); no overlap",
+    "mindspec doctor (built from this commit) against the live repo — all 4 domain OWNERSHIP.yaml manifests [OK], zero overlap/redundant/duplicate/dead-manifest warnings",
+    "isDocFile (docsync.go:393) and isProcessArtifact (divergence.go:300) both return false for .claude/workflows/ms-panel.js — confirms it is governable source, consistent with the bead's stated rationale",
+    "hand-traced GlobMatch('.claude/workflows/**', path): matches ms-panel.js; does not match a hypothetical '.claude/workflowsX/...' path (segment-level filepath.Match, no prefix bleed)"
+  ]
+}
