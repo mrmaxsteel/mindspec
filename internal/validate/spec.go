@@ -231,12 +231,18 @@ func checkImpactedDomainsResolutionParity(r *Result, root, specDir string) {
 // `## ADR Touchpoints` section, in both the bare-ID anchor form
 // (`[ADR-0031](../../adr/ADR-0031.md)`) and the filename-form anchor the
 // repo's merged specs actually write
-// (`[ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md)`). The
-// `[^\]]*` tail consumes any filename-slug characters between the 4-digit ID
-// and the closing `]`, so either link shape is captured under group 1 as the
-// bare `ADR-NNNN` ID. A bare-prose `ADR-####` mention with no `[...](...)`
-// anchor at all never matches.
-var adrTouchpointLinkRe = regexp.MustCompile(`\[(ADR-\d{4})[^\]]*\]\([^)]+\)`)
+// (`[ADR-0031-doc-sync-gate.md](../../adr/ADR-0031-doc-sync-gate.md)`). After
+// the 4-digit ID, group 2 (`([^0-9\]][^\]]*)?`) requires either nothing (bare
+// `]` immediately follows) or a non-digit, non-`]` character before any
+// further filename-slug tail — so a 5th digit can never be absorbed into the
+// same match. Go RE2 has no lookahead, so this digit boundary is expressed
+// structurally rather than as an assertion: `[ADR-12345](...)` and
+// `[ADR-00311](...)` fall outside the pattern entirely (no match at all)
+// instead of truncating to a 4-digit ID the author never wrote. Either
+// genuine link shape is still captured under group 1 as the bare `ADR-NNNN`
+// ID. A bare-prose `ADR-####` mention with no `[...](...)` anchor at all
+// never matches.
+var adrTouchpointLinkRe = regexp.MustCompile(`\[(ADR-\d{4})([^0-9\]][^\]]*)?\]\([^)]+\)`)
 
 // checkADRTouchpointsExist implements spec 110 R6: verify that every ADR
 // referenced by an anchored markdown link in the spec's `## ADR Touchpoints`

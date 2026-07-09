@@ -199,6 +199,66 @@ func TestValidateSpec_ADRTouchpointExtractionBoundary(t *testing.T) {
 		assertNoCoverageOrIrrelevant(t, r)
 	})
 
+	t.Run("bare-id-anchor-existing-passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestADRWithDomains(t, tmp, "ADR-0031", "Accepted", "workflow", "")
+		writeSpecFixture(t, tmp,
+			"- core: touched by tests\n",
+			"- [ADR-0031](../../adr/ADR-0031.md): relevant\n")
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "adr-touchpoint-missing"); found {
+			t.Errorf("expected no adr-touchpoint-missing for an existing bare-ID anchored ADR, got: %+v", r.Issues)
+		}
+		if r.HasFailures() {
+			t.Errorf("expected HasFailures() == false for an existing bare-ID anchored ADR, got: %+v", r.Issues)
+		}
+		assertNoCoverageOrIrrelevant(t, r)
+	})
+
+	t.Run("five-digit-id-produces-no-diagnostic", func(t *testing.T) {
+		// Regression for the digit-boundary fix: a 5-digit anchored id must
+		// fall outside the extraction shape entirely — it must NOT truncate
+		// to ADR-1234 and mis-report a missing ADR the author never wrote.
+		tmp := t.TempDir()
+		writeSpecFixture(t, tmp,
+			"- core: touched by tests\n",
+			"- [ADR-12345](../../adr/ADR-12345.md): relevant\n")
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "adr-touchpoint-missing"); found {
+			t.Errorf("expected no adr-touchpoint-missing for a 5-digit anchored id (must not truncate to ADR-1234), got: %+v", r.Issues)
+		}
+		if r.HasFailures() {
+			t.Errorf("expected HasFailures() == false for a 5-digit anchored id, got: %+v", r.Issues)
+		}
+		assertNoCoverageOrIrrelevant(t, r)
+	})
+
+	t.Run("five-digit-id-does-not-false-pass-via-four-digit-prefix", func(t *testing.T) {
+		// The boundary defect's other direction: [ADR-00311] must not match
+		// via the ADR-0031 prefix and silently pass against an existing
+		// ADR-0031. It must also not be promoted to a new error class (that
+		// would be stricter than plan-approve parity) — just no match.
+		tmp := t.TempDir()
+		writeTestADRWithDomains(t, tmp, "ADR-0031", "Accepted", "workflow", "")
+		writeSpecFixture(t, tmp,
+			"- core: touched by tests\n",
+			"- [ADR-00311](../../adr/ADR-00311.md): relevant\n")
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "adr-touchpoint-missing"); found {
+			t.Errorf("expected no adr-touchpoint-missing for ADR-00311 (must not falsely resolve via the ADR-0031 prefix), got: %+v", r.Issues)
+		}
+		if r.HasFailures() {
+			t.Errorf("expected HasFailures() == false for a 5-digit anchored id, got: %+v", r.Issues)
+		}
+		assertNoCoverageOrIrrelevant(t, r)
+	})
+
 	t.Run("bare-prose-mention-passes", func(t *testing.T) {
 		tmp := t.TempDir()
 		writeSpecFixture(t, tmp,
