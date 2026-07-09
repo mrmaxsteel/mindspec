@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Adversarial trace of every Panel.Gate read at a2007086: the field is read by NO production code — not PanelGateDecision (gate.go:131-263 reads Abandoned/Round/ReviewedHeadSHA/ExpectedReviewers/ApproveThreshold only), not ApproveThreshold (ExpectedReviewers+ApproveThresholdExpr only), not ResolveGateFacts, not Tally. The panel.go:136 helper ReviewerCountNote takes (recorded, configDefault int) — it cannot receive Gate; both call sites pass ExpectedReviewers. config.PanelGateAdvisoryDefault accepts recordedGate but has zero callers (Bead 3). Leaf pin holds (go list -deps: no internal imports). Empirical end-to-end probe (Scan→ForBead→ResolveGateFacts→PanelGateDecision, stub GateIO): gate absent/\"bead\"/\"weird\"/null/1MiB string/control-byte string all yield byte-identical decisions to the gate-less baseline across Allow, incomplete-Block, and reject-Block scenarios; null is a silent no-op. Wrong JSON types (123/{}/true/[]) fail the whole unmarshal → Registration.Err → unattributable → fail-open Allow — identical to abandon_reason:123 today, matching R6's pinned \"parse-lenient like abandon_reason\" precedent (finding F1-1). Mutation test: wiring Gate into the decision (Block on gate==\"bead\") or threshold (non-empty gate → N) makes TestPanel_GateFieldDecisionInert FAIL as designed; two escape probes noted as non-blocking findings. Package/complete/config tests green at the SHA.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "low",
+      "title": "Wrong-TYPE gate value (number/object/bool/array) fails the whole panel.json unmarshal and the panel drops to fail-open Allow",
+      "detail": "Verified empirically: {\"gate\": 123} sets Registration.Err (encoding/json UnmarshalTypeError), ForBead drops Err'd registrations, so an incomplete or REJECT panel flips Block→fail-open Allow. This is NOT new to this diff — any wrong-typed field (abandon_reason: 123, round: \"1\") already behaves identically, and R6 pins parse-lenience 'like abandon_reason' for unexpected VALUES (all string values, incl. control bytes via valid JSON escapes and 1MiB payloads, verified inert and Err-free). Residual to carry into spec 110: the panel writer MUST stamp gate as a JSON string, never a bare token/number — a writer bug here silently disarms the gate for that panel."
+    },
+    {
+      "id": "F1-2",
+      "severity": "low",
+      "title": "Inertness tripwire samples only gate ∈ {\"\", \"bead\", \"weird\"} — a wiring keyed on an unsampled enum value escapes",
+      "detail": "Mutation probe: ApproveThreshold() returning 1 when Gate==\"adhoc\" passes TestPanel_GateFieldDecisionInert AND the full package suite. Optional hardening (one line): extend the test's loop slice to all five enum keys plus \"weird\". Non-blocking — the ADR-0037 §1 amendment and R6's falsification clause are the normative defense; the test correctly pins exactly the two functions R6 names."
+    },
+    {
+      "id": "F1-3",
+      "severity": "low",
+      "title": "TestPanel_GateFieldDecisionInert constructs GateFacts directly, so a future Gate-wiring inside ResolveGateFacts escapes the whole suite",
+      "detail": "Mutation probe: making ResolveGateFacts return early (skipping staleness/dirty fact-gathering) when Gate==\"bead\" passes every test — a stale bead panel would then Allow. Today ResolveGateFacts verifiably reads no Gate (traced + grep), so the shipped code is clean; this is a tripwire-coverage note for the decision PIPELINE (Scan→ForBead→ResolveGateFacts→PanelGateDecision). Optional hardening: one end-to-end loop iteration through ResolveGateFacts with stub GateIO per gate value, asserting outcome identity with the gate-less baseline."
+    }
+  ]
+}

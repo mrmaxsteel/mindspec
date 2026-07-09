@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Built a standalone /tmp copy of the leaf panel package (panel.go/gate.go/tally.go, stdlib-only, no repo files touched) and empirically drove it. Round-trip with gate present ('bead') and legacy gate-less panel.json both register with no Err; Gate=='' for the legacy file. omitempty verified at the encoding/json level: marshaling an empty-Gate Panel drops the 'gate' key entirely, non-empty includes it verbatim. Fed 9 hostile gate values (NUL/control bytes, ANSI escapes, a 100KB string, shell-injection-shaped text, path traversal, embedded newlines, quote-breaking text) through ApproveThreshold() (always 5, unchanged) and through the full PanelGateDecision path via Tally+GateFacts on a 5-approve/1-dissent panel (always Allow, unchanged) -- gate content never altered outcomes. Scan preserved hostile Gate values byte-for-byte with no parse error and no corruption of sibling fields (bead_id intact). grep across gate.go confirms zero references to Panel.Gate anywhere in the decision path, and Decision.Message never interpolates it, so there is no injection surface via Block/Warn text either. Existing TestPanel_GateFieldDecisionInert and the full internal/panel suite pass; go build ./... is clean. ADR-0037 and architecture.md diffs match the code precisely (Sec1 amendment only, Secs 3/6/8 untouched, no new function added). Working tree left clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Empirically confirmed: legacy (gate-less) panel.json parses field-for-field identical to pre-bead behavior; Gate defaults to empty string and the key is omitted on re-marshal (omitempty).",
+    "Empirically confirmed: 9 hostile gate values (control bytes, ANSI escapes, 100KB string, shell/path-traversal/quote-breaking strings, embedded newlines) never change ApproveThreshold() or PanelGateDecision's Allow/Block outcome, and are preserved verbatim through Scan with no parse error.",
+    "Minor/non-blocking: BRIEF's F1 lens references 'the new helper at panel.go:136' -- the diff adds only the Gate field (no new function); line 136 in the post-diff file falls inside the pre-existing ApproveThreshold doc comment. Likely a stale line reference in the BRIEF, not a defect in the code under review; flagging for F1/tally awareness only."
+  ]
+}
