@@ -3,13 +3,15 @@ adr_citations:
     - ADR-0037
     - ADR-0035
     - ADR-0040
+approved_at: "2026-07-09T20:43:14Z"
+approved_by: user
 bead_ids:
-    - mindspec-4d9m
-    - mindspec-lczt
-    - mindspec-zw81
-    - mindspec-cthj
+    - mindspec-r6hk.1
+    - mindspec-r6hk.2
+    - mindspec-r6hk.3
+    - mindspec-r6hk.4
 spec_id: 113-panel-verb-workflow-followups
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []
