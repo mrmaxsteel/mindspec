@@ -132,4 +132,3 @@ The ladder works in both directions, and stepping down is cheap: set a gate back
 
 - [Review panels guide](review-panels.md) — the verifier every level depends on
 - [README § The autonomy ladder](../../../README.md#the-autonomy-ladder) — the short version
-- [Loop-engineering design notes](../../research/loop-engineering-adaptation.md) — the research and design history behind this ladder

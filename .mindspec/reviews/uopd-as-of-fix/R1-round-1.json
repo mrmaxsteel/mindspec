@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "The implementation faithfully and completely realizes bead mindspec-uopd's stated intent: give `complete` a committed-state close-verify read DISTINCT from `bd show`. The bead asked for 'a bd capability to read committed state distinct from the session'; the fix uses exactly that — `bd show <id> --as-of HEAD --json`, which bd 1.1.0 documents as 'Show issue as it existed at a specific commit hash or branch (requires Dolt).' The three design pillars are all present and correct: (1) as-of-first — the committed read is the PRIMARY verifier; (2) narrow-fallback — degrade to the old same-read path ONLY on the unknown-flag signature, empirically confirmed as `Error: unknown flag: --as-of`, while a genuine error (bad ref -> 'branch not found', lock) contains no 'unknown flag' and so can never trigger a silent downgrade; (3) comment/HONESTY-CLAUSE rewrite from gap-open to gap-closed, accurate. Behavior parity is airtight: verifyCommittedSameRead is byte-for-byte the old defaultVerifyCommitted, and parseBeadShowJSON is byte-for-byte the old inline FetchBeadByID body. The never-proceed-on-unverified-close invariant holds in all four paths. New tests exercise the real errors.As chain and pass fresh. No intent/implementation gap.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Committed-read capability matches bead intent exactly",
+      "detail": "mindspec-uopd asked for 'a bd capability to read committed state distinct from the session, or an upstream-bd fix.' bd 1.1.0's `--as-of HEAD` IS that upstream capability; FetchBeadAsOf(id,\"HEAD\") wires it in as the primary verifier. HEAD (committed ref) is the correct choice over WORKING, which reads the working set and equals plain `bd show` — defeating the purpose. Intent realized, not merely approximated."
+    },
+    {
+      "severity": "info",
+      "title": "Fallback path is provably as strong as pre-change verifier",
+      "detail": "verifyCommittedSameRead is byte-for-byte identical to main's defaultVerifyCommitted (confirmed via git show diff of both bodies). The downgrade only widens WHEN the weaker path runs (older bd), never weakens WHAT it checks. never-proceed-on-unverified-close is preserved across as-of-error / as-of-not-closed / fallback-error / fallback-not-closed."
+    },
+    {
+      "severity": "info",
+      "title": "internal/next refactor is behavior-identical for existing callers",
+      "detail": "parseBeadShowJSON is byte-for-byte the old inline FetchBeadByID body (empty-output, array, single-object branches all intact). FetchBeadByID's error wrapping and semantics are unchanged; existing callers are unaffected."
+    },
+    {
+      "severity": "info",
+      "title": "Residual: committed-vs-session distinctness rests on documented semantics, not a reproduced divergence",
+      "detail": "In the current clean/committed snapshot, --as-of HEAD, --as-of WORKING, and plain `bd show` all read identically (no uncommitted state to distinguish them), so I could not empirically OBSERVE the HEAD-vs-session divergence the fix relies on to catch 2u0u. This is inherent to 2u0u not being reproducible on demand, and the distinctness is architecturally sound (HEAD=committed ref vs session/working set). Not a defect and not a blocker — noted for the record as the one unverifiable-by-probe claim."
+    }
+  ]
+}

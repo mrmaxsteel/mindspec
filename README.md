@@ -243,7 +243,6 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | Configuring and running review panels | [Review panels guide](project-docs/user/guides/review-panels.md) |
 | Contributing to MindSpec | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | The decomposition research behind the plan gate | [scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md) |
-| Loop engineering: design notes and the maturity ladder | [loop-engineering-adaptation.md](project-docs/research/loop-engineering-adaptation.md) |
 | Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
 | Complete command reference | [USAGE.md](.mindspec/core/USAGE.md) |
 | Observability (OTEL + AgentMind) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver |

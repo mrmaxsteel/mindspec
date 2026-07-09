@@ -1,0 +1,58 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "All three round-1 asks are ADDRESSED and I verified rather than trusted: go test on internal/setup+validate (incl. the 3 new/updated tests) is green; go build clean. (1) Approve-gate collision: self-answer mode records `- [x]` lines, which checkOpenQuestions (line ~241, `HasPrefix(t, \"- [ ]\")`) never flags — traced the full create→grill→approve path plus the harness scenario's explicit non-interactive prompt, which lands squarely in mode 2. (2) Eval collision: I reproduced run_eval.sh's exact prompt construction live against fixtures/spec1.md (sonnet-4-5) — output was 9 clean [CATEGORY]-tagged findings, zero deferral/self-answer markers, confirming unambiguous mode-2 routing. (3) Stale harness note: HISTORY.md:941 left correctly unedited — its documented PASS behavior (defaults + continue) is now literally what mode 2 does as the shipped default, not stale evidence. Deviation D verified sound: the new .pre0uur.md snapshot is byte-exact vs the 24af2fdb canonical (diffed against `git show 24af2fdb:internal/setup/claude.go`), and syncing the stale dogfood mirrors to canonical is exactly what the managed-by:mindspec refresh mechanism is for, not scope creep. Merge-tree onto origin/main (aa482d9b, unchanged since round 1) is conflict-free. Two non-blocking residual notes below (approve-clause abuse-resistance is prose-only; spec-orchestrator.md's own spec-creation step never invokes the guarded skill text) — both pre-existing/low-severity, not regressions, and consistent with round-1's explicit 'no binary/Go changes' scoping.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "approve-gate collision (round-1 ask #1)",
+      "disposition": "ADDRESSED",
+      "severity": "none",
+      "area": "approve-gate integration",
+      "detail": "Group 1 (three-mode disposition) + Group 2 (approve clause) close the defect together. In mode 2, self-answer records `- [x] grill (self-answered, headless): ...` and the completion contract requires clearing the pre-existing template placeholder (`internal/spec/create.go:67`, `- [ ] <Question...>`) too — checkOpenQuestions (internal/validate/spec.go:226-248) only ERRORs on lines literally prefixed `- [ ]`, so a fully self-answered Open Questions section passes cleanly. Verified `TestValidateSpec_GrillDeferredMarkerBlocks` (backstop still ERRORs on the bare marker, by design) and `TestGrillDisposition_TextConsistency` (fragment parity across create/grill/approve) both PASS via `go test ./internal/validate/... ./internal/setup/...`. Traced the harness's `ScenarioSpecToIdle` prompt (scenario_spec_lifecycle.go:21) — 'there is NO human available to answer questions, so do NOT pause... make reasonable default decisions and proceed' — this is an unambiguous mode-2 trigger, and the scenario asserts `mindspec approve spec` SUCCEEDS, which the self-answer path now supports structurally (previously it would have hard-failed on the round-1-reported marker/gate collision)."
+    },
+    {
+      "item": "eval collision (round-1 ask #2)",
+      "disposition": "ADDRESSED",
+      "severity": "none",
+      "area": "bench/grill eval routing",
+      "detail": "Empirically verified, not just re-read the wording. I reconstructed run_eval.sh's exact prompt (full plugins/mindspec/skills/ms-spec-grill/SKILL.md content + the line-289 suffix 'Grill the following draft spec. Emit ONLY the tagged finding lines... Do not ask questions; this is a non-interactive batch evaluation.') and piped it to `claude -p --model claude-sonnet-4-5-20250929` against bench/grill/fixtures/spec1.md. Output: 9 correctly [CATEGORY]-tagged finding lines (SEMANTIC/GROUNDING/SYNONYM/CONTRADICTION/STRUCTURAL/EXACT_PHRASE) — zero deferral marker, zero self-answer Open-Questions line. This confirms mode 2 ('an explicit instruction to proceed non-interactively exists') is the unambiguous outcome for the eval's prompt shape, exactly as the BRIEF claims. This was a single-shot sonnet probe, not the full N=5 opus-pinned harness — consistent with round-1's own 'Deferred (NOT this round): full bench/grill eval run... Run post-merge if paranoia warrants' scoping, which I did not exceed."
+    },
+    {
+      "item": "stale harness note (round-1 ask #3)",
+      "disposition": "ADDRESSED",
+      "severity": "none",
+      "area": "harness interplay",
+      "detail": "HISTORY.md:941/957-963 is unmodified in this diff, per Group 5's 'adjust ONLY if it conflicts; do not rewrite history records.' Verified this judgment: the row's documented PASS behavior ('the grill still runs, applies a default grounding fix, and continues') is now literally what mode 2 does as the SHIPPED canonical path (not a scenario-specific workaround layered on an unguarded skill, as it was pre-0uur). No contradiction remains — the historical PASS is no longer stale evidence for a since-diverged code path."
+    },
+    {
+      "item": "(1) fully-headless create→approve trace",
+      "disposition": "confirmed, with one pre-existing scope caveat",
+      "severity": "low",
+      "area": "orchestrator integration",
+      "detail": "For any session that actually invokes the /ms-spec-create + /ms-spec-grill skill text under an explicit non-interactive instruction (harness, bench eval, or a human/CI running the skill headlessly with such an instruction), the trace is clean end-to-end per finding #1 above. However, the one shipped orchestrator agent definition in this repo, .claude/agents/spec-orchestrator.md, does NOT invoke the guard at all: its step 1 ('Spec creation') runs the bare `mindspec spec create <id>` CLI command and then spawns a bespoke drafting subagent to populate spec.md directly — it never references ms-spec-create's SKILL.md text, ms-spec-grill, 'Session disposition', or the deferral marker (grepped, zero hits). Its own Open-Questions handling is a different, pre-existing convention (line 480-481: 'ONLY include if unresolved; validator FAILS approval... resolve before approve OR remove the section'), resolved via its 6-reviewer 'Spec review panel' (step 2) and NO_CONSENSUS halt logic instead. Net: the fix is correct and sufficient for its actual invocation surface (the skill files), but is inapplicable/moot to spec-orchestrator.md's typical run since that flow never triggers it either way. This restates my own round-1 low-severity finding #4 ('autopilot flow scope') — unaddressed but out of round-1's formal asks, not a regression, not blocking."
+    },
+    {
+      "item": "(3) approve-clause composition and abuse-resistance",
+      "disposition": "composes at the prose/vocabulary level; not code-enforced",
+      "severity": "low",
+      "area": "approve-clause / panel integration",
+      "detail": "Vocabulary composes cleanly: spec-orchestrator.md literally has a '### 2. Spec review panel' step, and ms-panel-run/ms-panel-tally's generic bead|pr|commit panel infra (writing `<spec-dir>/reviews/<panel-slug>/panel.json` + verdict JSONs) is the same substrate spec-level panels use in practice. But nothing in internal/validate/spec.go or internal/approve/spec.go verifies the citation against an actual on-disk panel.json/verdict artifact — checkOpenQuestions only checks the `- [ ]` vs `- [x]` prefix, so any text after '[x]' (including a fabricated or stale panel citation) satisfies validation. This is a real abuse-resistance gap versus the bead-merge gate (ADR-0037), which DOES bind `mindspec complete` to a real panel.json in-binary. Not a blocking defect here: my own round-1 ask #2 explicitly requested a lightweight prose clause ('Keep it to a few lines'), and consolidated-round-1.md explicitly deferred 'Any binary/Go changes to validate/approve behavior' as out of scope for this round. Flagging as a residual, trust-based gap worth a future follow-up bead (same tracked-improvement pattern as 799d/adwu), not a round-2 blocker."
+    },
+    {
+      "item": "(4) deviation D — full dogfood mirror sync",
+      "disposition": "sound, correctly scoped as one commit",
+      "severity": "none",
+      "area": "mirror sync / deviation assessment",
+      "detail": "Confirmed both claims: the pre-fix `.agents/skills/ms-spec-approve/SKILL.md` and `.claude/skills/ms-spec-approve/SKILL.md` were missing `managed-by: mindspec` AND carried the deprecated `mindspec approve spec <id>` argument order (verified via `git diff 24af2fdb..34c787d3` and `git log` on the branch — the same stale body in both dogfood copies). And `internal/setup/historical_skills/ms-spec-approve.pre0uur.md` is byte-exact vs the 24af2fdb canonical (diffed the file against `git show 24af2fdb:internal/setup/claude.go`'s ms-spec-approve fragment — identical, modulo Go string-concat syntax) — it correctly pins the pre-change CANONICAL, not the stale dogfood bytes, which is the right test-design choice (a `.pre0uur` snapshot exists to test refresh-from-canonical, not refresh-from-arbitrary-drift). Bundling the CLI-argument-order fix into this commit is sound rather than scope creep: these 4 copies (`.claude/skills`, `.agents/skills`, `plugins/mindspec/skills`, `internal/setup/claude.go`) are designed to always be byte-identical (HC-6), so syncing all of them together when any canonical body changes is exactly what the refresh mechanism is for — the alternative (patching only the new clause onto stale, broken CLI syntax) would have left two of four copies pointing at a wrong command and required a second future fix. No functional/Go behavior changed, fully covered by `TestInstallSkills_RefreshesPreClauseApproveSnapshot` (verified PASS)."
+    },
+    {
+      "item": "(5) merge-tree vs current origin/main",
+      "disposition": "conflict-free",
+      "severity": "none",
+      "area": "merge cleanliness",
+      "detail": "`git fetch origin main` → aa482d9b, unchanged since round 1 (still includes PR #174/#175). `git merge-tree $(git merge-base origin/main fix/0uur-headless-grill-guard) origin/main fix/0uur-headless-grill-guard` exits 0, 0 occurrences of 'CONFLICT' across all 11 changed files — clean 3-way merge, same result as round 1."
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "bead_id": null,
+  "spec": "v0.10.0-prerelease",
+  "target": "prs/159+160",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "159:a5ea5b6f,160:21181776",
+  "note": "Round-2 verification that PR #159 (docs/governance/state) + PR #160 (migrate code fixes) address all round-1 prerelease-plan asks and are tag-ready for v0.10.0."
+}

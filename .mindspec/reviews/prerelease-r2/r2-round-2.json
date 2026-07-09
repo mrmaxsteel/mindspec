@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Release-readiness lens clean across all three round-1 asks. #1: ADR-0039 Status is 'Accepted'. #3: RELEASE-NOTES-v0.10.0.md exists, is user-facing and accurate — explicitly states non-breaking & opt-in ('NO action required', 'upgrading the binary alone changes nothing on disk'), describes migrate as `--abort` pre-publish rollback + forward-only, and makes NO crash-resume claim (no overclaim). `.goreleaser.yml` changelog exclude now lists `^Merge` so auto-notes aren't buried under merge subjects. #2: spot-checked CONVENTIONS.md (live old path docs/archive→project-docs/user/archive fixed AND resolver/fallback tier preserved verbatim — 'nested .mindspec/docs/ and root docs/ ... read-only compatibility fallbacks for pre-flatten repositories'), domains/core/architecture.md and domains/workflow/runbook.md (live docs/ examples correctly flattened), and project-docs guide (scaffold + spec paths flattened). No legitimate resolver-tier/historical mention over-rewritten. Both PRs MERGEABLE/CLEAN, all CI checks green. Latest tag v0.9.0 + backward-compatible feature => v0.10.0 minor is the correct SemVer bump, not v1.0.0. Ready to tag from this lens.",
+  "asks_status": {
+    "1": "ADDRESSED",
+    "2": "ADDRESSED",
+    "3": "ADDRESSED"
+  },
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "ask-1 ADR-0039",
+      "issue": "Status header reads '- **Status**: Accepted' on chore/v0.10.0-prerelease-hardening."
+    },
+    {
+      "severity": "info",
+      "area": "ask-3 release-notes",
+      "issue": "RELEASE-NOTES-v0.10.0.md states non-breaking/opt-in, frames migrate as --abort pre-publish rollback + forward-only, and avoids any crash-resume overclaim (crash-resume not mentioned). .goreleaser.yml changelog filters.exclude includes '^Merge'."
+    },
+    {
+      "severity": "info",
+      "area": "ask-2 stale-path docs",
+      "issue": "CONVENTIONS.md fixes live old path and PRESERVES the read-only fallback/resolver-tier note; architecture.md, runbook.md, and project-docs guide flatten live examples without destroying historical mentions."
+    },
+    {
+      "severity": "info",
+      "area": "version bump",
+      "issue": "Prev tag v0.9.0; non-breaking opt-in feature -> v0.10.0 minor is correct SemVer, v1.0.0 not warranted."
+    }
+  ]
+}

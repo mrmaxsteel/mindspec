@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "The round-2 delta (6f558bd6..6cf718c9) introduces no regressions in my author-of-record / intent-coverage lens and strictly strengthens the fix against bead mindspec-wu7t's intent. The FIX DIRECTION floor (detect the orphaned-finalize condition + emit a recovery command, replacing the silent revert) still holds and is now more robust: Group 2's gate (result.Pushed && FinalizeBranch == \"\") removes the contradictory dead-spec-branch PR instruction so the operator sees ONLY the recovery NOTE; Group 1 makes the chore-branch flow retry-idempotent (self-heal leftover temp worktree, recreate stale local branch, RemoteHeadSHA-probed force-with-lease) so an operator retry converges instead of hard-failing non-fast-forward; Group 3's baseline-push-first reorder preserves the always-push contract even on a chore-flow error. Both my round-1 non-blocking findings were addressed as promised: the squash blind-spot is now documented at the detection site AND filed as follow-up bead mindspec-3xqm, and the factually-wrong 'spec branch survives locally' comment is corrected. New exec sites (RemoteHeadSHA, PushBranchForceWithLease) use rejectOptionLike+noPrompt and the lease is pinned to the just-observed remote tip (concurrent human movement fails loudly). Deviations A-C are all justified. Build, go vet, and all targeted suites (executor/gitutil/workspace/cmd + TestApproveImplCallOrder) pass uncached.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "lens": "author-of-record / intent-coverage",
+      "title": "Round-1 finding #1 (squash-merge blind spot documentation) — ADDRESSED",
+      "detail": "ADDRESSED. My round-1 recommendation was (a) a one-line comment at the detection site documenting the merge-commit/FF/rebase assumption and (b) a follow-up bead. Both done: mindspec_executor.go now carries a 'Known blind spot (panel round 1, Group 5)' comment stating IsAncestor assumes SHA-preserving merges and that a squash-merged impl PR discards the SHAs so detection misses and the pre-fix behavior recurs, naming content-based detection as a deferred follow-up. Follow-up bead mindspec-3xqm is filed capturing squash-tolerant detection plus doctor/instruct surfacing. Matches the observed spec-106 merge-commit repro and this repo's merge-commit workflow; the residual squash gap is out of scope for this fix."
+    },
+    {
+      "severity": "info",
+      "lens": "correctness / documentation",
+      "title": "Round-1 finding #2 (factually-wrong leftover-branch comment, Deviation C) — ADDRESSED",
+      "detail": "ADDRESSED. The finalizeOrphanedSpecBranch doc comment previously justified leaving the local chore branch behind by claiming it was 'same as the spec branch, which also survives locally' — false, since FinalizeEpic's cleanup runs DeleteBranch(specBranch). The round-2 comment now reads '...note this differs from the spec branch, which FinalizeEpic's cleanup DELETES locally after pushing', which is accurate. Deviation C (leftover local chore branch) remains acceptable and is now correctly documented: a same-spec retry deletes+recreates it fresh from origin/main."
+    },
+    {
+      "severity": "info",
+      "lens": "invariants / ordering",
+      "title": "Group-3 reorder did NOT disturb the orphan-push-before-cleanup or close-before-export invariants",
+      "detail": "Re-verified after the reorder. PushBranch(specBranch) is now the first statement inside the HasRemote block; orphan detect + finalizeOrphanedSpecBranch (create+commit+push) run after it but still INSIDE the HasRemote block, which closes before the guardMergeLayout gate and the cleanup withWorkingDir block (mindspec_executor.go ~L437-487) that runs DeleteBranch(specBranch). So the chore push still strictly precedes cleanup. preFinalizeTip is still captured at the top of FinalizeEpic before any push, so pushing the spec branch first cannot affect IsAncestor(preFinalizeTip, origin/main) (independent refs). ApproveImpl still closes the epic (MUTATION 1/3) before FinalizeEpic (3/3), so Dolt has the closes at export time. TestApproveImplCallOrder passes uncached."
+    },
+    {
+      "severity": "info",
+      "lens": "hygiene / new surface",
+      "title": "New exec sites RemoteHeadSHA + PushBranchForceWithLease are hygienic; lease protects concurrent human movement",
+      "detail": "Both apply rejectOptionLike to every operand (remote/branch/expectedSHA) and wrap in noPrompt (GIT_TERMINAL_PROMPT=0), matching SEC-5/spec-097 convention. RemoteHeadSHA correctly distinguishes absent branch (empty output, zero exit -> \"\", nil) from a git failure (non-zero exit -> error), so an offline/auth failure is never conflated with absence (which would downgrade to a rejectable plain push). On the BRIEF's explicit question — could a stale observed SHA force-overwrite a HUMAN's work? — the lease is pinned to the tip observed via RemoteHeadSHA immediately before the push, so any concurrent human push in the read->push window moves the remote tip off expectedSHA and the lease FAILS loudly. The only residual overwrite is a human's work that was ALREADY the observed tip before this run, which is acceptable: chore/finalize-<specID> is machine-owned by naming convention, and refusing pre-existing tips would break the very retry idempotency Group 1 requires. Strictly safer than an unconditional --force. Not a regression."
+    },
+    {
+      "severity": "info",
+      "lens": "regression fidelity / deviations A-B-C",
+      "title": "Deviations A, B, C all justified; test coverage strengthened",
+      "detail": "A (retry test injects fake.removeErr into spec-worktree cleanup AFTER both pushes rather than a literal replay): sound and in fact the ONLY way to exercise the lease path within one FinalizeEpic entry point — a fully-successful run deletes the local spec branch in cleanup, so a literal re-run trips the pre-existing BranchExists gate and never reaches the chore flow. The test genuinely drives remoteSHA != \"\" -> PushBranchForceWithLease (run2Tip != run1Tip, changed export content, still a descendant of origin/main). B (extra test TestFinalizeEpic_OrphanChoreFailureStillPushesSpecBranch): a welcome strict-positive pinning Group 3's ordering contract (spec branch on origin at pre-finalize tip even when the chore export fails). C (cwd save/restore via t.Cleanup in the composition test): correct hygiene that prevents cross-test cwd pollution in cmd/mindspec. My round-1 low findings #3 (test proves carrier property, not end-to-end no-self-revert) and #4 (orphan path still pushes the dead spec branch) are unchanged by round 2 and remain acceptable known limitations, not regressions."
+    }
+  ]
+}

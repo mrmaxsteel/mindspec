@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "CODEBASE-PIN lens: every named file, function, and test exists as claimed and is green. `go test ./internal/executor/ -run TestFinalizeEpic -v` passes all 7 tests: the new TestFinalizeEpic_OrphanedSpecBranch (both table cases — not-yet-merged and already-merged) plus the 6 pre-existing FinalizeEpic tests (DirectMerge, BranchNotFound, DirectMergeLayoutRegressionBlocked, BeadMergeConflictAbortsFinalize, DirectMergeConflictPreservesSpecBranch, PartialBeadMergeMatrix) — so the direct/no-remote path is pinned unchanged. Forced-uncached `go test -count=1 ./internal/approve/... ./internal/gitutil/... ./internal/workspace/... ./cmd/...` all ok. `go vet ./...` exit 0. `gofmt -l` on all 7 touched files is empty (all formatted). Worktree is clean and exactly one commit ahead of main (6f558bd6). Touched-file set matches the brief exactly (7 files, +401/-5, per-file counts as stated). Symbols confirmed present: gitutil.FetchRemoteBranch, finalizeOrphanedSpecBranch, execBeadExportFn, workspace.FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath, FinalizeResult.FinalizeBranch, ImplResult.FinalizeBranch. Ordering pins hold: closes (impl.go ~345) precede FinalizeEpic (impl.go:372); orphan detect+push sit in the Push-to-remote block, before the cleanup block. Nothing to change.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "test-existence-and-green",
+      "detail": "TestFinalizeEpic_OrphanedSpecBranch exists in new internal/executor/finalize_orphan_test.go with 2 table cases; verbose run shows both subtests PASS. All 6 pre-existing TestFinalizeEpic_* also PASS in the same run (direct path pinned unchanged). Package total: ok, 3.072s."
+    },
+    {
+      "area": "adjacent-packages-green",
+      "detail": "go test -count=1 ./internal/approve/... ./internal/gitutil/... ./internal/workspace/... ./cmd/... => all ok (approve 7.493s, gitutil 2.454s, workspace 0.432s, cmd/mindspec 14.755s). Cached first run also ok. TestApproveImplCallOrder-bearing package (approve) is green, so the FinalizeEpic-internal change is invisible to the pinned mutation order."
+    },
+    {
+      "area": "vet-and-fmt",
+      "detail": "go vet ./... exit 0 (no diagnostics). gofmt -l over all 7 touched files (cmd/mindspec/impl.go, internal/approve/impl.go, internal/executor/executor.go, internal/executor/finalize_orphan_test.go, internal/executor/mindspec_executor.go, internal/gitutil/gitops.go, internal/workspace/worktree.go) prints nothing => all formatted."
+    },
+    {
+      "area": "git-state",
+      "detail": "HEAD=6f558bd66790e2c2bd1aded744fb3ff3fdf1463f; git log main..HEAD shows exactly one commit; git rev-list --left-right --count main...HEAD = 0 / 1 (one ahead, zero behind); git status --porcelain empty (clean worktree); branch fix/wu7t-protected-main-finalize."
+    },
+    {
+      "area": "symbol-and-file-pins",
+      "detail": "All claimed symbols located at their sites (gitops.go:248 FetchRemoteBranch, mindspec_executor.go:573 finalizeOrphanedSpecBranch, :916 execBeadExportFn, worktree.go:55/60/97 FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath, executor.go:179 & approve/impl.go:107 FinalizeBranch fields). git diff --stat main...HEAD == brief's claimed file set and line counts (401 insertions, 5 deletions)."
+    },
+    {
+      "area": "ordering-invariants",
+      "detail": "Verified the two brief-flagged pins directly in source: (1) ApproveImpl closes beads (~impl.go:345) before calling exec.FinalizeEpic (impl.go:372), so Dolt holds the closes when commitWithExport->execBeadExportFn/bead.Export runs inside FinalizeEpic; (2) the orphan detection, finalizeOrphanedSpecBranch push, and the unconditional spec-branch PushBranch all live in the 'Push to remote' block, which precedes the cleanup block (comment at ~line 490 explicitly notes it runs 'before the cleanup block below removes any worktree'). A cleanup failure therefore cannot strand the finalize commit."
+    }
+  ]
+}
