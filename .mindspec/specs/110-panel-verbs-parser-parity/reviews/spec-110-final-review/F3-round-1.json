@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Security + R7 honest boundaries hold under adversarial probing. I built the binary to /tmp and attacked every path. validatePanelSlug rejects empty/./../traversal/backslash/absolute on create AND verify AND tally. rejectControlBytes (unicode.IsControl) rejects newline/CR/tab/VT/ESC/DEL/U+0080/U+009B(CSI) on slug + --bead + --target; the rejection message itself is %q-escaped so no raw byte leaks and no forged recovery line is possible. --spec traversal is blocked by idvalidate.SpecID before any filepath.Join. TestPanelCreate_RejectsUnsafeSlugAndControlBytes pins error+zero-file-write on hostile input. R7a: internal/panel/gate.go is byte-identical to merge-base 2f894401 (zero diff) — PanelGateDecision gains/loses no input/output; contract-pin test passes. R7b: `go list -deps ./internal/panel | grep internal/config` is empty. R7c: spec-approve emits NO adr-coverage-missing/adr-cite-irrelevant — it uses the identical impacted-domains-resolve code (spec.go call `normalizeImpactedDomains(nil,root,\"\",...)` is byte-identical to plan.go:142) and a distinct existence-only adr-touchpoint-missing; R6 extraction is anchored-link-only (110's own spec validates clean despite its ADR-0040 prose mention). Single-home confirmed: instruct's verdict() now delegates to PanelGateDecision (panelstate.go:121), no surviving second matrix. git status clean, reads pinned to 2da52b09.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Slug validator empirically defeated attempts: ../../../etc/pwned, /etc/pwned, .., foo\\bar, empty — all rejected on create/verify/tally before filepath.Join.",
+    "Control-byte validator rejects full C0/C1/DEL set including U+009B CSI and U+0080 on all three input paths (slug/--bead/--target); rejection messages are %q-escaped, so terminal-injection and forged `recovery:` lines are impossible even in the error path.",
+    "--spec is guarded by idvalidate.SpecID (path-separator + pattern), so a traversal --spec fails before SpecDir's filepath.Join.",
+    "R7a: gate.go has ZERO diff vs merge-base 2f894401 — PanelGateDecision semantics/inputs/outputs are literally unchanged; the verbs are thin adapters.",
+    "R7b: internal/panel is a config-free leaf (deps grep empty); panel.Create takes plain values and imports no config/git.",
+    "R7c/R5: spec-approve resolver call is byte-identical to plan-approve's, so a bare-name-no-manifest domain is tolerated identically (no stricter rule); parity regression tests pass.",
+    "R6: adrTouchpointLinkRe requires an anchored [ADR-NNNN](path) link; bare-prose ADR-#### never matches — verified structurally and empirically (110's own spec passes with its ADR-0040 prose reference).",
+    "Single decision home real across all four consumers (panel verify, panel tally, internal/complete, instruct --panel-state); instruct's verdict() delegates to PanelGateDecision with only presentation-only Allow-reason synthesis left local."
+  ]
+}

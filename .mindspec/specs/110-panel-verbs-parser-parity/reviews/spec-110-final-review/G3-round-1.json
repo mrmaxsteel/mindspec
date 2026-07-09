@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G3 fable-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Integration lens, three probes. (1) 111 consumption: 111's plan (Bead 2) builds exactly `panel create <slug> --spec --target [--bead] [--round]` via buildCommand — every flag exists in cmd/mindspec/panel.go; the `panel directory: <dir>` reported line (panel.go:140) is the single layout anchor 111's Step 2 captures; `verify <slug>` prints the N/M + named-malformed report and always exits 0; `tally <slug>` exits per Decision.Action with an ADR-0035 recovery line — precisely the verbatim-passthrough + Block surface 111's R5/ADR-0035 sections assume. Re-panel via `--round N+1` co-bumps, prior verdicts untouched. No gap blocks 111. (2) 110-vs-112 merge: `git merge-tree origin/main 2da52b09` conflicts on ONLY workflow architecture.md + interfaces.md, both same-insertion-point APPEND conflicts with disjoint topics (112: gate field/advisory/--gate view; 110: verbs/parser-parity/Create writer). No contradictory claims — 112's text forward-cites 110's writer as a consumer, and both restate the config-free-leaf invariant identically. The merged tree BUILDS and internal/panel, cmd/mindspec, internal/complete, internal/config all test GREEN — the code union is already clean; impl-approve needs only the two-doc union resolve. (3) Schema: § Panel Artifact Schema + § Panel CLI Verb Tree documented; TestPanelSchemaDoc_MatchesConstants pins doc-to-constants; gate reads only verdict/hard_block/round (additive-tolerant); 112's `gate` is omitempty/parse-lenient. Stable ADR-0040 contract for 111 and other agents.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "110-vs-112 doc conflicts are append-union, code merges clean and green",
+      "detail": "Conflicts limited to .mindspec/domains/workflow/{architecture,interfaces}.md; both hunks are two independent sections added at the same insertion point (112's gate/advisory/config-show additions vs 110's panel-verbs/parser-parity/Create-writer additions). Semantically compatible — keep both sides in each hunk (union), ordering by date. The auto-merged Go tree builds and the four affected packages (internal/panel, cmd/mindspec, internal/complete, internal/config) pass tests, so the impl-approve resolve is doc-only."
+    },
+    {
+      "severity": "info",
+      "title": "panel create does not stamp 112's recorded gate field (designed degradation, follow-up candidate)",
+      "detail": "Post-merge, panel.Panel has 112's optional `gate` field but 110's `panel create` exposes no --gate flag, so CLI/111-workflow-created panels are gate-less. 112's PanelGateAdvisoryDefault handles this by design: gate-less bead panels fall back to the bead gate's default; gate-less non-bead panels SKIP the reviewer-count advisory once gates: is configured. 112's own doc declares writer-side gate stamping out of scope, so this is not a contradiction — but a `panel create --gate <name>` follow-up would let spec_approve/final_review panels get gate-appropriate advisories. Worth a bead, not a blocker."
+    },
+    {
+      "severity": "info",
+      "title": "111 plan wording: 'BRIEF path panel create reports' vs actual 'panel directory:' line",
+      "detail": "111's plan Step 2 says the workflow 'reads back only the BRIEF path panel create reports'; the CLI actually reports 'panel directory: <dir>' (BRIEF.md lives inside it). The plan's same paragraph correctly says it captures the panel directory from the reported path, so there is no functional gap — just imprecise phrasing 111's implementer should read as the directory line."
+    }
+  ]
+}

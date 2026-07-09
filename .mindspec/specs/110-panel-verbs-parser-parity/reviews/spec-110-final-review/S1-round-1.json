@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Built the binary to /tmp and drove both outcomes end-to-end against scratch repos (no writes to this worktree). Panel lifecycle: `panel create demo-slug --spec 999-test --target bead/999-test.1 --bead 999-test.1` stamped expected_reviewers=6, approve_threshold=n-1 from cfg, reviewed_head_sha=live bead tip. `panel verify` at 0/6 printed BLOCK, exited 0, and left git status byte-identical (read-only). `panel tally` at 0/6 exited 1 (Block); after writing 6 APPROVE verdict files, verify->PASS/exit0 and tally->PASS/exit0 (Allow). `panel create --round 2` co-bumped round+reviewed_head_sha to the new tip in one write, leaving round-1 verdict files and BRIEF.md untouched. Parser parity via `mindspec validate spec` (ApproveSpec's own gate) on scratch specs: a path-like zero-owner domain (internal/nope/x.go) was CAUGHT as impacted-domains-resolve/SevError, exit 1; a bad anchored ADR-Touchpoint link (ADR-9999) was CAUGHT as adr-touchpoint-missing/SevError, exit 1; a bare-name-no-manifest domain (genevieve) was TOLERATED, exit 0; a bare-prose ADR mention (ADR-9999/ADR-0040, no anchor) was TOLERATED, exit 0. All four match the R5/R6 falsification clauses exactly, and match the existing unit-test fixtures in internal/validate/spec_test.go. No discrepancies found.",
+  "concrete_changes_required": [],
+  "findings": [
+    "panel create: stamps expected_reviewers=6 / approve_threshold=\"n-1\" / reviewed_head_sha=live-tip correctly (verified via panel.json contents)",
+    "panel verify: writes zero files (git status --porcelain identical before/after), always exits 0 regardless of BLOCK/PASS text",
+    "panel tally: exit code tracks Decision.Action, not raw counts — 0/6 -> exit 1 (Block) with recovery line; 6/6 APPROVE -> exit 0 (Allow)",
+    "panel create --round 2 co-bumps round + reviewed_head_sha atomically; prior round's verdict files and BRIEF.md are left untouched",
+    "spec-approve parser parity: mangled path-like Impacted-Domain caught (impacted-domains-resolve), bad ADR-Touchpoint link caught (adr-touchpoint-missing), bare-name-no-manifest domain tolerated, bare-prose ADR-#### mention tolerated -- all four verified live against the built binary, matching R5/R6 exactly"
+  ]
+}

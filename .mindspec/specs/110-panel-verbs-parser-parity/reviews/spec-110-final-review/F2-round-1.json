@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "The 5 beads compose into one coherent system with no half-wiring found. fbel.1->fbel.4: `panel create` calls panel.Create with plain values, config/git resolved in cmd (panel.go:105-134); config-free leaf verified empirically (`go list -deps ./internal/panel | grep internal/config` empty). Single decision home is genuinely real across ALL FOUR consumers: internal/complete (panel_advisory.go:170,192), internal/instruct (panelstate.go:121 — verdict() builds GateFacts and delegates; gatherPanelState routes bead panels through ResolveGateFacts), panel verify (panel.go:347), panel tally (panel.go:457, exit derived from d.Action alone). Grep for a surviving second matrix: every remaining Approves/Rejects/ApproveThreshold reference outside gate.go is presentation-only formatting. fbel.5 skills reference the exact verb syntax + flags fbel.4 ships (--spec/--target/--bead/--round); mirrors byte-identical; R8 AC grep passes; all judgment sections survive (Artifact gates, Consolidate, Slot lens defaults, After-a-halt incl. Abandon item 4, Escape hatch). Skill's BRIEF-stub description matches fbel.1's writer (header delimiters, Your-job contract, 4 stub headings). fbel.2 parity uses contextpack.ParseSpec + normalizeImpactedDomains(nil,root,\"\") under impacted-domains-resolve, same adr.Store. root.go + redact.go wiring complete. Touched-package tests pass except the known pre-existing z4ps TestRun_IdleNoBeads.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "note": "Cross-bead nuance, not a defect: instruct verdict() synthesizes the Allow-path reason string locally (panelstate.go:122-134) because panel.Decision carries no Message on Allow; the decision itself is still PanelGateDecision's, which is what R2 pins. The comment documents this honestly."
+    },
+    {
+      "severity": "info",
+      "note": "R6 emits `adr-touchpoint-missing` (distinct code) rather than reusing `adr-cite-missing`. The spec pins the code name only for R5 (`impacted-domains-resolve`, honored) and describes R6 as the adr-cite-missing SHAPE; the impl comment (validate/spec.go) documents the distinct-code choice as deliberate (touchpoints prose vs plan frontmatter, spec 097 R2 boundary). Coherent, not a falsification."
+    },
+    {
+      "severity": "info",
+      "note": "interfaces.md's Bead-1 region says 'before Bead 4 lands that CLI verb, /ms-panel-run step 0 hand-authors it' — now historical since Bead 4 landed; the Bead-4 region below documents the shipped verbs. Append-only doc regions, phrased as steady-state intent, no contradiction. Optional one-line touch-up at impl-approve if desired."
+    },
+    {
+      "severity": "info",
+      "note": "ms-panel-run Step 0's 'capture panel create's reported dir' paragraph (the bead-5 r1 fix) correctly covers panelDirFor's non-flat legacy fallback that the flat-convention prose does not — skills and cmd agree on layout resolution."
+    }
+  ]
+}
