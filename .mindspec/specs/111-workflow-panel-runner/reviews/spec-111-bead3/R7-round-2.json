@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Both round-1 items fixed at 1fd29af9, verified against the shipped Bead-2 contract. Item 1 ADDRESSED: the Runner-dispatch tuple (both mirrors + runbook) is now `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}`, listed unconditionally so the skill always passes the resolved config value — spec R4's config-driven substitution is honored, and the arg name matches ms-panel.js exactly. The added clause is factually accurate on both counts I checked: the workflow cannot read config (its ALLOWED_CLI/header) and fail-closes an omitted flag to false (ms-panel.js:455 `=== true`); resolution source `panel.substitution.claude_sub_on_quota` is rendered by the same `mindspec config show` the skill already reads (config.go:196). Item 2 ADDRESSED: the tally note's narrowed-job sentence now leads with 'the § Artifact gates Allow-screen' and adds 'the workflow mechanizes the tally, not the human artifact-gate and consolidation judgment' — the consume-result-then-merge misread is closed, and the runbook's matching sentence was updated in lockstep. Delta is surgical (2 sentences + runbook, no section touched beyond the two flagged lines); both mirror pairs byte-identical at 1fd29af9; nothing new lost or weakened. No new issues.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Item 1 (claude_sub_on_quota drift): ADDRESSED — tuple includes claude_sub_on_quota in both ms-panel-run mirrors and the runbook entry, with the resolution source (config panel.substitution.claude_sub_on_quota via the same config show read) and the fail-closed rationale stated; arg name and semantics match the shipped ms-panel.js contract; flag is passed unconditionally so the config value (default true) now governs workflow-path substitution.",
+    "Item 2 (Allow-screen obscured): ADDRESSED — narrowed-job sentence in both ms-panel-tally mirrors names the § Artifact gates Allow-screen first and adds the mechanizes-the-tally-not-the-judgment clause; runbook updated to match ('narrows to the Artifact gates Allow-screen, consolidation, and the merge terminal').",
+    "Re-verified at 1fd29af9: mirror pairs byte-identical; delta touches only the two flagged sentences plus the runbook doc-sync — no retained section altered; git status clean (panel dir untracked as expected)."
+  ]
+}

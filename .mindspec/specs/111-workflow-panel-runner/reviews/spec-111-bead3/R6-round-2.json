@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "ADDRESSED. ms-panel-run/SKILL.md's Runner-dispatch bullet (both mirrors) now lists `claude_sub_on_quota` in the /ms-panel arg tuple, with a clause instructing it be resolved from `panel.substitution.claude_sub_on_quota` the same way `mix` is resolved from `panel:`, plus an explicit note that the workflow fail-closes an omitted flag to `false`. An operator following only the SKILL.md prose now passes the flag, so quota-wall substitution engages when configured -- SKILL.md and interfaces.md are now consistent, closing the gap my round-1 review flagged. runbook.md's doc-sync entry was updated in lockstep with matching wording. As a bonus beyond what I asked, the tally SKILL.md's Workflow-path note now also explicitly names 'the Artifact gates Allow-screen' in the narrowed Step-2 job description, reinforcing (not just implying) that the artifact-gate discipline survives on the workflow path -- directly relevant to my own and R5's lens. Mirror byte-identity holds for both SKILL.md pairs; go build ./... is clean; the delta is scoped exactly to the round-1 finding plus the one related strengthening, nothing else touched.",
+  "concrete_changes_required": [],
+  "findings": [
+    "claude_sub_on_quota now appears in the resolved-args tuple in both ms-panel-run/SKILL.md mirrors, with the same config-resolution treatment as mix and an explicit fail-closed note -- resolves my round-1 finding.",
+    "runbook.md's 2026-07-09 maintenance entry updated to match the new arg tuple and rationale -- doc-sync stays accurate.",
+    "Bonus: ms-panel-tally/SKILL.md's Workflow-path note now explicitly names 'the Artifact gates Allow-screen' in its narrowed-job description, not just 'consolidation and the merge terminal' -- a small but welcome strengthening of the artifact-gate-survives-the-workflow-path point.",
+    "Mirror byte-identity confirmed (diff -q clean) for both ms-panel-run and ms-panel-tally SKILL.md pairs; go build ./... clean at 1fd29af9."
+  ]
+}

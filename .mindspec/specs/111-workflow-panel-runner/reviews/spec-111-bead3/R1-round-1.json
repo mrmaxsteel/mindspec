@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Author-of-record lens: 84001704 delivers exactly Bead 3's three prescribed steps against the plan's key_file_paths, no missing step, no unrequested scope, nothing deleted (+70/-0). (1) Runner dispatch section added near the top of both ms-panel-run mirrors: reads runner: via `mindspec config show`, three labelled branches (claude-code-workflow workflow-path / claude-code-skills default skills-path / external stub), degradation-to-skills statement present, invokes /ms-panel ONCE with the exact R6 tuple {slug,spec,target,bead_id?,round,lenses[],mix} — correctly omits sha? (a Bead-2 advisory arg, not in R6). (2) All four plan-named sections (Launch the panel, Codex failure detection, Working directory matters, Anti-patterns) gated behind claude-code-skills with superseded callouts, none deleted; Slot lens defaults untouched. (3) ms-panel-tally Workflow-path note added; Consolidate/Artifact gates/After a halt/Escape hatch/Abandon all intact. Mirrors byte-identical (both pairs). Only the 5 key_file_paths touched. The flagged Step-0 judgment call is sound: Step 0 is not in the enumerated four, and the Runner-dispatch prose already instructs the workflow reader to skip it.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Diff scope matches plan Bead 3 key_file_paths exactly: the two ms-panel-run mirrors, the two ms-panel-tally mirrors, runbook.md — 5 files, +70/-0, pure additions.",
+    "Runner dispatch tuple matches spec R6/Step 1 exactly ({slug,spec,target,bead_id?,round,lenses[],mix}); sha? correctly excluded (Bead-2 workflow arg, advisory-only per R1).",
+    "POSITIVE: tally note says 'Step 2 consolidation' — verified correct against the actual post-110 slimmed ms-panel-tally (line 32, Consolidate is Step 2); the plan/spec 'Step 4' text was a stale pre-slimming reference, and the BRIEF itself says Step 2. Implementer pinned to the real base.",
+    "Step-0-labelling judgment call is fine: Step 0 was not in Step 2's enumerated four sections, and the Runner-dispatch section already tells the workflow-path reader 'do not separately walk Step 0'. No missing callout.",
+    "Mirror byte-identity holds: diff -q clean for both ms-panel-run and ms-panel-tally pairs.",
+    "Doc-sync runbook.md entry (2026-07-09, spec 111 Bead 3) accurately records the runner selection, the four superseded-not-deleted sections, and the retained judgment sections."
+  ]
+}

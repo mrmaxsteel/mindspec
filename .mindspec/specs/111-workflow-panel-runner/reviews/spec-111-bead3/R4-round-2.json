@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-1 finding was that the Runner-dispatch arg tuple omitted `claude_sub_on_quota`, so a workflow-path panel would silently fail-closed on quota-wall substitution regardless of the configured value. The fix adds `claude_sub_on_quota` to the tuple in ms-panel-run/SKILL.md (both mirrors, byte-identical per diff -q) — now `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}` — with a clause instructing it be resolved from config `panel.substitution.claude_sub_on_quota` the same way `mix` is resolved from `panel:`, and correctly documents the fail-closed default (\"the workflow cannot read config itself and fail-closes an omitted flag to false\") which matches ms-panel.js's own comment (lines 27-35) and its runtime behavior (`args.claude_sub_on_quota === true`, line 455) verbatim. runbook.md's tuple mention was updated to match. With this fix, a workflow-path panel configured with `claude_sub_on_quota: true` (the actual config default, internal/config/config.go:308) now has that value threaded through and gets quota-wall substitution instead of silently losing it. No new mismatch introduced; `go build ./...` clean; mirrors identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Round-1 item (claude_sub_on_quota missing from the workflow-path arg tuple): ADDRESSED. The tuple now includes it, with an accurate resolution clause matching ms-panel.js's documented fail-closed contract.",
+    "Bonus (not my round-1 item, noted for completeness): ms-panel-tally/SKILL.md's Workflow-path note was also tightened in this delta to explicitly name the Artifact gates Allow-screen as retained work on the workflow path, not just consolidation + merge terminal — consistent with, not conflicting with, the runner-dispatch tuple fix.",
+    "sha remains (correctly) absent from the tuple — still harmless, advisory-only and self-resolved by `panel create`."
+  ]
+}
