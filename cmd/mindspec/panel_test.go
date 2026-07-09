@@ -83,6 +83,22 @@ func snapshotTree(t *testing.T, root string) []string {
 	return out
 }
 
+// resetPanelCreateFlags resets panelCreateCmd's flags to their defaults
+// (and clears Changed) before a subtest runs. cobra flags live on the
+// package-level command and are NOT reset between Execute() calls, so a
+// value set by one t.Run — e.g. a --bead containing a control byte —
+// otherwise persists into the next subtest's Execute() and can produce a
+// false-positive rejection attributed to the wrong flag.
+func resetPanelCreateFlags(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"spec", "target", "bead", "round"} {
+		if f := panelCreateCmd.Flags().Lookup(name); f != nil {
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		}
+	}
+}
+
 // stubWorktreeListEmpty points panelWorktreeListFn at a stub returning no
 // entries, so `panel verify`/`panel tally` never spawn a real `bd`
 // subprocess in tests. Restored via t.Cleanup.
@@ -267,6 +283,7 @@ func TestPanelCreate_RejectsUnsafeSlugAndControlBytes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			resetPanelCreateFlags(t)
 			root := mkPanelTestRoot(t, "")
 			withTestChdir(t, root)
 			config.ResetCache()
