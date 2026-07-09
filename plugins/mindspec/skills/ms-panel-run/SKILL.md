@@ -35,76 +35,43 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 > by the `mindspec complete` gate (which is spec-lifecycle-scoped), so no `panel.json`
 > of theirs ever gates a merge.
 
-## Step 0 — create panel dir + BRIEF + panel.json
+## Step 0 — register the panel
 
-1. **Create the panel directory.**
+1. **Register (or re-panel) the panel.**
    ```bash
-   mkdir -p <spec-dir>/reviews/<panel-slug>
+   mindspec panel create <panel-slug> --spec <spec-id> --target <ref> [--bead <bead-id>] [--round N]
    ```
+   One call creates `<spec-dir>/reviews/<panel-slug>/`, writes `panel.json` — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read, with `expected_reviewers`/`approve_threshold` stamped from the configured panel defaults and `reviewed_head_sha` captured from `--target`'s live commit AT WRITE TIME — and writes (first `create`) or rewrites (re-panel) `BRIEF.md`'s machine-managed header, all in one atomic operation.
 
-2. **Write `panel.json`** — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read. Schema:
+   On a re-panel (`--round N+1`), `round` and `reviewed_head_sha` co-bump in the SAME write by construction — the two fields can never drift apart, which is exactly the invariant that closes the stale-verdict bypass (lola-f4a8 class). Prior round verdict files (`<slot>-round-<K>.json`, K < N+1) and the skill-authored BRIEF body below the header are left untouched.
 
-   ```json
-   {
-     "bead_id": "<bead-id>",        // null for non-bead targets (final-review / PR panels)
-     "spec": "<spec-slug>",
-     "target": "<bead/<id> | spec/<slug> | pr/<n> | <sha>>",
-     "round": 1,
-     "expected_reviewers": 6,
-     "reviewed_head_sha": "<git rev-parse of the target ref at fan-out>"
-   }
-   ```
+   Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets by hand, directly in `panel.json`: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned) — a plain file edit, not something `panel create` writes.
 
-   `reviewed_head_sha` is `git rev-parse` of the target ref (`bead/<id>` for a bead panel, the spec branch tip for a final-review panel) captured NOW, at fan-out.
-
-   **On every re-panel, bump `round` AND `reviewed_head_sha` in the SAME write.** The two fields move together by construction — never write one without the other. A re-panel that bumps `round` but leaves a stale `reviewed_head_sha` (or vice versa) is exactly the stale-verdict bypass the gate exists to close (lola-f4a8 class).
-
-   Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned).
-
-3. **Compose the BRIEF.md.** Required sections:
+2. **Fill in the BRIEF.md stub** `create` wrote. The machine-managed header (delimited by `<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`) already carries the slug, round, branch, reviewed commit, and the "## Your job" verdict-JSON contract (`verdict`, top-level `hard_block`, `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`, `findings`) — never edit inside it; it is machine-managed and gets rewritten wholesale on every `create`. Below it, `create` left a stub with four headings for the skill to fill:
 
    ```markdown
-   # <panel-slug> — Round <N> Review Panel
+   ## Summary
 
-   **Worktree**: <abs-path-to-bead-worktree>
-   **Branch**: bead/<bead-id> | spec/<slug> | pr/<n>
-   **Commit under review**: <sha> — <commit subject>
-   **Prior round verdict** (round >= 2 only): X APPROVE, Y REQUEST_CHANGES; consolidated asks below.
+   <1-paragraph plain-English summary of what this panel reviews. Don't paste the plan; summarise it.>
 
-   ## What the work does
-
-   <1-paragraph plain-English summary. Don't paste the plan; summarise it.>
-
-   ## Round-<N-1> concrete_changes_required (consolidated)  [round >= 2]
-
-   1. ...
-   2. ...
-
-   ## Files in scope (final state at <sha>)
+   ## Files in Scope
 
    - `path/to/file.py`
    - ...
 
-   ## Shared modules reused (unchanged)
+   ## Prior-Round Asks   [round >= 2]
 
-   - `app/entities/identify.py` — `IdentifyResultCase1/2/3`, `identify_via_llm`, ...
+   1. ...
+   2. ...
 
-   ## Fix-author deviations (assess these explicitly)  [round >= 2]
+   ## Lens
 
-   A. <deviation 1 — why the author diverged from the brief, and what they did instead>
-   B. ...
-
-   ## Your job
-
-   Verify the round-<N-1> concrete_changes_required are addressed (round >= 2), or evaluate the work cold (round 1). Each ask → ADDRESSED / PARTIAL / MISSED / NEW_ISSUE.
-
-   Verdict: APPROVE / REQUEST_CHANGES / REJECT.
-
-   Output JSON to `<spec-dir>/reviews/<panel-slug>/<your-slot>-round-<N>.json` with keys:
-   `reviewer_id`, `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings` (per round-<N-1> item). An artifact-gate finding may set `"hard_block": true`.
+   <per-slot lens assignment — see "Slot lens defaults" below>
    ```
 
-4. **Pre-stage the codex prompts.** Codex CLI sessions cannot accept the BRIEF as a tool input the way Claude `Agent` calls can. Write `/tmp/codex_<panel-slug>_r{4,5,6}.md` files, each opening with:
+   For round >= 2, also note any fix-author deviations (why the author diverged from the brief, and what they did instead) — fold them into Summary or a sub-bullet under Prior-Round Asks; there's no dedicated stub heading for them.
+
+3. **Pre-stage the codex prompts.** Codex CLI sessions cannot accept the BRIEF as a tool input the way Claude `Agent` calls can. Write `/tmp/codex_<panel-slug>_r{4,5,6}.md` files, each opening with:
    > You are R{N} codex on the <panel-slug> round-<round> verification panel. Read `<abs-path>/BRIEF.md`.
 
    followed by the slot-specific lens, the previous-round JSON path (round >= 2), and the concrete_changes_required items they personally raised in the previous round.
@@ -226,7 +193,7 @@ Mix to taste. The point is six distinct lenses, not six clones. For round >= 2, 
 - Don't run all six reviewers as foreground tool calls — that serialises the panel and wastes 5-10 minutes.
 - Don't reuse a codex `/tmp/codex_*.md` file across rounds — write a fresh one per round so the round number is unambiguous in the prompt.
 - Don't ask Claude reviewers to also do the codex empirical-probe lens — duplication is worse than coverage gaps; trust the family split.
-- Don't skip the `panel.json` write in step 0, or bump `round` without re-capturing `reviewed_head_sha`. The gate reads `panel.json`; a stale or missing one is a silent bypass.
+- Don't hand-edit `panel.json`'s `round`/`reviewed_head_sha` instead of calling `mindspec panel create --round N+1`. The verb is the only place the two co-bump atomically; the gate reads `panel.json`, and a stale or hand-desynced pair is a silent bypass.
 
 ## Then
 

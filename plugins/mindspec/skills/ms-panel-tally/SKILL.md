@@ -5,48 +5,27 @@ description: The single decision authority for a mindspec panel — read all ver
 
 # Tally Panel Verdicts
 
-Read `<spec-dir>/reviews/<panel-slug>/*-round-<N>.json`, summarise verdicts, apply the decision matrix (including the HARD artifact gates), consolidate the convergent `concrete_changes_required` list, and decide whether the panel passes. This skill is the **single decision authority** — both per-bead cycles and `/ms-spec-final-review` route their tally through here.
+Run `mindspec panel tally <panel-slug>` for the decision, apply the HARD artifact gates, consolidate the convergent `concrete_changes_required` list, and drive halt-recovery. This skill is the **single decision authority** — both per-bead cycles and `/ms-spec-final-review` route their tally through here.
 
 > Reviews are co-located under the spec (spec 106 flat layout): `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`, so panels live at `<spec-dir>/reviews/<panel-slug>/` — the location the `mindspec complete` gate scans.
 
 ## Inputs
 
-- `panel-slug` (required).
-- `round` (required) — the round just completed.
-- `expected-reviewers` (default `6`, = N) — read from `panel.json`.
+- `panel-slug` (required) — passed as `mindspec panel tally <panel-slug>`. The round tallied, the expected-reviewer count, and the approve threshold are all resolved automatically from `panel.json` and the configured panel defaults — nothing else to pass in.
 
 ## Steps
 
-1. **Load all verdicts.**
+1. **Run the tally.**
    ```bash
-   cd <spec-dir>/reviews/<panel-slug>
-   for f in *-round-<N>.json; do
-     python3 -c "import json; d=json.load(open('$f')); print(f, d['verdict'], d.get('confidence'))"
-   done
+   mindspec panel tally <panel-slug>
    ```
-   The latest round is the filename-derived `max(N)` over `*-round-<N>.json` — never trust `panel.json.round`, which can lag. If `panel.json.round` ≠ the filename max, the panel state is stale: re-run `/ms-panel-run` step 0 to re-sync before tallying.
+   This prints, in one shot: the per-slot verdict table (`verdict` + `hard_block`, malformed files named and counted as missing), the aggregate APPROVE / REQUEST_CHANGES / REJECT counts against the resolved threshold (**N − 1** by default — 5-of-6 for the standard 6-reviewer panel), the `panel.PanelGateDecision` decision (PASS / PASS with advisory / BLOCK), and the aggregated `concrete_changes_required` — read presentation-only from each REQUEST_CHANGES/REJECT verdict file, never feeding the decision. The exit code tracks the decision alone: `0` on Allow, `0` with the advisory printed on Warn, non-zero with a final recovery line (ADR-0035) on Block.
 
-2. **Tabulate.** Report:
-   - Per-slot: `verdict`, `confidence`, one-line rationale snippet.
-   - Aggregate: APPROVE count / REQUEST_CHANGES count / REJECT count.
-   - Family split: of the APPROVEs, how many Claude vs how many Codex? Family asymmetry matters.
-   - Malformed verdict JSON counts as missing (name the file).
+   This is the identical decision the in-binary `mindspec complete` gate enforces — including the filename-derived `max(N)` over `*-round-<N>.json` (never a possibly-lagging `panel.json.round`) and the `reviewed_head_sha` freshness check — so there is nothing left to hand-tabulate. On a Block from staleness, see § After a halt — recovery below. On Allow, hand off to the cycle's merge terminal per § Then below.
 
-3. **Decision matrix.** The approval threshold is **N − 1** (one dissent tolerated): 5-of-6 for the default 6-reviewer panel. Scale as ceil(5N/6) if you change N.
+2. **Consolidate `concrete_changes_required`.** This is the input to `/ms-bead-fix`. Process:
 
-   | Condition | Action |
-   |:----------|:-------|
-   | Any verdict carries `"hard_block": true` OR a `concrete_changes_required` item names a missing measurement artifact, drift report, cost projection, or regression baseline | **HARD block** (see § Artifact gates). Halt; commission the measurement run before merge. Not satisfiable by PR-body fixes. |
-   | Any REJECT | Halt (see § After a halt — recovery). REJECTs usually mean the brief or plan needs work. |
-   | Verdicts present < `expected_reviewers` | Incomplete — finish `/ms-panel-run` before deciding. |
-   | APPROVE ≥ N−1 AND no HARD-block flags AND head SHA fresh | Panel passes → merge terminal. |
-   | Below N−1 APPROVE | Fix-up needed → `/ms-bead-fix`. Flag to the user if ≤2 APPROVE (significant rework). |
-
-   On a pass, hand off to the cycle's **merge terminal**: run `mindspec complete <bead-id> "<summary>"` (gate-enforced — the in-binary `mindspec complete` gate re-verifies this tally before the merge lands). The "Then" handoff points at `/ms-bead-cycle`'s merge terminal.
-
-4. **Consolidate `concrete_changes_required`.** This is the input to `/ms-bead-fix`. Process:
-
-   a. Collect every `concrete_changes_required` item across the REQUEST_CHANGES verdicts.
+   a. Collect every `concrete_changes_required` item across the REQUEST_CHANGES/REJECT verdicts (the tally's aggregated output above, or the underlying verdict files directly).
 
    b. Dedupe semantically — multiple reviewers often flag the same defect differently ("enforce Case-3 invariants" / "reject malformed Case-3 payloads" / "reuse Bead-1 case models"). Group by defect, list distinct asks under each group.
 
@@ -58,11 +37,10 @@ Read `<spec-dir>/reviews/<panel-slug>/*-round-<N>.json`, summarise verdicts, app
 
    d. Write the consolidated list to `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md` for the fix subagent to read.
 
-5. **Report to the orchestrator** (`/ms-bead-cycle`):
+3. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs among R1–R3 claude vs R4–R6 codex — see the per-slot table above), and the consolidated-changes path:
    ```
-   Panel <slug> round <N>: <A> APPROVE, <R> REQUEST_CHANGES, <X> REJECT (threshold N−1 = <N0−1>/<N0>)
+   <mindspec panel tally output>
    Family split (APPROVEs): <claude>/3 claude, <codex>/3 codex
-   Decision: <merge | fix | halt>
    Consolidated changes: <path-to-md>
    ```
 
@@ -95,7 +73,7 @@ When the matrix halts (REJECT, HARD block, or `max-rounds` exceeded):
    - **HARD block** → commission the missing measurement run as a separate work unit, land the artifact at the named path, then re-panel.
    - **max-rounds exceeded** → halt with the bead `in_progress`; the user may revise the plan or split the bead.
 
-3. **Stale-verdict rule (now mechanized).** If commits landed on the bead branch after the panel reviewed it (`reviewed_head_sha` ≠ current branch tip), the verdicts are stale — bump the round and re-panel via `/ms-panel-run` step 0 (which re-captures `reviewed_head_sha` in the same write). The in-binary `mindspec complete` gate Blocks a stale-SHA complete, so this is enforced, not advisory.
+3. **Stale-verdict rule (mechanized).** If commits landed on the bead branch after the panel reviewed it (`reviewed_head_sha` ≠ current branch tip), the verdicts are stale — re-panel via `mindspec panel create <slug> --spec <id> --target <ref> --round <N+1>` (the co-bumping verb: `round` and a freshly re-resolved `reviewed_head_sha` land in the same write). The in-binary `mindspec complete` gate Blocks a stale-SHA complete, so this is enforced, not advisory.
 
 4. **Abandon procedure (legitimate exit).** To abandon a panel without merging (e.g. the bead is being reworked outside the panel loop): set `"abandoned": true` in `panel.json` AND record who/why in `"abandon_reason"`. Completion then writes a `panel_abandoned` audit entry (plus the reason) to the bead metadata. Abandonment is a plain repo-file edit and therefore agent-performable — it is legitimate precisely because it is always audited, never silent. Do NOT abandon to skip a HARD block; abandon only when the bead is genuinely leaving the panel flow.
 
