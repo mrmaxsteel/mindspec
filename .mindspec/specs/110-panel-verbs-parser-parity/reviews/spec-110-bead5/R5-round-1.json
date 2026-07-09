@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R5 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Both invariants hold. (1) Single verdict-instruction: grepped both SKILL.md files for '## Your job' and 'Output JSON to' — the only '## Your job' reference (ms-panel-run/SKILL.md:50) describes the machine-managed header create.go writes; it is not a second skill-authored verdict-JSON template. internal/panel/create.go's renderBriefHeader (lines 168-195) is the sole writer of the '## Your job' block, and its own comment states this explicitly: 'This is the ONE place a reviewer's verdict-JSON instructions are written — the skill (Bead 5) no longer re-authors a second copy.' No gap: the instruction still exists, now from the binary. (2) hard_block accuracy: grepped both skills for 'artifact-gate finding may set' and 'hard_block: true' — zero hits, the retired phrasing is fully gone. create.go:187-189 states hard_block is 'a top-level sibling of verdict — never a per-finding field.' internal/panel/tally.go:64-67 confirms verdictJSON is a flat struct with Verdict and HardBlock (json:\"hard_block\") as sibling top-level fields, not nested inside any findings array. The skill's description (ms-panel-run/SKILL.md:50: 'top-level hard_block') matches both the stub prose and the Go struct exactly. Mirrors byte-identical (diff -q clean, both skills).",
+  "concrete_changes_required": [],
+  "findings": []
+}

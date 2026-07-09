@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "B3's GateIO facts are sound: Worktree()=='' ⇒ WorktreeAbsent=true ⇒ dirty leg (7) skipped (gate.go:220/395), and a non-bead empty HeadSHA keeps the staleness leg (6) inert — behavior-identical to today's IsBead() guard. B1's BRIEF splice and B4's seams (configShowReviewRoots, cobra parent/AddCommand precedent, RevParseRef(workdir,ref), guard.NewFailure mirroring complete.panelGate, renderer sigs over Result/GateFacts) are all implementable as written. But B3 step 1's rule 'use Decision.Message as the one-line reason' is defeated by fact: PanelGateDecision's Allow return carries NO Message (gate.go:142,258). So every PASS panel renders an empty reason bullet (user-visible regression), and — since Bead 3's own verify command `-run 'PanelState|...'` matches TestPanelStateEntry_Verdict (confirmed) — its two GatePass rows (wantReason 'meets threshold 5/6' / '6/6 APPROVE') go RED, falsifying the plan's 'existing tests stay green' claim.",
+  "concrete_changes_required": [
+    "Bead 3 step 1: PanelGateDecision's Allow decision has an empty Message (internal/panel/gate.go:142 and :258), so mapping 'panel.Allow -> GatePass' with 'use Decision.Message as the reason' yields an empty PASS reason. Pin how the delegation produces a non-empty PASS reason for the Allow case (e.g. synthesize a 'N/N APPROVE — meets threshold M/N; mindspec complete would proceed' line from res.Approves/threshold, since PanelGateDecision returns none), so the instruct --panel-state PASS bullet stays populated.",
+    "Bead 3 step 3: the plan claims 'existing renderPanelState/gatherPanelState tests stay green', but the Bead 3 verification command `go test ./internal/instruct -run 'PanelState|PanelRounds|renderPanel'` also runs TestPanelStateEntry_Verdict (its name contains 'PanelState'), whose GatePass rows at_threshold_fresh/above_threshold_fresh assert reason substrings that the empty Allow message no longer satisfies. Either restore a PASS reason per the change above, or explicitly update those two wantReason values and stop asserting they pass unchanged."
+  ],
+  "findings": [
+    {
+      "lens": "implementability",
+      "severity": "medium",
+      "summary": "Allow decision has no Message; 'use Decision.Message as reason' produces empty PASS reasons and reddens TestPanelStateEntry_Verdict's two GatePass rows, which Bead 3's own -run 'PanelState|...' gate executes.",
+      "evidence": "internal/panel/gate.go:142,258 (Decision{Action: Allow} — no Message); internal/instruct/panelstate_test.go:98-110,120-121 (wantReason 'meets threshold 5/6' / '6/6 APPROVE', substring-checked at :223); confirmed `go test -list` matches TestPanelStateEntry_Verdict under the plan's -run pattern."
+    },
+    {
+      "lens": "implementability",
+      "severity": "low",
+      "summary": "B3 step 2 is ambiguous on the PanelStateEntry restructuring: 'build panel.GateFacts and return PanelGateDecision' (step 1) vs 'source the facts through ResolveGateFacts in gatherPanelState' (step 2) leave it unstated whether the struct keeps LiveBranchSHA/BranchMissing. Existing tests construct entries with `LiveBranchSHA:` (panelstate_test.go:96,249,270,287,301), so dropping those fields breaks compilation; keeping them means verdict() must synthesize f.Reg/f.Res/f.HeadSHA from the entry. Two implementers could diverge on the struct shape. Not blocking, but worth pinning.",
+      "evidence": "plan.md Bead 3 steps 1-2; internal/instruct/panelstate_test.go entry literals; PanelGateDecision requires f.Reg!=nil (gate.go:141) so verdict() must construct a Registration from Tally."
+    },
+    {
+      "lens": "implementability",
+      "severity": "info",
+      "summary": "B3 GateIO wiring and non-bead path verified correct. B1 BRIEF splice, B4 cobra/seams/renderers all have precedent and are implementable as written. RevParseRef(workdir,ref) matches the plan's revParseForPanelFn closure; complete.panelGate (panel_advisory.go:182-203) is a verbatim-mirrorable template for verify/tally including the guard.NewFailure-with-recovery-line Block.",
+      "evidence": "internal/panel/gate.go:220,349-398; internal/complete/panel_advisory.go:94-215; cmd/mindspec/config.go:23,58,250; internal/executor/mindspec_executor.go:868."
+    }
+  ]
+}

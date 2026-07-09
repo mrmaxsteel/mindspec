@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Drift audit is clean: I verified every confident skill assertion against 13788634's binary — `panel create` grammar matches cmd/mindspec/panel.go:53; stub headings match briefStubBody (create.go:26); header contents match renderBriefHeader incl. hard_block as top-level sibling (create.go:187, tally.go:66); tally exit codes match tallyExitAction; filename-derived max(N) + round-mismatch Block match Result.LatestRound + gate case (4); threshold N−1 matches ApproveThreshold; co-bump-by-construction matches Create's single Panel value. Mirrors byte-identical; grep gates pass; runbook accurate; judgment sections all survive. But one load-bearing rule WAS lost in the thinning: the old decision matrix's row 1 hard-blocked when a concrete_changes_required item NAMES a missing measurement artifact even WITHOUT hard_block:true, checked before the pass row. PanelGateDecision enforces only the flag/REJECT/threshold disjuncts, and new step 1 sends Allow unconditionally to the merge terminal — so a 5/6 Allow with one RC naming a missing cost_projection.json now merges. That is the exact lola-f4a8 $417 class the surviving § Artifact gates memorializes, with its procedural trigger deleted. One-clause fix.",
+  "concrete_changes_required": [
+    "ms-panel-tally step 1 (both plugins/ and .claude/ mirrors, byte-identical): on the Allow branch, before handing off to the merge terminal, require screening the tally's aggregated concrete_changes_required (printed even on Allow) against § Artifact gates — a finding naming a missing measurement artifact / drift report / cost projection / regression baseline HARD-blocks regardless of the vote count and regardless of whether the reviewer set hard_block:true (reviewers do not reliably set the flag; the old matrix row 1's second disjunct was this authority-side backstop and the binary does not enforce it)."
+  ],
+  "findings": [
+    {
+      "id": "F1-artifact-gate-allow-path",
+      "severity": "major",
+      "note": "Lost invariant: old matrix row 1's second disjunct ('a concrete_changes_required item names a missing measurement artifact... → HARD block', ordered before the pass row) has no procedural home. The binary Blocks only on hard_block:true/REJECT/threshold (internal/panel/gate.go cases 9-10). § Artifact gates survives as a reference section and the intro lists 'apply the HARD artifact gates', but step 1's 'On Allow, hand off to the cycle's merge terminal' is unconditional and step 2 consolidation is framed as fix-path input — a step-following agent merges a 5/6 Allow whose dissenting RC names a missing artifact. ms-spec-final-review mitigates only via reviewer-side hard_block discipline (F5 lens), which is the layer lola-f4a8 proved insufficient alone."
+    },
+    {
+      "id": "F2-inputs-section-stale",
+      "severity": "minor",
+      "note": "ms-panel-run § Inputs still lists `expected-reviewers` (default 6) as a caller input, contradicting step 1's 'stamped from the configured panel defaults' — `panel create` has no such flag. Pre-existing prose left un-thinned; harmless but now internally inconsistent."
+    },
+    {
+      "id": "F3-confidence-surfacing",
+      "severity": "minor",
+      "note": "Old tally tabulation surfaced per-slot `confidence`; `panel tally` prints verdict+hard_block only and no surviving step says to read confidence from the verdict files, yet the kept anti-pattern 'Don't ignore confidence' still requires it. Non-blocking: the anti-pattern preserves the judgment with an implicit read."
+    },
+    {
+      "id": "F4-low-approve-escalation-dropped",
+      "severity": "minor",
+      "note": "The old matrix's 'Flag to the user if ≤2 APPROVE (significant rework)' escalation heuristic was dropped with no home. Such a panel still Blocks on threshold (fail-safe), so only the user-escalation nuance is lost."
+    },
+    {
+      "id": "F5-verified-no-drift",
+      "severity": "info",
+      "note": "Confirmed accurate against the binary: create flag grammar; four stub headings; machine-managed-header contents incl. the single verdict-JSON instruction (renderBriefHeader is the ONE home; skill's second copy gone); hard_block top-level-sibling phrasing; tally exit semantics (Allow 0 / Warn 0+advisory / Block non-zero + ADR-0035 recovery); filename-derived latest round + panel.json.round-mismatch Block; N−1 default and `approve_threshold` panel.json key; re-panel leaving prior verdicts + skill body untouched; abandon as hand edit. Intro-paragraph edit and untouched frontmatter description are appropriate and grep-gate-neutral. Mirror byte-identity and R8 greps pass on both copies."
+    }
+  ]
+}

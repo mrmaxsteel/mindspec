@@ -120,6 +120,18 @@ retirement deferred to a follow-up bead. See the amendment below.
 > (§6), and the hatches (§7) are all UNCHANGED. The layout-v2 decision and the
 > per-artifact three-tier resolver this rides on are recorded in **ADR-0039**.
 
+> **Amendment (2026-07-09, spec 112):** `panel.json` gains one new optional
+> recorded field, `gate` (`json:"gate,omitempty"`) — the gate mix
+> (`spec_approve`/`plan_approve`/`bead`/`final_review`/`adhoc`) the panel
+> was created from, by convention but parse-lenient like `abandon_reason`:
+> an unexpected or absent value never sets `Registration.Err`. This is
+> **decision-inert metadata** in exactly the sense `abandon_reason` is —
+> recorded intent for advisory consumers, never an input to
+> `PanelGateDecision` or `ApproveThreshold()`. §§3/6/8 are **unchanged**:
+> this is not an extension of any rule — the threshold single home,
+> fail-open/fail-closed, and the trust boundary are unaffected by recorded
+> metadata that no decision function reads.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —

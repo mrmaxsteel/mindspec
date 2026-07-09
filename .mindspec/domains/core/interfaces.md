@@ -113,17 +113,78 @@ type Config struct {
 }
 
 type Panel struct {
-    Reviewers        []Reviewer   `yaml:"reviewers"`         // default [{claude,3},{codex,3}]
+    Reviewers        []Reviewer   `yaml:"reviewers"`         // ALL-GATES default; default [{claude,3},{codex,3}]
     ApproveThreshold string       `yaml:"approve_threshold"` // RAW "n-1" or integer string; default "n-1"; never resolved here
     Substitution     Substitution `yaml:"substitution"`
+    // Gates is the optional per-gate override map (spec 112 R1), keyed by
+    // one of PanelGateKeys. Absent and present-but-empty (`gates: {}`) are
+    // EQUIVALENT everywhere — every "gates is configured" predicate keys
+    // off len(Gates) > 0, never key presence. Default: empty (the standing
+    // per-gate protocol below is the documented EXAMPLE, never the
+    // default — DefaultConfig's panel stays 109's 3+3/"n-1").
+    Gates map[string]GatePanel `yaml:"gates"`
+    // Note is optional free-text advisory metadata (spec 112 R1): parsed
+    // and echoed verbatim by `config show`; never read by any validation
+    // or resolver.
+    Note string `yaml:"note"`
 }
+
+// GatePanel is one panel.gates entry: a per-gate override of the reviewer
+// mix and/or approve_threshold. A configured gate must set at least one of
+// the two (Load refuses an entry that sets neither).
+type GatePanel struct {
+    Reviewers        []Reviewer `yaml:"reviewers"`
+    ApproveThreshold string     `yaml:"approve_threshold"` // RAW expression, same grammar as Panel's
+}
+
+// PanelGateKeys is the closed, ordered enum of panel.gates keys (spec 112
+// R1, ADR-0034): {"spec_approve", "plan_approve", "bead", "final_review",
+// "adhoc"}. These name REVIEW EVENTS — deliberately distinct from
+// loop.gate_authority's vocabulary, which names APPROVAL ACTS
+// (bead_merge/impl_approve). Exported: the single source for validation,
+// recovery lines, and config-show's enum-order rendering.
+var PanelGateKeys = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
+
+// Reviewer is one entry of a reviewer mix (global or per-gate). Model and
+// Lens are open-vocabulary strings — NO name-membership validation exists
+// anywhere in Load (spec 112 R1, ADR-0040): model ids are runner-specific
+// and ship faster than any enum could track (e.g. claude-fable-5). Family
+// is the legacy 109 field, still parseable; Model wins for slot expansion
+// when an entry sets both. Count is a POINTER so an absent count (nil) is
+// distinguishable from an explicit `count: 0`/negative: nil resolves to 1
+// via CountValue() (spec 112 R2's one deliberate monotone relaxation over
+// 109, which refused count < 1 wholesale); non-nil non-positive is refused.
 type Reviewer struct {
     Family string `yaml:"family"`
-    Count  int    `yaml:"count"`
+    Model  string `yaml:"model"`
+    Lens   string `yaml:"lens"`
+    Count  *int   `yaml:"count"` // nil -> defaults to 1; explicit <= 0 refused
 }
+
+// CountValue returns the resolved count (nil -> 1). EXPORTED because
+// cmd/mindspec's config-show renderer is an out-of-package consumer (Go
+// forbids a Count() method beside the Count field); every consumer
+// (validation, resolvers, slot expansion, that renderer) goes through this
+// one accessor.
+func (r Reviewer) CountValue() int
+
 type Substitution struct {
-    ClaudeSubOnQuota bool `yaml:"claude_sub_on_quota"` // default true
+    ClaudeSubOnQuota bool `yaml:"claude_sub_on_quota"` // default true; INERT while Substitutes is non-empty
+    // Substitutes is the model-level, one-step substitution map (spec 112
+    // R5): unavailable-model -> substitute-model, both non-empty and
+    // key != value (chains are not followed; a mutual A<->B pair is
+    // legal). Global, not per-gate. Non-empty Substitutes IS the
+    // substitution policy and supersedes ClaudeSubOnQuota; empty means
+    // ClaudeSubOnQuota keeps its 109 meaning.
+    Substitutes map[string]string `yaml:"substitutes"`
 }
+
+// KnownModels returns a copy of the curated, deliberately non-exhaustive
+// advisory model-id list (spec 112 R8) — seeded with claude-fable-5,
+// claude-opus-4-8, claude-sonnet-5, gpt-5.5, claude, codex. Consumed ONLY
+// by `config show`'s warning annotation; NEVER by Load or
+// validateOrchestration — an unseeded id must never fail to load.
+func KnownModels() []string
 
 // Loop is the orchestration-loop governance skeleton (research §3.2 L3 /
 // §3.3). Every key is parsed, defaulted, validated, and surfaced — none is
@@ -157,11 +218,96 @@ type LoopContext struct {
 // values the spec-110 panel.json writer stamps as a fresh panel's defaults.
 func (c *Config) PanelExpectedReviewers() int
 func (c *Config) PanelApproveThresholdExpr() string
+
+// ReviewerSlot is one expanded reviewer position (spec 112 R3):
+// deterministic, declaration-ordered, ids "R1".."Rn".
+type ReviewerSlot struct {
+    Slot  string
+    Model string
+    Lens  string
+}
+
+// Gate-scoped resolvers (spec 112 R3) — the creation-time-default surface
+// the spec-110 panel.json writer and ms-panel-run step 0 consume; NOTHING
+// reads these at gate-decision time (internal/panel stays the sole
+// decision authority, ADR-0037). Each returns an error for a gate name
+// outside PanelGateKeys (fail loud on a caller typo, never silently fall
+// back to defaults). Resolution walks a PER-FIELD chain — reviewers and
+// approve_threshold resolve independently: the gate's own configured value
+// -> (for "adhoc" only) "bead"'s resolved value -> the global
+// reviewers/approve_threshold -> the built-in 3+3/"n-1" default.
+// PanelGateApproveThresholdExpr returns the RAW expression, NEVER a
+// resolved integer — resolution to an int stays single-homed in
+// internal/panel.Panel.ApproveThreshold (ADR-0037 §3).
+func (c *Config) PanelGateExpectedReviewers(gate string) (int, error)
+func (c *Config) PanelGateApproveThresholdExpr(gate string) (string, error)
+func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error)
+
+// PanelGateAdvisoryDefault is the single-home selection rule (spec 112 R7)
+// both cmd/mindspec's `config show` and internal/complete's panel advisory
+// resolve through, so the two callers cannot drift. recordedGate is a
+// panel.json Panel.Gate value (possibly empty or outside PanelGateKeys);
+// isBead is Panel.IsBead(). Returns (0, false) when the advisory must be
+// SKIPPED. Selection: len(Gates) == 0 -> (PanelExpectedReviewers(), true)
+// always; a known recordedGate -> that gate's PanelGateExpectedReviewers;
+// an empty recordedGate with isBead -> the "bead" gate's; anything else
+// (non-bead with no recorded gate, or an unknown recorded value) ->
+// (0, false). Never calls a gate-scoped resolver with a value outside
+// PanelGateKeys, so no resolver error can surface through this helper.
+func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool)
 ```
+
+**Deterministic slot expansion** (spec 112 R3): `PanelGateReviewerSlots` flattens a gate's resolved reviewer list into slots `"R1".."Rn"` in declaration order, expanding each entry's `CountValue()`. An entry's explicit `lens` applies to every slot it produces and does NOT advance the default-lens cursor. A lens-less slot takes `defaultLenses[cursor % 6]` from the interleaved ordering `author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration` (structural/sharp alternating); **one global cursor per expansion, starting at index 0**, advances only over lens-less slots. Normative worked example — a 9-reviewer, all-lens-less, 3-entries-of-`count: 3` panel expands to exactly: `R1` author-of-record, `R2` empirical-prober, `R3` codebase-pin, `R4` adversarial, `R5` contract-stability, `R6` integration, `R7` author-of-record, `R8` empirical-prober, `R9` codebase-pin.
 
 `Load` refuses (guard-style error with a `recovery: <command>` line, ADR-0035), and never panics, on: a `panel_skip` key anywhere under `loop.gate_authority` (panel-skip is permanently human, `MINDSPEC_SKIP_PANEL` is env-only, ADR-0037 §7); a `loop.halt.on_reject` other than `halt`; a `gate_authority` value outside `{panel, human}`; a `controller_handoff` outside `{per-spec, at-usage-threshold}`; an unknown `runner`; a `panel.approve_threshold` that is neither `"n-1"` nor an integer in `[1, sum(reviewers.count)]`; a `reviewers[].count < 1`; or a `sum(reviewers.count) < 2` (both close the threshold-skip loophole from the reviewer side, since a single-reviewer panel makes the default `"n-1"` resolve to an always-pass `0`). An absent/empty `panel:`/`models:`/`loop:`/`runner:` block round-trips to its documented default.
 
-Used by workflow: `internal/panel` stays a config-free leaf and never imports this package — its callers resolve `PanelExpectedReviewers()`/`PanelApproveThresholdExpr()` here and pass plain values in. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render those resolved values alongside `panel.ReviewerCountNote`.
+**Per-gate refusals (spec 112 R4)**, same guard-style/never-panic contract: a `panel.gates` key outside `PanelGateKeys` (the recovery line enumerates all five valid keys and disambiguates from `loop.gate_authority`'s different vocabulary); a configured gate entry setting neither `reviewers` nor `approve_threshold`; a reviewer entry (global or per-gate) with neither `model` nor `family`; an explicit non-positive `count` (`Count != nil && *Count < 1`; an ABSENT count is fine, defaulting to 1); a per-gate `reviewers` list whose expanded sum is `< 2`; a per-gate or INHERITED `approve_threshold` that is neither `"n-1"` nor an integer in `[1, that gate's resolved reviewer sum]` — checked at every link of the `adhoc` -> `bead` -> global inheritance chain, so a global integer valid for the global sum but out of range for a smaller inheriting gate is refused, and likewise a `bead` integer threshold inherited through `adhoc` by a smaller reviewers-only `adhoc` gate; and a `substitutes` entry with an empty key or value, or key == value. **No model or lens name-membership check exists on any `Load` path** — an unknown model id alone never errors; the curated `KnownModels()` list drives only a `config show` warning (a later bead).
+
+Used by workflow: `internal/panel` stays a config-free leaf and never imports this package — its callers resolve `PanelExpectedReviewers()`/`PanelApproveThresholdExpr()`/the gate-scoped resolvers here and pass plain values in. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render those resolved values alongside `panel.ReviewerCountNote`.
+
+### Per-gate panel config example (spec 112)
+
+The operator's standing review protocol (rev 2026-07-07) is the DOCUMENTED EXAMPLE for `panel.gates` — never the shipped default (`DefaultConfig` stays 109's 3+3/`"n-1"` with `gates`/`substitutes` empty). An operator commits this shape to their own `.mindspec/config.yaml` to enable it:
+
+```yaml
+panel:
+  note: "fable-window 2026-07, codex-enabled"   # optional free-text; echoed by `config show`, never consumed
+  reviewers:                       # 109 global list — the default for any gate not configured below
+    - {family: claude, count: 3}
+    - {family: codex, count: 3}
+  approve_threshold: "n-1"
+  substitution:
+    claude_sub_on_quota: true      # legacy family-level knob; superseded while substitutes is non-empty
+    substitutes:
+      gpt-5.5: claude-sonnet-5     # quota wall -> Sonnet, slot id kept: reviewer_id "R7 claude-sonnet-5-sub"
+  gates:
+    spec_approve:                  # 9 reviewers, pass >= 8 ("n-1")
+      reviewers:
+        - {model: claude-fable-5, count: 3}
+        - {model: claude-opus-4-8, count: 3}
+        - {model: gpt-5.5, count: 3}
+    plan_approve:                  # same 9-reviewer mix as spec_approve
+      reviewers:
+        - {model: claude-fable-5, count: 3}
+        - {model: claude-opus-4-8, count: 3}
+        - {model: gpt-5.5, count: 3}
+    bead:                          # 6 reviewers, pass >= 5; exploded form with explicit lenses
+      reviewers:
+        - {model: claude-opus-4-8, lens: author-of-record}
+        - {model: claude-opus-4-8, lens: codebase-pin}
+        - {model: claude-opus-4-8, lens: contract-stability}
+        - {model: claude-sonnet-5, lens: empirical-prober}
+        - {model: claude-sonnet-5, lens: adversarial}
+        - {model: claude-sonnet-5, lens: integration}
+    final_review:                  # 12 reviewers, pass >= 11
+      reviewers:
+        - {model: claude-fable-5, count: 3}
+        - {model: claude-opus-4-8, count: 3}
+        - {model: gpt-5.5, count: 3}
+        - {model: claude-sonnet-5, count: 3}
+      approve_threshold: "11"      # equals "n-1" for N=12; explicit for illustration
+    # adhoc: absent -> resolves to bead's mix
+```
 
 ## Consumed Interfaces
 

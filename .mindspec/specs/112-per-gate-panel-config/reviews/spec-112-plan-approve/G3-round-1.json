@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Bead 3 delivers the downstream contract R9 needs: `config show --gate <name> --json` is backed by typed `encoding/json`, delegates to the R3 resolvers, emits the pinned top-level members, and documents the additive-only schema plus the recorded `panel.json` `gate` field. Determinism is explicitly covered: configured gates render in the R1 enum order, substitute maps render sorted in text, and JSON map keys are pinned by `encoding/json`. The plan's `substitution.in_force` resolution is sound for machine consumers because it names the active policy with a closed two-value enum and ties it directly to R5's supersession rule: non-empty `substitutes` wins; otherwise `claude_sub_on_quota` remains active. Scope is clean: 112 exposes resolvers, JSON, docs, advisory selection, and the decision-inert field, while explicitly excluding 110's writer stamping and 111's runner/substitution consumption.",
+  "concrete_changes_required": [],
+  "findings": []
+}

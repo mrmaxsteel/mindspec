@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "Every DAG claim verified against the tree at e86082d6. B3's root status is real: PanelGateDecision/ResolveGateFacts exist on main (internal/panel/gate.go:131,349) and every PanelStateEntry consumer lives in internal/instruct/panelstate.go. B4<-B1 is a genuine compile edge (panel.Create is new; no Go code writes panel.json today); B5<-B4 is behaviorally real. Root doc-sync is disjoint as claimed (interfaces/architecture/overview all exist, distinct; runbook untouched; skill mirrors byte-identical today). ValidateSpec's two callers (cmd/mindspec/validate.go:32, internal/approve/spec.go:47) are both covered by B2's gates without source edits. The 112-overlap claim checks out at function level: 112 edits config.go/panel.go/complete/config.go(cmd), 110's panel+cmd work is new files, and 112 retains PanelExpectedReviewers()/PanelApproveThresholdExpr() with unchanged semantics. Remaining findings are minor footprint/gate-scope notes, none blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "low",
+      "title": "B4's real footprint includes cmd/mindspec/root.go and help_golden_test.go, absent from key_file_paths",
+      "detail": "Top-level cobra commands register centrally in cmd/mindspec/root.go's init (root.go:216-230), and help_golden_test.go pins `mindspec --help` output, so a new `panel` parent command forces edits to both. Neither is in B4's key_file_paths. No cross-spec hazard — 112 touches cmd/mindspec/config.go, never root.go — and B4's whole-package `go test ./cmd/mindspec` will force the golden update, so this is a scoping-accuracy note, not a collision."
+    },
+    {
+      "id": "F2-2",
+      "severity": "low",
+      "title": "B4 edits the file TestPanelSchemaDoc_MatchesConstants pins but never re-runs that test",
+      "detail": "B4 appends its CLI region to .mindspec/domains/workflow/interfaces.md, the file B1's TestPanelSchemaDoc_MatchesConstants reads. B4's per-bead gate runs only ./cmd/mindspec, so a clobbered B1 schema region would surface only at the pre-impl-approve full `go test ./...`. Cheap hardening: add `go test ./internal/panel -run 'TestPanelSchemaDoc_MatchesConstants$'` to B4's verification. The append itself cannot break the test's contains-style assertions, so this is a guard against accidental region rewrite, not an expected failure."
+    },
+    {
+      "id": "F2-3",
+      "severity": "info",
+      "title": "Cross-spec file-level overlap in domain docs, benign under the stated sequencing",
+      "detail": "112's beads edit workflow/interfaces.md (its B1, B3) and workflow/architecture.md (its B2, B3) — the same files 110's B1/B4 and B2 edit. The §Risks 'no shared edited function' claim is true, and 'clean fast-forward on every 110-owned path' holds because at rebase time the 110 branch carries no domain-doc edits (beads unimplemented). But that sentence silently assumes 112 fully lands first; if a 110 bead interleaves mid-112, same-file doc appends could textual-conflict (trivially resolvable, append regions). Worth one clause in §Risks, not a plan change."
+    },
+    {
+      "id": "F2-4",
+      "severity": "info",
+      "title": "Verified: B3 root claim, edge realness, and 112 resolver survival",
+      "detail": "PanelGateDecision/ResolveGateFacts confirmed on main proper via `git grep main`; PanelStateEntry has zero consumers outside internal/instruct; panel.Create and cmd/mindspec/panel.go are genuinely new (no existing Panel marshaller, no existing `panel` command); 112's plan keeps PanelExpectedReviewers()/PanelApproveThresholdExpr() (internals re-plumbed through CountValue(), signature and meaning unchanged) and its sole external Reviewer.Count reader fix is cmd/mindspec/config.go, which 110 never edits; 112's `gate` field is decision-inert per its own ADR-0037 bullet. No missing edge found: B2 uses only pre-existing validate helpers (normalizeImpactedDomains, parseSections, adrStoreForSpecFn/newMemoStore all present), and B4 needs nothing from B2/B3."
+    }
+  ]
+}

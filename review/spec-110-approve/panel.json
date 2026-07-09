@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "110-panel-verbs-parser-parity",
+  "target": "spec/110-panel-verbs-parser-parity",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "0c6c56699806f2dbf8299e87b78db67d277c2107"
+}

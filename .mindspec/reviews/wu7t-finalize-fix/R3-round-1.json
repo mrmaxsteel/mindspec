@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Contract-stability & ordering lens all clear. (a) TestApproveImplCallOrder is invariant: the only ApproveImpl-body change is `result.FinalizeBranch = fr.FinalizeBranch` — an assignment (not a CallExpr), placed after FinalizeEpic and after the override write; none of the 8 anchored calls nor the override-after-FinalizeEpic assertion move. Test passes. (b) Dolt contains the closes at export time: ApproveImpl closes the epic (MUTATION 1/3, impl.go:344) and marks done (2/3) BEFORE calling exec.FinalizeEpic (3/3, impl.go:372); bead closes landed earlier in their cycles. The orphan commit routes through commitWithExport(wtPath)→execBeadExportFn=bead.Export, which reads live Dolt, so the temp-worktree finalize commit necessarily carries the closes. (c) Orphan create+commit+PUSH (mindspec_executor.go:470-476, push at 606) sits inside the HasRemote block, strictly BEFORE the worktree/branch cleanup block (503-554); within the helper the push precedes the deferred worktree removal — a cleanup failure cannot strand the finalize. (d) FinalizeBranch is additive-only: no DeepEqual/positional literals on FinalizeResult; all literals are named-field; consumers only read/return it. (e) guardMergeLayout unchanged — 3 sites intact (bead->spec L299, FinalizeEpic auto-merge L399, direct spec->main L498); the orphan path does no regression merge into main so needs no guard. (f) Direct path byte-identical: all hunks live in the HasRemote/pr block or the read-only preFinalizeTip capture; the direct-merge else-branch, its guard, and cleanup merge are untouched; TestFinalizeEpic_* suite unmodified and green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-1",
+      "severity": "info",
+      "title": "TestApproveImplCallOrder unaffected — FinalizeEpic-internal change is invisible to it",
+      "detail": "The AST-anchored ordering test walks ApproveImpl for 8 CallExprs + the implMergeMetadataFn override-after-FinalizeEpic rule. The diff to ApproveImpl adds only `result.FinalizeBranch = fr.FinalizeBranch` (impl.go:420) — a field-selector assignment, not a matching CallExpr — after FinalizeEpic and after all override writes. Anchor order and override placement are preserved. Verified: `go test ./internal/approve -run TestApproveImplCallOrder` PASS."
+    },
+    {
+      "id": "R3-2",
+      "severity": "info",
+      "title": "Dolt closes precede FinalizeEpic; temp-worktree export carries them",
+      "detail": "ApproveImpl MUTATION 1/3 (implRunBDCombinedFn close, impl.go:344) + 2/3 phase=done run before MUTATION 3/3 exec.FinalizeEpic (impl.go:372). finalizeOrphanedSpecBranch's commitWithExport(wtPath) sets exportDir=wtPath and calls execBeadExportFn (=bead.Export), which re-exports live Dolt state into the temp worktree's .beads/issues.jsonl before CommitAll. Since the epic close already mutated Dolt, the from-main finalize commit necessarily contains the closes — the whole point of the fix."
+    },
+    {
+      "id": "R3-3",
+      "severity": "info",
+      "title": "Orphan finalize push ordered before cleanup — no strand on cleanup failure",
+      "detail": "finalizeOrphanedSpecBranch (create branch from origin/main, temp worktree, commit, PushBranch at :606) is invoked at mindspec_executor.go:470-476 inside the HasRemote block. The worktree/branch-removal cleanup block runs at 503-554, strictly after. Inside the helper the push completes before the deferred WorktreeRemoveForce fires, and a remove failure is a warning only. A cleanup failure therefore cannot un-land the pushed finalize branch. Idempotent on retry: a stale local chore/finalize-<specID> is deleted before CreateBranch (:578-582)."
+    },
+    {
+      "id": "R3-4",
+      "severity": "info",
+      "title": "FinalizeResult.FinalizeBranch is additive-only across all consumers",
+      "detail": "Consumers: ApproveImpl reads fr.FinalizeBranch (assign-through); MockExecutor returns the configured FinalizeEpicResult; cmd/mindspec implApproveTail reads ImplResult.FinalizeBranch; tests set FinalizeEpicResult via named-field literals only. No positional FinalizeResult literal and no reflect.DeepEqual/== over the whole struct exist, so the zero-valued new field breaks nothing. Full approve/executor/gitutil/workspace/cmd packages PASS."
+    },
+    {
+      "id": "R3-5",
+      "severity": "info",
+      "title": "guardMergeLayout coverage identical on both paths",
+      "detail": "Three call sites remain (bead->spec CompleteBead :299; FinalizeEpic bead->spec auto-merge :399; direct spec->main :498 gated on MergeStrategy==\"direct\"). The orphan path performs no regression merge into main — it builds a fresh branch from origin/main and commits an export-only delta, so its layout equals origin/main's; a later reviewer PR is main-layout->main. No guard is needed or bypassed. The remote/pr path never local-merges to main, exactly as before."
+    },
+    {
+      "id": "R3-6",
+      "severity": "low",
+      "title": "Spec-branch push failure after a successful orphan push discards the NOTE (retry-safe, non-blocking)",
+      "detail": "In the orphaned case, if finalizeOrphanedSpecBranch succeeds (branch pushed, result.FinalizeBranch set at :475) but the subsequent PushBranch(specBranch) at :482 fails, FinalizeEpic returns (result, err); ApproveImpl maps any FinalizeEpic error to (nil, err) (impl.go:373-375), so implApproveTail's NOTE never prints. Net effect: the finalize branch is still safely on the remote (the P1 strand/silent-revert is fixed), impl-approve exits non-zero, and a re-run re-detects the orphan, clears the stale local branch, and re-pushes idempotently. So this is a cosmetic loss of the one-time NOTE on a narrow failure, not a correctness or stranding regression. No change required; optionally worth a follow-up to surface the finalize branch on that error path."
+    }
+  ]
+}

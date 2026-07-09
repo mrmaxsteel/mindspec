@@ -73,6 +73,22 @@ type Panel struct {
 	// pre-existing panel.json, which omits this field entirely. See
 	// ApproveThreshold, the sole interpreter of this expression.
 	ApproveThresholdExpr string `json:"approve_threshold,omitempty"`
+
+	// Gate records which gate mix the panel was created from — a value
+	// drawn from the five-key enum (spec_approve/plan_approve/bead/
+	// final_review/adhoc, internal/config's panel.gates keys) BY
+	// CONVENTION but parse-lenient like AbandonReason: an unexpected or
+	// absent value is a consumer's concern, never a parse error here
+	// (flagging it malformed would set Registration.Err and tip the gate
+	// toward fail-open, the wrong direction). Gate is DECISION-INERT
+	// (ADR-0037 §1, amended 2026-07-09 spec 112): PanelGateDecision and
+	// ApproveThreshold() never read it, so its presence, absence, or value
+	// changes no Allow/Block outcome and no threshold. It is stamped by the
+	// spec-110 panel writer (until then /ms-panel-run step 0 may hand-write
+	// it); absence costs nothing. Name ("gate"), type (string), omitempty,
+	// and parse-lenience are a STABLE CONTRACT (spec 112 R9) — no follow-up
+	// may change any of the four silently.
+	Gate string `json:"gate,omitempty"`
 }
 
 // ApproveThreshold is the single home of the panel-approval threshold rule

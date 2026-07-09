@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Re-verified at 2809c8a6. My round-1 nits: (a) jq slot-count proof ADDRESSED — `jq '.slots | length'`=12 and `jq -r .approve_threshold`=11 replace both compact-JSON-fragile greps; jq is already required by the adjacent adhoc≡bead check, no new tooling. (b) cmd-side gate-aware coverage ADDRESSED — TestConfigShow_ReviewerCountNoteGateAware pins the gates-configured panel-scan path with a genuinely falsifying case (count matches the bead gate but not the global default → NO note; unwired 109 compare emits one), with its own PASS-line grep folded into the AC7 row. (c) R2 anchor (info nit) fixed beyond ask — the note string exists only via the Goal YAML. Provenance regression: none — 17 rows both rounds, only AC7/12-slot/R2 rows strengthened, R1–R9→bead map intact. Independently verified: config.go:149 is the sole external Reviewer.Count consumer (report.go's r.Count is the journal-report struct); TestConfigShow_EmitsPanelModelsLoop asserts 'count: 3', so Bead 1's new `go test ./cmd/mindspec` gate falsifies a skipped deref; workflow OWNERSHIP.yaml covers cmd/**; zero stale panelGateKeys references.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "ADDRESSED",
+      "title": "Round-1 nit (a): protocol-YAML 12-slot proof now jq-structural",
+      "detail": "Bead 3's protocol-YAML proof now uses `jq '.slots | length'` compared to \"12\" and `jq -r '.approve_threshold'` compared to \"11\" — both robust to encoding/json compact output that would have false-failed `grep -c '\"slot\"'` (line-count semantics) and the spaced-substring threshold grep. The Validation-Proof Provenance row's command as-written now proves its claim. Shell semantics checked: command substitution strips the trailing newline, jq -r strips quotes."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "ADDRESSED",
+      "title": "Round-1 nit (b): cmd/mindspec advisory caller now has a falsifying gates-configured test",
+      "detail": "TestConfigShow_ReviewerCountNoteGateAware (Bead 3 step 6 + dedicated PASS-line Verification grep, cited in the AC7 Provenance row) drives the full config show panel-scan path over a temp root with gates: configured. The pinned case — a bead panel whose recorded count equals the configured bead gate's default but differs from the global default emitting NO note — FAILS against unwired 109 code (which compares globally and would emit the note), so a skipped step-2 wiring can no longer go green. The diagnosis that the pre-existing TestConfigShow_ReviewerCountNoteWhenPanelDiffers runs gates-absent is correct by construction (gates do not exist pre-112)."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "ADDRESSED",
+      "title": "Round-1 nit (c/info): R2 doc-example grep anchor strengthened",
+      "detail": "The R2 row now greps `fable-window 2026-07, codex-enabled` in core/interfaces.md — verified present in the spec Goal YAML (spec.md line 16) and reachable in interfaces.md only by reproducing the standing-protocol example, so a known-model seed list alone cannot satisfy it. My round-1 finding said no change required; the fix went beyond ask."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "NO_REGRESSION",
+      "title": "Fix delta introduces no coverage or provenance regression",
+      "detail": "Provenance table has identical row structure across e06c0b76..2809c8a6 (12 ACs + 3 Validation Proofs + R2 + R9); only three rows were edited, all strengthening. New Bead 1 items are additive gates, and their load-bearing factual claims verify against the tree at the pinned SHA: cmd/mindspec/config.go:149 (`fmt.Fprintf(&b, \"      count: %d\\n\", r.Count)`) is the sole external Reviewer.Count consumer — cmd/mindspec/report.go's r.Count is the journal-report struct (internal/journal/reports.go), correctly fenced off. TestConfigShow_EmitsPanelModelsLoop asserts strings.Contains(out, \"count: 3\"), so `%d` on the new *int (which passes build and vet) fails Bead 1's new `go test ./cmd/mindspec` gate — the falsification claim is real, not asserted. workflow/OWNERSHIP.yaml line 19 covers cmd/**, grounding the doc-sync ride-along; Bead 1 (interfaces.md) and parallel Bead 2 (architecture.md) stay file-disjoint. PanelGateKeys export is consistent: zero stale panelGateKeys references remain in the plan. R5's reporting-half parenthetical clarifies, not moves, coverage — substitution.in_force already traced through Bead 3's AC9 row."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Full trace done at e06c0b76. Requirements: R1-R5 -> Bead 1, R6 -> Bead 2, R7-R9 -> Bead 3; every requirement has a delivering bead and every falsification clause maps to a named test or structural check (leaf invariant covers R3/R5's 'never an input to PanelGateDecision'). All 12 spec ACs appear in the Provenance table with runnable, anchored PASS-line greps whose test names match the spec's AC names exactly (all 10 test-named ACs verified string-for-string; AC11's go-list + gate.go greps in Bead 2, re-asserted Bead 3; AC12 via per-bead package tests plus the plan-time/pre-impl-approve full regression). All 7 Validation Proof bullets trace: 1-3 via the AC test rows, 4-5 via Bead 3's protocol-YAML proof (sums 9/9/6/12, final_review '11', adhoc==bead jq slots equality), 6 via Bead 2's ADR amendment greps including the count-higher-than-parent check, 7 via every bead's go build. Three advisory-grade verification-fidelity nits (findings below) - none is a coverage hole: each load-bearing fact still has a delivering bead, and the weakest proof (final_review 12 slots) is a one-line command fix, not a plan defect.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "hard_block": false,
+      "title": "Protocol-YAML proof's 12-slot grep assumes indented JSON",
+      "detail": "Bead 3 verification uses `/tmp/ms112 config show --gate final_review --json | /usr/bin/grep -c '\"slot\"'` expecting `12`, and greps for `\"approve_threshold\": \"11\"` (space after colon). Both assume json.MarshalIndent-style multi-line output; plan step 5 only pins `encoding/json`, and compact json.Marshal puts everything on one line, making grep -c (which counts LINES) print 1 and false-fail a correct implementation. Since jq is already used in the adjacent adhoc==bead check, prefer `jq '.slots | length'` prints 12 and `jq -r .approve_threshold` = '11'. The 12-slot final_review fact has no other independent proving test, so this is the one Provenance row whose command as-written may not prove its claim."
+    },
+    {
+      "severity": "minor",
+      "hard_block": false,
+      "title": "cmd/mindspec advisory call site (reviewerCountNotesFor) has no named test row",
+      "detail": "Validation Proof 3 claims 'both caller-side surfaces are gate-aware', but TestPanelAdvisory_GateAwareCompare covers only internal/complete, and TestConfigShow_GatesSubstitutesAndModelAdvisory's described scenarios don't include a panel reviewer-count-note case. The risk is well mitigated (selection rule single-homed in PanelGateAdvisoryDefault with its own Bead 1 test, both callers delegate), but the Bead 3 step 2 wiring (passing reg.Panel.Gate/IsBead, skipping on !ok) is unverified by any listed runnable step. Suggest one panel-scan row in the cmd/mindspec test."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "R2 doc-example grep anchor is weak",
+      "detail": "The R2 Provenance row's proof is `/usr/bin/grep -q 'claude-fable-5' .mindspec/domains/core/interfaces.md`, which would also pass if only the known-model seed list were documented without the standing-protocol example YAML. Step 7's instruction is explicit so delivery is not in doubt; a gate-key anchor (e.g. grep for 'final_review:') would bind the check to the example itself. No change required."
+    }
+  ]
+}

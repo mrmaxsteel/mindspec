@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Both round-1 asks are ADDRESSED with concrete, verified evidence, not just prose. (1) The 'never hand-edited' claim in interfaces.md is replaced with an accurate steady-state/pre-Bead-4 split plus an explicit carve-out for the /ms-panel-tally Abandon procedure's sanctioned hand-edit -- verified against the live /ms-panel-run skill (still hand-authors today) and ms-panel-tally SKILL.md §4 (abandon-by-hand, unchanged by this spec). (2) The overwrite-asymmetry is now documented in both create.go's Create docstring and interfaces.md, and genuinely pinned by TestCreate_RepanelOfAbandonedPanelRevivesIt, which hand-sets abandoned/abandon_reason via the real Abandon-procedure shape, calls the real Create() for round 2, and asserts both fields come back cleared plus round/SHA co-bumped -- I ran it (and the full internal/panel suite) and it passes; this is a real pin against Create's actual code path, not a mock. My round-1 marshaling and marker-splice-arithmetic findings still hold: findMarkerLines now returns line-start offsets instead of raw substring indices, but since a genuine marker always occupies its ENTIRE line, offset==marker-start is unchanged, so closeIdx/closeEnd math in spliceBriefHeader is unaffected by the refactor (verified by trace + passing crlf_body_preserved and the new fenced_quote_of_marker_preserved tests). The doc's rewritten verdict-payload paragraph also now matches tally.go's real parsing (non-enum strings count present-but-neutral; empty/invalid counts missing) exactly as I re-verified against the source. Build clean, git status clean.",
+  "concrete_changes_required": [],
+  "disposition": [
+    {
+      "round1_item": "S2.1 -- 'never hand-edited' claim in interfaces.md was inaccurate (no panel-create CLI exists yet; /ms-panel-run hand-authors panel.json today; ms-panel-tally's abandon procedure hand-edits it permanently)",
+      "status": "ADDRESSED",
+      "evidence": "interfaces.md § Panel Artifact Schema now reads: steady-state (Bead 4 onward) panel.Create is the sole writer in full; before Bead 4, /ms-panel-run step 0 hand-authors it; the one SANCTIONED hand-edit path in either era is /ms-panel-tally's Abandon procedure setting abandoned/abandon_reason. This matches the live skill files exactly -- checked plugins/mindspec/skills/ms-panel-run/SKILL.md (still hand-writes panel.json) and ms-panel-tally/SKILL.md §4 (abandon-by-hand) again at c9f54530; neither changed, so the doc's new claim is accurate against both."
+    },
+    {
+      "round1_item": "S2.2 -- Create() never reads the existing panel.json before overwriting, so a re-panel would silently clear a hand-set abandoned/abandon_reason with no doc or test coverage of the asymmetry",
+      "status": "ADDRESSED",
+      "evidence": "create.go's Create docstring (lines ~84-97) and interfaces.md's Registration paragraph both now state the full-struct-overwrite behavior and its consequence explicitly, naming TestCreate_RepanelOfAbandonedPanelRevivesIt. That test (internal/panel/create_test.go) creates round 1, hand-sets abandoned=true/abandon_reason via the real Abandon-procedure shape (read panel.json, mutate, write back -- not a fixture bypassing Create), calls Create again for round 2, and asserts abandoned==false, abandon_reason==\"\", Round==2, and the new SHA. Ran it directly: PASS. This is a real behavioral pin, not documentation-only."
+    }
+  ],
+  "findings": [
+    {
+      "area": "marker-splice index arithmetic (regression check)",
+      "severity": "info",
+      "detail": "spliceBriefHeader's openIdx/closeIdx/closeEnd computation is unchanged in form (closeEnd = closeIdx + len(briefHeaderClose); before/after slice at those offsets); the only change is that opens[0]/closes[0] now come from findMarkerLines' line-scoped offsets rather than strings.Index's raw substring offsets. Since findMarkerLines only records a match when a line's content is EXACTLY the marker (no leading/trailing text), the line-start offset is always identical to the marker's own start offset, so no arithmetic drift was introduced. Verified via trace plus passing crlf_body_preserved and fenced_quote_of_marker_preserved tests (both round-trip byte-identical bodies, including CRLF, through the new code path)."
+    },
+    {
+      "area": "verdict-payload doc accuracy (cross-check, not my round-1 ask but in-lens)",
+      "severity": "info",
+      "detail": "The rewritten 'Verdict JSON payload' paragraph's claim that any non-enum non-empty verdict string 'parses as present... but is neither an APPROVE nor a REJECT' and that empty/invalid JSON 'counts as MISSING' was re-checked directly against internal/panel/tally.go's Tally(): confirmed exact match (TrimSpace==\"\" or unmarshal error -> Malformed; otherwise appended to Verdicts and switched only on VerdictApprove/VerdictReject). Accurate."
+    },
+    {
+      "area": "fence-state interaction (speculative, not verified as a live bug)",
+      "severity": "info",
+      "detail": "scanNonFenceLines toggles a single inFence bool on any trimmed line starting with a triple-backtick, scanning start-to-end of the whole existing BRIEF.md. Because Create's real headers always sit at the top of the file (before any skill-authored body), a genuine marker can never itself land after an unclosed fence in practice -- I could not construct a realistic path to a false 'legacy' or false-negative lookalike detection through this mechanism, and did not spend further time trying since G1's round-2 job already covers hostile fence probes directly. Not raised as a blocking item; flagging only so G1's fence-probe results get read alongside mine."
+    }
+  ]
+}

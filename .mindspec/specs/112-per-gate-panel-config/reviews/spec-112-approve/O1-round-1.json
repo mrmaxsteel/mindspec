@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Grounding/repo-accuracy lens. Every checkable claim about EXISTING tree state at 825f04c5 is accurate: all five ADR domain attributions are exact (0037 workflow,execution; 0035 workflow,execution,core; 0034 workflow; 0023 workflow,git,state; 0039 core,workflow,execution,context-system), titles match, ADR-0037 pins the threshold at internal/panel.Panel.ApproveThreshold (§3) with §8 trust boundary and prior amendments 099/102/106. internal/panel symbols exist (ApproveThreshold, IsBead, PanelGateDecision, Registration.Err); R6's abandon_reason parse-lenient/fail-open analogy is a verbatim match to panel.go:57-66; internal/panel is a config-free fs-only leaf; threshold>0 guard is in gate.go (AC10 holds); harness.Agent, internal/complete, config show all present. Beads kkcw (decision record) and pev1 (candidate 113) match bd show exactly; commit ddd955f1 is the adhoc .mindspec/reviews/ routing verbatim. The 109-surface / ADR-0040 references the spec makes are honestly disclosed as not-yet-landed behind a HARD sequencing prerequisite, matching spec 108's precedent; the spec does not misrepresent the tree. One non-blocking timing note below.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "hard_block": false,
+      "summary": "Review runs BEFORE the spec's own prerequisite is met: at reviewed SHA 825f04c5 the branch is NOT rebased onto a 109-merged main. 109's spec dir (.mindspec/specs/109-orchestration-config-substrate/), ADR-0040-orchestration-layering-ratchet.md, and 109's config surface (internal/config.Panel, PanelExpectedReviewers, PanelApproveThresholdExpr, ReviewerCountNote) are all ABSENT. Consequently the 109 requirement-number refs (R2/R3/R4/R5/R6/R7/R8/R9/R10, AC7 fixture) and ADR-0040 §3 (harness.Agent counter-example) cannot be independently verified here and MUST be re-verified at plan time post-rebase. This is a process/timing observation, NOT a defect in spec 112 (which correctly encodes the prerequisite in Background/Approval), so it warrants no change to the spec."
+    },
+    {
+      "hard_block": false,
+      "summary": "The BRIEF's grounding context is inaccurate at this SHA and reviewers should not rely on it: it asserts '109 (JUST MERGED to main)', that 109's landed surface (internal/config.Panel etc.) 'is on main', and that '109's spec is at ../109-orchestration-config-substrate/spec.md (this worktree)'. None of those hold at 825f04c5 (git log shows no 109 merge; only a beads-JSONL export of the 109/110/111 epics landed). Verified-present from the BRIEF's list: domains core/workflow, ADRs 0037/0035/0034/0023/0039, internal/panel.ApproveThreshold, config show. Not present: ADR-0040, internal/config.Panel, PanelExpectedReviewers/PanelApproveThresholdExpr, ReviewerCountNote helper, 109 spec dir."
+    }
+  ]
+}

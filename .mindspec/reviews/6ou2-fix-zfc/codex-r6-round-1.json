@@ -1,0 +1,64 @@
+{
+  "reviewer_id": "R6 codex",
+  "recommended_fix": "enforce+teach short-tag ADR Domain(s); migrate downstream manifests/domains",
+  "zfc_verdict": "COMPLIANT",
+  "confidence": 0.88,
+  "rationale": "Fix 6ou2 by enforcing the contract, not by widening it. ADR-0032 originally accepted short-tag domain identifiers and rejected path-like identifiers; spec 100 amended only the spec Impacted-Domains input path by normalizing unambiguous path entries to declared OWNERSHIP dir names. It did not authorize ADR Domain(s) paths, tuple prose, aliases, hierarchy, or transitive path overlap. The validator should fail ADR Domain(s) tokens that are not declared short-tag domain names, while teaching: create/populate durable domains, put those exact names in spec Impacted Domains and ADR Domain(s), and use paths only as OWNERSHIP claims or spec-side convenience inputs. This is ZFC-clean because it checks declared structured data and avoids parsing free-form ADR strings like `api (lola, tools)`. Lola is currently violating the contract and paying for it with catch-all spec domains plus per-ADR `spec056` churn. Migrating lola to durable short-tag domains is real work, but it retires those workarounds and reduces future overlap traps.",
+  "adr_action": "For recommended enforce+teach: no reversal ADR is needed if ADR-0032 is read with its spec 100 amendment limited to spec.md Impacted-Domains normalization; add a clarifying spec/ADR note only if ambiguity remains. Fix (a) requires amending or superseding ADR-0032 sub-decision 1 and must explicitly reconcile/cite spec 100. If (a) parses free-form ADR Domain(s), it also conflicts with ADR-0036. Fix (b) requires ADR-0032 amendment/supersede for aliases/hierarchy/spec domains and ADR-0036 amendment for OWNERSHIP schema semantics.",
+  "findings": [
+    {
+      "severity": "high",
+      "area": "ADR contract",
+      "issue": "Fix (a) path-overlap reverses ADR-0032's accepted short-tag/exact-intersection model; spec 100 only normalized spec-side path inputs to names."
+    },
+    {
+      "severity": "high",
+      "area": "ZFC",
+      "issue": "Resolving ADR-side strings such as `api (lola, tools)` through OWNERSHIP would require free-form semantic parsing unless rejected up front."
+    },
+    {
+      "severity": "high",
+      "area": "delivery vehicle",
+      "issue": "This warrants a MindSpec spec, not a quick bug-fix branch: it changes gate semantics, diagnostics, migration behavior, and potentially clarifies an Accepted ADR."
+    },
+    {
+      "severity": "medium",
+      "area": "mindspec repo",
+      "issue": "Spot-check: current MindSpec ADR Domain(s) lines use short tags (`workflow`, `validation`, `execution`, `core`); recent specs lead with short-tag domains, so enforce+teach should pass after parser normalization of the first domain token."
+    },
+    {
+      "severity": "high",
+      "area": "lola migration",
+      "issue": "Lola ADRs use path-like and tuple/prose Domain(s), and spec 056 added catch-all `spec056` OWNERSHIP plus per-ADR `spec056`; durable short-tag domains would replace both patterns."
+    },
+    {
+      "severity": "medium",
+      "area": "blast radius",
+      "issue": "Downstreams that copied lola's pattern, or rely on ADR Domain(s) as file paths/prose labels, will need domain taxonomy and OWNERSHIP cleanup."
+    },
+    {
+      "severity": "medium",
+      "area": "migration sequencing",
+      "issue": "Use warn-then-error for syntactic ADR Domain(s) cleanup, but require at least one canonical short tag for coverage now; ignore legacy bad tokens once a valid tag covers the domain."
+    },
+    {
+      "severity": "high",
+      "area": "bead priority",
+      "issue": "The bead framing is right about the namespace mismatch but should reject accommodation fixes; priority should move above normal P2 because it blocks real plan approval and drives ADR churn."
+    }
+  ],
+  "fixes_assessed": {
+    "a": {
+      "verdict": "reject",
+      "why": "Raw path-overlap reverses ADR-0032 and likely smuggles cognition when applied to free-form ADR Domain(s); only declared-glob mechanics are ZFC-clean, but ADR domains are not declared globs."
+    },
+    "b": {
+      "verdict": "reject",
+      "why": "`:: spec` creates a spec-as-domain alias/umbrella, reversing the short-tag contract and baking in the catch-all anti-pattern."
+    },
+    "c": {
+      "verdict": "stopgap",
+      "why": "Warnings can help migration, but loosening the gate alone preserves invalid domains and leaves in-flight specs with unverifiable ADR coverage."
+    }
+  }
+}

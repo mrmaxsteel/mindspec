@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R6 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "The spec is otherwise gate-forward and coherent: 108/109 prerequisites plus rebase-forward are explicit; WA2 keeps contextpack/core/execution read-only while locating parity checks in internal/validate under the workflow domain; the skill-shrink sections are precise; and the planned scope decomposes cleanly into roughly 3-5 beads. The blocker is ADR-0040 handling. The spec says ADR-0040 is prose-only and not cited because it will not exist until 109 merges, but ADR-0040 appears inside the ## ADR Touchpoints section in the ADR-0037 bullet. R6 says spec-approve will resolve each ADR referenced in that section against adr.Store. Under that wording, the spec either accidentally cites ADR-0040 in the exact section that will be scanned, or the check's extraction rule is underspecified. This undermines the prose-not-cited resolution the series depends on.",
+  "concrete_changes_required": [
+    "Remove the ADR-0040 mention from the ## ADR Touchpoints section, including the ADR-0037 bullet, or narrowly specify R6 as resolving only top-level Markdown-linked touchpoint bullets and add an acceptance test proving incidental prose mentions in the section are ignored."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "location": ".mindspec/docs/specs/110-panel-verbs-parser-parity/spec.md:36",
+      "issue": "ADR-0040 appears inside ## ADR Touchpoints despite the spec's prose-not-cited resolution.",
+      "impact": "If R6 resolves every ADR reference in the Touchpoints section, this spec models a failing case before spec 109 lands ADR-0040; if it only resolves linked bullet IDs, the extraction contract is not stated tightly enough."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Built the binary and empirically drove all three verbs against a /tmp scratch git repo (never touching the reviewed worktree). `panel create` stamped expected_reviewers=3 (2 claude + 1 codex) and approve_threshold=\"2\" from the config resolvers, and reviewed_head_sha from the live --target tip via revParseForPanelFn; a --round 2 re-panel co-bumped round+SHA in panel.json while leaving the prior round-1 verdict file byte-identical. `panel verify` wrote nothing (verified via file-list diff before/after) and always exited 0, even while reporting BLOCK for a stale round (1/3 verdicts vs round-2 panel.json) and later for a sub-threshold round (1/3 APPROVE vs threshold 2/3) - matching the spec's 'read-only report is not itself a gate' contract. `panel tally` produced the identical BLOCK message text as verify's report for the same facts (decision-identical), and its exit code tracked Decision.Action, not raw counts: exit 1 on the sub-threshold BLOCK (with a genuine ADR-0035 recovery line), exit 0 once verdicts reached 3/3 APPROVE (PASS). Aggregated concrete_changes_required correctly pulled from both REQUEST_CHANGES files during the sub-threshold run. No defects found in the empirical/contract surface.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "note": "panel create/verify/tally end-to-end happy path confirmed empirically: resolver stamping (expected_reviewers, approve_threshold), reviewed_head_sha capture at write time, round+SHA co-bump on re-panel, prior verdict-file immutability, verify's zero-write/always-exit-0 contract, and tally's Decision.Action-derived exit code (0 on Allow/Warn, non-zero on Block) all behaved exactly as the BRIEF describes.",
+      "severity": "info"
+    }
+  ]
+}

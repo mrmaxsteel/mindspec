@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "Re-ran my round-1 attack empirically against c9f54530 (scratch copy of the package, docPath parameterized): renaming `panel.json` to `registration.json` inside the normative Panel Artifact Schema section now FAILS TestPanelSchemaDoc_MatchesConstants, and the committed negative fixture (TestPanelSchemaDoc_SectionScoped_RejectsRenamedNormativeName) self-constructs that exact attack and catches it against the real doc — my single required change is ADDRESSED. New scoping probes: heading demotion to h4 fails closed; a wrong token outside the section is ignored (intended semantics); prose drift still passes (disclosed design limit, no change was required). The marker-scoping rework holds under re-attack: fenced marker quotes and Target-injection no longer wedge re-panels (post-repanel marker state clean), internal-whitespace mangles reject with neither file touched, CRLF genuine marker lines splice byte-exactly, midline markers degrade to byte-safe legacy prepend, and all round-1 byte-safety/verdict-file probes still pass. Full package suite green at c9f54530, worktree clean. Remaining observations are info-level and byte-safe.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "title": "R1 F1-1 (section-scoping of the drift test): ADDRESSED and verified",
+      "detail": "extractPanelSchemaSection scopes every pin to the '### Panel Artifact Schema' section. Verified empirically: my exact round-1 attacked doc now fails the test; the negative fixture passes on the real doc (attack caught) and its fixture-assumption guards are sound. Fail-closed confirmed for a missing/demoted heading."
+    },
+    {
+      "id": "F1-R2-2",
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "title": "R1 F1-3 (sequential-write divergence): ADDRESSED as documentation, behavior unchanged",
+      "detail": "Docstring now names the panel.json-then-BRIEF sequential writes as a non-crash-atomic, self-healing bound. Re-verified the EACCES probe: error surfaced, panel.json bumped, next Create rewrites both. Consistent with the consolidated round-1 disposition (docs-only, non-blocking)."
+    },
+    {
+      "id": "F1-R2-3",
+      "severity": "info",
+      "disposition": "NEW_ISSUE",
+      "title": "Duplicate 'Panel Artifact Schema' heading is silently ignored",
+      "detail": "extractPanelSchemaSection uses the FIRST heading match; appending a second '### Panel Artifact Schema' section containing a contradictory claim (e.g. `registration.json`) leaves the test green. One-line hardening for a future bead: error when schemaSectionHeadingRE matches more than once. Not blocking — requires a self-inflicted duplicate normative heading."
+    },
+    {
+      "id": "F1-R2-4",
+      "severity": "info",
+      "disposition": "NEW_ISSUE",
+      "title": "Whitespace-mangle net covers internal whitespace only; line-level deviations degrade to legacy prepend",
+      "detail": "markerLookalikeRE is anchored ^<!--...-->$, so trailing spaces after '-->' or a leading indent on BOTH marker lines evade the G1.2 net and take the silent legacy-prepend path (stale header text remains in the body; all bytes preserved). An asymmetric single-line mangle fails closed via the 0/1 count check, and a lookalike coexisting with a genuine pair goes undetected (the net is consulted only in the 0-genuine-markers branch). All variants verified byte-safe; this is the inherent trade-off of G1.1's alone-on-line rule, so info only."
+    },
+    {
+      "id": "F1-R2-5",
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "title": "Round-1 wedges (fenced quote, Target injection) fixed; byte-preservation regressions clean",
+      "detail": "Fenced marker quotes in the skill body no longer jam re-panels and survive byte-identically; a Target containing marker text mid-line no longer wedges the next Create (marker state 1/1 after re-panel). CRLF-terminated genuine marker lines splice byte-exactly (the scanner's \\r strip handles them); midline markers changed from r1-splice to r2-legacy-prepend, byte-safe either way; BOM legacy, empty-BRIEF, and verdict-file-untouched probes (legacy/success/corrupt paths) all still pass. Prose drift in the doc ('N starting at 0') still passes the drift test — the disclosed, accepted limit of token pinning from my round-1 F1-2, which required no change."
+    }
+  ]
+}

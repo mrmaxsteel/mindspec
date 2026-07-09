@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.84,
+  "rationale": "The round-2 plan amendments close the security/robustness gaps I raised. Slug validation is now a shared CLI-boundary check before joins, with traversal and control-byte tests plus create-time rejection of control-bearing bead/target values. BRIEF rewrite semantics now pin legacy, corrupt, duplicated, and CRLF cases with fail-without-touching behavior for corrupt states. Tally's second-pass concrete_changes_required decode is explicitly presentation-only, deterministic on malformed payloads, and isolated from decision/exit. Output injection is addressed through rejection for command/recovery inputs and escaping for newline/control-bearing CCR text.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G2-1",
+      "disposition": "ADDRESSED",
+      "title": "Slug single-path-element validation before filesystem joins",
+      "detail": "The plan now requires shared validatePanelSlug for create/verify/tally before any filepath.Join, rejecting empty, dot, dotdot, slash/backslash, absolute, and control-character slugs. Tests cover traversal, newline/control cases, and no-write behavior."
+    },
+    {
+      "id": "G2-2",
+      "disposition": "ADDRESSED",
+      "title": "BRIEF marker rewrite edge cases and fail-without-touching semantics",
+      "detail": "The Create contract now specifies byte-preserving legacy no-marker repair, CRLF body preservation, and erroring on corrupt/ambiguous marker states before touching panel.json or BRIEF.md. TestCreate_BRIEFMarkerEdgeCases pins no-marker, marker-only-open, duplicated markers, CRLF, and no-write failure behavior."
+    },
+    {
+      "id": "G2-3",
+      "disposition": "ADDRESSED",
+      "title": "Output and recovery-line control-byte safety",
+      "detail": "The plan now rejects control-bearing slugs before output/recovery rendering, rejects control-bearing create --bead/--target values before they can enter panel.json or later gate messages, and requires newline/control bytes in CCR entries to render escaped rather than raw."
+    },
+    {
+      "id": "G2-4",
+      "disposition": "ADDRESSED",
+      "title": "Tally second-pass decode policy cannot affect decision or exit",
+      "detail": "The plan now states malformed JSON, absent keys, and wrong-type concrete_changes_required payloads attribute zero items plus a deterministic advisory, never fatal and never decision-affecting. RunE exit is derived solely from PanelGateDecision's d.Action, with tests covering the real file re-decode path and exit behavior."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "Verified cold, adversarially, with live probes. (1) IO split is sound: for bead panels ResolveGateFacts Tallies ONCE and entry.Tally IS facts.Res, so verdict() consumes the same snapshot the display renders — no double-read; verdict() is pure and its Allow deref of r.Panel is safe (branch-2 blocks nil before branch-10). (2) nil-Panel-nil-PanelErr is NOT string-theory dead: Tally yields it when panel.json vanishes between Scan's glob and Tally's stat (TOCTOU). But in that same race internal/complete's gate (same ResolveGateFacts→Tally→PanelGateDecision path) also Blocks — so fail-closed here is exactly the no-drift charter; old fail-open WAS the drift. Advisory-only blast radius. (3) The 14-row oracle is computed live from the gate; nil_panel row genuinely discriminates the old fail-open branch (panel_err row alone would not); the 4-literal source check backs it. All 11 pinned rows pass unedited (ran them). (4) Allow wording byte-identical to old; two silent gate-aligned decision flips found beyond the pinned rows (probed): abbreviated-SHA match and empty reviewed_head_sha, old Block → now Pass — both are the drift the spec orders removed. Only documented z4ps fails. Scope fence honored.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R7-1",
+      "severity": "info",
+      "title": "nil-Panel path is race-reachable, not literally dead — but Block matches the real gate in the identical race",
+      "detail": "panel.Tally (tally.go:235) leaves Panel=nil, PanelErr=nil when its os.Stat of panel.json fails; Scan guarantees panel.json existed at glob time, so the shape needs panel.json deleted between Scan and Tally (TOCTOU) — 'dead code' slightly overclaims. internal/complete's gate runs the same ResolveGateFacts→Tally sequence and Blocks identically in that race, so the fail-open→fail-closed flip is precisely the preview-equals-gate alignment this bead exists for. Acceptable and in-scope."
+    },
+    {
+      "id": "R7-2",
+      "severity": "minor",
+      "title": "Two additional silent decision-surface changes beyond the disclosed nil-Panel flip — both gate-aligned, neither test-pinned",
+      "detail": "Probed empirically: (a) reviewed_head_sha abbreviated to a prefix of the full live SHA — old exact-!= Blocked (false stale), new shaEqual passes; (b) empty reviewed_head_sha with a live SHA — old Blocked, new falls through to threshold. Both move the preview ONTO PanelGateDecision's answer (the spec's falsification clause requires this), so they are drift-fixes, not defects — but the BRIEF disclosed only the nil-Panel change, and neither has a discriminating test row: a partially re-introduced local staleness branch using exact != with reworded messages would pass all 14 rows and the literal check. Suggest (non-blocking) one abbreviated-SHA row in the delegation table."
+    },
+    {
+      "id": "R7-3",
+      "severity": "minor",
+      "title": "Dead guard with misleading comment in gatherPanelState; unreadable-dir handling now asymmetric bead vs non-bead",
+      "detail": "panelstate.go:279-281: ResolveGateFacts never returns nil Res (it fabricates Result{PanelErr} on Tally error), so `if facts.Res == nil { continue }` is unreachable and its 'same skip as the plain-Tally path' comment is false — an unreadable dir on the bead path now yields a Block entry (gate-aligned, arguably better) while the non-bead path still skips it. Race-window only; cosmetic cleanup candidate."
+    },
+    {
+      "id": "R7-4",
+      "severity": "minor",
+      "title": "Non-bead Block messages now carry RawMergeFence with an empty bead id; multi-line Block messages break bullet indentation",
+      "detail": "Probed: a non-bead (BeadID null) incomplete panel's relayed reason ends with 'Do NOT bypass with raw `git merge bead/`' — empty id, since facts.BeadID stays \"\" and gate.go's fence never fires for non-bead panels in the real gate (ForBead filters them). Also every Block reason now embeds a newline (the fence), which renderPanelState injects into a single '  - %s' bullet, producing an unindented continuation line in instruct --panel-state markdown. Cosmetic, advisory-only; inherent to verbatim relay. Fine to leave or address in a follow-up polish."
+    },
+    {
+      "id": "R7-5",
+      "severity": "info",
+      "title": "Verified: pinned rows, delegation test, budget, and scope fence",
+      "detail": "Both pinned Allow rows plus all 9 other pre-existing TestPanelStateEntry_Verdict rows pass with zero test-file edits (old BLOCK/WARN substrings all survive verbatim inside gate.go's richer messages). The synthesized Allow wording is byte-identical to the old branch. Abandoned/round-mismatch bead panels now skip the rev-parse (ResolveGateFacts short-circuit) — one fewer subprocess, decision unchanged. GateFacts.GitErr is unreachable through the BranchSHAResolver adapter (errBranchGone always satisfies IsRefNotFound), matching the test's stated coverage boundary. Only the documented z4ps TestRun_IdleNoBeads fails; go build/vet clean; commit touches exactly the 3 in-scope files, internal/panel untouched."
+    }
+  ]
+}

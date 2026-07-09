@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,11 +52,11 @@ type Config struct {
 	Runner string            `yaml:"runner"`
 }
 
-// Panel declares the review-panel creation-time defaults (spec 109 R2): the
-// reviewer mix, the approve-threshold expression, and the
-// quota-substitution policy. These seed a fresh panel.json (the spec-110
-// writer); an already-recorded panel's own fields are the sole authority
-// for its gate decision.
+// Panel declares the review-panel creation-time defaults (spec 109 R2,
+// extended by spec 112 R1). Reviewers/ApproveThreshold/Substitution are the
+// ALL-GATES default; Gates overrides them per lifecycle gate. These seed a
+// fresh panel.json (the spec-110 writer); an already-recorded panel's own
+// fields are the sole authority for its gate decision.
 type Panel struct {
 	Reviewers []Reviewer `yaml:"reviewers"`
 	// ApproveThreshold is the RAW expression ("n-1" or an integer string),
@@ -63,17 +64,141 @@ type Panel struct {
 	// internal/panel.Panel.ApproveThreshold; see PanelApproveThresholdExpr.
 	ApproveThreshold string       `yaml:"approve_threshold"`
 	Substitution     Substitution `yaml:"substitution"`
+	// Gates is the optional per-gate override map (spec 112 R1), keyed by
+	// one of PanelGateKeys. Absent or present-but-empty are EQUIVALENT
+	// everywhere in this package and its callers: every "gates is
+	// configured" predicate keys off len(Gates) > 0, never key presence —
+	// `gates: {}` behaves identically to an absent `gates:` key. Left empty
+	// by DefaultConfig; loadUncached backfills it with nothing (absent means
+	// "use the global default", not "use some other default").
+	Gates map[string]GatePanel `yaml:"gates"`
+	// Note is optional free-text advisory metadata (spec 112 R1) — e.g.
+	// "fable-window 2026-07, codex-enabled" — so a point-in-time reviewer
+	// mix can self-document. Parsed and echoed verbatim by `config show`;
+	// never read by any validation or resolver in this package.
+	Note string `yaml:"note"`
 }
 
-// Reviewer is one entry of the panel.reviewers mix.
+// GatePanel is one entry of panel.gates: a per-gate override of the
+// reviewer mix and/or the approve-threshold expression (spec 112 R1). A
+// configured gate must set at least one of the two fields — `Load` refuses
+// an entry that sets neither (R4b).
+type GatePanel struct {
+	Reviewers []Reviewer `yaml:"reviewers"`
+	// ApproveThreshold is the RAW expression, exactly like Panel's; never
+	// resolved here.
+	ApproveThreshold string `yaml:"approve_threshold"`
+}
+
+// PanelGateKeys is the closed, ordered enum of panel.gates keys (spec 112
+// R1, ADR-0034). These name REVIEW EVENTS and deliberately do not copy
+// loop.gate_authority's vocabulary, which names APPROVAL ACTS
+// (bead_merge/impl_approve). Exported because Bead 3's consumers
+// (cmd/mindspec, internal/complete) cannot reference a package-private
+// slice; declaration order is the single source for validation, recovery
+// lines, and config-show's enum-order rendering. This is the one place the
+// enum is declared — never duplicate it.
+var PanelGateKeys = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
+
+// Reviewer is one entry of a reviewer mix (global panel.reviewers or a
+// per-gate panel.gates.<gate>.reviewers list). Model and Lens are both
+// open-vocabulary strings — no name-membership validation exists anywhere
+// in Load (spec 112 R1, ADR-0040): model ids are runner-specific and ship
+// faster than this package can enumerate them. Family is the legacy 109
+// field, still parseable; an entry may set Family, Model, or both (Model
+// wins for slot expansion — see the unexported model() accessor). Count is
+// a pointer so an ABSENT count (nil) is distinguishable from an EXPLICIT
+// `count: 0`/negative: nil resolves to 1 (CountValue, the spec 112 R2
+// monotone relaxation over 109, which refused count < 1 wholesale);
+// non-nil non-positive is refused by Load (R4d).
 type Reviewer struct {
 	Family string `yaml:"family"`
-	Count  int    `yaml:"count"`
+	Model  string `yaml:"model"`
+	Lens   string `yaml:"lens"`
+	Count  *int   `yaml:"count"`
+}
+
+// CountValue returns the reviewer's resolved expanded count: an absent
+// Count (nil) defaults to 1. Exported because cmd/mindspec's config-show
+// renderer is an out-of-package consumer of this value (Go forbids a
+// same-named Count() method beside the Count field) — every consumer
+// (validation, resolvers, slot expansion, and that renderer) goes through
+// this one accessor so the nil-vs-explicit-zero distinction is decided in
+// exactly one place.
+func (r Reviewer) CountValue() int {
+	if r.Count == nil {
+		return 1
+	}
+	return *r.Count
+}
+
+// model returns the reviewer's open-vocabulary model identity for slot
+// expansion and validation: Model if set, else the legacy Family string —
+// "model wins" when an entry sets both. Returns "" only when neither is
+// set, which Load refuses (R4c).
+func (r Reviewer) model() string {
+	if r.Model != "" {
+		return r.Model
+	}
+	return r.Family
+}
+
+// intp returns a pointer to n — a tiny helper so DefaultConfig's reviewer
+// literals can populate the pointer-typed Count field inline.
+func intp(n int) *int {
+	return &n
+}
+
+// ReviewerSlot is one expanded reviewer position from
+// (*Config).PanelGateReviewerSlots (spec 112 R3): deterministic,
+// declaration-ordered, ids "R1".."Rn".
+type ReviewerSlot struct {
+	Slot  string
+	Model string
+	Lens  string
+}
+
+// defaultLenses is the interleaved, structural/sharp-alternating default
+// lens ordering the slot-expansion cursor walks for lens-less reviewer
+// slots (spec 112 R3). The 2026-07-07 live panels showed defect-finding
+// power tracked the assigned lens at least as much as the model tier.
+var defaultLenses = []string{
+	"author-of-record", "empirical-prober", "codebase-pin",
+	"adversarial", "contract-stability", "integration",
+}
+
+// knownModels is the curated, deliberately non-exhaustive advisory list of
+// model ids `config show` (a later bead) warns on absence from. NEVER
+// consulted by Load or validateOrchestration (spec 112 R1/R8; ADR-0040's
+// open-vocabulary portability principle) — a made-up id must never fail to
+// load. New model ids ship faster than this list can be updated (the
+// claude-fable-5 precedent).
+var knownModels = []string{
+	"claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "gpt-5.5",
+	"claude", "codex",
+}
+
+// KnownModels returns a copy of the curated known-model advisory list (spec
+// 112 R8) — a copy so callers cannot mutate the package-level slice.
+func KnownModels() []string {
+	out := make([]string, len(knownModels))
+	copy(out, knownModels)
+	return out
 }
 
 // Substitution controls quota-driven reviewer-substitution policy.
 type Substitution struct {
 	ClaudeSubOnQuota bool `yaml:"claude_sub_on_quota"`
+	// Substitutes is the model-level, one-step substitution map (spec 112
+	// R5): unavailable-model -> substitute-model, both open-vocabulary and
+	// validated as non-empty with key != value (R4h); chains are not
+	// followed (a mutual pair A->B, B->A is legal). Precedence is crisp:
+	// non-empty Substitutes IS the substitution policy and
+	// ClaudeSubOnQuota is inert (the supersession *reporting* half is
+	// Bead 3's surface); empty Substitutes means ClaudeSubOnQuota keeps its
+	// 109 meaning. Global, not per-gate — unavailability is a fact about
+	// the environment, not about a gate (ADR-0040 §3).
+	Substitutes map[string]string `yaml:"substitutes"`
 }
 
 // Loop is the orchestration-loop governance skeleton (spec 109 R4, the
@@ -176,11 +301,15 @@ func DefaultConfig() *Config {
 		},
 		Panel: Panel{
 			Reviewers: []Reviewer{
-				{Family: "claude", Count: 3},
-				{Family: "codex", Count: 3},
+				{Family: "claude", Count: intp(3)},
+				{Family: "codex", Count: intp(3)},
 			},
 			ApproveThreshold: "n-1",
 			Substitution:     Substitution{ClaudeSubOnQuota: true},
+			// Gates, Note, and Substitution.Substitutes stay empty here
+			// (spec 112 R2): the standing per-gate protocol is the
+			// documented example, never the default — an existing
+			// install's zero-config panel sizes must not change.
 		},
 		Models: map[string]string{},
 		Loop: Loop{
@@ -355,10 +484,10 @@ func loadUncached(root string) (*Config, error) {
 	return cfg, nil
 }
 
-// validateOrchestration enforces the un-weakenable knobs and the
-// threshold-skip / reviewer-floor guards (spec 109 R5). Every path returns a
-// guard-style error carrying a `recovery: <command>` line (ADR-0035), never
-// a panic.
+// validateOrchestration enforces the un-weakenable knobs, the
+// threshold-skip / reviewer-floor guards (spec 109 R5), and the per-gate
+// refusals (spec 112 R4). Every path returns a guard-style error carrying a
+// `recovery: <command>` line (ADR-0035), never a panic.
 func validateOrchestration(cfg *Config) error {
 	if _, ok := cfg.Loop.GateAuthority["panel_skip"]; ok {
 		return fmt.Errorf("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only, ADR-0037 §7)\nrecovery: remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
@@ -380,9 +509,13 @@ func validateOrchestration(cfg *Config) error {
 		return fmt.Errorf("runner %q is not a recognized orchestration adapter (want claude-code-skills, claude-code-workflow, or external)\nrecovery: set runner to claude-code-skills, claude-code-workflow, or external in .mindspec/config.yaml", cfg.Runner)
 	}
 
+	if err := validateReviewerEntries(cfg.Panel.Reviewers, "panel.reviewers"); err != nil {
+		return err
+	}
+
 	total := 0
 	for _, r := range cfg.Panel.Reviewers {
-		total += r.Count
+		total += r.CountValue()
 	}
 	expr := strings.TrimSpace(cfg.Panel.ApproveThreshold)
 	if !strings.EqualFold(expr, "n-1") {
@@ -392,13 +525,115 @@ func validateOrchestration(cfg *Config) error {
 		}
 	}
 
-	for _, r := range cfg.Panel.Reviewers {
-		if r.Count < 1 {
-			return fmt.Errorf("panel.reviewers[%s].count must be >= 1 (got %d)\nrecovery: set panel.reviewers.%s.count to at least 1, or remove that entry, in .mindspec/config.yaml", r.Family, r.Count, r.Family)
-		}
-	}
 	if total < 2 {
 		return fmt.Errorf("panel.reviewers must sum to at least 2 (got %d): a single-reviewer panel makes the default \"n-1\" threshold resolve to 0, an always-pass gate\nrecovery: add at least one more reviewer under panel.reviewers in .mindspec/config.yaml", total)
+	}
+
+	return validateGates(cfg)
+}
+
+// validateReviewerEntries applies the spec 112 R4(c)/(d) refusals — a
+// reviewer entry with neither `model` nor `family`, and an explicit
+// non-positive `count` — to reviewers, a global or per-gate list. label
+// identifies the offending list in the error/recovery text (e.g.
+// "panel.reviewers" or "panel.gates.bead.reviewers").
+func validateReviewerEntries(reviewers []Reviewer, label string) error {
+	for i, r := range reviewers {
+		if r.model() == "" {
+			return fmt.Errorf("%s[%d] sets neither \"model\" nor \"family\": every reviewer entry needs an open-vocabulary model identity\nrecovery: add a model or family value to %s[%d] in .mindspec/config.yaml", label, i, label, i)
+		}
+		if r.Count != nil && *r.Count < 1 {
+			return fmt.Errorf("%s[%d].count must be >= 1 (got %d)\nrecovery: set %s[%d].count to at least 1, or remove the count key to default to 1, in .mindspec/config.yaml", label, i, *r.Count, label, i)
+		}
+	}
+	return nil
+}
+
+// validateGates applies the spec 112 R4 refusals scoped to panel.gates: (a)
+// an unknown gates key, (b) a configured gate entry setting neither
+// reviewers nor approve_threshold, (e) a per-gate reviewers list whose own
+// expanded sum is < 2, and (f)+(g) the resolved threshold-vs-sum check run
+// per configured gate over the R3 per-field inheritance chain. (c)/(d) ride
+// validateReviewerEntries for each gate's own reviewers list; (h)
+// (substitutes) is validated separately.
+func validateGates(cfg *Config) error {
+	unknown := make([]string, 0, len(cfg.Panel.Gates))
+	for k := range cfg.Panel.Gates {
+		if !isValidGateKey(k) {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		// unknown[0] is an attacker/typo-controlled YAML map key: it is
+		// quoted via %q in the message clause, and MUST be quoted again
+		// (not %s) in the recovery clause below — an unescaped repeat is
+		// exactly the terminal-injection hole a control-byte-carrying key
+		// (ESC/BEL/embedded newline) would otherwise punch through the
+		// guard-recovery line (round-1 panel G1.1).
+		return fmt.Errorf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events\nrecovery: rename the panel.gates key %s to one of %s in .mindspec/config.yaml", unknown[0], strings.Join(PanelGateKeys, ", "), strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", "))
+	}
+
+	for _, gate := range PanelGateKeys {
+		gp, ok := cfg.Panel.Gates[gate]
+		if !ok {
+			continue
+		}
+		hasReviewers := len(gp.Reviewers) > 0
+		hasThreshold := strings.TrimSpace(gp.ApproveThreshold) != ""
+		if !hasReviewers && !hasThreshold {
+			return fmt.Errorf("panel.gates.%s sets neither reviewers nor approve_threshold: a configured gate entry that sets neither is a likely indentation mistake\nrecovery: add a reviewers list or an approve_threshold under panel.gates.%s in .mindspec/config.yaml, or remove the empty panel.gates.%s entry", gate, gate, gate)
+		}
+
+		if hasReviewers {
+			if err := validateReviewerEntries(gp.Reviewers, fmt.Sprintf("panel.gates.%s.reviewers", gate)); err != nil {
+				return err
+			}
+			ownSum := 0
+			for _, r := range gp.Reviewers {
+				ownSum += r.CountValue()
+			}
+			if ownSum < 2 {
+				return fmt.Errorf("panel.gates.%s.reviewers must sum to at least 2 (got %d): a single-reviewer gate makes the default \"n-1\" threshold resolve to 0, an always-pass gate\nrecovery: add at least one more reviewer under panel.gates.%s.reviewers in .mindspec/config.yaml", gate, ownSum, gate)
+			}
+		}
+
+		// (f)+(g): the resolved threshold must lie in [1, the resolved
+		// reviewer sum] at every link of the adhoc->bead->global chain —
+		// run for every configured gate regardless of which field(s) it
+		// sets itself, because an inherited half must still respect the
+		// INHERITING gate's own resolved sum.
+		resolvedExpr := strings.TrimSpace(cfg.resolveGateThresholdExpr(gate))
+		if !strings.EqualFold(resolvedExpr, "n-1") {
+			resolvedSum := 0
+			for _, r := range cfg.resolveGateReviewers(gate) {
+				resolvedSum += r.CountValue()
+			}
+			n, err := strconv.Atoi(resolvedExpr)
+			if err != nil || n < 1 || n > resolvedSum {
+				return fmt.Errorf("panel.gates.%s's resolved approve_threshold %q must be \"n-1\" or an integer in [1, %d] (that gate's resolved reviewer sum)\nrecovery: set panel.gates.%s.approve_threshold (or the value it inherits from bead/global) to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", gate, cfg.resolveGateThresholdExpr(gate), resolvedSum, gate, resolvedSum)
+			}
+		}
+	}
+
+	subKeys := make([]string, 0, len(cfg.Panel.Substitution.Substitutes))
+	for k := range cfg.Panel.Substitution.Substitutes {
+		subKeys = append(subKeys, k)
+	}
+	sort.Strings(subKeys)
+	for _, k := range subKeys {
+		v := cfg.Panel.Substitution.Substitutes[k]
+		if k == "" || v == "" {
+			return fmt.Errorf("panel.substitution.substitutes has an empty-sided entry (key %q -> value %q): both the unavailable and substitute model ids must be non-empty\nrecovery: fill in both sides of the panel.substitution.substitutes entry, or remove it, in .mindspec/config.yaml", k, v)
+		}
+		if k == v {
+			// k is an attacker/typo-controlled model id (a
+			// substitutes map key): quoted via %q in the message
+			// clause, and MUST be quoted again (not %s) in the
+			// recovery clause — same class of hole as the gate-key
+			// case above (round-1 panel G1.1).
+			return fmt.Errorf("panel.substitution.substitutes maps %q to itself: a substitution must name a different model\nrecovery: change the panel.substitution.substitutes entry for %s to a different substitute model id, or remove the self-mapping, in .mindspec/config.yaml", k, strconv.Quote(k))
+		}
 	}
 
 	return nil
@@ -426,14 +661,22 @@ func (c *Config) WorktreePath(root, name string) string {
 // when Reviewers is unset, independent of whether this Config went through
 // Load's backfill.
 func (c *Config) PanelExpectedReviewers() int {
-	if len(c.Panel.Reviewers) == 0 {
-		return 6
-	}
 	total := 0
-	for _, r := range c.Panel.Reviewers {
-		total += r.Count
+	for _, r := range c.globalReviewers() {
+		total += r.CountValue()
 	}
 	return total
+}
+
+// globalReviewers returns panel.reviewers with the built-in 3+3 fallback
+// (mirroring PanelExpectedReviewers' historical sum semantics as a list
+// rather than a sum) — the single "global" tier every gate-scoped resolver
+// falls back to.
+func (c *Config) globalReviewers() []Reviewer {
+	if len(c.Panel.Reviewers) == 0 {
+		return DefaultConfig().Panel.Reviewers
+	}
+	return c.Panel.Reviewers
 }
 
 // PanelApproveThresholdExpr returns the RAW panel.approve_threshold
@@ -446,4 +689,163 @@ func (c *Config) PanelApproveThresholdExpr() string {
 		return "n-1"
 	}
 	return c.Panel.ApproveThreshold
+}
+
+// isValidGateKey reports whether gate is one of the five PanelGateKeys.
+func isValidGateKey(gate string) bool {
+	for _, k := range PanelGateKeys {
+		if k == gate {
+			return true
+		}
+	}
+	return false
+}
+
+// gateKeyError is the shared ADR-0035 refusal for a gate name outside
+// PanelGateKeys, used by every gate-scoped resolver (spec 112 R3): a caller
+// typo (e.g. "final" for "final_review") must fail loud, never silently
+// fall back to defaults.
+func gateKeyError(gate string) error {
+	return fmt.Errorf("gate %q is not one of the five valid panel gate keys (%s)\nrecovery: pass one of %s to the gate-scoped config resolver, or fix the panel.gates key spelling in .mindspec/config.yaml", gate, strings.Join(PanelGateKeys, ", "), strings.Join(PanelGateKeys, ", "))
+}
+
+// resolveGateReviewers walks the R3 per-field resolution chain for a gate's
+// reviewer list: the gate's own configured reviewers -> (adhoc only)
+// bead's resolved reviewers -> the global list (with its own built-in
+// fallback via globalReviewers). gate is assumed already validated against
+// PanelGateKeys by the caller.
+func (c *Config) resolveGateReviewers(gate string) []Reviewer {
+	if gp, ok := c.Panel.Gates[gate]; ok && len(gp.Reviewers) > 0 {
+		return gp.Reviewers
+	}
+	if gate == "adhoc" {
+		return c.resolveGateReviewers("bead")
+	}
+	return c.globalReviewers()
+}
+
+// resolveGateThresholdExpr walks the R3 per-field resolution chain for a
+// gate's RAW approve_threshold expression: the gate's own configured
+// expression -> (adhoc only) bead's resolved expression -> the global
+// expression (with its own built-in "n-1" fallback via
+// PanelApproveThresholdExpr). Never resolves to an int — resolution to an
+// int stays single-homed in internal/panel.Panel.ApproveThreshold
+// (ADR-0037 §3). gate is assumed already validated against PanelGateKeys.
+func (c *Config) resolveGateThresholdExpr(gate string) string {
+	if gp, ok := c.Panel.Gates[gate]; ok && strings.TrimSpace(gp.ApproveThreshold) != "" {
+		return gp.ApproveThreshold
+	}
+	if gate == "adhoc" {
+		return c.resolveGateThresholdExpr("bead")
+	}
+	return c.PanelApproveThresholdExpr()
+}
+
+// PanelGateExpectedReviewers returns the expanded reviewer-slot count for
+// gate — the creation-time default the spec-110 panel.json writer and
+// ms-panel-run step 0 will stamp for that gate — resolved through the R3
+// per-field chain. Always equal to len(PanelGateReviewerSlots(gate)) by
+// construction (spec 112 R3). Returns an error for a gate name outside
+// PanelGateKeys.
+func (c *Config) PanelGateExpectedReviewers(gate string) (int, error) {
+	if !isValidGateKey(gate) {
+		return 0, gateKeyError(gate)
+	}
+	total := 0
+	for _, r := range c.resolveGateReviewers(gate) {
+		total += r.CountValue()
+	}
+	return total, nil
+}
+
+// PanelGateApproveThresholdExpr returns gate's RAW approve_threshold
+// expression, resolved through the R3 per-field chain — never a resolved
+// integer (spec 112 R3; ADR-0037 §3's threshold single home stays
+// internal/panel.Panel.ApproveThreshold). Returns an error for a gate name
+// outside PanelGateKeys.
+func (c *Config) PanelGateApproveThresholdExpr(gate string) (string, error) {
+	if !isValidGateKey(gate) {
+		return "", gateKeyError(gate)
+	}
+	return c.resolveGateThresholdExpr(gate), nil
+}
+
+// PanelGateReviewerSlots returns gate's deterministic, expanded reviewer
+// slots (spec 112 R3), resolved through the same per-field chain as
+// PanelGateExpectedReviewers. Returns an error for a gate name outside
+// PanelGateKeys.
+func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error) {
+	if !isValidGateKey(gate) {
+		return nil, gateKeyError(gate)
+	}
+	return expandSlots(c.resolveGateReviewers(gate)), nil
+}
+
+// expandSlots deterministically expands reviewers into "R1".."Rn" slots in
+// declaration order (spec 112 R3): each entry's CountValue() is expanded;
+// an explicit Lens applies to every slot that entry produces and does NOT
+// advance the default-lens cursor; a lens-less slot takes
+// defaultLenses[cursor % 6], and the single cursor — starting at index 0 —
+// advances only over lens-less slots. The worked example (a 9-reviewer,
+// all-lens-less, 3-entries-of-count-3 panel) must expand to exactly R1
+// author-of-record, R2 empirical-prober, R3 codebase-pin, R4 adversarial,
+// R5 contract-stability, R6 integration, R7 author-of-record, R8
+// empirical-prober, R9 codebase-pin — this is normative, not illustrative.
+func expandSlots(reviewers []Reviewer) []ReviewerSlot {
+	var slots []ReviewerSlot
+	cursor := 0
+	n := 0
+	for _, r := range reviewers {
+		model := r.model()
+		for i := 0; i < r.CountValue(); i++ {
+			n++
+			lens := r.Lens
+			if lens == "" {
+				lens = defaultLenses[cursor%len(defaultLenses)]
+				cursor++
+			}
+			slots = append(slots, ReviewerSlot{
+				Slot:  fmt.Sprintf("R%d", n),
+				Model: model,
+				Lens:  lens,
+			})
+		}
+	}
+	return slots
+}
+
+// PanelGateAdvisoryDefault is the single-home selection rule (spec 112 R7)
+// both Bead 3 caller-side ReviewerCountNote advisory sites resolve through,
+// so they cannot drift from each other. recordedGate is the panel.json
+// Panel.Gate value (possibly empty or outside PanelGateKeys); isBead is
+// whether the panel is a bead panel (Panel.IsBead()). Returns (0, false)
+// when the advisory should be SKIPPED — the caller must not print a note
+// in that case. Never calls a gate-scoped resolver with a value outside
+// PanelGateKeys, so no resolver error can surface through this helper.
+//
+//   - len(Gates) == 0 (gates not configured): every panel compares against
+//     the global default, exactly as 109 ships it — (PanelExpectedReviewers(), true).
+//   - recordedGate is a known gate key: that gate's PanelGateExpectedReviewers, true.
+//   - recordedGate is empty and isBead: the "bead" gate's PanelGateExpectedReviewers, true.
+//   - anything else (a non-bead panel with no recorded gate, or a recorded
+//     value outside the enum): (0, false) — skip the note.
+func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool) {
+	if len(c.Panel.Gates) == 0 {
+		return c.PanelExpectedReviewers(), true
+	}
+	if isValidGateKey(recordedGate) {
+		n, err := c.PanelGateExpectedReviewers(recordedGate)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	if recordedGate == "" && isBead {
+		n, err := c.PanelGateExpectedReviewers("bead")
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	return 0, false
 }

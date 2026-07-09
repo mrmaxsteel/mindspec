@@ -1,0 +1,40 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "All three of my round-1 asks are addressed with substance, not just text. (1) The R6 regex is widened to \\[(ADR-\\d{4})[^\\]]*\\]\\([^)]+\\) and the test gains the filename-form pair in both directions — missing fails with SevError, existing passes (the parity-safety pin). (2) The tally RunE now routes exit through a single tallyExitAction(d.Action) helper with an explicit must-not-read-raw-counts prescription, and the exit-code test adds the two falsifying rows (stale-SHA and hard_block, each with threshold-satisfying Approves) a re-derived count check would wrongly pass; the contract table is branch-complete over gate.go (2)-(10). (3) Warn is pinned to exit 0 + stderr advisory with an abandoned row, matching panel_advisory.go:204-212. I re-verified the fix's grounding: gate.go:142/:258 Allow branches carry empty Messages, the two GatePass wantReason rows exist verbatim, and three of the four deleted literals exist in gate.go. The fourth ('REJECT or hard_block is recorded') is panelstate-only — a cosmetic prose slip, non-blocking since the halt rows pin 'halt path', which gate.go contains.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "round1_item": "Widen R6 extraction regex to filename-form anchors + test pair",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 2 step 2 now uses \\[(ADR-\\d{4})[^\\]]*\\]\\([^)]+\\) with the 085–094 filename-form convention named explicitly. TestValidateSpec_ADRTouchpointExtractionBoundary gains (a2) filename-form anchor to a missing ADR fails with adr-touchpoint-missing + SevError, and (a3) filename-form anchor to an existing ADR passes with !HasFailures() — the widen-is-parity-safe direction I required. Bare-prose mentions remain unmatched (needs the ]( anchor). Residual, cosmetically only: a bracket text listing two IDs ([ADR-0032 and ADR-0034](p)) resolves only the first — no repo spec uses that shape."
+    },
+    {
+      "id": "F1-R2-2",
+      "round1_item": "Close the adapter-layer decision hole (RunE exit wiring pinned beyond two agreeing rows)",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 4 step 3 adds tallyExitAction(d panel.Decision, slug string) as the single decision-to-exit mapping, with the explicit fence 'RunE must not read res.Approves/res.Rejects... only d.Action'. TestPanelTally_ExitCodeTracksDecision now includes the two rows that falsify a re-derived count check — a stale-SHA panel and a hard_block panel each with threshold-satisfying Approves → non-zero + HasFinalRecoveryLine — plus sub-threshold and a Warn row, with 'the printed decision in every row equals PanelGateDecision's'. The contract test is branch-complete over gate.go branches (2)-(10), with the plan itself naming why a 3-row table was tautological. Two minor notes, neither blocking: the phrase 'exercised through the real tallyExitAction helper' could be misread as helper-unit-only, but the rows are panel-fixture-shaped (seeded verdict files, rev-parse seam), which forces command-level execution; and verify's printed token is pinned by step prose ('derived from d.Action') rather than a dedicated assertion — tally, the exit-bearing verb, is asserted per-row."
+    },
+    {
+      "id": "F1-R2-3",
+      "round1_item": "Pin panel tally's Warn exit semantics + Warn test row",
+      "disposition": "ADDRESSED",
+      "detail": "Warn → print d.Message advisory to stderr, return nil (exit 0), explicitly citing parity with internal/complete's non-blocking Warn handling (panel_advisory.go:204-212, which I verified round 1). The abandoned-panel row in TestPanelTally_ExitCodeTracksDecision asserts exit 0 with the advisory printed, and AC4 + Provenance now state the Warn case."
+    },
+    {
+      "id": "F1-R2-4",
+      "round1_item": null,
+      "disposition": "NEW_ISSUE",
+      "severity": "low",
+      "detail": "Non-blocking prose inaccuracy in Bead 3 step 3: the plan claims all four pre-refactor message literals 'live solely in gate.go's Decision.Message and are relayed, not reconstructed... their runtime appearance in a rendered reason is unaffected'. Verified per-literal: three exist in gate.go, but \"REJECT or hard_block is recorded\" is panelstate.go-only (gate.go count 0) — post-refactor that string disappears from runtime output entirely; gate.go words the REJECT condition differently. No behavioral or test consequence: the source-text absence assertion still works as a deletion signal, and the existing halt-path wantReason rows pin the substring 'halt path', which gate.go's messages do contain (3 occurrences), so they stay green. Worth a one-word prose fix at bead time; does not gate approval."
+    },
+    {
+      "id": "F1-R2-5",
+      "round1_item": "Round-1 F1-4 (optional hardening: assert git-freeness, not just config-freeness, of internal/panel)",
+      "disposition": "MISSED",
+      "detail": "Explicitly optional and non-blocking in round 1 (the spec's own falsification pins only internal/config, and the fix's two-step go-list form closes the false-green I noted). The G1.2 two-step rewrite landed in B1 + B4 + Provenance; git-freeness remains unasserted, matching the approved spec's boundary. No change required."
+    }
+  ]
+}

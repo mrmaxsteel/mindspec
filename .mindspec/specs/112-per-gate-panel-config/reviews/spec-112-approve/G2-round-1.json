@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Spec 112 correctly names 109's terminal-control-byte discipline for panel.note in R8, and JSON output should be structurally escaped by a real JSON encoder. But the spec does not require that every newly rendered open-vocabulary string in text config show use the same escaping: model, lens, substitutes keys/values, and warning text derived from them are all repo-controlled display surface. It also does not acknowledge or bound the new expansion DoS surface: count is only required positive, yet --gate expands slots and --json is intended for 110/111 machine consumption. A huge count or very large model/lens/note/substitute value can force large allocations/output and downstream parser load. These are spec obligations, not implementation details, because they define the contract future beads must satisfy.",
+  "concrete_changes_required": [
+    "Require 109 escapeConfigValue-equivalent control-byte/newline escaping for every new config-controlled string rendered by human text config show paths: panel.note, reviewer model, reviewer lens, substitutes map keys/values, and any known-model warning that embeds those values.",
+    "Add acceptance coverage with hostile control bytes/newlines in note, model, lens, and substitutes entries proving no raw control bytes and no forged output lines in config show text output.",
+    "Pin the --gate --json contract to a real JSON encoder, never hand-built JSON, and require a test that hostile control bytes round-trip as JSON strings without raw terminal control bytes in stdout.",
+    "Acknowledge and resolve the size-cap gap: either define explicit maximums for expanded reviewer slots/count and individual open string lengths, or explicitly document the deferred cap decision with a follow-up bead/spec and a non-accidental rationale."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "hard_block": false,
+      "title": "New open strings are not all pinned to 109's text escaping discipline",
+      "detail": "R8 says panel.note is echoed under 109's control-byte escaping, but the requirements and ACs do not require the same for model, lens, substitutes keys/values, or warnings embedding those values. Those are equally repo-controlled terminal-rendering inputs."
+    },
+    {
+      "severity": "medium",
+      "hard_block": false,
+      "title": "Unbounded slot expansion and string sizes are not acknowledged",
+      "detail": "R4 only rejects non-positive count. R3/R8 require expanded slots and machine-consumed --gate --json, so a large positive count or large open string can create allocation/output/parser DoS. The spec should cap it or explicitly defer the cap with tracked rationale."
+    }
+  ]
+}

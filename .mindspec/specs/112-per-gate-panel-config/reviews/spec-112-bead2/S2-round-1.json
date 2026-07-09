@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Gate's json:\"gate,omitempty\" tag matches R6/R9's pin exactly (name/type/omitempty/parse-lenient are the stable contract). Empirically verified (scratch /tmp probe): an absent gate key and an explicit gate:\"\" both unmarshal to Gate=\"\" and re-marshal to byte-identical output (key omitted) -- deterministic, and identical to the existing AbandonReason/ApproveThresholdExpr omitempty precedent already in Panel, so this isn't a novel semantic, it's consistent hygiene. TestPanel_GateFieldDecisionInert's legacy sub-test confirms a gate-less panel.json parses field-for-field identical to pre-bead behavior, and an unexpected-but-valid string (\"weird\") round-trips without setting Registration.Err, matching R6's parse-lenient clause. A genuine JSON type violation (gate:123) fails the whole Unmarshal and sets Registration.Err at the per-directory Scan level -- identical to how every other typed Panel field already behaves on a type mismatch, not a new gap (and squarely F1's adversarial lens, not a defect here). Struct-tag style, placement (appended after ApproveThresholdExpr, following historical append order), and doc-comment depth mirror the existing fields. Confirmed no internal/config import (leaf invariant holds). Full internal/panel suite, go vet, gofmt all clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "nit",
+      "description": "The struct-level JSON-schema doc comment atop Panel (panel.go lines 36-42) still lists only the original fields plus abandoned/abandon_reason; it was never updated for approve_threshold (109) and isn't updated for gate here either. Pre-existing drift, not introduced by this bead, and each field's own inline comment is authoritative and thorough -- non-blocking."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Downstream surface is stable. (a) verifyCommittedFn has exactly ONE production consumer (complete.go:559, case-a); on --as-of success+closed defaultVerifyCommitted returns nil, preserving the pre-change nil=proceed / non-nil=soft-block contract. The bounded retry wrapper (postCloseReadAttempts loop over fetchBeadByIDFn) is UNCHANGED and runs before commit+verify. (b) Enumerated all 6 paths through the new verifier: nil is returned ONLY on an affirmative committed-closed read (P1) or the documented old-bd same-read-closed fallback (P3a); every other outcome — as-of not-closed (P2), fallback not-closed (P3b), fallback read error (P3c), and any non-unknown-flag as-of error (P4) — returns an error, so the caller keeps the worktree and never proceeds. Invariant holds on every path. (c) parseBeadShowJSON is a pure extraction (byte-identical body, identical error strings/branches); all FetchBeadByID callers (release.go:174, next.go:349, 3 fetchBeadByIDFn seam sites) are behavior-identical; the FetchBeadByID_* shape tests still pass. (d) HONESTY-CLAUSE frames the closed gap in past tense (no stale claim) and every new claim is code-backed; empirically bd 1.1.0 --as-of HEAD returns the same array-of-one+status shape parseBeadShowJSON parses, and real unknown-flag stderr matches IsUnsupportedFlagError. Tests run non-cached and pass.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "contract-stability / verifyCommittedFn consumer",
+      "detail": "verifyCommittedFn has a single production consumer at complete.go:559 (case-a of the post-close switch). Its downstream contract (nil => proceed to merge; non-nil => guard.NewFailure soft-block that keeps the worktree and does not set BeadClosed) is unchanged. When --as-of HEAD succeeds and reads closed, defaultVerifyCommitted returns nil exactly as the old same-read verifier did. Consumer behavior is identical on the --as-of-success path."
+    },
+    {
+      "severity": "info",
+      "area": "contract-stability / bounded retry wrapper",
+      "detail": "The bounded post-close re-read wrapper (postCloseReadAttempts loop, complete.go ~500-510, using fetchBeadByIDFn + postCloseReadBackoff) is untouched by this change and is orthogonal to verifyCommittedFn (it runs earlier, before doltCommitFn and the committed-state verify). No behavioral drift."
+    },
+    {
+      "severity": "info",
+      "area": "never-proceed invariant / path enumeration",
+      "detail": "6 paths: P1 as-of ok+closed -> nil (committed-affirmed proceed). P2 as-of ok+not-closed -> error 'status %q (not closed)'. P3 unsupported-flag -> verifyCommittedSameRead: P3a same-read closed -> nil (documented old-bd downgrade, byte-identical to pre-change verifier), P3b same-read not-closed -> error, P3c same-read err -> error. P4 as-of err that is NOT the unknown-flag signature -> error '(--as-of HEAD) failed'. Only P1 and P3a return nil, and both require an affirmative closed read; the invariant is preserved on all paths."
+    },
+    {
+      "severity": "info",
+      "area": "parseBeadShowJSON refactor / caller parity",
+      "detail": "parseBeadShowJSON is a mechanical extraction: the moved body is byte-identical (empty-output guard, array-of-one branch, empty-array not-found, bare-object branch) with error messages still keyed on id. FetchBeadByID keeps the same runBDFn call and 'bd show %s failed' wrapper. All callers behavior-identical: cmd/mindspec/release.go:174 (defaultActiveBead), cmd/mindspec/next.go:349 (runEmitOnly), and the internal/complete fetchBeadByIDFn seam (idempotent-already-closed at :478, retry loop at :506, verifyCommittedSameRead at :147). next_test.go FetchBeadByID_{ArrayResponse,SingleObjectResponse,NotFound,EmptyArray} still pass, covering all four shape branches."
+    },
+    {
+      "severity": "info",
+      "area": "HONESTY-CLAUSE accuracy",
+      "detail": "The rewritten comment states the historical gap in past tense ('at the time bd exposed NO committed-state read') -> no stale claim survives. New claims (as-of read is verified FIRST; IsUnsupportedFlagError-gated fallback to same-read; one-line downgrade warning; hard read failure or not-closed in EITHER path still errors) are each backed by the code. Empirically verified against bd 1.1.0: bd show <id> --as-of HEAD --json returns the same single-element array with a status field that parseBeadShowJSON handles, and the real unknown-flag stderr is 'Error: unknown flag: --as-of', which IsUnsupportedFlagError matches (lowercased contains 'unknown flag' AND 'as-of')."
+    },
+    {
+      "severity": "low",
+      "area": "test coverage (non-blocking)",
+      "detail": "bead.IsUnsupportedFlagError has no dedicated unit test in internal/bead; it is exercised only indirectly via TestDefaultVerifyCommitted cases (c)/(d) through the real *exec.ExitError produced by fakeBDExitError. That indirect coverage does hit the genuine errors.As chain, so the narrowness contract is tested end-to-end. A focused table test (unknown-flag match, %w-wrapped match, wrong flag-name no-match, non-ExitError no-match) would pin the detector's boundary directly. Optional follow-up, not a merge blocker."
+    },
+    {
+      "severity": "low",
+      "area": "as-of HEAD semantics edge (non-blocking)",
+      "detail": "The correctness of 'a bd close auto-commits and is therefore visible at --as-of HEAD' is a bd-runtime fact (R1/R2's empirical remit). From a contract-stability angle the failure mode if that assumption ever breaks is fail-SAFE: a legitimately-closed bead reading back not-closed via --as-of would over-block (recoverable soft-block, re-runnable) rather than under-proceed, so it cannot violate the never-proceed-on-unverified-close invariant. Noted for completeness."
+    }
+  ]
+}

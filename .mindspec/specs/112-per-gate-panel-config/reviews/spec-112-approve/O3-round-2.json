@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Completeness & scope lens; re-verifying my three round-1 findings + no regression. All three ADDRESSED: (1) map render order now pinned — R8 renders gates in R1 enum order + substitutes sorted-key in BOTH text and --json, with a falsification clause, AC8, and R9's sorted-key echo; the --json slots array is already list-ordered via R3 expansion. (2) gates:{} now keys off len(gates)>0 explicitly in R2 (falsified if it diverges from absent anywhere), threaded through R7 and AC1. (3) The unknown-gates-key recovery line now enumerates all five valid keys with the loop.gate_authority disambiguation, falsified if any is omitted, mirrored in R8/AC3/AC9. The convergent cursor-start=0 fix makes R3's load-bearing lens rule fully deterministic — pinned, worked example declared normative, falsification predicate + AC5's exact 9-slot assignment — and the rotation-invariant guarantees (>=6 lens-less exercises all six; count>=2 spans structural+sharp) still hold under the pin because the interleaved order strictly alternates over an even period. The new R9 pins only the surface 112 exposes and its explicit Scope fence (falsified if beads add writer/runner behavior) SHARPENS the 112-vs-110/111 boundary rather than blurring it; Scope/Non-Goals/113 stay coherent. No regression in my lens.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "hard_block": false,
+      "severity": "info",
+      "title": "R8's prose summary of --gate output doesn't list the `gate` member that R9 pins",
+      "detail": "R8 describes the --gate [--json] output as 'the expanded slots, the expected reviewer count, the raw approve_threshold expression, and the effective substitution policy' — it omits the `gate` (resolved gate name) member. R9 then authoritatively enumerates all five members including `gate`, and AC10 asserts 'emits exactly the R9-documented members — gate, slots, expected_reviewers, approve_threshold, substitution'. So the member set is fully pinned and there is no real gap — R9+AC10 govern — but the R8 prose reads as a 4-item list next to R9's 5-item contract. Purely cosmetic; an implementer following R9/AC10 cannot get it wrong. Not worth a fix round."
+    },
+    {
+      "hard_block": false,
+      "severity": "info",
+      "title": "Round-1 disposition summary (all addressed)",
+      "detail": "O3-1 map render order → ADDRESSED (R8 deterministic-render clause + falsification + AC8 + R9 sorted-key). O3-2 gates:{} vs absent → ADDRESSED (R2 len(gates)>0 keying + falsification + R7 inline + AC1). O3-3 unknown-gate recovery enumerates 5 keys → ADDRESSED (R4 + falsification + R8 + AC3 + AC9). My two round-1 info items also resolved/benign: cursor-start=0 now pinned (R3 + AC5); the lenient-YAML typo-drop was info-only, remains backstopped by R4's structural refusals for load-bearing keys — no action needed. No new completeness or scope gap introduced by the fix delta; the 110(writer)/111(runner)/113(config-layer) boundaries and Non-Goals remain internally consistent with the now-present 109 surface."
+    }
+  ]
+}

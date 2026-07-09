@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "Bead 4 fulfills its own spec 110 AC and the CLI grammar (`panel create <slug> --spec --target [--bead] [--round]`) maps cleanly onto 111's planned `buildCommand(CMD_PANEL_CREATE, slug, spec, target, bead_id?, round?)`. `panel verify`/`panel tally` stdout is stable prose 111 passes through verbatim, which is fine. Target argument-injection is already closed for free via gitutil.rejectOptionLike inside RevParseRef. BUT: I built the binary and ran `panel create demo-slug --spec 999-demo --target main` — stdout is exactly `panel demo-slug registered: round 1, 6 expected reviewer(s), reviewed_head_sha <sha>`; it never prints the resolved panel directory, even though the file lands at review/demo-slug/. Spec 111's plan (line ~508-512) explicitly states the workflow 'reads back only the BRIEF path panel create reports... captures the panel directory... from that reported path once' and forbids re-implementing the layout logic itself. As written, there is nothing in this CLI's output for 111 Bead 2 to capture — 111 cannot satisfy its own no-duplication design against this contract without either duplicating panelDirFor's layout logic (which it explicitly disclaims) or this bead adding the missing line.",
+  "concrete_changes_required": [
+    "Add a stable, greppable line to `panel create`'s stdout reporting the resolved panel directory (e.g. `panel directory: <dir>`), and document it in interfaces.md's Panel CLI Verb Tree section, so spec 111 Bead 2 can capture the panel dir from `panel create`'s reported output instead of re-deriving `workspace.DetectLayout`/`SpecDir` logic itself."
+  ],
+  "findings": [
+    "panel create's grammar (positional slug + --spec/--target/--bead/--round) is a clean match for 111's buildCommand(CMD_PANEL_CREATE, ...) four-plus-optional-args pattern.",
+    "panel verify/tally's prose stdout is consumed verbatim by 111 (no parsing required on 111's side), so its exact wording stability is not load-bearing beyond that — fine as-is.",
+    "tallyExitAction correctly derives exit code from Decision.Action alone (Allow/Warn -> 0, Block -> non-zero with ADR-0035 recovery line), matching what 111's gate-Block-detection needs.",
+    "Target metacharacter/argument-injection is already closed via gitutil.RevParseRef's rejectOptionLike guard (inherited through the executor boundary, not added by this bead) plus this bead's own rejectControlBytes on --target/--bead and validatePanelSlug on <slug>.",
+    "GAP (see concrete_changes_required): panel create never reports the resolved panel directory anywhere in stdout, contradicting 111 plan's explicit assumption that the workflow captures the panel dir 'from that reported path'. Empirically confirmed by building the binary and running `panel create demo-slug --spec 999-demo --target main` in a scratch /tmp repo: file lands at review/demo-slug/panel.json but stdout only says 'panel demo-slug registered: round 1, ...'.",
+    "interfaces.md's Panel CLI Verb Tree doc-sync (lines 125-183 in this diff) is otherwise a coherent, accurate contract for the next bead to append to; it should also gain the directory-report line once added."
+  ]
+}

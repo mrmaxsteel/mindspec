@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-uopd",
+  "spec": null,
+  "target": "fix/uopd-as-of-committed-read",
+  "round": 1,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "d7f5c67a084e52c985aadb7abec8824cbe3132f4"
+}

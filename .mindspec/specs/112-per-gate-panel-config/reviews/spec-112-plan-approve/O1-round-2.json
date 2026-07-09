@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "All three of my round-1 must-fixes are ADDRESSED and empirically feasible against the landed tree. (1) Bead 1 now owns its Reviewer.Count consumer: cmd/mindspec/config.go is in key_file_paths, step 1 rewrites config.go:149 to r.CountValue() (an exported accessor — the plan correctly caught that a Count() method collides with the Count field, a subtlety I under-specified), and `go test ./cmd/mindspec` is in Verification, killing the %d-on-*int false-green. I confirmed config.go:149 is the sole silent site; report.go's r.Count is the unrelated journal struct the plan fences off, and internal/config's arithmetic sites (385/434) are compile-caught + accessor-updated. cmd/mindspec is genuinely GREEN after Bead 1. (2) nil-guard: panelGate returns nil,nil on both fail-open paths; the plan guards the deref with panelReg!=nil plus the panel-less test — required since Bead 3 moves the deref outside reviewerCountAdvisory's own nil-check. (3) PanelGateKeys exported. No new cross-bead breakage (see findings).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "Round-1 must-fix 1 — Bead 1 must own the Reviewer.Count consumer so cmd/mindspec stays GREEN",
+      "disposition": "ADDRESSED",
+      "detail": "cmd/mindspec/config.go added to Bead 1 key_file_paths (plan L17). Step 1 (L231-243) rewrites config.go:149 fmt.Fprintf count from r.Count to r.CountValue(), and Verification adds `go test ./cmd/mindspec` exits 0 (L395) alongside `go test ./internal/config` exits 0 (L394). Verified in the landed tree: Reviewer.Count is int (config.go:71); TestConfigShow_EmitsPanelModelsLoop asserts 'count: 3' at config_test.go:31 and :127, so %d on the new *int would print the address and fail — the added cmd test now falsifies a skipped deref. Scope fence correct: report.go r.Count (172/236) iterates journal `reports`, a distinct struct; the internal/config arithmetic sites (PanelExpectedReviewers L434, validateOrchestration L385/396) are Bead-1-scoped and compile-caught, and the plan updates them via accessors. NOTE: plan names the accessor CountValue() (exported) — a better resolution than my suggested count(), since Go forbids a Count() method beside the Count field. AC added (L406)."
+    },
+    {
+      "item": "Round-1 must-fix 2 — nil-guard on Bead 3's panelReg.Panel.Gate read + panel-less test",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 3 step 1 (L490-508) now guards the helper call with `only when panelReg != nil` and computes def,ok := PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()) inside that guard, calling reviewerCountAdvisory only when ok. Confirmed necessary against 109: panelGate returns nil,nil on the empty-beadID and len(regs)==0 fail-open paths (panel_advisory.go), and 109 is nil-safe only because reviewerCountAdvisory has its own `if reg == nil` return (L228) — Bead 3 moves the deref OUTSIDE that check, so the guard is load-bearing, not decorative. Step 6 (L566-569) adds the panel-less complete case (nil registration, gates configured AND absent) asserting no advisory + no panic."
+    },
+    {
+      "item": "Round-1 must-fix 3 — export the gate-key enum for cross-package use",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 1 step 2 (L253-259) declares PanelGateKeys as an exported ordered package slice, explicitly noting cmd/mindspec (package main) and internal/complete cannot reference an unexported name. Confirmed no pre-existing panelGateKeys/PanelGateKeys in internal/config — it is a new symbol. The exported-helper-consumed-cross-package pattern is already established (PanelExpectedReviewers is used from complete.go:384), so PanelGateKeys + the new exported resolvers/PanelGateAdvisoryDefault are feasible. Bead 3 step 3 (L519) references PanelGateKeys for enum-order rendering."
+    },
+    {
+      "item": "New cross-bead breakage check (fix added cmd/mindspec/config.go + workflow/interfaces.md to Bead 1)",
+      "disposition": "ADDRESSED",
+      "detail": "No new breakage. cmd/mindspec/config.go and workflow/interfaces.md are now touched by Bead 1 AND Bead 3, but Bead 3 depends_on [1,2] so it lands sequentially after Bead 1 — no parallel-merge conflict. The two PARALLEL roots stay file-disjoint: Bead 1 {internal/config/*, cmd/mindspec/config.go, core/interfaces.md, workflow/interfaces.md} vs Bead 2 {internal/panel/*, ADR-0037, workflow/architecture.md} — no overlap (Bead 2 uses architecture.md, not interfaces.md). Bead 1's one-line deref needs nothing from Bead 2, so cmd/mindspec is green after Bead 1 independent of Bead 2. The added workflow/interfaces.md note + doc-sync gate handling (L207-211, L397) is a sound consequence of the workflow-owned cmd/** edit."
+    },
+    {
+      "item": "Minor (non-blocking): accessor-name shorthand inconsistency in plan prose",
+      "disposition": "NEW_ISSUE",
+      "detail": "The count accessor is specified as exported CountValue() (L220, L227), but the slot-expansion prose refers to it as count() (L287 'sum of count()', L289 'each count() expanded') and R4 uses *Count directly (L318). This is cosmetic shorthand for the same nil->1 deref; intent is unambiguous and there is exactly one count accessor. Does not affect implementability or my APPROVE — flagged only so a fix editor can normalize the label to CountValue() if trivial. NOT grounds for another fix round."
+    }
+  ]
+}

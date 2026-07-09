@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "My sole round-1 blocking finding — implApproveTail printing both the spec-branch PR block and the wu7t NOTE together in the orphan case — is fully fixed: the gate is now literally `if result.Pushed && result.FinalizeBranch == \"\"` for the old block, matching the exact fix I proposed. `TestImplApproveTail_FinalizeBranchComposition` pins both directions (orphan → NOTE only, no dead-branch PR instruction; normal → old message only) and passes (`go test -run TestImplApproveTail -v` in the worktree, 4/4 green). The NOTE itself is accurate and actionable: exact `gh pr create --head <chore-branch>` command plus an explicit staleness warning ('main's committed .beads/issues.jsonl is STALE: the bd post-merge hook will keep reverting the epic-close/bead-done state ... on every subsequent merge/FF'). Full `go build ./...`, `go vet ./...`, and `go test ./cmd/... ./internal/gitutil/... ./internal/executor/... ./internal/workspace/... ./internal/approve/...` all pass. Re-verified integration: `git merge-tree` of the cumulative branch against the CURRENT origin/main tip (post-PR #173/uopd, d7f5c67a) shows zero conflicts, all sections auto-merge cleanly. New gitutil functions (RemoteHeadSHA, PushBranchForceWithLease) match PushBranch's style exactly (rejectOptionLike + noPrompt + trimmed CombinedOutput errors) with argv-asserting tests. Deviation C's `t.Cleanup(func(){ os.Chdir(origWd) })` matches the exact pattern used throughout cwdsafety_test.go/adr_test.go/context_test.go/otel_test.go — no discipline drift.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "R6 round-1 item 1 (sole concrete_changes_required): implApproveTail composition — gate the spec-branch PR block on result.FinalizeBranch == \"\"",
+      "status": "ADDRESSED",
+      "description": "cmd/mindspec/impl.go:158 now reads `if result.Pushed && result.FinalizeBranch == \"\"` — the exact gate proposed in round 1 — with a comment citing 'Bug wu7t panel round 1 (Group 2)'. New test cmd/mindspec/impl_finalize_note_test.go::TestImplApproveTail_FinalizeBranchComposition drives implApproveTail directly with FinalizeBranch set vs empty and asserts mutual exclusion of the two message blocks, plus asserts the orphan case never offers `gh pr create --head spec/...` (the dead-branch instruction) and does name the chore branch. Ran `go test -count=1 ./cmd/... -run TestImplApproveTail -v` in the worktree: all 4 subtests (including both composition cases) PASS. Full `go test ./cmd/...` (14.5s) also green, confirming no regression in sibling implApproveTail tests (SuccessFromRemovedSpecWorktree, SuccessNoNoteWhileCwdExists, ErrorPathEmitsNoteOnStderr in cwdsafety_test.go)."
+    },
+    {
+      "item": "NOTE guidance accuracy/actionability (BRIEF follow-up question)",
+      "status": "ADDRESSED",
+      "description": "The orphan-case NOTE (impl.go:170-172) prints the exact command `gh pr create --head <chore-branch> --base main --title \"chore(beads): finalize epic for spec <id>\" ...` and a dedicated staleness line: 'Until that PR merges, main's committed .beads/issues.jsonl is STALE: the bd post-merge hook will keep reverting the epic-close/bead-done state in Dolt on every subsequent merge/FF.' Both requested elements (exact command, staleness warning) are present and unambiguous."
+    },
+    {
+      "item": "Integration cleanliness re-check: PR #173 (uopd) merged to main after round-1",
+      "status": "ADDRESSED",
+      "description": "`git fetch origin main` confirms origin/main tip is now d1b4bebf (merge of PR #173, fix/uopd-as-of-committed-read, touching internal/bead/bdcli.go, internal/complete/complete.go(+test), internal/next/beads.go). `git merge-tree $(git merge-base origin/main 6cf718c9) origin/main 6cf718c9` produces zero files with unresolved conflicts (grep -c CONFLICT = 0 across 1067 lines of output) — every section reports 'merged' or 'added in remote' cleanly. No file-level overlap between the two branches' touched files (uopd never touches cmd/mindspec/impl.go, internal/executor, internal/gitutil, or internal/workspace)."
+    },
+    {
+      "item": "New gitutil functions (RemoteHeadSHA, PushBranchForceWithLease) — naming/style consistency",
+      "status": "ADDRESSED",
+      "description": "Both functions follow PushBranch's exact shape: rejectOptionLike(operand) guards on every string operand, noPrompt(execCommand(...)) wrapper, fmt.Errorf with trimmed CombinedOutput/Output on failure. Naming (RemoteHeadSHA, PushBranchForceWithLease) reads naturally alongside PushBranch/FetchRemoteBranch/BranchExists. gitops_test.go adds TestFetchRemoteBranch_RunsNarrowFetch, TestRemoteHeadSHA_ParsesLsRemote (present/absent/error three-way), and TestPushBranchForceWithLease_ArgvAndLease (exact argv assertion + failed-lease error case) — argv hygiene is directly tested, not just asserted in comments. Lease safety: the SHA is observed via RemoteHeadSHA immediately before the push in the same withWorkingDir closure in finalizeOrphanedSpecBranch, so the window for a human's concurrent push to race the lease is minimal, and if it does happen the lease fails loudly (compare-and-swap semantics) rather than silently clobbering — matches the round-1 concern's resolution."
+    },
+    {
+      "item": "Deviation C: cwd-discipline fix in the composition test",
+      "status": "ADDRESSED",
+      "description": "TestImplApproveTail_FinalizeBranchComposition uses `origWd, _ := os.Getwd(); t.Cleanup(func() { _ = os.Chdir(origWd) })` — grepped cmd/mindspec/*_test.go and confirmed this is the exact idiom already used by adr_test.go:81, context_test.go:59, otel_test.go:97, and cwdsafety_test.go's chdirIntoDoomed helper (which the pre-existing sibling implApproveTail tests use). No drift from repo test conventions; this was a real bug (implApproveTail calls os.Chdir(root) into a t.TempDir() that gets removed at test end) and the fix is idiomatic for this package."
+    }
+  ]
+}

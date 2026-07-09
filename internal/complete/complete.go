@@ -376,12 +376,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if panelGateErr != nil {
 		return nil, panelGateErr
 	}
-	// Caller-side panel.ReviewerCountNote advisory (spec 109 R8): the
-	// Allow/Block decision above is already final; this only surfaces a
-	// legitimately smaller/larger substituted reviewer quorum, never
-	// altering it.
-	if gateCfgErr == nil {
-		reviewerCountAdvisory(panelReg, gateCfg.PanelExpectedReviewers(), advisoryOut)
+	// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
+	// per spec 112 R7): the Allow/Block decision above is already final;
+	// this only surfaces a legitimately smaller/larger substituted reviewer
+	// quorum, never altering it. panelReg is nil on panelGate's fail-open
+	// paths (empty bead ID, no registered panel — the common panel-less
+	// `mindspec complete`); PanelGateAdvisoryDefault's arguments deref
+	// panelReg.Panel, so it must be guarded here even though
+	// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
+	// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
+	// unknown recorded gate, while gates: is configured) — no note prints.
+	if gateCfgErr == nil && panelReg != nil {
+		if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
+			reviewerCountAdvisory(panelReg, def, advisoryOut)
+		}
 	}
 
 	// 2.5. Auto-commit if commit message provided (via Executor)

@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "R9 scope fence is fully honored. `git show b27e793b --stat` confirms exactly the 6 named files changed. NO internal/config source edits: all six symbols the diff uses (PanelGateReviewerSlots, PanelGateExpectedReviewers, PanelGateApproveThresholdExpr, PanelGateAdvisoryDefault, PanelGateKeys, KnownModels) already exist at parent a07bb399:internal/config/config.go — the diff only CALLS them. No panel.json writer behavior: shipped config.go/complete.go contain zero fs writes; every os.WriteFile/MkdirAll hit is a test-fixture write and panel.Scan is read-only. No runner/dispatch/substitution consumption: substitution is only rendered, and the sole `runner:` mention is the pre-existing inert-block annotation text. No PanelGateDecision/ApproveThreshold semantic change: the R7 advisory sits AFTER panelGate's Allow/Block is fully computed, panelGate(...) appears only in test callers. Leaf invariant holds: `go list -deps ./internal/panel | grep internal/config` exits non-zero. Build of all four packages OK; git status clean. The R9 `--gate --json` 5-member doc is documented in interfaces.md as a STABLE, ADDITIVE-ONLY CONTRACT — a sound, forward-compatible base for spec 111 to consume.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Fence: exactly 6 files at b27e793b — cmd/mindspec/config.go, cmd/mindspec/config_test.go, internal/complete/complete.go, internal/complete/panel_advisory_test.go, .mindspec/domains/workflow/interfaces.md, architecture.md. No stray edits.",
+    "No internal/config edits: all resolvers (PanelGate*, PanelGateKeys, KnownModels) confirmed pre-existing at parent a07bb399; the diff imports/calls them only.",
+    "No writer behavior: shipped config.go/complete.go have no os.Create/WriteFile/MkdirAll; the 7 write hits in `git show` are all config_test.go temp-dir fixtures; panel.Scan is read-only.",
+    "No runner/dispatch/substitution consumption: substitution rendered for display only (renderSubstitutes, gateResolvedSubstitution); no ApplySubstitution/Dispatch; only `runner:` reference is the inert-block annotation string.",
+    "Gate decision semantics untouched: R7 change is inside the advisory block guarded on `gateCfgErr == nil && panelReg != nil`, running strictly AFTER panelGate returns Allow/Block; panelGate(...) invoked only from tests. No edits to PanelGateDecision/ApproveThreshold().",
+    "Leaf invariant intact: go list -deps ./internal/panel does not include internal/config (grep exits non-zero).",
+    "R9 contract sound: interfaces.md documents the 5-member --gate --json doc (gate, slots, expected_reviewers, approve_threshold, substitution) as STABLE + ADDITIVE-ONLY — rename/retype/remove is a breaking change no follow-up may make silently. gateResolvedDoc marshals via real encoding/json and delegates to the R3 resolvers via buildGateResolvedDoc, so text and JSON cannot diverge from the resolvers or each other. This is a correct forward-compatible surface for the spec-110 writer and spec-111 runner.",
+    "Build of ./cmd/mindspec ./internal/complete ./internal/config ./internal/panel succeeds; git status shows only the untracked review dir."
+  ]
+}

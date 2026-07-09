@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Panel struct marshaling is correct on the axes the plan actually scopes: BeadID *string has no omitempty (nil -> bead_id:null, verified by test), ReviewedHeadSHA has no omitempty (never silently dropped), ApproveThresholdExpr keeps omitempty for pre-109 byte-compat, and round-trip fidelity for every CreateInput field is proven by TestCreate_WritesRegistrationAtomically. Marker-splice index arithmetic (openIdx/closeIdx/closeEnd, header-at-EOF, empty existing file, empty body between markers) has no off-by-one; build+tests are green and git status is clean. One real doc/schema-contract defect: the R4 doc added by this commit (.mindspec/domains/workflow/interfaces.md line ~70) states panel.json is 'written in full by mindspec panel create ... and never hand-edited'. That's false today (cmd/mindspec has no panel-create wiring yet -- Bead 4 -- and the live /ms-panel-run skill step 0 instructs hand-authoring panel.json) and stays false post-Bead-4 (the still-standing ms-panel-tally abandon procedure requires hand-editing abandoned/abandon_reason into panel.json). Compounding this, Create() never reads the pre-existing panel.json -- unlike its read-before-splice treatment of BRIEF.md -- so it does a full-struct overwrite that would silently clear a hand-set abandoned/abandon_reason on any re-panel, with no test or docstring acknowledging the asymmetry.",
+  "concrete_changes_required": [
+    "In .mindspec/domains/workflow/interfaces.md's new Panel Artifact Schema § Registration paragraph, remove or qualify the absolute claim 'and never hand-edited' -- it contradicts the live /ms-panel-run step 0 (hand-authors panel.json today) and the still-standing ms-panel-tally abandon procedure (hand-edits abandoned/abandon_reason by design, documented in plugins/mindspec/skills/ms-panel-tally/SKILL.md §4).",
+    "Add a one-line doc/docstring note (interfaces.md and/or create.go's Create docstring) that Create() fully replaces panel.json from CreateInput's fields only, so it does not preserve out-of-band fields like abandoned/abandon_reason across a re-panel -- Bead 4's CLI (or a future abandon-aware caller) must check Panel.Abandoned before calling Create on an existing panel dir if that state should survive."
+  ],
+  "findings": [
+    {
+      "area": "schema-doc accuracy",
+      "severity": "must-fix",
+      "detail": "interfaces.md § Panel Artifact Schema, Registration paragraph: 'written in full by `mindspec panel create` (`panel.Create`, Bead 1) and never hand-edited'. No `panel create` CLI verb exists in cmd/mindspec yet (grep confirms zero references) -- the live plugins/mindspec/skills/ms-panel-run/SKILL.md Step 0 still instructs the agent to hand-write panel.json today. Separately, plugins/mindspec/skills/ms-panel-tally/SKILL.md §4 documents the abandon procedure as 'a plain repo-file edit' setting abandoned/abandon_reason directly in panel.json -- a sanctioned, permanent hand-edit path this spec does not remove. The 'never hand-edited' claim is therefore inaccurate both today and in the spec's own steady state."
+    },
+    {
+      "area": "Panel struct write semantics",
+      "severity": "should-fix",
+      "detail": "Create() builds `Panel{...}` purely from CreateInput and never reads any pre-existing panel.json (contrast: it DOES read+preserve the pre-existing BRIEF.md outside the delimited region). Because Abandoned/AbandonReason have no CreateInput counterpart, any Create() call on a directory whose panel.json was previously hand-edited to abandoned:true will silently drop both fields on write (they're omitempty, zero-valued). This may be intentionally correct (a fresh round implicitly un-abandons), but it is undocumented and untested, and directly collides with the new doc's 'never hand-edited' claim above."
+    },
+    {
+      "area": "field tags / round-trip",
+      "severity": "info",
+      "detail": "Verified correct: BeadID *string `json:\"bead_id\"` (no omitempty -> null when nil), ReviewedHeadSHA string `json:\"reviewed_head_sha\"` (no omitempty -> never omitted, even if \"\"), Round/ExpectedReviewers int (no omitempty), ApproveThresholdExpr `json:\"approve_threshold,omitempty\"` (omitted when \"\", preserving pre-109 panel.json byte-shape). All match CreateInput's doc comments and TestCreate_WritesRegistrationAtomically's round-trip assertions. go build ./... and `go test ./internal/panel/... -run 'TestCreate|TestPanelSchemaDoc' -v` both pass; git status clean after."
+    },
+    {
+      "area": "marker-splice arithmetic",
+      "severity": "info",
+      "detail": "spliceBriefHeader's openIdx/closeIdx/closeEnd math is sound: closeIdx<openIdx is explicitly rejected, closeEnd==len(existing) (header at EOF) slices to \"\" with no panic, an empty existing file (0-byte BRIEF.md, briefExists=true but content=\"\") correctly falls into the openCount==0&&closeCount==0 legacy-prepend branch, and adjacent markers with an empty body between them produce a valid before=\"\"/after=\"\" split. No off-by-one found."
+    },
+    {
+      "area": "write atomicity (secondary, F1's primary lens)",
+      "severity": "info",
+      "detail": "panel.json and BRIEF.md are written with two sequential plain os.WriteFile calls, not a temp-file+rename pattern; a process kill between the two writes (or mid-write of either) would leave panel.json and BRIEF.md's header disagreeing despite the docstring's 'single logical operation' framing. Existing tests only cover the pre-write validation-error path (both files correctly untouched), not a crash mid-write. Flagging for awareness; not counted as a required change under this lens since it's explicitly F1's assigned attack surface."
+    }
+  ]
+}

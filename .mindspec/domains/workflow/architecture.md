@@ -137,6 +137,84 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   panel's recorded `expected_reviewers` differs from the config
   default; it returns `""` on a match and is never consulted by
   `PanelGateDecision`, so no `Allow`/`Block` outcome changes.
+- **Spec-approve parser parity (Spec 110 Bead 2, R5/R6).** `spec approve`
+  (via `internal/approve.ApproveSpec`, which hard-fails on
+  `validate.ValidateSpec`'s `vr.HasFailures()`) now inherits two
+  plan-approve parser-parity checks folded directly into `ValidateSpec` —
+  no `internal/approve` source change was needed since the gate was
+  already `ValidateSpec`-shaped. **R5**: the `## Impacted Domains` entries
+  are resolved through the identical
+  `normalizeImpactedDomains(nil, root, "", impacted)` call
+  `internal/validate/plan.go` makes, emitting the same
+  `impacted-domains-resolve` `SevError` for a path-like zero/multi-owner
+  entry; a bare-name-no-manifest entry that plan-approve tolerates today
+  still passes — no stricter rule than plan-approve. **R6**: anchored
+  `## ADR Touchpoints` markdown links (both the bare-ID form
+  `[ADR-0031](...)` and the filename-form `[ADR-0031-doc-sync-gate.md](...)`)
+  are resolved for EXISTENCE ONLY against the same
+  `newMemoStore(adrStoreForSpecFn(root, specDir))` the plan-time citation
+  gate reads, emitting `adr-touchpoint-missing` on a dangling reference; a
+  bare-prose `ADR-####` mention with no `[...](...)` anchor is never
+  matched. Deliberately out of scope at spec-approve (R7c, ADR-0032):
+  Accepted-status, domain-intersection (`adr-cite-irrelevant`), and
+  coverage (`adr-coverage-*`) evaluation all stay plan-approve-only.
+- **Recorded `gate` field, decision-inert (Spec 112, ADR-0037 §1
+  amendment).** `internal/panel.Panel` gains one new optional field,
+  `Gate` (`json:"gate,omitempty"`) — the gate mix
+  (`spec_approve`/`plan_approve`/`bead`/`final_review`/`adhoc`) the
+  panel was created from, by convention but parse-lenient like
+  `AbandonReason`: an unexpected or absent value never sets
+  `Registration.Err`. It is DECISION-INERT — `PanelGateDecision` and
+  `ApproveThreshold()` never read it, so its presence, absence, or
+  value changes no `Allow`/`Block` outcome and no threshold. Name
+  (`gate`), type (string), `omitempty`, and parse-lenience are a
+  stable contract (spec 112 R9); no follow-up may change any of the
+  four silently. `internal/panel` remains a dependency-clean leaf:
+  this field is the bead's only touch point — no new import, no new
+  function, and the config-free-leaf invariant (no `internal/config`
+  import) is unchanged.
+- **Gate-aware reviewer-count advisory selection rule (Spec 112 R7).**
+  Both `panel.ReviewerCountNote` callers — `internal/complete`'s
+  complete-gate advisory and `mindspec config show`'s panel scan — resolve
+  the comparison default through one shared, config-homed rule,
+  `(*config.Config).PanelGateAdvisoryDefault(recordedGate string, isBead
+  bool) (int, bool)`, so the two surfaces cannot drift from each other.
+  The selection: (1) `gates:` unconfigured (`len(Gates) == 0`) → the flat
+  global default, exactly as Spec 109 shipped it; (2) a recorded gate that
+  is one of the five `panel.gates` keys → that gate's own resolved
+  default; (3) a gate-less bead panel (`Panel.IsBead()`, `Gate == ""`) →
+  the `bead` gate's default; (4) anything else — a gate-less non-bead
+  panel, or a recorded value outside the five-key enum — returns `(0,
+  false)`, and the caller must SKIP the note rather than guess: a
+  correctly-configured 9-reviewer `spec_approve` panel or 12-reviewer
+  `final_review` panel must never be flagged against an unrelated
+  default, and a spurious advisory trains operators to ignore real ones.
+  `PanelGateAdvisoryDefault` never calls a gate-scoped resolver with a
+  value outside the enum, so an unrecognized recorded `gate` can never
+  surface a resolver error through the advisory path. `internal/complete`'s
+  call site additionally guards on `panelReg != nil` before invoking the
+  rule (`panelReg.Panel` would otherwise be dereferenced on `panelGate`'s
+  nil fail-open return — the common panel-less `mindspec complete`); the
+  gate's own `Allow`/`Block` decision is fully computed before this call
+  runs and is never affected by it.
+- **`config show` gates/substitutes/known-model rendering + `--gate`
+  resolved view (Spec 112 R8/R9).** `renderConfig` renders `panel.gates`
+  in `config.PanelGateKeys` enum declaration order (never map-iteration
+  order) and `panel.substitution.substitutes` in sorted-key order — both
+  keys always present in the output, even empty (`gates: {}` /
+  `substitutes: {}`) — alongside a warning-style, exit-code-inert note for
+  any model id absent from the curated `config.KnownModels()` advisory
+  list. `mindspec config show --gate <name> [--json]` exposes the R3
+  gate-scoped resolvers as a single per-gate view through two pure
+  functions sharing one `buildGateResolvedDoc` builder, so the text and
+  JSON renders and the resolvers themselves cannot disagree. The JSON
+  document's five members (`gate`, `slots`, `expected_reviewers`,
+  `approve_threshold`, `substitution`) are a stable, additive-only
+  contract (R9) — the surface the Spec 110 `panel.json` writer and the
+  Spec 111 orchestration runner consume — carrying the same
+  never-silently-changed guarantee as the recorded `gate` field above.
+  This bead adds no writer- or runner-side behavior; both remain out of
+  scope here.
 - **Doctor layout detection (Spec 106).** `mindspec doctor` reports the
   detected docs layout (reusing `workspace.DetectLayout`), emits a
   `would-migrate-layout` Warn when a canonical/legacy tree would flatten

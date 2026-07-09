@@ -1,0 +1,41 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-reviewed the fix delta (825f04c5..39b5724, spec-only 19+/15-) at 39b5724 against 109's surface now present in this worktree. F2-1 is ADDRESSED: R2 names the count-less relaxation as the single monotone widening (109 R5 refuses count<1 — verified at internal/config/config.go:396; under R1 it loads as count:1), adds the matching falsification clause, and AC1 asserts it. No 109-compat regression in any of the twelve tightenings: the unknown-recorded-gate skip and the adhoc-chain range check fire only when gates: is configured; gates-absent behavior falls back to 109's global compare verbatim, with gates:{} pinned equivalent; the escaping and render-order pins cover only 112's new strings and cite 109's escapeConfigValue accurately (verified [0x20,0x7e] passthrough + strconv.Quote). Every citation re-verified directly against the landed code: raw-expression resolver discipline, ApproveThreshold single home, ReviewerCountNote's two call sites, IsBead(), gate.go:257 threshold>0, panel leaf import-cleanliness, and the 109 AC7 fixture (2+2/\"3\"/claude-code-workflow, config_test.go:558). One info-level wording nit; non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "minor",
+      "hard_block": false,
+      "disposition": "ADDRESSED",
+      "title": "Round-1 F2-1 (count-less relaxation unnamed in R2/AC1) — ADDRESSED at 39b5724",
+      "detail": "R2 now states the identity claim is monotone and names the exact input class: 'a count-less reviewer entry (109 R5 refuses count < 1; under R1 it loads as count: 1) — a deliberate relaxation that widens the accepted set without changing the meaning of any config 109 loads, so a literal reading of byte-identical cannot be turned against R1'. R2's falsification list gains 'if a count-less reviewer entry fails to load as count: 1', and AC1 (TestLoad_GatesAbsentByteIdentical109) now asserts 'a count-less reviewer entry — which 109 refuses — loads as count: 1 (R2's named monotone relaxation)'. Verified the factual anchor against the now-present landed code: internal/config/config.go validateOrchestration refuses r.Count < 1 (line 396), so a count-less {family: claude} entry (zero-value Count) is indeed 109-refused. This is precisely the fix I asked for — the identity claim is scoped to inputs 109 accepts and a too-literal AC1 implementation can no longer contradict R1."
+    },
+    {
+      "id": "F2-2",
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "NOT_ADOPTED_ACCEPTABLE",
+      "title": "Round-1 F2-2 ('global-cursor' terminology) — not adopted; acceptable",
+      "detail": "The cosmetic 'per-gate cursor' rewording was info-severity and did not enter the consolidated change list. The new cursor-start-0 text ('Walking the flattened slot list in declaration order', 'the first lens-less slot in a gate's flattened declaration order') further disambiguates the per-gate scope, so the residual ambiguity is now even smaller. No action needed."
+    },
+    {
+      "id": "F2-4",
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "NEW_ISSUE",
+      "title": "R2's 'covers every input 109 accepts' read hyper-literally collides with yaml unknown-key ignoring — prose nit only, no falsification conflict",
+      "detail": "109's Load uses non-strict yaml.Unmarshal, so a config carrying a malformed panel.gates: block is 'accepted' by a 109 binary (unknown keys silently ignored) yet rightly refused by 112 R4. A hyper-literal reading of R2's new monotone sentence ('it covers every input 109 accepts; 112 additionally accepts one input class 109 refuses') could be turned against R4 the same way the old 'byte-identical' wording could be turned against R1. In practice this is inert: none of R2's falsification predicates encode that overbroad reading (no clause says every 109-accepted input must load), the sentence's operative scope is 'without changing the meaning of any config 109 loads' (a gates:-carrying file is not a 109-era config), and this is the established semantics of every schema addition — 109 itself validates panel: keys a pre-109 binary would have ignored-accepted. Non-blocking; if a future tightening pass touches R2, 'every 109-schema input 109 accepts' would close even the pedantic reading."
+    },
+    {
+      "id": "F2-5",
+      "severity": "info",
+      "hard_block": false,
+      "disposition": "VERIFIED",
+      "title": "109 citations verified directly against the in-worktree surface; round-1 grounding gap (rebase prerequisite) resolved",
+      "detail": "The round-1 O1/F2 rebase-forward ask is done: merge 9884918c brings post-109 main in, and 109's ADR-0040, spec, and code are present at 39b5724. Verified directly (no git show main: needed): internal/config.Panel + Reviewer{Family,Count}; PanelExpectedReviewers()/PanelApproveThresholdExpr() returning raw expressions with the single-home comment; validateOrchestration's count>=1 / sum>=2 / threshold-range refusals with ADR-0035 recovery lines; internal/panel.ApproveThresholdExpr (json approve_threshold,omitempty) with ApproveThreshold() as sole interpreter (panel.go:97); ReviewerCountNote (panel.go:125) with exactly two caller-side surfaces (cmd/mindspec/config.go reviewerCountNotesFor line ~215-231; internal/complete/panel_advisory.go reviewerCountAdvisory); IsBead() (panel.go:137); parse-lenient abandon_reason precedent; gate.go:257 'threshold > 0' (AC10's grep target); go list -deps ./internal/panel contains no internal/config (leaf invariant holds today); escapeConfigValue (cmd/mindspec/config.go:81) matching R8's 'printable-ASCII passthrough; single-line quoted escape' exactly; loop.gate_authority vocabulary spec_approve/plan_approve/bead_merge/impl_approve matching R4's disambiguation note; the 109 AC7 fixture (config_test.go:558: 2+2 reviewers, approve_threshold \"3\", five-phase models:, full loop:, runner claude-code-workflow) matching R2's citation exactly; and beads mindspec-naq0/mindspec-pev1 (cited by the new size-cap deferral and the 113 layering note) exist in .beads/issues.jsonl. The Goal YAML's 9-slot spec_approve example matches R3's pinned cursor-0 expansion arithmetically (R1..R9 = author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration, author-of-record, empirical-prober, codebase-pin), and final_review's explicit \"11\" equals n-1 for N=12."
+    }
+  ]
+}

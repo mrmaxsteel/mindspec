@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "Most verification commands are runnable on this macOS tree: BSD grep accepts the PASS-line forms, /usr/bin/grep -qxF is available, ~/.local/bin/mindspec exists, package tests/build shapes run, and the Bead-5 quoted skill patterns match current content exactly where expected. Two verification probes need tightening. The Bead-4 manual e2e is not runnable/provable as written because create dirties the worktree before the claimed git status clean check, and it omits concrete setup for a sub-threshold panel. The leaf-import assertion can also false-green if go list itself fails.",
+  "concrete_changes_required": [
+    "Rewrite the Bead-4 manual e2e into explicit commands that either commit/snapshot the files created by panel create before running verify, or compare git status before/after verify, and include the exact sub-threshold verdict setup before tally.",
+    "Replace the leaf assertion with a form that fails when go list fails, for example `deps=$(go list -deps ./internal/panel) && ! printf '%s\\n' \"$deps\" | grep -q internal/config`, or an equivalent two-step check."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "location": ".mindspec/specs/110-panel-verbs-parser-parity/plan.md:625",
+      "summary": "Manual e2e cannot prove verify writes nothing as written.",
+      "detail": "`panel create` writes `<spec-dir>/reviews/demo/{panel.json,BRIEF.md}` before the manual proof asks for `git status` clean after `panel verify`. Unless the procedure commits those files or compares a before/after snapshot, the status check fails because of create's own writes, not verify. The tally half also says `on a sub-threshold panel` without specifying the verdict JSON setup needed to make that state reproducible."
+    },
+    {
+      "severity": "minor",
+      "location": ".mindspec/specs/110-panel-verbs-parser-parity/plan.md:338",
+      "summary": "The leaf dependency pipeline can false-green when `go list` fails.",
+      "detail": "On this shell, `! go list -deps ./does-not-exist | grep -q internal/config` exits 0. The current `./internal/panel` command succeeds today, and adjacent build/package tests mitigate it, but as a standalone leaf-invariant assertion it should fail closed on `go list` errors."
+    }
+  ]
+}

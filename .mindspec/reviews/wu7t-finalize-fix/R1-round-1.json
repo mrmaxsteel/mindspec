@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "The fix faithfully implements bead mindspec-wu7t and the BRIEF design, and it CLEARS the bead's FIX DIRECTION floor (\"at minimum, detect the orphaned-finalize condition and emit a recovery command\") and exceeds it: it detects the already-merged case via IsAncestor(preFinalizeTip, origin/main), reroutes the epic-close export onto a fresh from-main chore/finalize-<specID> branch, pushes it, and prints a LOUD NOTE with the exact `gh pr create` command plus the staleness warning — replacing the old silent revert. All three fix-author deviations (A preFinalizeTip captured unconditionally before the first auto-commit; B plain-git worktree instead of the bd-coupled WorktreeOps seam; C local chore branch left behind) are justified. Invariants hold: epic close precedes FinalizeEpic so Dolt has the closes at export; the orphan push precedes cleanup; TestApproveImplCallOrder is unaffected; fetch/ancestry failures degrade to today's behavior; new exec sites use noPrompt+rejectOptionLike. Build, go vet, and all targeted tests (executor, approve, gitutil, workspace, cmd/mindspec) pass. Remaining items are non-blocking follow-ups: ancestry detection is blind to squash-merge, one inaccurate doc comment, and the test proves the carrier property rather than end-to-end no-self-revert.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "medium",
+      "lens": "author-of-record / intent-coverage",
+      "title": "Orphan detection is ancestry-based, so it is blind to squash-merged impl PRs",
+      "detail": "Detection is `IsAncestor(preFinalizeTip, origin/main)`. That fires for merge-commit, fast-forward, and rebase-merge workflows (spec commit SHAs preserved on main), which matches the observed spec-106 repro and mindspec's own convention (git log shows `Merge pull request #...` merge commits). But GitHub 'Squash and merge' creates a new commit that does NOT have preFinalizeTip as an ancestor, so on a squash-merge protected-main repo `orphaned` stays false, no NOTE is emitted, and the old silent-orphan behavior recurs — the exact failure the bead targets. Not a round-1 blocker (matches the actual workflow, and content-based/PR-state detection would need the `gh` dependency the design deliberately avoids), but recommend (a) a one-line code comment in the detection block documenting the merge-commit/FF/rebase assumption, and (b) a follow-up bead for squash-merge repos."
+    },
+    {
+      "severity": "low",
+      "lens": "correctness / documentation",
+      "title": "finalizeOrphanedSpecBranch doc comment's justification is factually wrong (Deviation C)",
+      "detail": "The comment says the leftover local chore branch is 'harmless — same as the spec branch, which also survives locally after a \"pr\" push'. But FinalizeEpic's cleanup block unconditionally runs `gitutil.DeleteBranch(specBranch)` (mindspec_executor.go ~L478), so the spec branch does NOT survive locally — the analogy is inaccurate. The leftover local chore/finalize-<specID> branch is real debris. Deviation C itself is acceptable (harmless clutter; a same-spec retry deletes the stale local branch first, and a fresh impl-approve re-run cannot reach this code because the spec branch is already gone), but either delete the local chore branch after a successful push for symmetry, or correct the comment. Follow-up, non-blocking."
+    },
+    {
+      "severity": "low",
+      "lens": "regression fidelity",
+      "title": "New test proves the carrier property, not end-to-end 'no self-revert'",
+      "detail": "Acceptance criterion asks a regression to 'assert no self-revert after a subsequent merge/FF'. TestFinalizeEpic_OrphanedSpecBranch instead asserts the finalize export lands on a from-main branch that exists on the remote, is a descendant of origin/main, and carries the export (a valid PROXY: if the commit reaches a mergeable carrier, the bd hook won't revert once merged). It does not simulate the bd post-merge hook + a real merge to prove no revert. This is a reasonable scoping choice given the test is hermetic (no bd/Dolt), but it means the test cannot catch a regression in the self-revert mechanism itself — only in orphaning. Note as a known limitation; the guard it does provide is genuine and would fail if the fix were reverted."
+    },
+    {
+      "severity": "low",
+      "lens": "hygiene",
+      "title": "Orphaned path still pushes the (dead) spec branch, potentially recreating deleted remote debris",
+      "detail": "In the orphaned case the code still calls PushBranch(specBranch) unconditionally. The local spec branch now carries the finalize auto-commit, so if the remote spec branch was already deleted as post-merge debris this push RECREATES it on the remote carrying a finalize commit nobody will merge. This is by design (BRIEF: 'spec branch still pushed unconditionally'; the test pins it) and is harmless because the real carrier is the chore branch, but it is slightly untidy. No action required."
+    },
+    {
+      "severity": "info",
+      "lens": "invariants / ordering",
+      "title": "Ordering and safety invariants verified",
+      "detail": "Confirmed: (1) ApproveImpl closes the epic at MUTATION 1/3 (impl.go L337) before FinalizeEpic at MUTATION 3/3 (L365), so Dolt contains the closes at export time and commitWithExport(wtPath) writes/commits them into the temp worktree (exportDir := path). (2) finalizeOrphanedSpecBranch (create+commit+push) runs inside the HasRemote block BEFORE the cleanup withWorkingDir block, so a cleanup failure cannot strand the finalize. (3) preFinalizeTip is captured right after BranchExists and before the first auto-commit — correct checkpoint; a resolve failure disables detection and falls through (best-effort). (4) fetch failure and IsAncestor error both warn and fall through to today's behavior. (5) FetchRemoteBranch and the finalizeOrphanedSpecBranch cwd-dependent git calls are wrapped in withWorkingDir(g.Root) — actually MORE cwd-careful than the pre-existing unwrapped PushBranch. (6) FetchRemoteBranch/CreateBranch/PushBranch use noPrompt + rejectOptionLike (SEC-5). (7) FinalizeResult/ImplResult field additions are additive; TestApproveImplCallOrder (source-order AST anchors) is unaffected; the added assignment sits after FinalizeEpic. (8) Naming helpers (FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath, prefixes chore/finalize- and worktree-finalize-) are consistent with existing workspace conventions. Build + go vet + executor/approve/gitutil/workspace/cmd tests all green."
+    }
+  ]
+}
