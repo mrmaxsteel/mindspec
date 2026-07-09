@@ -14,7 +14,8 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
 - `panel-slug` (required) — e.g. `spec-050-bead2` (round 1) or `spec-050-bead2-r2` (round 2).
 - `target` (required) — one of `bead <bead-id>`, `pr <pr-number>`, or `commit <sha>`. For `/ms-spec-final-review`, `target` is the spec branch (`bead_id` null).
 - `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
-- `expected-reviewers` (default `6`) — the default panel size.
+
+`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel defaults (6 reviewers, N−1 threshold), so there is nothing to pass here.
 
 > **`<spec-dir>` / co-located reviews (spec 106 flat layout).** Panels are
 > co-located under the spec they review: `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`,
@@ -44,6 +45,8 @@ Step 0 was previously the separate `/ms-panel-create` skill; it is folded in her
    One call creates `<spec-dir>/reviews/<panel-slug>/`, writes `panel.json` — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read, with `expected_reviewers`/`approve_threshold` stamped from the configured panel defaults and `reviewed_head_sha` captured from `--target`'s live commit AT WRITE TIME — and writes (first `create`) or rewrites (re-panel) `BRIEF.md`'s machine-managed header, all in one atomic operation.
 
    On a re-panel (`--round N+1`), `round` and `reviewed_head_sha` co-bump in the SAME write by construction — the two fields can never drift apart, which is exactly the invariant that closes the stale-verdict bypass (lola-f4a8 class). Prior round verdict files (`<slot>-round-<K>.json`, K < N+1) and the skill-authored BRIEF body below the header are left untouched.
+
+   `panel create` prints a `panel directory: <dir>` line. **Capture that exact path and use it directly** for the rest of this skill — the BRIEF stub, the codex prompt files, and the verdict-file existence checks — instead of re-deriving it from the `<spec-dir>/reviews/<panel-slug>/` convention note above. The convention note documents `panelDirFor`'s flat-layout branch only; `panelDirFor` also has a non-flat legacy fallback (`<root>/review/<slug>`) that the reported line always resolves correctly and the prose convention does not cover.
 
    Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets by hand, directly in `panel.json`: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned) — a plain file edit, not something `panel create` writes.
 

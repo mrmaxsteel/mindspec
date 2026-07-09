@@ -76,8 +76,9 @@ Check current mode with `/spec-status`. If unclear:
   verdict-JSON template; `/ms-panel-tally` renders its decision and the
   aggregated `concrete_changes_required` with one `panel tally` call instead of
   a hand-tabulated decision matrix. The judgment sections both skills retain —
-  `/ms-panel-run`'s **Slot lens defaults** and **Anti-patterns**;
-  `/ms-panel-tally`'s **Artifact gates** (the HARD-vs-soft `hard_block`
+  `/ms-panel-run`'s **Launch the panel**, **Codex failure detection**,
+  **Working directory matters**, **Slot lens defaults**, and
+  **Anti-patterns**; `/ms-panel-tally`'s **Artifact gates** (the HARD-vs-soft `hard_block`
   judgment), **Consolidate** (semantic dedup + criticality ranking), and
   halt-recovery/escape-hatch procedure — are unchanged: the verbs mechanize the
   decision function and the artifact registration, not the human judgment

@@ -21,7 +21,9 @@ Run `mindspec panel tally <panel-slug>` for the decision, apply the HARD artifac
    ```
    This prints, in one shot: the per-slot verdict table (`verdict` + `hard_block`, malformed files named and counted as missing), the aggregate APPROVE / REQUEST_CHANGES / REJECT counts against the resolved threshold (**N − 1** by default — 5-of-6 for the standard 6-reviewer panel), the `panel.PanelGateDecision` decision (PASS / PASS with advisory / BLOCK), and the aggregated `concrete_changes_required` — read presentation-only from each REQUEST_CHANGES/REJECT verdict file, never feeding the decision. The exit code tracks the decision alone: `0` on Allow, `0` with the advisory printed on Warn, non-zero with a final recovery line (ADR-0035) on Block.
 
-   This is the identical decision the in-binary `mindspec complete` gate enforces — including the filename-derived `max(N)` over `*-round-<N>.json` (never a possibly-lagging `panel.json.round`) and the `reviewed_head_sha` freshness check — so there is nothing left to hand-tabulate. On a Block from staleness, see § After a halt — recovery below. On Allow, hand off to the cycle's merge terminal per § Then below.
+   This is the identical decision the in-binary `mindspec complete` gate enforces — including the filename-derived `max(N)` over `*-round-<N>.json` (never a possibly-lagging `panel.json.round`) and the `reviewed_head_sha` freshness check — so there is nothing left to hand-tabulate. On a Block from staleness, see § After a halt — recovery below.
+
+   **Before handing off to the merge terminal on an Allow**, screen the tally's aggregated `concrete_changes_required` (printed even on Allow) against § Artifact gates below: a CCR item naming a missing measurement artifact / cost projection / drift report / regression baseline **HARD-blocks regardless of vote count and regardless of whether any reviewer set `hard_block`**. The binary mechanizes only the `hard_block`-flag disjunct (gate.go cases 9–10); this screen restores the other half — an aggregated-CCR item can HARD-block an Allow even when no single verdict flagged it. Only once that screen is clear does an Allow hand off to the cycle's merge terminal per § Then below.
 
 2. **Consolidate `concrete_changes_required`.** This is the input to `/ms-bead-fix`. Process:
 
@@ -85,7 +87,7 @@ Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKI
 
 - Don't auto-merge below the N−1 threshold. The threshold is N−1 (5/6 for the default panel), and you should still note family asymmetry.
 - Don't pass raw verdict JSONs to the fix subagent — dedupe first. Six verdicts × ~3 items each = ~18 lines of duplicated asks otherwise.
-- Don't ignore `confidence`. A 0.96 REQUEST_CHANGES from one slot should outweigh a 0.70 APPROVE from another. Note this in the report.
+- Don't ignore `confidence`. A 0.96 REQUEST_CHANGES from one slot should outweigh a 0.70 APPROVE from another. `mindspec panel tally`'s printed table carries `verdict`/`hard_block` only, not `confidence` — read it from the underlying `<slot>-round-<N>.json` files when weighing verdicts, and note the weighting in the report.
 - Don't drop a REQUEST_CHANGES because "only one reviewer flagged it". A single empirically-grounded objection can be load-bearing — verify the claim before discarding.
 - Don't satisfy an artifact-gate HARD block with a PR-body edit. The artifact must exist at the named path.
 
