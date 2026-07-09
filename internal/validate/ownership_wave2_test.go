@@ -55,3 +55,25 @@ func TestWorkflowOwnsTraceAndGolangci(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkflowOwnsClaudeWorkflows proves the spec-111 claim —
+// .claude/workflows/** — attributes to the workflow domain through
+// attributeDomain against the live workflow OWNERSHIP.yaml. Without the
+// claim, .claude/workflows/ms-panel.js (governable source: isDocFile and
+// isProcessArtifact both return false for it) trips adr-divergence-unowned
+// when edited (spec 111 AC2, AC3, R9).
+func TestWorkflowOwnsClaudeWorkflows(t *testing.T) {
+	root := repoRootForWorkflowManifest(t)
+	domains := []string{"workflow"}
+
+	owner, own, err := attributeDomain(nil, root, "", ".claude/workflows/ms-panel.js", domains)
+	if err != nil {
+		t.Fatalf("attributeDomain(%q) err: %v", ".claude/workflows/ms-panel.js", err)
+	}
+	if owner != "workflow" {
+		t.Errorf("attributeDomain(%q) = %q, want %q", ".claude/workflows/ms-panel.js", owner, "workflow")
+	}
+	if own == nil {
+		t.Errorf("attributeDomain(%q) returned nil Ownership", ".claude/workflows/ms-panel.js")
+	}
+}

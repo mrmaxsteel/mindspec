@@ -19,6 +19,7 @@ paths:
   - cmd/**
   - plugins/mindspec/**
   - .claude/skills/**
+  - .claude/workflows/**
   - .agents/skills/**
   - scripts/bd-jsonl-merge-driver.sh
   - .golangci.yml
