@@ -137,6 +137,21 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   panel's recorded `expected_reviewers` differs from the config
   default; it returns `""` on a match and is never consulted by
   `PanelGateDecision`, so no `Allow`/`Block` outcome changes.
+- **Recorded `gate` field, decision-inert (Spec 112, ADR-0037 §1
+  amendment).** `internal/panel.Panel` gains one new optional field,
+  `Gate` (`json:"gate,omitempty"`) — the gate mix
+  (`spec_approve`/`plan_approve`/`bead`/`final_review`/`adhoc`) the
+  panel was created from, by convention but parse-lenient like
+  `AbandonReason`: an unexpected or absent value never sets
+  `Registration.Err`. It is DECISION-INERT — `PanelGateDecision` and
+  `ApproveThreshold()` never read it, so its presence, absence, or
+  value changes no `Allow`/`Block` outcome and no threshold. Name
+  (`gate`), type (string), `omitempty`, and parse-lenience are a
+  stable contract (spec 112 R9); no follow-up may change any of the
+  four silently. `internal/panel` remains a dependency-clean leaf:
+  this field is the bead's only touch point — no new import, no new
+  function, and the config-free-leaf invariant (no `internal/config`
+  import) is unchanged.
 - **Doctor layout detection (Spec 106).** `mindspec doctor` reports the
   detected docs layout (reusing `workspace.DetectLayout`), emits a
   `would-migrate-layout` Warn when a canonical/legacy tree would flatten

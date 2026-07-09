@@ -294,3 +294,79 @@ func TestPanel_AbandonedFieldsParse(t *testing.T) {
 		t.Errorf("abandoned/abandon_reason not parsed: %+v", p)
 	}
 }
+
+// TestPanel_GateFieldDecisionInert (Spec 112 AC6, ADR-0037 §1 amendment):
+// the recorded `gate` field's presence, absence, or value changes no
+// PanelGateDecision outcome and no ApproveThreshold() — it is decision-inert
+// metadata in exactly the sense AbandonReason is. An unexpected value never
+// sets Registration.Err (parse-lenient, like AbandonReason), and a gate-less
+// legacy panel.json parses field-for-field identical to today's.
+func TestPanel_GateFieldDecisionInert(t *testing.T) {
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	base := Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
+
+	for _, gate := range []string{"", "bead", "weird"} {
+		p := base
+		p.Gate = gate
+		// 5 APPROVE + 1 neutral dissent = 6/6 present (Complete()), 5/6
+		// APPROVE meets the N-1 threshold (mirrors
+		// TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision).
+		r := result(&p, 5, 0, 1, nil, nil)
+		r.Verdicts = append(r.Verdicts,
+			Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+		facts := GateFacts{
+			BeadID:  "mindspec-bd01",
+			Reg:     regn("/wt/review/slug"),
+			Res:     r,
+			HeadSHA: sha,
+		}
+		if got := PanelGateDecision(facts); got.Action != Allow {
+			t.Errorf("gate=%q: PanelGateDecision = %+v, want Allow", gate, got)
+		}
+		if th := p.ApproveThreshold(); th != 5 {
+			t.Errorf("gate=%q: ApproveThreshold() = %d, want 5 (Gate must not affect it)", gate, th)
+		}
+	}
+
+	// An unexpected gate value never sets Registration.Err.
+	root := t.TempDir()
+	writeFile(t, root, "review/weird-gate/panel.json", `{
+	  "bead_id": "mindspec-x.9", "spec": "s", "target": "bead/mindspec-x.9",
+	  "round": 1, "expected_reviewers": 6, "reviewed_head_sha": "abc",
+	  "gate": "weird"
+	}`)
+	regs := Scan(root)
+	if len(regs) != 1 || regs[0].Err != nil {
+		t.Fatalf("unexpected gate value must not error: %+v", regs)
+	}
+	if regs[0].Panel.Gate != "weird" {
+		t.Errorf("Gate = %q, want %q", regs[0].Panel.Gate, "weird")
+	}
+
+	// A gate-less legacy panel.json parses field-for-field identical to
+	// today's (byte-identical code paths — no new branch, no default fill).
+	legacyRoot := t.TempDir()
+	writeFile(t, legacyRoot, "review/legacy/panel.json", beadPanelJSON)
+	legacyRegs := Scan(legacyRoot)
+	if len(legacyRegs) != 1 || legacyRegs[0].Err != nil {
+		t.Fatalf("legacy scan failed: %+v", legacyRegs)
+	}
+	got := legacyRegs[0].Panel
+	want := Panel{
+		BeadID:            ptr("mindspec-x.1"),
+		Spec:              "093-skills-thin-down",
+		Target:            "bead/mindspec-x.1",
+		Round:             1,
+		ExpectedReviewers: 6,
+		ReviewedHeadSHA:   "abc1234abc1234abc1234abc1234abc1234abc12",
+	}
+	if got.Gate != "" {
+		t.Errorf("legacy Gate = %q, want empty", got.Gate)
+	}
+	if *got.BeadID != *want.BeadID || got.Spec != want.Spec || got.Target != want.Target ||
+		got.Round != want.Round || got.ExpectedReviewers != want.ExpectedReviewers ||
+		got.ReviewedHeadSHA != want.ReviewedHeadSHA || got.Abandoned != want.Abandoned ||
+		got.AbandonReason != want.AbandonReason || got.ApproveThresholdExpr != want.ApproveThresholdExpr {
+		t.Errorf("legacy Panel mismatch: got %+v, want %+v", got, want)
+	}
+}
