@@ -133,7 +133,9 @@ decision implementation (R7a).
 **Shared slug validation.** All three subcommands validate their
 `<slug>` positional argument through one shared `validatePanelSlug`
 BEFORE any `filepath.Join`: an empty slug, `.`, `..`, any `/` or `\`, an
-absolute path, or any control character (including `\n`/`\r`/NUL) is
+absolute path, or any control character — via `unicode.IsControl`, the
+full C0/DEL/C1 range (including `\n`/`\r`/NUL and the C1 CSI `U+009B`
+terminal-injection vector, mirroring `report.go`'s `stripControl`) — is
 rejected with a `guard.NewFailure` naming the offending value. `panel
 create` additionally rejects a `--bead`/`--target` value containing a
 control character through the same control-byte check before it is
@@ -156,7 +158,13 @@ directory is resolved layout-aware, reusing
 `review/<slug>` convention. A `--bead <id>` panel expects `--target
 bead/<id>` — the same ref `mindspec complete`'s gate rev-parses for
 staleness; a divergent `--target` can only fail SAFE (a stale-SHA Block
-at gate time), never a false-PASS.
+at gate time), never a false-PASS. On success, stdout carries two
+lines: `panel <slug> registered: round N, K expected reviewer(s),
+reviewed_head_sha <sha>` followed by `panel directory: <dir>` — the
+SAME resolved `dir` `panel.Create` wrote to. This second line is the
+stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
+reads to learn the panel directory without re-deriving the layout
+logic above.
 
 **`mindspec panel verify <slug>`** is a READ-ONLY completeness/
 staleness report: verdicts present vs `expected_reviewers`, per-slot

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -136,6 +137,7 @@ stale-SHA Block, never a false-PASS.`,
 
 		fmt.Fprintf(cmd.OutOrStdout(), "panel %s registered: round %d, %d expected reviewer(s), reviewed_head_sha %s\n",
 			slug, round, in.ExpectedReviewers, sha)
+		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\n", dir)
 		return nil
 	},
 }
@@ -240,15 +242,19 @@ func validatePanelSlug(slug string) error {
 	return rejectControlBytes("slug", slug)
 }
 
-// rejectControlBytes rejects a value containing any control character
-// (including \n/\r/NUL) — the control-byte discipline validatePanelSlug
-// applies to <slug> and `panel create` additionally applies to --bead/
-// --target: a value bearing a control byte must never reach a rendered
-// message or a guard.NewFailure recovery line, where an embedded newline
-// could forge a fake `recovery:` line (spec-109-final-review G2).
+// rejectControlBytes rejects a value containing any control character —
+// C0 (including \n/\r/NUL), DEL, or C1 (U+0080-U+009F, e.g. the CSI
+// U+009B terminal-injection vector report.go's stripControl already
+// documents as the 'codex-render-leak #2' incident) — via
+// unicode.IsControl, mirroring stripControl's own predicate. The
+// control-byte discipline validatePanelSlug applies to <slug> and `panel
+// create` additionally applies to --bead/--target: a value bearing a
+// control byte must never reach a rendered message or a guard.NewFailure
+// recovery line, where an embedded newline could forge a fake `recovery:`
+// line (spec-109-final-review G2).
 func rejectControlBytes(label, value string) error {
 	for _, r := range value {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) {
 			return guard.NewFailure(
 				fmt.Sprintf("%s %q contains a control character and is rejected", label, value),
 				"remove any control characters (including newlines) from the value")

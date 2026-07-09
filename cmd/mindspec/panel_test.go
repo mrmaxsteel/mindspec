@@ -255,6 +255,14 @@ func TestPanelCreate_RejectsUnsafeSlugAndControlBytes(t *testing.T) {
 		{"newline in slug", "demo\nEVIL", "", "bead/x"},
 		{"newline in --bead", "demo", "mindspec-x.1\nEVIL", "bead/x"},
 		{"newline in --target", "demo", "", "bead/x\nEVIL"},
+		// C1 control range (U+0080-U+009F), valid-UTF8-encoded: the CSI
+		// U+009B terminal-injection vector report.go's stripControl
+		// already handles (the 'codex-render-leak #2' incident). These
+		// bytes are NOT C0/DEL, so a predicate that only checks
+		// r < 0x20 || r == 0x7f misses them.
+		{"C1 CSI in slug", "demoslug", "", "bead/x"},
+		{"C1 CSI in --bead", "demo", "mindspec-x.1EVIL", "bead/x"},
+		{"C1 CSI in --target", "demo", "", "bead/xEVIL"},
 	}
 
 	for _, tc := range tests {
