@@ -149,6 +149,18 @@ over the known message templates, each pinned by a table test:
   <ref>` (honest transient Warn, names the recorded target);
 - no rule ever introduces a `mindspec complete` instruction.
 
+`sanitizeNonBeadDecision` and the non-bead reviewed-head-sha line are applied
+inside the render layer (`renderPanelVerify`/`renderPanelTally`), gated on
+non-bead — NEITHER function's signature changes, and because every pinned
+render test (`TestPanelVerbs_DecisionIsPanelGateDecision`,
+`TestPanelTally_ExitCodeTracksDecision`,
+`TestPanelVerify_MatchesGateAndWritesNothing`) uses BEAD fixtures, the
+non-bead-gated rewrite never fires for them and they stay unmodified. The one
+piece that cannot live in a shared helper is the non-bead Block's exit
+recovery line: `tallyExitAction(d, slug)` is a pinned 2-arg helper (see step
+4), so the non-bead recovery is rendered in the `panelTallyCmd` RunE handler
+instead, leaving that helper and its test byte-identical.
+
 **Steps**
 
 1. `resolvePanelGateFacts` (`cmd/mindspec/panel.go:302-315`): compute the
@@ -166,17 +178,45 @@ over the known message templates, each pinned by a table test:
    (ADR-0030). Update `revParseForPanelFn`'s doc comment.
 2. Add `sanitizeNonBeadDecision` with the four rewrite rules above; wire it
    into `renderPanelVerify` and `renderPanelTally` gated strictly on
-   non-bead (`facts.Res.Panel == nil || !facts.Res.Panel.IsBead()`); it
-   never mutates `Action`.
+   non-bead (`facts.Res.Panel == nil || !facts.Res.Panel.IsBead()`). It
+   never mutates `Action`, and neither render function's signature changes;
+   the non-bead gate means the bead-fixture pinned tests
+   (`TestPanelVerbs_DecisionIsPanelGateDecision`,
+   `TestPanelTally_ExitCodeTracksDecision`,
+   `TestPanelVerify_MatchesGateAndWritesNothing`) never exercise the rewrite
+   and stay unmodified.
 3. `renderPanelVerify`'s reviewed_head_sha line (`panel.go:361-369`): the
    `facts.MissingRef` case renders `(target <ref> no longer exists)` for a
    non-bead panel instead of `(target branch no longer exists — assumed
    merged)`; bead rendering byte-identical.
-4. `tallyExitAction` (`panel.go:526-537`): thread the non-bead flag (plus
-   spec/target for the recovery text) so a non-bead Block's recovery line
-   reads `re-run the panel (mindspec panel create <slug> --round <N+1>
-   --spec <id> --target <ref>)` with NO `then mindspec complete <bead>`
-   clause; the bead recovery string is unchanged.
+4. Non-bead recovery-line hygiene WITHOUT changing any pinned helper's
+   signature. `tallyExitAction(d, slug)` (`panel.go:526-537`) stays **2-arg
+   and byte-identical** — its only test caller,
+   `TestPanelTally_ExitCodeTracksDecision` (`panel_test.go:429`, bead
+   fixtures), must remain literally unmodified, and `panel.Decision` is
+   `{Action, Message}` only (no field to carry non-bead-ness) while
+   `internal/panel` takes a zero-byte diff, so threading a flag through
+   `tallyExitAction` is impossible without editing that pinned test. Instead,
+   branch in the `panelTallyCmd` RunE handler (`panel.go:~189-207`), which
+   already holds `reg` and therefore `reg.Panel.IsBead()`:
+   - **bead panel** (`reg.Panel.IsBead()` true): exactly today —
+     `return tallyExitAction(d, slug)`; the bead recovery string
+     (`… then mindspec complete <bead>`) is unchanged.
+   - **non-bead panel**: the handler applies the same `d.Action`→exit
+     contract but supplies the non-bead recovery line ITSELF — a
+     target-naming re-panel instruction
+     (`re-run the panel: mindspec panel create <slug> --round <N+1> --spec
+     <id> --target <ref>`) with NO `then mindspec complete <bead>` clause —
+     via a handler-local Block path (its own `guard.NewFailure` over the
+     already-sanitized `d.Message`), and NEVER routes the non-bead Block
+     through `tallyExitAction`'s bead-templated recovery (whose `<bead>`
+     literal would otherwise re-introduce the forbidden `mindspec complete`
+     string on a non-bead panel). Warn/Allow map to exit 0 as today.
+   This keeps `mindspec complete <bead>` out of every non-bead rendering
+   while leaving the pinned `tallyExitAction` helper and its test byte-for-byte
+   untouched — the relocation is purely WHERE the non-bead recovery is
+   rendered (the RunE handler, not inside a pinned helper), not a change to
+   the approved design.
 5. Tests in `cmd/mindspec/panel_test.go`, all via the existing shared infra
    (`mkPanelTestRoot`, `writePanelFixture`, `snapshotTree`,
    `stubWorktreeListEmpty`, `withTestChdir`, stubbed `revParseForPanelFn`):
@@ -212,6 +252,7 @@ over the known message templates, each pinned by a table test:
 **Verification**
 - [ ] `go test ./cmd/mindspec -run 'TestPanelVerify_NonBead|TestPanelTally_NonBead|TestSanitizeNonBeadDecision' -v` passes
 - [ ] `go test ./cmd/mindspec` passes with `TestPanelVerbs_DecisionIsPanelGateDecision` and `TestPanelTally_ExitCodeTracksDecision` UNMODIFIED (bead-panel decisions and messages byte-identical)
+- [ ] `tallyExitAction`'s signature is still `tallyExitAction(d panel.Decision, slug string) error` (2-arg, byte-identical) and its sole caller in `panel_test.go` (`tallyExitAction(d, "demo")`) is unchanged — the non-bead recovery line is rendered in the `panelTallyCmd` RunE handler, not by threading args through this pinned helper
 - [ ] `git show --name-only HEAD` lists NO file under `internal/panel/`, `internal/instruct/`, or `internal/complete/` (the R1 consistency fence as a zero-diff fact)
 - [ ] `go test ./internal/panel ./internal/instruct ./internal/complete` passes with zero test files modified (AC-global fence)
 - [ ] AC1 shell sequence in a scratch git repo with the built binary: `mindspec panel create p113 --spec <id> --target <branch>` (no `--bead`) → one more commit on `<branch>` → `mindspec panel verify p113` output has no `PASS` and no `references branch bead/`; `mindspec panel tally p113` exits non-zero; with the target un-advanced but a REJECT verdict file present, tally still exits non-zero
