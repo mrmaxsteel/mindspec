@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Core mechanism is sound and empirically verified: preFinalizeTip is captured before any finalize auto-commit; orphan detection correctly checks ancestry against a freshly fetched origin/main (hygienic FetchRemoteBranch); finalizeOrphanedSpecBranch's push happens before the cleanup block that removes worktrees/branches (no strand risk). Ran the new TestFinalizeEpic_OrphanedSpecBranch and full TestFinalizeEpic suite: all pass, including the unmodified direct-merge path. TestApproveImplCallOrder still passes -- the diff only appends a field assignment after FinalizeEpic; source+AST confirm epic-close precedes FinalizeEpic so the export captures closed Dolt state. The new test faithfully reproduces the bug precondition (merge --no-ff spec branch into main, push origin, THEN call FinalizeEpic) and pins remote existence/descendance/content. However I empirically reproduced a retry hazard in a scratch git fixture: if FinalizeEpic is retried after finalizeOrphanedSpecBranch already pushed the chore branch (e.g. a later step fails), the second run's non-force push is rejected (non-fast-forward), hard-failing impl approve until manual cleanup -- this undercuts deviation C's 'harmless' framing. Also, the pre-existing 'create a PR' stdout block fires unconditionally alongside the new NOTE, producing confusing guidance about the dead spec branch. Neither is data-loss-silent, but both are concrete, fixable gaps.",
+  "concrete_changes_required": [
+    "Idempotency (empirically verified): finalizeOrphanedSpecBranch unconditionally deletes-and-recreates the local chore/finalize-<specID> branch from origin/main and does a non-force PushBranch. If a prior run already pushed that branch to origin (e.g. impl approve later failed on the spec-branch push or worktree/branch cleanup, and the operator retries), the second run's push is rejected as non-fast-forward (reproduced in a scratch bare-remote fixture: two create-from-origin/main+push cycles against the same branch name -> `! [rejected] ... non-fast-forward` on the second push), hard-failing impl approve until an operator manually deletes/merges the stranded remote branch. Detect an existing remote chore/finalize-<specID> branch before recreating (e.g. skip if content is already current, fast-forward/reuse it, or fail with an explicit actionable message pointing at the existing branch/PR instead of surfacing the raw git rejection).",
+    "UX accuracy: cmd/mindspec/impl.go's pre-existing 'Branch pushed to remote. Create a PR to merge into main' block fires whenever result.Pushed is true, which this fix now also sets true in the orphaned case -- so the operator sees both that generic instruction (about the already-merged, dead spec branch) and the new accurate NOTE back to back. The CommitCount/DiffStat shown alongside the generic block is computed against LOCAL main (gitutil.CommitCount(g.Root, \"main\", specBranch)), not origin/main, so if local main hasn't been pulled since the implementation PR merged, it can misleadingly show a large 'unmerged' diff that is already on origin/main. Gate that block on result.FinalizeBranch == \"\" (or otherwise suppress/clarify it) so the orphaned case shows only the correct finalize-branch guidance.",
+    "Test hygiene (minor): add direct unit tests for the new pure primitives, matching this repo's existing convention -- TestFetchRemote_RunsFetch/_SetsNoPromptEnv exist for FetchRemote, TestSpecWorktreeName/TestBeadWorktreeName exist for the naming helpers -- but no analogous tests exist yet for FetchRemoteBranch (argv hygiene / noPrompt) or workspace.FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath (currently pinned only indirectly through the integration-style finalize_orphan_test.go)."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "correctness / idempotency",
+      "description": "Empirically reproduced (scratch bare-remote git fixture, two-run simulation) that finalizeOrphanedSpecBranch is not retry-safe once its push has already succeeded once: recreating chore/finalize-<specID> fresh from origin/main and re-pushing without --force produces a non-fast-forward rejection on the second attempt.",
+      "evidence": "git push -u origin chore/finalize-x on the second simulated run: '! [rejected] chore/finalize-x -> chore/finalize-x (non-fast-forward)' / 'error: failed to push some refs'."
+    },
+    {
+      "severity": "low",
+      "area": "ordering / invariants (confirmed correct)",
+      "description": "preFinalizeTip capture, ancestor check, and the orphan push all occur before the withWorkingDir cleanup block that removes worktrees and deletes the spec branch -- confirmed by reading internal/executor/mindspec_executor.go source order (FinalizeEpic lines ~397-556).",
+      "evidence": "Source read; also go build/go vet clean and go test ./internal/executor/ -run TestFinalizeEpic -v passes all 7 subtests including the 2 new orphan cases."
+    },
+    {
+      "severity": "low",
+      "area": "ordering / invariants (confirmed correct)",
+      "description": "TestApproveImplCallOrder (AST-based) still passes; the diff's only change to internal/approve/impl.go is a struct-field assignment placed after exec.FinalizeEpic's call site and after the override-metadata writes, so it doesn't touch any of the 8 pinned anchor call sites. Dolt epic-close (implRunBDCombinedFn(\"close\", epicID)) is anchor #5, strictly before exec.FinalizeEpic at anchor #8, confirming closed state precedes the export.",
+      "evidence": "go test ./internal/approve/... -run TestApproveImplCallOrder -v: PASS."
+    },
+    {
+      "severity": "low",
+      "area": "UX accuracy",
+      "description": "The generic 'Branch pushed to remote. Create a PR to merge into main' NOTE in cmd/mindspec/impl.go fires unconditionally alongside the new wu7t NOTE whenever result.Pushed && result.FinalizeBranch != \"\", producing confusing/duplicate guidance about the already-merged spec branch.",
+      "evidence": "Source read of implApproveTail; result.Pushed = (fr.MergeStrategy == \"pr\") is set to \"pr\" unconditionally at the top of the remote block, before the orphan check, so it is also true in the orphaned case."
+    },
+    {
+      "severity": "low",
+      "area": "test coverage / hygiene",
+      "description": "No direct unit tests for the new gitutil.FetchRemoteBranch or the new workspace naming helpers (FinalizeBranch/FinalizeWorktreeName/FinalizeWorktreePath), unlike the project's existing precedent for their siblings (FetchRemote, SpecWorktreeName, BeadWorktreeName).",
+      "evidence": "grep for FetchRemoteBranch/FinalizeBranch/FinalizeWorktree in internal/gitutil/*_test.go and internal/workspace/*_test.go returned no matches; comparison functions TestFetchRemote_RunsFetch, TestFetchRemote_SetsNoPromptEnv, TestSpecWorktreeName, TestBeadWorktreeName do exist for the analogous pre-existing primitives."
+    },
+    {
+      "severity": "informational",
+      "area": "regression fidelity (confirmed correct)",
+      "description": "The new test's 'already merged' case genuinely reproduces the bug's precondition: it merges --no-ff the spec branch into main and pushes origin main BEFORE calling FinalizeEpic, mirroring an already-merged implementation PR. Assertions correctly pin: chore/finalize-<specID> exists on the REMOTE (not just locally), is a descendant of origin/main, carries the export content, and the temporary worktree is cleaned up; the 'not yet merged' case pins FinalizeBranch stays empty and no chore branch is created. All existing TestFinalizeEpic_* tests (direct/no-remote path) pass unmodified.",
+      "evidence": "go test ./internal/executor/ -run TestFinalizeEpic -v -count=1: 7/7 subtests PASS (DirectMerge, BranchNotFound, OrphanedSpecBranch x2, DirectMergeLayoutRegressionBlocked, BeadMergeConflictAbortsFinalize, DirectMergeConflictPreservesSpecBranch, PartialBeadMergeMatrix)."
+    }
+  ]
+}

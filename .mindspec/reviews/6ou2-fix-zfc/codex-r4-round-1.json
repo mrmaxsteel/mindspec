@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "R4 codex",
+  "recommended_fix": "variant: enforce+teach short-tag contract; reject ADR-side path/tuple resolution",
+  "zfc_verdict": "COMPLIANT",
+  "confidence": 0.88,
+  "rationale": "The namespace asymmetry is real: plan validation normalizes spec Impacted Domains to ownership domain names, but ADR domains remain raw parsed literals and are compared by exact folded string equality. However, fixing this by resolving ADR Domain(s) through OWNERSHIP would require new interpretation of free-form ADR strings. ParseADR only does `splitTopLevel`, lowercases/trims each token, and appends it to `a.Domains`; `api (lola, tools)` remains a literal token. No parser maps that to paths/globs. Path-overlap on declared OWNERSHIP globs is mechanically possible only for already-resolved domain names, but it changes ADR-0032 semantics, needs new glob-vs-glob or file-enumeration logic beyond existing GlobMatch(pattern,path), and contradicts ADR-0036's accepted gap that resolved-file-set overlap is not checked. The smallest correct ZFC-aligned move is to enforce and teach the existing short-tag contract at ADR/spec validation points, with diagnostics naming the required OWNERSHIP directory names and rejecting path/tuple ADR Domain(s) rather than accommodating them.",
+  "adr_action": "No ADR amendment needed for enforce+teach. Any path-overlap or ADR-side path/tuple resolution requires superseding/amending ADR-0032 and ADR-0036; spec-100's spec-side path normalization should be reviewed but can remain as declared-glob normalization.",
+  "findings": [
+    {
+      "severity": "blocking",
+      "area": "plan validation namespace",
+      "issue": "Confirmed asymmetry: ValidatePlan calls normalizeImpactedDomains, then checkADRCitations uses intersectFold(a.Domains, impactedDomains) and coverageOf/domainSliceContains compares ADR raw domains to resolved domain names. There is no path-overlap fallback."
+    },
+    {
+      "severity": "blocking",
+      "area": "ADR parser / ZFC",
+      "issue": "ADR Domain(s) parsing is literal only: ParseADR extracts the line, splitTopLevel only avoids commas inside brackets, then lowercases/trims and appends tokens. Resolving `api (lola, tools)` would be new free-form-string cognition."
+    },
+    {
+      "severity": "high",
+      "area": "ownership resolution",
+      "issue": "normalizeImpactedDomains path resolution is declared-data based but only for spec entries; it matches concrete path-like entries against OWNERSHIP paths and hard-errors on zero or >1 owners."
+    },
+    {
+      "severity": "high",
+      "area": "fix a cost",
+      "issue": "Raw path-overlap would touch plan.go coverage/relevance helpers plus ownership utilities and tests; correct domain-glob overlap is not provided by GlobMatch, which is pattern-vs-path, so a glob cross-product or file enumeration would be new logic with correctness risk."
+    },
+    {
+      "severity": "high",
+      "area": "divergence",
+      "issue": "The same asymmetry bites bead-complete: divergence.go attributes changed files to ownership domain names, then calls coverageOf with that name. Path/tuple-only ADR domains would still yield adr-divergence-uncovered."
+    }
+  ],
+  "fixes_assessed": {
+    "a": {
+      "verdict": "reject",
+      "why": "Resolving ADR raw Domain(s) literals like path tuples smuggles cognition; path-overlap over declared domain globs is a broader ADR-0032/0036 policy change and needs new glob-overlap semantics."
+    },
+    "b": {
+      "verdict": "reject",
+      "why": "`:: spec` creates a special umbrella hierarchy and entrenches domain-as-spec ownership instead of enforcing durable short-tag domains."
+    },
+    "c": {
+      "verdict": "stopgap",
+      "why": "Downgrading to warning can unblock migration only if timeboxed and mirrored at complete-time; it weakens the ADR gate and does not resolve the namespace contract."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-lma4.3",
+  "spec": "112-per-gate-panel-config",
+  "target": "bead/mindspec-lma4.3",
+  "round": 2,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "75c17fd99575809c65a3ba2356445d8a363adee2"
+}

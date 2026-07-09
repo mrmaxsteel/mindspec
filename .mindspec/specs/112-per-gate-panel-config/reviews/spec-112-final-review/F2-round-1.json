@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Traced every producer->consumer edge across the three beads; the composition is complete with no half-wiring. lma4.1's exports are each consumed: PanelGateKeys drives lma4.3's enum-order rendering AND both recovery lines; KnownModels() feeds renderKnownModelWarnings; CountValue() is the renderer's count accessor; the three R3 resolvers are lma4.3's sole data source via the single buildGateResolvedDoc home (text/JSON/resolvers cannot disagree); Note and Substitutes are rendered; PanelGateAdvisoryDefault (homed in bead 1, consumed by bead 3) is the shared R7 rule at BOTH call sites, so they cannot drift. lma4.2's Gate field is read by both advisory sites and nowhere in decision code; leaf invariant verified (go list -deps: no internal/config; 'threshold > 0' guard intact). No contradictions: threshold stays raw everywhere; gates:{} == absent via len()>0 predicates throughout; docs (workflow interfaces/architecture, ADR-0037 amendment) match shipped code exactly, including the five R9 members and the nil-guard. Empirical: branch binary over the Goal YAML gives 9/9/6/12 sums, adhoc==bead byte-identical modulo gate name, exactly 5 JSON members, in_force supersession, loud unknown-gate and --json-without--gate refusals; all 10 named AC tests pass fresh (-count=1).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "info",
+      "title": "Full cross-bead wiring trace clean",
+      "detail": "Every symbol defined by lma4.1 (Gates/GatePanel, generalized Reviewer with Model/Lens/*int Count, CountValue, PanelGateKeys, KnownModels, ReviewerSlot, 3 gate resolvers, PanelGateAdvisoryDefault, Note, Substitutes) has a live consumer in lma4.3 or in config's own validation; lma4.2's Panel.Gate is consumed by both lma4.3 advisory call sites (internal/complete/complete.go step 2.25 and cmd/mindspec/config.go reviewerCountNotesFor). No dangling definitions, no field defined-but-never-read."
+    },
+    {
+      "id": "F2-2",
+      "severity": "info",
+      "title": "Single-home discipline prevents intra-feature drift",
+      "detail": "Three deliberate single homes hold the beads together: buildGateResolvedDoc (text render == JSON == R3 resolvers), PanelGateAdvisoryDefault (complete advisory == config-show scan), and PanelGateKeys (validation == recovery lines == render order). Verified each is the only path; the read surface faithfully reflects the schema and the recorded field."
+    },
+    {
+      "id": "F2-3",
+      "severity": "nit",
+      "title": "renderKnownModelWarnings re-derives model-wins inline",
+      "detail": "cmd/mindspec/config.go's collect closure does `id := r.Model; if id == \"\" { id = r.Family }`, duplicating internal/config's unexported (Reviewer).model() semantics rather than an exported accessor. Semantically identical today; purely cosmetic, no change required."
+    }
+  ]
+}

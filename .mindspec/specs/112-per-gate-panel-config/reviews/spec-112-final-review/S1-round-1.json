@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Built cmd/mindspec at d713a0b7 to an absolute /tmp path and drove it against absolute /tmp scratch repos (never touching the worktree's own config). Wrote the Goal's full four-family protocol YAML: `config show` rendered all four configured gates in enum order (spec_approve, plan_approve, bead, final_review) with resolved sums 9/9/6/12 and raw thresholds n-1/n-1/n-1/11, exactly as spec'd. `--gate <g> --json` returned exactly 5 members (gate, slots, expected_reviewers, approve_threshold, substitution) for every gate; `in_force` correctly read 'substitutes' when the map was populated. The 9-slot spec_approve worked example matched R3's pinned lens sequence byte-for-byte (author-of-record...codebase-pin). Unconfigured `adhoc --json` was byte-identical to `bead --json` apart from the gate field, confirming the fallback chain. Unknown `--gate bogus_gate` and bare `--json` (no `--gate`) both exited 1 with ADR-0035 recovery lines naming all five valid keys. A second scratch repo with only a 109-style global `reviewers`/`approve_threshold` (no `gates:` key) rendered `gates: {}`, and both `--gate bead` and `--gate spec_approve` resolved identically to the global 2+2/threshold-3 mix with `in_force: claude_sub_on_quota` (substitutes empty) — the 109 backward-compat path holds. No regression, no unexpected exit codes, worktree git status stayed clean throughout.",
+  "concrete_changes_required": [],
+  "findings": [
+    "config show (plain) renders gates in enum declaration order (spec_approve, plan_approve, bead, final_review) with correct resolved sums 9/9/6/12 and raw thresholds n-1/n-1/n-1/11 — matches R3/R8/AC verbatim.",
+    "config show --gate <g> --json returns exactly 5 documented members (gate, slots, expected_reviewers, approve_threshold, substitution) for spec_approve/plan_approve/bead/final_review; substitution.in_force flips correctly between 'substitutes' and 'claude_sub_on_quota' depending on which policy is populated.",
+    "final_review's 12 slots (R1-R12) and spec_approve's 9-slot lens sequence exactly match R3's pinned worked example (author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration, repeating).",
+    "adhoc (unconfigured) --gate --json is byte-identical to bead --gate --json apart from the 'gate' field value itself, confirming the adhoc-inherits-bead fallback (R3).",
+    "config show --gate bogus_gate --json exits 1 with a recovery line enumerating all five valid gate keys; config show --json (no --gate) exits 1 with a recovery line to add --gate — both per ADR-0035.",
+    "109 backward-compat verified: a global-reviewers-only config (no gates: key) renders gates: {} in plain show, and both an unconfigured bead-gate and an unconfigured spec_approve-gate --json resolve identically to the global 2-claude+2-codex/threshold-3 mix, with substitution.in_force correctly reporting claude_sub_on_quota when substitutes is empty.",
+    "Did not independently exercise the hostile-string escaping class (F3/G1's lens) or the full go test suite (S3's lens) — out of scope for this empirical end-to-end pass; deferring to those slots."
+  ]
+}

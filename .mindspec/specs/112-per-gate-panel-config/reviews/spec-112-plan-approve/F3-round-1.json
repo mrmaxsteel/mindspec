@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Adversarial coverage-refutation over four claims, grounded in the 109-landed tree at e06c0b76. Three claims are delivered-and-provable: the cursor-start-0 pin (AC5 test asserts the normative 9-slot worked example plus first-lens-less-slot and not-cursor-consuming), the escaping AC (AC10 test mirrors the spec across both text paths, the known-model warning, and a real-decoder JSON round-trip), and the adhoc inheritance-range refusal (step 5(f)+(g)'s one resolved check over every configured gate against the inheriting gate's resolved sum covers both named shapes plus the own-threshold/inherited-reviewers case; I also verified the R2 count-less relaxation does not collide with 109's existing refusal test, which uses explicit count: 0). One claim is a genuine gap: R7's second surface — cmd/mindspec reviewerCountNotesFor (config.go:224-231) — has no falsifying verification. The only existing test of that path runs gates-absent, where 109-identical behavior passes with or without Bead 3 step 2; TestPanelAdvisory_GateAwareCompare covers only internal/complete. An implementation that skips step 2 entirely passes every plan Verification while leaving the exact spurious-note regression R7 exists to kill live in config show. Cheap, surgical fix; design is sound.",
+  "concrete_changes_required": [
+    {
+      "id": "F3-1",
+      "bead": 3,
+      "change": "Add a falsifying test for the cmd/mindspec R7 caller: extend TestConfigShow_GatesSubstitutesAndModelAdvisory (or add a case to Bead 3 step 6) that registers panel.json fixtures and runs `config show` with `gates:` CONFIGURED, asserting through reviewerCountNotesFor: (a) a panel recording gate spec_approve with expected_reviewers matching the configured spec_approve sum (e.g. 9) yields NO note even though 9 != global 6; (b) a non-bead panel with no recorded gate yields NO note (skip carve-out); (c) a genuine mismatch against its own recorded gate's default yields the note. Without this, skipping plan step 2 passes every plan Verification (the existing TestConfigShow_ReviewerCountNoteWhenPanelDiffers is gates-absent and passes either way)."
+    },
+    {
+      "id": "F3-2",
+      "bead": 3,
+      "change": "Fix the protocol-YAML proof's falsification mechanics: `... --gate final_review --json | /usr/bin/grep -c '\"slot\"'` prints 12 only under indented JSON — compact encoding/json.Marshal output is one line, so grep -c prints 1 and the check fails on a correct implementation (or silently forces an unpinned MarshalIndent choice). Either pin json.MarshalIndent in step 5's gateResolvedJSON contract, or (better, jq is already used one line later) replace with `jq '.slots | length'` = 12 and `jq -r .approve_threshold` = 11, which also removes the whitespace-sensitive '\"approve_threshold\": \"11\"' substring check."
+    }
+  ],
+  "findings": [
+    {
+      "claim": "AC5 / R3 cursor-start-0 pin",
+      "status": "delivered-and-provable",
+      "detail": "TestPanelGateSlots_DeterministicExpansion (Bead 1 step 6) asserts cursor-start-0 via the first lens-less slot AND the full normative 9-slot worked example, plus explicit-lens non-consumption. Suggestion (non-blocking): the not-cursor-consuming fixture must place explicitly-lensed entries BEFORE lens-less ones at a flattened position where slot-index mod 6 diverges from the cursor value; otherwise a slot-index-mod-6 implementation satisfies every listed assertion (the all-lens-less worked example cannot distinguish the two)."
+    },
+    {
+      "claim": "AC10 / R8 escaping",
+      "status": "delivered-and-provable",
+      "detail": "TestConfigShow_HostileStringsEscaped covers note/model/lens/substitutes-key/substitutes-value with ESC/BEL + newlines across `config show` and `--gate` text paths, including inside the known-model warning, plus byte-exact round-trip under a real encoding/json decode. Matches every AC10 falsification clause. Hostile gate keys are unreachable (closed enum refused at Load), and note is absent from --gate output by design, so no path is left unescaped."
+    },
+    {
+      "claim": "AC3 / R4 adhoc inheritance-range refusal",
+      "status": "delivered-and-provable",
+      "detail": "Step 5(f)+(g) formulates the bound as one resolved check over EVERY configured gate's chain-resolved (expr, sum) against the inheriting gate's sum, which I could not break: it covers own-out-of-range, global-integer-inherited-by-smaller-gate, bead-integer-inherited-through-adhoc-chain (both named in TestLoad_RefusesPerGateKnobs per spec AC3), the unnamed bead-reviewers-only-inheriting-global-integer shape, and own-threshold-with-inherited-reviewers. Unconfigured adhoc is consistent by construction (inherits bead's full mix). Also verified: R2's count-less relaxation does not break 'existing 109 tests included' — the 109 refusal fixture is explicit count: 0 (config_test.go:529), still refused under 112."
+    },
+    {
+      "claim": "AC7 / R7 gate-aware compare + skip carve-out",
+      "status": "gap",
+      "detail": "The internal/complete caller is falsifiably verified (TestPanelAdvisory_GateAwareCompare covers all five R7 rows including the unknown-recorded-gate skip, and Bead 1's TestPanelGateAdvisoryDefault_SelectionRule pins the helper). But R7 names TWO caller surfaces, and the cmd/mindspec one (reviewerCountNotesFor, cmd/mindspec/config.go:224-231, currently hoisting cfg.PanelExpectedReviewers()) has NO verification that fails when Bead 3 step 2 is omitted: the sole existing test (TestConfigShow_ReviewerCountNoteWhenPanelDiffers, config_test.go:68) runs gates-absent, where R7 mandates 109-identical behavior — it passes with or without the rewiring. Bead 3's own AC bullet claims 'Both ReviewerCountNote callers' yet no command proves the second. A helper being correct does not prove a caller invokes it. See F3-1."
+    },
+    {
+      "claim": "Protocol-YAML Validation Proof (sums 9/9/6/12, final_review 12 slots / '11', adhoc = bead)",
+      "status": "gap (verification mechanics, not coverage)",
+      "detail": "The adhoc-equals-bead jq comparison is sound, but the 12-slot count uses grep -c, which counts LINES: compact json.Marshal output makes it print 1 for a correct 12-slot document, and nothing in the plan pins indented output. As written the proof cannot distinguish 'broken impl' from 'correct compact impl' without an implementer silently choosing MarshalIndent. See F3-2."
+    }
+  ]
+}

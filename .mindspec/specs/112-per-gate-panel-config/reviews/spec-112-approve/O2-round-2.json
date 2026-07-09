@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Contradiction re-scan of the round-2 delta (825f04c5..39b5724), pairwise across R1-R9, Scope, Non-Goals. (a) My round-1 residual is coherently closed: R7 now handles the recorded-but-unknown gate as 'no known gate' — advisory skips the count comparison when gates configured, falls to the 109 global compare when gates absent, and NEVER calls an R3 resolver with the unknown value, so R3's unknown-gate error can't surface. It explicitly reconciles with R6 ('surfaces may display the raw recorded value; only the count comparison is suppressed'), so R6's 'surfaced, never a parse error' still holds. No contradiction. (b) New R9 introduces no conflict: its members mirror R8/R3/R5 (raw threshold, R3 slot order, R5 supersession), evolution is additive-only, and the Scope fence + falsification clause ('beads add writer-/runner-side behavior') keep it strictly within 112 vs the 110/111 Out-of-Scope items. Advisory/decision-inert posture is preserved. (c) R4's cross-field inheritance check is complementary to R3's per-field chain, not contradictory: it identifies the donor via R3's chain and validates the inherited integer against the INHERITING gate's resolved sum (closing the bead->adhoc never-passable hole); Load-refusal precedes resolution so no valid config both loads and mis-resolves. Grounded 109/panel citations (AbandonReason omitempty, ReviewerCountNote(recorded,configDefault), PanelExpectedReviewers, config-free leaf, ADR-0037 amendments) all verified real. No new contradiction found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O2-a",
+      "topic": "R6 parse-lenient unknown gate vs R7 advisory (round-1 residual)",
+      "disposition": "ADDRESSED",
+      "note": "R7's new paragraph makes the recorded-but-unknown gate decision-inert on the advisory path (skip when gates configured, 109 global compare when absent) and forbids calling R3's erroring resolver with it. Reconciled with R6 verbatim; coherent, falsifiable ('yields a note or surfaces a resolver error while gates: is configured'). No new contradiction."
+    },
+    {
+      "id": "O2-b",
+      "topic": "New R9 stable downstream contract vs requirements / Non-Goals / 110-111 boundary",
+      "disposition": "ADDRESSED",
+      "note": "R9 members agree with R8 (--gate --json shape), R3 (slot order, raw threshold) and R5 (substitution supersession). Scope fence + 'Falsified if this spec's beads add writer- or runner-side behavior' keeps it inside 112; the 110 writer / 111 runner Out-of-Scope bullets are untouched. Additive-only evolution rule contradicts nothing. Consistent with the decision-inert / no-Allow/Block Non-Goals."
+    },
+    {
+      "id": "O2-c",
+      "topic": "R4 cross-field inheritance check vs R3 resolution chain + adhoc per-field",
+      "disposition": "ADDRESSED",
+      "note": "R4 validates an INHERITED integer threshold (donor found via R3's per-field chain: bead for adhoc, else global) against the inheriting gate's resolved sum; the set-threshold-over-inherited-reviewers case is caught by the existing per-gate range refusal. Disjoint cases, both keyed on R3's resolved sum. Load-refusal orders before resolution, so R3's inherit behavior only runs on configs R4 accepts. No contradiction with R3's falsification (adhoc inherits missing half)."
+    }
+  ]
+}

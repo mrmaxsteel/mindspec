@@ -1,0 +1,40 @@
+{
+  "reviewer_id": "R3 claude",
+  "recommended_fix": "enforce + teach: re-affirm ADR-0032 short-tags; teach (and optionally reject) path/tuple ADR `Domain(s)` literals at point-of-use in the existing adr-cite-irrelevant / adr-coverage-missing messages; operator migrates lola to durable disjoint short-tag domains with real OWNERSHIP. Reject (a) and (b); use the existing --override-adr audit-trailed escape, not a global error->warning, for any interim lola stopgap.",
+  "zfc_verdict": "COMPLIANT",
+  "confidence": 0.84,
+  "rationale": "Correctness: 6ou2 bundles symptoms with DIFFERENT origins. `[impacted-domains-resolve]` is emitted ONLY by spec-side normalizeImpactedDomains on zero/multi-owner of the spec's OWN entries (plan.go:143, divergence.go:155; pinned by TestNormalizeZeroAndAmbiguousAtPlanGate). The cited ADR's Domains NEVER enter that computation, so fixes (a)/(b) — which act on the spec<->ADR intersection — structurally CANNOT clear it; only naming a real domain dir (Rule 1, kept verbatim) or disjoint OWNERSHIP does. The catch-all workaround that makes resolve succeed is itself the latent multi-owner hard-error trap (works only because the rival domain's trailing-slash globs are dead). Only `adr-cite-irrelevant` / `adr-coverage-missing` are true spec<->ADR namespace mismatches, and they exist solely because lola's ADR `Domain(s)` field holds path/tuple literals (`api (lola, tools)`) — a CONTRACT VIOLATION of ADR-0032 sub-decision 1, not legitimate usage. Spec 100 already normalizes the SPEC side and intersects cleanly with a short-tag ADR (TestCheckADRCitationsFilePathImpactedResolves). Fix the symmetric side by enforcing short-tags on the ADR side and teaching it. Backward-compat: mindspec's own ADRs and every validate fixture use short-tags; suite green (29s); message-only teaching keeps it green and strands no correct usage. (a) resolving free-form ADR strings = the exact ZFC heuristic ADR-0036 forbids; raw path-overlap re-introduces path-prefix inference + broad-glob false positives that gut the relevance gate.",
+  "adr_action": "No decision reversal needed — enforce+teach RE-AFFIRMS ADR-0032 sub-decision 1 and ADR-0036. Optional: a clarifying (non-reversing) amendment to ADR-0032 recording that the ADR `Domain(s)` field is enforced as short-tag dir-names (the gate teaches), that ADR-side path-overlap/glob-resolution was REJECTED as an ADR-0036 ZFC violation, and that spec 100's spec-side normalization is the ONLY accommodation by design (ADR Domains literals are free-form and cannot be ZFC-cleanly resolved). By contrast (a)/(b) would REQUIRE superseding sub-decision 1 and conflict head-on with ADR-0036.",
+  "findings": [
+    {
+      "severity": "high",
+      "area": "correctness/completeness",
+      "issue": "`[impacted-domains-resolve]` is spec-side-only (normalizeImpactedDomains on the spec's own entries, pinned by TestNormalizeZeroAndAmbiguousAtPlanGate). Fixes (a) and (b) act on the spec<->ADR intersection and CANNOT clear it. The bead's symptom-grouping is misleading: that symptom is resolved only by OWNERSHIP curation / naming a real disjoint short-tag domain dir, i.e. the lola migration — no ADR-side code change reaches it."
+    },
+    {
+      "severity": "high",
+      "area": "zfc",
+      "issue": "Fix (a) 'resolve the ADR side through OWNERSHIP' must heuristically parse free-form Domains strings like `api (lola, tools)` to glob-resolve them — the precise free-form-string heuristic ADR-0036 forbids. The 'raw path-overlap' variant re-introduces path-PREFIX inference (the synthesized-fallback ZFC violation ADR-0036 removed) and smuggles back the ambiguity ADR-0032 rejected."
+    },
+    {
+      "severity": "medium",
+      "area": "correctness/signal-loss",
+      "issue": "Fix (a) raw path-overlap produces FALSE POSITIVES: any ADR whose Domains carries a broad path glob (api/**, internal/**) overlaps any spec touching that tree and counts as 'relevant', gutting the cite-relevance gate (ADR-0032 sub-decision 2). And trailing-slash literals (`api/app/lola/`, no `/**`) are dead under GlobMatch -> false negatives. The gate's signal collapses either way; current short-tag fixtures wouldn't even catch the regression."
+    },
+    {
+      "severity": "medium",
+      "area": "backward-compat",
+      "issue": "Fix (c) error->warning globally defeats ADR-0032's gate for ALL repos, including mindspec's own correct short-tag specs/ADRs — it disarms enforcement to accommodate one repo's contract violation. The audit-trailed --override-adr / --supersede-adr flags already exist as the scoped, per-bead escape; a global downgrade is the wrong blast radius."
+    },
+    {
+      "severity": "low",
+      "area": "backward-compat",
+      "issue": "enforce+teach strands NO legitimate usage: mindspec's own ADRs use short-tags (validation/adr/lifecycle/workflow; workflow/validation/doc-sync/ownership) and every internal/validate fixture (payments/search/core/genevieve) is short-tag — suite green in 29s. Rejecting path/tuple Domains literals only forces the ADR-0032-correct form; it cannot regress the happy path. Keep the enforcement as additive teaching message text (not a brand-new hard gate on the Domains field) to keep migration smooth."
+    }
+  ],
+  "fixes_assessed": {
+    "a": "reject — clears at best 2 of 4 symptoms (never `[impacted-domains-resolve]`, which is spec-side); to clear the other two it must either heuristically parse free-form ADR Domains (ZFC violation) or path-overlap on prefixes (false positives + dead-glob false negatives + re-introduces ADR-0036-removed inference); reverses ADR-0032 sub-decision 1 on the ADR side.",
+    "b": "reject — bakes the domain-as-spec anti-pattern into OWNERSHIP, adds net-new framework concept/config surface, still doesn't reach `[impacted-domains-resolve]` cleanly, and needs ADRs to reference the umbrella; pure accommodation of a contract violation.",
+    "c": "stopgap — only via the EXISTING per-bead --override-adr (audit-trailed). A global error->warning is rejected: it disarms ADR-0032 for every correct repo. Acceptable only as a temporary bridge while lola migrates to disjoint short-tag domains."
+  }
+}

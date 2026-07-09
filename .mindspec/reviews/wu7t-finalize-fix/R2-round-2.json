@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-1 approver (codebase-pin lens): re-ran everything uncached in the worktree and the round-2 delta introduces no regressions. Targeted executor tests all PASS (direct-path regression suite DirectMerge/DirectMergeLayoutRegressionBlocked/BeadMergeConflictAbortsFinalize/PartialBeadMergeMatrix unchanged-green; new orphan tests RetryConverges/LeftoverTempWorktreeSelfHeals/OrphanFetchFailureFallsBackToBaseline/OrphanChoreFailureStillPushesSpecBranch all PASS). Full executor package ok; gitutil/workspace/cmd/approve all ok. go vet ./... exit 0; gofmt -l on all 7 touched files empty. TestApproveImplCallOrder PASS — the ordering pin survives the Group-3 push reorder. New symbols present: RemoteHeadSHA (gitops.go:327), PushBranchForceWithLease (gitops.go:358); all 11 named test funcs exist. Branch exactly TWO commits ahead of main (6f558bd6 + 6cf718c9, HEAD 6cf718c9); worktree clean. New exec sites use rejectOptionLike on every operand + noPrompt; the force-with-lease is pinned to the freshly-observed remote tip so third-party tip movement fails loudly while the machine-owned chore branch is overwritten — sound.",
+  "concrete_changes_required": [],
+  "findings": {
+    "round1_lens_no_regression": "ADDRESSED — codebase re-pinned. All required suites green uncached, go vet clean, gofmt clean, TestApproveImplCallOrder still PASS. Group-3 reorder moves PushBranch(specBranch) to the top of the remote block (strictly earlier than before, further from cleanup) with no ordering breakage.",
+    "new_surface_gitutil_hygiene": "ADDRESSED — RemoteHeadSHA and PushBranchForceWithLease both apply rejectOptionLike to all operands and wrap in noPrompt (GIT_TERMINAL_PROMPT=0). RemoteHeadSHA treats non-zero exit as an error (not absent branch) and empty output as absent (\"\", nil). Consistent with SEC-5/spec-097 conventions.",
+    "lease_semantics": "ADDRESSED — lease is --force-with-lease=refs/heads/<branch>:<expectedSHA> pinned to the SHA just observed via RemoteHeadSHA. A tip that moves between observe and push (e.g. a human push to the machine-namespaced chore branch) fails the lease loudly; only the exact observed machine-owned tip is overwritten, which is the intended regenerated-each-run contract. No stale-SHA clobber of human work.",
+    "self_heal_ordering": "ADDRESSED — leftover temp worktree self-heals (stat -> WorktreeRemoveForce -> os.RemoveAll fallback -> WorktreePrune) BEFORE any branch op, so a leftover with choreBranch checked out cannot block DeleteBranch.",
+    "note_composition": "ADDRESSED — implApproveTail gates the spec-branch PR instruction on result.Pushed && result.FinalizeBranch == \"\"; orphan case prints only the NOTE. Pinned by TestImplApproveTail_FinalizeBranchComposition (cmd/mindspec/impl_finalize_note_test.go).",
+    "squash_blind_spot": "ADDRESSED — documented at the IsAncestor detection site; deferred follow-up correctly scoped out.",
+    "deviations_A_B_C": "ACCEPTABLE — (A) retry test drives a real mid-run cleanup failure rather than an out-of-scope literal replay; (B) one extra test pins Group-3 ordering; (C) round-1 composition test's cwd save/restore prevents cross-package cascade. None affect the codebase pin; all suites green.",
+    "branch_state": "VERIFIED — fix/wu7t-protected-main-finalize is exactly two commits ahead of main (6f558bd6 then 6cf718c9), HEAD=6cf718c9115ee2c12a411271e8953d0c1c2335bc, git status --porcelain empty (clean worktree)."
+  }
+}

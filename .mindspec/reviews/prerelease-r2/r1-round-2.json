@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Lens = ask #6 self-revert + state integrity. FULLY VERIFIED. PR #159's committed .beads/issues.jsonl now matches Dolt truth: epic mindspec-3d3i transitions open->closed and bead mindspec-3d3i.6 in_progress->closed in the diff; both read closed in the committed JSONL on origin/chore/v0.10.0-prerelease-hardening and both are closed in Dolt (closed_at 2026-06-24T12:06:xxZ). I diffed committed-JSONL status vs Dolt across all 667 shared issues: ZERO status divergences, so the bd post-merge JSONL->Dolt re-import is idempotent and the self-revert cannot recur. The 2 IDs in JSONL absent from `bd list` (2fy.1, 4qd) both exist in Dolt and are closed in both stores — consistent, not orphaned. Lifecycle bug mindspec-wu7t (P1, type=bug) is filed and OPEN; its description accurately captures the protected-main orphaned-finalize mechanism (finalize commit stranded on a deleted spec branch + post-merge hook re-importing stale committed JSONL), with fix directions and a divergence-guard suggestion. No other spec/bead left inconsistent. Only nit: RELEASE-NOTES-v0.10.0.md lacks a Known Issues entry for wu7t though the bug ships open. Not a state-integrity blocker.",
+  "asks_status": {
+    "1": "ADDRESSED",
+    "2": "ADDRESSED",
+    "3": "ADDRESSED",
+    "4": "ADDRESSED",
+    "5": "ADDRESSED",
+    "6": "ADDRESSED"
+  },
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "state-integrity / beads sync",
+      "issue": "Verified idempotent: committed .beads/issues.jsonl status matches Dolt across all 667 shared issues (0 divergences). spec-106 epic mindspec-3d3i and bead mindspec-3d3i.6 both closed in committed JSONL and Dolt. Post-merge re-import will not self-revert."
+    },
+    {
+      "severity": "info",
+      "area": "lifecycle bug filing",
+      "issue": "mindspec-wu7t (P1, bug, open) accurately describes the protected-main orphaned-finalize root cause and the post-merge-hook re-import making committed JSONL authoritative; includes concrete fix directions and a divergence-guard recommendation."
+    },
+    {
+      "severity": "low",
+      "area": "release notes / known issues",
+      "issue": "RELEASE-NOTES-v0.10.0.md has no Known Issues section surfacing mindspec-wu7t, even though the lifecycle self-revert root cause ships unfixed at this tag and wu7t's own description flags it as a release-notes known issue. Recommend a one-line Known Issues note (non-blocking)."
+    }
+  ]
+}

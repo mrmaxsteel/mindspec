@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "R3 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Refresh-mechanism lens (BRIEF jobs 3+4). Byte-exactness is airtight. (a) ms-spec-grill.pre0uur.md is byte-identical to base plugin ms-spec-grill/SKILL.md (the actual install body: claudeSkillFiles->skillFiles->pluginmindspec.SkillFiles embeds plugins/mindspec/skills/). ms-spec-create.pre0uur.md matches the TRUE runtime value of the pre-edit lifecycleSkillFiles()[\"ms-spec-create\"] — I extracted the RHS Go concatenation expression from git show d1b4bebf:claude.go and evaluated it (a naive text grab is wrong: the literal embeds backticks via raw+interpreted concatenation); SHA256 ecaa2426... matches the snapshot exactly. (b) No existing snapshot modified (diff --stat: 2 new files, 141 insertions, 0 deletions). .pre0uur parses under the segment-before-first-dot convention (name[:IndexByte('.')]). HC-6 mechanism (matchesShipped switch) unchanged and name-agnostic. The two new .pre0uur snapshots are correctly DISTINCT from the pre-existing .pre106 ones (pre106 carries old .mindspec/docs/... paths, pre0uur the flattened paths) — both legitimately needed, not redundant. (c) No inventory/count assertion needed updating; TestSkillInventory_Twelve (skillFiles=12, lifecycle=4) is unaffected by historical_skills additions. All 8 relevant tests PASS; full internal/setup suite green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-1",
+      "severity": "info",
+      "title": "grill snapshot byte-exact to install body (PASS)",
+      "detail": "git show d1b4bebf:plugins/mindspec/skills/ms-spec-grill/SKILL.md | diff - internal/setup/historical_skills/ms-spec-grill.pre0uur.md => byte-identical. Also byte-identical to git show d1b4bebf:.claude/skills/ms-spec-grill/SKILL.md. claudeSkillFiles()['ms-spec-grill'] is sourced from pluginmindspec.SkillFiles() which embeds plugins/mindspec/skills/, so the snapshot equals what a real pre-guard install had on disk. The refresh chain is correct."
+    },
+    {
+      "id": "R3-2",
+      "severity": "info",
+      "title": "create snapshot byte-exact to pre-edit lifecycleSkillFiles literal (PASS)",
+      "detail": "The ms-spec-create install body is the inline lifecycleSkillFiles()['ms-spec-create'] raw+interpreted backtick-concatenation, NOT a plain raw string. Method: extracted the RHS expression (\"ms-spec-create\": ... up to the next map key) from git show d1b4bebf:internal/setup/claude.go, wrapped it in a tiny main() and `go run` it to obtain the exact runtime bytes, then diffed vs internal/setup/historical_skills/ms-spec-create.pre0uur.md. Result: byte-identical, SHA256 ecaa24261966fc211f15711d5048c21c7be2bfcc5282a4ff3b45880669811d68 on both. A naive 'first-backtick' text extraction is a trap here (the value embeds backticks) — the snapshot is nonetheless exact."
+    },
+    {
+      "id": "R3-3",
+      "severity": "info",
+      "title": "No existing snapshot modified; .pre0uur naming parses (PASS)",
+      "detail": "git diff --stat over internal/setup/historical_skills/ shows only 2 NEW files (+141, no existing-file edits). previouslyShippedSkills() derives the skill name as name[:strings.IndexByte(name,'.')], so ms-spec-create.pre0uur.md -> 'ms-spec-create' and ms-spec-grill.pre0uur.md -> 'ms-spec-grill'; skill names contain no dot, so the tag is safe. matchesShipped iterates the full history list, so the new snapshots are recognized alongside the pre106 ones."
+    },
+    {
+      "id": "R3-4",
+      "severity": "info",
+      "title": ".pre0uur is DISTINCT from pre106 — both necessary (deviation A is sound)",
+      "detail": "ms-spec-grill.pre106.md and ms-spec-create.pre106.md carry the pre-flatten paths (.mindspec/docs/domains/, .mindspec/docs/adr/, docs/specs/) while the new .pre0uur.md carry the post-flatten flattened paths (.mindspec/domains/, .mindspec/adr/, .mindspec/specs/). So the .pre0uur snapshot captures the genuinely-different post-106/pre-guard revision — it is not a redundant duplicate of pre106. The bead-id tag (deviation A) is consistent with the segment-before-first-dot multi-snapshot convention already used by .pre106."
+    },
+    {
+      "id": "R3-5",
+      "severity": "low",
+      "title": "New tests pin only the refresh case for these two skills; HC-6-for-these-skills covered only generically",
+      "detail": "TestInstallSkills_RefreshesPreHeadlessGuardSnapshot / ...GrillSnapshot pin ONLY the refresh direction (a shipped guard-less snapshot refreshes to canonical). Neither pins that a USER-MODIFIED ms-spec-create / ms-spec-grill install is left untouched. That HC-6 path is exercised generically by TestInstallSkills_LeavesUserModified, but that test uses ms-spec-approve, not these two skills. The disposition switch in installSkills is skill-name-agnostic, so the mechanism is adequately covered and this matches the existing precedent (TestInstallSkills_RefreshesPre106Snapshot likewise pins only refresh for ms-panel-run). Non-blocking; an optional HC-6 assertion for these two names would add belt-and-suspenders parity but is not required for correctness."
+    },
+    {
+      "id": "R3-6",
+      "severity": "info",
+      "title": "No snapshot-count / inventory assertion needed updating (PASS)",
+      "detail": "TestSkillInventory_Twelve asserts len(skillFiles())==12 and len(lifecycleSkillFiles())==4; historical_skills additions do not flow through skillFiles()/lifecycleSkillFiles(), so the counts are unaffected. Grep confirms no test asserts a count over previouslyShippedSkills()/historical_skills entries. All 8 relevant tests (two new + inventory + Pre106 + LeavesUserModified + EndToEnd + CanonicalApproveOrder) PASS; the full internal/setup package is green."
+    }
+  ]
+}

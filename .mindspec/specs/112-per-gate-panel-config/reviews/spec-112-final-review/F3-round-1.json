@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Contract: the 5-member doc (gate, slots[{slot,model,lens}], expected_reviewers, approve_threshold raw-expr, substitution{substitutes,claude_sub_on_quota,in_force}) matches interfaces.md exactly; both text and JSON delegate to buildGateResolvedDoc which calls only the R3 resolvers, so drift is impossible by construction. TestConfigShowGate_ResolvedJSON pins EXACTLY five members, so a silent rename/retype/removal — or even an undeclared addition — fails a test: the additive-only rule is enforceable, not aspirational. substitutes marshals {} never null; in_force flips per R5 both ways (verified empirically). Injection re-probe at d713a0b7 with a hostile config (ESC/OSC/BEL/embedded 'recovery:' newlines in note, model, lens, substitutes key+value): config show, --gate text, known-model warnings, and the unknown---gate error (hostile gate name reaches stderr only via %q) all carried ZERO raw control bytes; --gate bead --json round-tripped every hostile value byte-exactly under a real JSON decode with no raw control byte in the raw output; two renders byte-identical; adhoc slots byte-identical to bead; exit codes correct; worktree stayed clean. panel.json Gate string json:\"gate,omitempty\" matches the pinned shape.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3.1",
+      "severity": "info",
+      "title": "R9 contract sound and self-enforcing",
+      "detail": "renderGateResolved and gateResolvedJSON share buildGateResolvedDoc (cmd/mindspec/config.go:433), which consumes only PanelGateReviewerSlots/PanelGateExpectedReviewers/PanelGateApproveThresholdExpr — --gate output cannot disagree with the R3 resolvers. The exact-5-member test (config_test.go:464-477) turns 'additive-only' into a failing test for any silent member change, and forces a deliberate test edit when a follow-up legitimately adds a member. nil substitutes map coerced to {} (config.go:462-465) so jq consumers never null-check."
+    },
+    {
+      "id": "F3.2",
+      "severity": "info",
+      "title": "Injection probe clean on all six surfaces",
+      "detail": "Hostile config (note/model/lens/substitutes-key/substitutes-value carrying ESC, OSC title-set, BEL, [2J wipe, and newline-forged 'recovery:' lines) driven through: config show text, config show --gate bead text, known-model warning lines, --gate --json, hostile --gate name error, --json-without---gate refusal. Zero raw non-LF control bytes on every stdout/stderr path (escapeConfigValue quotes non-printable-ASCII; gateKeyError uses %q; encoding/json escapes control chars). JSON decode returned every hostile value byte-exact. Both refusals exit non-zero with recovery lines naming the five gate keys; read-only confirmed (git status clean, no scratch in worktree)."
+    },
+    {
+      "id": "F3.3",
+      "severity": "info",
+      "title": "adhoc doc echoes requested gate name — consistent, worth knowing for 111",
+      "detail": "--gate adhoc --json returns gate:\"adhoc\" with slots byte-identical to bead (verified), matching the AC's deliberate 'byte-identical slots' wording. A 111 consumer should key round-trips on the name it requested, which is what it gets. No change needed."
+    },
+    {
+      "id": "F3.4",
+      "severity": "nit",
+      "title": "Cobra usage block trails CLI refusals",
+      "detail": "The unknown---gate and --json-without---gate errors are followed by cobra's default full usage/flags dump (SilenceUsage unset), pushing the recovery line up-screen. Cosmetic; no control-byte or contract impact; not spec-fenced. Non-blocking."
+    }
+  ]
+}

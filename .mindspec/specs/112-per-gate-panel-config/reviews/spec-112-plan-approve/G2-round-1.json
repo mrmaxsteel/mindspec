@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Bead 3 carries the security requirements through concretely. Step 3 requires every new config-controlled string in the normal text path, including panel.note, reviewer model, reviewer lens, substitutes keys/values, and warning lines embedding them, to pass through escapeConfigValue. Step 5 repeats the same requirement for config show --gate text output: expanded slot model/lens values, thresholds, and substitution policy strings are escaped. The JSON path is pinned to a typed struct marshaled with encoding/json, explicitly forbidding string concatenation, and includes the required substitution.in_force member. The hostile-bytes verification is present by name as TestConfigShow_HostileStringsEscaped and covers note, model, lens, substitutes key/value, both text paths, known-model warning embedding, and byte-exact JSON round-trip through a real JSON decode. I do not see an escaping gap left for the implementer to infer silently.",
+  "concrete_changes_required": [],
+  "findings": []
+}

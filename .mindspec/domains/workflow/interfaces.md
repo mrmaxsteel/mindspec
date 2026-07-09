@@ -211,6 +211,7 @@ raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
 | `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1) |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing (spec 110 R2) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; exit code tracks the decision alone (spec 110 R3) |
+| `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
 
 ## Agent Skills
 
@@ -275,6 +276,75 @@ raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
   backtick-quoted examples and asserts they agree with
   `panel.FileName` / `panel.verdictFileRE` / `panel.ConsolidatedName`,
   so this doc cannot silently drift from the code.
+- **2026-07-09 (spec 112 Bead 3, per-gate panel config — gate-aware
+  advisory + `config show` gates/substitutes/`--gate` — R7/R8/R9):** Both
+  `ReviewerCountNote` callers (`internal/complete`'s `complete.Run` step
+  2.25 and `cmd/mindspec/config.go`'s `reviewerCountNotesFor`) now compare a
+  recorded panel's `expected_reviewers` against the GATE-APPROPRIATE
+  config default through the single shared selection rule,
+  `(*config.Config).PanelGateAdvisoryDefault(recordedGate string, isBead
+  bool) (int, bool)` (homed in `internal/config`, spec 112 Bead 1): a
+  known recorded gate uses that gate's resolved default; a gate-less bead
+  panel falls back to the `bead` gate; a gate-less non-bead panel or an
+  unrecognized recorded gate value SKIPS the note (`ok == false`) once
+  `gates:` is configured; with `gates:` absent every panel still compares
+  against the flat global default, byte-identical to spec 109. The
+  `internal/complete` call site is guarded on `panelReg != nil` —
+  `panelGate` returns a nil registration on its fail-open paths (empty bead
+  ID, no registered panel), and `PanelGateAdvisoryDefault`'s arguments
+  deref `panelReg.Panel`, so the guard sits ahead of that call even though
+  `reviewerCountAdvisory` itself also nil-checks its `reg` parameter. No
+  `Allow`/`Block` decision is touched by any of this — the gate's outcome
+  is fully computed before the advisory call site runs.
+
+  `renderConfig` (`cmd/mindspec/config.go`) now also echoes a set
+  `panel.note` verbatim (escaped), renders `panel.gates` — only configured
+  gates, in `config.PanelGateKeys` enum declaration order, never map
+  iteration order — each with its as-configured reviewer entries, its
+  resolved reviewer sum (`PanelGateExpectedReviewers`), and its raw
+  `approve_threshold` expression (`PanelGateApproveThresholdExpr`); renders
+  `panel.substitution.substitutes` in sorted-key order beside the
+  slot-id-preservation convention line (a substituted reviewer writes
+  `reviewer_id "<slot> <substitute-model>-sub"`, keeping the slot id); and
+  annotates any model id (from the global reviewers, any gate's reviewers,
+  or either side of `substitutes`) absent from `config.KnownModels()` with
+  an advisory warning that never affects the exit code. The `gates:` and
+  `substitutes:` keys are never omitted — an unconfigured/empty map still
+  renders `gates: {}` / `substitutes: {}`. Every config-controlled string
+  this bead adds to a text-render path passes through the existing
+  `escapeConfigValue`.
+
+  `mindspec config show` gained `--gate <name> [--json]` (R8/R9): two pure
+  functions, `renderGateResolved` (text) and `gateResolvedJSON` (a typed
+  struct marshaled with `encoding/json`, never string concatenation), both
+  delegating to a shared `buildGateResolvedDoc` that calls ONLY the R3
+  config resolvers (`PanelGateReviewerSlots`/`PanelGateExpectedReviewers`/
+  `PanelGateApproveThresholdExpr`) — so `--gate` output cannot disagree
+  with them. The JSON document's five members —`gate`, `slots` (`{slot,
+  model, lens}` in R3 expansion order), `expected_reviewers`,
+  `approve_threshold` (the raw expression string), and `substitution`
+  (`substitutes` map, the legacy `claude_sub_on_quota` bool, and
+  `in_force`: `"substitutes"` when the map is non-empty, else
+  `"claude_sub_on_quota"`, per R5's supersession rule) — are a STABLE,
+  ADDITIVE-ONLY CONTRACT (spec 112 R9): the surface the spec-110
+  `panel.json` writer and the spec-111 orchestration runner build on.
+  Renaming, retyping, or removing a documented member is a breaking change
+  no follow-up may make silently — same stability guarantee as the
+  recorded `gate` field on `panel.json` (Bead 2). An unknown `--gate` value
+  propagates the R3 resolver's own ADR-0035 error (already carrying a
+  `recovery:` line enumerating the five valid gate keys); `--json` without
+  `--gate` is refused with its own recovery line, since the resolved view
+  is inherently per-gate. The command stays read-only on every path — no
+  writer- or runner-side behavior is added by this bead (out of scope for
+  spec 110/111).
+- **2026-07-08 (spec 112 Bead 1, per-gate panel config — the pointerization
+  ride-along):** `internal/config.Reviewer.Count` became a pointer
+  (`*int`, spec 112 R1) so an absent `count` is distinguishable from an
+  explicit `count: 0`. `cmd/mindspec/config.go`'s `renderConfig` (the sole
+  out-of-package `Reviewer.Count` reader) now renders reviewer counts
+  through the exported `(Reviewer).CountValue()` accessor instead of the
+  raw field — an absent `count` renders as its default, `1`. No other
+  workflow-domain behavior changes in this bead.
 - **2026-07-07 (spec 109 Bead 4, orchestration config substrate — R8/R9):**
   `cmd/mindspec/config.go` adds a read-only `config` command with a `show`
   subcommand: it loads the effective config via `config.Load`, renders it

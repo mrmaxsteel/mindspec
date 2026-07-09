@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Author-of-record lens: the diff delivers exactly Bead 3 steps 1-7, no missing step, no unrequested scope. Step 1 (complete.go): flat PanelExpectedReviewers replaced with gate-aware PanelGateAdvisoryDefault, guarded on panelReg != nil AND ok — matches plan verbatim. Step 2 (reviewerCountNotesFor): same per-registration helper, skips when !ok. Step 3 (renderConfig): note echoed, gates in PanelGateKeys enum order with resolved sums + RAW thresholds, substitutes sorted, gates:/substitutes: never omitted ({} when empty). Step 4: known-model advisory dedup+sorted, exit-inert. Step 5: buildGateResolvedDoc feeds text + real encoding/json; JSON has exactly the 5 R9 members (verified: gate/slots/expected_reviewers/approve_threshold/substitution), substitution has substitutes/claude_sub_on_quota/in_force. Step 6: all 5 named tests present (9 advisory subtests). Step 7: both workflow docs carry the additive-only R9 contract. Headline proof reproduced: sums 9/9/6/12, final_review 12 slots/thr \"11\"/in_force substitutes, adhoc==bead slots, unknown-gate + json-no-gate both exit 1 with 5-key recovery, read-only. AC7-AC10 each traced. Scope fence honored: no internal/config or internal/panel edits (6 files, all workflow). Packages green, build clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "AC7 (R7): both advisory call sites gate-aware via single-home PanelGateAdvisoryDefault; nil-guard on panelReg present at complete.go:391 (the plan's exact panic-avoidance requirement); gates-absent path returns (PanelExpectedReviewers(), true) = 109 verbatim. Delivered.",
+    "AC8 (R8): renderGates iterates config.PanelGateKeys (enum order, never map order), renderSubstitutes sorts keys, both {}-render when empty; renderKnownModelWarnings is exit-code-inert and dedup/sorted. Delivered.",
+    "AC9 (R8/R9): gateResolvedJSON uses json.Marshal over a typed struct — exactly 5 members confirmed via jq keys; in_force flips to \"substitutes\" on non-empty map (verified live); unknown --gate and --json-without-gate both exit non-zero with ADR-0035 five-key recovery lines. Delivered.",
+    "AC10 (R8): every new config-controlled string (note, model, family, lens, substitutes key+value, gate name, warning-embedded id) routed through escapeConfigValue (strconv.Quote for any byte <0x20 or >0x7e); --json path uses the real encoder for byte-exact round-trip. Delivered.",
+    "Scope fence R9 honored: 6 changed files all in workflow domain; no internal/config edit, no internal/panel edit, no panel.json writer, no runner/substitution consumption, no PanelGateDecision/ApproveThreshold change.",
+    "OBSERVATION (not a defect): plan lists 7 Bead-3 key_file_paths but internal/complete/panel_advisory.go is unchanged. Correct — plan step 1 explicitly keeps reviewerCountAdvisory's signature unchanged and edits only the call site in complete.go; panel_advisory.go was in-scope context, not a prescribed edit. No under-delivery.",
+    "cmd/mindspec and internal/complete both green; go build ./... clean; headline protocol-YAML proof (9/9/6/12, adhoc==bead, read-only) reproduced by hand with jq."
+  ]
+}

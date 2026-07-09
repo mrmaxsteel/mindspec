@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "CODEBASE-PIN lens — every mechanical gate passes. Exactly one commit ahead of d1b4bebf (24af2fdb). In the worktree: go build ./... and go vet ./... clean; go test ./internal/setup/... -count=1 all PASS. Both new tests exist and pass (TestInstallSkills_RefreshesPreHeadlessGuardSnapshot, ...GrillSnapshot); TestSkillInventory_Twelve passes. File set matches the BRIEF exactly (9 files, +256/-0). Sync verified: plugin/.claude/.agents copies of ms-spec-grill are byte-identical; .claude/.agents copies of ms-spec-create are byte-identical (no plugin copy — canonical lives in claude.go, as the BRIEF states). Snapshot byte-exactness confirmed: ms-spec-grill.pre0uur.md == d1b4bebf plugin body (14913==14913 bytes, diff empty); ms-spec-create.pre0uur.md == d1b4bebf .claude mirror (655==655, diff empty). HC-6 is pinned by pre-existing TestInstallSkills_LeavesUserModified; refresh fires only on byte-exact historical match, snapshots auto-registered via //go:embed. Deviation A sound (name parse splits at first dot, tag immaterial). Deviation B sound (.agents mirror byte-identical). No other embedder asserts the skill text — bench/grill/run_eval.sh only checks file existence.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Commit count: git rev-list --count d1b4bebf..fix/0uur-headless-grill-guard = 1 (24af2fdb). PASS.",
+    "go build ./... => BUILD_OK; go vet ./... => VET_OK (run in worktree agent-a0f12e237206a4a4c). PASS.",
+    "go test ./internal/setup/... -count=1 -v => PASS (whole package). Includes TestSkillInventory_Twelve PASS.",
+    "New test TestInstallSkills_RefreshesPreHeadlessGuardSnapshot: PASS — writes pre-guard ms-spec-create snapshot as existing install, asserts installSkills refreshes in place to canonical (now carrying 'Headless guard') and records it in r.Refreshed.",
+    "New test TestInstallSkills_RefreshesPreHeadlessGuardGrillSnapshot: PASS — mirror for the ms-spec-grill plugin skill, asserts refresh to guarded canonical carrying 'grill deferred: headless session'.",
+    "Sync — ms-spec-grill: diff plugin vs .claude == identical; plugin vs .agents == identical. ms-spec-create: diff .claude vs .agents == identical. No plugins/mindspec/skills/ms-spec-create/SKILL.md exists (canonical in claude.go lifecycleSkillFiles) — matches BRIEF.",
+    "Snapshot byte-exactness — grill: diff(git show d1b4bebf:plugins/.../ms-spec-grill/SKILL.md, branch:internal/setup/historical_skills/ms-spec-grill.pre0uur.md) empty; 14913==14913 bytes. BYTE-IDENTICAL.",
+    "Snapshot byte-exactness — create: diff(git show d1b4bebf:.claude/skills/ms-spec-create/SKILL.md, branch:internal/setup/historical_skills/ms-spec-create.pre0uur.md) empty; 655==655 bytes. BYTE-IDENTICAL. (Pre-edit .claude mirror is the committed output of lifecycleSkillFiles at base, the correct comparand.)",
+    "HC-6: pre-existing TestInstallSkills_LeavesUserModified (skills_test.go:349) pins that user-modified installs are left untouched with a notice and NOT refreshed. New snapshots are consumed only through previouslyShippedSkills() byte-exact matching, so a user-edited file will not match and is preserved. Respected.",
+    "Snapshot auto-registration: skills.go uses //go:embed historical_skills/*.md and derives skill name as the segment before the first dot, so ms-spec-{create,grill}.pre0uur.md are picked up automatically — no manual wiring needed. Deviation A (bead-id tag vs spec-number) has zero mechanical effect.",
+    "Deviation B: .agents/skills mirrors updated in lockstep and verified byte-identical to .claude; consistent with repo convention. Sound.",
+    "No hidden coupling: bench/grill/run_eval.sh references the grill SKILL.md only to assert existence (line 266) and use it as the eval prompt; it does not assert byte content, so the additive '## Headless guard' section cannot break the eval. No other Go/MD file embeds or asserts this skill text.",
+    "NON-BLOCKING (out of my lens, flagged for semantics reviewers): the guard is a judgment call in prose ('no human available to answer one-at-a-time — e.g. orchestrator, ms-spec-autopilot, or test harness'), not a hard programmatic signal (e.g. an env var). Wording is operational enough to satisfy the CODEBASE-PIN gate; decidability/over-trigger risk is for the semantics lens to weigh."
+  ]
+}

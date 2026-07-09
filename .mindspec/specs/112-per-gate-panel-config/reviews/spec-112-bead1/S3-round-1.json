@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "S3 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Checked every symbol/shape the plan says Bead 2/3 consume against this commit's actual exported surface (config_new.go extracted at 68fe576e, go build clean). PanelGateExpectedReviewers/PanelGateApproveThresholdExpr/PanelGateReviewerSlots match the plan's signatures exactly (gate string) -> (T, error), all erroring via gateKeyError for names outside PanelGateKeys. PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool) matches signature and the four-branch selection rule verbatim. PanelGateKeys is exported, ordered, and is the single enum source Bead 3 needs for gates-rendering order. CountValue(), KnownModels(), Panel.Note, Substitution.Substitutes, GatePanel{Reviewers, ApproveThreshold} are all exported with the documented semantics. Bead 2 needs nothing from this commit (internal/panel stays config-free by design). One non-blocking observation: ReviewerSlot has no json struct tags, so Bead 3's --gate --json slots array (which needs lowercase slot/model/lens per R9) can't reuse it directly for encoding/json.Marshal -- but this codebase's established idiom (state.go, migrate.go) is already 'define a small local tagged struct for CLI --json output,' which the plan's own gateResolvedJSON description anticipates. Copying three exported fields isn't reaching into internals.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "internal/config/config.go ReviewerSlot (lines 155-159)",
+      "description": "ReviewerSlot{Slot, Model, Lens string} carries no `json:` tags, so a direct encoding/json.Marshal would emit PascalCase keys (Slot/Model/Lens) rather than the lowercase slot/model/lens the R9 --gate --json contract requires. Not a blocker: this codebase's CLI JSON surfaces (cmd/mindspec/state.go, cmd/mindspec/migrate.go) already follow the pattern of defining a small local JSON-tagged struct for the response shape rather than tagging the internal type, and the plan's Bead 3 step 5 already describes gateResolvedJSON as its own typed struct. Bead 3 should just be sure to define (or the panel notes) an explicit slot-shaped JSON struct with `json:\"slot\"`/`json:\"model\"`/`json:\"lens\"` tags and copy the three exported ReviewerSlot fields into it -- flagging this so it isn't discovered late as a failing TestConfigShowGate_ResolvedJSON assertion."
+    },
+    {
+      "severity": "none",
+      "area": "PanelGateKeys / gate-scoped resolvers / PanelGateAdvisoryDefault",
+      "description": "All symbols Bead 3 is documented to call (PanelGateExpectedReviewers, PanelGateApproveThresholdExpr, PanelGateReviewerSlots, PanelGateAdvisoryDefault) exist with the exact signatures, exported visibility, and behavior the plan specifies. PanelGateKeys is exported and in the correct enum-declaration order for Bead 3's gates-rendering. GatePanel, Panel.Note, Substitution.Substitutes, Reviewer.CountValue(), and KnownModels() are all present, exported, and match the documented shapes. Bead 2 (internal/panel) consumes nothing from this commit, consistent with the plan's config-free-leaf invariant. go build ./internal/config/... ./cmd/mindspec/... is clean at this commit and git status is untouched."
+    }
+  ]
+}

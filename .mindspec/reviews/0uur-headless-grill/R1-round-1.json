@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Matches bead mindspec-0uur intent precisely: a prompt-layer headless guard that auto-defers the grill with a recorded default instead of stalling, in ms-spec-create (via claude.go canonical + .claude/.agents replicas), ms-spec-grill (plugin + replicas), plus historical snapshots for auto-refresh. The bead's `plugins/.../ms-spec-create/SKILL.md` doesn't exist (create's body lives in lifecycleSkillFiles()); the fix correctly edited claude.go instead — no mirror missed. Deviation A (.pre0uur tag) is justified: previouslyShippedSkills() keys by segment-before-first-dot (skills.go:49-53), so .pre0uur behaves identically to .pre106; snapshots verified byte-identical to d1b4bebf bodies. Deviation B (.agents mirror) justified: byte-identical, same install path. Consistent with spec 105's non-TTY principle — guard sits in the skill/prompt layer (ADR-0019 boundary), binary untouched and stays non-interactive. Standout strength: the deferral marker is an unchecked Open Questions item; validate/spec.go flags unchecked Open Questions as hard errors and ApproveSpec aborts on failure, so a headless-deferred grill CANNOT silently reach Plan Mode — auditability is enforced, not advisory. plugin==.claude==.agents post-change; tests pass.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "positive",
+      "area": "author-of-record / bead intent",
+      "detail": "Fix delivers exactly the bead's ask: auto-defer with a recorded default rather than block, across ms-spec-create (claude.go lifecycleSkillFiles + .claude/.agents replicas), ms-spec-grill (plugin + replicas), and historical snapshots. The bead's named path plugins/mindspec/skills/ms-spec-create/SKILL.md does not exist (confirmed via find); create's canonical body lives in internal/setup/claude.go, which the fix correctly edited. No mirror was silently skipped."
+    },
+    {
+      "severity": "positive",
+      "area": "marker auditability (BRIEF #2)",
+      "detail": "The marker '- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.' is an UNCHECKED item in the Open Questions section (a real scaffold section — internal/spec/create.go:65). validate/spec.go checkOpenQuestions (lines 226-246) raises an open-question ERROR for any '- [ ]' in Open Questions, and approve/spec.go:47-50 aborts ApproveSpec on vr.HasFailures(). Therefore a headless-deferred grill hard-blocks /ms-spec-approve until a human runs the grill and resolves it — the grill cannot be silently skipped through to Plan Mode. Self-enforcing, not merely a note someone might miss."
+    },
+    {
+      "severity": "positive",
+      "area": "deviation A (.pre0uur snapshot tag)",
+      "detail": "Justified. previouslyShippedSkills() (internal/setup/skills.go:41-53) keys snapshots by the segment before the first dot (strings.IndexByte(name,'.')), so ms-spec-create.pre0uur.md and ms-spec-grill.pre0uur.md are loaded under their skill names exactly like the .pre106 snapshots. Bead is not spec-tied, so a bead-id tag is a reasonable choice. The two new refresh tests pass, proving the loader picks the snapshots up."
+    },
+    {
+      "severity": "positive",
+      "area": "snapshot byte-exactness (BRIEF #3)",
+      "detail": "diff confirms ms-spec-grill.pre0uur.md is byte-identical to d1b4bebf's plugin AND .claude grill SKILL.md, and ms-spec-create.pre0uur.md is byte-identical to d1b4bebf's .claude ms-spec-create SKILL.md. No near-miss; auto-refresh will match real installs."
+    },
+    {
+      "severity": "positive",
+      "area": "HC-6 + sync (BRIEF #4, #5)",
+      "detail": "Two new tests pin the refresh of exact prior snapshots to the guarded canonical; the pre-existing TestInstallSkills_LeavesUserModified continues to guard that non-matching (user-modified) files are left alone — HC-6 respected (no existing snapshot modified). Post-change plugin==.claude==.agents verified byte-identical for both skills. No other embedder asserts this text (bench/grill/ operates on fixtures, not the SKILL bodies; TestSkillInventory_Twelve only counts). go test ./internal/setup ./internal/validate ./internal/approve all pass in the worktree."
+    },
+    {
+      "severity": "positive",
+      "area": "consistency with spec 105 non-TTY principle",
+      "detail": "Guard is placed in the skill/prompt layer with the binary untouched (stays non-interactive per 105 R8/AC9 and the ADR-0019 boundary that interactive judgment lives in the agent layer). Notably the fix uses SEMANTIC signals ('invoked by an orchestrator, ms-spec-autopilot, or a test harness') rather than the bead's loosely-suggested 'detect via CLAUDECODE/non-TTY' — which is the better call: CLAUDECODE=1 is set in interactive Claude Code sessions too, so an env-var check would over-trigger and suppress ALL grills, gutting 105's value. Author chose intent over letter correctly."
+    },
+    {
+      "severity": "minor",
+      "area": "guard decidability (BRIEF #1) — non-blocking note",
+      "detail": "The guard is judgment-based prose, so it is inherently probabilistic. Over-trigger (an agent wrongly self-identifying as headless in a genuine interactive session, silently degrading the grill to a deferral) is low-probability but non-zero; it self-heals at the gate because the marker then blocks approval until resolved, but the in-session grill would have been skipped. Under-trigger (still stalls) is low given the three named entry points cover the known headless callers. This is the architecturally-correct layer per 105 (no deterministic signal is appropriate here), so no change is required. Optional future hardening: name the invocation signal more operationally (e.g. 'you were dispatched by a skill/orchestrator, not a human conversational turn'). Also note an agent could technically 'resolve' the marker by flipping '- [ ]' to '- [x]' without running the grill — a residual social gap, out of scope for this bead."
+    }
+  ]
+}

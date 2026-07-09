@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Empirically validated against real bd 1.1.0 in the repo. `bd show <id> --as-of HEAD --json` returns the exact schema parseBeadShowJSON expects, confirmed on both an open bead (mindspec-kkcw) and a closed one (mindspec-lcd, status=\"closed\"). A genuinely-unknown flag (`--bogus-xyz`) produces stderr `Error: unknown flag: --bogus-xyz` with exit 1, which RunBD's cmd.Output() surfaces as a real *exec.ExitError with .Stderr populated — exactly the signature IsUnsupportedFlagError checks, and exactly what fakeBDExitError in the tests reconstructs. Traced the forced-commit-then-verify call sequence in complete.go (602-616): doltCommitFn always runs before verifyCommittedFn, so --as-of HEAD reflects the closed state regardless of the ambient dolt.auto-commit policy — this makes the 'auto-commit' framing in the comments a documentation nuance rather than a correctness risk. verifyCommittedSameRead is a byte-identical extraction of the pre-change verifier (parity preserved). Ran `go test ./internal/complete/ -run TestDefaultVerifyCommitted -v`: all 6 subtests PASS. Full `go test ./internal/complete/... ./internal/bead/... ./internal/next/...`, `go build ./...`, `go vet ./...` all clean. No misclassification or masking found in either direction.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "empirical-validation",
+      "description": "Central claim validated live: `bd show mindspec-lcd --as-of HEAD --json` (a real closed bead) returns `[{\"id\":\"mindspec-lcd\",...,\"status\":\"closed\",...}]` — the exact array-of-one shape FetchBeadAsOf/parseBeadShowJSON expects. `bd show mindspec-kkcw --as-of HEAD --json` (open bead) round-trips correctly too. Schema match confirmed, no drift from FetchBeadByID's shape for the fields BeadInfo actually reads (id/status/etc.); the --as-of variant omits extended count fields present in plain `bd show --json` output, but BeadInfo doesn't parse those anyway so it's a non-issue."
+    },
+    {
+      "severity": "info",
+      "area": "unknown-flag-signature",
+      "description": "Confirmed real bd 1.1.0 emits `Error: unknown flag: --<name>` on stderr with exit 1 for any unrecognized flag (tested with `--bogus-xyz`), and Go's cmd.Output() (used unwrapped by RunBD/tracedOutput) turns this into a genuine *exec.ExitError with .Stderr populated. IsUnsupportedFlagError's errors.As + substring check matches this exactly. fakeBDExitError in the tests constructs a real ExitError via a synthetic subprocess rather than a hand-rolled struct, so the test genuinely exercises the errors.As chain rather than a fake that can't regress — this satisfies BRIEF scrutiny point 5."
+    },
+    {
+      "severity": "info",
+      "area": "auto-commit-claim-precision",
+      "description": "`bd show --help` lists --dolt-auto-commit's CLI-flag default as \"off\" (config-overridable), which nuances the HONESTY-CLAUSE comment's blanket claim that 'bd auto-commits every write' — this repo's resolved config happens to be \"on\" (`bd config get dolt.auto-commit` -> on), but that's not universal. It doesn't affect correctness: complete.go's case-(a) branch (lines 592-616) always runs the FORCED `bd dolt commit` (doltCommitFn) immediately before defaultVerifyCommitted, so --as-of HEAD is guaranteed to see the closed state post-forced-commit independent of the ambient auto-commit policy. Non-blocking; a doc-comment tweak (attribute the guarantee to the forced `bd dolt commit` step rather than to ambient auto-commit mode) would be more precise but isn't required."
+    },
+    {
+      "severity": "info",
+      "area": "edge-case-bd-quirk",
+      "description": "Discovered a real bd asymmetry: `bd show <id> --as-of HEAD --json` for a NONEXISTENT bead returns exit=0 with EMPTY stdout and the error text only on stderr (`Error fetching <id> as of HEAD: not found...`) — unlike plain `bd show <id> --json` on a missing bead, which exits 1 with an error JSON object on stdout. Traced the consequence: RunBD returns (empty-bytes, nil-err) in this case, so FetchBeadAsOf falls through to parseBeadShowJSON, whose `trimmed == \"\"` check correctly turns this into a hard error (no wrapped *exec.ExitError, so IsUnsupportedFlagError correctly returns false — no misclassification as unsupported-flag, no silent fallback, no silent pass). The never-proceed-on-unverified-close invariant holds even on this untested bd quirk. Not reachable in the real call path (defaultVerifyCommitted only runs after a session re-read already confirmed status==closed, so the bead necessarily exists), so this is informational, not a defect."
+    },
+    {
+      "severity": "minor",
+      "area": "test-coverage-gap",
+      "description": "No dedicated TestIsUnsupportedFlagError exists in internal/bead/bdcli_test.go (the owning package) — the function is currently exercised only indirectly via internal/complete's TestDefaultVerifyCommitted using fakeBDExitError. That indirect coverage is real (genuine *exec.ExitError construction), so this is not a blocker, but a package-local unit test (covering a non-ExitError err, nil err, ExitError with unrelated stderr text, and case-insensitivity of both 'unknown flag' and the flag name) would pin the function's contract independent of any one caller's usage and survive if internal/complete's tests are refactored later."
+    }
+  ]
+}

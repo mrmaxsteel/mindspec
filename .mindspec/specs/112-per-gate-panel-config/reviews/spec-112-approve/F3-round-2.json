@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "round": 2,
+  "reviewed_sha": "39b5724423eeba385b6b2080c5f32b5dcfc7a2a6",
+  "rationale": "Re-ran the round-1 enumeration against 39b5724. (1) Cursor pin ADDRESSED: an off-by-k start (k not 0 mod 6) now fails two independent clauses — R3's first-lens-less-slot-must-be-author-of-record falsification and AC5's literal 9-slot sequence; 'always' plus AC5's two-loads-identical assertion also kill a cross-call persistent cursor; k=6-style impostors are extensionally identical, hence unobjectionable. (2) ADDRESSED: R3's per-field chain + falsification + AC4 leave one reading for partial adhoc, and R4's cross-field check validates the donor integer against the INHERITING gate's resolved sum at every chain link — my never-passable construction (bead sum 6 threshold '6', reviewers-only adhoc sum 2) now refuses, named verbatim in R4 and AC3. Donor integers below 1 are unreachable (the donor's own link refuses them), so the one-sided 'exceeding' falsification is complete. (3) ADDRESSED: unknown recorded gate = no-known-gate, skip when gates configured (outranking IsBead), global compare when absent, resolver error unreachable — my proposed fix verbatim, with falsification + AC7 case. Fresh attack: no load-bearing hole; two non-blocking wording nits in findings. Grounding spot-checked in-worktree (config.go:396 count<1; escapeConfigValue).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "round1_item": 1,
+      "claim": "R3/AC5 cursor-start pin kills the rotation-invariance hole",
+      "disposition": "ADDRESSED",
+      "status": "withstood",
+      "detail": "Enumerated cursor starts k=0..5 against the new text: k=0 reproduces the pinned example (Fable{author-of-record, empirical-prober, codebase-pin}, Opus{adversarial, contract-stability, integration}, GPT{author-of-record, empirical-prober, codebase-pin}); every k=1..5 makes the first lens-less slot resolve to lens[k] != author-of-record, failing R3's new falsification predicate directly, AND produces a 9-slot sequence differing from AC5's literal R1..R9 assertion, so an off-by-k implementation fails two clauses, not prose. The pin is assign-then-advance by construction (start 0 + first slot = lens[0]); an advance-then-assign impl starting at 5 is extensionally identical and correctly not distinguishable. A process-persistent cursor (fresh attack) is killed by 'the first lens-less slot in a gate's flattened declaration order ALWAYS takes author-of-record' and observably by AC5's two-loads-yield-identical-slot-lists assertion. The worked example spans residues 0..5, so it also pins the interleaved ordering itself (any permutation other than identity yields a different 9-sequence). Nothing rotation-invariant remains load-bearing.",
+      "hard_block": false
+    },
+    {
+      "round1_item": 2,
+      "claim": "R3/R4 partial-adhoc ambiguity + bead-integer-inherited-by-smaller-adhoc range hole",
+      "disposition": "ADDRESSED",
+      "status": "withstood",
+      "detail": "Ambiguity half: R3 now states the chain is walked per field with adhoc included, backed by a falsification clause (adhoc reviewers-only must inherit bead's resolved threshold, and vice versa) and AC4's explicit adhoc-chain cases — only the per-field reading passes. Range half: R4's cross-field inheritance check now runs the inherited integer against the INHERITING gate's resolved sum from whichever donor the chain supplies (bead-for-adhoc or global), naming my exact construction (bead '5'-over-6 inherited by a 2-reviewer reviewers-only adhoc) as a refusal, with AC3 covering both the global-donor and bead-donor variants. Probed for residual holes: threshold-only adhoc is covered by the ordinary per-gate check against 'that gate's RESOLVED reviewer sum' (inherited bead reviewers); unconfigured adhoc copies bead's pair wholesale so it is consistent by construction; adhoc reviewers-only with unconfigured bead inherits the global integer through bead's resolved value, which the 'whichever donor' wording covers; a donor integer below 1 is unreachable because the donor's own link (109 R5 or 112 R4) already refuses it, so the falsification's one-sided 'exceeding' phrasing loses nothing. The never-passable class is closed.",
+      "hard_block": false
+    },
+    {
+      "round1_item": 3,
+      "claim": "R7 unknown-recorded-gate caller behavior",
+      "disposition": "ADDRESSED",
+      "status": "withstood",
+      "detail": "R7 now specifies exactly the suggested treatment: an out-of-enum recorded gate is 'no known gate' — note skipped when gates: is configured (explicitly outranking the IsBead() guess, so a bead panel with a garbage recorded gate is also skipped — deliberate and stated), global comparison when gates: is absent (where the gate resolvers return global-derived values anyway, so no behavioral fork), the advisory path never invokes an R3 resolver with the unknown value so the unknown-gate error cannot surface or flip exit codes (ADR-0035/R8 preserved), and R6's surfaced-never-parse-error lenience is reconciled (raw value may display; only the count comparison is suppressed). Falsification clause + the new AC7 case ('unknown gate value with gates: configured yields no note and surfaces no resolver error') make it runnable. One pedantic non-hole: 'never calls an R3 resolver' is stricter than any observable predicate (a call-and-swallow impl passes all ACs); that is implementation guidance, not a falsifiability gap.",
+      "hard_block": false
+    },
+    {
+      "round1_item": null,
+      "claim": "Fresh adversarial pass over the new text (R9 contract, R2 relaxation, R4 completeness, R8 escaping order)",
+      "disposition": "NEW_ISSUE",
+      "status": "two non-blocking nits; no load-bearing hole",
+      "detail": "Nit A (R9): the --gate --json member 'gate (string, the resolved gate name)' is ambiguous for UNCONFIGURED adhoc — echo-the-requested-key ('adhoc') vs chain-terminus ('bead'). The Validation Proof pins only byte-identical SLOTS for adhoc-vs-bead (implying the documents differ, i.e. the echo reading), and the readings diverge only when adhoc is unconfigured, where bead's default equals adhoc's resolved values so no advisory or decision consequence exists — but R9 freezes this schema additive-only, so the one-word clarification ('the requested gate key, echoed') is worth making at plan time before 110 consumes it. Nit B (R3): the '(inheriting the global reviewers)' parenthetical survives one sentence before the per-field adhoc statement that supersedes it for adhoc; no longer observably ambiguous (falsification + AC4 pin the behavior) but imprecise. Verified as sound: R2's count-less relaxation claim is repo-true (109 refuses Count < 1 at internal/config/config.go:396, present in-worktree post-rebase); escapeConfigValue exists at cmd/mindspec/config.go:81 as R8 assumes; gates:{} len>0 keying, map render order, and the R9 scope fence introduce no contradiction with R2/R6/R7. Neither nit blocks approval.",
+      "hard_block": false
+    }
+  ]
+}

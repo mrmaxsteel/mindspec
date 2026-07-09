@@ -1,0 +1,38 @@
+{
+  "reviewer_id": "O1 opus",
+  "slot": "O1",
+  "family": "opus",
+  "lens": "grounding/repo-accuracy",
+  "round": 2,
+  "reviewed_sha": "39b5724423eeba385b6b2080c5f32b5dcfc7a2a6",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "My round-1 concern was orchestration-only: the 112 branch predated the 109 merge. That is resolved — at the reviewed SHA the branch is rebased onto post-109 main and 109's full surface is genuinely present and matches every 112 citation. ADR-0040 (line 108) quotes verbatim: 'move it to L2 the moment it is a checkable fact about a run (a count, a threshold, an enum, a boolean)'; its §3 harness.Agent counter-example is present. internal/config Panel{Reviewers,ApproveThreshold,Substitution}, Reviewer{Family,Count}, Substitution{ClaudeSubOnQuota}, DefaultConfig 3+3/'n-1'/true, count<1 + sum<2 refusals, and PanelExpectedReviewers/PanelApproveThresholdExpr all match 109 R2/R5. panel.ApproveThreshold() single-home and leaf-pure ReviewerCountNote(recorded,configDefault int) match R7. ADR-0037's 2026-07-07 spec-109 amendment grounds the 'second amendment' wording. Fix-delta claims are grounded: escapeConfigValue (config.go:81) is exactly '[0x20,0x7e] passthrough else strconv.Quote single-line' as R8 cites — a real 109 mechanism; --gate is genuinely new; R9's json members are internally consistent with 112's own R3 resolvers and real 109 Substitution; gates/substitutes are Go maps so the order-pin is warranted. No grounding regression.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O1-r2-1",
+      "severity": "info",
+      "disposition": "RESOLVED",
+      "note": "Round-1 rebase prerequisite satisfied: HEAD 39b57244 sits atop merge 9884918c ('into spec/112...'), and 2f894401 (Merge PR #177 spec-109) is in ancestry. ADR-0040 (15KB), the 109 spec (36KB), internal/config.Panel/resolvers, internal/panel.ApproveThreshold/ReviewerCountNote, and cmd/mindspec config show all read directly from the worktree — no `git show main:` needed."
+    },
+    {
+      "id": "O1-r2-2",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "note": "Escaping claim grounded. R8's '109 escapeConfigValue-equivalent (printable-ASCII passthrough; single-line quoted escape otherwise)' is a faithful description of the real function at cmd/mindspec/config.go:81 (unchanged iff every rune in [0x20,0x7e], else strconv.Quote). --gate flag confirmed absent from current cmd/mindspec, so 112 genuinely adds it."
+    },
+    {
+      "id": "O1-r2-3",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "note": "R9 --json members (gate/slots{slot,model,lens}/expected_reviewers/approve_threshold/substitution) are internally consistent with 112's declared R3 resolvers (PanelGateReviewerSlots->ReviewerSlot{Slot,Model,Lens}, PanelGateExpectedReviewers int, PanelGateApproveThresholdExpr raw string) and R5 supersession; the substitution member maps onto real 109 Substitution.ClaudeSubOnQuota. Map-order pin (gates enum-order, substitutes sorted-key) is warranted: both are Go maps per R1/R5. Scope fence to 110/111 honored — no writer/runner behavior specified."
+    },
+    {
+      "id": "O1-r2-4",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "note": "R2 monotone-relaxation claim grounded: 109 refuses count<1 (config.go:396-397) and sum<2 (401); 112 R1 defaults count to 1 and replays the per-gate sum-2 floor and threshold grammar (388-391) per gate. ADR-0037 carries a 2026-07-07 spec-109 amendment adding the recorded approve_threshold field, grounding 112 R6's 'second amendment note' and 'ApproveThreshold() as extended by 109's amendment'."
+    }
+  ]
+}

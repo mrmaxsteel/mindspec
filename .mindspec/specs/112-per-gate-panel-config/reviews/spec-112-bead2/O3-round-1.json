@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Contract-stability lens passes. R9 four-part pin verified in code and empirically: name `gate`, type string, `json:\"gate,omitempty\"`, and parse-lenient EXACTLY like `abandon_reason` (panel.go:91). Probe: empty gate drops the key so an un-stamped panel serializes byte-identical to legacy; an unexpected string value (\"weird\") parses with Err==nil; type mismatch (gate:123/{}) errors identically to `abandon_reason:123` — the named exemplar's leniency matched precisely, not weakened. Decision-inert confirmed: PanelGateDecision rules 0-10 and ApproveThreshold() never read p.Gate; the only non-test reference is PanelGateAdvisoryDefault (config.go:820), an explicitly advisory consumer. Leaf stays config-free (`go list -deps` shows no internal/config). TestPanel_GateFieldDecisionInert PASSES (absent/known/unexpected + legacy round-trip). ADR-0037 §1 homing correct: amendment appended at §1's tail before §2, alongside the 099/102/106 precedents; §3's 109 threshold note untouched; text sharply and correctly distinguishes itself from 109's (\"not an extension of any rule\" vs 109's \"genuine extension\"). §§3/6/8 unchanged in the diff. Legacy gate-less panel.json parses field-for-field identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    "R9 pin (panel.go:91): `Gate string json:\"gate,omitempty\"` — name/type/omitempty all as spec-fixed; comment pins all four as a stable contract.",
+    "Parse-lenience matches `abandon_reason` exactly: no validation in load(); unexpected string value keeps Err==nil (probe + TestPanel_GateFieldDecisionInert). Type mismatch (gate:123/object) errors identically to abandon_reason:123 — same string-field strictness as its named exemplar, so the 'like abandon_reason' pin is satisfied, not a new weakness. (Malformed-type propagation through the full gate path is F1/G1's lens; the parity here confirms it is pre-existing schema behavior, not introduced by this bead.)",
+    "omitempty round-trip: empty Gate drops the JSON key entirely, so an un-stamped panel writes byte-identical to a legacy panel.json (matches R6 'byte-identical code paths').",
+    "Decision-inert: `.Gate` is read only in panel_test.go; PanelGateDecision (gate.go:131, rules 0-10) and ApproveThreshold() (panel.go:113) never reference it. Sole other mention is the doc comment for advisory helper PanelGateAdvisoryDefault (config.go:820) — the intended advisory consumer, not a decision function.",
+    "ADR-0037 §1 amendment correctly homed at the tail of §1 (inserted after the 106 amendment, before '### 2. Round derivation'), joining the 099/102/106 precedents; §3's 109/ADR-0040 threshold amendment untouched (lines 144+ unchanged); diff touches only §1's region + the two doc files. §§3/6/8 unchanged.",
+    "Amendment text is precise: correctly frames the field as decision-inert metadata and explicitly contrasts with 109's amendment ('this is not an extension of any rule' vs 109's 'a genuine extension'), so the two amendments do not muddy the threshold single-home.",
+    "internal/panel stays a config-free leaf: `go list -deps ./internal/panel | grep internal/config` returns non-zero (no import).",
+    "Pre-existing failures (z4ps instruct, harness LLM test) confirmed decoupled from internal/panel — no dependency edge; not attributable to this diff."
+  ]
+}

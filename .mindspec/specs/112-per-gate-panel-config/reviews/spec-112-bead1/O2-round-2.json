@@ -1,0 +1,20 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-ran the full original Bead-1 Verification checklist fresh (-count=1) at the fix commit ad56c295 plus the fix's new/extended tests. Items 1-9 and 11 pass. Item 10 (doc-sync `git show --name-only HEAD`) exits 1, but only because the fix round added a second commit: HEAD's delta is `internal/config` only, correctly escaping+tests, so it doesn't re-list the docs. The doc-sync it verifies IS delivered on the branch — both core/ and workflow/ interfaces.md are in the full branch delta vs the plan-approve base c338b2ba, byte-untouched by the fix, and the item-9 anchors are intact — so the acceptance criterion holds; only the literal HEAD-scoped form of the check is confounded by the extra commit (the two commits square up on merge). The two fix tests pass: TestLoad_UnknownGateKeyEscapesControlBytes (new) and the cursorReset subtest inside TestPanelGateSlots_DeterministicExpansion (extended). A pristine detached checkout of ad56c295 to /tmp confirms items 7+8 green with a clean tree, isolating the commit. Delta is +103/-2, internal/config only, exactly the round-1 consolidation ask; no regression in my lens.",
+  "concrete_changes_required": [],
+  "findings": [
+    "commit under review: ad56c295 (fix on 68fe576e); delta = M internal/config/config.go, M internal/config/config_test.go only (+103/-2), escaping + tests",
+    "items 1-6 (six named-test PASS-line greps, fresh -count=1): all EXIT=0",
+    "item 7 go test ./internal/config: ok (0.176s) AND ok in a clean detached checkout of ad56c295 to /tmp (0.429s)",
+    "item 8 go test ./cmd/mindspec: ok (16.239s) AND ok in the clean checkout",
+    "item 9 core interfaces.md 'fable-window 2026-07, codex-enabled' + 'claude-fable-5' anchors: EXIT=0 (docs on disk intact)",
+    "item 10 git-show HEAD doc-sync: EXIT=1 — EXPECTED artifact of the 2nd (fix) commit; docs live in parent 68fe576e. Branch-level check `git diff --name-only c338b2ba..ad56c295` lists BOTH .mindspec/domains/core/interfaces.md and workflow/interfaces.md (EXIT=0); fix commit touched no .mindspec/ file. Doc-sync requirement satisfied; flag for tally that item 10 must be read at branch level, not HEAD.",
+    "item 11 go build ./...: EXIT=0",
+    "new test TestLoad_UnknownGateKeyEscapesControlBytes: --- PASS (fresh)",
+    "extended TestPanelGateSlots_DeterministicExpansion (incl. cursorReset fixture): --- PASS (fresh)",
+    "HEAD stayed ad56c295 throughout; my own builds/tests left the TRACKED tree clean and used /tmp for the pinned checkout (worktree pruned)",
+    "ENVIRONMENT NOTE (not a bead issue): the shared worktree is dirty with untracked scratch files from concurrent empirical-prober reviewers (seen: zzz_s1_scratch_probe_test.go, zzz_s2_scratch_probe_test.go, zzz_s2_scratch_probe2_test.go) — a READ-ONLY-rule violation by those reviewers (scratch must go under /tmp). Confirmed non-contaminating: the clean /tmp checkout of ad56c295 passes without them. These must be removed before the merge porcelain-clean gate."
+  ]
+}

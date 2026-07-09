@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-verified at 2809c8a6. F3-1 ADDRESSED: TestConfigShow_ReviewerCountNoteGateAware drives the full `config show` path over registered on-disk panels with gates configured; its first case (bead panel matching the configured bead gate's default while differing from the global default, asserting NO note) fails against the unwired 109 reviewerCountNotesFor — which hoists cfg.PanelExpectedReviewers() at config.go:226 — so a skipped step-2 wiring can no longer pass Verification. Positive-mismatch and gate-less-non-bead skip cases match my round-1 request; the AC bullet and Provenance row now cite the cmd-side test. F3-2 ADDRESSED: jq '.slots | length' and jq -r .approve_threshold replace both whitespace-sensitive greps; adhoc-equals-bead retained. Cursor-ordering nit ADDRESSED verbatim in step 6 plus the Verification parenthetical. Probed the delta for new gaps: Bead 1's go-test-cmd gate falsifies a skipped deref, the fable-window note anchor exists verbatim in the spec Goal YAML (no false-fail), and the nil-guard case is panic-falsifying. One non-blocking fixture nit recorded.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 3 step 6 adds TestConfigShow_ReviewerCountNoteGateAware (cmd/mindspec/config_test.go) with a dedicated PASS-line Verification grep. Falsification verified against the actual 109 code at the SHA: reviewerCountNotesFor (cmd/mindspec/config.go:224-237) hoists configDefault := cfg.PanelExpectedReviewers() and compares every scanned registration against it, so the new test's case (a) — a bead panel whose recorded count matches the configured bead gate's default but differs from the global default, asserting NO note — FAILS on unwired code, exactly closing the round-1 gap where TestConfigShow_ReviewerCountNoteWhenPanelDiffers (gates-absent, config_test.go:68) passed with or without step 2. Cases (b) genuine-mismatch-emits-note and (c) gate-less non-bead emits nothing cover my requested positive and skip-carve-out shapes. The Bead 3 AC bullet and the AC7 Provenance row now name the cmd-side test alongside TestPanelAdvisory_GateAwareCompare. Non-blocking fixture nit (below): make case (b)'s panel record a NON-bead gate (e.g. spec_approve, my round-1 shape) so the recorded-gate ARGUMENT to PanelGateAdvisoryDefault is pinned at the cmd call site too — with all three listed fixtures on the bead/IsBead path or gate-less, a degenerate caller passing (\"\", IsBead()) instead of (reg.Panel.Gate, IsBead()) would survive this one test; step 2's explicit argument spec and Bead 1's TestPanelGateAdvisoryDefault_SelectionRule known-gate row fence the rule itself, so this is a fixture-construction note, not a live gap of the round-1 kind."
+    },
+    {
+      "id": "F3-2",
+      "disposition": "ADDRESSED",
+      "detail": "The protocol-YAML proof now uses [ \"$(... --gate final_review --json | jq '.slots | length')\" = \"12\" ] and [ \"$(... | jq -r '.approve_threshold')\" = \"11\" ] — both structural and whitespace-insensitive; the grep -c '\"slot\"' line-count and the spaced-substring '\"approve_threshold\": \"11\"' check are both gone, and the delta's own comment records WHY (compact encoding/json would false-fail both grep forms). Mechanics check out: jq emits unquoted 12/raw 11, command substitution strips the trailing newline, and jq introduces no new dependency (the adhoc-equals-bead jq -c .slots comparison, unchanged, already required it in round 1)."
+    },
+    {
+      "id": "F3-nit-cursor-ordering",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 1 step 6 now makes the fixture ordering normative in my round-1 wording — at least one explicitly-lensed entry must PRECEDE lens-less entries at a position where slot-index mod 6 diverges from the cursor value, so a wrong lens[slot-index % 6] implementation fails — and the TestPanelGateSlots_DeterministicExpansion Verification line carries the same parenthetical so the implementer cannot miss it."
+    },
+    {
+      "id": "F3-new-probe-delta",
+      "disposition": "NO_NEW_ISSUE",
+      "detail": "Adversarial probe of the fix delta itself: (1) Bead 1's new 'go test ./cmd/mindspec' Verification is a real falsifier for the step-1 deref — %d on *int passes build+vet, and only 109's TestConfigShow_EmitsPanelModelsLoop catches the pointer-address render; at Bead-1 time cmd/mindspec contains only 109 tests, so no forward dependency on Bead 3's tests. (2) The strengthened R2 anchor grep -qF 'fable-window 2026-07, codex-enabled' matches spec.md's Goal YAML line 16 verbatim and is absent from the known-model seed list — strictly stronger than round 1's 'claude-fable-5' anchor, no false-fail. (3) The nil-guard's new test case (panel-less complete, gates configured AND absent) is panic-falsifying: dropping the guard makes panelReg.Panel.Gate deref panic. (4) CountValue() export rationale (Go forbids a Count() method beside the Count field) is correct. (5) Bead 1's new workflow/interfaces.md touch overlaps Bead 3's only across the real B1-to-B3 dependency edge (sequential), and Bead 2 stays file-disjoint (architecture.md only) — no parallel-bead collision. No new falsification gap found."
+    }
+  ]
+}

@@ -1,295 +1,283 @@
 # MindSpec
 
-**A planning and governance layer for AI coding agents.**
+[![Release](https://img.shields.io/github/v/release/mrmaxsteel/mindspec)](https://github.com/mrmaxsteel/mindspec/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-AI coding agents are powerful executors but poor planners. Without structure, they drift from intent, steamroll architecture decisions, and let scope creep turn a small feature into a three-subsystem refactor.
+**An opinionated loop-engineering framework for AI coding agents.**
 
-The fix isn't better prompting — it's better planning.
-
-MindSpec is the **planning and governance layer** that sits upstream of your agent orchestrator. It breaks work into spec → plan → bitesize beads, validates each bead against your architecture (ADRs, domain boundaries), and enforces quality gates before any code gets written. The result is a structured plan with clear acceptance criteria that any execution engine — Claude Code working solo, a multi-agent orchestrator like [Gastown](https://github.com/steveyegge/gastown), or OpenAI Codex — can implement reliably.
-
-Research on scaling agent systems ([arXiv:2512.08296](https://arxiv.org/abs/2512.08296)) confirms what we've seen in practice: **task decomposition quality is the #1 predictor of agent execution success.** MindSpec exists to get the decomposition right.
-
-<p align="center">
-  <img src="agentmind.png" alt="AgentMind — AI Agent Observability UI" width="800" />
-  <br />
-  <em>AgentMind — real-time observability for AI coding agents</em>
-</p>
-
-## Features
-
-**Lifecycle & Governance**
-- **Gated development lifecycle** — Explore, Spec, Plan, Implement, Review — every phase transition requires explicit human approval
-- **Explore Mode** — evaluate whether an idea is worth pursuing before committing to a full spec
-- **Spec-anchored implementation** — all code traces back to a versioned specification with acceptance criteria
-- **Human gates for architecture divergence** — if the agent needs to deviate from an ADR, it stops and escalates
-- **Scope discipline** — discovered work becomes new beads (work items), never scope creep in the current task
-
-**Context Engineering**
-- **Deterministic context packs** — token-budgeted, DDD-informed bundles of specs, domain docs, and ADRs assembled automatically
-- **Domain-driven bounded contexts** — specs declare impacted domains; context packs expand through the Context Map to include neighboring contexts
-- **Dynamic agent guidance** — `mindspec instruct` emits mode-appropriate operating instructions at runtime based on current state, replacing static instruction files
-- **Architecture Decision Records** — governed ADR lifecycle with auto-numbered IDs, superseding workflow, and mandatory citation in plans
-
-**Workflow Automation**
-- **One-command work selection** — `mindspec next` discovers the next ready work item, creates an isolated git worktree, and emits guidance
-- **Isolated worktrees** — each work item executes in its own git worktree, scoped to exactly what the plan defined
-- **Automated bead creation** — approving a spec or plan automatically creates and links the corresponding work items
-- **Doc-sync enforcement** — work items can't close without documentation updates; docs stay current because the system won't let you skip them
-- **Validation gates** — `mindspec validate` catches structural issues in specs, plans, and docs before they reach approval
-- **Proof runner** — executes validation proof commands from specs and records timestamped pass/fail evidence
-
-**Observability (OTEL-config only — spec 084)**
-- **`mindspec otel setup` writes one config and that's it.** Point
-  `mindspec otel setup --endpoint <url>` at any OTLP/HTTP receiver
-  (AgentMind, Honeycomb, Tempo, Jaeger, opentelemetry-collector-contrib,
-  …) and your workload's telemetry lands there. mindspec itself
-  never spawns, restarts, or probes a collector — that's not its
-  job.
-- **`mindspec otel status`** is a read-only diagnostic: shows the
-  configured endpoint, protocol, header keys (values redacted), and
-  which workload-config files (Claude Code settings, Codex config)
-  carry the stanza.
-- **No OTLP receiver in mindspec.** As of spec 084
-  ([ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md)),
-  mindspec does not run an OTLP receiver, does not parse OTLP, does
-  not read NDJSON, and does not depend on any specific
-  collector binary. If you want the AgentMind viz / replay / bench
-  UI, install the standalone `agentmind` binary from
-  [github.com/mrmaxsteel/agentmind](https://github.com/mrmaxsteel/agentmind/releases)
-  and point your endpoint at it.
-
-### Migration from `mindspec agentmind serve|replay|viz` (spec 084)
-
-Spec 084 removed mindspec's embedded observability surface. The
-following commands no longer exist; each prints a one-shot
-deprecation message and exits with code 2:
-
-| Removed command | Replacement |
-|---|---|
-| `mindspec agentmind serve` | `agentmind serve` (standalone binary; install from https://github.com/mrmaxsteel/agentmind/releases) |
-| `mindspec agentmind replay` | `agentmind replay` (standalone binary) |
-| `mindspec viz` | `agentmind serve` (standalone binary; the top-level `viz` alias is gone) |
-| `mindspec agentmind setup` | `mindspec otel setup` (renamed; no backwards-compat alias) |
-| `mindspec bench …` | No mindspec-side replacement. See [BENCH-MOVED.md](BENCH-MOVED.md) for the git-history rescue procedure; bench is destined for its own repo. |
-
-The deprecation messages live for exactly one mindspec release after
-spec 084 and are then deleted. See
-[ADR-0027](.mindspec/adr/ADR-0027-mindspec-otel-only.md) and
-[ADR-0028](.mindspec/adr/ADR-0028-bench-rescue-procedure.md) for
-the architectural rationale.
-
-**Project Setup & Integration**
-- **One-command bootstrap** — `mindspec init` scaffolds the full project structure; additive and safe for existing repos
-- **Brownfield onboarding** — analyzes existing docs and migrates them into canonical MindSpec structure with full provenance
-- **Claude Code integration** — `mindspec setup claude` configures hooks, slash commands, plan gates, and CLAUDE.md automatically
-- **Codex support** — first-class workflow for OpenAI Codex CLI with the same gated lifecycle
-- **Copilot support** — first-class workflow for GitHub Copilot users in both CLI and VS Code Chat
-- **OTLP-compatible** — any agent that speaks OpenTelemetry can feed AgentMind; not locked to a single agent
-
-## The Workflow
-
-Every phase transition requires explicit human approval:
-
-```
-             ┌─ dismiss ─→ Idle
-Idle ──→ [Explore Mode]
-             └─ promote ─→ Spec Mode ──gate──→ Plan Mode ──gate──→ Implementation ──→ Review ──gate──→ Idle
-```
-
-**Explore Mode** (optional) — Evaluate whether an idea is worth pursuing. The agent clarifies the problem, checks prior art, assesses feasibility, and recommends whether to proceed or dismiss. No specs or code — just structured conversation.
-
-**Spec Mode** — Define what "done" looks like. Problem statement, acceptance criteria, impacted domains, ADR touchpoints. No code allowed.
-
-**Plan Mode** — Decompose the spec into bounded work chunks. Review applicable ADRs. Check architectural fitness. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a superseding ADR or reject the divergence.
-
-**Implementation Mode** — Execute in an isolated git worktree. One bead per worktree, scoped to exactly what the plan defined. Doc-sync is mandatory. Discovered work becomes new beads, not scope creep.
-
-**Review Mode** — Validate against the original spec's acceptance criteria. Human approves to return to idle.
-
-The work graph is tracked by [Beads](https://github.com/steveyegge/beads), a git-native issue tracker that survives across sessions without external services.
-
-Documentation stays current because the system won't let you skip it — beads can't close without doc-sync, architecture decisions are tracked as ADRs that plans must cite, and every spec produces versioned artifacts that persist alongside the code.
-
-## Architecture
-
-MindSpec separates **planning** from **execution**, with [Beads](https://github.com/steveyegge/beads) as the substrate that connects them.
-
-### Planning & Governance Layer
-
-The planning layer owns everything *before* code gets written:
-
-- **Specification** — defines what "done" looks like with acceptance criteria and impacted domains
-- **Decomposition** — breaks specs into bitesize beads, each independently completable with clear scope
-- **Architecture validation** — plans must cite ADRs; divergence is blocked until a human approves a superseding ADR
-- **Quality gates** — every phase transition (spec → plan → implement → review) requires human approval
-- **Context engineering** — deterministic, token-budgeted context packs so the agent gets exactly the right information
-
-The planning layer doesn't write code. It produces a validated plan — a directed graph of beads with dependencies, acceptance criteria, and scoped documentation — then hands it off.
-
-### Beads: The Substrate
-
-[Beads](https://github.com/steveyegge/beads) is the interface between the two layers. Each bead is a self-contained work packet that encapsulates everything a fresh agent needs:
-
-- **Requirements** — what to build, with acceptance criteria and verification steps
-- **Context** — which domains are impacted, which ADRs apply, what dependencies exist
-- **Status** — lifecycle phase, blocking relationships, proof of completion
-
-This is what makes pluggable orchestration possible. The planning layer writes beads; the execution engine reads them. A fresh agent picking up a bead doesn't need session history or tribal knowledge — the bead carries the plan and the context. Any orchestrator that can read a bead can dispatch work.
-
-### Execution Engine
-
-The execution engine implements the plan by reading beads and dispatching agents:
-
-- **Bead dispatch** — each bead runs in an isolated git worktree, scoped to exactly what the plan defined
-- **Merge topology** — bead branches merge into the spec branch; the spec branch merges to main via PR
-- **Finalization** — once all beads close, the spec lifecycle completes with a single PR
-
-MindSpec ships with a built-in execution engine (`MindspecExecutor`) that drives Claude Code, Codex, or Copilot through implementation with human control between steps. But the `Executor` interface is pluggable — MindSpec's planning and governance layer can readily plug into multi-agent orchestrators like [Gastown](https://github.com/steveyegge/gastown), dispatching beads to parallel agents with their own quality gates and auto-finalization.
-
-**MindSpec doesn't compete with agent orchestrators — it makes them better.** An orchestrator running MindSpec-planned beads gets architecture-validated, well-decomposed work packets instead of a vague prompt. The orchestrator focuses on execution; MindSpec ensures there's something worth executing.
+Spec-driven development, research-backed planning, architecture guardrails, and adversarial review panels — so agents can build resilient software semi-autonomously, with the engineering discipline enforced by code instead of prose.
 
 ---
 
+> "The new default is that you are not writing the code directly 99% of the time, you are orchestrating agents who do and acting as oversight." — Andrej Karpathy, on why "vibe coding" grew up into *agentic engineering*
+
+MindSpec is a framework for that oversight. AI coding agents are phenomenal executors and unreliable engineers: left to themselves they drift from intent, steamroll architecture decisions, skip documentation, and let a "small feature" become a three-subsystem refactor. The usual answer is to watch them more closely. MindSpec's answer is to engineer the loop instead.
+
+Prompt engineering optimizes one instruction; context engineering one window; harness engineering one run. **Loop engineering** — Addy Osmani's name for "replacing yourself as the person who prompts the agent" by designing "the system that does it instead" — builds the system that decides what to work on, whether the result is acceptable, and when to stop. MindSpec is that system: a CLI plus a set of agent skills that wrap your coding agent in a gated lifecycle — **spec → plan → implement → review** — where **every gate is a validation in a Go binary that exits non-zero**, not an instruction the model might ignore.
+
+An unattended loop cannot be argued with, so its guardrails must not be arguable either. That is the core opinion, and everything else follows from it — and it's the conclusion production-scale loops have converged on independently: Stripe ships [over 1,300 machine-written pull requests a week](https://www.infoq.com/news/2026/03/stripe-autonomous-coding-agents/) — every one human-reviewed, none human-written — on the rule that anything deterministic never goes to a probabilistic model. Reliability comes from the quality of the constraints, not the size of the model.
+
+```
+ idea ─▶ SPEC ══gate══▶ PLAN ══gate══▶ IMPLEMENT ═══════▶ FINAL REVIEW ══gate══▶ main
+          │              │              │
+      adversarially   decomposition    the bead loop, per work item:
+      grilled until   checked against    • fresh agent, isolated git worktree
+      falsifiable     published          • exactly one commit, tests must pass
+                      research           • 6-reviewer panel, two model families
+                                         • merge gate enforced in the binary
+```
+
+**[Quickstart](#quickstart) · [The autonomy ladder](#the-autonomy-ladder) · [Documentation](#documentation)**
+
+## What you get
+
+- **Specs that survive contact with an agent** — every spec is interrogated by an adversarial grill agent until each requirement is concrete, falsifiable, and grounded in the actual repo. Vague verbs, contradictions, and untestable claims don't make it past the first gate.
+- **Research-backed planning** — decomposition quality is among the strongest predictors of agent success. Plans are validated against published thresholds for bead count, scope overlap, and dependency-chain depth (see [Planning](#planning-is-research-backed)).
+- **A work graph, not a chat history** — work items live in [Beads](https://github.com/gastownhall/beads), a git-native issue tracker. Each bead is a self-contained work packet a fresh agent can pick up with zero session history.
+- **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A six-reviewer panel with six distinct lenses across two model families is the verifier; the tally is code, not conversation.
+- **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
+- **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
+- **An autonomy ladder, not an autonomy switch** — run interactively, run a supervised autopilot, or grant a governed unattended loop with named halt conditions, budget ceilings, and a handoff log. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
+- **Every escape hatch audited** — overrides like `--override-adr` and `--allow-doc-skew` exist, but each use is journaled to a redacted, local friction log. Where overrides concentrate is where the system improves next.
+
+## The loop
+
+Every phase transition is a gate. Who holds each gate — you or a review panel — is configuration; what the gate checks is not.
+
+**Spec** — define what "done" looks like: problem statement, ≥3 falsifiable acceptance criteria each paired with a runnable proof, impacted domains, ADR touchpoints. The `ms-spec-grill` skill then interrogates the draft one question at a time, hunting synonym-dodges ("support", "handle", "improve"), non-falsifiable claims, cross-requirement contradictions, and repo claims the tree doesn't back up. No code allowed.
+
+**Plan** — decompose the spec into beads: independently completable work items with per-bead acceptance criteria. The plan validator checks decomposition against published research thresholds and requires ADR citations covering every impacted domain. If the plan needs to deviate from a cited ADR, it stops and escalates — you approve a superseding ADR or reject the divergence.
+
+**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic, token-budgeted context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
+
+**Review** — after the last bead merges, a final panel reviews the cumulative spec branch against main: scope drift, inter-bead coherence, release readiness. Approval merges spec → main via PR, and the lifecycle returns to idle.
+
+State never lives in the context window. The lifecycle phase is derived from the beads graph and git — which means a crashed or restarted agent loses nothing, and a fresh agent can always reconstruct exactly where the work stands.
+
+## Beads: a work graph your agent can actually use
+
+MindSpec tracks work in [Beads](https://github.com/gastownhall/beads) — a git-native issue tracker that lives in your repo and needs no external service. In its creator's words:
+
+> "…a magical 4-dimensional graph-based git-backed fairy-dusted issue-tracker database, designed to let coding agents track all your work and never get lost again." — Steve Yegge, announcing Beads
+
+This is not an incidental choice; it's what makes the loop possible.
+
+Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
+
+Fresh context per work item isn't a suggestion, it's enforced: the session-freshness gate hard-errors if an agent tries to claim a bead from a stale, compacted, or already-claimed session. Context quality degrades as sessions age; MindSpec makes the fresh start mandatory rather than hopeful.
+
+## Review panels
+
+Every bead merge — and, on the higher autonomy rungs, every gate — is judged by a review panel:
+
+- **Six reviewers, two model families**, launched in parallel. Cross-family review catches what any single model family systematically misses.
+- **Six distinct lenses, not six clones**: author-of-record (does the diff match the plan?), codebase pin (do the files and tests actually exist and pass?), contract stability, empirical prober (runs the validators by hand), schema correctness, and next-bead integration.
+- **N−1 approval threshold** — one dissent is tolerated; two is a fix round.
+- **Artifact hard gates** — a finding that names a missing measurement artifact (a benchmark, a cost projection, a regression baseline) blocks regardless of the vote count. Agents can't vote evidence into existence.
+- **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | verify | tally` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel.
+- **A REJECT halts the track.** Auto-fixing a rejection is the definition of verification debt, so the loop never does it.
+
+Verdicts persist as JSON alongside the spec, so every merge carries its review history in the repo.
+
+## Planning is research-backed
+
+Task decomposition quality is one of the strongest predictors of agent execution success. MindSpec's plan gate encodes thresholds derived from *Towards a Science of Scaling Agent Systems* (Kim et al., 2025 — [arXiv:2512.08296](https://arxiv.org/abs/2512.08296), v3 2026: 260 configurations across six agentic benchmarks, five architectures, and three LLM families):
+
+| Signal | Threshold | Why |
+|:-------|:----------|:----|
+| Beads per plan | 3–5 (>6 needs justification) | Coordination overhead grows super-linearly with agent count |
+| Scope overlap between beads | ~0.41 optimal; >0.50 flagged | Moderate overlap gives shared context; high overlap means duplicated work |
+| Dependency chain depth | ≤3 | Serial chains degraded performance 39–70% in benchmarked tasks |
+| Tool-heavy operations | kept in one bead | Fragmenting tool context across agents costs ~6× efficiency |
+| Trivial beads | folded into neighbors | A rename doesn't justify an agent session |
+
+The full decision framework lives in [project-docs/research/scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md). Your agent doesn't need to remember any of this — the validator applies it to every plan.
+
+## The autonomy ladder
+
+> "I don't prompt Claude anymore. I have loops running… My job is to write loops." — Boris Cherny, creator of Claude Code
+
+Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip and hope. Each rung is earned: a loop qualifies to run more agents by first proving it can stop a single bad one.
+
+| Level | Trigger | Gate authority |
+|:------|:--------|:---------------|
+| **0 — Interactive** | you | you approve every gate |
+| **1 — Assisted loop** | you start `/ms-spec-autopilot` | you approve spec and plan; panels verify every bead |
+| **2 — Governed loop** | you grant a scoped run | panels hold every gate, under named halt conditions and a handoff log |
+| **3 — Scheduled loop** | cron / heartbeat | as level 2, plus budget ceilings per wake |
+| **4 — Fleet** | a queue of specs | as level 3, parallel across specs (beads stay serial within a spec, by design) |
+
+The governance profile lives in `.mindspec/config.yaml`, and it selects **who holds each gate — never what the evidence is**:
+
+```yaml
+panel:
+  reviewers: [{family: claude, count: 3}, {family: codex, count: 3}]
+  approve_threshold: "n-1"
+loop:
+  enabled: true
+  gate_authority:              # who may pass each gate unattended: panel | human
+    spec_approve:  panel
+    plan_approve:  panel
+    bead_merge:    panel
+    impl_approve:  panel
+    # there is no panel_skip key — skipping the verifier is never delegable,
+    # and the loader refuses any config that tries to add one
+  halt:
+    max_rounds_per_bead: 3
+    max_consecutive_impl_failures: 2
+    panel_deadlock_rounds: 2
+    on_reject: halt            # the only accepted value — a REJECT always halts
+  budget: {max_beads_per_wake: 4}
+  handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
+```
+
+Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated.
+
+An unattended loop accrues four costs, and all four are silent while it runs — verification debt, comprehension rot, cognitive surrender, and token blowout. Each gets a structural guard here, not advice:
+
+| Cost | The guard |
+|:-----|:----------|
+| **Verification debt** | every merge is panel-verified; rejections stop the line instead of getting quietly patched over |
+| **Comprehension rot** | the handoff log records every delegated decision with its vote — your review moves per-batch, it doesn't disappear |
+| **Cognitive surrender** | the non-delegable gates keep one door permanently human; the loop can execute, but it cannot decide |
+| **Token blowout** | budget ceilings are a precondition for unattended running, not a reaction to the first surprising bill |
+
+`mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
+
+The level-by-level walkthrough — prerequisites, halt conditions, recovery, and the handoff review workflow — is in the [autonomy guide](project-docs/user/guides/autonomy.md).
+
+## Architecture guardrails
+
+MindSpec borrows bounded contexts from domain-driven design and makes them operational:
+
+- **Domains** (`mindspec domain add|list|show`) are bounded contexts with their own docs and an `OWNERSHIP.yaml` manifest mapping them to code paths. A `context-map.md` records the relationships between them.
+- **Specs declare impacted domains**, and context packs expand through the context map so the agent sees neighboring contexts it will touch.
+- **ADRs** (`mindspec adr create|list|show`) are the architecture's memory: auto-numbered, domain-tagged, with a governed superseding workflow. Plans must cite ADRs covering every impacted domain; the divergence gate blocks any merge whose diff touches a domain with uncited decisions. Deviating means creating a superseding ADR — a human decision with an audit trail, not a silent drift.
+- **Where a rule lives is itself governed**: enforcement ratchets downward from agent skills → mode-selected guidance → declared config → in-binary gates. A rule that proves load-bearing (or gameable) in a prompt ratchets down into the binary — never casually back up.
+
 ## Quickstart
 
-### Installation
+### Install
 
 **Linux/macOS:**
 ```bash
-# Quick install
 curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh
-
-# Custom install directory
-curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | INSTALL_DIR=~/.local/bin sh
-
-# Force reinstall/upgrade
-curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh -s -- --force
 ```
 
 **Windows (PowerShell):**
 ```powershell
-# Quick install
 irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex
-
-# Custom install directory
-irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -InstallDir "$env:USERPROFILE\bin"
-
-# Force reinstall/upgrade
-irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -Force
 ```
 
-**Alternative methods:**
-- Download from [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases)
-- Build from source: `make build && cp ./bin/mindspec /usr/local/bin/`
+Also available from [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases) (cosign-signed from v0.8.0 — see [SECURITY.md](SECURITY.md#verifying-releases)) or from source: `make build`. Upgrade by re-running the installer with `--force`.
 
-Releases from `v0.8.0` onward are cosign-signed — see [SECURITY.md](SECURITY.md#verifying-releases) to verify downloads.
+You'll also need [Beads](https://github.com/gastownhall/beads) (`bd`) and git. `mindspec doctor` checks the full setup.
 
-### Upgrading
-
-Upgrade the binary by re-running the installer with `--force`:
+### New project
 
 ```bash
-# Linux/macOS
-curl -fsSL https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.sh | sh -s -- --force
-
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/mrmaxsteel/mindspec/main/install.ps1 | iex -Force
-```
-
-For **existing projects** moving to `v0.8.0`:
-
-1. Ensure `bd` (beads) `>= 1.0.4` is installed — `mindspec doctor` enforces the minimum.
-2. Re-run `mindspec setup <agent>` to refresh the embedded skills.
-3. Configure the `.beads/issues.jsonl` merge driver in each existing clone:
-   ```bash
-   git config merge.beads.driver "$(git rev-parse --show-toplevel)/scripts/bd-jsonl-merge-driver.sh %A %O %B"
-   ```
-4. Scaffold ownership manifests: run `mindspec doctor --fix`, then `mindspec ownership populate`.
-
-See the [release notes](https://github.com/mrmaxsteel/mindspec/releases) for version-specific upgrade steps and breaking changes.
-
-### Setup
-
-```bash
-# Bootstrap your project
 cd your-project
-mindspec init
-mindspec setup claude   # Or: codex, copilot — configures hooks + skills
+mindspec init            # scaffold .mindspec/ + AGENTS.md
+mindspec setup claude    # or: codex, copilot — hooks, skills, gates
 ```
 
-`mindspec init` scaffolds the `.mindspec/` directory, `AGENTS.md`, and the project structure. `mindspec setup claude` adds Claude Code-specific integration (SessionStart hook, plan gates, and skills). From here, your coding agent picks up the workflow automatically — the SessionStart hook runs `mindspec instruct` and the agent knows what to do.
+Then tell your agent what to build. The SessionStart hook runs `mindspec instruct`, which emits mode-appropriate guidance derived from the current state — the agent knows where it is in the lifecycle without you explaining anything:
 
-Tell the agent what you want to build. It will walk you through the lifecycle:
+1. **Explore** (optional) — "I have an idea about X"; the agent assesses feasibility, you decide go/no-go
+2. **Spec** — the agent drafts, the grill interrogates, you approve
+3. **Plan** — the agent decomposes, the validator checks the research thresholds, you approve
+4. **Implement** — the bead loop runs: fresh agent per bead, panel per merge
+5. **Review** — final panel over the whole branch, you approve, spec merges to main
 
-1. **Explore** — "I have an idea about X" (agent evaluates feasibility, you decide go/no-go)
-2. **Spec** — Agent drafts the spec, you approve with `/ms-spec-approve`
-3. **Plan** — Agent decomposes into work chunks, you approve with `/ms-plan-approve`
-4. **Implement** — Agent codes in isolated worktrees, scoped to the plan
-5. **Review** — Agent verifies acceptance criteria, you approve with `/ms-impl-approve`
+When you're ready to loosen your grip, `/ms-spec-autopilot` runs the whole bead loop for a spec (level 1), and the `loop:` profile takes you up the ladder from there.
 
-### Guides
+### Existing codebase
+
+```bash
+cd existing-project
+mindspec onboard --infer   # reverse-onboard: inferred context map, domains,
+                           # ownership manifests, and as-built ADRs (Status: Proposed)
+mindspec setup claude
+```
+
+Inferred ADRs are marked as such and count as provisional coverage — promoting them to Accepted is an explicit ceremony, so the agent's guesses about your architecture never silently become the record. A `mode: brownfield` profile softens doc-sync from error to warning while the friction journal keeps score of the actual skew.
+
+For repos you don't want to onboard at all, `/ms-fix-cycle` runs a governed fix lane — discover, reproduce in a sandbox, patch with one commit, panel-review, PR with CI watch — with no `.mindspec/` required and the merge click left to a human.
+
+## Works with your agent
+
+**Claude Code is the first-class integration** — `mindspec setup claude` installs the hooks, the `ms-*` skill family, and the gates. **OpenAI Codex CLI** and **GitHub Copilot** are supported the same way (`mindspec setup codex|copilot`), and Codex additionally serves as the second model family on review panels.
+
+Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:`), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
+
+MindSpec is CLI-first and works standalone: every gate, validator, and panel verb is a testable command, which is also what makes the unattended rungs of the ladder trustworthy.
+
+## Built with itself
+
+MindSpec is fully self-hosted: **every feature since day one has shipped through its own lifecycle** — 100+ specs, 40+ architecture decision records, and, since the panel gate landed, a review-verdict trail carried with every merge — all in this repo. The `.mindspec/` directory here isn't a demo; it's the actual development history.
+
+It is also continuously tested against real agents: a behavioral harness runs live LLM sessions through every lifecycle phase and scores them on forward progress, retries, and wasted turns. The harness's failure taxonomy (skipped gates, shortcut closes, commits to main) doubles as the live monitor set for unattended loops — failures observed in testing become halt conditions in production.
+
+## Design principles
+
+1. **Guardrails over guidance** — rules that matter live in the binary and exit non-zero; prompts are advice
+2. **Maker ≠ verifier** — the implementing agent never judges or merges its own work
+3. **Spec-anchored** — all code traces to a versioned spec with falsifiable acceptance criteria
+4. **Fresh context per work item** — enforced, because state belongs on disk, not in the window
+5. **Evidence over assertion** — beads close on proof; missing artifacts block regardless of votes
+6. **Docs-first** — doc-sync is a gate; documentation debt can't accumulate silently
+7. **Human gates for divergence** — architecture deviations require a superseding ADR; halting is the default
+8. **Scope discipline** — discovered work becomes new beads, never scope creep
+9. **Deterministic context** — token-budgeted, provenance-hashed context packs, not "go read the repo"
+10. **Portability by contract** — integrate at artifacts and CLI verbs, never at prompt formats
+
+## Documentation
 
 | Goal | Guide |
 |:-----|:------|
-| **Full workflow with Claude Code** | [Claude Code guide](project-docs/user/guides/claude-code.md) |
-| **Full workflow with Codex** | [Codex guide](project-docs/user/guides/codex.md) |
-| **Full workflow with Copilot** | [Copilot guide](project-docs/user/guides/copilot.md) |
-| **Point mindspec at any OTLP/HTTP collector** | `mindspec otel setup --endpoint <url>` (see ADR-0027) |
-| **Visualize & benchmark agent activity (downstream of mindspec)** | [AgentMind guide](project-docs/user/guides/agentmind.md) |
-| **Installing the AgentMind binary (downstream tool)** | [AgentMind install](project-docs/installation/agentmind.md) |
-| **Workflow state machine (allowed/disallowed transitions)** | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
-| **Complete reference** | [USAGE.md](.mindspec/core/USAGE.md) |
+| Full workflow with Claude Code | [Claude Code guide](project-docs/user/guides/claude-code.md) |
+| Full workflow with Codex | [Codex guide](project-docs/user/guides/codex.md) |
+| Full workflow with Copilot | [Copilot guide](project-docs/user/guides/copilot.md) |
+| Climbing the autonomy ladder (autopilot → governed → scheduled) | [Autonomy guide](project-docs/user/guides/autonomy.md) |
+| Onboarding an existing codebase | [Brownfield guide](project-docs/user/guides/brownfield.md) |
+| Configuring and running review panels | [Review panels guide](project-docs/user/guides/review-panels.md) |
+| Contributing to MindSpec | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| The decomposition research behind the plan gate | [scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md) |
+| Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
+| Complete command reference | [USAGE.md](.mindspec/core/USAGE.md) |
+| Observability (OTEL + AgentMind) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver |
+| Release history | [CHANGELOG.md](CHANGELOG.md) |
 
-## Project Structure
+## Project structure
 
 ```
 your-project/
 ├── .mindspec/
-│   ├── config.yaml             # MindSpec + Beads configuration
-│   └── docs/
-│       ├── core/               # USAGE.md, MODES.md, ARCHITECTURE.md, etc.
-│       ├── adr/                # Architecture Decision Records
-│       ├── domains/            # Bounded context documentation
-│       └── specs/              # Versioned specifications and plans
-├── .beads/                     # Beads work graph (committed)
-├── .claude/                    # Claude Code config (created by mindspec setup claude)
-│   ├── settings.json           # Hooks (SessionStart, PreToolUse gates)
-│   ├── commands/               # Custom slash commands
-│   └── skills/                 # Skills (/ms-spec-create, /ms-spec-approve, etc.)
-├── AGENTS.md                   # Cross-agent workflow conventions
-└── CLAUDE.md                   # Claude Code-specific config
+│   ├── config.yaml          # panels, models, runner, loop governance
+│   ├── specs/               # versioned specs + plans + panel verdicts
+│   ├── adr/                 # Architecture Decision Records
+│   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests
+│   ├── context-map.md       # relationships between domains
+│   ├── reviews/             # ad-hoc review panels
+│   └── core/                # reference docs (USAGE, MODES, state machine)
+├── .beads/                  # the work graph (committed, git-native)
+├── .claude/                 # agent integration (or .agents/, .github/)
+├── AGENTS.md                # cross-agent conventions
+└── CLAUDE.md                # Claude Code entry point
 ```
-
-## Tested Against Real Agents
-
-MindSpec's workflow is continuously validated by a behavioral test harness that runs real LLM agents through every lifecycle phase. An iterative test-observe-measure-improve cycle tracks forward ratio, retry count, and wasted turns — then feeds failures back into MindSpec's own guidance layer until the agent gets it right. The result is a framework where your agent reliably follows the workflow, stays architecturally sound, and spends its turns on productive work instead of recovery.
-
-## Design Principles
-
-1. **Docs-first** — every code change updates documentation, enforced by the system
-2. **Spec-anchored** — all implementation traces back to a versioned specification
-3. **Human gates for divergence** — architecture deviations require approval and a new ADR
-4. **Proof of done** — beads close only with verification evidence
-5. **Scope discipline** — discovered work becomes new beads, never scope creep
-6. **Dynamic over static** — runtime guidance beats static files that drift
-7. **CLI-first** — logic lives in testable, versionable Go; IDE integrations are thin shims
-8. **Deterministic context** — token-budgeted context packs, not "go read this file" prompting
-9. **Planning over prompting** — structured decomposition beats prompt engineering at scale
 
 ## Requirements
 
-- Go 1.22+
-- [Beads](https://github.com/steveyegge/beads) CLI (`bd`)
-- Git (for worktree support)
-- Claude Code or Codex (for agent integration; MindSpec is CLI-first and works standalone)
+- Go 1.23+ (building from source only)
+- [Beads](https://github.com/gastownhall/beads) CLI (`bd`)
+- Git (worktree support)
+- A coding agent — Claude Code, Codex CLI, or Copilot for the integrated workflow; the CLI works standalone
 
 ## Building
 
 ```bash
 make build      # Build to ./bin/mindspec
-make test       # Run all tests
-make install    # Install to $GOPATH/bin
+make test       # Run the short test suite
 ```
 
 ## License

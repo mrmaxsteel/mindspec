@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.83,
+  "rationale": "Falsifiability discipline is exceptional. Every R1-R8 'Falsified if' clause names an observable (load error, resolver output, exit code, import graph, file diff), none is aspirational prose. All 11 ACs (BRIEF says 9; 9 test-shaped + 2 structural) are runnable: exact-anchored -run '...$' one-liners with PASS greps, plus two shell invariants. I verified the substrate on origin/main: PanelExpectedReviewers/PanelApproveThresholdExpr (config.go:428/444), ReviewerCountNote(recorded, configDefault int) (panel.go:125), internal/complete exists, 'threshold > 0' at gate.go:257, leaf invariant holds today, and 'decision-inert' has 0 hits in ADR-0037 so that proof genuinely discriminates. I mechanically simulated R3's cursor rule: the 9-slot worked example matches exactly (Fable{author,empirical,pin}, Opus{adversarial,contract,integration}, GPT{author,empirical,pin}); >=6 lens-less covers all six; the count>=2 structural+sharp span holds exhaustively for every cursor offset and entry mix (consecutive cursor values alternate parity = class). One proof-mesh gap, non-blocking: R7's skip branch (gates configured, non-bead panel, no recorded gate => note SKIPPED) has neither a falsified-if clause nor an AC7 case — its violation, the exact spurious-note regression R7 targets, would pass all ACs. Prose is unambiguous and one test closes it at plan time.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "medium",
+      "hard_block": false,
+      "title": "R7 skip carve-out has no falsification clause and no AC coverage",
+      "detail": "R7 specifies: with gates: configured, a non-bead panel with no recorded gate gets the advisory SKIPPED. AC7 tests the other three branches (recorded-gate compare, bead fallback, gates-absent 109 identity) but not this one, and none of R7's 'Falsified if' clauses covers it (all address recorded-gate matches, gates-absent behavior, decision inertness, or leaf purity). An implementer who compares such a panel against the global default instead of skipping — reintroducing the spurious note on every correctly-sized 9/12-reviewer panel, the exact regression R7 exists to kill — would leave all 11 ACs green. Recommend the plan add a fourth case to TestPanelAdvisory_GateAwareCompare: gates-configured config + non-bead panel.json with no gate field => no note emitted. The behavior is unambiguous in R7 prose, so this is closable in bead tests without re-opening the spec."
+    },
+    {
+      "severity": "low",
+      "hard_block": false,
+      "title": "R1 note-inertness falsification has no paired AC",
+      "detail": "R1 is 'Falsified if the note value affects any validation or resolver output' — genuinely falsifiable via a differential test (two configs differing only in note => identical resolver outputs and Load results), but no AC demands it; AC8 only proves the echo path. Cheap to fold into TestLoad_PerGateProtocolRoundTrips or the resolver tests."
+    },
+    {
+      "severity": "low",
+      "hard_block": false,
+      "title": "R5 supersession precedence flip is untested",
+      "detail": "The rule 'when substitutes is non-empty it IS the policy and claude_sub_on_quota is inert' is observable in 112 only via the 'effective substitution policy' in config show --gate output, and no AC pins the flip: AC9 emits the effective policy for one config but never contrasts empty vs non-empty substitutes with claude_sub_on_quota: true. Without that contrast, a renderer that always reports the legacy bool would pass. One added case in TestConfigShowGate_ResolvedJSON covers it."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "Known-model negative control and amendment-grep strength",
+      "detail": "AC8 tests only the positive warning path (made-up id warns, exit 0); no assertion that the four seeded ids (claude-fable-5, claude-opus-4-8, claude-sonnet-5, gpt-5.5) warn NOTHING, which is what the falsified-if 'shipped list omits any seeded id' needs behaviorally. Also, the validation proof grep -c 'amendment' is a weak counter (lowercase 'amendment' already appears >=2 times in ADR-0037 on main) — harmless because the paired grep -q 'decision-inert' is a true discriminator (verified 0 hits on main today)."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "R3 cursor initial value pinned only by the worked example",
+      "detail": "That the cursor starts at 0 and assigns-then-advances is derivable only from the normative 9-slot example, not stated as prose. AC5's exact 9-slot case makes any deviation detectable, so this is cosmetic; one clause ('the cursor starts at 0; assign, then advance') would remove all doubt for the bead implementer. Verified mechanically: the example's slot/lens assignment, the all-six-coverage claim for >=6 lens-less slots, and the count>=2 structural+sharp span all hold — the last one exhaustively across all cursor offsets and lensed/lens-less entry mixes."
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Pinned review at a2007086. I copied that commit to /tmp/g1-panel-probe.2762GN, generated hostile panel.json fixtures, and exercised panel.Scan, ResolveGateFacts, and PanelGateDecision. Valid gate strings, absent gate, null gate, and ANSI/control-byte strings were decision-identical across Allow/Warn/Block and did not surface in decision/advisory messages. However, gate:123 and gate:{} make json.Unmarshal fail the whole Panel, causing Registration.Err and the complete-gate path to Block as an unreadable registration. That violates the brief's parse-leniency requirement: malformed gate types must not break Scan or gate reads, and the field must remain decision-inert.",
+  "concrete_changes_required": [
+    "Make the gate field parse-lenient for non-string JSON values (at least number and object, plus null) so panel.Scan does not set Registration.Err solely because gate has a malformed type, and the complete-gate decision remains byte-identical to the no-gate fixture.",
+    "Add regression coverage with panel.json fixtures for gate absent, string, number, object, null, and ANSI/control-byte string values through Scan/Tally/ResolveGateFacts/PanelGateDecision."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "file": "internal/panel/panel.go",
+      "line": 91,
+      "summary": "Malformed gate JSON types poison the entire panel registration",
+      "details": "The new Gate string field is unmarshaled by the default encoding/json decoder. In /tmp fixtures, gate:123 failed with `json: cannot unmarshal number into Go struct field Panel.gate of type string`; gate:{} failed similarly for object. Because load() records that as Registration.Err and Tally surfaces PanelErr, PanelGateDecision takes the unreadable-registration Block path instead of producing the same outcome as a panel without gate. This violates the stable parse-lenient, decision-inert contract for hostile/malformed gate values."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "reviewer_id": "R3 opus",
+  "round": 2,
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "lens": "refresh-mechanism / snapshot mechanics",
+  "rationale": "Round-2 delta introduces no regression in my lens; all snapshot-mechanics claims verified independently. (1) pre0uur create/grill snapshots UNTOUCHED: git diff 24af2fdb..34c787d3 empty on both; identical blob hashes (create b21cab5d, grill 701792c7). (2) New ms-spec-approve.pre0uur.md is BYTE-EXACT vs the pre-round-2 canonical approve body: extracted the approve map value from `git show 24af2fdb:internal/setup/claude.go` via `go run` (evaluating the raw-string + backtick concatenation exactly as the compiler would); output equals the snapshot -- identical sha256 9d842633c43c, 479 bytes, empty diff. (3) Refresh selectors are UNIQUE per generation: empirical dump of previouslyShippedSkills() shows create selector (grill && .mindspec/specs/ && !Session disposition) matches exactly 1 of 4, grill selector (.mindspec/domains/ && !Session disposition) 1 of 2, approve selector (managed-by && !grill-deferred) 1 of 2; the approve-selected snapshot equals the pre0uur bytes AND differs from canonical, so the refresh assertion is meaningful. (4) HC-6 holds: TestInstallSkills_LeavesUserModified passes -- genuinely user-modified file left untouched with notice, not refreshed; adding the pre0uur snapshot only expands the recognized-shipped set. All refresh/disposition/validate tests green; full setup+validate suites pass non-cached; build clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-2-1",
+      "title": "pre0uur create/grill snapshots untouched by round 2",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "git diff 24af2fdb..34c787d3 on ms-spec-create.pre0uur.md and ms-spec-grill.pre0uur.md is empty (exit 0). Blob hashes identical across both commits (create b21cab5d7561..., grill 701792c797ed...). Both files exist at both commits."
+    },
+    {
+      "id": "R3-2-2",
+      "title": "New ms-spec-approve.pre0uur.md byte-exact vs pre-round-2 canonical approve body",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "Extracted the lifecycleSkillFiles()['ms-spec-approve'] value expression from git show 24af2fdb:internal/setup/claude.go and evaluated it via `go run` (the value uses raw-string + \"`...`\" concatenation, so naive extraction is insufficient). Program output == snapshot at 34c787d3: sha256 9d842633c43cd5dc1886d56d6dece63c4d0ef8066ea1841870d60050d2e1a047, 479 bytes, diff empty. This is the correct pre-change canonical (round-2 added step 4 marker-resolution clause AFTER this point)."
+    },
+    {
+      "id": "R3-2-3",
+      "title": "Refresh selectors uniquely identify each snapshot generation",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "Ran a throwaway probe against the real previouslyShippedSkills() (removed after). ms-spec-create: 4 snapshots, selector matches exactly 1 (pre0uur) -- pre-093 .md excluded (no grill), pre106 excluded (docs/specs not .mindspec/specs), marker-less canonical excluded (has Session disposition). ms-spec-grill: 2 snapshots, matches exactly 1 (pre0uur) -- pre106 excluded (.mindspec/docs/domains not .mindspec/domains). ms-spec-approve: 2 snapshots, matches exactly 1 (pre0uur) -- marker-less canonical excluded (no managed-by line). Approve-selected snapshot equals the byte-exact pre0uur AND differs from canonical, so the refresh-to-canonical assertion is non-vacuous."
+    },
+    {
+      "id": "R3-2-4",
+      "title": "HC-6 (user-modified left untouched) still holds",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "TestInstallSkills_LeavesUserModified passes: a ms-spec-approve carrying '# My own version' (matching neither canonical nor any shipped snapshot, incl. the new pre0uur) is left byte-untouched, a notice is recorded, and it is NOT added to Refreshed. Adding the pre0uur approve snapshot only expands the recognized-shipped set to include a genuinely-prior revision; it does not weaken the user-modified protection."
+    },
+    {
+      "id": "R3-2-5",
+      "title": "Test/build health",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "In worktree at 34c787d3: TestInstallSkills_RefreshesPreHeadlessGuardSnapshot, ...GrillSnapshot, ...PreClauseApproveSnapshot, TestGrillDisposition_TextConsistency, TestValidateSpec_GrillDeferredMarkerBlocks, TestInstallSkills_LeavesUserModified, TestSetupRefresh_EndToEnd_* all PASS. Full ./internal/setup and ./internal/validate suites pass with -count=1 (non-cached). go build ./... clean."
+    }
+  ]
+}

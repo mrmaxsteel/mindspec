@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Merge is conflict-free onto current origin/main (aa482d9b, incl. #174/#175) and the 12-skill count/sync are intact. But the guard's own prescribed remediation collides with an existing hard gate: internal/validate/spec.go checkOpenQuestions() errors on ANY unresolved `- [ ]` line in Open Questions, and internal/approve/spec.go ApproveSpec() hard-fails on vr.HasFailures(). The guard tells the agent to append exactly such a line ('- [ ] grill deferred...'). No skill (ms-spec-approve, ms-spec-autopilot, spec-orchestrator) mentions or handles this, and no test exercises `mindspec approve spec` against a spec carrying this marker. Net effect: the fix trades an infinite Q&A stall for a guaranteed, undocumented `mindspec approve spec` validation failure — it does not deliver 'flows cleanly through the guard, no stall' for a fully headless spec-create→approve pass, which is exactly the autopilot-blocking scenario this bead exists to fix. Separately, bench/grill/run_eval.sh feeds the whole guarded SKILL.md as the grill prompt plus its own 'this is a non-interactive batch evaluation' instruction — a near-exact match for the guard's trigger language — creating a real, unverified risk of collapsing eval recall to 0 on any of its N=5 MIN-aggregated runs.",
+  "concrete_changes_required": [
+    "Reconcile the deferral marker with the Open-Questions validation gate: internal/validate/spec.go checkOpenQuestions() (line ~226-248) treats any '- [ ] ...' line as a blocking error, and internal/approve/spec.go ApproveSpec() (line 47-50) hard-fails `mindspec approve spec` on it. Either (a) update ms-spec-approve / ms-spec-autopilot / spec-orchestrator.md to explicitly recognize a 'grill deferred: headless session' Open Question as an expected halt-and-report condition (not a generic validation error to blindly retry-fix), or (b) stop routing the deferral marker through the checkbox-gated Open Questions section since that section is the one thing spec-approve hard-blocks on. Add a test that runs `mindspec approve spec` (or validate.ValidateSpec) against a spec.md whose Open Questions section contains exactly the guard's prescribed line, to pin the actual (currently untested) behavior.",
+    "Verify bench/grill/run_eval.sh against the new Headless guard section before merge: it does `GRILL_PROMPT=\"$(cat \"$SKILL\")\"` (reads plugins/mindspec/skills/ms-spec-grill/SKILL.md verbatim, now including 'Headless guard — check before asking anything') then appends 'Do not ask questions; this is a non-interactive batch evaluation.' — wording that plausibly satisfies the guard's own headless trigger ('a test harness'). Run the eval once for real (MS_GRILL_RUNS>=1, real credentials) to confirm no run degenerates to emitting only the deferral marker instead of tagged findings; if it does, add a counter-instruction in run_eval.sh's per-fixture prompt or exclude the Headless guard section from the eval's copy of the skill text.",
+    "Re-verify (or explicitly annotate as superseded) internal/harness/HISTORY.md's SpecToIdle row: its recorded fix behavior ('the grill still runs, applies a default grounding fix, and continues') described the PR #155 workaround against the PRE-0uur skill text. Post-0uur the skill now instructs the agent to skip the grill entirely and defer via the Open Questions marker on headless detection (harness scenarios are named as a literal trigger example) — a different code path than what HISTORY.md documents as PASS, and one that (per finding 1) risks failing the scenario's `assertCommandSucceeded(t, events, \"mindspec\", \"approve\", \"spec\")` assertion."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "approve-gate integration",
+      "detail": "internal/validate/spec.go:226-248 checkOpenQuestions() adds a SevError for every unresolved '- [ ]' line in the spec's Open Questions section (case-insensitive 'none' prefix is the only escape). internal/approve/spec.go:47-50 ApproveSpec() returns a hard error when vr.HasFailures() is true, so `mindspec approve spec` fails outright. The new Headless guard (plugins/mindspec/skills/ms-spec-grill/SKILL.md, .claude/skills/ms-spec-grill/SKILL.md, .agents mirror, and the ms-spec-create clause in internal/setup/claude.go) prescribes appending `- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.` to Open Questions on headless detection — precisely the pattern that trips this gate. None of ms-spec-approve/SKILL.md, ms-spec-autopilot/SKILL.md, or .claude/agents/spec-orchestrator.md reference or handle this marker; grepped and confirmed absent in all three."
+    },
+    {
+      "severity": "high",
+      "area": "bench/grill eval perturbation",
+      "detail": "bench/grill/run_eval.sh line 64/268 sets GRILL_PROMPT to the full contents of plugins/mindspec/skills/ms-spec-grill/SKILL.md (now including the Headless guard section, which explicitly names 'a test harness' as a headless trigger), then line 289 appends 'Do not ask questions; this is a non-interactive batch evaluation.' to every per-fixture prompt. This is a plausible collision: if the model applies the guard instead of grilling, that run emits only the deferral line (no [CATEGORY] tagged findings), scoring recall=0/precision=0 for that run. Because the gate takes MIN(recall) and MIN(precision) across MS_GRILL_RUNS (default 5) runs, a single triggered run fails the whole eval. run_eval.sh is unmodified in this diff — no counter-instruction or mitigation was added."
+    },
+    {
+      "severity": "medium",
+      "area": "harness interplay",
+      "detail": "internal/harness/HISTORY.md:941/957-963 documents PR #155's SpecToIdle fix as: scenario prompt declares non-interactive, 'the grill still runs, applies a default grounding fix, and continues' (shipped skill unchanged at that time). Post-0uur the shipped skill text itself now short-circuits headless sessions before any question is asked, which is a materially different code path than the one HISTORY.md validated as PASS. Not a hard contradiction (both avoid the literal turn-stall), but the documented PASS is stale evidence for the new code path, and the new path is the one exposed to finding 1's approve-gate risk. internal/harness/scenario_spec_lifecycle.go:21's ScenarioSpecToIdle prompt ('automated, non-interactive run... make reasonable default decisions and proceed') and assertion at line 33 (assertCommandSucceeded for `mindspec approve spec`) is the concrete regression surface."
+    },
+    {
+      "severity": "low",
+      "area": "autopilot flow scope",
+      "detail": "BRIEF frames item 2 as 'the autopilot's spec-create step' — but .claude/skills/ms-spec-autopilot/SKILL.md never invokes ms-spec-create; it explicitly starts from 'a mindspec-approved plan' and loops /ms-bead-cycle. The guard's relevance to headless spec-create is only via other entry points (a human/CLI running /ms-spec-create headlessly, the harness, or an upstream orchestrator like spec-orchestrator.md that creates a spec before handing off to autopilot) — none of which are named in the shipped skill text or docs. Documentation-scope gap, not a functional defect."
+    },
+    {
+      "severity": "none",
+      "area": "merge cleanliness",
+      "detail": "git fetch origin main -> aa482d9b (includes PR #174 fix/wu7t-protected-main-finalize and PR #175 beads-jsonl-sync, both landed after the d1b4bebf base). `git merge-tree $(git merge-base origin/main fix/0uur-headless-grill-guard) origin/main fix/0uur-headless-grill-guard` exits 0 with no CONFLICT markers across all 9 changed files — clean fast-forward-style 3-way merge."
+    },
+    {
+      "severity": "none",
+      "area": "12-skill inventory / doc staleness",
+      "detail": "internal/setup/skills_test.go TestSkillInventory_Twelve pins skillFiles() at exactly 12 (4 lifecycle + 8 plugin); this diff only edits existing ms-spec-create and ms-spec-grill bodies, adding no new skill file, so the count is unaffected and the test is untouched by this diff. No project doc (AGENTS.md, CLAUDE.md, project-docs/user/guides/*) quotes step 5's literal text outside the source-of-truth files this diff correctly updates in lockstep (plugins/mindspec/skills, .claude/skills, .agents/skills, internal/setup/claude.go all byte-identical post-change, verified by diff). project-docs/ROADMAP-2026-07-07.md:73 still lists 0uur as open/autopilot-blocking — expected pending merge, not a defect."
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-wu7t",
+  "spec": null,
+  "target": "fix/wu7t-protected-main-finalize",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "6cf718c9115ee2c12a411271e8953d0c1c2335bc"
+}

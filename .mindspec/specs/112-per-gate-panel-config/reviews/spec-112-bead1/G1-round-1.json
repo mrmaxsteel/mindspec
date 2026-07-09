@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "I built the reviewed SHA to /tmp and exercised hostile configs via config show. Negative counts, duplicate gate keys, malformed global/per-gate/inherited thresholds, and large counts refused or rendered without panic. Valid hostile model/lens/note/substitute values did not reach current config show output because Bead 1 still renders only the legacy subset. However, a hostile unknown panel.gates key is escaped in the main error text but interpolated raw in the recovery line, emitting a literal ESC byte and forged newline on stderr. That violates the same terminal-safety pattern as 109's escapeConfigValue hardening and should be fixed before landing.",
+  "concrete_changes_required": [
+    "Escape or quote unknown panel.gates keys everywhere they are embedded in Load error/recovery text, especially internal/config/config.go:568's recovery line.",
+    "Add a regression test with an unknown gate key containing ESC/BEL and an embedded newline, asserting stderr/error text contains no raw control byte and no forged physical recovery line."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "file": "internal/config/config.go",
+      "line": 568,
+      "summary": "Unknown panel.gates recovery line emits config-controlled key bytes raw.",
+      "observed": "Fixture key \"bad\\x1b[31m\\nforged_gate: yes\" made config show exit 1. The main error used %q safely, but the recovery line printed `panel.gates.bad` followed by a raw ESC byte and a physical newline `forged_gate: yes ...`; byte scan found esc=1 and forged_lines=1 in stderr.",
+      "expected": "All config-controlled strings in user-facing config errors/recovery text should be single-line escaped/quoted, matching the intent of cmd/mindspec escapeConfigValue hardening and preventing terminal control or line-forgery output."
+    },
+    {
+      "severity": "info",
+      "summary": "Other hostile probes behaved as expected.",
+      "observed": "Negative count was refused with a recovery line; duplicate gate keys were rejected by yaml.v3 as a duplicate mapping key; malformed global and per-gate threshold expressions were refused; inherited global and adhoc-from-bead integer thresholds exceeding the inheriting gate's sum were refused; a 1,000,000,000 count rendered without panic; MaxInt+1 overflow was refused, though with a negative-sum diagnostic."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R5 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Verified against pinned b27e793b (via `git show <sha>:path` plus an isolated detached worktree build+test, since the shared working tree churned mid-review): the --gate --json doc has exactly the 5 documented members via real encoding/json (no omitempty anywhere), in the right order; renderGates walks config.PanelGateKeys (enum order, not map range) and renderSubstitutes/renderKnownModelWarnings sort keys; gates:/substitutes: are never omitted in `config show` text (empty renders `{}`, confirmed live); the complete.go call site guards `panelReg != nil` before dereferencing `panelReg.Panel.Gate`; KnownModels() lookup is an exact-string map membership check, exit-inert; resetConfigShowGateFlags is a test-only pflag reset for the shared rootCmd singleton, shipped RunE reads flags per-call via cmd.Flags().GetString/GetBool with no package-var capture. Headline proof reproduced empirically (spec/plan=9, bead=8, final=12/threshold \"11\", adhoc==bead, unknown-gate and --json-without-gate refusals, hostile-string escaping/round-trip all hold; go build/test green; internal/panel leaf invariant holds). One real gap: `buildGateResolvedDoc` assigns `cfg.Panel.Substitution.Substitutes` (nil when unconfigured) straight into the JSON doc, so `config show --gate <g> --json` emits `\"substitutes\":null` instead of `{}` in the common no-substitutes case — confirmed live. That breaks the natural `jq '.substitution.substitutes|keys'` consumption R8 explicitly designs for (\"consumable...without linking Go\"), unlike the text path which explicitly renders `{}`. Not a crash/security/scope issue and all tests pass, but a concrete, cheap, verified type-consistency bug in the stated JSON contract.",
+  "concrete_changes_required": [
+    "In buildGateResolvedDoc (cmd/mindspec/config.go), normalize a nil cfg.Panel.Substitution.Substitutes to an empty non-nil map[string]string{} before assigning it into gateResolvedSubstitution.Substitutes, so `config show --gate <name> --json` emits `\"substitutes\":{}` rather than `\"substitutes\":null` when no substitutes are configured — matching the text path's explicit {}-on-empty convention and keeping the documented JSON contract jq/non-Go-consumable as R8 intends. Add/extend a test asserting the raw JSON substring `\"substitutes\":{}` for a config with no substitutes configured (the existing tests only check the typed-unmarshal shape, which doesn't distinguish null from {})."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "cmd/mindspec/config.go: buildGateResolvedDoc / gateResolvedSubstitution",
+      "description": "config show --gate <name> --json renders \"substitutes\":null (not {}) when Panel.Substitution.Substitutes is nil/unconfigured, because the field is assigned directly from the config map without normalization and Go's encoding/json marshals a nil map as null. Confirmed empirically: `config show --gate bead --json` against a config with no substitutes prints {\"substitutes\":null,...}, and `echo '{\"substitutes\":null}' | jq '.substitutes|keys'` errors (`null (null) has no keys`) while the {} form succeeds. This contradicts the sibling text path (renderSubstitutes explicitly special-cases len==0 to print `substitutes: {}`) and undercuts R8's stated design goal of a jq/non-Go-consumable resolved surface. No test catches it because the existing JSON tests unmarshal into a typed struct (nil and {} both decode to a usable nil/empty map in Go)."
+    },
+    {
+      "severity": "info",
+      "area": "review environment",
+      "description": "Mid-review, ad-hoc `Bash` calls using relative paths without an explicit `cd` picked up a different worktree's HEAD (bead/mindspec-fbel.3 @ 38bd74ea) for a couple of commands, per this harness's documented cwd-resets-between-Bash-calls behavior — not a concurrent mutation of the shared lma4.3 worktree (which was confirmed stable at b27e793b via absolute-path `git -C`/cd'd checks throughout). All substantive findings in this verdict were re-verified via `git show b27e793b:<path>` content and an isolated `git worktree add --detach` build+test, so they are not affected. Flagging only so other reviewers relying on relative-path Bash calls in this panel don't get silently misdirected."
+    }
+  ]
+}

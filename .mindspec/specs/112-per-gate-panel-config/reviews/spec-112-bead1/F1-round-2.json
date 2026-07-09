@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Empirical re-verification at ad56c295. Re-applied my round-1 cursor-reset-on-explicit expandSlots patch in scratch against the round-2 test file: it now FAILS TestPanelGateSlots_DeterministicExpansion (the cursorReset fixture kills it), and an entry-level-reset cousin dies too. All round-1 wrong variants (per-entry rotation, slot-index mod, cursor-consuming explicit, cursor-start-1) still fail; the correct implementation passes, so the fixture adds discrimination without over-constraining. Escaping delta is error-text-only: I probed both changed refusal paths (unknown gate key AND substitutes self-map) with hostile ESC/BEL/newline keys plus plain forms — all four still refuse, zero raw control bytes, exactly one newline, recovery line intact; notably my probe covers the substitutes path with hostile bytes, which the shipped G1.2 test does not. No expansion or resolver code touched by the diff. One residual info item: a 'dedup' wrong variant (cursor skips lenses claimed by explicit entries) still passes the suite — every fixture's explicit lens is adversarial (index 3), never reached by the cursor. Doc-pinned semantics and diminishing returns make this non-blocking. Full suite green at ad56c295 (config + cmd, 2x).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "severity": "info",
+      "area": "internal/config/config_test.go (TestPanelGateSlots_DeterministicExpansion)",
+      "summary": "Residual unnamed wrong variant survives: a cursor that SKIPS default lenses already claimed by explicit entries passes the whole suite (all fixtures use 'adversarial', index 3, as the explicit lens; cursor never reaches it). Distinguishing mix [{model:b, lens:author-of-record},{model:c}]: correct R2=author-of-record (duplicates are legal), dedup variant gives empirical-prober. One assertion would kill it; semantics are already doc-pinned and all plan-named classes plus the reset class are now covered, so this is take-it-or-leave-it, not a required change.",
+      "blocking": false
+    },
+    {
+      "id": "F1-R2-2",
+      "severity": "minor",
+      "area": "panel hygiene (not the implementation)",
+      "summary": "Two untracked reviewer scratch files were left in the bead worktree: internal/config/zzz_s2_scratch_probe_test.go and zzz_s2_scratch_probe2_test.go — a READ-ONLY-rule breach (scratch belongs under /tmp). They are benign (no TestMain/init; t.TempDir-scoped) and I verified the shipped suite passes clean-room without them, so no verdict impact; they should be removed before merge so `git status` is clean.",
+      "blocking": false
+    }
+  ]
+}

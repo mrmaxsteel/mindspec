@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-0uur",
+  "spec": null,
+  "target": "fix/0uur-headless-grill-guard",
+  "round": 2,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "34c787d3983a262ae27f114deb5ef2fd09791924"
+}

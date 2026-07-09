@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "The fix delta strengthens falsifiability everywhere it touches; no regression. Every new 'Falsified if' clause names an observable: cursor-start-at-0 converts internal state into two decidable predicates (first lens-less slot = author-of-record; the exact 9-slot expansion) and its 'a gate's' quantifier even pins per-gate reset; unknown-recorded-gate falsifies on note presence + resolver-error surfacing, both observable, and its IsBead-precedence parenthetical is internally consistent with R6; the escaping clauses pair a structural check (real JSON encoder) with a behavioral one (byte-exact round-trip under real decode), and R8's pinned rule matches the landed escapeConfigValue byte-for-byte (config.go:81, verified in-worktree); R9's four falsified-ifs are each decidable (member name/type, doc presence, resolver differential, bead-diff inspection) and it correctly does NOT claim the forward-binding additive-only norm as falsifiable-here. Every new/edited AC is a runnable exact-anchored -run '...$' + PASS grep, and Validation Proofs were updated to include TestConfigShow_HostileStringsEscaped. R2's monotone-relaxation premise is factually true: 109 refuses count<1 at config.go:397. All five of my round-1 findings are ADDRESSED. Three low/info proof-mesh residuals remain, all closable in bead tests without reopening the spec.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "hard_block": false,
+      "title": "R9 doc-sync falsification lacks a paired runnable proof",
+      "disposition": "NEW_ISSUE",
+      "detail": "R9's 'Falsified if the schema documentation is absent from the workflow domain doc-sync' has no grep-style entry in Validation Proofs against .mindspec/domains/workflow/interfaces.md (unlike the ADR-0037 amendment, which gets two greps). The In-Scope doc-sync bullet plus plan-gate review make it decidable, but a one-line grep for the schema member names would make it mechanical. Closable at plan time; not a spec-text blocker."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "AC7 unknown-gate case does not pin the discriminating fixture (bead panel + unknown gate)",
+      "disposition": "NEW_ISSUE",
+      "detail": "R7's strongest new claim — 'the explicit-but-unresolvable record outranks the IsBead() guess' — is only discriminated by a fixture where IsBead()=true AND gate is unknown; AC7's wording ('a panel recording an unknown gate value') permits a non-bead fixture, under which an impl that falls back to the bead-guess for bead panels would pass the AC while violating the falsification clause (which quantifies over all panels). Recommend the plan's TestPanelAdvisory_GateAwareCompare use (or add) the IsBead=true fixture. Prose + falsification are unambiguous, so this is a test-authoring note, not a spec gap."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "Per-gate cursor reset is pinned by the falsification quantifier; a two-gate AC fixture would seal it",
+      "disposition": "NEW_ISSUE",
+      "detail": "The cursor-start clause quantifies over 'a gate's flattened declaration order' (every gate), which forbids a cursor shared across gate resolutions, and AC5's 'two loads of identical config yield identical slot lists' catches package-global cursor state. A single-gate test fixture would satisfy AC5's letter while leaving the cross-gate case untested; a two-gate fixture (each first lens-less slot asserted author-of-record) closes it for free. Non-blocking."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "Round-1 F1 findings: all five ADDRESSED",
+      "disposition": "ADDRESSED",
+      "detail": "(1) R7 skip carve-out (my medium): falsification clause added + AC7 4th case — ADDRESSED. (2) Note-inertness paired AC: AC2 differential-load assertion — ADDRESSED. (3) R5 supersession flip: AC9 now asserts the flip both ways — ADDRESSED. (4) Known-model negative control: AC8 asserts none of the six seeded/legacy ids warns — ADDRESSED. (5) Cursor start pinned in prose: R3 predicate + AC5 exact 9-slot assertion, worked example declared normative — ADDRESSED. Also verified the convergent items from other lenses land coherently in my lens: R4's adhoc-chain check gets both AC3 sub-cases; the size-cap deferral is named in Out of Scope with rationale (a documented decision, correctly not given a falsification clause); gates:{} and count-less relaxation each carry clause+AC pairs."
+    }
+  ]
+}
