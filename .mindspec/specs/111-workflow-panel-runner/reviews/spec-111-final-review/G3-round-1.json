@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "The workflow adapter wiring is mostly coherent: the branch binary builds to /tmp, config show renders the default runner, ms-panel-run documents workflow/skills/external plus degradation, the workflow command tuple matches the CLI, bead-target panel create/verify/tally works end-to-end, install is Claude-only, and ms-panel.js is not a lifecycle/consolidation authority. However, the optional non-bead path the workflow exposes is unsound: panel verify/tally ignore panel.json.target when bead_id is null and instead rev-parse bead/. A scratch non-bead panel stamped at review-target continued to PASS advisory after review-target advanced, with the bogus message 'panel for  references branch bead/'. That breaks the create→verify/tally contract for spec/final-review panels and the workflow would faithfully return the wrong result.",
+  "concrete_changes_required": [
+    "Fix panel verify/tally fact resolution for non-bead panels so it checks panel.json.target against reviewed_head_sha, or explicitly rejects/marks unsupported non-bead panel verification instead of PASSing with a bead/ advisory.",
+    "Add an end-to-end regression test for panel create --spec <id> --target <non-bead-ref> without --bead: advancing the target after panel creation must not produce PASS."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "panel verify/tally integration",
+      "issue": "Non-bead panels created with --target but no --bead do not verify the recorded target ref. cmd/mindspec/panel.go passes an empty bead id into panel.ResolveGateFacts, whose staleness check always rev-parses \"bead/\" + beadID. Empirical scratch run: panel create p --spec 123-scratch --target review-target --round 1 stamped reviewed_head_sha=33d0f6a..., then review-target advanced to e5f8040..., but panel verify reported PASS advisory and panel tally reported decision PASS advisory with 'panel for  references branch bead/'. This breaks the workflow path for final-review/spec panels that omit bead_id.",
+      "hard_block": true
+    },
+    {
+      "severity": "medium",
+      "area": "workflow syntax validation",
+      "issue": "node --check .claude/workflows/ms-panel.js fails with 'await is only valid in async functions and the top level bodies of modules'. This may be acceptable if Claude Code wraps workflow scripts in an async function, but it contradicts the spec's recorded JS-toolchain validation proof and leaves runtime parseability unpinned.",
+      "hard_block": false
+    }
+  ]
+}
