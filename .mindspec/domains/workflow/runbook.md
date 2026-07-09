@@ -89,15 +89,19 @@ Check current mode with `/spec-status`. If unclear:
   `claude-code-workflow` composes the slot lenses (§ Slot lens defaults, the
   retained judgment step) and invokes the `/ms-panel` workflow (spec 111 Bead 2)
   **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[],
-  mix}`, letting the workflow's own registration + fan-out + verify/tally-return
-  mechanics stand in for the manual **Launch the panel**, **Codex failure
-  detection**, and **Working directory matters** sections (those sections are
-  labelled `claude-code-skills` path only and superseded, not deleted, for the
+  mix, claude_sub_on_quota}` (the latter resolved from config
+  `panel.substitution.claude_sub_on_quota`, spec 109, the same way `mix` is
+  resolved from `panel:` — the workflow cannot read config itself and
+  fail-closes an omitted flag to `false`), letting the workflow's own
+  registration + fan-out + verify/tally-return mechanics stand in for the
+  manual **Launch the panel**, **Codex failure detection**, and **Working
+  directory matters** sections (those sections are labelled
+  `claude-code-skills` path only and superseded, not deleted, for the
   workflow path); `claude-code-skills` retains the hand-driven launch path
   unchanged as the default runner; `external` is a documented out-of-scope stub
   (human/skills-path per ADR-0040 degraded modes). `/ms-panel-tally` gained a
   matching note: on the workflow path the per-slot table and decision arrive
-  pre-rendered in the workflow result, so its own job narrows to consolidation
-  and the merge terminal. Judgment sections in both skills — Slot lens
-  defaults, Consolidate, Artifact gates, After a halt — recovery, and Escape
-  hatch — are retained unchanged on both paths.
+  pre-rendered in the workflow result, so its own job narrows to the Artifact
+  gates Allow-screen, consolidation, and the merge terminal. Judgment sections
+  in both skills — Slot lens defaults, Consolidate, Artifact gates, After a
+  halt — recovery, and Escape hatch — are retained unchanged on both paths.
