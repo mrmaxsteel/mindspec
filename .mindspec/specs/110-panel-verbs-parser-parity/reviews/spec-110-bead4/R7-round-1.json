@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Attacked the security validators hardest — all three classes hold. (1) validatePanelSlug is the first RunE statement in create/verify/tally; it rejects empty/./..//\\/absolute/control-byte. Empirically ../ ../../etc /etc/x .. . foo\\bar and \\n/\\r/ESC/TAB/DEL slugs all rejected. create additionally rejectControlBytes on --bead/--target; --target also passes RejectOptionLike (SEC-5). --bead ../../etc and --spec are inert: they never become path components — only JSON-escaped panel.json fields / git refs (--spec flat path gated by idvalidate.SpecID's anchored pattern). Every filepath.Join in panel.go receives a validated slug or trusted on-disk value. The NUL 'pass' is shell argv truncation, not a bypass (r<0x20 covers NUL). (2) No decision drift: verify/tally route solely through panel.PanelGateDecision — the identical symbol internal/complete.panelGate uses; stale-SHA empirically BLOCKs tally with exit 1 + valid ADR-0035 recovery, verify reports BLOCK but exits 0 by design; tallyExitAction keys off d.Action alone, no second matrix. (3) No forged recovery line: hostile \\nrecovery:/ESC in concrete_changes_required is strconv.Quote-escaped (escapeConfigValue), rendered inert inside a quoted string; error messages use %q and are pre-rejected. redact enum entries are a real build-gate requirement (redact_enum_drift_test walks the cobra tree), not creep. go test ./cmd/mindspec/... green.",
+  "concrete_changes_required": [],
+  "findings": [
+    "SECURITY (path-traversal): PASS — validatePanelSlug rejects /,\\,.,..,absolute,empty before any filepath.Join in all three subcommands; empirically confirmed against ../, ../../etc, /etc/x, .., ., foo\\bar. --bead/--target never reach filepath.Join (JSON fields / git refs only), so their control-byte-only guard is correct, not a gap.",
+    "SECURITY (terminal-injection, spec-109 G2): PASS — rejectControlBytes rejects all C0 + 0x7f on slug/--bead/--target (verified \\n,\\r,ESC,TAB,DEL); tally's concrete_changes aggregation strconv.Quote-escapes author-supplied strings, defeating an empirical forged-recovery-line + ANSI injection attempt.",
+    "R7a single-home: CONFIRMED — verify->PanelGateDecision, tally->PanelGateDecision+tallyExitAction(d.Action); no re-implemented threshold/count matrix; counts in tally output are presentation-only.",
+    "Decision parity: CONFIRMED — stale-SHA yields tally BLOCK/exit 1 with valid recovery line, verify BLOCK report/exit 0 (read-only by design), matching internal/complete's gate.",
+    "redact enum change is a genuine drift-guard requirement (redact_enum_drift_test.go fails the build for any unregistered cobra command), not scope creep."
+  ]
+}

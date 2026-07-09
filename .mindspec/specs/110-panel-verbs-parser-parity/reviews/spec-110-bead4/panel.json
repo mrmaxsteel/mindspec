@@ -2,7 +2,7 @@
   "bead_id": "mindspec-fbel.4",
   "spec": "110-panel-verbs-parser-parity",
   "target": "bead/mindspec-fbel.4",
-  "round": 1,
+  "round": 2,
   "expected_reviewers": 8,
-  "reviewed_head_sha": "75ae9c6a86fcbc332f66e605437ac38bb73c3966"
+  "reviewed_head_sha": "989e26845746038ea6b748d4a125fa5f7c0b06be"
 }
