@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.91,
+  "rationale": "112 gives downstream consumers a stable read surface. The 110 plan calls the existing global cfg.PanelExpectedReviewers() int and cfg.PanelApproveThresholdExpr() string resolvers; both remain with those signatures, while the new gate-scoped resolvers are additive. The R9 JSON surface is typed/encoder-backed and emits the documented five top-level members: gate, slots, expected_reviewers, approve_threshold, substitution. Tests and a /tmp protocol smoke check confirm final_review resolves to 12 slots, raw threshold \"11\", substitution.in_force, and adhoc-to-bead fallback. workflow/interfaces.md documents additive-only evolution and the recorded panel.json gate field is string/omitempty/parse-lenient/decision-inert. No writer/runner behavior leaks into 112.",
+  "concrete_changes_required": [],
+  "findings": []
+}

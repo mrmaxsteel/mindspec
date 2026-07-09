@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "112-per-gate-panel-config",
+  "target": "spec/112-per-gate-panel-config",
+  "round": 1,
+  "expected_reviewers": 12,
+  "reviewed_head_sha": "d713a0b79c0073382fd0a181abc57d0193bd2521"
+}

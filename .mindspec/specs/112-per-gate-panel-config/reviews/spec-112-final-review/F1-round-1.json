@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Spec 112 delivers its Goal end-to-end, verified empirically at d713a0b7. All 12 AC commands run verbatim and pass with tests confirmed matched (-v shows 5+1+1+3 --- PASS lines; AC11 deps-grep exits 1, threshold-guard grep exits 0; AC12 build+4 packages green). The Goal's exact four-family YAML, written to a /tmp scratch repo, loads and resolves through the branch binary: config show renders all four gates in enum order with sums 9/9/6/12 and raw thresholds; --gate spec_approve expands to precisely R3's normative worked example (R1 author-of-record ... R9 codebase-pin, structural/sharp alternation per family); --gate final_review --json emits exactly the 5 R9 members with threshold \"11\" and in_force=substitutes; adhoc slots byte-equal bead; unknown --gate and bare --json exit 1 with 5-key recovery lines. A 109-style global-only config resolves every gate from global values (in_force flips to claude_sub_on_quota); made-up model id warns but exits 0; inherited bead-\"5\"-into-2-reviewer-adhoc refuses (exit 1) with the exact chain-aware message; unknown gates key refusal names all five keys and disambiguates gate_authority. ADR-0037 amendment with decision-inert present; R9 schema documented in workflow/interfaces.md; standing-protocol example in core/interfaces.md. No AC lacks implementation or test.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "info",
+      "title": "All 10 test-backed ACs pass non-vacuously",
+      "detail": "Ran each AC's go test command with -v and counted --- PASS lines to rule out empty -run matches: 5/5 internal/config, 1/1 internal/panel, 1/1 internal/complete, 3/3 cmd/mindspec. AC11 (go list -deps ./internal/panel | grep internal/config exits non-zero; 'threshold > 0' grep in internal/panel/gate.go exits 0) and AC12 (go build ./... plus the four touched packages, exit 0) both hold."
+    },
+    {
+      "id": "F1-2",
+      "severity": "info",
+      "title": "Goal's four-family protocol is expressible and resolvable in the shipped schema",
+      "detail": "The Goal's YAML verbatim in /tmp/.mindspec/config.yaml: show renders spec_approve/plan_approve/bead/final_review in enum order with expected_reviewers 9/9/6/12 and raw thresholds (n-1/n-1/n-1/11); note echoed; substitutes rendered with the slot-id-preservation convention comment. --gate spec_approve --json matches R3's pinned worked example exactly: Fable {author-of-record, empirical-prober, codebase-pin}, Opus {adversarial, contract-stability, integration}, GPT {author-of-record, empirical-prober, codebase-pin}. final_review gives 12 slots R1-R12 continuing the cursor correctly (Sonnet R10-R12 = adversarial, contract-stability, integration)."
+    },
+    {
+      "id": "F1-3",
+      "severity": "info",
+      "title": "R9 contract, fallback, refusals, and backward compat all verified live",
+      "detail": "--gate final_review --json has exactly the 5 documented members {gate, slots, expected_reviewers, approve_threshold, substitution} with substitution.in_force flipping per R5 (substitutes when populated, claude_sub_on_quota under a legacy config). Unconfigured adhoc slots byte-equal bead's. Unknown --gate final and --json-without---gate both exit 1 with recovery lines naming all five keys. A 109-shape 2+2/'3' config resolves every gate from globals (4 slots, family strings as models, raw '3'). R4 spot-probes: unknown gates key 'final' refused (exit 1, all five keys + gate_authority disambiguation); bead threshold '5' inherited by a 2-reviewer adhoc refused against the inheriting gate's sum (exit 1). Made-up model id: warning line, exit 0 — no enum-membership in Load."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "title": "Doc-sync and ADR amendment present; invariants hold",
+      "detail": "ADR-0037 carries the second amendment note ('decision-inert' greps clean, 3 'amendment' hits). workflow/interfaces.md documents the --gate CLI surface and the 5-member JSON schema; core/interfaces.md carries the standing-protocol gates example. internal/panel remains import-clean of internal/config and the third-defense threshold guard survives. Worktree left clean; all scratch under absolute /tmp."
+    }
+  ]
+}
