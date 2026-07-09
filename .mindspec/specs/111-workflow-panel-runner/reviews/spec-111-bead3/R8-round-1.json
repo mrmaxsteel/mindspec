@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Ran all 8 acceptance greps from bd show mindspec-9cyu.3 on both plugins and .claude copies: all pass, including the word-boundary /ms-panel([^-a-z]|$) check (4 matches, none false-positive substrings of ms-panel-run/ms-panel-tally). diff -q on both mirror pairs: identical. git show --stat HEAD confirms +70/-0, five files, zero deletions. go build ./... exits 0; go test -count=1 ./plugins/... ./internal/setup/... both green. Read the full unified diff for all three files: every addition is a new callout/section, no existing line touched or removed. Spot-checked retention-grep discriminating power by counting matched lines per pattern in ms-panel-tally (workflow:1, Artifact gates:1, Escape hatch:2, Consolidate:3) and ms-panel-run ('Launch the panel':1 = the header itself) - each is low enough that deleting the corresponding section would flip the grep to failing, confirming the ACs actually pin section presence rather than passing vacuously. mindspec config show confirms `runner: claude-code-skills` is live and the dispatch command's grep '^runner:' anchors correctly against that exact line format.",
+  "concrete_changes_required": [],
+  "findings": [
+    "All 8 bd-show acceptance greps pass on both plugins/ and .claude/ copies (claude-code-workflow, word-boundary /ms-panel, Slot lens defaults, Launch the panel in ms-panel-run; workflow, ## Artifact gates, Consolidate, After a halt, Escape hatch in ms-panel-tally).",
+    "diff -q plugins/.../ms-panel-run <-> .claude/.../ms-panel-run and the tally pair: both byte-identical.",
+    "git show --stat HEAD: 5 files changed, 70 insertions(+), 0 deletions(-) - genuinely additive, confirmed by reading the full unified diff (every hunk is a pure addition; no existing line altered).",
+    "go build ./... exit 0; go test -count=1 ./plugins/... ./internal/setup/... both ok (no failures, no skips beyond the pre-known harness/instruct exclusions which weren't even in scope here).",
+    "Retention-section byte-check: Consolidate (line 32), ## Artifact gates (line 53), After a halt - recovery (line 67), Abandon procedure (line 84), Escape hatch (line 86) in ms-panel-tally are all present verbatim and untouched except for the new Workflow-path note inserted above them (line 18) - confirmed by direct file read, not just grep.",
+    "mindspec config show confirms the live config has `runner: claude-code-skills  # declared, not yet enforced` at a bare `runner:` line start, so the dispatch snippet's `mindspec config show | grep '^runner:'` is empirically correct against the real output format.",
+    "Minor non-blocking observation (not a grep-gate finding, matches R7/adversarial territory more than empirical): the composed /ms-panel arg tuple in ms-panel-run's Runner-dispatch text omits the workflow's documented optional `claude_sub_on_quota` field. This matches the bead's own plan-approved description verbatim (also omits it), and the workflow treats absent-or-not-exactly-true as fail-closed false per its own header comment, so this is not a functional gap introduced by the implementer - just worth another lens's eyes if plan-fidelity vs completeness is in question.",
+    "Step-0-labelling judgment call (item 6 in BRIEF) is a judgment call outside the empirical lens - deferring to R1/R3/R7 on whether Step 0 itself needs the superseded callout; grep-wise nothing hinges on it since it's not part of the literal ACs."
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "The three branches (claude-code-workflow, claude-code-skills default, external stub) are present, correctly labelled, and the host-degradation rule is stated. `mindspec config show` does emit a `runner: <value>` line (cmd/mindspec/config.go:254), so the read is the right surface. The `/ms-panel` workflow is invoked once with the right name. But the documented arg tuple `{slug, spec, target, bead_id?, round, lenses[], mix}` omits `claude_sub_on_quota`, which ms-panel.js explicitly expects the invoking skill to resolve from `panel.substitution.claude_sub_on_quota` and pass in, defaulting fail-closed (false) if absent (ms-panel.js:27-35,455). That config key defaults to `true` in internal/config/config.go:308, so a workflow-path panel that never passes it silently loses R4's quota-wall claude-sub substitution — a real feature regression relative to the skills-path (which does substitute, per the retained 'Launch the panel' logic) — with no note in the skill that this needs resolving. `sha` is also absent from the tuple but that's harmless (advisory-only, self-resolved by `panel create`). No other arg-name/mismatch found; mix/lenses/slug/spec/target/bead_id/round all line up.",
+  "concrete_changes_required": [
+    "Add `claude_sub_on_quota` to the Runner-dispatch arg tuple in ms-panel-run/SKILL.md (both mirrors): instruct the workflow-path to resolve it from config `panel.substitution.claude_sub_on_quota` and pass it through, the same way `mix` is resolved from `panel:` — otherwise every workflow-path panel silently fails closed on quota-wall substitution regardless of the configured value."
+  ],
+  "findings": [
+    "Runner dispatch's documented arg tuple omits `claude_sub_on_quota`; ms-panel.js (lines 27-35, 455) treats its absence as false (fail-closed, no claude-sub substitution), while the config default is true (internal/config/config.go:308) — a silent behavior divergence between workflow-path and skills-path panels.",
+    "`sha` is also omitted from the tuple, but this is inconsequential: it's advisory-only display text and the workflow self-resolves the authoritative SHA via `mindspec panel create` regardless (ms-panel.js:17-19, 469-473).",
+    "Everything else checked out: claude-code-skills confirmed as the actual code default (internal/config/config.go, runner validation error message); `mindspec config show` surface confirmed correct; single `/ms-panel` invocation with correct workflow name; `go build ./...` clean."
+  ]
+}

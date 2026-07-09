@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-9cyu.3",
+  "spec": "111-workflow-panel-runner",
+  "target": "bead/mindspec-9cyu.3",
+  "round": 2,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "1fd29af9fef1ddd8f9a7cff1b21bff6311bafaa4"
+}
