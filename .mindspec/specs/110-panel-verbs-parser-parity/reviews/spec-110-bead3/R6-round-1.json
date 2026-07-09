@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Single-home invariant is real for downstream consumers. Both internal/complete (panel_advisory.go:192) and internal/instruct (panelstate.go:121, post-refactor) call panel.PanelGateDecision over facts built via panel.ResolveGateFacts — confirmed by grep across internal/; no remaining independent decision branch survives in panelstate.go (only the GatePass/GateWarn/GateBlock enum mapping, gateLabel rendering, and the Allow-reason synthesis, which the spec explicitly permits since Allow carries no Message). Bead 4 (cmd/mindspec panel verb tree) per plan.md depends only on internal/panel (Bead 1); it does not import or touch internal/instruct at all, so gatherPanelState's new GateIO adaptation (errBranchGone sentinel, Worktree always \"\") is fully internal and creates zero coupling surface Bead 4 could trip over. The doc-sync entry in .mindspec/domains/workflow/overview.md accurately narrates the ratchet: names ADR-0040, panel.GateFacts/PanelGateDecision/ResolveGateFacts, the GateIO adaptation with inert dirty-tree/staleness legs, and the removed second copy — consistent with the diff. Ran the full instruct panel-state test suite plus the new 14-row delegation table locally: all PASS, including the two pinned Allow-reason rows unchanged.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Verified via grep that internal/complete and internal/instruct are the only two call sites of panel.PanelGateDecision in internal/ — no third copy exists anywhere.",
+    "Bead 4 (next consumer per plan.md) has no dependency edge onto internal/instruct, so this bead's internal GateIO seam cannot create integration friction for it.",
+    "Ran `go test ./internal/instruct/... -run 'TestPanelStateVerdict_DelegatesToPanelGateDecision|TestPanelStateEntry_Verdict|PanelState|PanelRounds|renderPanel' -v`: all pass, including the 14-row delegation table and both pre-existing pinned Allow-reason rows (at_threshold_fresh, above_threshold_fresh).",
+    "doc-sync addition to overview.md matches the actual code change (ADR-0040 ratchet, GateIO adaptation, inert non-bead staleness leg) with no drift."
+  ]
+}
