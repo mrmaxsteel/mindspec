@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "R5 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.9,
+  "rationale": "Schema/type checks mostly hold: revParseForPanelFn seam is correctly signed/swappable and errors propagate wrapped (never a silent empty SHA); panelDirFor's layout-aware resolution matches internal/complete.panelGateRoots exactly (flat -> <specDir>/reviews/<slug>, else root/review/<slug>, both within Scan's review+reviews glob); tallyExitAction is correct over all 3 GateAction values and is well pinned by TestPanelTally_ExitCodeTracksDecision/TestPanelVerbs_DecisionIsPanelGateDecision; nil guards (IsBead, findPanelRegistration) are sound. But rejectControlBytes (panel.go:249-258) only rejects r<0x20 || r==0x7f (C0+DEL) -- it misses the C1 range (U+0080-U+009F), including CSI U+009B. Empirically reproduced: `panel create` with a slug containing a valid-UTF8-encoded U+009B succeeds (exit 0), creates review/<slug-with-CSI>/panel.json, and prints the raw C1 byte unescaped via the `%s` success message straight to the terminal. This is the EXACT bug class cmd/mindspec/report.go's stripControl already documents and fixes elsewhere in this package, citing a prior incident ('codex-render-leak #2') for the identical CSI-U+009B case. Same gap applies to --bead/--target.",
+  "concrete_changes_required": [
+    "rejectControlBytes (cmd/mindspec/panel.go) must reject the full C0+C1+DEL control range, not just C0+DEL -- switch its predicate to unicode.IsControl(r) (matching cmd/mindspec/report.go's stripControl, which documents this exact class from 'codex-render-leak #2'), or equivalently the r<0x20||r>0x7e allowlist cmd/mindspec/config.go's escapeConfigValue already uses.",
+    "Add a slug/--bead/--target test case with a C1 control rune (e.g. U+009B CSI, valid UTF-8 encoded) to TestPanelCreate_RejectsUnsafeSlugAndControlBytes so this class is pinned going forward."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "hard_block": true,
+      "location": "cmd/mindspec/panel.go:249-258 (rejectControlBytes), used by validatePanelSlug and panel create's --bead/--target checks",
+      "description": "rejectControlBytes only tests r<0x20 || r==0x7f, missing the C1 control range (U+0080-U+009F). A slug (or --bead/--target) carrying a valid-UTF-8-encoded C1 byte such as U+009B (CSI) passes validation, the panel directory is created, and the success message ('panel %s registered: ...') prints the raw byte via %s straight to the terminal -- the identical terminal-injection class the same package's report.go::stripControl already fixed once (documented there as 'codex-render-leak #2', explicitly calling out C1 CSI U+009B as the reason a C0-only strip is insufficient). Reproduced empirically: `panel create $'demo\\xc2\\x9bX' --spec 110-test --target HEAD` exits 0 and echoes the raw CSI byte in stdout."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "location": "cmd/mindspec/panel.go:509-531 (tallyExitAction)",
+      "description": "Minor style-only note, not a defect: the switch handles Warn/Block explicitly and falls to default for Allow, whereas renderPanelVerify/renderPanelTally both switch explicitly over all three GateAction values. Functionally correct today (GateAction has exactly 3 members) and well covered by TestPanelTally_ExitCodeTracksDecision; flagged only for stylistic consistency, no change required."
+    }
+  ]
+}

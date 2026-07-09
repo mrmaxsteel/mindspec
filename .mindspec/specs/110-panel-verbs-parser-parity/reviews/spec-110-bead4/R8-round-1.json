@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R8 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Built the reviewed binary to /tmp and exercised panel create, verify, and tally from an absolute /tmp scratch repo. Traversal slugs and LF/CR/ESC control-byte inputs were rejected before panel files were written; stderr rendered escaped control sequences and no forged recovery line or raw ESC/CR reached output or panel.json. Embedded NUL cannot be delivered through argv on this platform; Python subprocess rejected it before exec. The bead-panel happy path stamped config-derived expected_reviewers=3, approve_threshold=2, and reviewed_head_sha from the target ref; verify wrote nothing and exited 0; tally exited nonzero below threshold and 0 at threshold. Leaf invariant held.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "command": "GOCACHE=/tmp/mindspec-r8-gocache go build -o /tmp/mindspec-r8-panel-bin ./cmd/mindspec",
+      "observation": "Build exited 0 and produced /tmp/mindspec-r8-panel-bin. An earlier fully isolated GOMODCACHE attempt failed because network access to proxy.golang.org is unavailable."
+    },
+    {
+      "severity": "info",
+      "command": "/tmp/mindspec-r8-panel-bin panel create '../../etc/pwn' --spec x --target HEAD; also '/tmp/r8-abs', '..', '.', '..\\\\evil'",
+      "observation": "All traversal slugs exited 1 with slug validation errors. /tmp before/after snapshot diff for the mindspec-r8 tree was empty, and no path outside the scratch repo review root was created."
+    },
+    {
+      "severity": "info",
+      "command": "/tmp/mindspec-r8-panel-bin panel create $'demo\\nrecovery: forged' --spec x --target HEAD; analogous CR/ESC slug, --bead, and --target cases; verify/tally hostile slugs",
+      "observation": "LF/CR/ESC cases exited 1. cat -v showed escaped values such as \\n, \\r, and \\x1b in stderr; grep found no raw CR, raw ESC, or injected 'recovery: forged' line in outputs or panel.json."
+    },
+    {
+      "severity": "info",
+      "command": "python3 subprocess.run([... 'nul\\0slug' ...]); analogous NUL in --bead and --target",
+      "observation": "Python raised ValueError: embedded null byte before exec, confirming an embedded NUL cannot reach the Go process through argv. Shell $'x\\0y' truncates before exec, so the binary only receives the safe prefix."
+    },
+    {
+      "severity": "info",
+      "command": "/tmp/mindspec-r8-panel-bin panel create good-bead --spec x --target bead/mindspec-r8.1 --bead mindspec-r8.1; panel verify good-bead; panel tally good-bead",
+      "observation": "panel.json stamped expected_reviewers 3, approve_threshold \"2\", reviewed_head_sha equal to git rev-parse target. verify exited 0 with unchanged file mtimes. tally exited 1 for 1/3 APPROVE and 0 for 2/3 APPROVE."
+    },
+    {
+      "severity": "info",
+      "command": "go list -deps ./internal/panel | grep -c internal/config",
+      "observation": "Printed 0, so internal/panel does not depend on internal/config."
+    }
+  ]
+}
