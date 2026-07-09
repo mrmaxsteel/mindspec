@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-09T20:10:35Z"
+approved_by: user
+status: Approved
 ---
 # Spec 113-panel-verb-workflow-followups: Panel-verb & workflow followup hardening (110/111/112 fallout wave)
 
@@ -92,7 +92,7 @@ No dedicated config-validation ADR exists in `.mindspec/adr/`; R4's authority is
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-09
+- **Notes**: Approved via mindspec approve spec
