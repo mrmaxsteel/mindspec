@@ -228,3 +228,22 @@ func TestMsPanelWorkflow_AllowedCLIExactSet(t *testing.T) {
 		t.Error(`".codex.log" must appear in ms-panel.js (R3b audit artifact)`)
 	}
 }
+
+// TestMsPanelWorkflow_ShellMetacharRejectsBareDollar is the spec-113 R2 floor
+// pin: SHELL_METACHAR_RE must reject a bare `$` (not merely the `$(`
+// digraph), so `$HOME`/`${x}`/`$x` variable-expansion can no longer survive
+// validateShellSafe. Go cannot execute the JS regex, so this is a
+// string-level pin (same style as TestMsPanelWorkflow_AllowedCLIExactSet)
+// asserting the exact declaration line appears exactly once; the behavioral
+// match matrix (positive/negative rows) runs under node in verification.
+func TestMsPanelWorkflow_ShellMetacharRejectsBareDollar(t *testing.T) {
+	content := WorkflowFiles()["ms-panel.js"]
+	if content == "" {
+		t.Fatal(`WorkflowFiles()["ms-panel.js"] is empty`)
+	}
+
+	const wantDecl = `const SHELL_METACHAR_RE = /[\x60;|&\n$]/;`
+	if n := strings.Count(content, wantDecl); n != 1 {
+		t.Errorf("expected the exact declaration %q exactly once, found %d", wantDecl, n)
+	}
+}
