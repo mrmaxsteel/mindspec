@@ -70,7 +70,16 @@ A --bead <id> panel expects --target bead/<id> — the exact ref
 ` + "`mindspec complete`'s gate rev-parses for staleness. A --target that" + `
 diverges from bead/<id> can only FAIL SAFE: at gate time the recorded
 reviewed_head_sha will not match the live bead/<id> tip, producing a
-stale-SHA Block, never a false-PASS.`,
+stale-SHA Block, never a false-PASS.
+
+An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
+decision-inert panel.json "gate" field and resolves expected_reviewers/
+approve_threshold from that gate's creation-time defaults
+(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr) instead
+of the global panel.reviewers/approve_threshold. --gate must be one of
+the five config.PanelGateKeys (spec_approve, plan_approve, bead,
+final_review, adhoc); omitting it is byte-identical to today: the global
+defaults are used and no "gate" key is written.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -82,15 +91,22 @@ stale-SHA Block, never a false-PASS.`,
 		target, _ := cmd.Flags().GetString("target")
 		beadID, _ := cmd.Flags().GetString("bead")
 		round, _ := cmd.Flags().GetInt("round")
+		gate, _ := cmd.Flags().GetString("gate")
 
 		// Control-byte discipline (spec-109-final-review G2): a --bead/
 		// --target value carrying a control byte must never reach
 		// panel.json or a rendered/recovery message. Same check
-		// validatePanelSlug applies to the slug itself.
+		// validatePanelSlug applies to the slug itself. --gate (spec 113
+		// R3) gets the same discipline, applied BEFORE the enum-membership
+		// check below so a control-byte value never reaches a rendered
+		// message either way.
 		if err := rejectControlBytes("--bead", beadID); err != nil {
 			return err
 		}
 		if err := rejectControlBytes("--target", target); err != nil {
+			return err
+		}
+		if err := rejectControlBytes("--gate", gate); err != nil {
 			return err
 		}
 		if strings.TrimSpace(specID) == "" {
@@ -101,6 +117,18 @@ stale-SHA Block, never a false-PASS.`,
 		}
 		if round <= 0 {
 			round = 1
+		}
+		// --gate membership, validated BEFORE any filesystem write or
+		// root/config resolution side effect (spec 113 R3): a value
+		// outside config.PanelGateKeys — the single enum declaration,
+		// internal/config/config.go:101 — is rejected with a recovery
+		// line naming all five keys (ADR-0035), never a second copy of
+		// the enum.
+		if gate != "" && !isValidPanelGateKey(gate) {
+			keys := strings.Join(config.PanelGateKeys, ", ")
+			return guard.NewFailure(
+				fmt.Sprintf("--gate %q is not one of the five valid panel gate keys (%s)", gate, keys),
+				fmt.Sprintf("pass one of %s to --gate", keys))
 		}
 
 		root, err := findRoot()
@@ -127,14 +155,36 @@ stale-SHA Block, never a false-PASS.`,
 			beadPtr = &beadID
 		}
 
+		// Spec 113 R3: when --gate is set, resolve the creation-time
+		// defaults through 112 R3's gate-scoped resolvers instead of the
+		// global ones; when omitted, EXACTLY today's global-resolver
+		// calls with Gate: "" — preserving the 112-R9
+		// byte-identical-when-absent contract. The resolver errors are
+		// unreachable post-validation (gate is already confirmed a
+		// member of PanelGateKeys above) but returned defensively rather
+		// than ignored.
+		expectedReviewers := cfg.PanelExpectedReviewers()
+		approveThresholdExpr := cfg.PanelApproveThresholdExpr()
+		if gate != "" {
+			expectedReviewers, err = cfg.PanelGateExpectedReviewers(gate)
+			if err != nil {
+				return err
+			}
+			approveThresholdExpr, err = cfg.PanelGateApproveThresholdExpr(gate)
+			if err != nil {
+				return err
+			}
+		}
+
 		in := panel.CreateInput{
 			BeadID:               beadPtr,
 			Spec:                 specID,
 			Target:               target,
 			Round:                round,
-			ExpectedReviewers:    cfg.PanelExpectedReviewers(),
-			ApproveThresholdExpr: cfg.PanelApproveThresholdExpr(),
+			ExpectedReviewers:    expectedReviewers,
+			ApproveThresholdExpr: approveThresholdExpr,
 			ReviewedHeadSHA:      sha,
+			Gate:                 gate,
 		}
 		if err := panel.Create(dir, in); err != nil {
 			return err
@@ -232,6 +282,7 @@ func init() {
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for global defaults)")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)
@@ -281,6 +332,20 @@ func rejectControlBytes(label, value string) error {
 		}
 	}
 	return nil
+}
+
+// isValidPanelGateKey reports whether gate is a member of
+// config.PanelGateKeys — the SINGLE enum declaration
+// (internal/config/config.go:101). This iterates that slice rather than
+// duplicating its literal values, per spec 113 R3: `panel create --gate`
+// must never carry a second copy of the five-key enum.
+func isValidPanelGateKey(gate string) bool {
+	for _, k := range config.PanelGateKeys {
+		if k == gate {
+			return true
+		}
+	}
+	return false
 }
 
 // panelDirFor resolves the panel directory for slug, layout-aware —

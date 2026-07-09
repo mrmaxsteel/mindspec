@@ -145,7 +145,7 @@ class (a slug/flag value bearing a control byte can never forge an
 extra display line or a fake `recovery:` line).
 
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
-<id>] [--round N]`** stamps `expected_reviewers`/`approve_threshold`
+<id>] [--round N] [--gate <name>]`** stamps `expected_reviewers`/`approve_threshold`
 from the config resolvers (`config.PanelExpectedReviewers()` /
 `config.PanelApproveThresholdExpr()`, spec 109) and `reviewed_head_sha`
 from `--target`'s live commit (resolved via the executor at write
@@ -165,6 +165,28 @@ SAME resolved `dir` `panel.Create` wrote to. This second line is the
 stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
 reads to learn the panel directory without re-deriving the layout
 logic above.
+
+**`--gate <name>`** (spec 112 R9's deferred writer, completed by spec
+113 R3) is optional and validated against the closed enum
+`config.PanelGateKeys` (`spec_approve`, `plan_approve`, `bead`,
+`final_review`, `adhoc` — the single declaration,
+`internal/config/config.go:101`; the CLI never keeps a second copy) —
+same control-byte discipline as `--bead`/`--target`, checked before the
+enum-membership check. A value outside the enum is rejected with a
+`guard.NewFailure` whose recovery line names all five keys, BEFORE any
+filesystem write. When given, `panel.json`'s decision-inert `gate` field
+(`json:"gate,omitempty"`) is stamped with the value, and
+`expected_reviewers`/`approve_threshold` are resolved through spec 112
+R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
+`cfg.PanelGateApproveThresholdExpr(gate)`) instead of the global ones.
+When omitted, behavior is byte-identical to pre-spec-113 output: the
+global resolvers are used and no `gate` key is written. The field stays
+decision-inert end to end — neither `PanelGateDecision` nor
+`ApproveThreshold()` reads it — but it IS what `config
+show`/`mindspec complete`'s `PanelGateAdvisoryDefault` selection keys on
+for the reviewer-count advisory note, so a CLI-created `final_review`
+panel now selects that gate's per-gate default instead of being
+advisory-skipped.
 
 **`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
 ALWAYS exits `0` — it is a report, never a gate. It prints verdicts
@@ -229,7 +251,7 @@ complete-gated.
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
-| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1) |
+| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the decision-inert `gate` field + that gate's creation-time defaults (spec 113 R3) |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
