@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens: every claim ties to real, passing code at b27e793b. go build ./... exit 0; go vet ./cmd/mindspec/... ./internal/complete/... exit 0. All five named tests exist and PASS: TestPanelAdvisory_GateAwareCompare (9 subtests), TestConfigShow_GatesSubstitutesAndModelAdvisory, TestConfigShowGate_ResolvedJSON, TestConfigShow_HostileStringsEscaped, TestConfigShow_ReviewerCountNoteGateAware. Every resolver the code calls exists with the used signature: KnownModels (config.go:183), PanelGateExpectedReviewers (:750), PanelGateApproveThresholdExpr (:766), PanelGateAdvisoryDefault (:832), PanelGateKeys var enum (:101), escapeConfigValue (cmd/mindspec/config.go:114). Nil-guard confirmed at complete.go:389 (panelReg != nil) before the .Panel.Gate deref at :390. Scope fence holds: internal/config diff vs parent a07bb399 is empty; panel leaf invariant intact (go list -deps ./internal/panel | grep internal/config → exit 1); changed files match the BRIEF's six exactly. The two pre-existing failures (internal/harness, internal/instruct z4ps) are outside this bead's packages and its diff.",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... exit 0; go vet ./cmd/mindspec/... ./internal/complete/... exit 0.",
+    "5/5 named tests present and PASS (TestPanelAdvisory_GateAwareCompare carries 9 gate-aware subtests, all green).",
+    "Resolvers exist and are called with correct signatures: PanelGateAdvisoryDefault, PanelGateKeys, PanelGateExpectedReviewers, PanelGateApproveThresholdExpr, KnownModels, escapeConfigValue.",
+    "PanelGateKeys is a package-level ordered slice var (spec_approve, plan_approve, bead, final_review, adhoc) — enum declaration order the renderConfig loop iterates, not map order.",
+    "Nil-guard is real: complete.go:389 gates the PanelGateAdvisoryDefault call on panelReg != nil; deref of panelReg.Panel occurs only inside that guard.",
+    "Scope fence R9 verified: no internal/config edits (empty diff vs a07bb399); internal/panel leaf invariant intact (deps grep exits non-zero); changed-file set == BRIEF's six files.",
+    "Pre-existing failures (internal/harness, internal/instruct) are not in this bead's packages nor its diff."
+  ]
+}

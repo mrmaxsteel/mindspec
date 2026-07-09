@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Scope: every touched Go package maps to a declared domain per the domain OWNERSHIP.yaml files — internal/config → core; internal/panel, internal/complete, cmd/** → workflow. ADR-0037 and the domain-interface docs are doc-classified and carry themselves; .beads/issues.jsonl is tracker metadata. No file lands outside core+workflow — zero scope creep. Inertness (the load-bearing claim) holds under grep: no os/exec, exec.Command, `go func`, Spawn, or Dispatch is added anywhere in Go source (the earlier apparent hits were all inside issues.jsonl issue prose for spec 111). internal/panel/gate.go is UNTOUCHED and PanelGateDecision/ApproveThreshold never read the new Panel.Gate field, which is plain recorded json:\"gate,omitempty\" data. `go list -deps ./internal/panel | grep internal/config` = 0 (leaf stays config-free); the `threshold > 0` third-defense guard survives (count 1). The new config resolvers and PanelGateAdvisoryDefault are consumed only in cmd/mindspec's read-only `config show`/`--json` render surface and in complete.go's advisory — placed AFTER the panelGateErr decision returns, nil-guarded, never altering Allow/Block. substitutes/known-model feed render only. models:/loop:/runner: config blocks are structurally unchanged (the only `models` match is the knownModels advisory slice). ADR-0037 decision-inert amendment note present. Config supplies creation-time defaults only; 109 R6–R8 intact.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "scope",
+      "note": "All touched Go packages (internal/config, internal/panel, internal/complete, cmd/mindspec) map to core or workflow per .mindspec/domains/{core,workflow}/OWNERSHIP.yaml. Docs (ADR-0037, domain interfaces/architecture) and .beads/issues.jsonl are doc/tracker-classified. No out-of-domain file touched.",
+      "severity": "info"
+    },
+    {
+      "area": "inertness/no-dispatch",
+      "note": "No os/exec, exec.Command, `go func`, Spawn, or Dispatch added in any *.go (non-test) file across the changeset. No reviewer spawning, no runner wiring — 111 territory untouched.",
+      "severity": "info"
+    },
+    {
+      "area": "inertness/decision-authority",
+      "note": "internal/panel/gate.go is not in the changeset. PanelGateDecision and ApproveThreshold() do not read Panel.Gate (the only gate.go matches are the GateAction/GateFacts/GateIO type names). Panel.Gate is decision-inert recorded metadata, parse-lenient like AbandonReason, never setting Registration.Err.",
+      "severity": "info"
+    },
+    {
+      "area": "inertness/config-free-leaf",
+      "note": "go list -deps ./internal/panel | grep -c internal/config = 0. The leaf stays config-free; panel.go's only edit is the added Gate string field.",
+      "severity": "info"
+    },
+    {
+      "area": "inertness/creation-time-only",
+      "note": "New resolvers (PanelGateExpectedReviewers/ApproveThresholdExpr/ReviewerSlots) and PanelGateAdvisoryDefault are consumed ONLY in cmd/mindspec config show/--json (read-only pull) and internal/complete's advisory, which runs after the gate decision has already returned and is nil-guarded (panelReg != nil). No resolver output becomes an input to PanelGateDecision. Substitutes/known-model consumed only on render paths. The `threshold > 0` third-defense guard survives (grep count 1).",
+      "severity": "info"
+    },
+    {
+      "area": "inertness/109-blocks-untouched",
+      "note": "models:/loop:/runner: config blocks are structurally unchanged — the only `models` substring hits are the new knownModels advisory slice + KnownModels() accessor, and the only `loop` hit is a recovery-line string distinguishing panel.gates keys from loop.gate_authority's vocabulary. They stay exactly as inert as 109 left them. ADR-0037 'decision-inert' amendment note present (grep count 1).",
+      "severity": "info"
+    }
+  ]
+}

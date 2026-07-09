@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.91,
+  "rationale": "Most schema/resolver contracts check out: config tests pass, the /tmp-built CLI resolves the Goal protocol to 9/6/6/12 with raw thresholds, unknown model ids stay advisory, substitutes marshal as {}, PanelGateKeys order is respected by rendering, and the recorded panel gate is decision-inert. I found one R4 validation miss: explicit empty model values are accepted when family is also present, because the typed struct cannot distinguish absent model from model: \"\". R4 explicitly lists an empty-string model as a Load refusal, so this is a schema/type-correctness gap.",
+  "concrete_changes_required": [
+    "Make Load refuse an explicit empty-string reviewer model even when family is present, for both global panel.reviewers and per-gate panel.gates.<gate>.reviewers. Add a regression covering model: \"\", family: codex."
+  ],
+  "findings": [
+    {
+      "id": "G2-1",
+      "severity": "blocking",
+      "file": "internal/config/config.go",
+      "line": 540,
+      "hard_block": true,
+      "summary": "R4 requires an explicit empty-string model to be refused, but validateReviewerEntries accepts model: \"\" when family is also present.",
+      "details": "Spec R4 says Load must refuse a reviewer entry with neither model nor family, or an empty-string model. validateReviewerEntries only checks r.model() == \"\"; r.model() falls back to Family when Model is empty, so the explicit-empty-model case is silently accepted and resolved as the legacy family.",
+      "repro": "With /tmp-built binary: config containing panel.gates.bead.reviewers: [{model: \"\", family: codex, count: 1}, {model: claude-sonnet-5, count: 1}] exits 0 and emits slot R1 model codex. Expected: Load error with recovery line."
+    }
+  ]
+}

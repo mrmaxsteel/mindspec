@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round 2 addresses my downstream-consumer block. R9 gives 110 and 111 a stable surface: the `config show --gate <name> --json` member names/types, ordered slots, raw threshold expression, effective substitution policy, and recorded `panel.json.gate` semantics are pinned and documented. That is firm enough for 110 to stamp creation-time defaults and for 111 to resolve runner slot/model/lens/substitution inputs without guessing. The scope fence is also correct: 112 exposes config/resolver/CLI contracts and the inert recorded field, while explicitly leaving writer stamping to 110 and runner consumption to 111. That resolves the earlier concern without smuggling downstream implementation requirements into 112. Map-order reproducibility is now falsifiable: gates render in the closed enum order and substitutes in sorted-key order, while JSON is encoder-produced, so Go map iteration cannot leak into the documented machine output.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "round1_change_required": "Add an explicit downstream-integration requirement and AC for spec 110's writer: panel create must accept or otherwise receive a known gate, stamp panel.json.gate, and use PanelGateExpectedReviewers/PanelGateApproveThresholdExpr for that gate while preserving a documented legacy path.",
+      "disposition": "ADDRESSED",
+      "assessment": "R9 deliberately does not specify 110 writer behavior, and that boundary is right. It pins the exported `--gate --json` schema plus recorded `gate` field that 110 must build on, while leaving stamping mechanics to 110."
+    },
+    {
+      "round1_change_required": "Add an explicit downstream-integration requirement and AC for spec 111/ms-panel-run: it must consume config show --gate <gate> --json or equivalent resolver output as slot/model/lens data, replacing the old {family,count}+lenses contract for per-gate panels.",
+      "disposition": "ADDRESSED",
+      "assessment": "R9 makes `config show --gate <name> --json` the stable documented contract for 111, including slots, models, lenses, counts, threshold expression, and substitution policy. Consumption details remain correctly owned by 111."
+    },
+    {
+      "round1_change_required": "Pin the machine JSON shape for config show --gate, especially the effective substitution policy, so 111 can implement substitutes-vs-claude_sub_on_quota precedence without inference.",
+      "disposition": "ADDRESSED",
+      "assessment": "R9 and its AC pin the JSON members and require `substitution` to report the substitutes map, the legacy bool, and which policy is in force per R5. R8 also pins deterministic gate/substitute ordering and encoder-backed JSON."
+    }
+  ]
+}

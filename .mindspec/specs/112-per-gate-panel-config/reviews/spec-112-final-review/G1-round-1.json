@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "Built the pinned d713a0b7 branch binary to /tmp and drove it from an absolute /tmp scratch git repo containing YAML-decoded hostile strings: ESC, BEL, and embedded newlines forging recovery lines in panel.note, reviewer model, lens, substitutes key/value, plus a hostile --gate argument. Plain config show, config show --gate spec_approve, and the unknown-gate error path emitted no raw ESC/BEL/CR and no forged recovery line; cat -v showed single-line quoted escapes, including known-model warnings. config show --gate spec_approve --json round-tripped the hostile model/lens/substitute key/value byte-exactly via jq -j. All five gates emitted exactly the documented five JSON members with no nulls.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Text-path scan over show.stdout/stderr, gate_text.stdout/stderr, and hostile unknown-gate stdout/stderr found zero raw ESC, BEL, or CR bytes and no newline-forged 'recovery: forged' line.",
+    "cat -v confirmed hostile values render as literal quoted escape sequences in panel.note, reviewer model/lens, substitutes key/value, known-model warning lines, and the unknown-gate recovery path.",
+    "jq -j byte comparisons passed for .slots[0].model, .slots[0].lens, the substitutes key, and the substitutes value; decoded bytes contained the expected ESC, BEL, and embedded newline only after JSON decoding.",
+    "For spec_approve, plan_approve, bead, final_review, and adhoc, jq verified exactly the top-level keys gate, slots, expected_reviewers, approve_threshold, and substitution; recursive null count was zero for every gate."
+  ]
+}

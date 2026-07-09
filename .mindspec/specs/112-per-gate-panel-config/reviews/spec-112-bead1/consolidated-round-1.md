@@ -1,0 +1,11 @@
+# spec-112-bead1 — consolidated round-1 changes
+
+Tally: 7 APPROVE (O1, O2, O3, S1, S2, S3, F1) / 1 REQUEST_CHANGES (G1) / 0 REJECT. Mechanically ≥7, but G1's finding is an empirically-reproduced terminal-injection in the refusal path — the same class that RC'd 109's final review — and a fix commit stales the verdicts anyway, so we fix + round-2 rather than merge past it. Scope: internal/config only, ONE commit.
+
+1. **(G1.1) Escape config-controlled strings in Load error/recovery text — must.** A hostile unknown `panel.gates` key containing control bytes reaches the refusal error text unescaped (`internal/config/config.go:568`'s recovery line reproduced; ESC/BEL/newline → raw to stderr, forgeable physical `recovery:` line). Route the embedded key (and audit the OTHER new refusal messages from this bead that embed config-controlled strings — gate keys, model ids, substitute sides — for the same hole) through quoting/escaping consistent with 109's `escapeConfigValue` handling in cmd. `strconv.Quote` on embedded identifiers is acceptable and simplest.
+2. **(G1.2) Regression test — must.** Unknown gate key carrying ESC, BEL, and an embedded newline: assert the Load error text contains no raw control byte and cannot forge a physical recovery line (the newline must appear escaped, not literal).
+3. **(F1-1, non-blocking but same test file — fold in) Cursor-reset fixture — should.** Add the distinguishing mix `[lens-less, explicit, lens-less]` (correct: R3=empirical-prober; wrong cursor-reset-on-explicit variant: R3=author-of-record) to `TestPanelGateSlots_DeterministicExpansion` so the one wrong-implementation variant F1 found surviving the suite now fails.
+
+Carried non-blocking (no action this bead): S3's ReviewerSlot-json-tags note (Bead 3 uses its own tagged struct per plan); S2's Model-wins-over-Family untested branch (may fold into item 3's edit if trivial); F1-2 enormous counts load (spec-silent); F1-3 whitespace-only substitute sides pass R4h (file as follow-up bead if Max wants it).
+
+Constraints: ONE commit `fix(config): escape config-controlled strings in refusal text + cursor-reset fixture (bead panel r1) [mindspec-lma4.1]`; only internal/config/config.go + config_test.go; all Bead-1 verification items must still pass (incl. `go test ./cmd/mindspec`); no push/bd/complete.

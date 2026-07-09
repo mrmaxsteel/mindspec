@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 fixes satisfy my security/parse-surface blockers. R8 now makes 109 escapeConfigValue-equivalent escaping mandatory, not advisory, for every new config-controlled human-text string I named: note, model, lens, substitutes keys/values, and warnings embedding them, in both config show and --gate text paths. The hostile-string AC covers ESC/BEL/newline injection and line-forgery prevention, including warning text. The --gate --json path is pinned to a real encoder and tested by decoding hostile values byte-exactly as JSON strings, which closes the hand-built JSON concern. The size-cap issue is explicitly resolved by deliberate deferral with rationale and named follow-up class; I would prefer caps eventually, but it is no longer a silent spec gap. No new blocking issue found in the round-2 delta.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "round_1_item": "Require 109 escapeConfigValue-equivalent control-byte/newline escaping for every new config-controlled string rendered by human text config show paths: panel.note, reviewer model, reviewer lens, substitutes map keys/values, and any known-model warning that embeds those values.",
+      "disposition": "ADDRESSED",
+      "detail": "R8 now explicitly requires escapeConfigValue-equivalent escaping for note/model/lens/substitutes keys and values and warning lines embedding them, in config show and config show --gate text output."
+    },
+    {
+      "round_1_item": "Add acceptance coverage with hostile control bytes/newlines in note, model, lens, and substitutes entries proving no raw control bytes and no forged output lines in config show text output.",
+      "disposition": "ADDRESSED",
+      "detail": "TestConfigShow_HostileStringsEscaped covers panel.note, model, lens, substitutes key/value carrying ESC/BEL and embedded newlines, with no raw control bytes and no forged lines in both text paths."
+    },
+    {
+      "round_1_item": "Pin the --gate --json contract to a real JSON encoder, never hand-built JSON, and require a test that hostile control bytes round-trip as JSON strings without raw terminal control bytes in stdout.",
+      "disposition": "ADDRESSED",
+      "detail": "R8 requires encoding/json or equivalent, forbids string-concatenated JSON, and the hostile-string AC requires real JSON decode round-tripping hostile values byte-exactly as strings."
+    },
+    {
+      "round_1_item": "Acknowledge and resolve the size-cap gap: either define explicit maximums for expanded reviewer slots/count and individual open string lengths, or explicitly document the deferred cap decision with a follow-up bead/spec and a non-accidental rationale.",
+      "disposition": "ADDRESSED",
+      "detail": "Out of Scope now deliberately defers size maxima for counts, expanded slots, and open-vocabulary string lengths, with rationale and follow-up class references rather than leaving the issue implicit."
+    }
+  ]
+}
