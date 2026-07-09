@@ -493,7 +493,7 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		target = res.Panel.Target
 	}
 	if nonBead {
-		d = sanitizeNonBeadDecision(d, slug, target)
+		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -518,7 +518,15 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		case facts.MissingRef:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (target branch no longer exists — assumed merged)\n", res.Panel.ReviewedHeadSHA)
 		case facts.GitErr != nil && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %v)\n", res.Panel.ReviewedHeadSHA, displayTarget, facts.GitErr)
+			// facts.GitErr wraps "rev-parse %s: %w" (gitutil.RevParseRef)
+			// with the RAW target — a NUL byte in target defeats the
+			// ErrRefNotFound sentinel match, routing here instead of the
+			// escaped MissingRef leg above (spec-113-final S2, empirically
+			// confirmed with the real binary: a NUL/ESC/newline-bearing
+			// target re-leaked through this exact %v). Render the error's
+			// STRING through escapeConfigValue, never raw, so those
+			// control bytes can never reach the terminal here either.
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %s)\n", res.Panel.ReviewedHeadSHA, displayTarget, escapeConfigValue(facts.GitErr.Error()))
 		case facts.GitErr != nil:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify live tip: %v)\n", res.Panel.ReviewedHeadSHA, facts.GitErr)
 		case facts.HeadSHA != "" && nonBead:
@@ -625,7 +633,7 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		if res != nil && res.Panel != nil {
 			target = res.Panel.Target
 		}
-		d = sanitizeNonBeadDecision(d, slug, target)
+		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -793,7 +801,21 @@ func shellQuoteTarget(s string) string {
 // never rev-parses to a real gitutil.ErrRefNotFound — see
 // nonBeadTargetRevParse), so no dangling/empty `--target` case arises
 // here; that edge belongs to tallyExitActionNonBead (F3-2).
-func sanitizeNonBeadDecision(d panel.Decision, slug, target string) panel.Decision {
+//
+// gitErr is facts.GitErr (leg (5b) only): internal/panel's shared
+// PanelGateDecision template interpolates f.GitErr RAW (%v) into
+// d.Message BEFORE this function ever runs. A hostile target containing a
+// NUL byte defeats gitutil.RevParseRef's ErrRefNotFound sentinel match (a
+// non-*exec.ExitError wrap), routing the panel to this leg (5b) INSTEAD
+// of the escaped leg (5) missing-ref path above — and the wrapped error
+// string ("rev-parse <target>: <err>") re-embeds the target's raw control
+// bytes (spec-113-final S2, empirically confirmed: a captured stderr held
+// a raw NUL, a raw ESC/ANSI sequence, and a bare newline splitting the
+// advisory into a forged extra line). Rather than patch substrings of the
+// already-interpolated message (fragile if gitErr.Error() ever collided
+// with template text), leg (5b) rebuilds its whole sentence from scratch
+// with gitErr.Error() run through escapeConfigValue — never raw.
+func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error) panel.Decision {
 	msg := d.Message
 	if msg == "" {
 		return d
@@ -819,11 +841,20 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string) panel.Decisi
 			slug, displayTarget, slug, shellQuoteTarget(displayTarget))
 	}
 
-	// Leg (5b) transient git error: rename the empty `panel for : ` prefix
-	// and the empty `bead/` ref fragment to the recorded slug/target
-	// (honest transient Warn — never claims the target was deleted).
-	msg = strings.Replace(msg, "panel for : ", fmt.Sprintf("panel %s: ", slug), 1)
-	msg = strings.Replace(msg, "could not verify branch bead/", fmt.Sprintf("could not verify target %s", displayTarget), 1)
+	// Leg (5b) transient git error: the shared template's message is
+	// "panel for : could not verify branch bead/ (transient git error:
+	// <RAW gitErr>) — staleness check skipped; ..." (BeadID == ""). Detect
+	// it by its stable "could not verify branch bead/" fragment and
+	// rebuild the ENTIRE sentence — renaming the empty bead/ fragments to
+	// the recorded slug/target AND re-interpolating gitErr through
+	// escapeConfigValue instead of carrying forward its already-raw %v
+	// text (spec-113-final S2).
+	if gitErr != nil && strings.Contains(msg, "could not verify branch bead/") {
+		msg = fmt.Sprintf(
+			"panel %s: could not verify target %s (transient git error: %s) — staleness check skipped; "+
+				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
+			slug, displayTarget, escapeConfigValue(gitErr.Error()))
+	}
 
 	d.Message = msg
 	return d

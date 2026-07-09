@@ -918,6 +918,95 @@ func TestPanelTally_NonBeadHostileTargetEscapedAndQuoted(t *testing.T) {
 	})
 }
 
+// TestPanelVerbs_NonBeadGitErrHostileTargetEscaped is the spec-113-final S2
+// pin (empirically confirmed with the real binary): the G2 fix
+// (82b28b2f) escaped the MissingRef ("target no longer exists") display
+// path but MISSED a second render path — the non-bead facts.GitErr
+// (transient rev-parse error) branch.
+//
+// A hostile target containing a NUL byte makes exec.Command fail with a
+// NON-*exec.ExitError, so gitutil.RevParseRef wraps it as
+// fmt.Errorf("rev-parse %s: %w", ref, err) WITHOUT the ErrRefNotFound
+// sentinel — internal/panel/gate.go's ResolveGateFacts then routes it to
+// facts.GitErr (not facts.MissingRef), bypassing the escaped MissingRef
+// path entirely. Both facts.GitErr consumers — renderPanelVerify's direct
+// "%v" render and sanitizeNonBeadDecision's leg-5b transient-error
+// message (fed by internal/panel's own raw "%v" template) — re-leak the
+// target's control bytes verbatim before this fix.
+//
+// This test drives that branch directly by stubbing revParseForPanelFn to
+// return a NON-ErrRefNotFound error that WRAPS the hostile target string,
+// mirroring the real gitutil.RevParseRef wrap shape ("rev-parse %s: %w")
+// without spawning a real NUL-byte git subprocess. It must fail (RED)
+// against the pre-fix code and pass (GREEN) after — verified in a /tmp
+// clone by stashing the fix and re-running this test.
+func TestPanelVerbs_NonBeadGitErrHostileTargetEscaped(t *testing.T) {
+	sha := "1234deadbeef1234deadbeef1234deadbeef1234"
+	target := "spec/x\x00\x1b[31m\nrecovery: forged"
+	simulated := fmt.Errorf("rev-parse %s: simulated", target)
+
+	assertClean := func(t *testing.T, combined string) {
+		t.Helper()
+		if strings.ContainsRune(combined, 0x00) {
+			t.Errorf("rendered output contains a raw NUL byte:\n%q", combined)
+		}
+		if strings.ContainsRune(combined, 0x1b) {
+			t.Errorf("rendered output contains a raw ESC control byte:\n%q", combined)
+		}
+		for _, line := range strings.Split(combined, "\n") {
+			if line == "recovery: forged" {
+				t.Errorf("a forged standalone `recovery: forged` line reached the output — the embedded control byte/newline in target was not escaped:\n%q", combined)
+			}
+		}
+	}
+
+	t.Run("panel verify", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		nonBeadPanelFixture(t, root, "demo", target, sha, panel.VerdictApprove, 1)
+		withTestChdir(t, root)
+		stubNonBeadRevParse(t, func(_, _ string) (string, error) { return "", simulated })
+
+		out, err := runPanelVerbCmd("verify", "demo")
+		combined := out
+		if err != nil {
+			combined += err.Error()
+		}
+		if !strings.Contains(combined, "could not verify target") {
+			t.Fatalf("expected the GitErr branch to render, got:\n%s (err=%v)", out, err)
+		}
+		assertClean(t, combined)
+	})
+
+	t.Run("panel tally", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		nonBeadPanelFixture(t, root, "demo", target, sha, panel.VerdictApprove, 1)
+		withTestChdir(t, root)
+		stubNonBeadRevParse(t, func(_, _ string) (string, error) { return "", simulated })
+
+		out, err := runPanelVerbCmd("tally", "demo")
+		combined := out
+		if err != nil {
+			combined += err.Error()
+		}
+		if !strings.Contains(combined, "could not verify target") {
+			t.Fatalf("expected the GitErr branch to render, got:\n%s (err=%v)", out, err)
+		}
+		assertClean(t, combined)
+	})
+
+	t.Run("sanitizeNonBeadDecision leg (5b) directly", func(t *testing.T) {
+		facts := panel.GateFacts{
+			BeadID: "",
+			Reg:    &panel.Registration{Dir: "/wt/review/demo"},
+			Res:    buildResult(&panel.Panel{Spec: "113-nb", Target: target, Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}, 6, 0, 6, 1, nil),
+			GitErr: simulated,
+		}
+		want := panel.PanelGateDecision(facts)
+		got := sanitizeNonBeadDecision(want, "demo", target, facts.GitErr)
+		assertClean(t, got.Message)
+	})
+}
+
 // TestSanitizeNonBeadDecision builds messages from the REAL
 // panel.PanelGateDecision over beadID=="" fact rows spanning legs (2), (5),
 // (5b), (6), (8), (9), (10), then asserts sanitizeNonBeadDecision's output
@@ -990,7 +1079,7 @@ func TestSanitizeNonBeadDecision(t *testing.T) {
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
 			want := panel.PanelGateDecision(tc.facts)
-			got := sanitizeNonBeadDecision(want, slug, target)
+			got := sanitizeNonBeadDecision(want, slug, target, tc.facts.GitErr)
 
 			if got.Action != want.Action {
 				t.Fatalf("sanitizeNonBeadDecision changed Action: got %v, want %v", got.Action, want.Action)
