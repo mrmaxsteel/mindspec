@@ -447,42 +447,58 @@ adr-divergence edge). Doc-sync: `.mindspec/domains/workflow/interfaces.md`.
    chokepoint.** Define one function, alongside `ALLOWED_CLI`, that every
    agent step invokes to obtain the exact string it is told to run: it
    asserts `verb` is one of the four `ALLOWED_CLI` entries (throwing
-   otherwise), **rejects any argument in `args` that starts with a leading
-   `-`** (round-2 item 2's argument-injection guard — a hardened-but-dash-
-   prefixed value can never be smuggled in as a flag to the invoked binary),
-   and appends only the remaining already-hardened argument values (this
-   step's validation), never free operator text, using a fixed per-verb
-   template. No agent step's prompt hand-assembles or narrates a shell
+   otherwise), then assembles the command from a **fixed per-verb
+   template** — the template alone supplies each verb's fixed option flags
+   (`--spec`, `--target`, `--bead`, `--round` for the panel verbs;
+   `--sandbox read-only --skip-git-repo-check` for the codex verb, already
+   pinned in the `ALLOWED_CLI` entry itself) — interleaving into that
+   template's value slots only the caller-passed **user-derived values**
+   (`slug`, `spec`, `target`, `bead_id`, `round`). `args` therefore never
+   carries a flag, only these values, and `buildCommand` **rejects any
+   element of `args` that starts with a leading `-`** (round-2 item 2's
+   argument-injection guard, scoped to values — since no legitimate
+   `slug`/`spec`/`target`/`bead_id`/`round` value ever begins with `-`, a
+   flag-shaped value such as a `slug` or `target` of `--json` — or an
+   attempt to append a second `--sandbox` override after the codex
+   prefix — is rejected as an injection attempt, while the template's own
+   fixed flags, never passed through `args`, run untouched) — this step's
+   validation applied to already-hardened argument values, never free
+   operator text. No agent step's prompt hand-assembles or narrates a shell
    command in prose, and **no call site retypes a command string as a
    literal** — every call passes one of the four verb identifiers
-   destructured from `ALLOWED_CLI` above; each embeds only
-   `buildCommand(...)`'s return value (e.g. "Run exactly:
-   `${buildCommand(CMD_PANEL_CREATE, slug, ...)}` — do not modify this
-   command"). This is what makes `ALLOWED_CLI` enforcement structural: a
-   step's runnable command is fully determined by code that can only ever
-   select one of the four prefixes, never by an agent's own interpretation of
-   a looser instruction, and never by a call site that reintroduces the
-   command string as its own literal — and it is what makes the
-   positive-enumeration test below (Step 6) hold **by construction**, not by
-   accident: since `buildCommand` is the sole assembler of any command string
-   and every caller passes it a verb identifier rather than a literal, no
-   `mindspec`- or `codex`-bearing literal can exist anywhere in the file
-   outside the `ALLOWED_CLI` array declaration itself for that test to miss.
+   destructured from `ALLOWED_CLI` above, followed only by user-derived
+   values; each embeds only `buildCommand(...)`'s return value (e.g. "Run
+   exactly: `${buildCommand(CMD_PANEL_CREATE, slug, spec, target)}` — do
+   not modify this command"). This is what makes `ALLOWED_CLI` enforcement
+   structural: a step's runnable command is fully determined by code that
+   can only ever select one of the four prefixes plus one fixed per-verb
+   flag template, never by an agent's own interpretation of a looser
+   instruction, and never by a call site that reintroduces the command
+   string — or any of its flags — as its own literal — and it is what makes
+   the positive-enumeration test below (Step 6) hold **by construction**,
+   not by accident: since `buildCommand` is the sole assembler of any
+   command string and every caller passes it a verb identifier plus values
+   rather than a literal or a flag, no `mindspec`- or `codex`-bearing
+   literal can exist anywhere in the file outside the `ALLOWED_CLI` array
+   declaration itself for that test to miss.
 
    `sha?` is **advisory-only** (an optional BRIEF display hint); the authoritative
    `reviewed_head_sha` is self-resolved by `mindspec panel create` from
    `--target` at write time (110 R1), so the workflow **never** uses `sha?` to
    set the recorded SHA and works when it is omitted.
 2. Registration step (R2): a single `agent()` step that runs
-   `buildCommand(CMD_PANEL_CREATE, slug, "--spec", spec, "--target",
-   target, ...)` (Step 1's destructured identifier, never the literal string)
-   — the hardened equivalent of `mindspec panel create
+   `buildCommand(CMD_PANEL_CREATE, slug, spec, target, bead_id?, round?)`
+   (Step 1's destructured identifier, never the literal string, followed
+   only by user-derived values — the fixed `--spec`/`--target`/`--bead`/
+   `--round` flags come from `buildCommand`'s own per-verb template, never
+   from this call site) — the hardened equivalent of `mindspec panel create
    <slug> --spec <spec> --target <target> [--bead <bead_id>] [--round
    <round>]` — so `panel.json` (round + `reviewed_head_sha` co-bumped by
    construction, `expected_reviewers` / `approve_threshold` stamped from the 109
-   resolvers) is written **by the binary**. A re-panel passes `--round N+1`
-   (re-resolving the SHA in the same write; prior-round `<slot>-round-<K>.json`
-   files untouched). The workflow contains **no** hand-typed `panel.json` schema
+   resolvers) is written **by the binary**. A re-panel passes the round
+   **value** `N+1` (the template supplies the `--round` flag; re-resolving
+   the SHA in the same write; prior-round `<slot>-round-<K>.json` files
+   untouched). The workflow contains **no** hand-typed `panel.json` schema
    and **no** re-implementation of the round+SHA co-bump — it reads back only the
    BRIEF path `panel create` reports. **This is the single reported layout every
    later step derives its write paths from:** the step captures the panel
