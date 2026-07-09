@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -177,6 +178,148 @@ func TestPanelAdvisory_ReviewerCountNote(t *testing.T) {
 	if nilBuf.Len() != 0 {
 		t.Errorf("expected no note for a nil registration, got %q", nilBuf.String())
 	}
+}
+
+// gateAwareAdvise reproduces complete.go's actual gate-aware call site
+// (complete.go step 2.25, spec 112 R7) exactly: guarded on reg != nil, since
+// PanelGateAdvisoryDefault's arguments deref reg.Panel and panelGate returns
+// a nil registration on its fail-open paths (empty bead ID, no registered
+// panel — the common panel-less `mindspec complete`); reviewerCountAdvisory
+// only runs when PanelGateAdvisoryDefault reports ok (the R7 skip
+// carve-outs print nothing).
+func gateAwareAdvise(cfg *config.Config, reg *panel.Registration) string {
+	var buf bytes.Buffer
+	if reg != nil {
+		if def, ok := cfg.PanelGateAdvisoryDefault(reg.Panel.Gate, reg.Panel.IsBead()); ok {
+			reviewerCountAdvisory(reg, def, &buf)
+		}
+	}
+	return buf.String()
+}
+
+// TestPanelAdvisory_GateAwareCompare covers spec 112 R7/AC7: both
+// caller-side ReviewerCountNote surfaces compare a recorded
+// expected_reviewers against the GATE-APPROPRIATE config default, never the
+// flat global one, once gates: is configured — killing the spurious-note
+// regression a per-gate config would otherwise create. This test drives
+// the complete-side surface (cmd/mindspec's config-show surface gets its
+// own TestConfigShow_ReviewerCountNoteGateAware).
+func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
+	// gatesCfg configures "bead" (resolved sum 6 — incidentally equal to
+	// the built-in global default, so a match here proves comparison
+	// against bead's OWN default, not a coincidental global match) and
+	// "final_review" (resolved sum 12, clearly differing from both) —
+	// enough to distinguish "this gate's default" from "another gate's
+	// default" and from "the global default".
+	six, twelve := 6, 12
+	gatesCfg := config.DefaultConfig()
+	gatesCfg.Panel.Gates = map[string]config.GatePanel{
+		"bead":         {Reviewers: []config.Reviewer{{Model: "claude-opus-4-8", Count: &six}}},
+		"final_review": {Reviewers: []config.Reviewer{{Model: "claude-fable-5", Count: &twelve}}},
+	}
+
+	t.Run("bead panel matching its own gate default, despite differing from another gate", func(t *testing.T) {
+		root := t.TempDir()
+		writePanel(t, root, "112-bead-match", panel.Panel{
+			BeadID: bp("mindspec-bead-match"), Spec: "112", Round: 1, ExpectedReviewers: 6,
+		}, map[string]string{"a-round-1.json": "APPROVE"})
+		reg, err := panelGate("mindspec-bead-match", []string{root}, "", false, nil)
+		if err != nil || reg == nil {
+			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
+		}
+		if out := gateAwareAdvise(gatesCfg, reg); out != "" {
+			t.Errorf("recorded count matches bead's own gate default (6): expected no note, got %q", out)
+		}
+	})
+
+	t.Run("bead panel mismatching its own gate default", func(t *testing.T) {
+		root := t.TempDir()
+		writePanel(t, root, "112-bead-mismatch", panel.Panel{
+			BeadID: bp("mindspec-bead-mismatch"), Spec: "112", Round: 1, ExpectedReviewers: 4,
+		}, map[string]string{"a-round-1.json": "APPROVE"})
+		reg, err := panelGate("mindspec-bead-mismatch", []string{root}, "", false, nil)
+		if err != nil || reg == nil {
+			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
+		}
+		out := gateAwareAdvise(gatesCfg, reg)
+		if !strings.Contains(out, "recorded 4") || !strings.Contains(out, "config default is 6") {
+			t.Errorf("expected a mismatch note (recorded 4 vs bead's own default 6), got %q", out)
+		}
+	})
+
+	t.Run("known non-bead gate matching its own default", func(t *testing.T) {
+		reg := &panel.Registration{Panel: panel.Panel{
+			Spec: "112", Round: 1, ExpectedReviewers: 12, Gate: "final_review",
+		}}
+		if out := gateAwareAdvise(gatesCfg, reg); out != "" {
+			t.Errorf("recorded count matches final_review's default (12): expected no note, got %q", out)
+		}
+	})
+
+	t.Run("known non-bead gate mismatching its own default", func(t *testing.T) {
+		reg := &panel.Registration{Panel: panel.Panel{
+			Spec: "112", Round: 1, ExpectedReviewers: 9, Gate: "final_review",
+		}}
+		out := gateAwareAdvise(gatesCfg, reg)
+		if !strings.Contains(out, "recorded 9") || !strings.Contains(out, "config default is 12") {
+			t.Errorf("expected a mismatch note (recorded 9 vs final_review's default 12), got %q", out)
+		}
+	})
+
+	t.Run("non-bead panel with no recorded gate is skipped while gates are configured", func(t *testing.T) {
+		reg := &panel.Registration{Panel: panel.Panel{
+			Spec: "112", Round: 1, ExpectedReviewers: 999,
+		}}
+		if out := gateAwareAdvise(gatesCfg, reg); out != "" {
+			t.Errorf("a non-bead, gate-less panel must skip the note while gates: is configured, got %q", out)
+		}
+	})
+
+	t.Run("unknown recorded gate value is skipped and surfaces no resolver error", func(t *testing.T) {
+		reg := &panel.Registration{Panel: panel.Panel{
+			BeadID: bp("mindspec-x"), Spec: "112", Round: 1, ExpectedReviewers: 999, Gate: "not-a-real-gate",
+		}}
+		if out := gateAwareAdvise(gatesCfg, reg); out != "" {
+			t.Errorf("an unrecognized recorded gate value must skip the note (never call a resolver with it), got %q", out)
+		}
+	})
+
+	t.Run("panel-less complete stays advisory-silent and panic-free, gates configured", func(t *testing.T) {
+		root := t.TempDir()
+		reg, err := panelGate("", []string{root}, "", false, nil) // empty bead ID -> fail-open nil
+		if err != nil || reg != nil {
+			t.Fatalf("expected nil, nil for an empty bead ID (fail-open), got reg=%v err=%v", reg, err)
+		}
+		if out := gateAwareAdvise(gatesCfg, reg); out != "" {
+			t.Errorf("a nil registration must stay silent, got %q", out)
+		}
+	})
+
+	t.Run("panel-less complete stays advisory-silent and panic-free, gates absent", func(t *testing.T) {
+		root := t.TempDir()
+		reg, err := panelGate("", []string{root}, "", false, nil)
+		if err != nil || reg != nil {
+			t.Fatalf("expected nil, nil for an empty bead ID (fail-open), got reg=%v err=%v", reg, err)
+		}
+		if out := gateAwareAdvise(config.DefaultConfig(), reg); out != "" {
+			t.Errorf("a nil registration must stay silent, got %q", out)
+		}
+	})
+
+	t.Run("gates absent: every panel compares against the global default exactly as 109", func(t *testing.T) {
+		root := t.TempDir()
+		writePanel(t, root, "112-global", panel.Panel{
+			BeadID: bp("mindspec-global"), Spec: "112", Round: 1, ExpectedReviewers: 4, Gate: "final_review",
+		}, map[string]string{"a-round-1.json": "APPROVE"})
+		reg, err := panelGate("mindspec-global", []string{root}, "", false, nil)
+		if err != nil || reg == nil {
+			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
+		}
+		out := gateAwareAdvise(config.DefaultConfig(), reg)
+		if !strings.Contains(out, "recorded 4") || !strings.Contains(out, "config default is 6") {
+			t.Errorf("gates-absent must compare against the global default (6) regardless of any recorded gate, got %q", out)
+		}
+	})
 }
 
 // TestWritePanelAuditMetadata_NoPanel_NoWrite: nil registration → no

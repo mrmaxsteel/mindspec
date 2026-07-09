@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,14 @@ and runner: orchestration blocks (spec 109) alongside the pre-existing
 keys — to stdout. Read-only: it writes no file and exits 0 on a valid
 config. The models:, loop:, and runner: blocks are annotated "` + inertAnnotation + `"
 because only panel: and the pre-existing keys drive in-binary behavior
-in this release.`,
+in this release.
+
+With --gate <name> (spec 112 R8/R9), prints that single gate's resolved
+creation-time defaults instead — the expanded reviewer slots, expected
+reviewer count, raw approve_threshold expression, and effective
+substitution policy — as text, or as JSON with --json. --gate accepts one
+of the five panel.gates keys (spec_approve, plan_approve, bead,
+final_review, adhoc); --json requires --gate. Both forms stay read-only.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := findRoot()
 		if err != nil {
@@ -43,18 +51,43 @@ in this release.`,
 		if err != nil {
 			return err
 		}
-		out, err := renderConfig(cfg)
+
+		gate, _ := cmd.Flags().GetString("gate")
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if gate == "" {
+			if asJSON {
+				return fmt.Errorf("--json requires --gate <name>: the resolved view is per-gate\nrecovery: pass --gate (one of %s) alongside --json", strings.Join(config.PanelGateKeys, ", "))
+			}
+			out, err := renderConfig(cfg)
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			fmt.Fprint(w, out)
+			fmt.Fprint(w, reviewerCountNotesFor(cfg, root))
+			return nil
+		}
+
+		if asJSON {
+			data, err := gateResolvedJSON(cfg, gate)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			return nil
+		}
+		out, err := renderGateResolved(cfg, gate)
 		if err != nil {
 			return err
 		}
-		w := cmd.OutOrStdout()
-		fmt.Fprint(w, out)
-		fmt.Fprint(w, reviewerCountNotesFor(cfg, root))
+		fmt.Fprint(cmd.OutOrStdout(), out)
 		return nil
 	},
 }
 
 func init() {
+	configShowCmd.Flags().String("gate", "", "print the resolved creation-time defaults for one panel gate (spec_approve|plan_approve|bead|final_review|adhoc)")
+	configShowCmd.Flags().Bool("json", false, "with --gate, print the resolved view as JSON instead of text")
 	configCmd.AddCommand(configShowCmd)
 }
 
@@ -161,6 +194,14 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintf(&b, "  approve_threshold: %s\n", escapeConfigValue(cfg.PanelApproveThresholdExpr()))
 	fmt.Fprintln(&b, "  substitution:")
 	fmt.Fprintf(&b, "    claude_sub_on_quota: %t\n", cfg.Panel.Substitution.ClaudeSubOnQuota)
+	renderSubstitutes(&b, "    ", cfg.Panel.Substitution.Substitutes)
+	if cfg.Panel.Note != "" {
+		fmt.Fprintf(&b, "  note: %s\n", escapeConfigValue(cfg.Panel.Note))
+	}
+	if err := renderGates(&b, cfg); err != nil {
+		return "", err
+	}
+	renderKnownModelWarnings(&b, cfg)
 	fmt.Fprintln(&b)
 
 	// models: free-form phase -> model-id map, INERT (spec 109 R3). Map
@@ -215,21 +256,290 @@ func renderConfig(cfg *config.Config) (string, error) {
 	return b.String(), nil
 }
 
+// renderSubstitutes renders panel.substitution.substitutes (spec 112 R5) at
+// indent, in sorted-key order — Go map iteration order must never leak into
+// this command's output — followed by the slot-id-preservation convention
+// line: a substituted reviewer writes its verdict under reviewer_id "<slot>
+// <substitute-model>-sub", keeping the slot id, so verdicts stay comparable
+// across rounds. The substitutes key is never omitted (R8): an empty map
+// still renders "substitutes: {}".
+func renderSubstitutes(b *strings.Builder, indent string, substitutes map[string]string) {
+	if len(substitutes) == 0 {
+		fmt.Fprintf(b, "%ssubstitutes: {}\n", indent)
+	} else {
+		fmt.Fprintf(b, "%ssubstitutes:\n", indent)
+		keys := make([]string, 0, len(substitutes))
+		for k := range substitutes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(b, "%s  %s: %s\n", indent, escapeConfigValue(k), escapeConfigValue(substitutes[k]))
+		}
+	}
+	fmt.Fprintf(b, "%s# a substituted reviewer writes reviewer_id \"<slot> <substitute-model>-sub\", keeping the slot id\n", indent)
+}
+
+// renderReviewerEntry renders one AS-CONFIGURED reviewer entry (spec 112
+// R8) — model/family/lens/count exactly as the operator set them, not the
+// resolved chain — at the given indent. Load's validateReviewerEntries
+// guarantees at least one of Model/Family is non-empty, so the leading
+// "- " always gets a field on the same line.
+func renderReviewerEntry(b *strings.Builder, indent string, r config.Reviewer) {
+	fmt.Fprintf(b, "%s- ", indent)
+	wroteFirst := false
+	if r.Model != "" {
+		fmt.Fprintf(b, "model: %s\n", escapeConfigValue(r.Model))
+		wroteFirst = true
+	}
+	if r.Family != "" {
+		if wroteFirst {
+			fmt.Fprintf(b, "%s  family: %s\n", indent, escapeConfigValue(r.Family))
+		} else {
+			fmt.Fprintf(b, "family: %s\n", escapeConfigValue(r.Family))
+			wroteFirst = true
+		}
+	}
+	if r.Lens != "" {
+		fmt.Fprintf(b, "%s  lens: %s\n", indent, escapeConfigValue(r.Lens))
+	}
+	fmt.Fprintf(b, "%s  count: %d\n", indent, r.CountValue())
+}
+
+// renderGates renders panel.gates (spec 112 R8) — only CONFIGURED gates, in
+// config.PanelGateKeys enum declaration order (never map-iteration order) —
+// each with its as-configured reviewer entries, its resolved reviewer sum
+// (PanelGateExpectedReviewers), and its RAW threshold expression
+// (PanelGateApproveThresholdExpr, never resolved to an int here). The gates
+// key is never omitted (R8): no configured gates still renders "gates: {}".
+func renderGates(b *strings.Builder, cfg *config.Config) error {
+	if len(cfg.Panel.Gates) == 0 {
+		fmt.Fprintln(b, "  gates: {}")
+		return nil
+	}
+	fmt.Fprintln(b, "  gates:")
+	for _, gate := range config.PanelGateKeys {
+		gp, ok := cfg.Panel.Gates[gate]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(b, "    %s:\n", escapeConfigValue(gate))
+		if len(gp.Reviewers) > 0 {
+			fmt.Fprintln(b, "      reviewers:")
+			for _, r := range gp.Reviewers {
+				renderReviewerEntry(b, "        ", r)
+			}
+		}
+		sum, err := cfg.PanelGateExpectedReviewers(gate)
+		if err != nil {
+			return err
+		}
+		expr, err := cfg.PanelGateApproveThresholdExpr(gate)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "      expected_reviewers: %d\n", sum)
+		fmt.Fprintf(b, "      approve_threshold: %s\n", escapeConfigValue(expr))
+	}
+	return nil
+}
+
+// renderKnownModelWarnings appends one advisory comment per DISTINCT model
+// id — drawn from the global reviewers, every configured gate's reviewers,
+// and either side of substitutes — that is absent from config.KnownModels()
+// (spec 112 R8). Advisory-only by construction: never consulted by
+// validation, never affects the exit code (an unrecognized id still exits
+// 0); ids are deduplicated and sorted for deterministic output.
+func renderKnownModelWarnings(b *strings.Builder, cfg *config.Config) {
+	known := make(map[string]bool, len(config.KnownModels()))
+	for _, m := range config.KnownModels() {
+		known[m] = true
+	}
+	seen := make(map[string]bool)
+	var unknown []string
+	add := func(id string) {
+		if id == "" || known[id] || seen[id] {
+			return
+		}
+		seen[id] = true
+		unknown = append(unknown, id)
+	}
+	collect := func(reviewers []config.Reviewer) {
+		for _, r := range reviewers {
+			id := r.Model
+			if id == "" {
+				id = r.Family
+			}
+			add(id)
+		}
+	}
+	collect(cfg.Panel.Reviewers)
+	for _, gate := range config.PanelGateKeys {
+		if gp, ok := cfg.Panel.Gates[gate]; ok {
+			collect(gp.Reviewers)
+		}
+	}
+	for k, v := range cfg.Panel.Substitution.Substitutes {
+		add(k)
+		add(v)
+	}
+	sort.Strings(unknown)
+	for _, id := range unknown {
+		fmt.Fprintf(b, "  # model %s not in the known-model list — fine if intentional\n", escapeConfigValue(id))
+	}
+}
+
+// gateResolvedSlot is one member of gateResolvedDoc.Slots — the JSON/text
+// shape of a config.ReviewerSlot (spec 112 R9).
+type gateResolvedSlot struct {
+	Slot  string `json:"slot"`
+	Model string `json:"model"`
+	Lens  string `json:"lens"`
+}
+
+// gateResolvedSubstitution is the "substitution" member of gateResolvedDoc
+// (spec 112 R9): the effective substitution policy. Substitutes marshals
+// through encoding/json, which emits map keys in sorted order — the same
+// ordering renderSubstitutes uses for the text path — so both paths agree.
+// InForce is "substitutes" when Substitutes is non-empty (R5: the map IS
+// the policy), else "claude_sub_on_quota" (the legacy field keeps its 109
+// meaning).
+type gateResolvedSubstitution struct {
+	Substitutes      map[string]string `json:"substitutes"`
+	ClaudeSubOnQuota bool              `json:"claude_sub_on_quota"`
+	InForce          string            `json:"in_force"`
+}
+
+// gateResolvedDoc is the R9 stable contract: config show --gate <name>
+// --json's exact five members. Evolution is additive-only (documented in
+// .mindspec/domains/workflow/interfaces.md) — renaming, retyping, or
+// removing a member here is a breaking change no follow-up may make
+// silently.
+type gateResolvedDoc struct {
+	Gate              string                   `json:"gate"`
+	Slots             []gateResolvedSlot       `json:"slots"`
+	ExpectedReviewers int                      `json:"expected_reviewers"`
+	ApproveThreshold  string                   `json:"approve_threshold"`
+	Substitution      gateResolvedSubstitution `json:"substitution"`
+}
+
+// buildGateResolvedDoc resolves gate's creation-time defaults entirely
+// through the R3 config resolvers (PanelGateReviewerSlots/
+// PanelGateExpectedReviewers/PanelGateApproveThresholdExpr), so
+// renderGateResolved and gateResolvedJSON cannot disagree with them or with
+// each other — both delegate here. Returns the resolver's own ADR-0035
+// error (already carrying a "recovery:" line enumerating the five valid
+// gate keys) for a gate name outside config.PanelGateKeys.
+func buildGateResolvedDoc(cfg *config.Config, gate string) (gateResolvedDoc, error) {
+	slots, err := cfg.PanelGateReviewerSlots(gate)
+	if err != nil {
+		return gateResolvedDoc{}, err
+	}
+	expected, err := cfg.PanelGateExpectedReviewers(gate)
+	if err != nil {
+		return gateResolvedDoc{}, err
+	}
+	threshold, err := cfg.PanelGateApproveThresholdExpr(gate)
+	if err != nil {
+		return gateResolvedDoc{}, err
+	}
+
+	docSlots := make([]gateResolvedSlot, len(slots))
+	for i, s := range slots {
+		docSlots[i] = gateResolvedSlot{Slot: s.Slot, Model: s.Model, Lens: s.Lens}
+	}
+
+	inForce := "claude_sub_on_quota"
+	if len(cfg.Panel.Substitution.Substitutes) > 0 {
+		inForce = "substitutes"
+	}
+
+	// A config with no configured substitutes leaves this map nil; marshal
+	// it as "{}" (never "null") so JSON consumers (e.g. jq) can always
+	// index into .substitution.substitutes without a null-check, matching
+	// the never-null treatment renderSubstitutes already gives the text
+	// path and slots gives docSlots above.
+	substitutes := cfg.Panel.Substitution.Substitutes
+	if substitutes == nil {
+		substitutes = map[string]string{}
+	}
+
+	return gateResolvedDoc{
+		Gate:              gate,
+		Slots:             docSlots,
+		ExpectedReviewers: expected,
+		ApproveThreshold:  threshold,
+		Substitution: gateResolvedSubstitution{
+			Substitutes:      substitutes,
+			ClaudeSubOnQuota: cfg.Panel.Substitution.ClaudeSubOnQuota,
+			InForce:          inForce,
+		},
+	}, nil
+}
+
+// gateResolvedJSON marshals gate's resolved view (spec 112 R9) with the
+// real encoding/json encoder — never string concatenation — so a hostile
+// config-controlled string (a model id, a lens, a substitutes key/value)
+// round-trips as a properly escaped JSON string rather than forging
+// document structure.
+func gateResolvedJSON(cfg *config.Config, gate string) ([]byte, error) {
+	doc, err := buildGateResolvedDoc(cfg, gate)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(doc)
+}
+
+// renderGateResolved renders gate's resolved view (spec 112 R8/R9) as
+// human-readable text: the expanded slots, expected reviewer count, raw
+// approve_threshold expression, and effective substitution policy — every
+// config-controlled string escaped. Delegates to buildGateResolvedDoc so
+// this cannot disagree with gateResolvedJSON or the R3 resolvers.
+func renderGateResolved(cfg *config.Config, gate string) (string, error) {
+	doc, err := buildGateResolvedDoc(cfg, gate)
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "gate: %s\n", escapeConfigValue(doc.Gate))
+	fmt.Fprintln(&b, "slots:")
+	for _, s := range doc.Slots {
+		fmt.Fprintf(&b, "  - slot: %s\n", escapeConfigValue(s.Slot))
+		fmt.Fprintf(&b, "    model: %s\n", escapeConfigValue(s.Model))
+		fmt.Fprintf(&b, "    lens: %s\n", escapeConfigValue(s.Lens))
+	}
+	fmt.Fprintf(&b, "expected_reviewers: %d\n", doc.ExpectedReviewers)
+	fmt.Fprintf(&b, "approve_threshold: %s\n", escapeConfigValue(doc.ApproveThreshold))
+	fmt.Fprintln(&b, "substitution:")
+	renderSubstitutes(&b, "  ", doc.Substitution.Substitutes)
+	fmt.Fprintf(&b, "  claude_sub_on_quota: %t\n", doc.Substitution.ClaudeSubOnQuota)
+	fmt.Fprintf(&b, "  in_force: %s\n", doc.Substitution.InForce)
+
+	return b.String(), nil
+}
+
 // reviewerCountNotesFor scans registered panels under root's review roots
 // and returns one panel.ReviewerCountNote line per panel whose recorded
-// expected_reviewers differs from cfg's current PanelExpectedReviewers
-// default (spec 109 R8) — empty when no panel is registered or every
-// recorded count matches, the common case. The scan/append lives HERE, not
-// in renderConfig, which stays pure over *config.Config alone (R9); this
-// function performs the ONLY fs I/O `config show` does, and it is
-// read-only — panel.Scan opens no files for writing. A malformed
+// expected_reviewers differs from the gate-appropriate config default (spec
+// 109 R8, gate-aware per spec 112 R7) — empty when no panel is registered or
+// every recorded count matches, the common case. The scan/append lives
+// HERE, not in renderConfig, which stays pure over *config.Config alone
+// (R9); this function performs the ONLY fs I/O `config show` does, and it
+// is read-only — panel.Scan opens no files for writing. A malformed
 // registration (Err != nil) is skipped: it has no ExpectedReviewers to
-// compare.
+// compare. cfg.PanelGateAdvisoryDefault is the SAME single-home selection
+// rule internal/complete's reviewerCountAdvisory call site resolves
+// through, so the two callers cannot drift from each other; a registration
+// where ok is false (the R7 skip carve-outs) is skipped.
 func reviewerCountNotesFor(cfg *config.Config, root string) string {
 	var b strings.Builder
-	configDefault := cfg.PanelExpectedReviewers()
 	for _, reg := range panel.Scan(configShowReviewRoots(root)...) {
 		if reg.Err != nil {
+			continue
+		}
+		configDefault, ok := cfg.PanelGateAdvisoryDefault(reg.Panel.Gate, reg.Panel.IsBead())
+		if !ok {
 			continue
 		}
 		note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault)
