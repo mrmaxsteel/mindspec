@@ -454,13 +454,23 @@ func buildGateResolvedDoc(cfg *config.Config, gate string) (gateResolvedDoc, err
 		inForce = "substitutes"
 	}
 
+	// A config with no configured substitutes leaves this map nil; marshal
+	// it as "{}" (never "null") so JSON consumers (e.g. jq) can always
+	// index into .substitution.substitutes without a null-check, matching
+	// the never-null treatment renderSubstitutes already gives the text
+	// path and slots gives docSlots above.
+	substitutes := cfg.Panel.Substitution.Substitutes
+	if substitutes == nil {
+		substitutes = map[string]string{}
+	}
+
 	return gateResolvedDoc{
 		Gate:              gate,
 		Slots:             docSlots,
 		ExpectedReviewers: expected,
 		ApproveThreshold:  threshold,
 		Substitution: gateResolvedSubstitution{
-			Substitutes:      cfg.Panel.Substitution.Substitutes,
+			Substitutes:      substitutes,
 			ClaudeSubOnQuota: cfg.Panel.Substitution.ClaudeSubOnQuota,
 			InForce:          inForce,
 		},

@@ -551,6 +551,20 @@ panel:
 	if err != nil {
 		t.Fatalf("gateResolvedJSON: %v", err)
 	}
+
+	// A nil (unconfigured) substitutes map must marshal to "{}", never
+	// "null" — checked on the RAW JSON STRING, not via unmarshal-into-struct,
+	// since both nil and {} decode to an equivalent empty Go map and would
+	// hide a "null" regression. A "null" here breaks jq consumers doing
+	// `.substitution.substitutes|keys` and contradicts the never-null
+	// treatment slots and the text path (renderSubstitutes) already give.
+	if !bytes.Contains(data, []byte(`"substitutes":{}`)) {
+		t.Errorf("expected raw JSON to contain %q for an unconfigured substitutes map, got: %s", `"substitutes":{}`, data)
+	}
+	if bytes.Contains(data, []byte(`"substitutes":null`)) {
+		t.Errorf("substitutes must never marshal to null, got: %s", data)
+	}
+
 	var flipped struct {
 		Substitution struct {
 			InForce string `json:"in_force"`
