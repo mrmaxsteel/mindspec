@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "G2 (82b28b2f) does not regress R1 and the zero-internal-diff fence still holds. (1) git diff 45ae7577..0f7e1a1a over gate.go/panel.go/internal/instruct/internal/complete is EMPTY; the only internal/panel/*.go change is create.go's +13 Gate field (decision-inert metadata, omitempty, byte-identical when omitted). tallyExitAction is STILL 2-arg (d, slug); only tallyExitActionNonBead gained the gate param (d, slug, target, gate), fed from reg.Panel.Gate. (2) sanitizeNonBeadDecision only touches d.Message and returns d — Action is never mutated; leg(5)/(5b) still rewrite the bead/ fragments to target-naming text, no bead/ leak. Escaping is display-only: escapeConfigValue returns clean printable-ASCII targets UNCHANGED (no-op for every real branch/spec ref), and shellQuoteTarget only wraps the copyable recovery command. Block still returns guard.NewFailure (non-zero). (3) All pins PASS incl. new TestPanelTally_NonBeadHostileTargetEscapedAndQuoted and the stale/advance/REJECT non-bead blockers.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"severity": "info", "area": "zero-internal-diff", "detail": "Decision-logic files (gate.go, panel.go, internal/instruct, internal/complete) have an EMPTY diff vs merge-base. Sole internal change is create.go +13 (R3 Gate field, decision-inert, omitempty → byte-identical when omitted). tallyExitAction unchanged at 2-arg; gate param went to the non-bead variant only."},
+    {"severity": "info", "area": "r1-no-regression", "detail": "escapeConfigValue is a proven no-op for clean printable-ASCII (0x20-0x7e) targets, so every real branch/spec ref renders identically. Escaping is applied to display strings and the copyable recovery command only; sanitizeNonBeadDecision never mutates d.Action and leaks no bead/ ref; non-bead Block still returns a non-zero guard.NewFailure."},
+    {"severity": "info", "area": "pins", "detail": "go test ./cmd/mindspec ./internal/panel -run 'NonBead|Sanitize|PanelVerify|PanelTally' -v — ALL PASS, including the added TestPanelTally_NonBeadHostileTargetEscapedAndQuoted (control-byte escaped, shell-metachar single-quoted) and the non-bead advance/REJECT/stale/incomplete blockers."}
+  ]
+}
