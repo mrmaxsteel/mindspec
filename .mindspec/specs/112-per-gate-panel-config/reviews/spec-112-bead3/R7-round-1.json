@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "R7 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.75,
+  "rationale": "Escaping is genuinely complete: I built the binary and drove a hostile config (ANSI ESC, BEL, embedded newlines forging 'recovery:' lines) through note, gate reviewer model/lens, substitutes key AND value, the known-model warning, and a hostile --gate name — every path emerged strconv.Quote'd or %q'd, no raw control byte reached the terminal on any text path. JSON is encoding/json end-to-end; hostile bytes round-trip byte-exact (jq decodes the key back to a raw newline). Nil-guard is sufficient (Registration.Panel is a value field, panel.go:166). Threshold stays raw ('n-1' for final_review, not 11). 9/9/6/12 reproduces; adhoc slots == bead slots; unknown --gate exits 1 with the five-key recovery; fence and leaf invariant hold. One real contract defect: with substitutes unconfigured (the DEFAULT config), --gate --json emits \"substitutes\":null — R9 and interfaces.md pin the member as a map, the text path renders {}, and the named jq consumers ('.substitution.substitutes|keys') error on null. Unexamined by tests. One-line fix.",
+  "concrete_changes_required": [
+    "cmd/mindspec/config.go buildGateResolvedDoc: backfill a non-nil map before constructing the doc — `subs := cfg.Panel.Substitution.Substitutes; if subs == nil { subs = map[string]string{} }` and pass `subs` into gateResolvedSubstitution — so an unconfigured/empty substitutes emits {} (JSON object, matching the pinned 'map' type in spec R9 / interfaces.md and the text path's never-omit {}), never null. Extend the existing empty-substitutes flip test (config_test.go ~:548-563) to also assert the marshaled bytes contain \"substitutes\":{}."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "medium",
+      "class": "contract",
+      "summary": "R9 pinned JSON doc emits \"substitutes\":null for an unconfigured/empty map (the default-config case) — a non-map JSON type for a member spec R9 and interfaces.md document as 'the substitutes map', and inconsistent with the text path's explicit 'substitutes: {}' never-omit rendering and with slots (make() guarantees [] never null). jq consumers ('.substitution.substitutes|keys', the ms-panel-run step-0 / spec-110 writer pattern R9 names) error on null. Empirically reproduced: `config show --gate bead --json` over a substitutes-less config prints {\"substitutes\":null,...}. The empty-substitutes test asserts only in_force, so the shape is unexamined, not deliberate. Fixing it NOW matters because R9's additive-only stability clause makes null→{} a riskier change once 110/111 consume the surface.",
+      "hard_block": false
+    },
+    {
+      "id": "F2",
+      "severity": "none",
+      "class": "escaping-verified",
+      "summary": "Traced every config-controlled string to stdout and probed empirically with hostile bytes: note (config.go:199), gate name (326), threshold expr (342, 503), reviewer model/family/lens (292-306, 499-500), substitutes key+value (277), known-model warning id (388), slot fields (498-500) — all through escapeConfigValue; the safe-set rule (printable ASCII passthrough, strconv.Quote otherwise) cannot emit a raw newline or ESC. The --gate error echoes the hostile name via %q (internal/config gateKeyError, config.go:709). The '--json requires --gate' line embeds only PanelGateKeys constants. No injection path found; a forged 'recovery:' line is not constructible from config."
+    },
+    {
+      "id": "F3",
+      "severity": "none",
+      "class": "nil-guard-verified",
+      "summary": "panelReg != nil is sufficient at complete.go:389: Registration.Panel is a VALUE (panel.go:166 `Panel Panel`), not a pointer, so no sub-field nil deref exists; Panel.IsBead() nil-checks BeadID internally; reviewerCountAdvisory re-checks reg/Err/w. panelGate's fail-open nil returns stay advisory-silent and panic-free (TestPanelAdvisory_GateAwareCompare covers the carve-outs)."
+    },
+    {
+      "id": "F4",
+      "severity": "low",
+      "class": "observation-nonblocking",
+      "summary": "Two non-blocking observations, neither this bead's defect: (a) the GLOBAL panel.reviewers block still renders only family/count (config.go:181-186), so a model-only global entry prints a misleading empty '- family:' line with model/lens visible only via the known-model warning — 109-era render shape, R8 mandates model/lens render for gates only; (b) reviewerCountNotesFor writes reg.Slug() (an fs-controlled panel-directory basename, not a config string) unescaped at config.go:539 — pre-existing 109 line, untouched by this diff; suggest routing it through escapeConfigValue in the naq0 hardening follow-up."
+    },
+    {
+      "id": "F5",
+      "severity": "none",
+      "class": "acceptance-verified",
+      "summary": "Headline proof reproduced against the spec Goal YAML: sums 9/9/6/12 in enum order; --gate final_review --json slots=12, approve_threshold='n-1' RAW (resolution to 11 stays single-homed in panel.ApproveThreshold — no resolved-number leakage); adhoc slots byte-equal bead slots; unknown --gate exit 1 + five-key recovery; --json sans --gate refused with its own recovery; text gates:/substitutes: render {} when empty; unknown-model warnings exit-inert (exit 0). Scope fence holds: diff touches no internal/config; `go list -deps ./internal/panel | grep internal/config` empty; cobra flag-reset is test-only hygiene (RunE reads cmd.Flags() directly, config.go:55-56 — no package-var capture)."
+    }
+  ]
+}

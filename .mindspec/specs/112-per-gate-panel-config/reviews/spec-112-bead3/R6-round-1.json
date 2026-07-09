@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R6 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "R9 contract is stable, additive-only, and explicitly names spec 111 as the consumer: gateResolvedDoc (cmd/mindspec/config.go:413-424) has exactly 5 JSON members via real encoding/json, with a documented no-silent-break guarantee mirrored verbatim in interfaces.md and architecture.md. buildGateResolvedDoc calls only Bead-1's R3 resolvers (PanelGateReviewerSlots/ExpectedReviewers/ApproveThresholdExpr) and PanelGateAdvisoryDefault/PanelGateKeys/KnownModels are all pre-existing config-package symbols — no parallel/duplicate definitions in this diff, confirming clean composition with Beads 1-2. Grepped all Go files for the new surfaces (gateResolvedJSON, buildGateResolvedDoc, PanelGateAdvisoryDefault): referenced only in cmd/mindspec and internal/complete plus their tests/definitions -- no runner/dispatch package touches them, confirming the whole feature stays inert-but-observable (declarable + inspectable, no enforcement). internal/config diff is empty (scope fence honored); internal/panel leaf invariant holds (go list -deps | grep internal/config: no match). complete.go's advisory call is correctly nil-guarded on panelReg before dereferencing panelReg.Panel, and sits after the Allow/Block decision is already returned. Doc-sync between interfaces.md and architecture.md is coherent and consistent.",
+  "concrete_changes_required": [],
+  "findings": [
+    "R9 stability guarantee for the 5-member gateResolvedDoc JSON contract is explicit in both interfaces.md:139-141 and architecture.md:190-194, and both name spec 110 (panel.json writer) and spec 111 (orchestration runner) as consumers -- a stable read surface (resolved slots + threshold + substitution) is in place for 111 to build on.",
+    "Resolvers called by this bead (PanelGateAdvisoryDefault, PanelGateReviewerSlots, PanelGateExpectedReviewers, PanelGateApproveThresholdExpr, PanelGateKeys, KnownModels) and the Panel.Gate/IsBead() surface are all pre-existing from Beads 1-2 -- confirmed via grep, no dangling references or reimplementation.",
+    "New symbols (gateResolvedJSON, buildGateResolvedDoc, PanelGateAdvisoryDefault usage) are referenced only from cmd/mindspec/config.go and internal/complete/complete.go -- no runner or dispatch package consumes them, so the feature remains observable-only with no accidental activation of enforcement behavior.",
+    "Scope fence confirmed: git show --stat shows zero internal/config edits in this commit; go list -deps ./internal/panel has no internal/config in its dependency closure.",
+    "internal/complete/complete.go's gate-aware advisory call is correctly guarded on panelReg != nil ahead of the panelReg.Panel dereference, and runs strictly after panelGateErr is checked/returned, so Allow/Block is untouched by this bead."
+  ]
+}

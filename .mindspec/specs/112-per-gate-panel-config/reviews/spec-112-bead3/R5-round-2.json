@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R5 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Fix verified on the delta at 75c17fd9 (isolated detached worktree, absolute /tmp paths throughout — no relative-path scratch writes). The nil-guard in buildGateResolvedDoc normalizes cfg.Panel.Substitution.Substitutes to map[string]string{} only for the JSON-doc field; the separate `inForce` variable is still computed off the original `cfg.Panel.Substitution.Substitutes` (len(nil)==0 == len({})==0), so in_force is unaffected — confirmed empirically both ways: empty substitutes -> {\"substitutes\":{},...,\"in_force\":\"claude_sub_on_quota\"}, non-empty -> populated map + \"in_force\":\"substitutes\". `jq '.substitution.substitutes|keys'` now returns [] instead of erroring. Reverted just the config.go half of the diff on a throwaway copy and reran TestConfigShowGate_ResolvedJSON: it fails exactly as expected (both the contains-{} and not-contains-null assertions catch the null), so the regression test is real, not decorative. grep confirms Substitutes is the only map-typed field feeding gateResolvedDoc/JSON (slots already used non-nil make()); no other member carries this pattern. go build/test green (cmd/mindspec, internal/complete, internal/config).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "round-1 substitutes:null vs {} in --gate --json",
+      "disposition": "ADDRESSED",
+      "description": "buildGateResolvedDoc now normalizes a nil Substitutes map to {} before building the doc; empirically confirmed the raw JSON now reads \"substitutes\":{} for an unconfigured config, jq keys works, and in_force still flips correctly both directions. The new raw-string test assertions in TestConfigShowGate_ResolvedJSON demonstrably fail against the pre-fix code (verified by reverting just that file and rerunning), so they would have caught the round-1 bug."
+    }
+  ]
+}

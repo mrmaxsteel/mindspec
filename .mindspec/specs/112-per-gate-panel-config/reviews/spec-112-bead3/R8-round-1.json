@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R8 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "I built the reviewed commit and ran the requested targeted tests; they passed. A scratch per-gate config rendered gates in enum order with sums matching configured counts, final JSON had 10 slots, raw threshold \"8\", and exactly the documented 5 top-level keys. Hostile note, lens/model, and substitutes key/value carrying ESC, CR, newline, and forged recovery text produced no raw ESC/CR/BEL or forged line on text paths, including known-model warnings, while JSON decoded byte-exactly. Unknown gate and --json without --gate refused non-zero with recovery text and no repo writes. Scope fence held: only the six named files, no internal/config edits, and internal/panel still does not depend on internal/config. Cobra flag reset appears test-only hygiene; shipped code reads flags from the command.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "none",
+      "summary": "No terminal-injection or JSON-contract defect found in the reviewed bead."
+    }
+  ]
+}
