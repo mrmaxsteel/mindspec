@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "The four beads are complete and integrable. R1 is reachable through the shared GateIO/revParseForPanelFn path: verify and tally both call resolvePanelGateFacts, ResolveGateFacts classifies wrapped gitutil.ErrRefNotFound through the executor IsRefNotFound seam, and CLI-only sanitization can preserve internal/panel, internal/instruct, and internal/complete behavior. R1 covers both stale-target and unadvanced REJECT cases. R2 has a real source pin, node metachar matrix, mirror cmp, and plugin tests. R3 specifies both writer changes and tests for gate stamping, invalid-gate no-write/five-key recovery, omitted-gate byte identity, and advisory read-through via reviewerCountNotesFor/config show. R4 pins both accepted empty-model-with-family and refused empty-model-alone cases. The R1/R3 overlap in cmd/mindspec/panel.go and panel_test.go is a merge-adjacency issue; landing R1 first is sufficient. AC-global is wired through the whole-spec build/test gate and R1 zero-diff fence.",
+  "concrete_changes_required": [],
+  "findings": []
+}

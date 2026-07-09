@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "113-panel-verb-workflow-followups",
+  "target": "spec/113-panel-verb-workflow-followups",
+  "round": 2,
+  "expected_reviewers": 9,
+  "reviewed_head_sha": "6d9b1f6211fcd69c3d8bfb7433a10340193666ee"
+}
