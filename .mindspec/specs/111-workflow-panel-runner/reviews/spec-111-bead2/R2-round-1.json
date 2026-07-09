@@ -1,0 +1,20 @@
+{
+  "reviewer_id": "R2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Codebase-pin lens: every claim verified against 1ad0d796. `go build ./...` clean. `go test -count=1 ./plugins/... ./internal/setup/...` both packages green (0 failures in scope). Named tests PASS: TestWorkflowFiles_EmbedsMsPanel, TestMsPanelWorkflow_AllowedCLIExactSet, TestRunClaude_FreshSetup, TestRunClaude_Idempotent. `diff -q plugins/mindspec/workflows/ms-panel.js .claude/workflows/ms-panel.js` -> identical (526 lines each, byte-for-byte). WorkflowFiles() exists at embed.go:55 (flat basename map, //go:embed workflows/*) and is consumed at claude.go:167 and claude_test.go:120. installWorkflows is defined at claude.go:217 and called ONLY at claude.go:167 inside RunClaude (def claude.go:148); RunCodex (codex.go) and RunCopilot (copilot.go) contain zero references. A dedicated test TestClaudeSetup_InstallsWorkflowClaudeTargetOnly PASSES, proving RunCodex/RunCopilot create no .claude/workflows nor .agents/workflows -- stronger than a grep. Created-count edit is base+1: FreshSetup 14->15, Idempotent Skipped 14->15 (base 14 on this branch, +1 for the workflow file), consistent with the tests' passing runtime count. Scope-fence exact: 7 files, +1487/-9. Left git status clean; no /tmp scratch used.",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... : clean.",
+    "go test -count=1 ./plugins/... ./internal/setup/... : both green (ok plugins/mindspec 0.885s, ok internal/setup 19.421s).",
+    "TestWorkflowFiles_EmbedsMsPanel PASS; TestMsPanelWorkflow_AllowedCLIExactSet PASS.",
+    "TestRunClaude_FreshSetup PASS; TestRunClaude_Idempotent PASS.",
+    "diff -q both ms-panel.js copies -> identical; wc -l = 526 each.",
+    "WorkflowFiles() defined plugins/mindspec/embed.go:55; used internal/setup/claude.go:167 + claude_test.go:120.",
+    "installWorkflows called ONLY at claude.go:167 inside RunClaude (claude.go:148); no reference in codex.go RunCodex or copilot.go RunCopilot.",
+    "Bonus test TestClaudeSetup_InstallsWorkflowClaudeTargetOnly PASS: RunCodex/RunCopilot produce no .claude/workflows or .agents/workflows.",
+    "Created-count is base+1: FreshSetup len(Created) 14->15; Idempotent Skipped 14->15 -- matches passing runtime count of 15.",
+    "Commit scope exact: 7 files, +1487/-9 insertions, matching the BRIEF manifest.",
+    "The 2 known pre-existing failures (harness, instruct z4ps) are outside the two tested packages -- both packages reported ok."
+  ]
+}

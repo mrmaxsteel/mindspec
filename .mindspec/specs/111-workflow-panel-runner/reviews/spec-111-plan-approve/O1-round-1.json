@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.7,
+  "rationale": "I fetched the cited docs (code.claude.com/docs/en/workflows). The workflow platform is real and accurately described: `.claude/workflows/*.js`, `/ms-panel` invocation, the `args` global, the verbatim 'No direct filesystem or shell access from the workflow itself. Agents read, write, and run commands' limit, `agent()` steps, and a top-level `return` result. The embed/install/ownership plumbing (Bead 1, Bead 2 setup, the tests) mirrors real existing patterns (SkillFiles/installSkills, TestWorkflowOwnsTraceAndGolangci, attributeDomain signature, created-count 14->15) and is fully implementable by a Sonnet impl. But one load-bearing platform claim is FALSE: the plan (Testing Strategy, ADR-fitness (b), and the 'No platform output-schema dependency' section at :645) asserts the docs 'describe no structured-output enforcement.' The docs' own example shows `agent(prompt, { schema: {...} })` enforcing an agent's returned shape, plus the Agent SDK Workflow-tool reference. The workflow will still function, so this is not a REJECT, but the false premise both mis-describes the platform and steers the impl away from schema-shaping the verdict at the source.",
+  "concrete_changes_required": [
+    "Correct the false platform claim in the PLAN (no spec edit needed): plan.md:141-142 ('platform-level output-schema guarantee ... the docs describe none'), :406 ('not assumed as a platform guarantee (the docs describe none)'), and :645-646 ('The Claude Code workflows docs describe no structured-output enforcement'). The cited docs (code.claude.com/docs/en/workflows, 'What the saved script looks like') show the documented `agent(prompt, { schema })` option that constrains an agent step's structured RETURN value, and point to the Agent SDK Workflow-tool reference for the full option set. Replace 'the docs describe no output-schema enforcement' with the accurate statement.",
+    "Reconcile the design against the real API in Bead 2: state precisely why `mindspec panel verify` is still required despite `schema` (the 110 contract is an on-disk `<slot>-round-<N>.json` FILE the agent writes, which the return-value `schema` does not itself govern), AND direct each reviewer `agent()` step to use the `schema` option to produce a 110-shaped verdict object and write that same schema-validated object to the file. Conformance then holds at the source for claude slots (and the wrapper's transcription for codex slots), making the R3 re-serialize ladder the exceptional fallback rather than the primary conformance mechanism. This changes no spec requirement (R3's ladder still exists); it strengthens the implementation the plan hands a Sonnet impl.",
+    "Minor: name the concrete fan-out primitive the workflow uses for one-agent-per-slot. Docs provide `agent()` (single) and `pipeline(list, fn)` (one per item); there is no documented `parallel()`. Bead 2 step 3's abstract 'emit one agent step per slot' should specify `pipeline()` (or an explicit loop of `agent()` calls) so the impl doesn't reach for a non-existent primitive."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "area": "platform claim accuracy (implementability lens)",
+      "detail": "The plan repeatedly states the Claude Code workflows docs describe no structured-output/output-schema enforcement (plan.md:141-142, :406, :645-646; inherited from spec.md:27/:59/:102/:141). The cited docs' worked example is `agent('...', { schema: { type: 'object', required: ['files'], properties: { files: {...} } } })` and then reads `found.files` as validated structured data, with the Agent SDK Workflow-tool reference cited for 'the full set of options.' The `schema` option is real and documented. The claim is factually wrong against the very URL the spec cites."
+    },
+    {
+      "severity": "low",
+      "area": "design consequence of the false premise",
+      "detail": "Because the plan believes no schema mechanism exists, claude slots are only 'prompted with the 110 verdict-JSON shape' (plan.md:394) and conformance is enforced purely post-hoc via `panel verify` + the same-reviewer re-serialize ladder (R3). A schema-validated agent return, written to the contract file by the same agent, would eliminate the parse-failure class at the source for claude slots — precisely the failure class R3 exists to catch — making the ladder an exception path. The conclusion (panel verify still needed for the on-disk FILE contract) is defensible; the stated justification is not, and it yields a strictly more fragile design than the real API supports."
+    },
+    {
+      "severity": "info",
+      "area": "platform behaviors that ARE real (verified)",
+      "detail": "Confirmed accurate against the docs: dynamic-workflow feature exists (v2.1.154+, paid plans); `.claude/workflows/` project vs `~/.claude/workflows/` user save locations; `/name` slash invocation; `args` global passed as structured data; 'No direct filesystem or shell access from the workflow itself. Agents read, write, and run commands. The script coordinates the agents' (exact quote); agents run shell/write files (so the codex-wrapper + `.codex.log` + verdict-file-write design and the agent-returned-status substitution branch are all realizable); top-level `return` result; session-scoped resume. The plan's honest-limits framing is correct on every point except the schema claim."
+    },
+    {
+      "severity": "info",
+      "area": "plumbing implementability (strong)",
+      "detail": "Bead 1 mirrors an exact existing pattern: `attributeDomain(nil, root, \"\", path, domains)` (ownership.go:361), `repoRootForWorkflowManifest(t)` + `TestWorkflowOwnsTraceAndGolangci` (ownership_wave2_test.go), path-glob-only so it passes on the claim alone. Bead 2 setup: `WorkflowFiles()` mirrors `SkillFiles()` (embed.go), `installWorkflows` mirrors `installSkills` (skills.go:105) writing flat `<dir>/<basename>`; created-count 14->15 is correct (claude_test.go:24/:102 assert 14; TestSkillInventory stays 12). No pre-existing `.claude/workflows/` refs, so it is genuinely new but cleanly patterned. A Sonnet impl succeeds on these from the steps alone."
+    }
+  ]
+}

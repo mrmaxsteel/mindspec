@@ -225,6 +225,64 @@ raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
 
 ## Maintenance Notes
 
+- **2026-07-09 (spec 111 Bead 2, the `/ms-panel` workflow adapter — R1-R5,
+  R3b, R8):** `plugins/mindspec/workflows/ms-panel.js` (embedded and
+  installed byte-identical to `.claude/workflows/ms-panel.js`) is the first
+  Claude Code **dynamic workflow** MindSpec ships — a `.js` orchestration
+  script invocable as `/ms-panel` that coordinates agents and performs no
+  shell/file I/O itself (every CLI call and file write below is an `agent()`
+  step).
+  **Args contract:** `{slug, spec, target, bead_id?, round, sha?, lenses[],
+  mix, claude_sub_on_quota?}`. `mix` and `claude_sub_on_quota` are resolved
+  by the invoking skill (`ms-panel-run`, spec 111 Bead 3) from config
+  `panel:` / `panel.substitution.claude_sub_on_quota` (spec 109) — this
+  workflow never reads `.mindspec/config.yaml` itself (no fs access, and
+  `mindspec config show` is deliberately outside `ALLOWED_CLI`).
+  `claude_sub_on_quota` is not part of spec 111 R1's illustrative args tuple;
+  it is the field this bead adds and documents here so Bead 3 can rely on it.
+  `sha` is advisory-only display text — the workflow never reads it to set
+  the recorded SHA.
+  **Input hardening** runs before any command or path is built: `slug`,
+  `spec`, `bead_id` (optional), and every `mix[].family` are validated
+  against the clean-single-path-element contract (reject empty, `.`, `..`,
+  `/`, `\`, control bytes); `target` against a branch-name-safe grammar
+  (reject empty, control bytes, a leading `-`, `git check-ref-format`
+  disallowed constructs, a trailing `/` or `.lock`, whitespace); `target` and
+  `bead_id` additionally reject shell metacharacters; `round` must be a
+  positive integer. Any failure throws before registration runs.
+  **`buildCommand(verb, ...values)`** is the sole command-construction
+  chokepoint: `verb` must be one of the four identifiers destructured from
+  the static `ALLOWED_CLI` array (`mindspec panel create`, the sandboxed
+  `codex exec --sandbox read-only --skip-git-repo-check`, `mindspec panel
+  verify`, `mindspec panel tally`), and every value is rejected if it starts
+  with `-` (argument-injection guard). The lifecycle merge-terminal command
+  appears nowhere in the file.
+  **Fan-out (R3/R3b):** `mix` flattens into `{slotId, family, lens}`
+  descriptors (`slotId` from a fixed `R1, R2, …` enumeration, never from
+  args), fanned out via `pipeline()`. A `claude` slot is a single `agent()`
+  step that writes its verdict to `<panel-dir>/<slot>-round-<N>.json`. A
+  `codex` slot is a **wrapper agent**: it execs the sandboxed codex command,
+  persists codex's raw stdout verbatim to `<slot>-round-<N>.codex.log`, and
+  writes the verdict itself — codex never writes a file, sandbox-enforced by
+  the `--sandbox read-only` pin. A rendered-but-malformed verdict is
+  re-prompted to the **same** reviewer exactly once (a re-serialize, never a
+  fresh review); still unparseable after that single retry fails CLOSED to a
+  MISSING slot — never substituted.
+  **Substitution (R4):** reserved exclusively for a quota wall with **no**
+  verdict ever rendered. When `claude_sub_on_quota === true`, a `claude`
+  agent substitutes for that slot keeping the slot id, with `reviewer_id:
+  "<slot> claude-sub"`; when false (the fail-closed default when the field is
+  absent), the slot is left missing.
+  **Return (R5):** the workflow's single structured result carries `mindspec
+  panel verify` + `mindspec panel tally` stdout verbatim (unmodified) plus
+  the per-slot outcomes; it never runs the lifecycle merge-terminal command,
+  never consolidates, never authors a `consolidated-round-<N>.md`.
+  **Distribution (R8):** `plugins/mindspec/embed.go`'s `WorkflowFiles()`
+  (`//go:embed workflows/*`) mirrors `SkillFiles()`; `internal/setup/claude.go`'s
+  `installWorkflows` mirrors `installSkills`' create/skip/notice disposition
+  and installs to `.claude/workflows/` on the Claude target only —
+  `RunCodex`/`RunCopilot` (which install only to `.agents/skills/`) never
+  receive it.
 - **2026-07-09 (spec 110 Bead 4, panel-verbs-parser-parity — R1/R2/R3/R7a):**
   `cmd/mindspec/panel.go` adds the `panel create | verify | tally <slug>`
   verb tree (§ Panel CLI Verb Tree above). `create` is the sole caller

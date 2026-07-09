@@ -160,30 +160,91 @@ func RunClaude(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 3. CLAUDE.md (append with marker)
+	// 3. Workflows (.claude/workflows/<name>.js) — Claude Code dynamic
+	// workflows are a Claude-target-only capability (spec 111 R8, ADR-0040
+	// capability tiers); RunCodex/RunCopilot below have no equivalent call,
+	// since they install only to .agents/skills/.
+	if err := installWorkflows(filepath.Join(root, ".claude", "workflows"), filepath.Join(".claude", "workflows"), pluginmindspec.WorkflowFiles(), check, r); err != nil {
+		return nil, err
+	}
+
+	// 4. CLAUDE.md (append with marker)
 	if err := ensureClaudeMD(root, check, r); err != nil {
 		return nil, err
 	}
 
-	// 4. Install/upgrade git hooks (pre-commit, post-checkout)
+	// 5. Install/upgrade git hooks (pre-commit, post-checkout)
 	if !check {
 		if err := githooks.InstallAll(root); err != nil {
 			return nil, fmt.Errorf("installing git hooks: %w", err)
 		}
 	}
 
-	// 5. Optionally chain bd setup claude
+	// 6. Optionally chain bd setup claude
 	if !check {
 		chainBeadsSetup(root, "claude", r)
 	}
 
-	// 6. Surface .beads/config.yaml drift. Runs after chainBeadsSetup so
+	// 7. Surface .beads/config.yaml drift. Runs after chainBeadsSetup so
 	// projects that hadn't run `bd init` yet get the config created here too
 	// (bd setup scaffolds .beads/ by this point). Check mode scans read-only
 	// so --check still reports pending drift without writing.
 	applyBeadsConfig(root, check, r)
 
 	return r, nil
+}
+
+// installWorkflows writes the wanted Claude Code dynamic workflow scripts
+// (spec 111) under workflowsDir. Unlike installSkills' per-name subdirectory
+// (SKILL.md alongside other assets), a workflow is a single tracked file, so
+// wanted is keyed and written by basename directly under workflowsDir.
+// workflowsRel is the repo-relative form of workflowsDir, used for Result
+// reporting.
+//
+// Per-workflow disposition mirrors installSkills' create/skip/notice shape:
+//   - absent → create.
+//   - present and byte-identical to the canonical content → skip (current).
+//   - present and different → user-modified: leave it, notice (HC-6).
+//
+// There is no refresh case yet: ms-panel.js is the first workflow MindSpec
+// ships, so there is no previously-shipped-workflows snapshot set to
+// byte-match against (installSkills' previouslyShippedSkills() precedent). A
+// future revision needing to refresh an existing install in place would add
+// that snapshot set the same way skills did.
+//
+// In check mode nothing is written; the Result still records what WOULD
+// happen.
+func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]string, check bool, r *Result) error {
+	for name, content := range wanted {
+		relPath := filepath.Join(workflowsRel, name)
+		absPath := filepath.Join(workflowsDir, name)
+
+		if !fileExists(absPath) {
+			r.Created = append(r.Created, relPath)
+			if !check {
+				if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+					return fmt.Errorf("creating dir for %s: %w", relPath, err)
+				}
+				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
+			continue
+		}
+
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", relPath, err)
+		}
+
+		if string(data) == content {
+			r.Skipped = append(r.Skipped, relPath)
+			continue
+		}
+
+		r.Notices = append(r.Notices, relPath+" (user-modified — left in place; delete it to receive the canonical version)")
+	}
+	return nil
 }
 
 // applyBeadsConfig runs the config step on r. Shared by RunClaude, RunCodex,

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	pluginmindspec "github.com/mrmaxsteel/mindspec/plugins/mindspec"
 )
 
 func TestRunClaude_FreshSetup(t *testing.T) {
@@ -20,9 +22,11 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 	}
 
 	// Should create settings.json, 4 lifecycle skill files, 8 plugin skill
-	// files, and CLAUDE.md = 14 items (spec 093 thinned 16 → 11; +ms-spec-grill).
-	if len(r.Created) != 14 {
-		t.Errorf("expected 14 created items, got %d: %v", len(r.Created), r.Created)
+	// files, 1 workflow file (spec 111 R8: .claude/workflows/ms-panel.js),
+	// and CLAUDE.md = 15 items (spec 093 thinned 16 → 11; +ms-spec-grill;
+	// +ms-panel workflow).
+	if len(r.Created) != 15 {
+		t.Errorf("expected 15 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -99,8 +103,57 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 14 {
-		t.Errorf("second run should skip 14 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 15 {
+		t.Errorf("second run should skip 15 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	}
+}
+
+// TestClaudeSetup_InstallsWorkflowClaudeTargetOnly proves spec 111 R8/AC7:
+// RunClaude writes .claude/workflows/ms-panel.js byte-identical to the
+// embedded plugin source, while RunCodex/RunCopilot (which install only to
+// .agents/skills/) create no .claude/workflows/** and no .agents/workflows/**
+// file at all — dynamic workflows are a Claude Code capability (ADR-0040
+// tiers).
+func TestClaudeSetup_InstallsWorkflowClaudeTargetOnly(t *testing.T) {
+	t.Parallel()
+
+	want := pluginmindspec.WorkflowFiles()["ms-panel.js"]
+	if want == "" {
+		t.Fatal("WorkflowFiles()[\"ms-panel.js\"] is empty")
+	}
+
+	claudeRoot := t.TempDir()
+	if _, err := RunClaude(claudeRoot, false); err != nil {
+		t.Fatalf("RunClaude: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(claudeRoot, ".claude", "workflows", "ms-panel.js"))
+	if err != nil {
+		t.Fatalf("reading installed workflow: %v", err)
+	}
+	if string(got) != want {
+		t.Error(".claude/workflows/ms-panel.js is not byte-identical to the embedded workflow")
+	}
+
+	codexRoot := t.TempDir()
+	if _, err := RunCodex(codexRoot, false); err != nil {
+		t.Fatalf("RunCodex: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexRoot, ".claude", "workflows")); !os.IsNotExist(err) {
+		t.Error("RunCodex should not create .claude/workflows")
+	}
+	if _, err := os.Stat(filepath.Join(codexRoot, ".agents", "workflows")); !os.IsNotExist(err) {
+		t.Error("RunCodex should not create .agents/workflows")
+	}
+
+	copilotRoot := t.TempDir()
+	if _, err := RunCopilot(copilotRoot, false); err != nil {
+		t.Fatalf("RunCopilot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(copilotRoot, ".claude", "workflows")); !os.IsNotExist(err) {
+		t.Error("RunCopilot should not create .claude/workflows")
+	}
+	if _, err := os.Stat(filepath.Join(copilotRoot, ".agents", "workflows")); !os.IsNotExist(err) {
+		t.Error("RunCopilot should not create .agents/workflows")
 	}
 }
 

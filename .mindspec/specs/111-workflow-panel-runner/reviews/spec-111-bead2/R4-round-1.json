@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Empirical lens, commit 1ad0d796. `go build ./...` clean. `go test -count=1 -v ./plugins/... ./internal/setup/... -run 'Workflow|MsPanel|RunClaude'` all PASS: TestWorkflowFiles_EmbedsMsPanel, TestMsPanelWorkflow_AllowedCLIExactSet, TestClaudeSetup_InstallsWorkflowClaudeTargetOnly, and the 10 RunClaude tests. Both ms-panel.js copies (plugin source vs .claude/workflows mirror) diff -q identical. Mutation spot-checks confirm the tests are load-bearing, not decorative: (a) replicated TestMsPanelWorkflow_AllowedCLIExactSet's core assertions in a standalone /tmp checker against a copy with a 5th ALLOWED_CLI entry ('mindspec panel destroy') -> 4 assertions fail (array count != 4, unexpected entry, dup/malformed map, mindspec-bearing literal not one of three allowed verbs). (b) simulated TestWorkflowFiles_EmbedsMsPanel's got-vs-want equality on /tmp copies with one byte flipped -> equality check fails, reproducing the embed/on-disk divergence the test pins. (c) confirmed by static read of claude.go:167/217-229 that installWorkflows unconditionally runs in RunClaude step 3 and appends directly to the same r.Created slice TestRunClaude_FreshSetup counts (==15); TestClaudeSetup_InstallsWorkflowClaudeTargetOnly independently proves end-to-end that RunClaude actually writes the file to a real t.TempDir() byte-identical to the embed, and RunCodex/RunCopilot create neither .claude/workflows nor .agents/workflows -- so removing installWorkflows' effect would deterministically drop the count to 14, not merely coincide with it. Did not mutate any tracked repo files (shared worktree, other reviewers active); all mutation checks ran against /tmp copies with a standalone Go harness. git status left clean; scratch removed.",
+  "concrete_changes_required": [],
+  "findings": [
+    "go build ./... : clean, no errors",
+    "go test -count=1 -v ./plugins/... ./internal/setup/... -run 'Workflow|MsPanel|RunClaude' : ALL PASS (2 new structural tests + TestClaudeSetup_InstallsWorkflowClaudeTargetOnly + 9 other RunClaude tests)",
+    "diff -q plugins/mindspec/workflows/ms-panel.js .claude/workflows/ms-panel.js : identical (byte-identical mirror confirmed)",
+    "Mutation (a) 5th ALLOWED_CLI entry: standalone /tmp replica of TestMsPanelWorkflow_AllowedCLIExactSet's positive-enumeration logic correctly FAILS with 4 distinct errors (array-size, dup-map, unexpected-entry, non-allowed-verb-inside-array)",
+    "Mutation (b) 1-byte corruption: standalone /tmp replica of TestWorkflowFiles_EmbedsMsPanel's equality check correctly FAILS (got != want)",
+    "Mutation (c) created-count causality: static trace confirms claude.go:167 installWorkflows() call feeds r.Created (claude.go:223) which TestRunClaude_FreshSetup asserts ==15; TestClaudeSetup_InstallsWorkflowClaudeTargetOnly independently proves the write is real (RunClaude writes the file; RunCodex/RunCopilot do not) -- count is load-bearing, not coincidental"
+  ]
+}

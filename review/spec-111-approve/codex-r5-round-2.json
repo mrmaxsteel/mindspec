@@ -1,0 +1,60 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "Original R5 asks 5, 7, and 8 are addressed. Ask 6's comment-defeat problem is addressed: the stricter literal-nowhere ban is valid, the one-liner is shell-correct under sh/bash, and I accept the positive greps being satisfied by the allowlist declaration because that declaration is now the structural artifact. Deviations A and C are acceptable. The remaining issue is newly introduced by the remediation: R5 now claims ALLOWED_CLI contains exactly four commands and falsifies any extra admitted command, but AC4 only proves the four permitted strings are present and that 'mindspec complete' is absent. A workflow could admit a fifth command such as 'git push' or 'mindspec approve' and still pass every listed grep. That leaves the lifecycle-boundary allowlist claim structurally unfalsified.",
+  "concrete_changes_required": [
+    "Tighten AC4 so it falsifies the new exact-four ALLOWED_CLI requirement, not just presence of the four allowed strings. For example, add a static check that extracts the ALLOWED_CLI declaration from .claude/workflows/ms-panel.js and compares it exactly to ['mindspec panel create','codex exec','mindspec panel verify','mindspec panel tally'], or otherwise fails if the allowlist admits any additional command."
+  ],
+  "findings": [
+    {
+      "tag": "ADDRESSED",
+      "ask": "Ask 5",
+      "requirement": "R3 / Manual proof",
+      "severity": "info",
+      "text": "The malformed-verdict branch is now driven end-to-end: rendered-but-invalid output triggers one same-reviewer re-prompt, uses that reviewer's own output/log, preserves the same slot and family reviewer_id, and persistent parse failure leaves no verdict file so verify reports incomplete and the gate Blocks. The proof explicitly says this is never claude-substitution."
+    },
+    {
+      "tag": "ADDRESSED",
+      "ask": "Ask 6",
+      "requirement": "R5 / AC4",
+      "severity": "info",
+      "text": "The original comment-defeat concern is fixed by requiring the literal 'mindspec complete' string to appear nowhere in the workflow file. The AC one-liner is valid sh/bash shell, and I accept the positive greps being satisfiable by the ALLOWED_CLI declaration because the allowlist is now the intended structural artifact."
+    },
+    {
+      "tag": "ADDRESSED",
+      "ask": "Ask 7",
+      "requirement": "R7 / AC8",
+      "severity": "info",
+      "text": "AC8 now pins all four judgment sections: 'Artifact gates', 'Consolidate', 'After a halt', and 'Escape hatch'."
+    },
+    {
+      "tag": "ADDRESSED",
+      "ask": "Ask 8",
+      "requirement": "R5 / ADR-0035 / Manual proof",
+      "severity": "info",
+      "text": "The prose, falsified clause, and Manual proof now align on verbatim pass-through: verify/tally stdout must be unmodified CLI stdout, not a summarized or re-rendered result."
+    },
+    {
+      "tag": "ADDRESSED",
+      "ask": "Deviation A",
+      "requirement": "Requirements numbering",
+      "severity": "info",
+      "text": "Keeping the new audit-log requirement as 3b is acceptable. It preserves round-to-round references and does not create semantic ambiguity in the requirement set."
+    },
+    {
+      "tag": "ADDRESSED",
+      "ask": "Deviation C",
+      "requirement": "Background citation",
+      "severity": "info",
+      "text": "Decoupling from the untracked research document is acceptable. The spec now states the rationale in its own terms without depending on absent section numbers or quoted source text."
+    },
+    {
+      "tag": "NEW_ISSUE",
+      "ask": "New precision issue",
+      "requirement": "R5 / AC4",
+      "severity": "medium",
+      "text": "The remediation introduced an exact-four ALLOWED_CLI invariant and a falsified clause for extra admitted commands, but AC4 does not test exactness. It checks for ALLOWED_CLI, the four allowed command strings, claude-sub, and absence of 'mindspec complete'; it does not fail if the allowlist also admits another lifecycle-mutating or shell command."
+    }
+  ]
+}

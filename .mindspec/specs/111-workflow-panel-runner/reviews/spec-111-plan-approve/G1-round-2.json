@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.88,
+  "rationale": "G1.1 and G1.2 are addressed: the prescribed ALLOWED_CLI snippet now passes the relevant exact-command/absence grep, and the e2e PATH order pins the branch-built mindspec while letting the codex shim shadow the real CLI. I did not find a new unrunnable shell command in the added verification lines. G1.3 is still partial: the malformed-once shim scenario says the first stdout is narrative prose with no JSON, then asks reviewers to canonically JSON-decode that first attempt and compare verdict fields against the final file. That value-fidelity proof is impossible as written, so the successful reserialize branch is not deterministic.",
+  "concrete_changes_required": [
+    "Revise the `malformed-once` shim scenario so the first payload contains a known, machine-comparable verdict object that is intentionally rejected by the one-object rule, for example narrative-wrapped valid verdict JSON, or remove the canonical JSON field comparison from that scenario and replace it with a runnable fidelity check. Specify the exact first and second shim payload shapes."
+  ],
+  "findings": [
+    {
+      "ask": "G1.1",
+      "disposition": "ADDRESSED",
+      "finding": "Applied the plan's ALLOWED_CLI grep components to the prescribed snippet text: the four allowed commands are present and the literal `mindspec complete` is absent. The full AC4 grep's `claude-sub` check is intentionally outside this snippet and is covered elsewhere in the workflow text."
+    },
+    {
+      "ask": "G1.2",
+      "disposition": "ADDRESSED",
+      "finding": "The manual e2e now builds `/tmp/ms111/mindspec` and launches Claude with `/tmp/ms111` on PATH, so bare `mindspec` calls resolve to the branch build. Scenario runs put `/tmp/ms111-shim` before `/tmp/ms111`, which shadows only `codex` while preserving the branch-built `mindspec`."
+    },
+    {
+      "ask": "G1.3",
+      "disposition": "PARTIAL",
+      "finding": "The shim covers healthy, malformed-always, multi-object, and quota-wall true/false branches, but `malformed-once` is self-contradictory: it emits prose with no JSON on the first invocation, while the scenario requires canonical JSON decode and field comparison from that first attempt. That branch cannot prove same-verdict reserialization as written."
+    },
+    {
+      "ask": "added-command spot-check",
+      "disposition": "ADDRESSED",
+      "finding": "I spot-checked the added verification commands and PATH examples and did not find a new unrunnable shell command. The remaining issue is a scenario-data contradiction, not shell syntax or PATH mechanics."
+    }
+  ]
+}

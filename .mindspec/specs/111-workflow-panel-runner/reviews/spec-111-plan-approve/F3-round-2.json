@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.75,
+  "round_1_dispositions": [
+    {
+      "ask": "Word-boundary-anchor the /ms-panel grep in Bead 3's two skill-copy checks",
+      "disposition": "ADDRESSED",
+      "evidence": "Both checks now use `grep -Eq '/ms-panel([^-a-z]|$)'`. Empirically verified: it FAILS on today's skill text in both copies (only /ms-panel-tally, /ms-panel-create, /ms-panel-run substrings present), under both ugrep 7.5.0 (the machine's grep) and /usr/bin/grep; it MATCHES the realistic handoff forms (backtick-quoted, space-followed, end-of-line) and correctly excludes the hyphenated substrings. Falsifiable in both directions."
+    },
+    {
+      "ask": "Specify a deterministic induction mechanism for the Manual e2e's failure branches (codex PATH shim, both quota-flag values)",
+      "disposition": "PARTIAL",
+      "evidence": "The mechanism is real and covers every branch: /tmp/ms111-shim/codex driven by MS111_CODEX_SCENARIO with per-scenario canned payloads (healthy, malformed-once, malformed-always, multi-object, quota-wall), exact /ms-panel invocation args per run, separate slugs per failure mode, claude_sub_on_quota toggled true/false across runs 5-6, plus the new input-hardening run 7 — routing and observables for runs 3-7 are deterministic and falsifiable (file presence/absence, reviewer_id value, no panel dir created). BUT run 2's value-fidelity clause — the carry-forward-#2 check itself — is still unexercisable as written: `malformed-once`'s first payload is specified as 'narrative prose (no JSON)', while run 2 instructs 'decode both the .codex.log-derived first attempt and the final verdict file canonically as JSON and confirm verdict/hard_block/concrete_changes_required are equal'. A no-JSON first attempt has no decodable operand, so the equality check has nothing to compare — the clause degenerates to unexercisable prose for the third consecutive panel round (spec r2 nit -> plan r1 major -> still not runnable). One-line fix."
+    }
+  ],
+  "rationale": "Nine of ten fix items land cleanly under the falsification lens: the anchored grep is empirically falsifiable both directions (verified), the positive-enumeration test cannot pass vacuously (the exact-set assertion fails on an empty extraction), the ALLOWED_CLI snippet no longer self-violates its own no-'mindspec complete' grep, and e2e runs 3-7 are deterministically inducible with file-level observables. Two residuals: (1) run 2's value-fidelity comparison — the twice-carried carry-forward #2 — cannot run against a 'narrative prose (no JSON)' first payload; the fidelity operand must exist, so malformed-once's first payload must be a rendered verdict with known canned gate-field values in a malformed or narrative-wrapped serialization. (2) Verified against 110's plan: `panel create` stamps expected_reviewers from `cfg.PanelExpectedReviewers()` (config), so the fixture mixes (3 slots, 1 slot) mismatch the scratch config default — every run reads incomplete, run 1's happy-path PASS preview is unobservable, and run 3's 'verify reports incomplete' is true regardless of behavior. Both are one-line plan-text fixes.",
+  "concrete_changes_required": [
+    "Manual e2e shim spec: redefine `malformed-once`'s FIRST payload as a rendered verdict with known canned values in a malformed serialization (e.g. a single valid verdict JSON object wrapped in narrative prose, or the object with a trailing comma) rather than valueless prose — and state run 2's fidelity check as: the final verdict file's `verdict`/`hard_block`/`concrete_changes_required` equal the scenario's canned first-attempt values (canonical decode). Without a first operand the carry-forward-#2 equality check cannot be executed.",
+    "Manual e2e setup: add one line — write the scratch repo's `.mindspec/config.yaml` `panel:` mix to match each scenario's fixture mix (e.g. `[{claude,2},{codex,1}]` for run 1, `[{codex,1}]` for runs 2-6) — since 110's `panel create` stamps `expected_reviewers` from the config resolvers (`cfg.PanelExpectedReviewers()`), not from the workflow's `mix` arg. Otherwise `panel verify` reports incomplete in every run: run 1's happy-path verify/tally PASS preview is unobservable and run 3's 'verify reports incomplete + gate Blocks' observable holds regardless of whether the MISSING behavior worked."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "title": "Run 2's value-fidelity check (carry-forward #2) still has no first operand",
+      "detail": "MS111_CODEX_SCENARIO=malformed-once prints 'narrative prose (no JSON)' on attempt 1, but run 2 requires canonically decoding the .codex.log-derived first attempt as JSON to compare verdict/hard_block/concrete_changes_required against the final verdict file. Pure prose cannot be decoded and contains no gate-field values, so the equality confirmation is impossible as written; the tester will either skip it or improvise a payload. The routing half of the scenario (re-prompt once, same reviewer_id) IS exercisable; only the fidelity half is not."
+    },
+    {
+      "severity": "minor",
+      "title": "Scratch config `panel:` mix unspecified — completeness observables lose discrimination",
+      "detail": "Verified in 110's plan (lines 712/802/889): `panel create` resolves expected_reviewers via cfg.PanelExpectedReviewers() from config, and 111's R1 says the workflow derives fan-out only from the passed `mix` arg. The e2e sets `runner:` and (runs 5-6) `claude_sub_on_quota` in the scratch config but never `panel:`, so expected_reviewers defaults to the config mix while the fixture runs 1 or 3 slots — verify reports incomplete in every scenario. File-presence observables survive, but run 1 cannot show a verbatim PASS preview and run 3's incomplete/Block observable cannot fail."
+    },
+    {
+      "severity": "info",
+      "title": "New checks sweep: no other false-greens introduced by the 162 added lines",
+      "detail": "The positive-enumeration test cannot pass vacuously: the exact-set assertion must find and parse the 4-element ALLOWED_CLI array (a broken extractor yields an empty set != 4 and fails); residual risk is only a partially-broken extractor missing one quote form, inherent to static analysis and mitigated by naming all three quote forms. The updated AC4 grep loop's full sandboxed codex string is comment-satisfiable but backstopped by the exact-set test (unchanged posture). The revised ALLOWED_CLI snippet comment no longer contains the literal 'mindspec complete', so the file spec no longer self-violates its own AC4 grep. The buildCommand defined-exactly-once + no-stray-literal assertions can fail when the structure is absent. Nits, non-blocking: malformed-once needs per-invocation shim state (a counter file — implied, one line of shell); `go build -o /tmp/ms111/mindspec` needs `mkdir -p /tmp/ms111` first; MS111_CODEX_SCENARIO must be set on the session launch per scenario run (implied by the per-run env prefix)."
+    }
+  ]
+}

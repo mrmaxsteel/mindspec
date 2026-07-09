@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "I re-fetched code.claude.com/docs/en/workflows and checked all three round-1 asks against bf01a21a. Every one is ADDRESSED and accurate to the live docs. The three false 'docs describe no structured-output enforcement' instances are gone, replaced by the correct statement: the docs DO document a `schema` option on `agent()`, it governs the step's in-memory RETURN value (the docs' `agent(..., { schema })` example whose result `found.files` is read as structured data), not what the agent writes to disk with its Write tool — so `panel verify` is still required for the on-disk `<slot>-round-<N>.json` contract. That reasoning is exactly right. Bead 2 step 3 now uses `schema` on every verdict-producing `agent()` call and still instructs the file write, correctly disambiguating the two values — implementable as written. Fan-out is the documented `pipeline(list, itemFn)` (matches the docs' `pipeline(found.files, file => agent(...))` example and 'runs one per item in a list'); no `parallel()` exists; the 16-concurrent cap and no-fs/shell limit are quoted accurately. No implementability regression from the hardening delta in my lens.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "O1.1 — three false platform claims (disposition: ADDRESSED)",
+      "detail": "All three instances corrected and verified against a fresh doc fetch. (a) ADR-Fitness divergence report, plan.md:140-149: now 'relying on the documented `schema` option (a JSON Schema an agent() step's structured return value must conform to) ... rejected: schema governs the calling step's in-memory return, not the on-disk <slot>-round-<N>.json file panel verify reads.' (b) Bead 2 step 3, plan.md:505-507: 'Verdict conformance of the on-disk file — distinct from an agent step's schema-checked in-memory return — is not something panel verify can skip.' (c) Risks/Sequencing, plan.md:800-810: 'The Claude Code workflows docs document a schema option on agent() steps ... but no enforcement of what an agent subsequently writes to disk.' The docs' worked example (`agent('...', { schema: {...} })` then `found.files`) confirms schema constrains the return value; nothing in the docs governs Write-tool output. Accurate."
+    },
+    {
+      "severity": "info",
+      "area": "O1.2 — schema-per-reviewer-step + file-write reconciliation (disposition: ADDRESSED)",
+      "detail": "plan.md:476-484 (claude slot): agent() called with the `schema` option set to the 110 verdict shape so the return is schema-conformant, AND instructed to write that same object to <panel-dir>/<slot>-round-<N>.json via Write; the parenthetical correctly notes schema constrains only the in-memory return, distinct from the on-disk write, so the write instruction is still required. plan.md:486 (codex slot): the wrapper's own agent() call also carries `schema` over its transcribed-verdict return. This is the exact reconciliation I asked for — schema reduces malformation at the source while panel verify + the R3 ladder remain the on-disk guarantee. Implementable by a Sonnet impl as written."
+    },
+    {
+      "severity": "info",
+      "area": "O1.3 — pipeline(list, itemFn) named fan-out (disposition: ADDRESSED)",
+      "detail": "plan.md:462-472: fan-out is 'the documented pipeline(list, itemFn) primitive ... \"pipeline() runs one [agent] per item in a list\", bounded by the runtime's 16-concurrent-agent cap, rather than an unnamed or undocumented parallel construct,' with itemFn dispatching on descriptor.family. Verified: the docs' example is `await pipeline(found.files, file => agent(...))` and prose 'pipeline() runs one per item in a list'; the signature and description match exactly. No parallel() primitive exists on the page. The 16-agent cap is quoted verbatim. Correct."
+    },
+    {
+      "severity": "info",
+      "area": "no NEW_ISSUE in my lens from the fix delta",
+      "detail": "The hardening additions (buildCommand chokepoint, args input validation, --sandbox read-only codex pin, positive-enumeration test, codex PATH-shim e2e scenarios 1-7) belong to F1/F3/G1/G2 lenses, but I sanity-checked them for implementability regressions in the workflow mechanics: buildCommand(verb, ...args) is a plain JS function; the schema+pipeline integration is clean; the shim (executable `codex` on PATH reading MS111_CODEX_SCENARIO) is a standard, realizable induction path. Minor, non-blocking: the docs describe pipeline as 'runs one per item' and list the 16-agent cap as a runtime-wide limit without explicitly binding pipeline to concurrency; the plan's 'concurrent fan-out' characterization is a reasonable inference and does not affect correctness or implementability."
+    }
+  ]
+}

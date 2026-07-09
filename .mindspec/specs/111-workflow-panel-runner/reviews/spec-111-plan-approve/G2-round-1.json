@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.84,
+  "rationale": "The plan substantially improves the spec with exact-set tests and audit logs, but the security guarantees are still not mechanically pinned. The ALLOWED_CLI test proves a declared constant, not that every shell-capable agent step is restricted to that constant or that raw args cannot be shell/path injected. The codex stdout parser is also underspecified for ambiguous or adversarial output. Because the workflow delegates shell and file I/O to prompted agents reading untrusted BRIEF content, these are gate-integrity risks, not polish. Tighten the plan before implementation so bead review has falsifiable checks beyond lexical greps and manual inspection.",
+  "concrete_changes_required": [
+    "In Bead 2, require a concrete enforcement mechanism tying every shell-capable agent step to ALLOWED_CLI: either tool-level restrictions if the workflow API supports them, or a single command builder/wrapper that rejects any verb outside the exact set and constructs commands from fixed argv/prefixes, not free-form prompted shell strings. Add a structural test proving all command invocations flow through that mechanism, not just that the ALLOWED_CLI literal exists.",
+    "Add input/path hardening for slug, spec, target, bead_id, round, slot, and all verdict/log paths. The workflow should validate identifiers against the same contracts as the 110 CLI or consume paths reported by panel create, reject path traversal and shell metacharacter-bearing values, and avoid deriving write paths directly from raw args.",
+    "Specify deterministic codex stdout parsing: accept only one unambiguous verdict object, fail CLOSED to the reserialize/MISSING path on multiple objects or mixed narrative ambiguity, and make the value-fidelity proof compare all gate-relevant fields after canonical JSON decoding."
+  ],
+  "findings": [
+    {
+      "severity": "HIGH",
+      "location": "plan.md:360-376, plan.md:456-467",
+      "summary": "ALLOWED_CLI is only declared and exact-set-tested; the plan does not require command invocations to be mechanically routed through or rejected by that allowlist.",
+      "details": "Bead 2 says the workflow declares a static ALLOWED_CLI array and later tests that literal. But the actual CLI calls are performed by agent steps. Without tool-level restrictions or an enforcing command builder, prompt injection from the BRIEF/lens or implementer drift can still cause a shell-capable agent to run a fifth command while the exact-set test stays green."
+    },
+    {
+      "severity": "HIGH",
+      "location": "plan.md:381-433",
+      "summary": "Raw workflow args are interpolated into shell commands and file paths without a planned validation or escaping contract.",
+      "details": "The plan uses <slug>, <spec>, <target>, <bead_id>, and <round> in commands and derives verdict/log paths from <spec-dir>/reviews/<slug>/... . It does not require argv construction, shell quoting, identifier validation, or deriving the writable panel path from panel create output. A malicious or malformed slug/target can become command injection or path traversal if the workflow is invoked directly."
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "plan.md:398-413, plan.md:491-493",
+      "summary": "Codex stdout parsing is underspecified for adversarial or ambiguous transcripts.",
+      "details": "The plan says the wrapper parses stdout into the verdict shape and stores .codex.log, but it does not define what happens when stdout contains multiple JSON objects, JSON plus prose, or a malicious embedded replacement verdict. The manual e2e checks one malformed case and selected field fidelity, but bead review needs a deterministic parser rule and a fail-closed ambiguity rule."
+    }
+  ]
+}

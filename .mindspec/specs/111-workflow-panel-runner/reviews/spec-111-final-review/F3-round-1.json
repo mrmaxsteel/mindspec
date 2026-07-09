@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Security + adapter-invariants lens, empirically re-verified at 4e8a1f45. (1) Extracted the pre-agent() validators to a /tmp node scratch and ran 49 assertions: every RCE payload throws — slug/spec/bead_id x$(id), x;id, x|sh, `whoami`, a&b, newline, 'foo bar', .., ., a/b all rejected via validatePathElement (whitespace/control/path-sep) + validateShellSafe ([`;|&\\n] and $(); target's git-ref grammar rejects -rf, a..b, a~b, foo.lock, foo/, whitespace, metachars; validateMix enum-rejects shell/bash/claude;/code$(x); round rejects 0/-1/1.5/'1'/null. buildCommand rejects leading-dash values and any non-ALLOWED_CLI verb; the assembled command line carries zero shell metacharacters. (2) ALLOWED_CLI is a static 4-entry literal, buildCommand is the sole assembler with fixed per-verb flags; 'mindspec complete' appears NOWHERE (grep + go test). (3) Anti-laundering ladder fails CLOSED: parse_failure -> one re-serialize retry -> outcome 'missing' (never substituted); a retry that itself hits a quota wall still returns 'missing'; substitution fires ONLY on a first-attempt quota_wall AND only when claude_sub_on_quota===true. (4) Adapter invariants hold: returns verify+tally verbatim, no consolidation, no PanelGateDecision, and go list -deps ./internal/panel shows no internal/config (config-free leaf). Mutation test: injecting 'mindspec complete' into ALLOWED_CLI makes TestMsPanelWorkflow_AllowedCLIExactSet fail on both the literal-ban and the count — the guard genuinely bites; restore left git status clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "49/49 injection assertions throw or pass as expected; no bypass found across slug/spec/bead_id/target/mix.family/round and buildCommand.",
+    "buildCommand output for a full create verb contains no [$;|&`\\n] metacharacter; codex exec flags fixed in ALLOWED_CLI with no value slots.",
+    "Anti-laundering ladder confirmed fail-closed by source trace (runCodexSlot lines 385-411 + Step 4 substitution branch 494-509).",
+    "internal/panel is a config-free leaf: go list -deps ./internal/panel returns no internal/config.",
+    "Exact-set test proven non-hollow via mutation (5th ALLOWED_CLI entry + banned literal both caught); embed copy is byte-identical to plugin source; working tree left clean at 4e8a1f45."
+  ]
+}

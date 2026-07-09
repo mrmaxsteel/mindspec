@@ -1,0 +1,8 @@
+{
+  "bead_id": null,
+  "spec": "111-workflow-panel-runner",
+  "target": "spec/111-workflow-panel-runner",
+  "round": 4,
+  "expected_reviewers": 9,
+  "reviewed_head_sha": "aec82bfde854d4ba24d137b942803eb6dc909a16"
+}

@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R4 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Empirically verified the R9 AC end-to-end at commit 68c87106. Code inspection: isDocFile (docsync.go:393) checks docs/, .mindspec/docs/, project-docs/, rootOperatorDocs, and lifecycleDocSubtrees prefixes — none match .claude/workflows/ms-panel.js. isProcessArtifact (divergence.go:300) adds .beads/, review/, co-located-review, mover-run-state, vestigial-config-drop — none match either. So the path classifies as governable source, exactly as claimed. Ran TestWorkflowOwnsClaudeWorkflows in place: PASS (attributeDomain resolves 'workflow', non-nil Ownership). Then exported commit 68c87106 via `git archive` into a throwaway /tmp copy, deleted the `- .claude/workflows/**` line from that copy's OWNERSHIP.yaml, and reran the same test: it FAILS as expected — attributeDomain returns (\"\", nil) i.e. zero owners, which is exactly the adr-divergence-unowned trip condition. This proves the claim is load-bearing and the test is non-vacuous. Also grepped all domains' OWNERSHIP.yaml: only workflow claims .claude/workflows/** or plugins/mindspec/**, so no double-ownership/redundancy. go build ./... and go test ./internal/validate/... both green. Cleaned up /tmp scratch; git status clean save for the untracked reviews dir.",
+  "concrete_changes_required": [],
+  "findings": [
+    "isDocFile and isProcessArtifact both correctly return false for .claude/workflows/ms-panel.js (verified by reading docsync.go:393-411 and divergence.go:300-307) — confirms governable-source classification per R9.",
+    "Empirical negative-control: removing '- .claude/workflows/**' from a /tmp copy of OWNERSHIP.yaml causes attributeDomain(\".claude/workflows/ms-panel.js\") to return (\"\", nil, nil) — zero owners — and TestWorkflowOwnsClaudeWorkflows fails exactly as the test's own doc comment predicts. The claim is genuinely load-bearing, not decorative.",
+    "No double-ownership: grepped all domains/*/OWNERSHIP.yaml for 'claude/workflows' and 'plugins/mindspec' — only the workflow domain claims either; no over-reach into another domain's territory and no redundant plugins/mindspec/workflows/** entry.",
+    "GlobMatch semantics (ownership.go:417-457) confirm '.claude/workflows/**' matches nested files (trailing ** segment matches zero-or-more remaining segments) and does NOT match a sibling like '.claude/workflowsX' (filepath.Match requires exact 'workflows' segment).",
+    "go build ./... clean; go test ./internal/validate/... all green (including the new test, cached pass)."
+  ]
+}

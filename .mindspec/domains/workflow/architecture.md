@@ -305,3 +305,23 @@ removed the three stale `unparam` carve-outs in `.golangci.yml`
 `internal/next/beads.go` `findRoot` — all matching nothing on the tree after
 the wave-1 `findRoot` deletion), keeping the live `internal/validate/state.go`
 `validateReviewMode` carve-out. `golangci-lint run ./...` stays clean.
+
+## Ownership claim — `.claude/workflows/**` (spec 111, 2026-07-09)
+
+Bead `mindspec-9cyu.1` adds `.claude/workflows/**` to
+`.mindspec/domains/workflow/OWNERSHIP.yaml`'s `paths:` list, adjacent to the
+existing `.claude/skills/**` claim, so the two `.claude/**` sub-tree claims
+sit together. Claude Code dynamic workflows installed under
+`.claude/workflows/` (the dogfood copy Claude Code reads) are governable
+source — `isDocFile` and `isProcessArtifact` both return false for them — so
+without this claim, editing one would trip `adr-divergence-unowned`.
+
+The claim lands here, in the same bead and same diff as the doc-sync you're
+reading, and **before** bead `mindspec-9cyu.2` adds the tracked
+`.claude/workflows/ms-panel.js` workflow artifact itself — the ADR-0036
+same-diff-or-earlier invariant (the spec-108 wave-2 precedent above).
+`plugins/mindspec/workflows/**` (the plugin source of truth `ms-panel.js` is
+embedded from) needs no separate claim: it already resolves to workflow
+through the existing `plugins/mindspec/**` glob. With the claim in place,
+`validate.attributeDomain` resolves `.claude/workflows/ms-panel.js` to
+`"workflow"`.

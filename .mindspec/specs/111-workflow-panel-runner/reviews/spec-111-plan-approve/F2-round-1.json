@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "DAG/merge-signal lens. Both edges are real: .claude/workflows/ms-panel.js is governable source (isDocFile docsync.go:393 and isProcessArtifact divergence.go:300 both false for it) and the divergence gate reads OWNERSHIP.yaml at the diffed ownerRef (divergence.go:185), with .claude/workflows/** unclaimed today while plugins/mindspec/** is claimed — so B2 diffed without B1 fails its own gate. B3→B2 mirrors 110's B5→B4. Doc-sync files are disjoint within 111 (architecture/interfaces/runbook) and the footprint analysis is exact (no source_globs; only claude.go forces a region). §606 verified against both upstream plans: 110's B5 slims exactly the named sections and keeps every section B3 references (live skill headers confirmed); 110 touches validate/spec.go+spec_test.go, not ownership_wave2_test.go; 112's new symbols (CountValue, PanelGateKeys, Panel.Gate, config show --gate) are consumed nowhere in 111; the 14→15 and 12-skill counts are current and collision-free. One wording nit, non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "§606 'only overlap' enumeration is incomplete (non-blocking)",
+      "detail": "The Mechanical-rebase-safety bullet claims 111's only overlaps with 110/112 are internal/validate/ownership_wave2_test.go and the workflow OWNERSHIP.yaml. In fact Bead 3 edits the same four SKILL.md files 110's Bead 5 edits, and all three 111 doc-sync targets (architecture.md, interfaces.md, runbook.md) are also appended to by 110 and/or 112. The operative claim still holds: the plan itself flags the SKILL.md collision one bullet earlier ('Rebase point'), and the forward-rebase happens before any 111 bead is authored (the spec branch carries only spec/plan/review files), so the rebase is clean regardless. Conversely, the listed OWNERSHIP.yaml 'overlap' is not one — neither 110 nor 112 touches that file. Suggest tightening the sentence at next edit; no re-round needed."
+    },
+    {
+      "severity": "info",
+      "title": "Upstream-surface claims verified against 110's and 112's actual plans",
+      "detail": "110's Bead 5 removes exactly what §606 says (step-0 hand-typed panel.json schema incl. \"reviewed_head_sha\", the skill-authored verdict-output block, and ms-panel-tally's '| Condition | Action |' matrix) and explicitly keeps every section 111's Bead 3 gates or retains (Launch the panel, Codex failure detection, Working directory matters, Slot lens defaults, Anti-patterns; tally's Consolidate/Artifact gates/After a halt/Escape hatch/Abandon) — all present in the live skills today. 112's frontmatter confirms its footprint (internal/config, internal/panel/panel.go, internal/complete, cmd/mindspec/config.go); 111 consumes only Runner, Panel.Reviewers, and Substitution.ClaudeSubOnQuota, all present on this post-109 base (internal/config/config.go:51,60,76) and kept by 112. internal/setup is untouched by both upstream specs, so the 14→15 created-count move (claude_test.go:24,102 are 14 today) and TestSkillInventory_Twelve (skills_test.go:14) have no cross-spec collision."
+    },
+    {
+      "severity": "info",
+      "title": "112 as merge prerequisite is sequencing, not scope creep",
+      "detail": "The spec predates 112 and never cites it; the plan adds 112 to the forward-rebase prerequisite but consumes nothing from it — no bead references a 112 symbol, config key, or behavior, and §606 pins the boundary explicitly ('111 reads none of 112's new symbols... a post-112 rebase touches no 111 line'), which checks out against 112's plan. The attribution of the 112 prerequisite to 'the standing model-tiering protocol' is an odd sourcing for a merge-order rule, but it is a conservative orchestration note, not scope creep."
+    }
+  ]
+}
