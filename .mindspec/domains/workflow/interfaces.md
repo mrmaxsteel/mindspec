@@ -122,6 +122,66 @@ Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a
 partial or alternate shape.
 
+### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
+
+`mindspec panel create | verify | tally <slug>` is the CLI half of the
+ADR-0040 portability contract (the Panel Artifact Schema above is the
+artifact half): every subcommand is a thin adapter over `panel.Create` /
+`panel.ResolveGateFacts` / `panel.PanelGateDecision` — never a second
+decision implementation (R7a).
+
+**Shared slug validation.** All three subcommands validate their
+`<slug>` positional argument through one shared `validatePanelSlug`
+BEFORE any `filepath.Join`: an empty slug, `.`, `..`, any `/` or `\`, an
+absolute path, or any control character (including `\n`/`\r`/NUL) is
+rejected with a `guard.NewFailure` naming the offending value. `panel
+create` additionally rejects a `--bead`/`--target` value containing a
+control character through the same control-byte check before it is
+ever written to `panel.json` or interpolated into a rendered message or
+recovery line — closing the spec-109-final-review G2 terminal-injection
+class (a slug/flag value bearing a control byte can never forge an
+extra display line or a fake `recovery:` line).
+
+**`mindspec panel create <slug> --spec <id> --target <ref> [--bead
+<id>] [--round N]`** stamps `expected_reviewers`/`approve_threshold`
+from the config resolvers (`config.PanelExpectedReviewers()` /
+`config.PanelApproveThresholdExpr()`, spec 109) and `reviewed_head_sha`
+from `--target`'s live commit (resolved via the executor at write
+time), in the SAME `panel.Create` write that co-bumps `panel.json` and
+the BRIEF machine-managed header (Bead 1) — leaving prior verdict files
+and the skill-authored BRIEF body untouched on a re-panel. The panel
+directory is resolved layout-aware, reusing
+`internal/complete.panelGateRoots`' own logic: the co-located
+`<spec-dir>/reviews/<slug>` on a flat tree, otherwise the repo-root
+`review/<slug>` convention. A `--bead <id>` panel expects `--target
+bead/<id>` — the same ref `mindspec complete`'s gate rev-parses for
+staleness; a divergent `--target` can only fail SAFE (a stale-SHA Block
+at gate time), never a false-PASS.
+
+**`mindspec panel verify <slug>`** is a READ-ONLY completeness/
+staleness report: verdicts present vs `expected_reviewers`, per-slot
+parse status (malformed files named), `reviewed_head_sha` vs the live
+target tip, and a PASS/BLOCK preview computed by
+`panel.PanelGateDecision` over facts gathered by
+`panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
+gate enforces. It writes no file and always exits `0` (a read-only
+report is not itself a gate).
+
+**`mindspec panel tally <slug>`** prints the per-slot verdict table
+(slot, verdict, `hard_block`), the aggregate APPROVE/REQUEST_CHANGES/
+REJECT counts + the resolved threshold, the `panel.PanelGateDecision`
+decision, and the aggregated `concrete_changes_required` — read
+presentation-only from each REQUEST_CHANGES/REJECT verdict file (a
+re-parse failure, an absent key, or a non-array-of-strings type
+attributes zero items to that slot with an advisory note, never fatal;
+this second-pass read never feeds the decision). The exit code is
+derived from the decision's `Action` ALONE — never re-derived from raw
+verdict counts (`res.Approves` etc.): `Allow` -> `0`; `Warn` -> `0` with
+the advisory printed (non-blocking, parity with `internal/complete`'s
+Warn handling); `Block` -> non-zero, carrying `PanelGateDecision`'s
+raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
+(`guard.HasFinalRecoveryLine`).
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()`, `workspace.DetectWorktreeContext()` for locating state and worktrees
@@ -140,6 +200,9 @@ partial or alternate shape.
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
+| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1) |
+| `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing (spec 110 R2) |
+| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; exit code tracks the decision alone (spec 110 R3) |
 
 ## Agent Skills
 
@@ -153,6 +216,28 @@ partial or alternate shape.
 
 ## Maintenance Notes
 
+- **2026-07-09 (spec 110 Bead 4, panel-verbs-parser-parity — R1/R2/R3/R7a):**
+  `cmd/mindspec/panel.go` adds the `panel create | verify | tally <slug>`
+  verb tree (§ Panel CLI Verb Tree above). `create` is the sole caller
+  that resolves `internal/config`'s 109 resolvers and the target SHA and
+  passes them to `panel.Create` as plain values (`internal/panel` stays
+  an import-clean, config-free leaf — `go list -deps ./internal/panel`
+  carries no `internal/config`, R7b). `verify` and `tally` both call
+  `panel.ResolveGateFacts` + `panel.PanelGateDecision` and render its
+  `Action` verbatim — `TestPanelVerbs_DecisionIsPanelGateDecision`
+  (`cmd/mindspec/panel_test.go`) is the R7a contract pin: a
+  branch-complete table of `panel.GateFacts` rows spanning every
+  `gate.go` branch asserts `renderPanelVerify` and `renderPanelTally`
+  render the IDENTICAL `Action`, so relocating any decision branch into
+  a CLI adapter breaks the test. `panel tally`'s exit code
+  (`tallyExitAction`) is derived from the decision's `Action` alone,
+  never from raw verdict counts, closing the "passes every planned gate
+  yet exits 0 on a stale-SHA or `hard_block` Block" regression class.
+  Adding the `panel` command also required registering it in
+  `internal/redact`'s `CommandTokens`/`SubcommandTokens` closed-set
+  enums (`tally`/`verify`; `create` already existed) — the drift guard
+  (`cmd/mindspec/redact_enum_drift_test.go`) fails closed on any
+  cobra-tree addition the redaction allowlist doesn't mirror.
 - **2026-07-08 (spec 110 Bead 1, panel-verbs-parser-parity — R1/R4/R7b):**
   `internal/panel` gains a leaf-safe registration writer,
   `Create(dir string, in CreateInput) error` (`internal/panel/create.go`).
