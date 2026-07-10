@@ -309,7 +309,7 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 // erroring) or an unparseable response returns an error — the fail-closed
 // signal MergeMetadata above, and the complete-side durable-obligation
 // reconciliation (internal/complete), both rely on: a read error is never a
-// licence to proceed as if the store were empty.
+// license to proceed as if the store were empty.
 func GetMetadata(issueID string) (map[string]interface{}, error) {
 	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
 	if err != nil {

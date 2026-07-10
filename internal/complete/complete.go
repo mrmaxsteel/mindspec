@@ -45,7 +45,7 @@ var (
 	// (panelGate's persistRefutationPending) and the pre-close
 	// reconciliation (reconcilePendingRefutations) both read bead metadata
 	// through this seam BEFORE unioning/deciding. A read/parse error is
-	// fail-closed by construction (bead.GetMetadata) — never a licence to
+	// fail-closed by construction (bead.GetMetadata) — never a license to
 	// proceed as if the store were empty.
 	completeGetMetadataFn = bead.GetMetadata
 	gitUserEmailFn        = bead.GitUserEmail
