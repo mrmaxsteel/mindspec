@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Option B closes my round-6 desynchronization. Even if BranchExists transiently misses after MergeBase, the added gate independently reads bead.WorktreeList, the same bd worktree list source used by FinalizeEpic, and rejects a listed closed-epic bead whose branch is non-ancestor. Thus the live worktree my counterexample required is visible to the gate; list or ancestry failure also refuses. The remaining gap is accurately narrower: FinalizeEpic performs a later list, so only a candidate introduced or materially changed between snapshots can evade the earlier enumeration. In the ordinary single-process bd close to impl approve flow, ApproveImpl and FinalizeEpic do not create bead worktrees between those calls; doing so requires a concurrent lifecycle mutator, legitimately outside the serialized one-mutator model. Removal between calls is safe because FinalizeEpic then cannot merge it. Fact 2 now correctly addresses only persistently missing or corrupt refs; transient recovery is explicitly handled by the enumeration leg. I found no additional ordinary-flow, same-epic ungated merge path beyond the separately disclosed cross-spec global-loop issue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "grade": "ADDRESSED",
+      "title": "Option B closes the round-6 transient probe race",
+      "detail": "The independent same-source worktree enumeration makes a probe miss insufficient to hide a live merge candidate and fails closed on its own list and ancestry errors."
+    },
+    {
+      "grade": "ADDRESSED",
+      "title": "Two-list residual and persistent-ref re-scope are honest",
+      "detail": "The spec expressly limits closure to the first snapshot and scopes intervening candidate creation to concurrent lifecycle mutation; ordinary serialized approval creates no worktree in that interval. Fact 2 no longer claims to cover transient recovery."
+    }
+  ]
+}
