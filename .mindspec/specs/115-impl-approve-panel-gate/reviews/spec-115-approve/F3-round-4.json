@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Verified at 4cbf437b. Fix 1 ADDRESSED in all five sub-parts: the three-way BranchExistsE contract is stated consistently in R1, the OQ2 resolution, the Scope internal/gitutil bullet, and Impacted Domains; the exit-1-vs-128 grounding is accurate (ErrRefNotFound doc at gitops.go:13-19, plain --verify in BranchExists at :98, RevParseRef's ExitCode()==1 branch at exactly :542, so the spec's :524-542 cite is correct). No contradiction: R1's 'refuses on any infra error' now explicitly scopes the error class to exit-128 transient/structural failures, with exit-1 absence yielding (false,nil) — coherent with OQ2's 'INFRA errors, never legitimate absence', with R2's untouched fail-open advisory, and with R1's orphan trigger (absent branch fails the branch-EXISTS predicate, so AC2(d)'s no-refusal pin is correct and does not collide with R3/AC6(a), which requires an unsettled durable obligation). Fix 2 ADDRESSED: every named test now has an exact-named -run; the bare lifecycle run is explicitly a no-regression pin. Both new test names and BranchExistsE are 0 code hits (RED). Diff 77d8a1a9..4cbf437b touches only spec.md + round-3 panel artifacts. All 4 OQs [x]. Scope: both new tests land on surfaces already in scope — a natural fold, no over-scope.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-R4-1",
+      "fix": "Fix 1 (G2 BranchExistsE three-way contract)",
+      "grade": "ADDRESSED",
+      "note": "All five sub-parts present: (a) three-way contract + RevParseRef/ErrRefNotFound precedent stated in R1, OQ2, Scope gitutil bullet, and Impacted Domains execution bullet; (b) R1 Falsified-if gained the anti-false-refusal falsifier ('genuinely-absent... yields anything but (false, nil)'); (c) AC1(c) adds TestBranchExistsE_ThreeWay with existence grep + exact-named run; (d) AC2(d) adds TestApproveImpl_DeletedBranchNoRefusal pinning the deleted-branch normal path to FinalizeEpic; (e) AC1(b) wrapper-parity tightened to the MIXED closed-bead list (error on one bead, later provable orphan still returned by the fail-open wrapper). Citations verified against gitops.go at the pinned SHA: exit-1 branch is exactly line 542."
+    },
+    {
+      "id": "F3-R4-2",
+      "fix": "Fix 2 (G3 AC1 exact-named lifecycle proof)",
+      "grade": "ADDRESSED",
+      "note": "AC1 now runs go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v, with the bare package run explicitly retained as a no-regression pin on top of (not instead of) the named run. Audited every AC1-AC7 proof chain: each named test has an exact-named -run clause, so the Validation-Proofs 'every named test has an exact-named run' statement is now true."
+    },
+    {
+      "id": "F3-R4-3",
+      "fix": "Coherence (F3 lens)",
+      "grade": "ADDRESSED",
+      "note": "No contradiction introduced. R1's fail-closed posture now reads as the exit-128 infra class only — exit-1 absence is (false, nil), which coheres with R1's orphan predicate (absent branch = no branch-EXISTS trigger = not an orphan = no refusal), with R2's advisory-only fail-open, with R5's no-regression (deleted branch is the normal happy path), and with R3 (deleted branch + unsettled obligation still refuses via AC6(a) — AC2(d) is the settled post-complete state, distinct fixtures, no collision). All 4 OQs remain [x]; OQ2 text explicitly scopes fail-closed to infra errors, never legitimate absence."
+    },
+    {
+      "id": "F3-R4-4",
+      "fix": "Scope + new-defect sweep",
+      "grade": "ADDRESSED",
+      "note": "Diff 77d8a1a9..4cbf437b touches only spec.md (+ separately-committed round-3 panel artifacts); no code changed. TestBranchExistsE_ThreeWay lands in internal/gitutil (already an in-scope change surface since round 2's BranchExistsE seam) and TestApproveImpl_DeletedBranchNoRefusal in internal/approve (already the primary test surface) — natural folds, no over-scope. Discriminators genuinely RED: BranchExistsE, ScanOrphanedClosedBeads, and both new test names have zero .go hits at 4cbf437b. Cosmetic only, no action needed: Validation Proofs labels the round-3-commit additions 'round-4 additions', and the brief cites RevParseRef as :524-545 vs the spec's accurate :524-542."
+    }
+  ]
+}

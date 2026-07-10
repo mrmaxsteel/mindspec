@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "G1 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At pinned SHA 4cbf437b, both bounded round-3 fixes are complete and tree-grounded. Empirically, plain `git rev-parse --verify` on a missing branch exits 128, while `--verify --quiet` exits 1. The cited ErrRefNotFound/RevParseRef implementation distinguishes those cases exactly, while BranchExists remains the plain bool-only probe. Requirement 1, Scope, OQ2, its falsifier, AC1, and AC2 consistently specify and test the three-way BranchExistsE contract, deleted-branch non-refusal, and mixed-list wrapper parity. AC1 now includes the exact-named lifecycle run. Both new tests and every prior named discriminator are absent; BranchExistsE and ScanOrphanedClosedBeads have zero internal Go-code hits. The revision commit changes only spec.md; 9fe5e11b contains only round-3 panel artifacts. FinalizeEpic, ApproveImpl ordering, epic scoping, ADR/skill zero-hit baselines, four resolved OQs, and the single h4n5 issue entry remain intact. No unsupported citation or new defect found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "fix_1a",
+      "status": "ADDRESSED",
+      "evidence": "Requirement 1's branch-probe leg, OQ2, and Scope all state present `(true,nil)`, genuine absence `(false,nil)`, and infrastructure failure as non-nil error, grounded on ErrRefNotFound/RevParseRef exit-1-vs-128 behavior."
+    },
+    {
+      "id": "fix_1b",
+      "status": "ADDRESSED",
+      "evidence": "Requirement 1's Falsified-if clause now rejects any genuinely absent branch outcome other than `(false,nil)` and explicitly rejects normal deleted-branch refusal."
+    },
+    {
+      "id": "fix_1c",
+      "status": "ADDRESSED",
+      "evidence": "AC1 adds exact-named `TestBranchExistsE_ThreeWay` with present/absent/infra outcomes and an existence discriminator; grep exits 1 at 4cbf437b, so it is genuinely RED."
+    },
+    {
+      "id": "fix_1d",
+      "status": "ADDRESSED",
+      "evidence": "AC2 adds exact-named `TestApproveImpl_DeletedBranchNoRefusal`, requiring a genuinely absent branch to proceed to FinalizeEpic; grep exits 1 at 4cbf437b."
+    },
+    {
+      "id": "fix_1e",
+      "status": "ADDRESSED",
+      "evidence": "AC1 requires a mixed closed-bead list where Scan returns the one-bead probe/ancestry error while the fail-open wrapper continues and returns later provable orphans byte-identically for existing consumers."
+    },
+    {
+      "id": "fix_2",
+      "status": "ADDRESSED",
+      "evidence": "AC1 now runs `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v`; the additional package-wide run is only a no-regression pin."
+    }
+  ]
+}

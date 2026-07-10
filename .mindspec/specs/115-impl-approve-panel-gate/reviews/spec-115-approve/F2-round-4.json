@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounding verified against code and empirically. gitops.go:13-19 is exactly the ErrRefNotFound doc distinguishing exit-1 'genuinely absent' from the exit-128 transient/structural class; RevParseRef uses --verify --quiet (:534) with the ExitCode()==1 branch at exactly :542; BranchExists uses plain --verify at :98 within :94-100. Empirical /tmp throwaway repo: plain --verify on a missing ref exits 128; --verify --quiet exits 1 with empty output — the spec's three-way contract wording and its 'plain --verify exits 128 — verified' claim match reality precisely, so the naive error-wrap false-refusal argument is sound. All Fix-1 sub-parts (a)-(e) present at 4cbf437b; Fix 2's exact-named lifecycle run landed and the Validation-Proofs statement is now true. Both new test names are 0 hits repo-wide at 77d8a1a9 and 0 code hits at 4cbf437b (genuinely RED). Diff 77d8a1a9..4cbf437b touches only spec.md plus the round-3 panel artifacts; all 4 OQs remain [x]; no design change. One literal imprecision noted (non-blocking, settled convention): 'BranchExistsE ... ZERO hits repo-wide at 77d8a1a9' is true for the code tree but the spec/round-2 brief themselves name the planned symbol — identical to the thrice-approved AC4 ScanOrphanedClosedBeads@eb6a2ed1 phrasing; every operative proof discriminator is code-scoped and RED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "fix": "Fix 1 (G2 — BranchExistsE three-way contract)",
+      "grade": "ADDRESSED",
+      "evidence": "R1, Scope internal/gitutil bullet, and OQ2 all state present→(true,nil) / genuinely-absent(exit 1)→(false,nil) / exit-128-class→error, citing gitops.go:13-19 and :524-542. Citations verified line-exact: ErrRefNotFound doc 13-19, --verify --quiet at :534, ExitCode()==1 at :542, BranchExists plain --verify at :98. Empirical: plain --verify=128, --verify --quiet=1 empty output. (a) all three sites updated; (b) R1 Falsified-if gained the anti-false-refusal clause ('genuinely-absent ... anything but (false, nil)'); (c) AC1(c) adds TestBranchExistsE_ThreeWay with existence grep + exact-named -run; (d) AC2(d) adds TestApproveImpl_DeletedBranchNoRefusal proceeding to FinalizeEpic; (e) AC1(b) wrapper parity tightened to the mixed closed-bead list. Both new test names 0 hits repo-wide at 77d8a1a9, 0 .go hits at 4cbf437b."
+    },
+    {
+      "fix": "Fix 2 (G3 — AC1 lifecycle proof exact-named)",
+      "grade": "ADDRESSED",
+      "evidence": "AC1 proof now chains go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v with the bare package run explicitly retained as the no-regression pin; Validation Proofs' 'exact-named run for every named test' statement is now true and the named-test list includes TestBranchExistsE_ThreeWay (internal/gitutil) and TestApproveImpl_DeletedBranchNoRefusal."
+    },
+    {
+      "fix": "New-defect sweep",
+      "grade": "ADDRESSED",
+      "evidence": "Diff 77d8a1a9..4cbf437b touches only spec.md (16 lines) plus the separately-committed round-3 panel artifacts (9fe5e11b). No AC regressed; all 4 OQs [x]; design core unchanged. Minor non-blocking observation: AC1(c)/Validation-Proofs' 'BranchExistsE ... ZERO hits repo-wide at 77d8a1a9' is literally true only code-tree-wide (spec.md and consolidated-round-2.md name the planned symbol at that commit); this mirrors the settled, thrice-approved AC4 phrasing for ScanOrphanedClosedBeads at eb6a2ed1, and every operative proof discriminator is code-scoped and genuinely RED, so discriminating power is intact."
+    }
+  ]
+}

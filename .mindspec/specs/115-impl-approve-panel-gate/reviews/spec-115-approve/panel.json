@@ -2,7 +2,7 @@
   "bead_id": null,
   "spec": "115-impl-approve-panel-gate",
   "target": "spec/115-impl-approve-panel-gate",
-  "round": 3,
+  "round": 4,
   "expected_reviewers": 9,
-  "reviewed_head_sha": "77d8a1a92e04b473d1b7a7beeee2a39b08545119"
+  "reviewed_head_sha": "4cbf437ba3c58643246a760eb1ac1ed73c14e4ed"
 }

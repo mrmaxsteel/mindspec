@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Falsifiability verified at 4cbf437b. Both new discriminators are genuinely RED: grep for 'func TestBranchExistsE_ThreeWay' (internal/gitutil) and 'func TestApproveImpl_DeletedBranchNoRefusal' (internal/approve) exit 1; BranchExistsE and ScanOrphanedClosedBeads have zero code hits; all eleven prior named tests remain absent; AC9's ADR/skill-doc greps still return 0. Fix 2 landed: AC1's proof now chains the exact-named `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v` with the bare package run retained only as a no-regression pin — I walked AC1-AC7 and every named test has an exact-named -run clause, so the Validation-Proofs claim is now true. Fix 1's five sub-parts (a-e) all present: three-way contract in R1 + OQ2 + Scope, anti-false-refusal falsifier, AC1(c) gitutil test, AC2(d) deleted-branch pin, AC1(b) mixed-list wrapper parity. Empirically confirmed in /tmp: plain --verify exits 128 on a missing ref, --verify --quiet exits 1, not-a-repo exits 128 — the exit-1-vs-128 discrimination and gitops.go:13-19/:524-542/:94-100 citations are accurate. Diff 77d8a1a9..4cbf437b touches only spec.md (8 bounded hunks) plus round-3 panel artifacts; no AC regressed; regression pins (impl_test.go:75/:299/:714) intact. No new defect found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "FIX1-branchexistse-three-way",
+      "grade": "ADDRESSED",
+      "detail": "All five sub-parts verified: (a) R1, OQ2, and the Scope internal/gitutil bullet each state the three-way contract (present->(true,nil); genuinely absent exit-1->(false,nil); exit-128 infra class->error) citing RevParseRef/ErrRefNotFound; (b) R1 Falsified-if gained the anti-false-refusal falsifier ('genuinely-absent branch yields anything but (false,nil)'); (c) AC1(c) adds TestBranchExistsE_ThreeWay with existence grep + exact-named run — 0 hits at 4cbf437b (RED); (d) AC2(d) adds TestApproveImpl_DeletedBranchNoRefusal with exact-named run — 0 hits (RED); (e) AC1(b) wrapper parity upgraded to the MIXED closed-bead list (one erroring bead + a later provable orphan). Exit-code claims empirically reproduced under /tmp."
+    },
+    {
+      "id": "FIX2-ac1-exact-named-lifecycle-run",
+      "grade": "ADDRESSED",
+      "detail": "AC1's proof now contains `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v` chained after the existence grep, with the bare `go test ./internal/lifecycle` explicitly retained as the package no-regression pin. Walked AC1-AC7: every named new test (10 approve + 2 complete + 1 lifecycle + 1 gitutil + the CallOrder anchor) has an exact-named -run clause, so the Validation-Proofs 'every named test has an exact-named run' statement is now true."
+    },
+    {
+      "id": "R4-no-new-defect",
+      "grade": "ADDRESSED",
+      "detail": "Diff 77d8a1a9..4cbf437b modifies only spec.md (hunks at lines 29/42/53/59/80-81/94/102 — exactly the two fix surfaces) plus the separately-committed round-3 panel artifacts. All other AC discriminators remain RED, TestApproveImpl_HappyPath/FinalizeEpicCalled/CallOrder remain at their cited lines unmodified, AC10 remains the deliberate exactly-one-workflow-claimant pin. Minor non-blocking nit: the spec cites RevParseRef as gitops.go:524-542 while the function body runs a few lines past 542; the cited ExitCode()==1 branch is at the stated location, so the grounding is materially accurate."
+    }
+  ]
+}

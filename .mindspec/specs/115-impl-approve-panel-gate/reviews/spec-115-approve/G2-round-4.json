@@ -1,0 +1,47 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.98,
+  "rationale": "Fix 1(a-e) and Fix 2 are textually complete: R1/OQ2/Scope specify the three outcomes, the false-refusal falsifier and both RED named tests exist, AC1(b) pins mixed-list wrapper parity, and AC1 uses the exact lifecycle test run. But the claimed discriminator is not robust: `rev-parse --verify --quiet` exit 1 does not uniquely prove absence. In a temporary repository, an existing loose `refs/heads/bead/loose` behind an unreadable `.git/refs/heads` directory returned exit 1 with empty output; a dangling symbolic branch also returned 1. Under the specified mapping, BranchExistsE returns `(false,nil)`, Scan sees no orphan, and ApproveImpl passes instead of refusing on structural ref-store failure. If access recovers before FinalizeEpic, its independent worktree loop may then merge the branch. Full `refs/heads/...` avoids ambiguity; packed refs and detached HEAD behaved correctly, but the inaccessible-loose-ref trace leaves the original fail-open leg residual.",
+  "concrete_changes_required": [
+    "Revise BranchExistsE so exit 1 alone is not treated as proof of genuine absence: independently distinguish an absent ref from an inaccessible/corrupt loose ref store, and return a non-nil error for the latter.",
+    "Extend TestBranchExistsE_ThreeWay (or add an exact-named companion) with an existing loose branch whose ref store is unreadable, asserting error; pin the ApproveImpl gate refusal for that outcome."
+  ],
+  "findings": [
+    {
+      "id": "Fix 1(a)",
+      "status": "ADDRESSED",
+      "note": "R1, OQ2, and Scope state present/absent/infra outcomes and accurately cite gitops.go:13-19 and RevParseRef at 524-545."
+    },
+    {
+      "id": "Fix 1(b)",
+      "status": "ADDRESSED",
+      "note": "R1 now falsifies any genuinely absent branch outcome other than (false,nil)."
+    },
+    {
+      "id": "Fix 1(c)",
+      "status": "ADDRESSED",
+      "note": "AC1 names TestBranchExistsE_ThreeWay with an exact run; the test and BranchExistsE have zero code hits at 4cbf437b."
+    },
+    {
+      "id": "Fix 1(d)",
+      "status": "ADDRESSED",
+      "note": "AC2 names TestApproveImpl_DeletedBranchNoRefusal and requires FinalizeEpic continuation; the test has zero hits at 4cbf437b."
+    },
+    {
+      "id": "Fix 1(e)",
+      "status": "ADDRESSED",
+      "note": "AC1(b) genuinely pins a mixed list: one probe/ancestry error makes Scan error and the gate refuse while the fail-open wrapper still returns later provable orphans."
+    },
+    {
+      "id": "Fix 1 residual",
+      "status": "NEW_ISSUE",
+      "note": "Exit 1 can mask structural ref-store failure: an existing loose branch with unreadable refs/heads returned 1/empty, so the specified mapping misclassifies infra as absence and fails open."
+    },
+    {
+      "id": "Fix 2",
+      "status": "ADDRESSED",
+      "note": "AC1 now runs TestScanOrphanedClosedBeads_ErrorPreserving with the exact -run pattern; the package-wide run is only an additional regression pin."
+    }
+  ]
+}
