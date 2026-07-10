@@ -153,7 +153,10 @@ var (
 // `refutation_pending_entries` (fail-closed, via completeGetMetadataFn),
 // UNIONS this run's applied (slot, round) entries into that set (never a
 // bare replace — an older still-unsatisfied pending from a prior run must
-// survive), and writes the merged array. If EITHER the read or the write
+// survive), and writes the merged array. Each entry carries its ORIGIN
+// panel set — the slug of every matched panel whose decision applied that
+// refutation (round-2 G1+F1) — so a later verified discharge is bound to
+// the panels that actually held the cleared RC. If EITHER the read or the write
 // fails, the refutation is NOT applied: this function returns a Block (a
 // genuine guard.NewFailure, not an abort-with-applied) and reports NO
 // applied refutations, so the RC stays unresolved.
@@ -179,6 +182,12 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 	var firstWarn string
 	var applied []panel.Refutation
 	appliedSeen := make(map[string]bool) // dedup by "slot\x00round" ACROSS matched panels (item 3/step 4).
+	// appliedOrigins records, per (slot, round) key, EVERY matched panel slug
+	// whose decision applied that refutation — the ORIGIN set the pending
+	// obligation is bound to (round-2 G1+F1). Collected even for an
+	// already-seen key, so a slot+round cleared in two matched panels
+	// carries both origins.
+	appliedOrigins := make(map[string][]string)
 	for i := range regs {
 		if matched == nil {
 			r := regs[i]
@@ -230,6 +239,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		case panel.Allow:
 			for _, ref := range d.AppliedRefutations {
 				key := ref.Slot + "\x00" + strconv.Itoa(ref.Round)
+				appliedOrigins[key] = append(appliedOrigins[key], regs[i].Slug())
 				if appliedSeen[key] {
 					continue
 				}
@@ -240,7 +250,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 	}
 
 	if len(applied) > 0 {
-		if err := persistRefutationPending(beadID, applied); err != nil {
+		if err := persistRefutationPending(beadID, applied, appliedOrigins); err != nil {
 			slots := make([]string, 0, len(applied))
 			for _, a := range applied {
 				slots = append(slots, a.Slot)
@@ -273,9 +283,23 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 // Deliberately carries no reason/evidence — those are re-derived from the
 // live panel.json's Refutations at reconciliation time (or from the current
 // run's own AppliedRefutations, which already carry them).
+//
+// Panels is the ORIGIN set (round-2 G1+F1 blocking fix): the slugs of every
+// matched panel in which this (slot, round) refutation actually cleared a
+// latest-round REQUEST_CHANGES when the obligation was recorded. A verified
+// natural-resolution discharge is bound to THESE panels — every origin must
+// be present in the current matched set, readable, and affirmatively resolve
+// the slot — so removing or corrupting the origin panel (panel.ForBead drops
+// an Err != nil registration exactly like a deletion) while a decoy resolved
+// panel remains can never settle the obligation as "naturally moot". An
+// entry with a missing/empty origin set is fail-closed: it can Satisfy (if
+// re-applied this run) or be covered-of-record, but never discharge.
 type refutationPendingEntry struct {
 	Slot  string `json:"slot"`
 	Round int    `json:"round"`
+	// Panels holds the origin panel slugs (review/<slug> basenames),
+	// sorted and deduplicated for determinism.
+	Panels []string `json:"panels"`
 }
 
 // dischargedEntry is one element of the `refutation_discharged_entries`
@@ -339,28 +363,50 @@ func decodeRefutations(raw interface{}) ([]panel.Refutation, error) {
 	return out, nil
 }
 
-// unionPendingEntries returns the deterministic (slot, round)-deduplicated
-// union of existing pending entries and the current run's newly applied
-// refutations — existing entries win ties (never clobbered), then new ones
-// are appended, then the whole set is sorted for determinism.
-func unionPendingEntries(existing []refutationPendingEntry, add []panel.Refutation) []refutationPendingEntry {
-	seen := make(map[string]bool)
-	var out []refutationPendingEntry
-	for _, e := range existing {
-		key := pendingEntryKey(e.Slot, e.Round)
-		if seen[key] {
+// dedupeSortedSlugs returns the sorted, deduplicated copy of an origin slug
+// set (nil for an empty input, so a truly origin-less entry stays visibly
+// origin-less rather than gaining an empty-but-present array).
+func dedupeSortedSlugs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if seen[s] {
 			continue
 		}
-		seen[key] = true
+		seen[s] = true
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// unionPendingEntries returns the deterministic (slot, round)-deduplicated
+// union of existing pending entries and the current run's newly recorded
+// ones. A key present in BOTH keeps a single entry whose origin set is the
+// UNION of both origin sets (an obligation is never clobbered, and every
+// panel that ever carried the cleared RC stays bound to it — strictly more
+// conservative at discharge time). The result is sorted for determinism.
+func unionPendingEntries(existing, add []refutationPendingEntry) []refutationPendingEntry {
+	idx := make(map[string]int)
+	var out []refutationPendingEntry
+	merge := func(e refutationPendingEntry) {
+		key := pendingEntryKey(e.Slot, e.Round)
+		if i, ok := idx[key]; ok {
+			out[i].Panels = dedupeSortedSlugs(append(out[i].Panels, e.Panels...))
+			return
+		}
+		idx[key] = len(out)
+		e.Panels = dedupeSortedSlugs(e.Panels)
 		out = append(out, e)
 	}
+	for _, e := range existing {
+		merge(e)
+	}
 	for _, a := range add {
-		key := pendingEntryKey(a.Slot, a.Round)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, refutationPendingEntry{Slot: a.Slot, Round: a.Round})
+		merge(a)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Slot != out[j].Slot {
@@ -454,8 +500,10 @@ func unionDischargedEntries(existing, add []dischargedEntry) []dischargedEntry {
 // R2 step 5a): read-then-UNION-then-write the `refutation_pending_entries`
 // array, fail-closed on either the read or the write. Called from panelGate
 // ONLY when this run's decision(s) carried a non-empty AppliedRefutations
-// set.
-func persistRefutationPending(beadID string, applied []panel.Refutation) error {
+// set. origins maps each applied entry's pendingEntryKey to the matched
+// panel slugs whose decisions applied it — persisted as the entry's origin
+// set, the panels a later verified discharge is bound to (round-2 G1+F1).
+func persistRefutationPending(beadID string, applied []panel.Refutation, origins map[string][]string) error {
 	existingMeta, err := completeGetMetadataFn(beadID)
 	if err != nil {
 		return fmt.Errorf("reading existing refutation obligations: %w", err)
@@ -467,7 +515,15 @@ func persistRefutationPending(beadID string, applied []panel.Refutation) error {
 		// Blocks), exactly like a read error above.
 		return fmt.Errorf("reading existing refutation obligations: %w", decErr)
 	}
-	merged := unionPendingEntries(existing, applied)
+	add := make([]refutationPendingEntry, 0, len(applied))
+	for _, a := range applied {
+		add = append(add, refutationPendingEntry{
+			Slot:   a.Slot,
+			Round:  a.Round,
+			Panels: origins[pendingEntryKey(a.Slot, a.Round)],
+		})
+	}
+	merged := unionPendingEntries(existing, add)
 	if err := completeMergeMetadataFn(beadID, map[string]interface{}{
 		"refutation_pending_entries": merged,
 	}); err != nil {
@@ -550,6 +606,9 @@ func writeRefutationDischargedMetadata(beadID string, entries []dischargedEntry)
 // pending round does NOT meet this test.
 func dischargeEvidence(res *panel.Result, slot string, round int) bool {
 	if res == nil {
+		// Defensive only: reconcilePendingRefutations never passes nil (an
+		// erroring tally flips retallyOK instead, and panel.Tally never
+		// returns a nil Result with a nil error).
 		return false
 	}
 	if res.LatestRound > round {
@@ -591,17 +650,27 @@ func dischargeEvidence(res *panel.Result, slot string, round int) bool {
 // L533-535: a compound-failure retry — audit durably written, close
 // failed, panel removed — must not re-Refuse an already-met obligation).
 // Discharge fires ONLY on affirmative re-tally evidence
-// (dischargeEvidence) holding in EVERY matched panel — never on a bare
-// Allow/Warn gate action, since Warn paths (abandoned/missing-ref/
-// transient-gitErr) pass WITHOUT the RC resolving. No matched panel at
-// all, ANY erroring re-tally, ANY matched panel still showing the RC live
-// (or lacking affirmative evidence the slot resolved — the pending's
-// origin panel cannot be told apart from one whose verdicts were removed),
-// a completeGetMetadataFn read error, or a present-but-corrupt
-// entries value all Refuse (fail-closed, over-conservative: never a lost
-// obligation, never a false discharge). A bead with NO recorded pending
-// reconciles to a no-op — §6 fail-open preserved for genuinely pristine
-// beads.
+// (dischargeEvidence) — never on a bare Allow/Warn gate action, since Warn
+// paths (abandoned/missing-ref/transient-gitErr) pass WITHOUT the RC
+// resolving — and is ORIGIN-BOUND (the round-2 G1+F1 blocking fix): each
+// pending entry records the panel slugs where its refutation actually
+// cleared a latest-round RC, and the discharge test must hold BOTH in
+// every recorded origin panel — each one present in the CURRENT matched
+// set (panel.ForBead drops an unreadable Err != nil registration exactly
+// like a deletion, so presence implies readability) AND affirmatively
+// resolving the slot — and in every other currently-matched panel (the
+// round-1 all-panel guard). A decoy resolved panel can therefore never
+// substitute for a removed or corrupted origin: making the origin panel
+// disappear no longer converts a live obligation into a no-questions
+// "naturally moot" discharge. No matched panel at all, ANY erroring
+// re-tally, ANY origin panel absent/unreadable/still-live-RC, a pending
+// entry with NO recorded origin set (fail-closed origin decode — it can
+// still Satisfy or be covered, never discharge), ANY matched panel still
+// showing the RC live, a completeGetMetadataFn read error, or a
+// present-but-corrupt entries value all Refuse (fail-closed,
+// over-conservative: never a lost obligation, never a false discharge). A
+// bead with NO recorded pending reconciles to a no-op — §6 fail-open
+// preserved for genuinely pristine beads.
 func reconcilePendingRefutations(beadID string, roots []string, applied []panel.Refutation) error {
 	refuse := func(msg string) error {
 		return guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
@@ -664,6 +733,7 @@ func reconcilePendingRefutations(beadID string, roots []string, applied []panel.
 	regs := panel.ForBead(panelScanFn(roots...), beadID)
 	retallyOK := len(regs) > 0
 	var results []*panel.Result
+	resultsBySlug := make(map[string][]*panel.Result)
 	for i := range regs {
 		r, tallyErr := panelTallyFn(regs[i].Dir)
 		if tallyErr != nil {
@@ -671,18 +741,41 @@ func reconcilePendingRefutations(beadID string, roots []string, applied []panel.
 			break
 		}
 		results = append(results, r)
+		slug := regs[i].Slug()
+		resultsBySlug[slug] = append(resultsBySlug[slug], r)
 	}
-	// dischargeVerified: the two-disjunct dischargeEvidence test must hold
-	// in EVERY matched panel, so a pending is never discharged from one
-	// panel's APPROVE state while ANY matched panel still shows (or cannot
-	// affirmatively deny) the slot as a live latest-round RC at/covering its
-	// round.
-	dischargeVerified := func(slot string, round int) bool {
+	// dischargeVerified: ORIGIN-BOUND (round-2 G1+F1) on top of the round-1
+	// all-panel guard. The two-disjunct dischargeEvidence test must hold
+	// (1) in EVERY panel of the pending entry's recorded origin set — each
+	// origin slug must be in the current matched set at all (absent OR
+	// corrupt origins both vanish from panel.ForBead and both veto the
+	// discharge; a decoy non-origin panel can never substitute) — and
+	// (2) in EVERY other currently-matched panel, so a pending is never
+	// discharged from one panel's APPROVE state while ANY matched panel
+	// still shows (or cannot affirmatively deny) the slot as a live
+	// latest-round RC at/covering its round. An entry with NO recorded
+	// origin set cannot be verified against its origin → never discharges
+	// (fail-closed, symmetric with the corrupt-store Refuse).
+	dischargeVerified := func(p refutationPendingEntry) bool {
 		if !retallyOK {
 			return false
 		}
+		if len(p.Panels) == 0 {
+			return false
+		}
+		for _, slug := range p.Panels {
+			originResults, present := resultsBySlug[slug]
+			if slug == "" || !present {
+				return false
+			}
+			for _, r := range originResults {
+				if !dischargeEvidence(r, p.Slot, p.Round) {
+					return false
+				}
+			}
+		}
 		for _, r := range results {
-			if !dischargeEvidence(r, slot, round) {
+			if !dischargeEvidence(r, p.Slot, p.Round) {
 				return false
 			}
 		}
@@ -703,20 +796,26 @@ func reconcilePendingRefutations(beadID string, roots []string, applied []panel.
 			toSatisfy = append(toSatisfy, ref)
 			continue
 		}
-		if dischargeVerified(p.Slot, p.Round) {
+		if dischargeVerified(p) {
 			toDischarge = append(toDischarge, dischargedEntry{
 				Slot: p.Slot, Round: p.Round,
 				Reason: fmt.Sprintf("RC resolved naturally — the slot's latest-round verdict is no longer REQUEST_CHANGES at/after round %d", p.Round),
 			})
 			continue
 		}
-		unresolved = append(unresolved, fmt.Sprintf("%s@%d", p.Slot, p.Round))
+		label := fmt.Sprintf("%s@%d", p.Slot, p.Round)
+		if len(p.Panels) > 0 {
+			label += fmt.Sprintf(" (origin panel(s): %s)", strings.Join(p.Panels, ", "))
+		} else {
+			label += " (origin panel unrecorded)"
+		}
+		unresolved = append(unresolved, label)
 	}
 
 	if len(unresolved) > 0 {
 		sort.Strings(unresolved)
 		return guard.NewFailure(fmt.Sprintf(
-			"this bead carries an unsatisfied refutation obligation for %s that cannot be verified as satisfied or resolved — restore the panel so it can be satisfied or discharged, or restore the audit",
+			"this bead carries an unsatisfied refutation obligation for %s that cannot be verified as satisfied or resolved — restore the origin panel(s) so it can be satisfied or discharged, or restore the audit",
 			strings.Join(unresolved, ", ")),
 			fmt.Sprintf("mindspec complete %s", beadID))
 	}
