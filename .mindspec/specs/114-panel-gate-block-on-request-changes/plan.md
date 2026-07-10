@@ -4,8 +4,14 @@ adr_citations:
     - ADR-0035
     - ADR-0040
     - ADR-0023
+approved_at: "2026-07-10T09:15:23Z"
+approved_by: user
+bead_ids:
+    - mindspec-mvp8.1
+    - mindspec-mvp8.2
+    - mindspec-mvp8.3
 spec_id: 114-panel-gate-block-on-request-changes
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []
@@ -20,7 +26,8 @@ work_chunks:
         - internal/complete/panel_gate_e2e_test.go
         - internal/instruct/panelstate_test.go
         - cmd/mindspec/panel_test.go
-    - depends_on: [1]
+    - depends_on:
+        - 1
       id: 2
       key_file_paths:
         - internal/panel/panel.go
@@ -34,7 +41,8 @@ work_chunks:
         - internal/panel/panel_test.go
         - internal/bead/bdcli.go
         - internal/bead/bdcli_test.go
-    - depends_on: [2]
+    - depends_on:
+        - 2
       id: 3
       key_file_paths:
         - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
