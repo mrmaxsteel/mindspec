@@ -1,0 +1,57 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Contradiction lens, pinned 2b4fb8f0 in a /tmp clone. My Finding A is RESOLVED: the dated addendum (spec.md:32-38) sits ABOVE every discharge passage and its blanket clause + notably-list names all four passages I flagged — §7 ADR-Touchpoints refutation_discharged (now :51), R2's satisfy/discharge/refuse trichotomy + VERIFIED-discharged and its falsifiers (:59), In Scope's RE-TALLYING/panel.Tally (:68), AC11(d)/(e)/(f) (:102); §6 'satisfied or discharged' (:51) is caught by the blanket. Forward-only compliant (diff shows pure addition; approved text unedited). Addendum accuracy re-verified against ship: 0 discharge tokens in any .go or in ADR-0037; all 8 named falsifier tests exist in panel_refuted_test.go. A reader can no longer take spec.md as claiming discharge is current. F3-2 fixed by the plan amendment's spec-wide broadening covering all four locations I named; AC2 label now matches shipped TestPanelRefuted_WriteMetadata (:88). Finding B: ACCEPT the follow-up disposition — R1/R2 are complete-scoped, FinalizeEpic (:381-418) is pre-existing on a different verb behind a forbidden anti-pattern, the scope note is honest, o4fd is P1 OPEN in the dolt DB (JSONL export pending), and blocking 114 would leave BOTH holes open. Doc-only delta re-confirmed CI-green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "status": "ADDRESSED",
+      "severity": "major",
+      "hard_block": false,
+      "title": "spec.md mandated the deleted discharge/re-tally mechanism as current — FIXED by dated superseding addendum",
+      "detail": "The '## Amendment (2026-07-10, implementation — DISCHARGE PATH DELETED)' addendum at spec.md:32-38 unambiguously supersedes every passage I flagged in round 1: (1) ADR-Touchpoints §7 'a refutation_discharged audit' and §6 'satisfied or discharged' (round-1 line ~39, now :51) — §7 is named in the notably-list, §6 caught by the blanket 'every discharge... reference below'; (2) R2(b)(ii)'s satisfy/discharge/refuse trichotomy, 'VERIFIED-discharged', and the R2 falsifiers naming refutation_discharged (round-1 ~47, now :59) — named; (3) In Scope's 'RE-TALLYING the matched panel from panelReg.Dir (panel.Tally)' (round-1 ~56, now :68) — named verbatim; (4) AC11(d)/(e)/(f) (round-1 ~90, now :102) — named. The addendum's shipped-design description is accurate against the pinned tree: zero refutation_discharged/discharge/re-tally in any shipped .go (only the deliberate-removal comments at panel_advisory.go:281-283,501-506), zero discharge mentions in shipped ADR-0037, and every falsifier test the addendum names exists (TestPanelRefuted_SatisfyFromMarker_PanelGone:301, _MarkerCarriesReasonEvidence:1040, _NaturalResolution_NoObligation:372, plus _CrossRun_UnionReconcilesAll:425, _HatchStillReconcilesPendingObligation:675, _AlreadyCoveredPending_Completes:845, _MalformedPendingEntries_Refuses:925, _MarkerWriteFailure_Blocks:216). Forward-only compliant: git diff 41d8e8af..2b4fb8f0 shows spec.md changed by pure insertion (+12 lines, 0 deletions) — the approved text is preserved unedited, exactly the append/supersede form ADR-0023 requires. The contradiction is closed: spec.md can no longer be read as asserting discharge is the current design."
+    },
+    {
+      "id": "F3-2",
+      "status": "ADDRESSED",
+      "severity": "minor",
+      "hard_block": false,
+      "title": "plan.md amendment scope broadened plan-wide — FIXED",
+      "detail": "The Bead-2 DESIGN AMENDMENT now ends: 'This amendment is SPEC-WIDE, not section-local: it supersedes every discharge / refutation_discharged / verified-discharge / reconciliation-re-tally reference ANYWHERE in this plan (incl. the § above at \"satisfying (panel_refuted), VERIFIED-discharging …\", the Bead-3 instructions that mention writing a refutation_discharged audit, ADR Fitness, and Testing Strategy)'. That covers all four out-of-section locations I flagged: the Decomposition Bead-2 bullet above the amendment (~80-82, quoted verbatim), the Bead-3 ADR-§7 and SKILL instructions (~928, ~983), ADR Fitness (~1049-1091), and Testing Strategy (~1128). Cosmetic word-slip only: 'SPEC-WIDE' means plan-wide, and the very next words ('ANYWHERE in this plan') disambiguate — not blocking. The AC2 crosswalk provenance fix (O3's nit) is also correct: TestPanelRefuted_WriteMetadata is the shipped name (panel_refuted_test.go:88) and the row honestly notes the draft label."
+    },
+    {
+      "id": "F3-3",
+      "status": "ADDRESSED",
+      "severity": "info",
+      "hard_block": false,
+      "title": ".beads historical discharge mentions unchanged — still acceptable as history",
+      "detail": ".beads/issues.jsonl still carries exactly 3 refutation_discharged mentions inside closed-bead description text, dated before the redesign. With spec.md, plan.md, ADR-0037, and consolidated-round-3.md now all coherently superseding, these are unambiguously historical records; rewriting closed-bead descriptions remains unwarranted. No change required."
+    },
+    {
+      "id": "F3-R2-B",
+      "status": "ADDRESSED",
+      "severity": "info",
+      "hard_block": false,
+      "title": "Finding B disposition: out-of-scope tracked follow-up is the RIGHT call",
+      "detail": "Code-verified the bypass is real and exactly as described: internal/executor/mindspec_executor.go:381-418 auto-merges non-ancestor bead branches in FinalizeEpic, with a pre-existing comment ('handles beads that were closed via bd close without mindspec complete') proving the path predates 114 (it carries spec-106 and spec-092 annotations). I accept the follow-up disposition: (1) spec 114's R1/R2 are explicitly scoped to the mindspec complete gate — B is a different verb; (2) the path requires raw bd close, an orchestrator-forbidden anti-pattern per AGENTS.md guardrails; (3) O1/F1 confirmed no un-audited path within 114's own mechanism, so 114 is a strict monotonic improvement — blocking it would leave BOTH holes open while fixing neither; (4) the scope note (spec.md:44-46) is honest — it names the hole, the file:lines, and explicitly calls o4fd 'the no-silent-out-vote-in-the-binary completion' rather than over-claiming 114 closed it; (5) this satisfies the findings-never-out-voted contract: the finding is adjudicated with a durable, dated disposition, not ignored. Verified mindspec-o4fd exists as P1 OPEN (bd show; created 2026-07-10) with an accurate description. One sync note, non-blocking: o4fd is in the dolt DB but not yet exported to .beads/issues.jsonl at 2b4fb8f0 — it should ride the next bd export so the repo snapshot matches the tracker of record."
+    },
+    {
+      "id": "F3-R2-N1",
+      "status": "OPEN",
+      "severity": "info",
+      "hard_block": false,
+      "title": "Nit: addendum's notably-list names AC5, which contains no discharge/re-tally reference (vacuous over-listing)",
+      "detail": "spec.md:34's parenthetical '(notably §7 …; R1/R2 …; In Scope's …; AC5; and AC11 (d)/(e)/(f) …)' includes AC5, but AC5 (unchanged-paths + four-fixture carve-out, :97) contains zero discharge/refutation_discharged/re-tally tokens (grep-verified), so the operative blanket clause — which supersedes only such references — touches nothing in it. Harm is limited to a moment of reader confusion about why AC5 is listed; it cannot resurrect the round-1 contradiction (the supersession direction is unaffected) and AC5's live content is not discounted, since the addendum separately affirms 'Everything else in R1/R2/AC1–AC12 shipped AS WRITTEN'. Not worth a round: fold the two-word deletion into any future spec.md touch. Does not affect my APPROVE."
+    },
+    {
+      "id": "F3-R2-OK",
+      "status": "ADDRESSED",
+      "severity": "info",
+      "hard_block": false,
+      "title": "No-code-regression + round-1 approvals carry forward",
+      "detail": "git diff 41d8e8af..2b4fb8f0 touches only spec.md (+12/-0), plan.md (2 lines), reviews/spec-114-final/BRIEF.md, and the round-1 verdict JSONs — zero .go files, so round 1's CI-green holds by construction; re-confirmed anyway in the /tmp clone at 2b4fb8f0: go build ./... clean, gofmt -l ./cmd ./internal empty, go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all ok, clone git-clean. The doc addenda introduce no new contradiction, no over-claim (the scope note under-claims appropriately), and everything I round-1-verified as coherent (code, ADR-0037, both SKILL copies, plan AC11 row, consolidated-round-3.md) is untouched."
+    }
+  ]
+}

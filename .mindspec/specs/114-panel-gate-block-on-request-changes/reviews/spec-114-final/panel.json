@@ -2,7 +2,7 @@
   "bead_id": null,
   "spec": "114-panel-gate-block-on-request-changes",
   "target": "spec/114-panel-gate-block-on-request-changes",
-  "round": 1,
+  "round": 2,
   "expected_reviewers": 12,
-  "reviewed_head_sha": "41d8e8afce90ba3d3bf6f96c3bdd7b9b8221332d"
+  "reviewed_head_sha": "2b4fb8f09eff6e008b5887c1a765c3339874c880"
 }

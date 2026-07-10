@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "No-regression lens, round 2, all work in an absolute /tmp clone pinned at 2b4fb8f0, git clean. CONFIRMED `git diff 41d8e8af 2b4fb8f0` touches ZERO .go files (only spec.md, plan.md, and round-1 review artifacts) — so my round-1 no-regression conclusion holds unchanged by construction. Re-swept anyway in /tmp (go1.26.1): build OK, `gofmt -l ./cmd ./internal` empty, and go test ./internal/panel ./internal/complete ./internal/bead all PASS. Finding A RESOLVED: the dated spec.md addendum is forward-only-compliant (append+supersede, approved text untouched) and unambiguously supersedes every discharge/`refutation_discharged`/verified-discharge/re-tally reference below it. I verified its claims against the SHIPPED code — `reconcilePendingRefutations` settles from the self-contained `refutation_pending_entries` marker and writes `panel_refuted` from it, with NO `panel.Tally`/panel read at reconcile and NO `refutation_discharged` anywhere in the code (grep-confirmed); the plan's spec-wide broadening + the AC2 provenance-label fix (`TestPanelRefuted_WriteMetadata`, which exists) are correct and non-misleading. Finding B disposition is CORRECT: FinalizeEpic/impl-approve is a pre-existing, different-verb, orchestrator-forbidden path outside 114's `complete`-scoped R1/R2; the scope note is honest (does not over-claim) and o4fd(P1) is filed — treating it as a tracked follow-up, not a 114 blocker, is the right call. No new problem introduced by the addenda. Round-1 APPROVE carried forward.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "A",
+      "status": "ADDRESSED",
+      "note": "spec.md dated addendum supersedes all discharge/re-tally language; accurate vs shipped code (reconcile-from-marker, no discharge, no re-tally — grep + reconcilePendingRefutations verified); forward-only compliant. Plan broadening + AC2 label fix correct."
+    },
+    {
+      "id": "B",
+      "status": "ADDRESSED",
+      "note": "Accept out-of-scope disposition: FinalizeEpic/impl-approve is a pre-existing different-verb path outside 114's complete-scoped R1/R2 and already an orchestrator-forbidden anti-pattern; honest scope note + o4fd(P1) follow-up. Not a 114 merge blocker."
+    }
+  ]
+}

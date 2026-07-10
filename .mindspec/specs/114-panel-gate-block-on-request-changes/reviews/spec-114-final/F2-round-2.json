@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "Carrying my round-1 APPROVE forward; the doc-only delta fixes my round-1 info finding and introduces no new problem. Verified in a /tmp clone pinned to 2b4fb8f0: git diff 41d8e8af..2b4fb8f0 touches ONLY spec.md (+12/-0, purely additive — forward-only compliant), plan.md (2 lines: amendment-block broadening + AC2 label fix that PRESERVES the draft name parenthetically), and the round-1 review artifacts; zero .go files; the full diff vs true base 71398a68 is the identical 23-file substantive set from round 1. The spec.md addendum is accurate and fully grounded: the shipped AC11 falsifier tests exist byte-for-byte (TestPanelRefuted_SatisfyFromMarker_PanelGone / _MarkerCarriesReasonEvidence / _NaturalResolution_NoObligation, panel_refuted_test.go:301/1040/372; AC2's TestPanelRefuted_WriteMetadata:88), the self-contained marker carries {slot,round,reason,evidence} (panel_advisory.go:287-290), reconcile settles from the marker with zero discharge/re-tally code anywhere in .go, and the cited 8/8-unanimous Bead-2 round-4 panel (incl. G1 codex) is on disk. Finding B: the scope note's FinalizeEpic claim matches mindspec_executor.go:381-418 exactly, and mindspec-o4fd is live in bd as P1 OPEN with a concrete repro. Out-of-scope-follow-up is the RIGHT disposition: R1/R2 are complete-scoped, the path is pre-existing (guarded since specs 092/106, untouched by 114), 114 strictly narrows the attack surface, the note is honest about what is NOT enforced, and blocking 114 would fix nothing about B. Empirical: build/gofmt/vet clean; go test panel+complete+bead+cmd PASS; -race panel+complete PASS.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "hard_block": false,
+      "status": "ADDRESSED",
+      "title": "Round-1: spec.md retained superseded discharge language without an in-file supersession pointer",
+      "detail": "ADDRESSED by the dated 'Amendment (2026-07-10)' addendum at spec.md:32-38: it enumerates the exact superseded passages (verified present below it — §7 ADR-Touchpoints refutation_discharged at L51, R2's satisfy/discharge/refuse trichotomy + VERIFIED-discharged at L59, In Scope RE-TALLYING/panel.Tally at L68, AC11 (d)/(e)/(f) at L102), states the shipped satisfy-from-marker design accurately against the code, names the real shipped test names, and leaves the approved text unedited (append-only diff). Exactly the archaeology aid my round-1 finding asked for."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "status": "OPEN",
+      "title": "Round-1: stale comment phrasing in gate.go leg 9.5 (cosmetic)",
+      "detail": "internal/panel/gate.go:279-280 'Bead 1 has none yet' phrasing remains stale post-Bead-2. Correctly untouched in this doc-only round (a code edit would have broken the no-code-regression construction); behavior (AC10 no-advertise) is correct and test-pinned. Fold into any future code-touching pass; never blocking."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "status": "ADDRESSED",
+      "title": "Finding B (G2): impl-approve/FinalizeEpic un-gated auto-merge — disposition accepted",
+      "detail": "The scope note's code citation is exact (FinalizeEpic auto-merges raw-bd-close'd bead branches at internal/executor/mindspec_executor.go:381-418 with layout/conflict guards but NO panel gate), mindspec-o4fd is confirmed filed P1 OPEN in bd with the G2 repro, and the note honestly disclaims rather than over-claims. Accepting follow-up disposition: 114's R1/R2 are explicitly complete-scoped, the path pre-exists 114, and O1/F1 cleared 114's own mechanism. o4fd is the 'no silent out-vote in the binary' completion and should ship promptly given the P1."
+    }
+  ]
+}
