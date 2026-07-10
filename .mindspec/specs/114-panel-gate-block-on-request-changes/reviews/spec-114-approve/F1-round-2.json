@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-1 finding ADDRESSED. All four load-bearing anti-gaming falsifiers are now pinned by real acceptance criteria with runnable proofs, not just 'Falsified if' prose. AC7 pins sub-threshold-after-refutation with a concrete decision-table scenario (6 APPROVE + 2 refuted RC, expected 8, threshold 7 -> Block on the floor) matching R1's chosen-model numbers, plus a message-content constraint. AC8 pins both halves of the unrecognized-verdict falsifier: blocks as not-an-APPROVE AND non-refutable. AC9 asserts the tally-level observable directly (Result.Approves unchanged after an applied refutation), which with AC7 pins the never-increments property end-to-end. AC10 is a checkable fixed-string predicate (names slot ids, ends with recovery:, no panel refute / refutations / refute substring) explicitly mirroring the HC-7 MINDSPEC_SKIP_PANEL assertion, exercised in both internal/panel and internal/complete. AC11 durable-audit fence exists (injected MergeMetadata failure -> non-zero, distinguished from best-effort abandon/skip). Validation Proofs enumerate AC7-AC12 under the test commands, so they are wired into the proof ledger. All 4 OQs remain [x]. An implementer ticking AC1-AC12 is now forced to test-prove every anti-gaming property.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R1-01",
+      "round1_finding": "Load-bearing anti-gaming falsifiers (sub-threshold-refuted-still-blocks, refuted-RC-never-increments-Approves, unrecognized-verdict-not-refutable, no-advertise message rule) lived only in R1/R2 'Falsified if' clauses with no acceptance criterion pinning them.",
+      "disposition": "ADDRESSED",
+      "evidence": "spec.md@5c0140d: AC7 (line 84) sub-threshold 6/8 threshold-7 both-RCs-refuted -> Block, proof 'go test ./internal/panel -run Refut|PanelGateDecision'; AC8 (line 85) unrecognized verdict blocks and is non-refutable, same proof; AC9 (line 86) Result.Approves unchanged after applied refutation, proof 'go test ./internal/panel -run Refut'; AC10 (line 87) fixed-string no-advertise predicate mirroring HC-7, proofs in internal/panel and internal/complete; AC11 (line 88) durable-audit write-failure fence present. Validation Proofs (lines 94-95) reference AC7/AC8/AC9/AC12 and AC10/AC11. Each new AC is an assertion with a concrete scenario plus a runnable command, not a restatement."
+    }
+  ]
+}
