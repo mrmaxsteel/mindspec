@@ -224,12 +224,11 @@ func TestApproveThreshold_InterpretsRecordedExpr(t *testing.T) {
 func TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision(t *testing.T) {
 	sha := "abc1234def5678abc1234def5678abc1234def56"
 	p := &Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
-	// 5 APPROVE + 1 neutral dissent = 6/6 present (Complete()), 5/6 APPROVE
-	// meets the N-1 threshold — mirrors the existing "threshold met" row in
-	// panel_decision_test.go.
-	r := result(p, 5, 0, 1, nil, nil)
-	r.Verdicts = append(r.Verdicts,
-		Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+	// 6/6 all-APPROVE (Spec 114 R1: a REQUEST_CHANGES filler would now
+	// unconditionally Block via the new unresolved-verdict leg — this
+	// fixture's SUBJECT is config-default inertness, not RC tolerance, so it
+	// must feed a genuinely clean panel to keep testing the Allow path).
+	r := result(p, 6, 0, 1, nil, nil)
 	facts := GateFacts{
 		BeadID:  "mindspec-bd01",
 		Reg:     regn("/wt/review/slug"),
@@ -239,7 +238,7 @@ func TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision(t *testing.T) {
 
 	want := PanelGateDecision(facts)
 	if want.Action != Allow {
-		t.Fatalf("precondition: expected Allow with 5/6 approves, got %+v", want)
+		t.Fatalf("precondition: expected Allow with 6/6 approves, got %+v", want)
 	}
 
 	for _, configDefault := range []int{3, 6, 10} {
@@ -308,12 +307,12 @@ func TestPanel_GateFieldDecisionInert(t *testing.T) {
 	for _, gate := range []string{"", "bead", "weird"} {
 		p := base
 		p.Gate = gate
-		// 5 APPROVE + 1 neutral dissent = 6/6 present (Complete()), 5/6
-		// APPROVE meets the N-1 threshold (mirrors
-		// TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision).
-		r := result(&p, 5, 0, 1, nil, nil)
-		r.Verdicts = append(r.Verdicts,
-			Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+		// 6/6 all-APPROVE (Spec 114 R1: mirrors
+		// TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision — a
+		// REQUEST_CHANGES filler would now Block via the unresolved-verdict
+		// leg, and this fixture's subject is Gate-field inertness, not RC
+		// tolerance).
+		r := result(&p, 6, 0, 1, nil, nil)
 		facts := GateFacts{
 			BeadID:  "mindspec-bd01",
 			Reg:     regn("/wt/review/slug"),
@@ -406,8 +405,11 @@ func TestPanel_GateFieldDecisionInertAllEnumValues(t *testing.T) {
 		headSHA string
 		wantAct GateAction
 	}{
-		// Allow: 5 APPROVE + 1 dissent = 6/6 present, 5/6 meets the N-1
-		// threshold, SHA current (mirrors 112's pin).
+		// Allow: 6/6 all-APPROVE, SHA current (mirrors 112's pin; Spec 114
+		// R1 replaces the incidental REQUEST_CHANGES filler with a genuine
+		// APPROVE since this fixture's subject is Gate-field inertness, not
+		// RC tolerance — the shared buildFacts closure below feeds real
+		// APPROVEs so the "allow" scenario stays Allow for every gate value).
 		{name: "allow", headSHA: sha, wantAct: Allow},
 		// Block: identical votes but a stale reviewed_head_sha — the
 		// staleness leg blocks regardless of gate.
@@ -417,9 +419,7 @@ func TestPanel_GateFieldDecisionInertAllEnumValues(t *testing.T) {
 	buildFacts := func(gate, headSHA string) GateFacts {
 		p := Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
 		p.Gate = gate
-		r := result(&p, 5, 0, 1, nil, nil)
-		r.Verdicts = append(r.Verdicts,
-			Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+		r := result(&p, 6, 0, 1, nil, nil)
 		return GateFacts{
 			BeadID:  "mindspec-bd01",
 			Reg:     regn("/wt/review/slug"),

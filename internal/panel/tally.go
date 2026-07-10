@@ -151,6 +151,25 @@ func (r *Result) Complete() bool {
 	return r.ExpectedReviewers() > 0 && len(r.Verdicts) >= r.ExpectedReviewers()
 }
 
+// UnresolvedVerdicts returns the latest-round verdicts whose canonical
+// Verdict is neither VerdictApprove nor VerdictReject — i.e. REQUEST_CHANGES
+// plus anything unrecognized, exactly the "neither" set the Approves/Rejects
+// doc comment above names. REJECTs are deliberately excluded: they are leg
+// (9)'s business (PanelGateDecision) and must never be treated as merely
+// "unresolved" even if leg ordering were ever edited. Verdicts is already
+// slot-sorted (see Tally), so the returned slice — and every message built
+// from it — is deterministic (Spec 114 R1).
+func (r *Result) UnresolvedVerdicts() []Verdict {
+	var out []Verdict
+	for _, v := range r.Verdicts {
+		if v.Verdict == VerdictApprove || v.Verdict == VerdictReject {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
 // VoteVerdict is the deterministic vote-only gate outcome of a tally
 // (Spec 093 Req 12). It is the subset of the pre-complete hook's decision
 // that depends ONLY on fs-derived panel state — registration validity,
@@ -207,6 +226,14 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 		return VoteBlock, fmt.Sprintf("round %d: REJECT/hard_block recorded (%d/%d APPROVE)", round, r.Approves, n)
 	}
 	threshold := p.ApproveThreshold()
+	if unresolved := r.UnresolvedVerdicts(); len(unresolved) > 0 {
+		slots := make([]string, len(unresolved))
+		for i, v := range unresolved {
+			slots[i] = v.Slot
+		}
+		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE, threshold is %d/%d",
+			round, strings.Join(slots, ", "), r.Approves, n, threshold, n)
+	}
 	if threshold > 0 && r.Approves >= threshold {
 		return VotePass, fmt.Sprintf("round %d: %d/%d APPROVE (threshold %d/%d)", round, r.Approves, n, threshold, n)
 	}
