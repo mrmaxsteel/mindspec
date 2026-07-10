@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Re-verified at a1194682. All 12 ACs still map in Provenance to a bead plus a named runnable test, including every rework addition: AC11 now carries TestPanelGate_RefutedAuditWriteFailure_FailsCompletion (asserts bead NOT closed via the closeBeadFn seam — I confirmed it is a stubbable package var at complete.go:29), the TOCTOU panel-removed retry, the post-write erasure-survival e2e, and TestMergeMetadata_FailClosedOnReadError; AC12 gains the (slot,round) dedup collapsed-record row inside a Dup-named subtest; AC2's recovery-path re-audit and the skip-env-with-refutations row are in Bead 2 step 7(B)(vi)/(viii) and the verification bullets. Grounding re-checked at fae2bfb6: MergeMetadata (bdcli.go:266-290) genuinely proceeds-from-empty on read error and replace-writes — the erasure hole and fail-closed fix are real; write-before-close correctly precedes the :547 close and the :548-553 already-closed recovery branch. No AC orphaned; no proof broken. All three of my round-1 minors: ADDRESSED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "severity": "disposition",
+      "title": "F1-1 (AC5 carve-out is four flips, not three) — ADDRESSED",
+      "detail": "Bead 1 step 5 is now titled 'The AC5 carve-out — FOUR intended outcome flips' and enumerates (a)-(d) including the VoteDecision lockstep twin; the Bead-1 verification diff-review, the Bead-1 AC, and the Provenance AC5 row all name the four-flip set plus the step-6 (a)-(h) outcome-preserving list. Exactly the framing I asked the bead-1 panel to gate on."
+    },
+    {
+      "id": "F1-R2-2",
+      "severity": "disposition",
+      "title": "F1-2 (AC12 'Dup' regex matched no test name) — ADDRESSED",
+      "detail": "Step 7(A)(vii) now mandates a Dup-named subtest (TestPanelGateDecision_Refutations/DuplicateSlot...) 'so -run Dup selects it', and the Provenance AC12 proof `go test ./internal/panel -run 'Refut|Dup'` now bites on its own term. The subtest additionally pins the new same-slot+round dedup-to-one-applied-record behavior, extending AC12 into the audit path."
+    },
+    {
+      "id": "F1-R2-3",
+      "severity": "disposition",
+      "title": "F1-3 (skip-env path with refutations-carrying panel) — ADDRESSED",
+      "detail": "Step 7(B)(viii) adds the exact e2e I suggested: MINDSPEC_SKIP_PANEL over a panel carrying a refutations array -> gate skipped, AppliedRefutations empty, completion succeeds, NO panel_refuted written (only panel_gate_skipped). Named in the internal/complete verification bullet and covered by the AC11-adjacent run command."
+    },
+    {
+      "id": "F1-R2-4",
+      "severity": "nit",
+      "title": "Two Bead-2 sub-scenarios lack their own test function names",
+      "detail": "The TOCTOU retry (7(B)(iii)) is specified as a follow-on inside/beside TestPanelGate_RefutedAuditWriteFailure_FailsCompletion, and the already-closed recovery-path audit test (7(B)(vi)) is described ('a test drives a pre-closed bead...') but not given a function name. Both are pinned in the verification bullets and reachable via `go test ./internal/complete -run 'PanelRefuted|PanelGate'`, so the proofs are runnable; the implementer should give each its own named (sub)test so the bead panel can point at them. Cosmetic, not blocking."
+    },
+    {
+      "id": "F1-R2-5",
+      "severity": "note",
+      "title": "Fail-closed MergeMetadata blast radius claim verified plausible",
+      "detail": "At fae2bfb6 the plan's claim holds for the sites I checked: MergeMetadata callers reached via completeMergeMetadataFn are best-effort (warn) except the new step-3.75 fatal write, and a clean-but-empty read still merges from empty (only a read/parse FAILURE aborts). The Bead-2 panel should still grep all MergeMetadata call sites (incl. internal/next epic-phase sync) to confirm none treats an error return as fatal-in-a-loop."
+    }
+  ]
+}

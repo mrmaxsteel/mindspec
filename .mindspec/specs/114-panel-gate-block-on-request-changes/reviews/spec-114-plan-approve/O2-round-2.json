@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-1 concerns and the new rework both hold. (1) The ADR-0037 §7 grounding is now correct in BOTH the Bead 3 §7 amendment spec and the Bead 2 step-5 rationale: the durable-vs-best-effort asymmetry is grounded SOLELY in AppliedRefutations (refutation changes the gate outcome → non-empty applied set), and the struck 'terminal non-merge exit' claim is explicitly repudiated (abandon/env-skip both Warn→Allow→MERGE yet produce no applied set). Adding internal/bead needs no new ADR — verified ADR-0037 line 5 Domain(s): workflow, execution. (2) Testing Strategy names real, runnable tests for every new case: TOCTOU retry (write-fails→not-closed→panel-removed→no un-audited merge) via closeBeadFn spy (complete.go:29,547) + readStubMergeExecutor.completeCalled; erasure-survival via the step-5.5 doc-skew write; TestMergeMetadata_FailClosedOnReadError over the proven show-stub seam (bdcli_test.go:603/621); the (slot,round) dedup Dup row; recovery-path audit test; and AC7-11 anti-gaming rows. The ./internal/bead lane is added to the AC5 sweep. All cited seams exist; step ordering (gates→close→best-effort writes) confirms placement of step 3.75 pre-close.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"severity": "none", "note": "§7 grounding regrounded correctly in AppliedRefutations at both Bead 2 step 5 (plan L475-480) and Bead 3 step 3 (L662-687); no residual 'non-merge exit' basis."},
+    {"severity": "none", "note": "MergeMetadata (bdcli.go:263-290) currently proceeds-from-empty on a show read error — exactly the fail-open the plan makes fail-closed; the fix is well-located and strictly safer for all callers."},
+    {"severity": "none", "note": "TOCTOU/erasure/dedup/recovery/AC7-11 tests all have named functions, -run selectors, and existing harness seams (setupPanelGateRepo, completeMergeMetadataFn, closeBeadFn, execCommand show-stub). None un-runnable."}
+  ]
+}

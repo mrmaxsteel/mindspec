@@ -64,13 +64,15 @@ within the ≤3 bound; `work_chunks` declares the edges):
   production diff.
 - **Bead 2 (R2)** — the `refutations` schema on `panel.json`, the
   gate-validated per-slot clearing, the applied-refutation plumbing out of
-  `PanelGateDecision`/`panelGate`, the **durable** `panel_refuted` audit
-  written **BEFORE the bead close** (write-before-close, the airtight form —
-  see the durable-audit design below), a **fail-closed `bead.MergeMetadata`**
-  so a later transient read-failure can never erase the audit, and
-  deduplicated applied-refutation selection. Subtle production ordering; this
-  bead edits `internal/bead` (execution domain — a plan-time scope refinement
-  the plan-approve panel required; see the domain note below).
+  `PanelGateDecision`/`panelGate`, and the full **durable-obligation
+  protocol**: a fail-closed `refutation_pending` marker on bead metadata
+  written the moment the gate decides to apply a refutation (pre-close), the
+  satisfying `panel_refuted` audit (pre-close), a **fail-open-path override**
+  that refuses to merge an in-progress bead carrying an unsatisfied
+  obligation even when the `panel.json` is gone, a **fail-closed
+  `bead.MergeMetadata`** so no later read-failure can erase the audit, and
+  deduplicated applied-refutation selection. This bead edits `internal/bead`
+  (execution domain — see the amendment note below).
 - **Bead 3 (docs)** — the ADR-0037 amendment and the /ms-panel-tally
   refutation procedure (both skill copies).
 
@@ -95,18 +97,39 @@ those two review-surface reasons; splitting Bead 1 by package was rejected
 because the `VoteDecision` lockstep (R1's own falsifier) must land
 atomically with the gate leg.
 
-**Impacted-domains refinement (plan-approve panel, G2).** The approved
-spec's Impacted Domains scoped `internal/bead` read-only ("no change lands
-there"). The plan-approve panel's durable-audit airtightness review found
-that `bead.MergeMetadata` (internal/bead/bdcli.go:263-290) must be made
-**fail-closed** (item 2 below) to keep the audit un-eraseable, so Bead 2 now
-edits `internal/bead` — an **execution-domain** file. This is a genuine
-plan-time scope addition: ADR-0037 (cited; Domain(s) workflow, execution)
-already covers execution, so no new ADR is needed, but the Bead 2 brief must
-declare the execution domain in its OWNERSHIP attribution (the bead touches
-both workflow — `internal/panel`, `internal/complete` — and execution —
-`internal/bead`) so the complete-time ADR-divergence gate does not
-false-block it.
+**Durable-obligation stays IN Bead 2 (not a new Bead 4) — decomposition
+decision (round-3 G2).** The round-3 durable-obligation protocol (the early
+`refutation_pending` marker, the fail-open-path override, the fail-closed
+`MergeMetadata`) is folded into Bead 2 rather than split into a Bead 4. The
+protocol is inseparable from the `panel_refuted` audit it enforces: a Bead 2
+that shipped `panel_refuted` WITHOUT the obligation would itself carry the
+exact G2 hole round-2 rejected (a panel-removed retry merging un-audited), so
+that intermediate merged state would not be individually panel-passable — and
+every bead must pass its own gate. The three pieces touch the SAME files as
+the rest of Bead 2 (`complete.go`, `panel_advisory.go`, `internal/bead`) and
+cannot be tested without Bead 2's applied-refutation plumbing, so a Bead 4
+would be a pure R_scope-overlap dependency with no independence. The chain
+stays A→B→C (length 3). Bead 2 grows but the mechanism lands atomically.
+
+**Impacted-domains amendment (plan-approve rounds 2-3, operator-authorized).**
+Bead 2 edits `internal/bead/bdcli.go` (making `bead.MergeMetadata`
+fail-closed — item 2 below), an **execution-domain** file. The round-2 plan
+proposed to have the Bead 2 brief "declare the execution domain in its
+OWNERSHIP attribution" — round-3 finding O3 proved that mechanically WRONG:
+the complete-time ADR-divergence gate derives its CANDIDATE domains from the
+**spec's `## Impacted Domains`** (`internal/validate/divergence.go:104/155/162`,
+`attributeDomainCached` in `ownership.go:373`), which listed workflow only and
+said `internal/bead` had "no change"; a file attributed to `execution` (not in
+the candidate set) hard-errors at `divergence.go:221` BEFORE the ADR-coverage
+check — a brief-side OWNERSHIP note cannot fix that. **Fix (operator-authorized
+amendment, applied):** the spec's `## Impacted Domains` now ADDS **execution /
+`internal/bead/**`** (owned per `.mindspec/domains/execution/OWNERSHIP.yaml:3`)
+with a good-reason note, and strikes the "no change lands there" line. ADR-0037
+(Domain(s): workflow, execution) and ADR-0035 (workflow, execution, core), both
+cited, cover execution — so ADR-coverage still passes and no new ADR is added;
+`mindspec validate spec` passes with the amendment (verified). The
+`--override-adr "<reason>"` fallback (precedented, spec 110) is therefore NOT
+needed and is not used.
 
 **Reviewer/fixer scratch discipline (inherit into every bead brief and
 reviewer prompt):** reviewers and fixers MUST use ABSOLUTE `/tmp` scratch
@@ -340,21 +363,22 @@ production diff outside `internal/panel` in this bead.
 **Depends on**
 None (first bead).
 
-## Bead 2: R2 — audited refutation escape + DURABLE `panel_refuted` audit (schema, gate validation, write-before-close, fail-closed MergeMetadata)
+## Bead 2: R2 — audited refutation escape + DURABLE-obligation protocol (schema, gate validation, pending-marker + panel_refuted pre-close, fail-open override, fail-closed MergeMetadata)
 
 **Scope**
 
 `internal/panel/panel.go` (schema), `internal/panel/tally.go` +
 `internal/panel/gate.go` (gate validation + applied-refutation plumbing),
 `internal/complete/panel_advisory.go` + `internal/complete/complete.go` (the
-durable audit write, placed BEFORE the bead close, and the dedup), and
-`internal/bead/bdcli.go` (making `bead.MergeMetadata` FAIL-CLOSED — the
-execution-domain edit the plan-approve panel required; see the domain note in
-Decomposition). The write goes through the existing `completeMergeMetadataFn`
-seam (`internal/complete/complete.go:42`) → `bead.MergeMetadata`
-(`internal/bead/bdcli.go:263-290`, which JSON-marshals the merged map, so a
-nested entries array round-trips). No new CLI verb (OQ3: hand-edit
-`panel.json`; the gate carries the whole validation burden).
+durable-obligation protocol — the pre-close `refutation_pending` marker, the
+pre-close `panel_refuted` audit, the fail-open-path obligation check, and the
+dedup), and `internal/bead/bdcli.go` (making `bead.MergeMetadata` FAIL-CLOSED
+and adding a `GetMetadata` read helper — the execution-domain edit; see the
+amendment note in Decomposition). The writes go through the existing
+`completeMergeMetadataFn` seam (`internal/complete/complete.go:42`) →
+`bead.MergeMetadata` (`internal/bead/bdcli.go:263-290`, which JSON-marshals the
+merged map, so a nested entries array round-trips). No new CLI verb (OQ3:
+hand-edit `panel.json`; the gate carries the whole validation burden).
 
 **Steps**
 
@@ -433,73 +457,108 @@ nested entries array round-trips). No new CLI verb (OQ3: hand-edit
    `internal/complete/panel_gate_layout_test.go` (:152,:162) — all
    mechanical `reg, err :=` → `reg, _, err :=` updates (AC5-permitted
    struct/return additions; no outcome changes).
-5. **The durable audit write — WRITE-BEFORE-CLOSE (`complete.go`, a new
-   step at 3.75; carry-forward #1 / review item 1, the airtight form).** Add
-   `writePanelRefutedMetadata(beadID string, applied []panel.Refutation)
-   error` in panel_advisory.go: builds `panel_refuted: true`,
-   `panel_refuted_at: <RFC3339 UTC>`, and
-   `panel_refuted_entries: [{slot, round, reason, evidence}, ...]` (keys
-   parallel to `panel_abandoned`, panel_advisory.go:332-341) and RETURNS the
-   `completeMergeMetadataFn` error — non-swallowing, unlike
-   `writePanelAuditMetadata` (panel_advisory.go:304-342) which stays
-   best-effort for abandon/skip byte-unchanged. Call it in `Run` at a new
-   **step 3.75**: AFTER the last blocking gate (the ADR-divergence decision,
-   complete.go:542-544) and BEFORE the step-4 bead close
-   (complete.go:546-547), guarded on a non-empty `applied` set (the set
-   `panelGate` returned at step 2.25). On error, return a `guard.NewFailure`
-   whose body states that the gate passed by relying on recorded
-   refutation(s) but the durable `panel_refuted` audit could not be written,
-   that nothing was closed or merged, and that the state is recoverable
-   (re-run `mindspec complete <bead>` — the panel is still present, so
-   `panelGate` re-derives the same applied set and retries the write), with
-   recovery line `mindspec complete <bead>`.
-   **Why write-BEFORE-CLOSE, not before-merge (the TOCTOU fix — this is the
-   load-bearing correction the plan-approve panel required):** the earlier
-   write-before-MERGE design wrote `panel_refuted` after the step-4 close.
-   If that write failed the bead was ALREADY CLOSED; on retry, if the
-   `panel.json` had been removed/lost, `panelGate` FAIL-OPENS (ADR-0037 §6,
-   no panel → silent pass) and the already-closed bead merges with NO
-   `panel_refuted` — a silent, un-audited, gate-cleared completion, exactly
-   what AC11 forbids. The complete.go:695-708 convergence contract
-   guarantees merge-RETRY, not audit-obligation preservation, so it does not
-   cover this hole. Writing BEFORE the close makes the invariant
-   **bead-closed ⟹ audit-was-written-this-run**, hence
-   **merged ⟹ closed ⟹ audited**: the bead can never reach the closed (or
-   merged) state without the audit already durably on metadata. Placing it
-   after the step-3.5 gates (not earlier) still avoids a spurious audit for
-   a completion that fails doc-sync/ADR; the only mutation ahead of it is
-   the step-2.5 `CommitAll` of the bead's own work, which a normal re-run
-   already tolerates idempotently (a clean retry re-measures the same fresh
-   tip at step 2.25). The step-5.6 `writePanelAuditMetadata` call
-   (complete.go:778-785) is byte-unchanged and does NOT write
-   `panel_refuted`. **The durable-vs-best-effort asymmetry is grounded
-   SOLELY in AppliedRefutations (review item 5):** a refutation CHANGES the
-   gate outcome and therefore produces a non-empty `AppliedRefutations`
-   set — abandon and env-skip both Warn→Allow→MERGE too (they are NOT
-   "terminal non-merge exits"), but they produce NO `AppliedRefutations`, so
-   they carry no un-eraseable audit obligation and stay best-effort.
-6. **Fail-closed `bead.MergeMetadata` (`internal/bead/bdcli.go:263-290`;
-   carry-forward #1 / review item 2 — closes the post-write erasure hole).**
-   Today `MergeMetadata` IGNORES a metadata-READ failure: on a `bd show`
-   error it proceeds from an EMPTY `merged` map and replace-writes, ERASING
-   every existing key — so a transient read failure during ANY later
-   best-effort write (the step-5.5 doc-skew / adr-override / adr-supersede
-   writes, or the step-6.5 epic-phase sync, all via the same helper) could
-   wipe a just-written `panel_refuted`, yielding a successful completion with
-   the audit LOST. FIX: make `MergeMetadata` **fail-closed** — when the
-   existing-metadata read (`tracedOutput("show", ...)`) errors OR its JSON
-   fails to unmarshal, RETURN that error instead of proceeding from empty (a
-   genuinely absent metadata map — a clean read that yields no items — still
-   merges from empty, unchanged; only a READ/PARSE FAILURE now aborts). This
-   is strictly safer for every caller: the fatal one (our step-3.75
-   `panel_refuted` write) surfaces the failure, and the best-effort ones
-   warn-and-continue WITHOUT erasing. Blast-radius note: every existing
-   `MergeMetadata` caller currently proceeds-from-empty on read error; after
-   this change they error on read failure instead — all of them are already
-   best-effort (warn) except our new fatal write, so no other behavior
-   regresses (a failed read was already a latent corruption, now it is a
-   visible no-op). This is the `internal/bead` (execution-domain) edit; the
-   Bead 2 brief declares that domain in its OWNERSHIP attribution.
+5. **The DURABLE-OBLIGATION protocol (`complete.go` + `panel_advisory.go`;
+   carry-forward #1 + round-3 G2 — the airtight, cross-run form).** The
+   round-2 write-before-CLOSE design stopped the FIRST failed attempt from
+   closing the bead, but round-3 G2 found a residual hole: if the
+   `panel_refuted` write fails (bead stays `in_progress`, no audit) and the
+   `panel.json` is THEN removed, a retry hits the §6 no-panel fail-open path
+   with an in-progress bead → it can close+merge with NO `panel_refuted`. So
+   "bead-closed ⟹ audited" held WITHIN a run but not ACROSS retries where the
+   panel disappears. The fix makes the obligation DURABLE on bead metadata,
+   independent of the removable panel. Two metadata keys, both written via
+   the (now fail-closed, step 6) `completeMergeMetadataFn` seam, both
+   fail-closed, both BEFORE the close:
+   - **(a) `refutation_pending` marker (the moment the gate applies a
+     refutation).** In `Run`, immediately after `panelGate` returns a
+     non-empty `applied` set at step 2.25, add a **step 2.3** that writes
+     `refutation_pending: true` + `refutation_pending_entries:
+     [{slot, round}, ...]` (the deduped applied slot(s)+round(s)) to bead
+     metadata. If this write fails, return a `guard.NewFailure` and ABORT
+     pre-close (the gate has not cleared; the bead stays `in_progress`; no
+     CommitAll-past-this occurs — actually place step 2.3 right after the
+     step-2.25 gate and BEFORE step-2.5 CommitAll so an abort leaves the
+     least mutation). Recovery line: re-run `mindspec complete <bead>`.
+   - **(b) `panel_refuted` satisfying audit (pre-close, upgrade
+     pending→satisfied).** Add `writePanelRefutedMetadata(beadID, applied)
+     error` in panel_advisory.go building `panel_refuted: true`,
+     `panel_refuted_at: <RFC3339 UTC>`, `panel_refuted_entries:
+     [{slot, round, reason, evidence}, ...]` (keys parallel to
+     `panel_abandoned`, panel_advisory.go:332-341), RETURNING the merge
+     error (non-swallowing, unlike `writePanelAuditMetadata`,
+     panel_advisory.go:304-342, which stays best-effort for abandon/skip).
+     Call it at a new **step 3.75**: AFTER the last blocking gate (the
+     ADR-divergence decision, complete.go:542-544) and BEFORE the step-4
+     close (complete.go:546-547), guarded on the non-empty `applied` set. On
+     error, `guard.NewFailure` + abort pre-close (nothing closed/merged;
+     `refutation_pending` remains, so a retry is still gated by (c)).
+   - **(c) fail-open-path OBLIGATION OVERRIDE (§6).** The no-panel fail-open
+     path — today `panelGate` returns `(nil, nil, nil)` and `Run` proceeds
+     (complete.go:152-156) — must now, before proceeding, READ bead metadata
+     (via the new `bead.GetMetadata`, step 6) and REFUSE to merge if
+     `refutation_pending` is present with NO matching `panel_refuted`
+     covering the same slot(s)+round(s). This is a recoverable
+     `guard.NewFailure`: "this bead has a recorded refutation obligation but
+     no durable `panel_refuted` audit; its panel.json is absent — restore
+     the panel (so the gate re-applies and re-audits) or restore the audit
+     before completing", recovery line `mindspec complete <bead>`. Placement:
+     in `Run` at step 2.25 when `panelGate` reports no matched panel AND
+     `beadID != ""`, do the metadata check before falling through to the
+     normal panel-less completion. A bead with NO obligation on metadata
+     fails open exactly as today (dogfooding safety, R2 §6 preserved).
+   **Net invariant (state it in the code comment):** a bead that EVER has a
+   refutation applied can never close or merge — across ANY number of
+   `mindspec complete` retries, including one after the panel.json is
+   removed — without a durable `panel_refuted` audit on its bead metadata.
+   Proof sketch: closing/merging requires either (i) a panel-present run
+   whose gate applies the refutation, which writes `refutation_pending` (2.3,
+   fail-closed) THEN `panel_refuted` (3.75, fail-closed) both before close —
+   any failure aborts pre-close leaving `in_progress` + an unsatisfied
+   obligation; or (ii) the no-panel fail-open path, which (c) blocks whenever
+   an unsatisfied obligation is on metadata. The only way past both is a
+   durably-recorded `panel_refuted`. The step-5.6 `writePanelAuditMetadata`
+   call (complete.go:778-785) is byte-unchanged and does NOT write
+   `panel_refuted`. **The durable-vs-best-effort asymmetry is grounded SOLELY
+   in AppliedRefutations (review item 5):** a refutation produces a non-empty
+   `AppliedRefutations` set and thus a durable obligation; abandon and
+   env-skip both Warn→Allow→MERGE too (they are NOT "terminal non-merge
+   exits") but produce NO `AppliedRefutations`, so they carry no obligation
+   and stay best-effort.
+6. **Fail-closed `bead.MergeMetadata` + `GetMetadata` read helper
+   (`internal/bead/bdcli.go:263-290`; carry-forward #1 / review item 2 —
+   closes the post-write erasure hole).** Today `MergeMetadata` IGNORES a
+   metadata-READ failure: on a `bd show` error it proceeds from an EMPTY
+   `merged` map and replace-writes, ERASING every existing key — so a
+   transient read failure during ANY later write (the step-5.5 doc-skew /
+   adr-override / adr-supersede writes, or the step-6.5 epic-phase sync, all
+   via the same helper) could wipe a just-written `panel_refuted`, yielding a
+   successful completion with the audit LOST. FIX: make `MergeMetadata`
+   **fail-closed** — when the existing-metadata read (`tracedOutput("show",
+   ...)`) errors OR its JSON fails to unmarshal, RETURN that error instead of
+   proceeding from empty (a genuinely absent metadata map — a clean read that
+   yields no items — still merges from empty, unchanged; only a READ/PARSE
+   FAILURE now aborts). ALSO add an exported
+   `func GetMetadata(issueID string) (map[string]interface{}, error)` (the
+   same `bd show <id> --json` read `MergeMetadata` already does, returning the
+   parsed `metadata` map or a read error) so the step-5(c) fail-open override
+   can consult the obligation. **Blast-radius — the ACTUAL caller taxonomy
+   (round-2 F3 correction; do NOT claim "all best-effort"):** the change makes
+   a read-error fatal where it was silently swallowed. By class, no caller
+   regresses: (1) **already-fatal** callers — `internal/bead/repair.go:86`,
+   and `phase.EnsureMigrated` (reached fatally from `complete.go:283` and both
+   approve paths) — already propagate write errors fatally; making the rare
+   read-error also fatal is strictly safer (a swallowed read-error there was a
+   latent silent corruption). (2) **best-effort/warn** callers — complete's
+   doc-skew/adr-override/adr-supersede/panel audits and `approve/impl.go`
+   writes — are unchanged on the common path and merely warn (never erase) on
+   the rare read-error. (3) **ignore** caller — `release.go:133` discards the
+   return — unchanged. Keep a blast-radius grep
+   (`grep -rn 'MergeMetadata(' --include='*.go'`) as a Bead-2 verification
+   step (round-2 F1). This is the `internal/bead` (execution-domain) edit; the
+   complete-time ADR-divergence gate accepts it because the spec's
+   `## Impacted Domains` now declares execution / `internal/bead/**` (the
+   round-3 O3 amendment — a brief-side OWNERSHIP note alone would NOT have
+   satisfied the gate, which derives candidate domains from the spec).
 7. **Tests. (A) Refutation semantics (`internal/panel`).** New table-driven
    `TestPanelGateDecision_Refutations` (+ `TestVoteDecision_Refutations`
    lockstep rows and `TestResult_AppliedRefutations` unit rows), all
@@ -534,7 +593,7 @@ nested entries array round-trips). No new CLI verb (OQ3: hand-edit
    dedup); (viii) the AC10 predicate re-asserted on the Block message of a
    panel that HAS a refutations array (the tempting case): still no `refut`
    substring.
-   **(B) Durable audit + write-before-close + fail-closed
+   **(B) Durable-obligation protocol + fail-closed metadata
    (`internal/complete` + `internal/bead`).** (i) **AC2 audit-half**:
    `TestWritePanelRefutedMetadata` beside
    `TestWritePanelAuditMetadata_Abandoned` (panel_advisory_test.go:111-134):
@@ -542,47 +601,58 @@ nested entries array round-trips). No new CLI verb (OQ3: hand-edit
    `panel_refuted_at`, and the applied slot/round/reason/evidence entries —
    and asserts the ERROR RETURN propagates (non-swallowing); plus e2e on the
    `setupPanelGateRepo` harness: a 5A+1RC panel with a matching
-   `refutations` entry → `Run` succeeds, `ex.completeCalled == true`, and
-   the captured metadata carries the audit. (ii) **AC11 write-fails →
-   not-closed → merge never runs**:
+   `refutations` entry → `Run` succeeds, `ex.completeCalled == true`, and the
+   captured metadata carries BOTH `refutation_pending` and `panel_refuted`.
+   (ii) **AC11 audit-write-fails → not-closed → merge never runs**:
    `TestPanelGate_RefutedAuditWriteFailure_FailsCompletion` — stub
    `completeMergeMetadataFn` to fail ONLY on maps containing `panel_refuted`
-   (other writes succeed); same fixture → `Run` returns non-zero,
-   `ex.completeCalled == false`, AND `closeBeadFn` was NOT called (the bead
-   is not closed — the write-before-close guarantee). (iii) **AC11 TOCTOU
-   retry (item 1)**: after that failed run, remove the `panel.json`
-   (simulating a lost/removed panel) and re-run `Run`; assert the completion
-   does NOT merge an un-audited already-closed bead — because the first run
-   never closed the bead, the retry is a plain panel-less fail-open of a
-   still-`in_progress` bead, and NO `panel_refuted`-relying merge occurs
-   (there is no applied refutation to lose). (iv) **Post-write erasure
-   survival (item 2)**: a successful refutation completion in which a LATER
-   best-effort write (e.g. the step-5.5 doc-skew write, driven via
+   (the pending write and others succeed); same fixture → `Run` returns
+   non-zero, `ex.completeCalled == false`, AND `closeBeadFn` was NOT called
+   (the bead is not closed — the pre-close guarantee). (iii) **AC11
+   pending-marker-write-fails → abort pre-close (round-3 item 1(ii))**: stub
+   the metadata write to fail on `refutation_pending` → `Run` returns
+   non-zero, `closeBeadFn` NOT called, no `panel_refuted` written (the gate
+   never even reached the satisfying write). (iv) **AC11 CROSS-RUN
+   panel-removed retry (round-3 item 1(i) — G2's requested assertion)**:
+   drive run 1 to fail its `panel_refuted` write (bead stays `in_progress`,
+   `refutation_pending` recorded, no `panel_refuted`); then REMOVE the
+   `panel.json` and run `Run` a SECOND time with metadata writes now
+   succeeding → assert the second run REFUSES (non-zero, `closeBeadFn` NOT
+   called, `ex.completeCalled == false`) via the fail-open obligation
+   override — it must NOT close/merge the bead without a `panel_refuted`.
+   This is the strong assertion (not merely "avoid an already-closed
+   merge"): a refutation-cleared finding cannot vanish un-audited even after
+   panel removal. A companion positive control: once the panel is RESTORED
+   (or a `panel_refuted` is present), the retry completes. (v) **Post-write
+   erasure survival (round-2 item 2)**: a successful refutation completion in
+   which a LATER best-effort write (the step-5.5 doc-skew write via
    `AllowDocSkew`) hits a `MergeMetadata` read failure → assert
-   `panel_refuted` SURVIVES on the captured metadata (fail-closed
-   `MergeMetadata` no-ops the erasing write instead of replacing from
-   empty). (v) **`internal/bead` unit**: `TestMergeMetadata_FailClosedOnReadError`
-   in `bdcli_test.go` — inject a `show` read failure and assert
-   `MergeMetadata` returns an error and performs NO replace-write (existing
-   keys preserved), while a clean empty read still merges. (vi)
-   **Already-closed recovery path (item 8)**: qualify — the recovery branch
-   (complete.go:547-554) does NOT force the dolt-commit + committed-state
-   verify the normal close path (complete.go:555-650) runs, so the
-   durability rationale must NOT lean on it. Because step 3.75 writes
-   `panel_refuted` BEFORE the close, a recovery re-run (bead already closed,
-   panel still present) still re-derives the applied set and re-writes the
-   audit at step 3.75 before reaching the recovery branch; a test drives a
-   pre-closed bead with a live refutation panel and asserts the audit is
-   present after completion. (vii) **Asymmetry control**: an ABANDONED panel
-   with the same `panel_refuted`-failing stub still completes successfully
-   with only a warning (abandon produces no `AppliedRefutations`, so no
-   durable obligation). (viii) **skip-env-with-refutations e2e (item 10)**:
-   a `MINDSPEC_SKIP_PANEL` complete over a panel that carries a
-   `refutations` array → the gate is skipped, `AppliedRefutations` is empty,
-   completion succeeds, and NO `panel_refuted` is written (only
-   `panel_gate_skipped`). (ix) An applied-refutations-empty completion
-   (plain all-APPROVE pass) writes NO `panel_refuted` key — only genuine
-   clears are recorded (the "unused entry never audited" falsifier).
+   `panel_refuted` SURVIVES (fail-closed `MergeMetadata` no-ops the erasing
+   write instead of replacing from empty). (vi) **`internal/bead` units**:
+   `TestMergeMetadata_FailClosedOnReadError` in `bdcli_test.go` — inject a
+   `show` read failure and assert `MergeMetadata` returns an error and
+   performs NO replace-write (existing keys preserved), while a clean empty
+   read still merges; and `TestGetMetadata` — the read helper returns the
+   parsed metadata map (and surfaces a read error). (vii) **Already-closed
+   recovery-path audit (round-2 item 8 / round-3 O3 minor)**: the recovery
+   branch (complete.go:547-554) does NOT force the dolt-commit +
+   committed-state verify the normal close path (complete.go:555-650) runs,
+   so the durability rationale must not lean on it. Because step 2.3/3.75
+   write the obligation + audit BEFORE the close, a recovery re-run (bead
+   already closed, panel still present) still re-derives the applied set and
+   re-writes both before reaching the recovery branch; a test drives a
+   pre-closed bead with a live refutation panel and asserts `panel_refuted`
+   is present after completion. (viii) **Asymmetry control**: an ABANDONED
+   panel with the same `panel_refuted`-failing stub still completes
+   successfully with only a warning (abandon produces no `AppliedRefutations`
+   → no obligation, no pending marker). (ix) **skip-env-with-refutations
+   e2e (round-2 item 10)**: a `MINDSPEC_SKIP_PANEL` complete over a panel
+   carrying a `refutations` array → gate skipped, `AppliedRefutations`
+   empty, no `refutation_pending`, completion succeeds, NO `panel_refuted`
+   (only `panel_gate_skipped`). (x) An applied-refutations-empty completion
+   (plain all-APPROVE pass) writes neither `refutation_pending` nor
+   `panel_refuted` — only genuine clears are recorded (the "unused entry
+   never audited" falsifier).
 
 **Verification**
 
@@ -590,14 +660,20 @@ nested entries array round-trips). No new CLI verb (OQ3: hand-edit
   AC2(gate)/AC3/AC4/AC7/AC8/AC9/AC12 decision rows + the (slot,round) dedup
   row green.
 - [ ] `go test ./internal/complete -run 'PanelRefuted|PanelGate'` —
-  AC2(audit) write content, AC11 write-failure fence (non-zero, bead NOT
-  closed, merge never ran), the TOCTOU retry (panel removed → no un-audited
-  merge), the post-write erasure-survival test, the already-closed recovery
-  audit test, the skip-env-with-refutations (no `panel_refuted`) row, the
-  abandon best-effort asymmetry control, and the whole pre-existing
-  `TestPanelGate_*` suite green.
-- [ ] `go test ./internal/bead -run 'MergeMetadata'` — the fail-closed
-  read-error test green (returns error, no replace-write).
+  AC2(audit) `refutation_pending`+`panel_refuted` write content; the AC11
+  audit-write-fail and pending-write-fail fences (non-zero, bead NOT closed);
+  the CROSS-RUN panel-removed retry (second run REFUSES via the fail-open
+  obligation override); the post-write erasure-survival test; the
+  already-closed recovery-path audit test; the skip-env-with-refutations (no
+  `panel_refuted`) row; the abandon best-effort asymmetry control; and the
+  whole pre-existing `TestPanelGate_*` suite green.
+- [ ] `go test ./internal/bead -run 'MergeMetadata|GetMetadata'` — the
+  fail-closed read-error test (returns error, no replace-write) and the
+  `GetMetadata` read-helper test green.
+- [ ] `grep -rn 'MergeMetadata(' --include='*.go'` — blast-radius review
+  confirms the caller taxonomy (already-fatal: repair.go / phase.EnsureMigrated;
+  warn: complete + approve/impl; ignore: release.go) so making the read-error
+  fatal regresses no class (round-2 F1/F3).
 - [ ] `go build ./... && go test ./internal/panel ./internal/complete ./internal/instruct ./cmd/mindspec ./internal/bead` — full sweep green; diff review confirms no fixture outside Bead 1's four-flip set changed outcome (this bead adds tests, the one `Decision` comparability fix, and the mechanical `panelGate` return-arity caller updates).
 - [ ] `gofmt -l ./cmd ./internal` prints nothing.
 
@@ -613,12 +689,14 @@ nested entries array round-trips). No new CLI verb (OQ3: hand-edit
   so a sub-threshold panel still blocks on the floor after every RC is
   refuted; duplicate refutation entries collapse to one audited record
   (AC3, AC4, AC7, AC8, AC9, AC12, item 3).
-- A `MergeMetadata` failure on an APPLIED refutation fails the completion
-  BEFORE THE BEAD CLOSES — never a silent, un-audited, gate-cleared merge,
-  and never an already-closed bead that a panel-removed retry can merge
-  un-audited (AC11, TOCTOU item 1) — while abandon/env-skip audits stay
-  best-effort (grounded in their empty `AppliedRefutations`, not in any
-  "non-merge exit" claim).
+- **The durable-obligation invariant (round-3 G2):** a bead that EVER has a
+  refutation applied can never close or merge — across ANY number of
+  `mindspec complete` retries, including one after the `panel.json` is
+  removed — without a durable `panel_refuted` audit on its bead metadata.
+  Enforced by the pre-close fail-closed `refutation_pending` marker, the
+  pre-close fail-closed `panel_refuted` write, and the fail-open-path
+  obligation override; abandon/env-skip stay best-effort (grounded in their
+  empty `AppliedRefutations`, not in any "non-merge exit" claim) (AC11).
 - A written `panel_refuted` audit cannot be erased by a later transient
   metadata read failure: `bead.MergeMetadata` is fail-closed (item 2).
 
@@ -668,24 +746,46 @@ contract.
    leg 3, and env-skip likewise merges — neither is a non-merge exit), but
    solely in the fact that a refutation CHANGES the gate outcome and
    produces an applied-refutation obligation, whereas abandon/skip produce
-   none. Concretely: `mindspec complete` writes `panel_refuted`
-   **before the bead closes** (so a bead can never close, and thus never
-   merge, without the audit already written) and a write failure fails the
-   completion pre-close; and `bead.MergeMetadata` is **fail-closed** on a
-   metadata read error so no later best-effort write can erase a recorded
-   `panel_refuted` (review item 2). Like the skip hatch, the Block message
-   never advertises a paste-able refutation incantation (OQ4); the escape is
-   documented here and in /ms-panel-tally only, so it stays a deliberate
-   looked-up action. State (review item 7) that of the hatches only env-skip
-   and abandonment carry a bead-metadata audit (`panel_gate_skipped` /
-   `panel_abandoned`); the `enforcement.panel_gate: false` config toggle
-   writes no audit. Re-affirm §6 (fail-open without a panel, fail-closed
-   with one — unchanged) and §8 (trust boundary unchanged: the record is
-   agent-writable by design; an **empty `reason` still clears — a documented
-   footgun in parity with empty `abandon_reason`**, not an endorsed use;
-   reason + evidence carry the refutation's legitimacy) — the O1 minor,
-   recorded.
-4. **/ms-panel-tally SKILL.md**: add item 5, "Refutation procedure
+   none. Concretely, the DURABLE-OBLIGATION protocol: `mindspec complete`
+   writes a fail-closed `refutation_pending` marker to bead metadata the
+   moment the gate applies a refutation, then the satisfying `panel_refuted`
+   audit — BOTH before the bead closes — and the §6 fail-open-without-a-panel
+   path additionally CHECKS bead metadata and REFUSES to merge an in-progress
+   bead carrying an unsatisfied obligation (so even a panel-removed retry
+   cannot merge un-audited); and `bead.MergeMetadata` is **fail-closed** on a
+   metadata read error so no later write can erase a recorded `panel_refuted`
+   (review item 2). Like the skip hatch, the Block message never advertises a
+   paste-able refutation incantation (OQ4); the escape is documented here and
+   in /ms-panel-tally only. State (review item 7) that of the hatches only
+   env-skip and abandonment carry a bead-metadata audit (`panel_gate_skipped`
+   / `panel_abandoned`); the `enforcement.panel_gate: false` config toggle
+   writes no audit. Re-affirm §6 (fail-open without a panel, fail-closed with
+   one — UNCHANGED for beads with no refutation obligation; the new obligation
+   check only overrides fail-open for a bead that has a recorded, unsatisfied
+   `refutation_pending`).
+4. **ADR-0037 §8 amendment (operator-authorized, round-3 G2 — the
+   durable-refutation anti-tamper carve-out).** §8's standing posture is
+   "anti-footgun, not anti-adversary — every gate input is an agent-writable
+   artifact; do not fix perceived forgeability." Amend it with a NARROW,
+   good-reason carve-out: a refutation is different in kind from the passive
+   footguns §8 scopes out — it ACTIVELY clears a specific reviewer's
+   evidence-bearing finding, so allowing that clearance to later vanish
+   without a trace (panel removed after a refutation was applied) would
+   defeat 114's whole purpose. Therefore the refutation audit obligation is
+   made **durable across retries** via the bead-metadata `refutation_pending`
+   marker + the fail-open override + fail-closed `MergeMetadata`. State the
+   scope precisely so the carve-out does not over-claim: this is a durability
+   guarantee for the AUDIT of an applied refutation ONLY — the general
+   posture is otherwise UNCHANGED (an empty `reason` still clears; the panel
+   is still freely removable for a bead with NO refutation applied; verdicts
+   and panel.json remain agent-writable; no signing/hashing is added; a
+   motivated adversary who never records a refutation is not the target). Cite
+   this active-clearance-vs-passive-footgun distinction as the amendment
+   rationale, and the operator's explicit authorization. Re-affirm the §8
+   empty-`reason`-still-clears footgun (parity with empty `abandon_reason`)
+   and that reason + evidence carry the refutation's legitimacy (the O1
+   minor) within the otherwise-unchanged posture.
+5. **/ms-panel-tally SKILL.md**: add item 5, "Refutation procedure
    (per-slot, always audited)", directly beside the abandon procedure (item
    4, SKILL.md:84): hand-edit `panel.json`, appending to `refutations` one
    entry naming the filename-derived slot, the latest round, a who/why
@@ -704,7 +804,7 @@ contract.
    refutation above", and the N−1 bullet notes the threshold is now a
    floor, not a sufficient condition. Copy the updated file byte-identically
    to `.claude/skills/ms-panel-tally/SKILL.md`.
-5. **Proof pass**: run the AC6 grep and the mirror diff; run the build and
+6. **Proof pass**: run the AC6 grep and the mirror diff; run the build and
    the two core test packages once to confirm the docs-only diff is clean.
 
 **Verification**
@@ -712,8 +812,10 @@ contract.
 - [ ] `grep -n 'refut' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md plugins/mindspec/skills/ms-panel-tally/SKILL.md` returns hits in BOTH files (AC6).
 - [ ] `diff -q plugins/mindspec/skills/ms-panel-tally/SKILL.md .claude/skills/ms-panel-tally/SKILL.md` reports identical (mirror in sync).
 - [ ] Manual review checklist for the bead panel: the amendment text names
-  the §1, §3, and §7 changes, re-affirms §6/§8 including the empty-reason
-  footgun, and states the durable-vs-best-effort audit distinction in §7.
+  the §1, §3, §7, and §8 changes (§8 now AMENDED with the durable-refutation
+  anti-tamper carve-out, not merely re-affirmed), re-affirms §6 and the §8
+  empty-reason footgun, and states the durable-obligation protocol
+  (pending marker + fail-open override + fail-closed MergeMetadata) in §7/§8.
 - [ ] `go build ./... && go test ./internal/panel ./internal/complete` still
   green (docs-only diff; no code drift).
 
@@ -721,8 +823,10 @@ contract.
 
 - ADR-0037 carries a dated 2026-07-10 amendment enumerating the §1
   `refutations` schema, the §3 layered-threshold rule (with the explicit
-  ADR-0040 composition statement), and the §7 durable, non-advertised
-  refutation escape, re-affirming §6/§8 (AC6).
+  ADR-0040 composition statement), the §7 durable, non-advertised refutation
+  escape, and the **§8 durable-refutation anti-tamper carve-out**
+  (operator-authorized), re-affirming §6 and the otherwise-unchanged §8
+  posture (AC6).
 - Both /ms-panel-tally copies document the refutation procedure beside the
   abandon procedure with the reason+evidence-carry-legitimacy /
   empty-reason-footgun framing (AC6, O1 minor).
@@ -733,30 +837,39 @@ the AC6 grep hits real names).
 
 ## ADR Fitness
 
-- **ADR-0037 (panel gate as enforced contract) — AMENDED; remains the right
-  home.** This spec is a §3/§7 semantics change plus a §1 schema addition
-  to the exact contract ADR-0037 records; Bead 3 amends it in place
-  following its own amendment convention (five prior dated amendments
-  already live in the file). Creating a new ADR was considered and
-  rejected: the single-home property ("this is the SINGLE home of the
-  panel-gate enforced contract", internal/panel/gate.go:10-17) is itself
-  part of the contract, and splitting the RC rule from the threshold rule
-  it layers on would recreate the two-sources drift the ADR exists to
-  prevent. §6 and §8 are deliberately NOT amended, only re-affirmed:
-  fail-open without a panel and the anti-footgun (not anti-adversary) trust
-  boundary are unchanged — the refutation record is exactly as
-  agent-writable as `abandoned`, and no bead adds signing/hashing (the §8
-  "do not fix forgeability" fence). The §7 amendment ALSO records the
-  write-before-close audit placement and the fail-closed `MergeMetadata`
-  (the two durability guarantees the plan-approve panel required).
+- **ADR-0037 (panel gate as enforced contract) — AMENDED (§1/§3/§7/§8);
+  remains the right home.** This spec is a §3/§7 semantics change, a §1
+  schema addition, and (round-3, operator-authorized) a §8 carve-out — all to
+  the exact contract ADR-0037 records; Bead 3 amends it in place following its
+  own amendment convention (five prior dated amendments already live in the
+  file). Creating a new ADR was considered and rejected: the single-home
+  property ("this is the SINGLE home of the panel-gate enforced contract",
+  internal/panel/gate.go:10-17) is itself part of the contract, and splitting
+  the RC rule from the threshold rule it layers on would recreate the
+  two-sources drift the ADR exists to prevent. §6 is unchanged except that the
+  fail-open path now defers to a recorded refutation obligation. **§8 is
+  amended, not merely re-affirmed:** the operator authorized a NARROW
+  anti-tamper carve-out for the durable refutation audit — a refutation
+  actively clears a finding (unlike the passive footguns §8 scopes out), so
+  its audit obligation is durable across retries via the bead-metadata
+  `refutation_pending` marker + fail-open override + fail-closed
+  `MergeMetadata`. The general §8 posture is otherwise UNCHANGED (empty
+  `reason` still clears; the panel is freely removable for a bead with NO
+  refutation; verdicts/panel.json stay agent-writable; no signing/hashing —
+  the "do not fix general forgeability" fence still holds; a party that never
+  records a refutation is not the target). The §7 amendment records the
+  durable-obligation protocol (pre-close pending marker + pre-close
+  `panel_refuted` + fail-open override + fail-closed `MergeMetadata`).
 - **ADR-0035 (agent error contract) — best choice, unchanged.** The new
   leg-9.5 Block routes through the existing `guard.NewFailure` wiring
   (panel_advisory.go:201-203) so the final line is a genuine `recovery:`
-  command, and the new step-3.75 pre-close audit-write failure constructs
-  its own `guard.NewFailure` with an idempotent-rerun recovery line — both
-  conforming to the convention `internal/guard/recovery_convention_test.go`
-  enforces. No amendment needed: the contract already covers new failure
-  modes by construction.
+  command, and each new pre-close failure — the step-2.3 pending-marker
+  write, the step-3.75 `panel_refuted` write, and the fail-open obligation
+  override — constructs its own `guard.NewFailure` with an idempotent-rerun
+  recovery line (restore the panel / the audit, then re-run), all conforming
+  to the convention `internal/guard/recovery_convention_test.go` enforces. No
+  amendment needed: the contract already covers new failure modes by
+  construction.
 - **ADR-0040 (orchestration layering ratchet) — best choice, unchanged;
   composition made explicit.** The recorded `approve_threshold` stays the
   sole per-panel floor interpreter (`panel.ApproveThreshold`,
@@ -770,18 +883,23 @@ the AC6 grep hits real names).
   now ALSO reached by an execution-domain edit.** The `refutations` array is
   a review artifact, not workflow state (ADR-0037 §8 closing paragraph); the
   gate reads it and writes nothing to it. Lifecycle state stays derived from
-  bd: the durable audit lands on bead METADATA via the `bead.MergeMetadata`
-  seam, exactly like `panel_abandoned`. Two refinements from the plan-approve
-  panel: (1) the audit is written BEFORE the bead CLOSE (not merely before
-  the merge) so the state authority never records a closed bead whose
-  refutation obligation is unwritten; (2) `bead.MergeMetadata` itself is made
-  fail-closed on a read error (the `internal/bead` execution-domain edit) so
-  the single state authority's metadata can never be silently corrupted by a
-  transient read — a strengthening of ADR-0023's own invariant, fully within
-  its spirit. ADR-0037's Domain(s) already include execution, so this edit
-  needs no new ADR; it does expand this plan's scope beyond the approved
-  spec's "internal/bead read-only" note, recorded in the Decomposition
-  domain note.
+  bd: the durable obligation + audit land on bead METADATA
+  (`refutation_pending`, `panel_refuted`) via the `bead.MergeMetadata` seam,
+  exactly like `panel_abandoned`. Three refinements from the plan-approve
+  panel: (1) the obligation marker + audit are written BEFORE the bead CLOSE
+  (not merely before the merge) so the state authority never records a closed
+  bead whose refutation obligation is unwritten; (2) the fail-open path
+  consults bead metadata so the obligation is enforced even when the panel
+  artifact is gone — bead metadata (the state authority) is the durable
+  record, not the removable review artifact, which is exactly ADR-0023's
+  division of labor; (3) `bead.MergeMetadata` itself is made fail-closed on a
+  read error (the `internal/bead` execution-domain edit) so the single state
+  authority's metadata can never be silently corrupted by a transient read —
+  a strengthening of ADR-0023's own invariant, fully within its spirit.
+  ADR-0037's Domain(s) already include execution, so this edit needs no new
+  ADR; the spec's `## Impacted Domains` is amended to declare execution /
+  `internal/bead/**` (round-3 O3), recorded in the Decomposition amendment
+  note.
 
 ## Testing Strategy
 
@@ -799,26 +917,32 @@ the AC6 grep hits real names).
   gate row that touches the vote portion (the R1 never-disagree falsifier).
   `internal/config` is untouched (N/A — no new keys, per the spec's Out of
   Scope).
-- **`internal/complete` — gate wiring + durable audit (write-before-close).**
-  Reuse the two existing harnesses: the real-temp-repo `setupPanelGateRepo`
-  e2e suite (panel_gate_e2e_test.go:43-70) for AC1's end-to-end Block, AC2's
-  passing-by-refutation completion, the AC11 write-fails→not-closed→merge-
-  never-runs fence, the TOCTOU retry (panel removed after a failed pre-close
-  write → no un-audited merge), the already-closed recovery-path audit test,
-  and the skip-env-with-refutations (no `panel_refuted`) row; and the
+- **`internal/complete` — gate wiring + durable-obligation protocol.**
+  Reuse the real-temp-repo `setupPanelGateRepo` e2e suite
+  (panel_gate_e2e_test.go:43-70) for AC1's end-to-end Block, AC2's
+  passing-by-refutation completion (asserting BOTH `refutation_pending` and
+  `panel_refuted`), the AC11 audit-write-fail and pending-write-fail fences
+  (non-zero, bead NOT closed), the **cross-run panel-removed retry** (run 1
+  fails the `panel_refuted` write leaving `refutation_pending`; run 2 with the
+  panel removed must REFUSE via the fail-open obligation override), the
+  post-write erasure-survival test, the already-closed recovery-path audit
+  test, and the skip-env-with-refutations (no `panel_refuted`) row; and the
   seam-stub pattern of `TestWritePanelAuditMetadata_Abandoned`
-  (panel_advisory_test.go:111-134, swapping `completeMergeMetadataFn`) for
-  the audit-content, the selective `panel_refuted`-only failing stub, the
-  post-write erasure-survival test, and the abandon best-effort asymmetry
-  control. The not-closed guarantee is asserted via a `closeBeadFn` spy plus
-  the harness's `readStubMergeExecutor.completeCalled` flag (neither close
-  nor merge ran on the failed write).
-- **`internal/bead` — fail-closed `MergeMetadata`.**
+  (panel_advisory_test.go:111-134, swapping `completeMergeMetadataFn`) for the
+  audit-content, the selective `panel_refuted`-only / `refutation_pending`-only
+  failing stubs, and the abandon best-effort asymmetry control. The
+  not-closed / refuse guarantee is asserted via a `closeBeadFn` spy plus the
+  harness's `readStubMergeExecutor.completeCalled` flag (neither close nor
+  merge ran).
+- **`internal/bead` — fail-closed `MergeMetadata` + `GetMetadata` helper.**
   `TestMergeMetadata_FailClosedOnReadError` in `bdcli_test.go` (stubbing the
   `bd show` read via the package's existing test seam) asserts a read/parse
   failure returns an error and performs NO replace-write (existing keys
-  preserved), while a clean empty read still merges — the unit floor under
-  the complete-side erasure-survival test.
+  preserved), while a clean empty read still merges; `TestGetMetadata` pins
+  the read helper the fail-open override consults. These are the unit floor
+  under the complete-side erasure-survival and obligation-override tests. Plus
+  the blast-radius grep confirming the caller taxonomy (already-fatal / warn /
+  ignore) so making the read-error fatal regresses no class (round-2 F1/F3).
 - **`cmd/mindspec` + `internal/instruct` — inheritance surfaces.** No new
   production code; `TestPanelVerbs_DecisionIsPanelGateDecision` and
   `TestSanitizeNonBeadDecision` (equality-pinned against the shared
@@ -855,5 +979,6 @@ the AC6 grep hits real names).
 | AC8 (unrecognized verdict blocks and is non-refutable) | Bead 1 (blocks) + Bead 2 (non-refutable) | unrecognized rows in `TestPanelGateDecision_UnresolvedRequestChangesBlocks` and `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|PanelGateDecision'` |
 | AC9 (refuted RC never increments Approves) | Bead 2 | `TestResult_AppliedRefutations` + AC9 assertions in the refutation table; `go test ./internal/panel -run 'Refut'` |
 | AC10 (no-advertise Block-message predicate) | Bead 1 (predicate) + Bead 2 (re-asserted with refutations present) + Bead 3 (the doc-side no-advertise contract) | fixed-string predicate rows in both decision tables + `TestPanelGate_RequestChangesBlocksComplete` recovery-line assert; `go test ./internal/panel -run 'PanelGateDecision' && go test ./internal/complete -run 'PanelGate'` |
-| AC11 (durable audit: write failure must not silently complete; write-before-close + fail-closed MergeMetadata) | Bead 2 | `TestPanelGate_RefutedAuditWriteFailure_FailsCompletion` (non-zero, bead NOT closed, merge never ran) + the TOCTOU panel-removed retry + the post-write erasure-survival test + `TestMergeMetadata_FailClosedOnReadError` + the abandon best-effort asymmetry control; `go test ./internal/complete -run 'PanelRefuted\|PanelGate' && go test ./internal/bead -run 'MergeMetadata'` |
+| AC11 (durable-obligation: write failure must not silently complete; durable across retries incl. panel removal; fail-closed MergeMetadata) | Bead 2 | `TestPanelGate_RefutedAuditWriteFailure_FailsCompletion` (non-zero, bead NOT closed) + the pending-write-fail abort + the **cross-run panel-removed retry** (2nd Run REFUSES via the fail-open obligation override) + the post-write erasure-survival test + `TestMergeMetadata_FailClosedOnReadError` + `TestGetMetadata` + the abandon best-effort asymmetry control; `go test ./internal/complete -run 'PanelRefuted\|PanelGate' && go test ./internal/bead -run 'MergeMetadata\|GetMetadata'` |
+| AC11 supporting — already-closed recovery-path audit (round-3 O3 minor) | Bead 2 | the recovery-path audit test (pre-closed bead + live refutation panel → `panel_refuted` present after completion, step 7(B)(vii)); `go test ./internal/complete -run 'PanelRefuted\|PanelGate'` |
 | AC12 (duplicate slot files at latest round — chosen behavior stated + pinned; dedup extended into the audit path) | Bead 2 (step 2: byte-exact slot matching against the slot's tallied latest-round verdict; a REJECT under a near-duplicate slot is never cleared; same-slot+round entries collapse to one applied record) | `Dup`-named rows in `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|Dup'` |

@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "All three round-1 findings are addressed and grounded at a1194682. (1) The panel_decision_test.go:211 fixture (2A+1RC, ExpectedReviewers:3 → Allow) is now step 6(f): converted to 3/3 all-APPROVE, RC filler dropped, no-hardcoded-6 subject preserved; it appears in the diff-review checklist ('step-6 (a)-(h)') and the AC5 provenance row, and the sibling :222 Block row's mustNotHave [\"5/6\",\"/6\"] survives leg 9.5's superset message. (2) Step 4 now states leg 10 stays reachable with zero refutations via the threshold>0 guard, correctly pinned to the resolved-threshold-0 sub-case (panel_test.go:260-277, result(p0,1,0,1,...) synthesizes one APPROVE, no RC filler; gate.go:255-262 confirms). (3) Bead 2 step 4 and Bead 3 step 3 now state only env-skip/abandon carry audits (panel_advisory.go:322-330 grounds the panelSkipEnvFn guard); config-disabled writes none. No new issues.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-AC5-missed-fixture-211",
+      "disposition": "ADDRESSED",
+      "detail": "panel_decision_test.go:211-219 (verified: 'expected_reviewers:3 → 3/3 present, 2 APPROVE Allow (no hardcoded 6)' starts at :211, appends a VerdictRequestChanges filler) is now enumerated as outcome-preserving update (f) in Bead 1 step 6, with the correct fix (3rd genuine APPROVE, subject preserved), included in the AC5 diff-review verification bullet and the provenance table. The sibling :222 Block row analysis (leg-9.5 message contains '1/3 APPROVE'/'threshold is 2/3', no '/6') checks out against the leg-9.5 message template and the fixture's mustNotHave."
+    },
+    {
+      "id": "R1-minor-leg10-unreachable-claim",
+      "disposition": "ADDRESSED",
+      "detail": "Step 4 now says 'Leg (10) stays reachable and is NOT removed', grounded in the resolved-threshold-0 sub-case of TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision (panel_test.go:260-277 at the pin: 1-reviewer panel, result(p0,1,0,1,nil,nil) yields one APPROVE verdict and no RC filler, so UnresolvedVerdicts is empty, the fixture passes leg 9.5 and must Block at gate.go's threshold>0 guard, :255-262). Step 6(a) additionally fences that sub-case as untouched."
+    },
+    {
+      "id": "R1-minor-config-disabled-audit-overstatement",
+      "disposition": "ADDRESSED",
+      "detail": "Bead 2 step 4 now states only the env-skip path has its own audit (panel_gate_skipped via writePanelAuditMetadata, guarded on panelSkipEnvFn() at panel_advisory.go:322-330 — line refs verified) and that the config-disabled path writes NO audit ('do not claim it does'); panelGate's !panelGateEnabled branch is a bare continue. Bead 3 step 3 carries the same correction into the ADR-0037 §7 amendment text (only env-skip and abandonment carry bead-metadata audits)."
+    }
+  ]
+}

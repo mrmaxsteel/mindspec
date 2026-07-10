@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.98,
+  "rationale": "Two holes are closed: MergeMetadata is specified fail-closed on show/read and JSON-parse errors, with no replace-write and erasure-survival coverage; AppliedRefutations is deterministically deduplicated by (slot, round), first-wins, both within Result and across matched panels. The write-after-close defect is improved but not airtight. Step 3.75 prevents the first failed audit attempt from closing the bead, yet the mandated retry test then removes panel.json. On rerun the unchanged no-panel path fail-opens; the still-in-progress bead may then close and merge with no applied set and no panel_refuted audit. Calling this safe because it is not an already-closed retry narrows the original requirement: it still permits an unaudited merge after a refutation-cleared attempt whose audit failed. Thus bead-closed implies audit-written only within a run that currently re-derives AppliedRefutations, not across retries. A durable pending obligation or a retry fence is still required.",
+  "concrete_changes_required": [
+    "Persist a non-bypassable refutation-audit obligation before or atomically with the gate-cleared transition, or otherwise make a later no-panel retry refuse to close/merge until panel_refuted is durably present.",
+    "Rewrite the panel-removed retry test to assert the second Run itself does not close or merge without panel_refuted; do not limit the assertion to avoiding an already-closed merge."
+  ],
+  "findings": [
+    {
+      "disposition": "PARTIAL",
+      "severity": "load-bearing",
+      "defect": "Closed-state retry can discard the audit obligation",
+      "evidence": "Step 3.75 moves the write before close, but the specified failure-then-panel-removal retry re-enters the no-panel fail-open path with an in-progress bead. With AppliedRefutations now empty, nothing prevents that retry from closing and merging without panel_refuted."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "A later best-effort metadata write can erase the durable audit",
+      "evidence": "Bead 2 step 6 requires MergeMetadata to return on both show/read and JSON-unmarshal failure before any replace-write; the bead unit and post-write erasure-survival tests pin preservation."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "note",
+      "defect": "Applied refutations were not deterministically deduplicated",
+      "evidence": "Bead 2 steps 2 and 4 deduplicate by exact (slot, round), specify stable first-wins selection, sort the result, and test duplicate entries plus cross-panel accumulation."
+    }
+  ]
+}

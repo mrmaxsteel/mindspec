@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-1 finding ADDRESSED. Fixture panel_decision_test.go:211-219 is now step 6(f) with a correct outcome-preserving fix (3/3 all-APPROVE; I verified the sibling Block row :221-234 stays green under the leg-9.5 superset message). The two G3 additions verified at fae2bfb6: (g) cmd panel_test.go:557-558 is genuinely a parity row (test compares adapter actions against live PanelGateDecision) so the rename-plus-genuine-at-threshold fix is right; (h) panelstate_test.go:903-905 flips under 6(e) and gets the recorded-threshold fix. I independently swept all RC/empty-verdict fixtures across the eight test files and found NO unclassified flip — every residual dissent-filler site is Block-side and survives via the verified message superset (leg-10 msg is a strict substring subset of the planned 9.5 msg). Step-6(c) pointer now correct: buildFacts at panel_test.go:417-428, RC append confirmed. Durable-audit rework: all complete.go pins accurate (542-544/546-554/695-708/778-785); write-before-close invariant, TOCTOU retry wording, fail-closed MergeMetadata (proceed-from-empty confirmed at bdcli.go:266-290), two-layer dedup, and the AppliedRefutations-grounded asymmetry are mutually consistent with R1/R2/OQ2-4/§6/§8. One LOW prose nit (below), non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-R2-1",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "summary": "Round-1 RC: panel_decision_test.go:211-219 (plus G3's cmd panel_test.go:557-558 and panelstate_test.go:903-905) are now classified as outcome-preserving updates 6(f)-(h); the AC5 carve-out stays exactly four intended flips (step 5 a-d) and the diff-review proof is satisfiable. Verified against fae2bfb6: independent sweep of VerdictRequestChanges/empty-verdict fixtures across panel_decision_test.go, panel_test.go, votedecision_test.go, panel_advisory_test.go, panel_gate_e2e_test.go, panel_gate_layout_test.go, panelstate_test.go, cmd/mindspec/panel_test.go found no fixture outside the enumerated set whose pinned outcome flips: remaining dissent-filler sites (panelstate :246/:392/:745/:784, e2e subThresholdVerdicts users, cmd :402/:1075, panel_decision :196-209/:221-234) are Block-side and their asserted substrings ('X/N APPROVE', 'threshold is T/N', consolidated name, fence, 'gate would BLOCK') all appear in the planned leg-9.5 message; cmd :445-478 pins tally body content, not the decision."
+    },
+    {
+      "id": "F3-R2-2",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "summary": "Round-1 minor: the step-6(c) pointer is fixed — it now names TestPanel_GateFieldDecisionInertAllEnumValues' shared buildFacts closure at panel_test.go:417-428, which I confirmed starts at :417 and appends the VerdictRequestChanges filler."
+    },
+    {
+      "id": "F3-R2-3",
+      "severity": "low",
+      "disposition": "NEW (non-blocking)",
+      "summary": "Bead 2 step 6 blast-radius sentence 'all of them are already best-effort (warn) except our new fatal write' is inaccurate: cmd/mindspec/repair.go:86 returns a guard.NewFailure on MergeMetadata error (fatal), and phase.EnsureMigrated (internal/phase/migrate.go:59-63) propagates fatally to complete.go:283, approve/impl.go:140, approve/plan.go:74; release.go:133 ignores the error. After fail-closed, a transient bd-show read failure on those paths becomes a visible fatal error instead of a silent proceed-from-empty replace-write. This does NOT contradict the design — the plan's own 'strictly safer for every caller' judgment holds (visible retryable failure beats silent metadata erasure, and EnsureMigrated only reaches the merge on unmigrated legacy epics) — but the Bead-2 brief should correct the caller enumeration so the implementer and bead panel are not misled about blast radius. Prose fix only; no step changes."
+    },
+    {
+      "id": "F3-R2-4",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "summary": "Durable-audit rework introduces no contradiction: step-3.75 placement pins accurate at fae2bfb6 (ADR gate complete.go:542-544, close :546-547, already-closed recovery :547-554 without verify-close, convergence contract :695-708 merge-retry-only, step-5.6 :778-785 skip/abandon-only); write-before-close yields merged⟹closed⟹audited; the TOCTOU-retry test's fail-open wording is consistent with the §6 re-affirmation (no applied refutation exists to lose); MergeMetadata's proceed-from-empty-on-read-error confirmed at bdcli.go:266-290 so the fail-closed fix and the erasure-survival test are coherent with the warn-side step-5.5 callers; the (slot,round) dedup at both layers is consistent with AC9/AC12; the config-disabled-writes-no-audit note matches writePanelAuditMetadata (skip-env and abandoned only); the AppliedRefutations-grounded durable-vs-best-effort asymmetry is stated identically in Bead 2 step 5, Bead 2 AC, and Bead 3 §7."
+    }
+  ]
+}
