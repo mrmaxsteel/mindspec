@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "My round-2 RC (the internal/bead edit tripped the ADR-divergence gate because Impacted Domains was workflow-only) is ADDRESSED. spec.md now declares execution / internal/bead/** (owned per .mindspec/domains/execution/OWNERSHIP.yaml:3) and strikes the 'no change lands there' line. Verified ParseSpec (contextpack/spec.go:62-88) extracts 'execution' from the **execution**: bullet, so candidateDomains includes execution and internal/bead/bdcli.go attributes to a declared domain instead of hard-erroring unowned at divergence.go:~221. ADR-0037 (workflow, execution) and ADR-0035 (workflow, execution, core) are both Accepted+cited, so coverage passes with no new ADR; `mindspec validate spec` returns all-checks-passed at 14fd3312. Decomposition: folding the durable-obligation into Bead 2 (not a Bead 4) is justified — a Bead 2 without it would carry the G2 hole round-2 rejected (non-passable intermediate), and the pieces share Bead 2's files/plumbing; chain stays <=3. Bead 2 is heavy but atomic and one-round verifiable via exhaustive AC->test enumeration. bead.GetMetadata is well-placed (execution seam, consumed by fail-open override step 5c, tested). One residual editorial contradiction keeps this from full confidence.",
+  "concrete_changes_required": [
+    "spec.md Out of Scope line 65 still reads '`internal/bead` — `MergeMetadata` is consumed as-is through the existing `completeMergeMetadataFn` seam.' — this now DIRECTLY contradicts In Scope line 57 (internal/bead/bdcli.go: MergeMetadata made fail-closed + GetMetadata helper) and the Impacted-Domains amendment. Strike or rewrite this Out-of-Scope bullet so internal/bead is not simultaneously declared out-of-scope and consumed-as-is. Editorial only; non-blocking but should land with the amendment."
+  ],
+  "findings": [
+    {
+      "id": "R2-disposition",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "note": "ADR-divergence gate no longer hard-errors on internal/bead/bdcli.go. Mechanism confirmed end-to-end: Impacted Domains adds execution -> ParseSpec extracts it -> normalizeImpactedDomains resolves it (execution domain dir exists) -> candidateDomains={execution,workflow} -> attributeDomainCached maps internal/bead/** to execution (not domain=='') -> coverageOf(execution)=coveredAccepted via ADR-0037/0035 -> continue, no adr-divergence-unowned/uncovered error. validate spec passes."
+    },
+    {
+      "id": "domain-parity",
+      "severity": "info",
+      "note": "execution OWNERSHIP.yaml line 3 == internal/bead/** confirmed. Both covering ADRs are Status: Accepted (not Proposed), so no coveredProposedOnly hard-error at impl-approve either. --override-adr correctly NOT needed (plan line 130-132)."
+    },
+    {
+      "id": "decomposition",
+      "severity": "info",
+      "note": "Durable-obligation folded into Bead 2 is the right call (plan 100-112). A Bead 4 split would either recreate the round-2 G2 hole in an intermediate merged state (violating 'every bead passes its own gate') or be a zero-independence pure-overlap bead. Bead 2 is at the upper bound of one-round reviewability (11 key files, ~15 test scenarios, 13 mechanical caller updates) but the mechanism is atomic and the plan enumerates every touched fixture + AC->test mapping, keeping the review surface tractable. Within tolerance."
+    },
+    {
+      "id": "getmetadata-seam",
+      "severity": "info",
+      "note": "bead.GetMetadata placed correctly: exported in internal/bead/bdcli.go (execution domain), reads `bd show <id> --json` exactly as MergeMetadata already does, consumed only by the fail-open obligation override (complete.go step 5c) which must read the durable refutation_pending marker off bead metadata (not the removable panel.json). Single-homed bead-CLI access preserved (ADR-0023). Tested by TestGetMetadata (provenance AC11 row); TestMergeMetadata_FailClosedOnReadError pins the fail-closed read. Provenance table maps all new tests AC1-AC12."
+    }
+  ]
+}

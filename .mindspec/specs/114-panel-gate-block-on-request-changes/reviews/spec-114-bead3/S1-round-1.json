@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin check: every cited symbol/behavior exists exactly as the ADR/SKILL describe. internal/panel/panel.go:109/117-129 has `Refutations []Refutation` (json:\"refutations,omitempty\") and `Refutation{Slot,Round,Reason,Evidence}` verbatim. internal/complete/panel_advisory.go has persistRefutationPending (self-contained refutation_pending_entries marker, union-not-replace, fail-closed), reconcilePendingRefutations (every-path incl. hatch, satisfy-from-marker), and writePanelRefutedMetadata (literal panel_refuted/panel_refuted_at/panel_refuted_entries keys). internal/bead/bdcli.go MergeMetadata/GetMetadata are fail-closed (read/parse error returns err, never silently empties). internal/panel/gate.go:135/267/293-299 has leg (9.5) unresolved-block and AppliedRefutations returned only on Allow, matching the ADR's §3/§7 text. `go build ./...` clean; `go test -count=1 ./internal/panel ./internal/complete` both ok. `grep -n refut` hits 36 lines in the ADR and 4 in plugins SKILL (AC6 satisfied). `grep -rin 'refutation_discharged|discharge'` across all 3 files returns nothing (no reintroduced discharge concept). diff of the two SKILL.md copies is byte-identical. This commit alone touches exactly 3 files, +154/-10 (ADR +140/-0, each SKILL +14/-4), no Go code.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "The ADR refers to 'a self-contained `refutation_pending` marker' as a concept name; the actual bead-metadata JSON key is `refutation_pending_entries` (plural/suffixed), not the bare string `refutation_pending`. The ADR never asserts the literal key string, so this is not a doc/code mismatch — just noting for the record that a reader diffing against `grep refutation_pending` on the metadata blob should expect the `_entries` suffix."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Lens: ADR-0037 §7/§8 durable-obligation description vs shipped code. Every claim checks out. §7 amendment (1) 'applied ≡ durably persisted self-contained marker {slot,round,reason,evidence}, UNIONed not replaced, read-or-write failure ⟹ BLOCK' matches persistRefutationPending + panelGate's guard.NewFailure on marker-write error and unionPendingEntries. (2) 'reconcile before close on EVERY path incl hatch, writes panel_refuted FROM THE MARKER, works with panel.json removed, corrupt/malformed ⟹ Refuse' matches reconcilePendingRefutations (called unconditionally at complete.go step 3.75, after the gate, before close; no panel read; shape-invalid slot==\"\"/round<1 Refuses). (3) 'fail-closed GetMetadata/MergeMetadata' matches bdcli.go (read/parse error returns error, merge-read propagates). §7 asymmetry is grounded exactly right: explicitly NOT a 'terminal non-merge exit' claim but in obligation-creation (a refutation changes the gate outcome). 'Natural resolution = no marker = zero ceremony' present and true by construction. §8 carve-out is narrow (applied-refutation audit-durability only, empty-reason footgun re-affirmed, no tamper-resistance over-claim). grep confirms NO discharge/refutation_discharged/re-tally anywhere in the ADR. Build + internal/complete + internal/panel green; git clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "ADR §7 amendment point 1 (applied≡durable, UNION-not-replace, read-or-write-fail⟹BLOCK) exactly matches persistRefutationPending + unionPendingEntries + panelGate Block-on-persist-error.",
+    "ADR §7 amendment point 2 (satisfy-from-marker, every path incl hatch, works with panel.json removed, malformed⟹Refuse) matches reconcilePendingRefutations; verified it runs unconditionally at complete.go:570 before close and does no panel read.",
+    "ADR §7 amendment point 3 (fail-closed GetMetadata/MergeMetadata) matches bdcli.go GetMetadata/MergeMetadata error propagation.",
+    "§7 asymmetry (refutation durable vs abandon/skip best-effort) correctly grounded in obligation-creation and explicitly disclaims the 'non-merge exit' rationale; writePanelRefutedMetadata is non-swallowing vs best-effort writePanelAuditMetadata — accurate.",
+    "No discharge/refutation_discharged/re-tally language in ADR (grep empty); §8 carve-out is narrow audit-durability with no tamper-resistance over-claim."
+  ]
+}

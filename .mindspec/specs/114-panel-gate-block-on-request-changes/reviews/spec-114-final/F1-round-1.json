@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Traced the whole mechanism end-to-end in a /tmp clone at 41d8e8af against true base 71398a68 (verified merge-base; the clone's own origin/main ref was stale — diffed explicitly). Composition is coherent with no seam bug: UnresolvedVerdicts (tally.go:173) feeds leg 9.5 (gate.go:281) after REJECT/hard_block, before threshold; VoteDecision twin keeps identical ordering. isRefuted (tally.go:192) is the single matching home — byte-exact slot, Round==LatestRound, RC-only (hard_block RC blocks at leg 9 first; unrecognized never refutable). Approves never incremented, so AC7's sub-threshold-all-refuted Block holds (test passes). AppliedRefutations returned only on the leg-10 Allow; panelGate Blocks short-circuit BEFORE persist, so no dangling marker; persistRefutationPending is read-union-write fail-closed. reconcilePendingRefutations runs unconditionally at complete.go:570 (step 3.75, after ADR gate, before close/merge) on every path incl. both hatches, satisfies from the self-contained marker with zero panel reads, refuses on unreadable/corrupt/shape-invalid stores even under env-skip (tested). bdcli GetMetadata/MergeMetadata fail-closed (fixes a real erase bug). ADR-0037 + both SKILL copies (byte-identical) match the shipped no-discharge design exactly. CI: build, gofmt (empty), vet, all 5 spec packages green, -race clean; scope is exactly the declared 23 files. Two non-blocking doc-hygiene findings below.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "low",
+      "hard_block": false,
+      "title": "spec.md AC11/R2 still carry the original discharge language with no in-spec amendment marker",
+      "detail": "spec.md's AC11 clauses (d)/(e)/(f) and R2's falsified-if list still literally require `refutation_discharged` / verified-discharge writes the shipped code deliberately does not perform (discharge deleted, operator decision). The supersession is well recorded in plan.md's Bead-2 DESIGN AMENDMENT (L379-380) + the amended AC11 row, reviews/spec-114-bead2/consolidated-round-3.md, ADR-0037, and both SKILL copies — and the BRIEF pre-adjudicates the amended form as governing — but spec.md itself has no pointer, unlike the line-35 Impacted Domains amendment note which shows in-spec amendment is the practiced pattern. A one-line amendment note on spec.md AC11 referencing the plan's DESIGN AMENDMENT would close the last artifact a literal reader could take as claiming a discharge mechanism. Recorded for adjudication, not blocking: no shipped user-facing doc (ADR/SKILL) claims discharge, and the mechanism itself is unaffected."
+    },
+    {
+      "id": "F1-2",
+      "severity": "cosmetic",
+      "hard_block": false,
+      "title": "Stale 'Bead 1 has none yet' phrasing in gate.go leg-9.5 comment and panel_decision_test.go",
+      "detail": "internal/panel/gate.go (leg 9.5 comment: 'no refutation escape is advertised here — Bead 1 has none yet; AC10') and internal/panel/panel_decision_test.go (~L280, L364) retain Bead-1-era phrasing now that Bead 2 shipped the escape. The pinned invariant (the Block message never advertises a refutation incantation) is permanent per AC10 and the code/tests enforce it correctly; only the historical parenthetical reads stale. Cosmetic comment tidy, no behavior."
+    }
+  ]
+}

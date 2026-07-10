@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Distinct-slug deletion, corruption, and between-scan disappearance now Refuse correctly; origin capture, multi-origin union, missing/malformed panels, natural resolution, focused/full/race suites, build, format, and vet all passed. The origin identity is still not unique, however. Registration.Slug records only a basename while canonical transition mode scans distinct repo-root review/<slug> and co-located <spec-dir>/reviews/<slug> directories. My /tmp real-Run repro used the same slug in both: run 1 persisted X@1 from the repo-root RC origin; run 2 removed that origin, retained the co-located APPROVE decoy, set MINDSPEC_SKIP_PANEL, then wrote refutation_discharged, closed, and merged. resultsBySlug lets the non-origin registration impersonate the removed origin. Thus both prior blocking invariants remain incompletely closed despite the advertised different-slug cases passing.",
+  "concrete_changes_required": [
+    "Persist and reconcile a collision-free origin identity (for example a canonical panel-directory identity relative to its scan convention/root), not basename alone; every recorded origin must match the same registration that applied the refutation.",
+    "Add a real complete.Run regression with repo-root review/same-slug and co-located reviews/same-slug: after removing/corrupting the RC-bearing origin, the surviving APPROVE decoy must Refuse without discharge, close, or merge."
+  ],
+  "findings": [
+    {
+      "status": "MISSED",
+      "severity": "blocking",
+      "title": "Round-1 cross-panel false discharge survives same-slug cross-root aliasing",
+      "evidence": "panelGate stores regs[i].Slug() at panel_advisory.go:242; Registration.Slug is filepath.Base at panel.go:210, although Scan treats distinct canonical directories as separate registrations. In /tmp, review/same-slug held X@1 RC and the refutation while the co-located reviews/same-slug decoy held X APPROVE. Removing the former caused Run to discharge, close=true, merge=true."
+    },
+    {
+      "status": "MISSED",
+      "severity": "blocking",
+      "title": "Round-2 historical-origin disappearance remains falsely dischargeable",
+      "evidence": "reconciliation groups registrations by basename in resultsBySlug at panel_advisory.go:736-745 and considers an origin present when that basename exists at lines 766-775. A different physical registration with the same basename therefore substitutes for the missing origin, violating the required origin-presence invariant."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "title": "Advertised distinct-slug guards and empirical matrix",
+      "evidence": "Custom real-Run delete, corrupt, and between-scan probes all Refused with no discharge/close/merge; multi-origin and cross-run union probes passed; missing/malformed panels Refused; round advance discharged. go build, gofmt (empty), vet, focused tests, full panel/complete/bead/cmd sweep, and three-package race sweep passed. Reverting origin checks made TestPanelRefuted_OriginRemoved_Refuses RED."
+    }
+  ]
+}

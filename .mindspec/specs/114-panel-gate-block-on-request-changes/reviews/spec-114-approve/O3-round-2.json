@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Impacted-domains parity holds. Every touched owned path maps to the declared `workflow` domain: internal/panel/** (OWNERSHIP.yaml:14), internal/complete/** (:2), cmd/** (:19), plugins/mindspec/** (:20) \u2014 the spec's cited lines are accurate. internal/bead/** is owned by execution (execution/OWNERSHIP.yaml:3) but is genuinely consumed read-only: I confirmed MergeMetadata(issueID, map[string]interface{}) (bdcli.go:263) takes arbitrary keys, so writing `panel_refuted` is caller-side in writePanelAuditMetadata (panel_advisory.go:304-342) exactly like `panel_abandoned` \u2014 no edit lands in internal/bead. The spec states this honestly. ADR-0037.md is not a domain-owned path (only internal/adr/** Go code is owned, :16), so its amendment needs no domain declaration; consistent with prior specs. Decomposition maps cleanly to ~2-4 independently-landable, one-round-verifiable beads: (A) R1 gate-block [gate.go+tally.go+VoteDecision+complete wiring, AC1]; (B) R2 refutation schema+coverage+audit [panel.go, gate/tally, panel_advisory, AC2-4]; (C) ADR-0037 + ms-panel-tally docs [AC6]. The A\u2192B dependency (can't clear an RC that doesn't yet block) is a natural, AC-visible ordering, not a hidden one. Bead assignment of the ADR amendment is correctly deferred to plan time.",
+  "concrete_changes_required": [],
+  "findings": [
+    "PARITY OK: touched owned paths (internal/panel, internal/complete, cmd, plugins/mindspec) all map to declared `workflow`; cited OWNERSHIP.yaml lines 2/14/19-20 verified correct.",
+    "SEAM OK: internal/bead (execution domain) consumed read-only \u2014 MergeMetadata(bdcli.go:263) accepts arbitrary keys; `panel_refuted` write is caller-side, no bead edit; parallel to existing `panel_abandoned` in writePanelAuditMetadata. Spec's seam claim is honest.",
+    "ADR PATH: .mindspec/adr/ADR-0037.md is not domain-owned (only internal/adr/** is, line 16), so the amendment requires no impacted-domain declaration \u2014 parity intact.",
+    "DECOMPOSITION OK: ~3 beads (gate-block R1 / refutation+audit R2 / docs) each one-round bead-panel verifiable; A\u2192B ordering is declared via the AC1-vs-AC2-4 split, not hidden.",
+    "ADR OWNERSHIP: spec lists ADR-0037 in Scope + AC6 but does not pre-assign it to a bead \u2014 correct for a spec; the \u00a73(R1)/\u00a77(R2) amendment naturally lands with the docs bead or final code bead at plan time.",
+    "MINOR (non-blocking): Impacted Domains prose enumerates code trees but not the new test files; tests live under the same owned internal/panel + internal/complete trees, so parity is unaffected."
+  ],
+  "carried_forward": "round-1 APPROVE carried: findings were spec-quality (AC coverage/AC5/audit-durability) not design; this slot approved the core R1/R2 model which is unchanged"
+}

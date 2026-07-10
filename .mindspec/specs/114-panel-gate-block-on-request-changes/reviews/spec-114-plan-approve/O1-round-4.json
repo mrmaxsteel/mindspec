@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.79,
+  "rationale": "Both my round-3 findings are ADDRESSED. (1) GetMetadata read-error now REFUSES fail-closed (step 5d + step 6 helper surfacing read/parse error + test vi). (2) The applied-before-persist window is eliminated: the refutation_pending marker write is folded INTO panelGate's allow-decision, and a marker-write failure returns a genuine Block (RC not cleared), so applied-in-a-run is definitionally the same as durable-marker-persisted (steps 5a, tests iii/iv). Implementability confirmed: PanelGateDecision stays a pure leaf producing Allow+AppliedRefutations; the metadata write lives in panelGate (internal/complete, already holds completeMergeMetadataFn) which turns marker-write failure into a clean guard.NewFailure via the new 3-value return; reconcilePendingRefutations has a real insertion point between the ADR-divergence gate (complete.go:544) and close (546). One residual, narrow but real: the marker write's refutation_pending_entries array semantics across a re-panel-to-newer-round are unspecified, and the discharge case implicitly requires them preserved (union). A replace-write would silently drop a prior unsatisfied obligation -> un-audited merge. One-sentence fix.",
+  "concrete_changes_required": [
+    "Step 5(a): specify that the refutation_pending marker write UNIONs the new applied (slot,round) entries with any pre-existing refutation_pending_entries already on bead metadata (read via GetMetadata, then dedup) rather than REPLACING the array. Rationale: step 5(c) reconciliation iterates 'each recorded unsatisfied refutation_pending entry' and its Discharge case explicitly handles 'the round advanced past the pending round' -- that past-round pending can only BE recorded at reconcile time if the re-panel marker write preserved it. Under naive replace semantics, a run-1 refutation of a round-1 RC whose panel_refuted write failed, followed by a re-panel to round 2 (same slot RCs+refuted, or flips), overwrites entries=[(X,1)] with [(X,2)] and completes with (X,1) never audited nor discharged -- the exact silent-drop the AC11 invariant forbids. Add a cross-run test: run-1 records (X,1) then fails panel_refuted; re-panel to round 2; assert run-2 completes only after (X,1) is DISCHARGED (past-round moot) and (X,2) satisfied, i.e. no obligation vanishes.",
+    "Step 5(c): state that the reconciliation never CLEARS refutation_pending to false and keys resolution strictly per-entry on a covering panel_refuted/refutation_discharged audit, so the union array is the sole obligation ledger and a stale top-level boolean cannot mask an uncovered entry."
+  ],
+  "findings": [
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "Round-3 #1: GetMetadata read/parse error not specified fail-closed on the reconciliation",
+      "evidence": "Step 5(d) makes a bead.GetMetadata read/parse error return the (c) Refuse guard.NewFailure (nothing closed/merged) -- 'an unreadable metadata store cannot prove the bead is obligation-free.' Step 6 adds GetMetadata surfacing the read error and a swappable completeGetMetadataFn seam. Test 7(B)(vi) TestPanelRefuted_GetMetadataError_Refuses pins closeBeadFn and ex.completeCalled both false. Symmetric with the fail-closed MergeMetadata. Definitively closed."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "Round-3 #2: applied-in-memory-before-marker-persist relocated the hole one step earlier",
+      "evidence": "Step 5(a) folds the refutation_pending marker write INTO panelGate at the step-2.25 decision: an Allow carrying non-empty AppliedRefutations triggers a fail-closed marker write, and on write FAILURE panelGate returns a genuine Block naming the still-unresolved RC (not an abort-with-applied), so the RC is never cleared without a durable marker. complete.Run returns immediately on panelGateErr (complete.go:376-378). applied-in-a-run <=> marker durably persisted, no window. Tests iii (MarkerWriteFailure_Blocks: no panel_refuted, closeBeadFn not called) and iv (CrossRun_PanelRemoved_Refuses) pin it. PanelGateDecision stays pure; the write correctly lives in the complete-side panelGate. Implementable and clean."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "supporting",
+      "defect": "Every-path reconciliation on the natural-resolution (G3) path",
+      "evidence": "reconcilePendingRefutations runs on BOTH panel-present and no-panel paths before the step-4 close. Satisfy/discharge/refuse rule is sound and complete for the reachable state space: panel-present+gate-passed forces every latest-round RC to be either refuted-applied (satisfy) or gone (discharge), so Refuse is reserved for no-panel/unverifiable. Discharge writes refutation_discharged (never silent). Test v (NaturalResolution_Discharges) + negative twin (discharge-write-fails -> refuse pre-close) cover it. Sound MODULO the pending-entries union gap above."
+    },
+    {
+      "disposition": "MISSED",
+      "severity": "load-bearing",
+      "defect": "refutation_pending_entries array merge semantics across a re-panel are unspecified; naive replace-write drops a prior unsatisfied obligation -> un-audited merge",
+      "evidence": "Step 5(a) says the marker carries 'refutation_pending_entries: [{slot,round}] (deduped)' but does not say the write UNIONs with existing entries. MergeMetadata merges at top-level key granularity, so a re-panel run's marker REPLACES the array. Scenario: run-1 refutes X's round-1 RC, writes marker (X,1), then panel_refuted write FAILS (bead in_progress, obligation durable). Operator re-panels to round 2; X RCs+refuted -> (X,2). panelGate writes entries=[(X,2)], overwriting [(X,1)]. Reconciliation reads only [(X,2)], satisfies it, closes -- (X,1) never audited nor discharged, violating the AC11 invariant ('a refutation that EVER durably clears an RC ... can never let its bead close ... without a durable panel_refuted or refutation_discharged audit'). The plan's OWN Discharge case ('round advanced past the pending round') presumes the past-round pending is still recorded, i.e. it already assumes union -- so this is an internal-consistency gap, fixable with one explicit sentence. Narrow (requires a failed satisfy write then a re-panel) but a genuine residual un-audited-merge path."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Lens: ADR-0037 §-completeness + no-over-claim. All five required spec-114 amendments land as dated 2026-07-10 blockquote blocks in the file's house style: §1 refutations array (schema {slot,round,reason,evidence}, parse-lenient like abandon_reason, single consumer internal/panel tally.go, explicitly NOT decision-inert vs the 109/112 precedents, no CLI verb); §3 threshold-as-floor (necessary floor still meaningful but no longer sufficient; unresolved RC blocks like REJECT; unrecognized verdict non-refutable; refuted RC never increments Approves so cannot buy a sub-threshold panel; round-pinned re-RC blocks; explicit ADR-0040 composition 'compose, not contradict'); §6 refusal branch (fail-open UNCHANGED for pristine beads; durable-obligation bead Refuses on fail-closed metadata/marker error); §7 audited-refutation hatch (durable-obligation protocol, self-contained marker, satisfy-from-marker every path incl hatch, asymmetry correctly grounded in outcome-change NOT a false terminal-non-merge claim); §8 NARROW audit-durability carve-out (labelled audit-durability not anti-tamper, applied refutations ONLY, empty-reason footgun re-affirmed in parity with empty abandon_reason, posture otherwise UNCHANGED). No over-claim: every tamper/signing/hashing mention in the new blocks is a NEGATION ('NOT general tamper-resistance', 'no signing or hashing is added'). No discharge/re-tally language anywhere. No internal contradiction with the base §8 trust boundary or Alternatives Considered #2.",
+  "concrete_changes_required": [],
+  "findings": [
+    "§1 (line 135): complete — refutations schema, parse-lenient, single consumer tally.go, NOT decision-inert distinction vs 109/112 stated correctly.",
+    "§3 (line 201): complete — floor-not-sufficient framing explicit; floor remains meaningful ('still sets the approve floor'); ADR-0040 composition named; refuted RC never counts toward floor.",
+    "§6 (line 253): complete — pristine-bead fail-open unchanged; narrow refusal branch only for durable unsatisfied obligation.",
+    "§7 (line 294): complete — durable-obligation protocol correct; asymmetry grounded in outcome-change, explicitly avoiding the over-claim of a 'terminal non-merge exit'.",
+    "§8 (line 378): NARROW audit-durability carve-out confirmed — applied-refutation-only; empty-reason footgun re-affirmed; general anti-adversary/anti-footgun posture explicitly UNCHANGED; no over-claim of tamper-resistance/signing/hashing/forgery-proofing.",
+    "NOTE (non-blocking): §7's 'cannot be spoofed by panel-file manipulation' is correctly scoped to audit-content-source (written from the self-contained marker, not from re-read panels) and is bounded by §8's explicit 'panel.json remains agent-writable / no signing or hashing' — it is a durability/honesty claim, not an anti-tamper claim, so it does not over-claim."
+  ]
+}

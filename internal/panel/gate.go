@@ -45,9 +45,18 @@ const (
 // Decision is the panel gate's outcome: an action plus the message to surface.
 // The caller maps it to its own protocol (the hook -> hook.Result, the
 // in-binary gate -> guard.NewFailure for Block).
+//
+// AppliedRefutations (Spec 114 R2) is populated ONLY on the leg-(10)
+// threshold Allow return — the only path where a refutation can have
+// changed the outcome (every applied refutation is outcome-relevant by
+// construction: without it, its RC would have blocked at leg 9.5).
+// Warn/short-circuit paths never evaluate refutations and return nil. Note:
+// Decision is no longer comparable with ==/!= (this field is a slice) —
+// callers needing equality must compare Action+Message instead.
 type Decision struct {
-	Action  GateAction
-	Message string
+	Action             GateAction
+	Message            string
+	AppliedRefutations []Refutation
 }
 
 // RawMergeFence is appended to every Block message (Spec 093 Req 12 / G3-1,
@@ -123,6 +132,9 @@ type GateFacts struct {
 //	(7) dirty tree    → Block  (CommitAll bypass; skipped when worktree absent)
 //	(8) incomplete    → Block  (verdicts < expected_reviewers)
 //	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
+//	(9.5) unresolved  → Block  (unresolved REQUEST_CHANGES / unrecognized
+//	                    verdict(s) — Spec 114 R1; layered ON TOP of the
+//	                    threshold floor, not a replacement for it)
 //	(10) threshold    → Allow iff APPROVE ≥ N−1, else Block
 //
 // false POSITIVES (a wrongful Block) are the pinned bug class (Req 9); the
@@ -252,10 +264,39 @@ func PanelGateDecision(f GateFacts) Decision {
 			slug, round, detail, RawMergeFence(f.BeadID))}
 	}
 
+	// (9.5) Unresolved non-APPROVE — any latest-round verdict that is neither
+	// a canonical APPROVE nor a canonical REJECT (i.e. REQUEST_CHANGES, or an
+	// unrecognized/non-standard verdict string — both are "not an APPROVE")
+	// Blocks, exactly like a REJECT, regardless of the approve count (Spec
+	// 114 R1). This is LAYERED on top of the leg (10) threshold floor, not a
+	// replacement: leg (10) below still Blocks a sub-threshold panel even
+	// once every unresolved verdict is cleared. The message deliberately
+	// carries a substring-set superset of leg (10)'s message ("X/N APPROVE",
+	// "threshold is T/N", the consolidated-round name, the fence) so
+	// pre-existing sub-threshold fixtures whose panels carry RC/neutral
+	// filler keep their pinned substring assertions green even where they
+	// now route through this leg instead of leg (10). It never contains
+	// "refut" (no refutation escape is advertised here — Bead 1 has none
+	// yet; AC10) and never MINDSPEC_SKIP_PANEL (HC-7).
+	if unresolved := f.Res.UnresolvedVerdicts(); len(unresolved) > 0 {
+		slots := make([]string, len(unresolved))
+		for i, v := range unresolved {
+			slots[i] = v.Slot
+		}
+		threshold := p.ApproveThreshold()
+		return Decision{Action: Block, Message: fmt.Sprintf(
+			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE (threshold is %d/%d); every latest-round verdict must be APPROVE. Run /ms-bead-fix with %s, then re-panel (/ms-panel-run step 0)%s",
+			slug, round, strings.Join(slots, ", "), f.Res.Approves, n, threshold, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
+	}
+
 	// (10) Threshold — N−1 (Req 12, single home in panel.ApproveThreshold).
+	// Spec 114 R2: this is the ONLY leg that returns AppliedRefutations — a
+	// refutation only ever changes the outcome by clearing leg 9.5's block,
+	// so this Allow is the sole point where "what got applied" is
+	// outcome-relevant.
 	threshold := p.ApproveThreshold()
 	if f.Res.Approves >= threshold && threshold > 0 {
-		return Decision{Action: Allow}
+		return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations()}
 	}
 	return Decision{Action: Block, Message: fmt.Sprintf(
 		"panel %s round %d: %d/%d APPROVE — threshold is %d/%d. Run /ms-bead-fix with %s, then re-panel%s",

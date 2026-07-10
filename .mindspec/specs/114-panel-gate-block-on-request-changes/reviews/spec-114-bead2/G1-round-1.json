@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The pinned commit builds cleanly and all mandated focused, full, vet, formatting, and race checks pass; both required mutations make their named tests fail. However, the durable-audit invariant has a false-discharge path when multiple panel directories match one bead. panelGate aggregates applied refutations across every registration but returns only the first registration; reconciliation re-tallies only that directory. Under a hatch, a pending X@1 originating in panel B (where X remains REQUEST_CHANGES) is discharged from panel A's X@1 APPROVE state. My /tmp prober reproduced this exactly. The resulting refutation_discharged record is not verified against the panel whose refutation created the obligation. Reconciliation also ignores existing matching panel_refuted/refutation_discharged entries, contrary to the contract, so an audited retry can become permanently blocked after panel removal.",
+  "concrete_changes_required": [
+    "Bind each pending obligation to its originating panel registration (or preserve an equivalent source set) and verify discharge against that source; never use an arbitrary first matched panel. Add an end-to-end multi-panel hatch/no-panel retry test with contradictory same-slot verdicts.",
+    "Before tally-based satisfy/discharge/refuse logic, subtract pending entries already covered by matching durable panel_refuted_entries or refutation_discharged_entries. Add a retry test with a covering audit and panel.json removed."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "title": "Cross-panel false discharge violates the verified-audit invariant",
+      "evidence": "internal/complete/panel_advisory.go:178-186 selects the first registration, lines 231-238 aggregate applied refutations across all registrations, and lines 584-604 re-tally only that first directory. A /tmp test with aaa-first/X=APPROVE and zzz-origin/X=REQUEST_CHANGES under MINDSPEC_SKIP_PANEL observed reconciliation return nil and write discharge while the origin RC remained live."
+    },
+    {
+      "severity": "major",
+      "title": "Already-covered pending obligations are not recognized",
+      "evidence": "internal/complete/panel_advisory.go:566-628 never reads panel_refuted_entries or refutation_discharged_entries when reconciling. A /tmp test seeded pending X@1 plus matching panel_refuted_entries and no panel; reconciliation refused instead of treating the durable audit as covering the obligation."
+    },
+    {
+      "severity": "info",
+      "title": "Mandated verification and mutation results",
+      "evidence": "go build ./..., go vet, focused tests, full panel/complete/bead/cmd tests, and go test -race all passed; gofmt -l was empty. Marker-failure mutation made TestPanelRefuted_MarkerWriteFailure_Blocks fail; discharge-verdict mutation made TestPanelRefuted_WarnPathDoesNotDischarge fail."
+    }
+  ]
+}

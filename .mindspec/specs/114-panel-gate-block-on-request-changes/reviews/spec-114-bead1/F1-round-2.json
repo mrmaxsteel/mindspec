@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Adversarial re-probe of a2f2451, all work in an absolute /tmp git-archive copy; shared worktree never touched (git status clean at end). (1) Mutation-kill: with leg 9.5 disabled (false &&), all THREE rows of TestPanelGateDecision_UnresolvedRequestChangesBlocks now FAIL — rows 1-2 on 'action = 0, want Block', and the renamed two-RC row specifically on 'message missing \"revA\"' / '\"revB\"' while its action stays Block via leg 10, proving the discriminator is the slot naming itself. (2) Grep confirms revA/revB appear nowhere in gate.go/tally.go production text; assertions are case-sensitive strings.Contains, and no fixed template text (incl. slug '/wt/review/slug', fence, ConsolidatedName) contains 'revA'/'revB'. (3) e2e: the new 'unresolved REQUEST_CHANGES' assertion passes on real code and fires explicitly under the mutation, pinning RED-on-revert to leg 9.5. (4) Delta is 3 files, test/comment only; gate.go one-word comment, tally.go 0-line diff. Pristine /tmp run: build, gofmt, vet, full panel/complete/cmd tests all green; lockstep and layering tests pass. S2's hollow-row finding is genuinely fixed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1R2-1",
+      "severity": "info",
+      "title": "Mutation-kill confirmed: two-RC row now discriminates leg 9.5",
+      "detail": "Disabling leg 9.5 in a /tmp copy fails all three subtests; the renamed row fails on missing revA/revB (panel_decision_test.go:359) while still reaching Block via leg 10 — so the mustHave can only be satisfied by leg 9.5's %s slot-list substitution. Baseline (unmutated) passes."
+    },
+    {
+      "id": "F1R2-2",
+      "severity": "info",
+      "title": "revA/revB are not fixed substrings of any Block-message template",
+      "detail": "Case-sensitive grep over internal/panel non-test files finds zero occurrences; the leg-9.5 and leg-10 fixed text, RawMergeFence, ConsolidatedName, and the fixture slug ('review' lacks capital A/B) cannot satisfy the assertion. The round-1 x/y collision class is closed."
+    },
+    {
+      "id": "F1R2-3",
+      "severity": "info",
+      "title": "e2e block-reason assertion is sound both directions",
+      "detail": "TestPanelGate_RequestChangesBlocksComplete passes on real code and, under the leg-9.5 mutation, fails with the new 'must be attributable to leg 9.5' error at panel_gate_e2e_test.go:226 — the round-1 wrong-reason RED (doc-sync overlap) is now distinguishable."
+    },
+    {
+      "id": "F1R2-4",
+      "severity": "info",
+      "title": "No production logic changed; no regression",
+      "detail": "git diff 4dfebbcb..a2f2451 touches only panel_decision_test.go, panel_gate_e2e_test.go, and a one-word comment in gate.go; tally.go diff is empty, so leg 9.5 / UnresolvedVerdicts / VoteDecision are byte-identical to round-1-approved code. Bead scope vs plan base is the same 9 files, no internal/bead or refutation code. go build, gofmt -l (empty), go vet, and go test -count=1 ./internal/panel ./internal/complete ./cmd/mindspec all green in the pristine /tmp copy; lockstep (TestVoteDecision) and layering (ThresholdFloorIsLayeredNotReplaced) pass."
+    }
+  ]
+}

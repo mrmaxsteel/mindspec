@@ -151,6 +151,89 @@ func (r *Result) Complete() bool {
 	return r.ExpectedReviewers() > 0 && len(r.Verdicts) >= r.ExpectedReviewers()
 }
 
+// UnresolvedVerdicts returns the latest-round verdicts whose canonical
+// Verdict is neither VerdictApprove nor VerdictReject — i.e. REQUEST_CHANGES
+// plus anything unrecognized, exactly the "neither" set the Approves/Rejects
+// doc comment above names. REJECTs are deliberately excluded: they are leg
+// (9)'s business (PanelGateDecision) and must never be treated as merely
+// "unresolved" even if leg ordering were ever edited. Verdicts is already
+// slot-sorted (see Tally), so the returned slice — and every message built
+// from it — is deterministic (Spec 114 R1).
+//
+// Spec 114 R2 (the audited-refutation escape): a latest-round
+// REQUEST_CHANGES is treated as RESOLVED — and excluded here — iff some
+// Panel.Refutations entry has a byte-equal Slot AND Round == r.LatestRound
+// (isRefuted, the single home of this matching rule). This is the ONLY
+// gate-validation home for refutations (tally.go, single-homed per the
+// plan): REJECT/hard_block/unrecognized verdicts are never
+// VerdictRequestChanges, so they can never be refuted here, and a
+// round-N refutation never clears a round-(N+1) re-RC because the check is
+// against the CURRENT r.LatestRound, not the verdict's own (always-latest)
+// round.
+func (r *Result) UnresolvedVerdicts() []Verdict {
+	var out []Verdict
+	for _, v := range r.Verdicts {
+		if v.Verdict == VerdictApprove || v.Verdict == VerdictReject {
+			continue
+		}
+		if v.Verdict == VerdictRequestChanges && r.isRefuted(v.Slot) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// isRefuted reports whether some recorded Panel.Refutations entry names
+// slot at the panel's CURRENT LatestRound (Spec 114 R2) — byte-exact Slot
+// match, exact Round match. The single home of the refutation-matching
+// rule; UnresolvedVerdicts and AppliedRefutations both call this so they
+// can never disagree.
+func (r *Result) isRefuted(slot string) bool {
+	if r.Panel == nil {
+		return false
+	}
+	for _, ref := range r.Panel.Refutations {
+		if ref.Slot == slot && ref.Round == r.LatestRound {
+			return true
+		}
+	}
+	return false
+}
+
+// AppliedRefutations returns exactly the recorded Panel.Refutations entries
+// that matched a latest-round REQUEST_CHANGES verdict via the same exact
+// rule isRefuted applies (Spec 114 R2): byte-equal Slot, Round ==
+// r.LatestRound. Entries matching nothing — a stale round, an unknown slot,
+// or a REJECT/hard_block/unrecognized-verdict slot (never
+// VerdictRequestChanges) — are NEVER returned. Deterministically
+// deduplicated by (slot, round): two refutations entries naming the same
+// slot+round collapse to ONE record, first-wins in the panel's recorded
+// array order (stable); the result is then slot-sorted for determinism,
+// mirroring Verdicts' own sort (Tally).
+func (r *Result) AppliedRefutations() []Refutation {
+	if r.Panel == nil || len(r.Panel.Refutations) == 0 {
+		return nil
+	}
+	rcSlots := make(map[string]bool)
+	for _, v := range r.Verdicts {
+		if v.Verdict == VerdictRequestChanges {
+			rcSlots[v.Slot] = true
+		}
+	}
+	seen := make(map[string]bool)
+	var out []Refutation
+	for _, ref := range r.Panel.Refutations {
+		if ref.Round != r.LatestRound || !rcSlots[ref.Slot] || seen[ref.Slot] {
+			continue
+		}
+		seen[ref.Slot] = true
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	return out
+}
+
 // VoteVerdict is the deterministic vote-only gate outcome of a tally
 // (Spec 093 Req 12). It is the subset of the pre-complete hook's decision
 // that depends ONLY on fs-derived panel state — registration validity,
@@ -207,6 +290,14 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 		return VoteBlock, fmt.Sprintf("round %d: REJECT/hard_block recorded (%d/%d APPROVE)", round, r.Approves, n)
 	}
 	threshold := p.ApproveThreshold()
+	if unresolved := r.UnresolvedVerdicts(); len(unresolved) > 0 {
+		slots := make([]string, len(unresolved))
+		for i, v := range unresolved {
+			slots[i] = v.Slot
+		}
+		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE, threshold is %d/%d",
+			round, strings.Join(slots, ", "), r.Approves, n, threshold, n)
+	}
 	if threshold > 0 && r.Approves >= threshold {
 		return VotePass, fmt.Sprintf("round %d: %d/%d APPROVE (threshold %d/%d)", round, r.Approves, n, threshold, n)
 	}

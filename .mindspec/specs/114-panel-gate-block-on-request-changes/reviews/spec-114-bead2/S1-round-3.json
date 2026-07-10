@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "S1 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Codebase-pin lens, all in an absolute /tmp git-archive clone of 6f6634b4 (live worktree left clean). Every named symbol exists and matches the brief: refutationPendingEntry.Panels []string json:\"panels\" (panel_advisory.go:302); appliedOrigins map accumulated per-registration in panelGate at :242 (unchanged public arity) and passed to persistRefutationPending(beadID, applied, origins) (:506); dischargeVerified(p refutationPendingEntry) (:759) fails closed on !retallyOK, len(Panels)==0, and requires every origin slug present in resultsBySlug AND dischargeEvidence in every origin re-tally AND every other matched panel. The 2 new tests (TestPanelRefuted_OriginRemoved_Refuses :1162, TestPanelRefuted_OriginCorrupted_Refuses :1261) plus their restore-and-resolve positive controls are real and green. Gates: go build clean; gofmt -l ./cmd ./internal empty (exit 0); go vet ./internal/panel ./internal/complete ./internal/bead clean; targeted complete PanelRefuted|PanelGate all PASS (incl the 2 new + CrossPanel/AlreadyCovered/Malformed); panel Refut|Round|Dup|PanelGateDecision all PASS; bead MergeMetadata|GetMetadata all PASS; -race on panel/complete/bead all ok. Full sweep: only internal/harness FAILs (TestLLM_SpecToIdle 600s timeout, TestLLM_PrecommitReexportComplete) — LLM integration tests spawning a real claude CLI subprocess, zero diff to internal/harness, environmental. z4ps TestRun_IdleNoBeads ok. Scope: 1 commit, 2 files, internal/complete/ only. No missing symbols, no red tests in scope.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "symbols-present", "status": "ADDRESSED", "detail": "All target symbols exist at pinned SHA: Panels []string field, appliedOrigins accumulation in panelGate, persistRefutationPending 3-arg signature, dischargeVerified origin-bound closure with fail-closed guards."},
+    {"id": "new-tests-green", "status": "ADDRESSED", "detail": "TestPanelRefuted_OriginRemoved_Refuses and TestPanelRefuted_OriginCorrupted_Refuses both PASS with positive controls (restore+resolve origin discharges). Origin-removal/corruption discharge holes closed."},
+    {"id": "gates-clean", "status": "ADDRESSED", "detail": "build/gofmt/vet clean; all targeted test suites PASS; -race clean on the 3 touched packages."},
+    {"id": "harness-fail-preexisting", "status": "ADDRESSED", "detail": "internal/harness FAIL is TestLLM_* CLI-subprocess integration tests (timeout / no git upstream), unrelated to this internal/complete-only diff. z4ps (TestRun_IdleNoBeads) is ok."},
+    {"id": "scope-fence", "status": "ADDRESSED", "detail": "git diff 7de2c459..6f6634b4 = 1 commit, 2 files both under internal/complete/; panelGate public arity unchanged; no panel/bead/ADR/doc edits."}
+  ]
+}

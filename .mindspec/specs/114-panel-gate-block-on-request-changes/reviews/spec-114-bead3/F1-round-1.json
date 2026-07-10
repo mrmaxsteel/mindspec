@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Adversarial doc-vs-code pass at 38ee213c found no lie, over-claim, stale discharge, or incantation leak. Every amendment claim is code-grounded: byte-exact slot + Round==LatestRound (tally.go isRefuted:192-202), RC-only clearing with REJECT/hard_block/unrecognized non-refutable (tally.go:173-185), Approves never incremented, leg 9.5 layered on the leg-10 floor with staleness(6)/incompleteness(8) untouched (gate.go), union-not-replace marker write failing to Block (panel_advisory.go persistRefutationPending:421-449), every-path incl. hatch reconciliation at complete.go step 3.75, fail-closed GetMetadata/MergeMetadata (bdcli.go:275/313), config toggle writing no audit. grep finds zero discharge/re-tally language; the sole rationale phrase is the permitted marker-not-panel-reread line. Section 8 explicitly disclaims tamper-resistance, no signing/hashing (true), and the empty-reason footgun is honestly disclosed (isRefuted ignores Reason). New SKILL item leaks no MINDSPEC_SKIP_PANEL (the diff's one hit is unchanged context); gate Block messages contain no refutation incantation. Mirror byte-identical, 3 files only, build+tests green, cross-ref 'After a halt, item 5' valid.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Section 7 pt 3 'no later write can erase a recorded audit' is true of the binary's own writers (all routes go through key-preserving MergeMetadata; the only same-key writers union, and guard/recovery.go bans raw bd update --metadata) but not of an out-of-band bd replace-write; section 8's agent-writable disclaimer keeps this honest in context. Non-blocking.",
+    "ADR shorthand 'refutation_pending marker' vs the actual metadata key refutation_pending_entries mirrors the code's own comment vocabulary (complete.go:559). Non-blocking.",
+    "tally.go:190 comment claims AppliedRefutations 'calls' isRefuted but it re-implements the equivalent rule inline (tally.go:227) — Bead-2 code comment, out of this docs bead's scope."
+  ]
+}

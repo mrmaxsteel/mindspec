@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Pinned 41d8e8af in an absolute /tmp clone. AC1-AC10 and AC12 are genuinely implemented and mapped to passing named tests; the amended AC11 behavior is implemented by the self-contained pending marker, pre-close every-path satisfy-to-panel_refuted reconciliation, union/dedup, and fail-closed metadata operations, with the named PanelRefuted/MergeMetadata/GetMetadata tests passing. The requested `go test ./internal/panel ./internal/complete ./internal/bead` passed. ADR-0037 amendments and both ms-panel-tally copies match shipped code, contain no discharge mechanism, and section 8 stays narrowly audit-durability-only. However, governing spec.md was not amended: ADR Touchpoints line 39, Requirement 2 line 47, scope line 56, and AC11 line 90 still mandate re-tally-based verified discharge/refutation_discharged and panel-removed refusal. This directly contradicts shipped code, ADR, SKILL, and the plan's explicit DESIGN AMENDMENT/AC11 row. Thus AC11's requested amended no-discharge form is missing from spec.md and doc-vs-code/coherence is not merge-clean.",
+  "concrete_changes_required": [
+    "Amend spec.md's ADR Touchpoints, Requirement 2, In Scope description, AC11, falsifiers, and validation prose to the shipped no-discharge contract: self-contained {slot,round,reason,evidence} marker; every-path satisfy to panel_refuted from the marker even when panel.json is gone; no re-tally, refusal-on-panel-removal, refutation_discharged, or verified-discharge language."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "area": "spec.md AC11 / doc-vs-code coherence",
+      "issue": "spec.md lines 39, 47, 56, and 90 still specify the deleted discharge-by-re-tally design. In particular AC11 requires panel-removed refusal and refutation_discharged, while shipped reconciliation deliberately writes panel_refuted from the self-contained marker after panel removal. The plan amendment and provenance row record the deletion, but they do not supersede contradictory normative spec requirements cleanly.",
+      "hard_block": false
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "S3 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "Scope fence + stray-artifact lens: CLEAN. `git diff --stat origin/main...HEAD -- . ':!*/reviews/*'` yields exactly the 23 files the BRIEF names (internal/panel|complete|bead, cmd/mindspec test, internal/instruct test, ADR-0037, both SKILL copies, spec.md, plan.md, .beads/issues.jsonl) — no unexpected production file. `diff -q .claude/skills/ms-panel-tally/SKILL.md plugins/mindspec/skills/ms-panel-tally/SKILL.md` is byte-identical (exit 0). No debug/scratch/TODO/FIXME/print in added Go lines; no committed /tmp path; no binary/oversized blob (largest additions are test files and plan.md, all text). `.beads/issues.jsonl` diff is 4 added lines = the 3 bead entries + 1 epic for this spec, pure tracker sync (though mvp8.3 shows status `in_progress` and the epic `open` rather than `closed` — a minor tracker-hygiene loose end, not a scope/artifact violation). One real, evidenced finding surfaced while confirming scope-file provenance: `spec.md`'s R2 falsifiers and especially AC11(d)/(e) still literally require a `refutation_discharged` audit key and a 'verified discharge' test scenario — but the shipped code and tests contain ZERO occurrences of 'Discharge' (grep confirmed), because Bead 2's round-3 redesign (`reviews/spec-114-bead2/consolidated-round-3.md`) deleted the discharge mechanism entirely in favor of satisfy-always-from-marker. `plan.md` line 1194 was correctly amended with an explicit DESIGN AMENDMENT note mapping AC11 to the as-shipped no-discharge tests, but `spec.md` (frozen post-approval per ADR-0023 forward-only lifecycle) carries no equivalent note, so AC11 as literally worded in the approved spec is not satisfied by name (though the code's actual guarantee is a strict improvement — always-satisfy is safer than the deleted discharge path). Not hard_block: no un-audited-merge path results, and this is squarely O3/F3/G3's doc-coherence lens too, but per 'findings never out-voted' I'm surfacing it since it's concrete and evidenced.",
+  "concrete_changes_required": [
+    "Reconcile spec.md's AC11(d)/(e) and R2 discharge language with the as-shipped no-discharge design: since ADR-0023 forward-only likely forbids literally rewriting the approved spec.md body, add a dated addendum/amendment note (parallel to plan.md's Bead-2 DESIGN AMENDMENT and ADR-0037's amendment) pointing at reviews/spec-114-bead2/consolidated-round-3.md, so a future reader of spec.md alone does not believe a refutation_discharged audit/test exists.",
+    "Optionally close/update the .beads/issues.jsonl tracker entries for this spec (mvp8.3 shown in_progress, epic mvp8 shown open) now that all three beads and the final review are complete, so the tracker state matches the merged reality."
+  ],
+  "findings": [
+    {
+      "description": "Scope fence: exactly the 23 files listed in the BRIEF are the substantive (non-reviews/) delta; no unexpected production file touched.",
+      "severity": "info",
+      "hard_block": false
+    },
+    {
+      "description": "The two ms-panel-tally SKILL.md copies (.claude/skills and plugins/mindspec/skills) are byte-identical at HEAD.",
+      "severity": "info",
+      "hard_block": false
+    },
+    {
+      "description": "No leftover scratch/debug/TODO/print code, no committed /tmp path, no accidental binary/large file in the diff.",
+      "severity": "info",
+      "hard_block": false
+    },
+    {
+      "description": ".beads/issues.jsonl change is 4 added lines (3 bead entries + 1 epic) for spec 114, i.e. tracker sync — though mvp8.3/epic mvp8 are not marked closed yet.",
+      "severity": "low",
+      "hard_block": false
+    },
+    {
+      "description": "spec.md's AC11(d)/(e) and part of R2's prose still describe a 'refutation_discharged' verified-discharge mechanism that was deleted during Bead 2 (consolidated-round-3.md, operator decision) and has zero code/test presence in the shipped diff. plan.md and ADR-0037 were amended to record the deletion; spec.md (frozen post-approval) was not given an equivalent addendum, so AC11 as literally worded is not satisfied by name (the actual behavior is a safe superset via satisfy-always).",
+      "severity": "medium",
+      "hard_block": false
+    }
+  ]
+}

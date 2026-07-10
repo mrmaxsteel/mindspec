@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "The layered model is coherent: R1, R2, R3, OQ1 and AC2 agree pairwise (refuted RC clears the veto but never increments Approves; at-threshold 7+1-refuted passes, sub-threshold 6+2-refuted blocks on the floor; AC2's 5-genuine-APPROVE/threshold-5 Allow is consistent). Non-Goals are correct (112 per-gate config layered under, refute verb deferred to the 110/113 verb family, MINDSPEC_SKIP_PANEL untouched); all 4 OQs resolved and encoded; scope decomposes to ~2-4 beads; no thinness or synonym-dodge. One real internal contradiction blocks: AC5 requires the existing internal/panel decision tests, internal/complete advisory/gate tests, and cmd/mindspec panel tests to pass 'without semantic modification', but at least three pre-existing fixtures pin the exact RC-tolerated pass R1 removes — panel_decision_test.go '5 APPROVE + 1 dissent → Allow' (and the 3-reviewer 2-APPROVE+1-RC Allow), panel_advisory_test.go TestPanelAdvisory_Passing_WouldPass (2 APPROVE + 1 RC → 'would PASS'), and panel_test.go:388 'passing (at-threshold) → exit 0' (5 APPROVE + 1 RC filler). An implementer cannot satisfy AC1 and AC5's letter simultaneously. Also one dead conditional left from OQ3's resolution.",
+  "concrete_changes_required": [
+    "AC5: add an explicit carve-out for pre-existing tests that pin the now-removed RC-tolerated pass — internal/panel/panel_decision_test.go 'threshold met: 6/6 present, 5 APPROVE + 1 dissent → Allow' and 'expected_reviewers:3 → 3/3 present, 2 APPROVE Allow'; internal/complete/panel_advisory_test.go TestPanelAdvisory_Passing_WouldPass (2 APPROVE + 1 RC → 'would PASS'); cmd/mindspec/panel_test.go:386-389 'passing (at-threshold) → exit 0' (buildResult 5,0,6 = 1 RC filler). These MUST be semantically updated (flip to Block/'would BLOCK', or gain a refutation fixture) and become AC1 evidence; the 'no semantic modification' rule applies to all OTHER preserved behaviors. As written, AC1 and AC5 are jointly unsatisfiable.",
+    "In Scope, cmd/mindspec/panel.go bullet: strike the stale conditional 'a recording surface if OQ3 resolves to a CLI verb' — OQ3 is resolved to hand-edit/no verb (Non-Goals); the dead clause could mislead bead decomposition into scoping a recording surface."
+  ],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "major",
+      "title": "R1/AC1 contradicts AC5's 'existing tests pass without semantic modification'",
+      "detail": "R1 flips the gate outcome for complete, fresh, at-threshold panels carrying an unrefuted REQUEST_CHANGES. At least three pre-existing tests in the suites AC5 names pin the old Allow/pass for exactly that shape: internal/panel/panel_decision_test.go (want: Allow for 5 APPROVE + 1 RC, and for 3-reviewer 2 APPROVE + 1 RC), internal/complete/panel_advisory_test.go TestPanelAdvisory_Passing_WouldPass (VoteDecision lockstep flips it), cmd/mindspec/panel_test.go 'passing (at-threshold) → exit 0'. 'Mechanical fixture additions only where a struct gains fields' does not cover flipping a want or changing what a named test pins. Fix is a one-clause AC5 carve-out."
+    },
+    {
+      "id": "F3-2",
+      "severity": "minor",
+      "title": "Dead OQ3 conditional in In Scope",
+      "detail": "In Scope's cmd/mindspec/panel.go bullet still says 'a recording surface if OQ3 resolves to a CLI verb', but OQ3 is resolved [x] to hand-edit-panel.json with the verb an explicit Non-Goal. Residue from before resolution; strike it."
+    },
+    {
+      "id": "F3-3",
+      "severity": "info",
+      "title": "'Mandatory audit' vs 'best-effort' write — acceptable as abandon-parallel, could add one clarifying phrase",
+      "detail": "R2 calls the panel_refuted audit 'mandatory, never silent' while the write at step 5.6 is 'best-effort' after the terminal mutation. This exactly mirrors panel_abandoned's semantics and the falsifier is testable via the stubbed completeMergeMetadataFn, so not a blocking contradiction; an optional phrase like 'always attempted, best-effort at runtime exactly like panel_abandoned' would remove the surface tension."
+    },
+    {
+      "id": "F3-4",
+      "severity": "info",
+      "title": "Layered model verified coherent; no 112/113 conflict",
+      "detail": "Pairwise-checked R1, R2, R3, OQ1-OQ4, ACs, Non-Goals: 'refuted RC never counts as APPROVE' does not contradict 'refutation unblocks' — the spec consistently states near/at-threshold refutation unblocks (7+1 refuted, threshold 7; AC2's 5+1 refuted, threshold 5) while sub-threshold still blocks on the floor (6+2 refuted, threshold 7). Non-Goals correctly exclude per-gate counts/thresholds (spec 112), a refute verb (110/113 family follow-up), and MINDSPEC_SKIP_PANEL. Specs 110/112/113 titles confirmed in-tree; no contradiction."
+    }
+  ]
+}

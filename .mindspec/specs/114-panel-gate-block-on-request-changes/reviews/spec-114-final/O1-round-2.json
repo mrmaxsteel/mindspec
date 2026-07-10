@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Anti-gaming end-to-end lens, round 2. Delta is DOC-ONLY: git diff 41d8e8af..2b4fb8f0 touches zero .go (confirmed) — only spec.md/plan.md addenda + round-1 artifacts. My round-1 conclusion (no un-audited path clears/merges an unresolved RC WITHIN 114's `complete` mechanism) stands by construction; re-ran /tmp CI green (build ok, gofmt -l empty, panel/complete/bead/cmd all PASS). Finding B disposition is the RIGHT call, not a blocker: FinalizeEpic (mindspec_executor.go:381-418) does auto-merge raw-`bd close`'d bead branches with only a directional layout guard — no panel gate, no reconciliation — so B is a REAL bypass, but on a DIFFERENT verb (`impl approve`, not `complete`), PRE-EXISTING (comment predates 114), and already an orchestrator-forbidden anti-pattern. Blocking 114 would not fix B (orthogonal FinalizeEpic work) and deferring it regresses NOTHING: pre-114 both paths were open; post-114 `complete` is closed and impl-approve is unchanged — strictly better. Decisive: the scope note is HONEST — it does not claim 114 closed the impl-approve path, names o4fd(P1) as the tracked completion, and both anti-gaming reviewers cleared only 114's own mechanism. The spec.md discharge-deletion addendum does NOT weaken/misstate any shipped guarantee: it removes the spoofable re-tally attack surface (satisfy-from-marker, self-contained {slot,round,reason,evidence}, always panel_refuted, no re-tally on any path incl. hatch) — strictly MORE honest provenance — and its recap of the intact guarantees (leg 9.5 on the threshold floor, latest-round-canonical-RC-only never REJECT/hard_block/other-slot/newer-round, Approves never incremented, applied≡persisted UNIONed marker read-or-write-fail⟹Block, reconcile-before-close every path, fail-closed Merge/GetMetadata) matches my round-1 code trace exactly. No over-claim, no internal contradiction, forward-only-compliant (append/supersede). No new problem introduced. Round-1 APPROVE carried forward.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "A",
+      "summary": "spec.md described the deleted discharge/re-tally mechanism",
+      "status": "ADDRESSED",
+      "detail": "Dated superseding addendum accurately states the shipped self-contained-marker/no-discharge design (matches code + ADR-0037 + consolidated-round-3.md), unambiguously supersedes every discharge/refutation_discharged/verified-discharge/re-tally reference below, and is forward-only-compliant (append, not rewrite). Plan broadening (spec-wide) + AC2 provenance-label fix correct."
+    },
+    {
+      "id": "B",
+      "summary": "impl-approve/FinalizeEpic auto-merges raw bd-close'd beads un-gated",
+      "status": "ADDRESSED",
+      "detail": "Real bypass, confirmed at mindspec_executor.go:381-418, but out-of-scope for 114 (separate `impl approve` verb, pre-existing, orchestrator-forbidden). Honest scope note (no over-claim) + tracked follow-up o4fd(P1). Correct disposition; does NOT block 114. Not a WITHIN-mechanism hole."
+    }
+  ]
+}

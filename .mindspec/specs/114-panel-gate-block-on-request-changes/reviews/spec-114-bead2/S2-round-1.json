@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Tests-real lens, all mutation-probed in an isolated /tmp archive of ce9f5395 (shared worktree never touched, restored + re-built green after each probe). (1) Disabled the marker-write-failure Block in panelGate (swallowed persistRefutationPending's error instead of returning guard.NewFailure) -> TestPanelRefuted_MarkerWriteFailure_Blocks goes RED on BOTH subtests ('marker write itself fails' and 'the union read fails') -- load-bearing, confirmed. (2) Replaced dischargeEvidence(res,...) with a bare `true` (discharge on gate-pass alone) -> TestPanelRefuted_WarnPathDoesNotDischarge goes RED, plus TestPanelRefuted_CrossRun_PanelRemoved_Refuses also flips RED as a bonus catch -- load-bearing, confirmed. (3) Made bead.MergeMetadata swallow the read error and proceed from empty -> TestMergeMetadata_FailClosedOnReadError goes RED (load-bearing unit test, confirmed) but TestPanelRefuted_AuditSurvivesLaterReadError STAYS GREEN, because that e2e test drives a fakeMetadataStore double at the complete-package seam rather than the real bead.MergeMetadata -- this is exactly the author-documented deviation ('erasure-survival models the contract cross-package'), openly disclosed in the test's own doc comment (panel_refuted_test.go:613-618), and the underlying fail-closed claim IS pinned end-to-end by the pairing: the unit test proves the real function is fail-closed, the e2e test proves the complete-side reconciliation behaves correctly GIVEN fail-closed semantics. Legitimate split, not a hollow gap. (4) Made persistRefutationPending bare-replace (skip read-then-union) -> TestPanelRefuted_CrossRun_UnionReconcilesAll goes RED (X@1's discharge and B@2's satisfy both fail to materialize) -- load-bearing, confirmed. Assessed the Warn-discharge-drives-reconcile-directly deviation (TestPanelRefuted_WarnPathDoesNotDischarge calls reconcilePendingRefutations directly rather than through a full Run e2e): the doc comment's stated reason (deleting the live bead/<id> ref to produce a genuine MissingRef fact would also break unrelated doc-sync/ADR merge-base gates) is sound, and mutation-probe (2) proves this direct-call test is still fully load-bearing against the real vulnerability -- legitimate, not hollow. Assessed the full-repo-hang deviation empirically: ran `go test ./internal/harness/... -timeout 30s` myself and reproduced a genuine hang unrelated to this bead's changes (TestLLM_StalePhaseImplApprove blocks in an os/exec I/O-wait goroutine, pre-existing, no diff footprint here) -- confirms the plan's scoped-sweep verification commands (per-package, not a literal `go test ./...`) are the correct empirical scope, not test-avoidance. All 4 targeted mutation probes plus the 3 deviation assessments land clean; no hollow load-bearing test found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "Mutation probe 1 (swallow marker-write/union-read failure in panelGate) turns TestPanelRefuted_MarkerWriteFailure_Blocks RED on both subtests -- the applied-equiv-persisted invariant is genuinely test-pinned, not vacuous."
+    },
+    {
+      "severity": "info",
+      "description": "Mutation probe 2 (bare gate-pass discharge, ignoring dischargeEvidence's re-tally) turns TestPanelRefuted_WarnPathDoesNotDischarge RED (and TestPanelRefuted_CrossRun_PanelRemoved_Refuses RED as a bonus) -- the verified-vote-state discharge gate is real, not decorative."
+    },
+    {
+      "severity": "info",
+      "description": "Mutation probe 3 (bead.MergeMetadata proceeds from empty on read error) turns TestMergeMetadata_FailClosedOnReadError RED as expected, but leaves TestPanelRefuted_AuditSurvivesLaterReadError green -- confirming the author-disclosed cross-package modeling deviation is real but non-hollow: the fail-closed contract itself is pinned by the direct unit test, and the e2e test only (correctly) exercises the complete-side consequence of that contract via a double."
+    },
+    {
+      "severity": "info",
+      "description": "Mutation probe 4 (bare-replace instead of read-then-union in persistRefutationPending) turns TestPanelRefuted_CrossRun_UnionReconcilesAll RED -- the union-not-clobber claim for multi-run pending obligations is genuinely enforced by a test, not asserted without teeth."
+    },
+    {
+      "severity": "info",
+      "description": "Independently reproduced (in the isolated /tmp clone) a genuine pre-existing hang in internal/harness (TestLLM_StalePhaseImplApprove, os/exec I/O-wait, times out at 30s) unrelated to Bead 2's diff -- the plan's per-package verification scope (not a literal `go test ./...`) is empirically justified, not an attempt to dodge a real regression."
+    }
+  ]
+}

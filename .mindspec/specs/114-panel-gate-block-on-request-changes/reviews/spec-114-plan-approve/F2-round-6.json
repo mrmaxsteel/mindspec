@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Both round-5 findings ADDRESSED. F2r5-1: step 5(c) now grounds discharge vote-state in reconcilePendingRefutations' own re-tally of panelReg.Dir via panel.Tally (verified fs-only, tally.go:219-317; LatestRound + slot-sorted latest-round Verdicts), uniform across panel-present/no-panel/hatch; step 5(e) explicitly strikes the false hatch-tally claim and cites the real hatch code correctly (bare GateFacts at panel_advisory.go:169-175; config-disabled continue at :176-179 before ResolveGateFacts; writePanelAuditMetadata never tallies). internal/complete already uses internal/panel — no new edge; Registration.Dir confirmed (panel.go:163-164). Two-disjunct discharge test is sound and fail-closed: availability guard (no dir/tally error/no readable verdicts -> Refuse) precedes the disjuncts, covering the filename-derived-LatestRound-with-all-malformed corner; LatestRound < pending round refuses. F2r5-2: step 4's Signature-scope paragraph resolves the 3-tuple explicitly (no *Result threaded; re-tally makes it unnecessary); current 2-tuple at :140 and sole caller complete.go:375 verified.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2r6-1",
+      "severity": "resolved",
+      "disposition": "F2r5-1 ADDRESSED",
+      "note": "Plan step 5(c)/(e): reconciliation re-tallies panelReg.Dir via panel.Tally on ALL paths; the false 'panelGate tallies on hatch' claim is struck and replaced with an accurate description of panel_advisory.go:169-179. panel.Tally verified fs-only with LatestRound + per-slot latest-round verdicts; no new dependency edge."
+    },
+    {
+      "id": "F2r6-2",
+      "severity": "resolved",
+      "disposition": "F2r5-2 ADDRESSED",
+      "note": "Step 4 'Signature scope (F2 resolution)': panelGate keeps the 3-tuple (*Registration, []Refutation, error); no *Result return; reconciliation's own panel.Tally(panelReg.Dir) supplies vote-state path-independently. Grounded against the current 2-tuple at panel_advisory.go:140 and the enumerated caller sites."
+    },
+    {
+      "id": "F2r6-3",
+      "severity": "resolved",
+      "disposition": "fail-closed fallback CONFIRMED",
+      "note": "No-panel path, re-tally error, or no readable verdicts -> discharge cannot fire -> Refuse; any Refuse fails the whole completion pre-close. Pinned by TestPanelRefuted_CrossRun_PanelRemoved_Refuses, _WarnPathDoesNotDischarge, _GetMetadataError_Refuses. Over-conservative and sound; pristine beads keep section-6 fail-open."
+    },
+    {
+      "id": "F2r6-4",
+      "severity": "nit",
+      "disposition": "non-blocking",
+      "note": "The synthetic refutation_discharged reason text ('no longer REQUEST_CHANGES at/after round N') is loose under disjunct (i) when the slot re-RCs at a NEWER round on a hatch path — that discharge is round-supersession, not resolution. Mechanics are sound (the newer RC blocks non-hatch paths and carries its own obligation only if refuted); implementer may prefer 'superseded by round M' wording."
+    }
+  ]
+}

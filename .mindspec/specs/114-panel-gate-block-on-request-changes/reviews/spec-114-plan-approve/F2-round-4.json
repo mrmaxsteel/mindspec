@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "All round-4 claims ground at 2b159553. (1) panelGate boundary confirmed: it holds the PanelGateDecision result (panel_advisory.go:192), already returns guard.NewFailure Blocks (:201-203), and completeMergeMetadataFn (complete.go:42) is a same-package var panel_advisory.go already calls (:327/:338) — folding the marker write into the allow-decision and converting a failed write into a Block is fully within the existing boundary; caller complete.go:375-378 returns pre-mutation. (2) Reconcile placement grounded: gap between the ADR-divergence terminal (:541-544) and step-4 close (:546-547) exists; GetMetadata is cleanly extractable from MergeMetadata's read body (bdcli.go:270-280), whose `if err == nil` swallow + replace-write-from-empty confirm both fail-closed fixes. (3) Citation fixes landed: the complete.go:152-156 mis-pin is gone; repair.go:86 is the fatal repairMergeMetadataFn caller in cmd/mindspec (internal/bead/repair.go does not exist). (4) Spec Out-of-Scope and §8-amended editorial reconciled. Hatches-excepted qualifier (my F2R3-2) adopted. Minor pins only.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2R4-1",
+      "severity": "info",
+      "claim": "Grounded positives — the four verification targets",
+      "grounding": "(1) panelGate CAN write the marker and turn an Allow into a Block: package complete, holds d := panel.PanelGateDecision(facts) at panel_advisory.go:192, Block path already constructs guard.NewFailure (:201-203), completeMergeMetadataFn seam at complete.go:42 already consumed by writePanelAuditMetadata (:327/:338); the one production caller complete.go:375-378 returns panelGateErr before any mutation, so a marker-write-failure Block leaves the bead in_progress. Signature-ripple enumeration verified (grep: exactly the listed advisory/e2e/layout call sites). (2) reconcilePendingRefutations slot exists: ADR-divergence terminal at complete.go:541-544 (plan pins 542-544), step-4 close at :546-547, recovery branch and dolt-verify asymmetry as described; GetMetadata extractable from MergeMetadata's read (bdcli.go:270-280: tracedOutput(\"show\", [show <id> --json]) + items[0].Metadata), and the `if err == nil` swallow at :271 plus replace-write at :292 confirm both the fail-open read hole and the erasure hole; completeGetMetadataFn seam matches the existing write-seam pattern. (3) Citations fixed: no complete.go:152-156 remains; cmd/mindspec/repair.go:86 is repairMergeMetadataFn with a fatal guard.NewFailure at :89; internal/bead/ contains only bdcli/config/hygiene/identity files — internal/bead/repair.go does not exist. Caller taxonomy re-verified: phase/migrate.go seam (fatal), approve/impl.go+plan.go+spec.go (warn/fatal writes), release.go:133 `_ =` ignore. (4) spec.md Out-of-Scope (line 65) now states internal/bead is NOT consumed read-only, consistent with In Scope line 57 and the Impacted Domains execution bullet (line 35); Background line 30 describes the narrow §8 audit-durability amendment consistently with ADR Touchpoints line 39's '§8 is AMENDED'."
+    },
+    {
+      "id": "F2R4-2",
+      "severity": "info",
+      "claim": "Discharge rule soundness (new round-4 mechanism)",
+      "grounding": "The satisfy-vs-discharge-vs-refuse trichotomy is logically closed given leg 9.5: a live-panel PASS entails every latest-round RC is either covered by a current applied refutation (satisfy) or gone (discharge — reviewer flipped or round advanced past the pending round, both named in the rule text); Refuse is reserved for no-panel/unreadable-metadata. The cross-round case (pending (slot,1), current applied (slot,2)) resolves via the 'round advanced' discharge clause — no gap. My round-3 F2R3-2 hatch over-claim is fixed: the net invariant now carries the 'hatches excepted' scope in both plan (Bead 2 step 5 + AC) and spec R2/§7."
+    },
+    {
+      "id": "F2R4-3",
+      "severity": "minor",
+      "claim": "Plan Bead 2 step 4: 'the 13 test call sites'",
+      "grounding": "The enumerated list is 12 sites (e2e :272,:282,:297,:320 = 4; advisory :152,:226,:240,:289,:300,:314 = 6; layout :152,:162 = 2) and `grep -n 'panelGate(' internal/complete/*_test.go | wc -l` returns 12. The enumeration itself is exact and complete; only the '13' count is off by one. Editorial; no design impact."
+    },
+    {
+      "id": "F2R4-4",
+      "severity": "info",
+      "claim": "Residual cosmetic pins (carried, non-blocking)",
+      "grounding": "(a) MergeMetadata pinned as bdcli.go:263-290 twice; the function body spans :266-300 (doc comment from :263) — end-pin drift carried from my r3 info finding, not among the citations round 4 committed to fix. (b) panel_test.go struct-equality compare is at :255 (plan says ~254 — within its own tilde tolerance). (c) complete.go:283 calls phase.EnsureMigratedWithCache, not EnsureMigrated verbatim (the cached wrapper of the same fatal migration path) — the taxonomy conclusion is unaffected. (d) The four-flip and outcome-preserving fixture pins spot-checked green: the 5A+1RC Allow fixture appends slot-z RC at panel_decision_test.go:186-194; the sub-threshold via-neutral mustHave set ('4/6 APPROVE', 'threshold is 5/6', consolidated, fence) is a substring subset of the proposed leg-9.5 message; the expected_reviewers:3 Allow row (:211-219) and its mustNotHave ['5/6','/6'] sibling (:221-234) behave exactly as the plan classifies; the resolved-threshold-0 sub-case (:260-277) synthesizes 1/1 APPROVE with no RC filler, so it keeps reaching leg 10, as claimed."
+    }
+  ]
+}

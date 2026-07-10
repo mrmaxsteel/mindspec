@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Verified in a /tmp archive of 33a8ce8d (worktree left clean; build/gofmt/vet/full tests/-race all green). (1) Self-contained marker: refutationPendingEntry carries {slot,round,reason,evidence}, persisted at apply time in persistRefutationPending; reconcile writes panel_refuted FROM the marker, not panel.json. TestPanelRefuted_SatisfyFromMarker_PanelGone proves the honest audit lands with panel.json REMOVED (full reason/evidence preserved). (2) applied≡persisted: marker write is folded into panelGate's allow-with-refutations path, read-then-UNION-then-write (unionPendingEntries, never bare replace); read OR write failure returns a Block, not abort-with-applied. (3) reconcilePendingRefutations(beadID) error runs at step-3.75 (line 570) BEFORE the only close (575) and terminal merge (697), on every path incl. both hatches; grep-confirmed it opens ZERO panel directories; every not-already-covered pending is satisfied from its marker; read/corrupt/shape-invalid ⇒ Refuse, write-fail ⇒ fail pre-close. (4) NO discharge/re-tally survives (deleted-symbol grep clean; internal/panel byte-unchanged vs ce9f5395). Mutation probes: swallowing the reconcile write, skipping it, and neutering the shape-invalid guard each turned named tests RED. No un-audited-merge path found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "self-contained-marker", "status": "ADDRESSED", "note": "refutationPendingEntry{slot,round,reason,evidence} persisted at apply time; panel_refuted written from marker. TestPanelRefuted_SatisfyFromMarker_PanelGone + MarkerCarriesReasonEvidence green; skipping the satisfying write turns both RED."},
+    {"id": "applied-equiv-persisted", "status": "ADDRESSED", "note": "persistRefutationPending read-then-union-then-write; either failure ⇒ panelGate Block. TestPanelRefuted_MarkerWriteFailure_Blocks green."},
+    {"id": "reconcile-before-close-every-path", "status": "ADDRESSED", "note": "step-3.75 precedes close(575)+merge(697); hatch subtests (env-skip, config-disabled, unreadable-store-REFUSES) green. Swallowing reconcile write ⇒ TestPanelRefuted_SatisfyWriteFailure_FailsCompletion RED."},
+    {"id": "reconcile-reads-no-panel-dir", "status": "ADDRESSED", "note": "grep over reconcile-reachable fns finds no panel.Scan/ForBead/Tally/.Dir; settlement is marker-only, so no removed/corrupted/aliased panel arrangement can influence it."},
+    {"id": "false-discharge-class-gone", "status": "OBVIATED", "note": "dischargeVerified/dischargeEvidence/refutation_discharged/appliedOrigins/reconcile-time ForBead all deleted (grep clean); internal/panel diff vs ce9f5395 EMPTY. Rounds 1/2/3 false-discharge variants are structurally unrepresentable."},
+    {"id": "shape-invalid-guard", "status": "ADDRESSED", "note": "empty-slot/round<1 ⇒ Refuse; neutering the guard turns TestPanelRefuted_MalformedPendingEntries_Refuses RED."},
+    {"id": "panelGate-arity-2tuple", "status": "ADDRESSED", "note": "all call sites (1 prod + test sites) consistent 2-tuple; build+full test green; scope = internal/complete only, no ADR/plan/doc edits."}
+  ]
+}

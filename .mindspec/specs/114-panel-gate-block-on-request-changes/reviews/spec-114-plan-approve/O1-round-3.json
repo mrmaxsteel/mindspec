@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.8,
+  "rationale": "The durable-obligation mechanism is well-designed and CLOSES the exact G2 round-2 hole: step 2.3 writes refutation_pending fail-closed after the 2.25 gate and BEFORE CommitAll/close (least mutation on abort; marker persists via bd auto-commit independent of git CommitAll), step 3.75 writes panel_refuted before the step-4 close after all blocking gates, and the §6 fail-open override plus fail-closed MergeMetadata cover the panel_refuted-write-failure + panel-removal retry. Placements are correct against complete.go (2.3 after :393, before :400 CommitAll; 3.75 after :542-544 adr gate, before :546 close). But the invariant is NOT yet airtight on two residuals I independently reproduced (concurring with G2). (1) If the step-2.3 marker write itself fails, the run aborts with NO durable obligation; a subsequent panel.json removal makes run 2 indistinguishable from a no-refutation bead → fail-open merge, un-audited — the same class one step earlier. (2) GetMetadata error handling in the §6 override is unspecified; a fail-open reading lets a transient read failure merge a bead that HAS a durable refutation_pending.",
+  "concrete_changes_required": [
+    "Step 5(c)/§6 override: explicitly require a GetMetadata read/parse ERROR to fail-CLOSED (recoverable guard.NewFailure, recovery `mindspec complete <bead>`), never fall through to merge. This is symmetric with the item-6 fail-closed MergeMetadata rationale and is currently only implied. Add a test: no-panel + GetMetadata errors → closeBeadFn NOT called, ex.completeCalled == false.",
+    "Step 5 marker-write-failure cross-run residual: state the ordering rationale explicitly and BOUND it. On 2.3 failure the bead is pristine/in_progress with the panel intact, so the natural retry re-applies — add a test asserting that (panel present) recovery path. Then either (a) document this narrow window as an accepted §8-scoped footgun (external panel deletion between a failed pre-mutation marker write and retry), tying it to the §8 carve-out, or (b) strengthen so a refutation cannot be 'applied' without a durable marker. Do not broaden the override to block all no-panel in_progress beads (breaks dogfooding fail-open)."
+  ],
+  "findings": [
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "G2 round-2 panel_refuted-write-failure + panel-removal retry hole",
+      "evidence": "Durable refutation_pending marker (step 2.3, fail-closed, pre-CommitAll/pre-close) + fail-open override (§6) + fail-closed MergeMetadata close the named cross-run hole; cross-run test 7(B)(iv) asserts run 2 REFUSES via the override. Placements verified against complete.go step sequence."
+    },
+    {
+      "disposition": "PARTIAL",
+      "severity": "load-bearing",
+      "defect": "Failure class relocated to the step-2.3 marker write, not eliminated",
+      "evidence": "panelGate returns an applied refutation BEFORE 2.3 persists the marker; if 2.3 fails the run aborts with no durable obligation. Panel removed before retry → §6 override sees neither panel nor marker → fail-open merge with no panel_refuted. Same panel-removed-retry class, one step earlier. Mitigated (pristine bead, panel intact) but not airtight, and untested cross-run."
+    },
+    {
+      "disposition": "MISSED",
+      "severity": "load-bearing",
+      "defect": "GetMetadata read/parse error not specified fail-closed on the §6 override",
+      "evidence": "Step 6 says GetMetadata surfaces read errors; step 5(c) only refuses when readable metadata shows an unsatisfied marker. A fail-open implementation (if err==nil && meta[...]) would let a transient read failure merge a bead carrying a durable refutation_pending un-audited — undercutting the very mechanism item-6 hardened MergeMetadata against."
+    }
+  ]
+}

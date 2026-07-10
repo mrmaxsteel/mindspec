@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.83,
+  "rationale": "No new contradiction. (1) 'Hatches except the gate, not the obligation' is coherent with 'hatches unchanged'/\u00a76: the hatch's gate semantics (skip decision, HC-7, panel_gate_skipped audit) are untouched; the reconciliation is a separate path-independent pre-close step, and a refutation_pending obligation is a post-114 state unreachable in any pre-114 history, so 'exact semantics' holds for every existing behavior. Spec R2, AC11(f), plan 5(e), test (xii), and Bead-3 \u00a77 all state the same rule. (2) The union-marker + verified-vote-state-discharge invariant is verbatim-consistent across R2's falsifier, AC11's header, the \u00a77/\u00a78 touchpoints, plan 5(a)-(e), the net-invariant comment, Bead-2 ACs, Bead-3, and ADR Fitness; the discharge condition uses the identical two-disjunct test in R2 and 5(c). (3) AC5's four-fixture set is unchanged and matches Bead-1 step 5 (a)-(d) exactly. (4) R1, OQ1-4, and the leg-9.5 message-superset are untouched by round 5. Findings are minor/advisory.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "Plan 5(e) premise about hatch-path tally describes the post-Bead-2 state, not HEAD",
+      "detail": "At HEAD, panelGate's skip-env and config-disabled paths `continue` before ResolveGateFacts (panel_advisory.go:160-179) \u2014 no tally is computed on a hatch run, which plan step 4 itself states correctly ('the gate did not evaluate facts'). Step 5(e)'s justification 'panelGate still scans + tallies the matched panel for the panel_gate_skipped audit, so the Result is available' is therefore inaccurate as a description of current code (only the matched *registration* is captured). Not a semantic contradiction: the required behavior is unambiguously pinned (AC11(f) + test (xii): hatch + pending \u2192 discharge only on affirmative tally evidence, else Refuse), so Bead 2 must compute the matched panel's tally during hatch-path reconciliation. Recommend rewording 5(e) so an implementer does not assume the Result already exists."
+    },
+    {
+      "severity": "minor",
+      "title": "Discharge headline gloss vs operative disjunct on same-slot re-RC at a newer round",
+      "detail": "Pending (X,1) with X filing a NEW RC at round 2: the operative disjunct ('latest round advanced past the pending round') discharges (X,1), while the gloss ('no longer a latest-round REQUEST_CHANGES at/after its recorded round') reads as non-dischargeable. The disjunct is the right rule (R3c makes the round-2 RC new business that itself blocks or needs its own (X,2) refutation, so the round-1 obligation is genuinely moot) and it is stated identically in spec R2 and plan 5(c) \u2014 no spec/plan drift, wording looseness only."
+    },
+    {
+      "severity": "minor",
+      "title": "AC11(f)/test (xii) list panel_refuted as a covering hatch write, but satisfy is unavailable on hatch",
+      "detail": "Plan 5(e) correctly derives that a hatch run has an empty AppliedRefutations set, so a NEW panel_refuted can never be written on a hatch path; AC11(f) and test (xii) phrase the covering audit as the generic 'panel_refuted/refutation_discharged' pair. The panel_refuted branch is unreachable there in practice (an already-satisfied entry is simply not pending). Generic-pair phrasing, not a conflict."
+    },
+    {
+      "severity": "info",
+      "title": "Marker-failure Block message contains 'refutation' \u2014 deliberately outside AC10's scope",
+      "detail": "Plan 5(a)'s guard.NewFailure text ('the refutation could not be durably recorded...') mentions refutation, while AC10's no-advertise predicate pins the PanelGateDecision leg-9.5 message (including the refutations-present row, test 7(A)(viii)). Coherent: the marker-failure Block only fires after the operator has already recorded a refutation, so nothing is being advertised, and no paste-able incantation is printed (the R1 falsifier's actual test)."
+    }
+  ],
+  "carried_forward": "round-5 APPROVE carried: mechanism confirmed TOTAL/airtight; round-6 is a precision fix for F2 discharge-evidence acquisition (re-tally from panelReg.Dir) \u2014 no design/ADR/domain/AC change"
+}

@@ -61,10 +61,27 @@ func TestVoteDecision(t *testing.T) {
 			want: VoteBlock,
 		},
 		{
-			name: "threshold met 5/6 with 6 present → Pass",
+			// Spec 114 R1 (the VoteDecision lockstep twin's intended flip,
+			// one of the FOUR named fixtures): a real 5-APPROVE-plus-1-RC
+			// panel used to Pass on the vote count alone; the vote-only twin
+			// must now move in lockstep with the gate and Block on the
+			// unresolved dissent.
+			name: "threshold met 5/6 with 6 present (1 unresolved RC) → Block (Spec 114 R1)",
 			res: &Result{
 				Panel: &Panel{ExpectedReviewers: 6, Round: 1}, LatestRound: 1,
-				Verdicts: makeVerdicts(6, 0), Approves: 5,
+				Verdicts: approveAndRCVerdicts(5), Approves: 5,
+			},
+			want:    VoteBlock,
+			summary: "unresolved",
+		},
+		{
+			// Companion row (Spec 114 R1 step 5d): a genuinely clean 6/6
+			// all-APPROVE panel still Passes — R1 removes RC tolerance, not
+			// the at-threshold Pass path itself.
+			name: "threshold met 6/6 all-APPROVE → Pass",
+			res: &Result{
+				Panel: &Panel{ExpectedReviewers: 6, Round: 1}, LatestRound: 1,
+				Verdicts: makeApproveVerdicts(6), Approves: 6,
 			},
 			want: VotePass,
 		},
@@ -96,6 +113,30 @@ func makeVerdicts(n, _ int) []Verdict {
 	for i := range out {
 		out[i] = Verdict{Slot: string(rune('a' + i)), Round: 1}
 	}
+	return out
+}
+
+// makeApproveVerdicts returns n verdicts with a REAL canonical APPROVE
+// string (Spec 114 R1: UnresolvedVerdicts inspects the actual Verdict field,
+// so a fixture asserting a Pass/Allow outcome under the new unresolved-verdict
+// leg must carry genuine APPROVE strings, not the empty-string placeholders
+// makeVerdicts uses for tests whose subject predates R1).
+func makeApproveVerdicts(n int) []Verdict {
+	out := make([]Verdict, n)
+	for i := range out {
+		out[i] = Verdict{Slot: string(rune('a' + i)), Round: 1, Verdict: VerdictApprove}
+	}
+	return out
+}
+
+// approveAndRCVerdicts returns approves REAL APPROVE verdicts plus one
+// trailing REAL REQUEST_CHANGES verdict (Spec 114 R1 fixture).
+func approveAndRCVerdicts(approves int) []Verdict {
+	out := make([]Verdict, approves+1)
+	for i := 0; i < approves; i++ {
+		out[i] = Verdict{Slot: string(rune('a' + i)), Round: 1, Verdict: VerdictApprove}
+	}
+	out[approves] = Verdict{Slot: string(rune('a' + approves)), Round: 1, Verdict: VerdictRequestChanges}
 	return out
 }
 

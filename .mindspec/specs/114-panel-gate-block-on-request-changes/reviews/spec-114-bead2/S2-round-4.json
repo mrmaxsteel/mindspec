@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Mutation-probed all four load-bearing points on an absolute /tmp archive of 33a8ce8d (worktree left clean). (1) Swallowing the reconcile panel_refuted write error (`_ = writePanelRefutedMetadata(...)`) turned exactly the 4 named tests RED (SatisfyWriteFailure_FailsCompletion, SatisfyFromMarker_PanelGone, CrossRun_UnionReconcilesAll, MarkerCarriesReasonEvidence) and nothing else — matches the fixer's claim precisely. (2) Dropping reason/evidence at marker-persist time turned MarkerCarriesReasonEvidence (plus SatisfyFromMarker_PanelGone and CrossRun_UnionReconcilesAll, which also assert content) RED. (3) Removing the already-covered no-op check turned AlreadyCoveredPending_Completes RED (its no-op subtest hits the stubbed panel_refuted-write failure). (4) Decode-as-empty fail-open on refutation_pending_entries turned the malformed-entries subtest RED; separately, deleting the shape-invalid (empty-slot/round<1) guard turned the shape-invalid subtest RED — both precisely scoped, no collateral failures. Verified SatisfyFromMarker_PanelGone/NaturalResolution_NoObligation assert the right things by reading their bodies. Lost-coverage check: the 6 deleted tests (5 discharge + inverted CrossRun_PanelRemoved_Refuses) defended only the origin/re-tally identity mechanism now deleted by construction (byte-empty internal/panel diff, verified); WarnPathDoesNotDischarge's real concern (genuine-applied-refutation determination) remains pinned in internal/panel/refutation_test.go, untouched. Full build/vet/test/-race green.",
+  "concrete_changes_required": [],
+  "findings": []
+}

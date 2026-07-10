@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Empirical, run in an isolated /tmp clone pinned to 4dfebbcb (the shared bead worktree was concurrently mutated mid-review by another reviewer's probe — gate.go had `false && len(unresolved)>0` disabling leg 9.5; I restored it, git status clean, and moved all work to the clone). In the clone: `go build ./...` clean; `gofmt -l ./cmd ./internal` empty; `go vet ./internal/panel ./internal/complete` clean; `go test -count=1 ./internal/panel ./internal/complete ./cmd/mindspec` all PASS; `go test ./internal/instruct` PASS incl. TestRun_IdleNoBeads (5x, no z4ps flake this run). HEAD = exactly the 9 files, one commit, no internal/bead, no AppliedRefutations (grep-empty). Break-it probe: (a) 5A+1RC Blocks naming slot; (b) 6/6 all-APPROVE Allows (no false block); (c) unrecognized 'MAYBE'/'LGTM_BUT' Blocks; (c2) lowercase 'approve' Blocks (case-sensitive); (d) sub-threshold RC message keeps '3/6 APPROVE'+'threshold is 5/6' superset; (e) VoteDecision VoteBlocks in lockstep. AC5 fixture flips + preserving updates match the diff exactly.",
+  "concrete_changes_required": [],
+  "findings": [
+    "build/gofmt/vet all clean in isolated clone at 4dfebbcb",
+    "go test ./internal/panel ./internal/complete ./cmd/mindspec ./internal/instruct all PASS; TestRun_IdleNoBeads green (no z4ps flake observed across 5 runs)",
+    "leg 9.5 correct: fires on UnresolvedVerdicts() (neither APPROVE nor REJECT), placed after leg 9 REJECT, before leg 10 threshold; layered (threshold floor preserved)",
+    "byte-superset message verified: sub-threshold RC route retains 'X/N APPROVE' + 'threshold is T/N' leg-10 substrings",
+    "VoteDecision twin in lockstep — same RC/unrecognized inputs VoteBlock",
+    "scope clean: exactly 9 files, one commit, no internal/bead, no AppliedRefutations (Bead 2's), no 'refut'/SkipPanelEnv in Block message (AC10/HC-7)",
+    "PROCESS NOTE (not a bead defect): shared bead worktree gate.go was concurrently mutated by another reviewer during this review (leg 9.5 disabled via 'false &&'); I reverted it and git status is clean. All my results come from an isolated clone, immune to that interference.",
+    "Did not observe the full `go test ./...` completion (background run still in flight when verdict was requested); the four in-scope packages plus instruct were exercised directly and passed."
+  ]
+}

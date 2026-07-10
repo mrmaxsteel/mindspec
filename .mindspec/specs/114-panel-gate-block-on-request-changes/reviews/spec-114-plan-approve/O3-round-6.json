@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-4 holds on all three axes I own. DOMAIN: the marker-write (panelGate, internal/complete), reconcile step + discharge (internal/complete), and GetMetadata/fail-closed MergeMetadata (internal/bead) all fall within the two domains the spec's Impacted Domains now declares (workflow + execution). Both are covered by cited ADR-0037/ADR-0035; the divergence gate derives candidates from that section, and `mindspec validate spec` passes. DECOMPOSITION: Bead 2 is heavier but the atomicity constraint (lines 100-112) is binding \u2014 a Bead 2 without the round-4 obligation redesign would itself carry the G2 hole and fail its own gate; the additions touch the same files and cannot be tested independently, so splitting recreates an un-passable intermediate. Chain stays A->B->C. PROVENANCE: AC11(a-f) each map to a named round-4 test (Discharges/GetMetadataError/MarkerWriteFailure) and AC12 dedup extends into the audit path. Editorial contradiction rewritten. APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "domain-gate-passes",
+      "severity": "info",
+      "disposition": "verified",
+      "note": "Impacted Domains declares workflow (internal/panel, internal/complete, cmd, plugins/mindspec) AND execution (internal/bead/**, owned per execution/OWNERSHIP.yaml). All round-4 edits (marker-write in panelGate, reconcile-every-path, refutation_discharged in internal/complete; GetMetadata + fail-closed MergeMetadata in internal/bead) land in declared domains. ADR-0037 (workflow,execution) + ADR-0035 cover execution; no new ADR. `mindspec validate spec 114` => all checks passed; HEAD pinned at 2b159553."
+    },
+    {
+      "id": "bead2-atomic-not-splittable",
+      "severity": "info",
+      "disposition": "verified",
+      "note": "Bead 2 is at the upper bound of reviewable size (schema + gate validation + AppliedRefutations dedup + panelGate return-arity + full durable-obligation protocol + fail-closed bead metadata + ~13 named e2e scenarios). But it is genuinely atomic: the satisfy/discharge/refuse reconciliation, the applied-equals-persisted marker, and fail-closed reads are inseparable from the panel_refuted audit they enforce \u2014 a Bead 2 shipping the audit without them is not individually panel-passable (the exact G2 hole). Splitting into a Bead 4 would be a pure R_scope-overlap dependency on the same files with no independent test surface. AC5 fixture-flip review is isolated to Bead 1, keeping Bead 2's review surface the mechanism + its named matrix. One-round verifiable."
+    },
+    {
+      "id": "provenance-round4-mapped",
+      "severity": "info",
+      "disposition": "verified",
+      "note": "AC11 sub-parts each have a named test: (a) SatisfyWriteFailure_FailsCompletion, (b) MarkerWriteFailure_Blocks (applied-equals-persisted), (c) CrossRun_PanelRemoved_Refuses, (d) CrossRun_NaturalResolution_Discharges (refutation_discharged / reconcile), (e) GetMetadataError_Refuses + AuditSurvivesLaterReadError + MergeMetadata_FailClosedOnReadError, (f) PristineNoPanel_FailsOpen. AC12 dedup extended into the audit path (item 3, provenance row 1073). Reconcile step = Bead 2 step 5(c); GetMetadata seam = completeGetMetadataFn. Satisfy-before-discharge precedence stated and the trichotomy is exhaustive; no soundness gap in the discharge path."
+    },
+    {
+      "id": "round3-editorial-addressed",
+      "severity": "info",
+      "disposition": "addressed",
+      "note": "My round-3 Out-of-Scope contradiction (section claimed internal/bead read-only while In-Scope changed it) is rewritten: spec line 65 now leads 'internal/bead is NOT consumed read-only: bead.MergeMetadata is made fail-closed ... and a GetMetadata read helper is added' and narrows what actually stays out (bd/Dolt storage, bd CLI surface, completeMergeMetadataFn seam signature). Struck as flagged. Non-blocking, now resolved."
+    }
+  ],
+  "carried_forward": "round-5 APPROVE carried: mechanism confirmed TOTAL/airtight; round-6 is a precision fix for F2 discharge-evidence acquisition (re-tally from panelReg.Dir) \u2014 no design/ADR/domain/AC change"
+}

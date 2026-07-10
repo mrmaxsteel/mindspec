@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Grounded the three round-5 additions at 17d0b008. (1) Marker read-union-write: GROUNDED — MergeMetadata (bdcli.go:266-300) holds the factorable `bd show --json` read, swallows read errors from empty (erasure hole real), and replace-writes top-level keys, so union is necessary and feasible; panelGate shares the package with completeMergeMetadataFn (complete.go:42). (3) Hatches: GROUNDED — skip-env/config-disabled live at panel_advisory.go:169-179, fall through to `return matched, nil`, and Run continues past divergence (:543-544) to close (:547), so pre-close reconciliation is reachable on every path; 12 test call sites match. (2) Vote-state plumbing: PARTIAL — Res IS in loop scope on evaluated paths incl. all Warn legs (ResolveGateFacts tallies first, gate.go:352), but step 5(e)'s claim that panelGate 'still scans + tallies' on hatch paths is FALSE (skip-env builds bare GateFacts, config-disabled skips facts, writePanelAuditMetadata never tallies), and step 4's 3-tuple signature carries no Result despite step 5(c)'s 'plumbed from panelGate'.",
+  "concrete_changes_required": [
+    "Fix step 5(e): on hatch paths panelGate does NOT tally today (skip-env builds GateFacts{BeadID, SkipEnv: true} with no ResolveGateFacts, panel_advisory.go:169-175; config-disabled skips fact evaluation, :176-179; writePanelAuditMetadata :317-343 reads only the scanned Registration). State that hatch-path discharge evidence requires ADDING a tally — e.g. panel.Tally(matched.Dir) in the hatch branches or at reconciliation via the returned registration's Dir (fs-only, exported, cheap) — instead of asserting the Result 'is available' from the panel_gate_skipped audit.",
+    "Reconcile step 4 vs step 5(c): the declared panelGate signature (*panel.Registration, []panel.Refutation, error) has no slot for the panel.Result step 5(c) says is 'plumbed from panelGate into reconciliation' (Registration carries only Dir/Panel/Err — no tally). Either add the Result (or the vote-state summary) to the return — updating the enumerated 12-site mechanical caller fix accordingly — or specify that reconciliation re-tallies via panel.Tally(panelReg.Dir), and say which."
+  ],
+  "findings": [
+    {
+      "id": "F2r5-1",
+      "severity": "major",
+      "claim": "Plan step 5(e): 'panelGate still scans + tallies the matched panel for the panel_gate_skipped audit, so the Result is available' on hatch paths",
+      "evidence": "FALSE against the tree. Skip-env branch (internal/complete/panel_advisory.go:169-175) calls PanelGateDecision(panel.GateFacts{BeadID: beadID, SkipEnv: true}) — no ResolveGateFacts, no Tally. Config-disabled branch (:176-179) is commented 'do not evaluate facts'. writePanelAuditMetadata (:317-343) never tallies — it reads reg.Panel.Abandoned from the scan. Scan happens (ForBead, :152, 'We still scan so the matched registration flows to the audit writes') but tally does not. The hatch-path verified-discharge mechanism (round-5 item 3) depends on this tally; an implementer following the plan as written would find no Result on hatch paths. Fix is small (add panel.Tally on the hatch/reconcile path) but the claim as stated is ungrounded."
+    },
+    {
+      "id": "F2r5-2",
+      "severity": "minor",
+      "claim": "Step 5(c)/(e): the matched panel's panel.Result is 'plumbed from panelGate into reconciliation'",
+      "evidence": "Step 4 fixes the new panelGate signature at (*panel.Registration, []panel.Refutation, error) and enumerates the 12 test call sites as mechanical reg,_,err updates (verified: exactly 12 — panel_advisory_test.go:152,226,240,289,300,314; panel_gate_e2e_test.go:272,282,297,320; panel_gate_layout_test.go:152,162). That signature cannot carry a panel.Result, and Registration (panel.go:162-169) is only {Dir, Panel, Err}. The Result IS in scope inside panelGate's loop on evaluated paths (ResolveGateFacts tallies first, gate.go:352-360 — including the abandoned/missing-ref/transient Warn legs, so the Warn-no-false-discharge design is sound), but the plan never says how it crosses the panelGate boundary. Internal inconsistency; pick a mechanism."
+    },
+    {
+      "id": "F2r5-3",
+      "severity": "info",
+      "claim": "Round-5 claims verified as GROUNDED",
+      "evidence": "(a) Union-not-replace rationale: bead.MergeMetadata (internal/bead/bdcli.go:266-300) reads via tracedOutput('show',...), IGNORES read errors (proceeds from empty merged map — the erasure hole is real), applies updates by top-level key (merged[k]=v), and replace-writes the whole marshaled map via bd update --metadata — so a naive marker write of only-current entries would clobber an older pending array under the same key; read-then-union is necessary and feasible (entries round-trip as []interface{}). The read body is directly factorable into GetMetadata. (b) panelGate boundary: same package as completeMergeMetadataFn (complete.go:42), beadID in hand, guard.NewFailure already used for Block — marker-failure-Block fits. (c) Hatch placement + reconcile-before-close: hatches are inside panelGate (panel_advisory.go:157, 169-179), both fall through to return matched,nil; complete.Run continues past the ADR-divergence gate (complete.go:543-544) to closeBeadFn (:547, recovery branch :547-554), so a reconciliation inserted between them runs on panel-present, no-panel (nil,nil return at :154-156 also continues), and hatch paths. Step-4 NOTE that config-disabled writes NO audit is accurate (writePanelAuditMetadata gates panel_gate_skipped on panelSkipEnvFn()). writePanelAuditMetadata call at complete.go:784 (plan pin 778-785, fine). Plan line pins verified against fae2bfb6, an ancestor of 17d0b008 with zero .go diff."
+    }
+  ]
+}

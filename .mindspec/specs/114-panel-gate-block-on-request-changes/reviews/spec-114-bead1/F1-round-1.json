@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Mutation-probed 4dfebbcb in a /tmp copy built via git archive. (1) Disabling leg 9.5 (`false &&`) killed 5 tests incl. both named ones (TestPanelGateDecision_UnresolvedRequestChangesBlocks, TestPanelGate_RequestChangesBlocksComplete) — not hollow. (2) Disabling the VoteDecision twin killed TestVoteDecision + TestPanelAdvisory_Dissent_WouldBlock. (3) Letting RC slip UnresolvedVerdicts killed 7 tests; letting unrecognized strings slip killed the AC8 case. (4) Full-Tally probe: 'request_changes', 'LGTM', 'APPROVED', 'APPROVE WITH NITS' all Block; clean all-APPROVE (incl. ' approve ' canonicalization) still Allows — no false block. (5) 5000-tally seeded sweep (n 1-9, threshold exprs, hard_blocks, mismatch, abandoned, incomplete, junk verdicts): zero PanelGateDecision/VoteDecision divergence. (6) Parent-commit tests vs new code: every failure maps to an intentionally-edited function in the 7 touched files — no unclassified fixture flip; old sub-threshold fixtures stayed green, confirming the byte-superset message. AC10 predicate asserted and holds. One process finding (worktree mutated mid-panel by another agent, since restored) — not a defect of the commit.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "info",
+      "title": "Leg 9.5 not hollow — revert mutation killed by 5 tests",
+      "detail": "Replacing the leg-9.5 condition with `false && ...` in a /tmp copy turned TestPanelGateDecision_UnresolvedRequestChangesBlocks, TestPanelGateDecision_ThresholdFloorIsLayeredNotReplaced, TestPanelGateDecision, TestPanelGate_RequestChangesBlocksComplete (e2e) and cmd TestPanelTally_ExitCodeTracksDecision RED. Same for the VoteDecision twin (TestVoteDecision, TestPanelAdvisory_Dissent_WouldBlock)."
+    },
+    {
+      "id": "F1-2",
+      "severity": "info",
+      "title": "No non-APPROVE can slip; no false block on clean panels",
+      "detail": "UnresolvedVerdicts covers latest-round RC AND any unrecognized string (Tally canonicalizes trim+uppercase; empty/whitespace verdicts are Malformed -> missing -> leg-8 block; earlier-round files never tallied; hard_block APPROVE caught by leg 9). End-to-end Tally probe: LGTM/APPROVED/'APPROVE WITH NITS' Block; 6/6 genuine APPROVEs Allow. Sub-mutation letting only unrecognized strings slip is killed by exactly one test (the AC8 case in TestPanelGateDecision_UnresolvedRequestChangesBlocks) — adequate but single-killer; noted, not required."
+    },
+    {
+      "id": "F1-3",
+      "severity": "info",
+      "title": "Lockstep + fixture reconciliation verified",
+      "detail": "5000-iteration seeded sweep found zero vote-portion divergence between PanelGateDecision and VoteDecision. Running 4dfebbcb~1 tests against 4dfebbcb code fails ONLY tests intentionally edited in the diff (the 4 named flips plus preserving updates whose old RC/empty fillers now legitimately block); no test outside the 7 touched files flips."
+    },
+    {
+      "id": "F1-4",
+      "severity": "medium",
+      "title": "PROCESS: bead worktree was mutated mid-panel by a concurrent agent",
+      "detail": "During this review the live worktree's internal/panel/gate.go was observed in TWO successive mutated states (leg 9.5 disabled with `false &&`; git status dirty), i.e. some panel agent ran mutation probes IN the shared worktree in violation of the /tmp-only fence. It was later restored; I verified gate.go is now byte-identical to 4dfebbcb and `git status` is clean. Not a defect of the commit, but the orchestrator MUST re-verify the worktree is clean and at 4dfebbcb immediately before `mindspec complete`, and should re-tighten the /tmp fence in reviewer prompts (this is the exact hazard class in the 2026-07-08 handover lesson)."
+    }
+  ]
+}

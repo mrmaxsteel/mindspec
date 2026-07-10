@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "TestPanelGateDecision_UnresolvedRequestChangesBlocks, TestPanelGateDecision_ApprovesExcludesUnresolvedVerdicts, TestPanelGate_RequestChangesBlocksComplete all pass and target the real production paths (PanelGateDecision, real Tally() over on-disk files, real complete.Run e2e harness). I mutation-tested by disabling leg 9.5 (`if unresolved := f.Res.UnresolvedVerdicts(); false && len(unresolved) > 0`) and confirmed RED-on-revert for two of the three table rows in TestPanelGateDecision_UnresolvedRequestChangesBlocks, plus the e2e and Tally-based tests. However the third row ('two unresolved RC slots -> Block naming both', 4 APPROVE/6, threshold 5) is sub-threshold on its own, so with leg 9.5 fully disabled it STILL blocks via leg 10 (generic threshold path) with Action==Block preserved, and its mustHave checks for slot names \"x\" and \"y\" are satisfied by coincidental substrings already present in every Block message (\"/ms-bead-fix\" contains \"x\"; \"bypass\"/\"only\" contain \"y\") -- confirmed empirically. This subtest does not actually discriminate leg 9.5's multi-slot-naming behavior; it would pass even if leg 9.5 never named the slots.",
+  "concrete_changes_required": [
+    "In panel_decision_test.go's TestPanelGateDecision_UnresolvedRequestChangesBlocks, fix the 'two unresolved RC slots' row so it actually pins leg 9.5's multi-slot naming: (a) raise approves to meet/exceed the threshold (e.g. 5/6, matching the other two rows) so leg 10 alone would Allow and only leg 9.5 can produce the Block, and (b) rename the RC slots away from single letters that coincide with fixed message substrings (e.g. use 'revA'/'revB' instead of 'x'/'y', since '/ms-bead-fix' contains 'x' and 'bypass'/'only' contain 'y' in every Block message) so the mustHave checks cannot pass on incidental substring matches."
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "location": "internal/panel/panel_decision_test.go:330-340 (TestPanelGateDecision_UnresolvedRequestChangesBlocks, 'two unresolved RC slots' subtest)",
+      "description": "Mutation test (disabling leg 9.5 in gate.go) proves this subtest is hollow with respect to its stated purpose: its facts (4/6 approves, threshold 5/6) are already sub-threshold, so leg 10 blocks regardless of leg 9.5, and its mustHave assertions for slot names 'x' and 'y' are trivially satisfied by unrelated substrings present in every Block message ('/ms-bead-fix' contains 'x'; 'bypass' and 'only' contain 'y'). The subtest would pass unchanged even if leg 9.5's multi-slot naming were completely broken or removed.",
+      "reproduction": "Applied `if unresolved := f.Res.UnresolvedVerdicts(); false && len(unresolved) > 0 {` in gate.go, ran `go test ./internal/panel -run UnresolvedRequestChanges -v`: rows 1 and 2 correctly FAIL (missing 'z'); row 3 ('two unresolved RC slots') PASSES despite leg 9.5 being fully disabled. Reverted gate.go to original (diff against backup confirmed identical); git status clean."
+    },
+    {
+      "severity": "low",
+      "location": "internal/complete/panel_gate_e2e_test.go:188-226 (TestPanelGate_RequestChangesBlocksComplete)",
+      "description": "Not a blocking issue, but a robustness note: under the same leg-9.5-disabled mutation, this e2e test still fails overall (good, RED-on-revert holds) but for the WRONG reason — the panel gate itself would Allow (5/6 approves meets the N-1 threshold without leg 9.5), and the failure is masked by an unrelated doc-sync gate tripping on the fixture's undocumented internal/thing/thing.go change. The initial `if err == nil { t.Fatal }` check alone would not have caught a leg-9.5 regression if doc-sync happened not to fire; the test only catches it here because the later content assertions (recovery line, git-merge fence, '5/6 APPROVE' substring) also fail against the doc-sync message. Consider asserting the block reason is specifically the panel gate (e.g. checking for 'unresolved REQUEST_CHANGES' text) rather than relying on message-shape overlap, though this is not required to land Bead 1."
+    }
+  ]
+}

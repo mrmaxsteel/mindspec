@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounding lens: I read every cited anchor at 472f9ed6 and traced the out-vote. All substantive claims hold exactly. gate.go leg 9 (245-253) and leg 10 (255-262: Approves >= threshold && threshold > 0 -> Allow at 257-258); tally.go 296-301 increments only VerdictApprove/VerdictReject with the 'REQUEST_CHANGES (and anything unrecognized) is neither' doc at 107-111 verbatim; ApproveThreshold N-1 single home at panel.go:113-127; traced 5 APPROVE + 1 RC through the matrix (RC parses into Verdicts so Complete passes leg 8, Rejects=0 passes leg 9, 5>=5 Allows at leg 10) - the out-vote is real, and the unrecognized-verdict rider is real (tally.go:284 rejects only empty verdicts). Abandon precedent exact: panel.go:58-68 parse-lenient, writePanelAuditMetadata 304-342 writing panel_abandoned/_at/_reason + panel_gate_skipped/_at via completeMergeMetadataFn -> bead.MergeMetadata (bdcli.go:263-266) at step 5.6 (complete.go:778-785). Exact-line hits: panelstate.go:121, SKILL.md:84, cmd/mindspec/panel.go:7-10, OWNERSHIP.yaml lines 2/14/19-20. ADR-0037 sections 3/6/7/8 characterized faithfully, including the verbatim 'always audited, never silent' contract. No 'refut' identifier exists in Go code - the feature is new. Two cosmetic line-span over-inclusions noted below; neither contradicts a claim.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "info",
+      "claim": "Background: 'on Block it returns a guard.NewFailure whose final line is an ADR-0035 recovery command (panel_advisory.go:194-207)'",
+      "evidence": "The Block case is panel_advisory.go:194-203 (case panel.Block through the guard.NewFailure return); lines 204-207 are the panel.Warn case. The cited span contains and supports the claim; it merely over-spans by four lines into the adjacent case. No fix required.",
+      "disposition": "cosmetic line-span over-inclusion; claim supported"
+    },
+    {
+      "id": "F2-2",
+      "severity": "info",
+      "claim": "Background: 'Result.VoteDecision (internal/panel/tally.go:180-214, threshold legs at 206-213)'",
+      "evidence": "VoteDecision is exactly tally.go:180-214. The threshold leg proper is 209-213; 206-208 is the Rejects/HardBlocks leg. Again an over-span that still contains the cited code and the claim (VoteDecision reproduces the identical vote-portion pass) is verified true.",
+      "disposition": "cosmetic line-span over-inclusion; claim supported"
+    },
+    {
+      "id": "F2-3",
+      "severity": "info",
+      "claim": "Positive grounding confirmations",
+      "evidence": "Verified exact: gate.go:131-263 PanelGateDecision; leg comment block covering legs (0)-(10); leg 9 at 245-253; leg 10 at 255-262; ApproveThreshold panel.go:113-127 (N-1 default, spec-109 expression override, threshold>0 guard); tally.go:296-301 switch; tally.go:107-111 'neither' doc; tally.go:43-59 filename-derived Verdict.Slot; tally.go:273-276 latest-round-only tally (grounds R3b natural resolution); panel.go:58-68 Abandoned/AbandonReason with the parse-lenient-by-design comment R2 mirrors; panelGate panel_advisory.go:140-215; complete.go:337-378 step 2.25 call site (call at 375, pre-mutation return at 376-378); panelAdvisory 48-77 rendering VoteDecision; writePanelAuditMetadata 304-342; complete.go:778-785 step 5.6 best-effort post-mutation audit; bdcli.go:263-266 MergeMetadata; cmd/mindspec/panel.go:7-10 (verbs delegate to PanelGateDecision, TestPanelVerbs pin); internal/instruct/panelstate.go:121 is literally 'd := panel.PanelGateDecision(facts)'; SKILL.md:84 is literally the abandon procedure with the audited-never-silent framing; panel_advisory_test.go:109 TestWritePanelAuditMetadata_Abandoned; ADR-0037 sections 3 ('one dissent tolerated'), 6, 7 (verbatim 'legitimate precisely because it is always audited, never silent'), 8 (anti-footgun-not-anti-adversary + the closing review-artifacts-not-workflow-state paragraph the ADR-0023 touchpoint cites); ADR-0035/ADR-0040/ADR-0023 exist at the cited relative paths; internal/guard/recovery_convention_test.go exists; OWNERSHIP.yaml lines 2, 14, 19, 20 are exactly internal/complete/**, internal/panel/**, cmd/**, plugins/mindspec/**. grep for 'refut' across internal/, cmd/, plugins/ Go sources returns zero hits, so the refutation surface is genuinely greenfield within the cited files.",
+      "disposition": "grounded"
+    }
+  ]
+}

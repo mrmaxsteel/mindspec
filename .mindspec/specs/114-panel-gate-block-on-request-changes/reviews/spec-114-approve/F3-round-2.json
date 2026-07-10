@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-1 blocker ADDRESSED. AC5 now carries an explicit RC-tolerance carve-out naming exactly the three fixtures I cited (panel_decision_test.go '5 APPROVE + 1 dissent -> Allow' ~184-193; panel_advisory_test.go TestPanelAdvisory_Passing_WouldPass ~68-82; cmd/mindspec/panel_test.go at-threshold dissent ~386-389) as the one intended semantic break, WILL-changing to Block/would-BLOCK/non-zero, with 'no semantic modification' scoped to all OTHER tests plus a diff-review proof that no fixture outside the named set flips outcome. The set is mirrored in In Scope and Validation Proofs; AC1's Block expectation is now precisely the carve-out — no contradiction remains. The dead OQ3-CLI-verb conditional in In Scope is struck ('OQ3 resolved to hand-edit: no new CLI recording verb'). No new contradictions: AC7 matches OQ1's layered floor, AC8 matches R1/R2c non-refutable-unrecognized, AC9 matches never-increments-Approves, AC10's no-'refut'-substring coheres with R1's 'unresolved' wording and AC6's doc-side grep, AC11's durable audit matches R2b and the ADR-0037 §7 amendment (step-5.6 ordering is a plan-level wiring decision, acknowledged in scope), AC12 coheres with R2c/R3.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-R1-1",
+      "title": "AC1 vs AC5 contradiction (3 pre-existing RC-tolerance fixtures pin the pass R1 removes)",
+      "disposition": "ADDRESSED",
+      "evidence": "spec.md AC5 (pinned 5c0140da): carve-out names all three fixtures as the intended semantic break with new Block/would-BLOCK/non-zero expectations; 'no semantic modification' applies only to other tests; proof adds a diff review that only the named set changed outcome. Duplicated in In Scope (RC-tolerance fixtures bullet) and Validation Proofs."
+    },
+    {
+      "id": "F3-R1-2",
+      "title": "Dead 'if OQ3 resolves to a CLI verb' conditional in In Scope",
+      "disposition": "ADDRESSED",
+      "evidence": "In Scope cmd/mindspec/panel.go bullet now reads '(OQ3 resolved to hand-edit: no new CLI recording verb in this spec)' — conditional struck, consistent with the Non-Goals bullet and resolved OQ3."
+    },
+    {
+      "id": "F3-R2-1",
+      "title": "Coherence of round-1 additions (AC7-AC12, durable-audit R2 amendment)",
+      "disposition": "ADDRESSED",
+      "evidence": "AC7 restates OQ1's layered model (6 APPROVE + 2 refuted RC at threshold 7 still Blocks); AC8/AC9/AC10 restate R1's falsifiers; AC11 matches R2(b) and ADR-0037 §7 durable-audit amendment; AC12 coheres with R2(c)/R3. Non-blocking note: AC11 implies the current after-terminal-mutation step-5.6 audit write must move or gate the mutation — In Scope's '+ complete.go step 5.6/2.25 wiring' already grants this; resolve ordering in the plan."
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "G3 gpt-5.6-sol",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Both round-4 blockers are ADDRESSED at pinned commit 17d0b008. Reconciliation is now total over the durable unioned pending-entry set and is explicitly placed after the last blocking gate but before close on panel-present, no-panel, env-skip, config-disabled, and abandoned/Warn paths. Every uncovered entry must satisfy, verified-discharge, or refuse; GetMetadata/read and audit-write failures refuse before close, including under hatches. Discharge no longer infers resolution from Allow/Warn: it requires actual tally state showing the slot is no longer a latest-round REQUEST_CHANGES at/after the pending round, and abandoned/missing-ref/transient-Warn negative tests prevent false discharge. The union test proves old X and new B obligations both reconcile. TestPanelRefuted_HatchStillReconcilesPendingObligation covers the requested hatch matrix plus read-error refusal, and all new round-5 tests are mapped in AC11 provenance and selected by the stated verification command. No residual un-audited-merge, lost-obligation, or unreconciled hatch path remains in the planned contract.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G3-DURABLE-OBLIGATION-LIVE-PANEL-BYPASS",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "The full unioned obligation set is reconciled before every close, including both gate hatches; unverifiable state and metadata errors refuse."
+    },
+    {
+      "id": "G3-ROUND4-DISCHARGE-EVIDENCE",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "Discharge now requires affirmative latest-round tally evidence; bare Allow/Warn is insufficient and has named negative coverage."
+    },
+    {
+      "id": "G3-ROUND4-BYPASS-PROVENANCE",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "Union, Warn, hatch, and GetMetadata-error scenarios are named, AC11-mapped, and command-selected."
+    },
+    {
+      "id": "G3-ROUND5-IMPLEMENTATION-PRECISION",
+      "severity": "info",
+      "disposition": "NOTE",
+      "summary": "Step 5(e) requires hatch-path tally results although step 4's sketched return tuple names only registration/applied/error; implementation must plumb or derive the Result as step 5(c) requires, otherwise safely refuse. This is editorial because the normative rule and tests are explicit."
+    }
+  ],
+  "carried_forward": "round-5 APPROVE carried: mechanism confirmed TOTAL/airtight; round-6 is a precision fix for F2 discharge-evidence acquisition (re-tally from panelReg.Dir) \u2014 no design/ADR/domain/AC change"
+}

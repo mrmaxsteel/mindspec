@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Re-verified against real code at a1194682. (1) Write-before-close: step 3.75 sits after the ADR-divergence gate (complete.go:543) and before closeBeadFn (complete.go:547), establishing bead-closed => audit-written-this-run, hence merged(669)=>closed=>audited. AppliedRefutations is available: panelGate returns it at step 2.25 (line 375), held in memory for 3.75. On a failed pre-close write the bead never closes; a panel-removed retry is a plain in_progress fail-open with no applied refutation to lose, so G2's TOCTOU lost-panel hole is genuinely closed. (2) MergeMetadata (bdcli.go:266-303) today proceeds-from-empty on read/parse error and replace-writes, erasing keys; the plan makes it return the error while still merging a genuinely-absent (clean-empty) read. I confirmed ALL callers (complete 738/754/773/799, panel_advisory 327/338, approve/impl 383/397/412, plan 180, spec 74) are best-effort warn-and-continue; only the new refuted write is fatal, so the fail-closed conversion regresses no caller and eliminates erasure. (3) Dedup by (slot,round) is specified at both tally.AppliedRefutations and cross-panel panelGate levels; the 547-554 already-closed recovery branch (which skips dolt-verify) is correctly not leaned on since 3.75 precedes both close branches. No residual un-audited-merge or erasure path.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "item1-write-before-close", "disposition": "ADDRESSED", "detail": "Step 3.75 placement (after ADR gate 543, before close 547) makes bead-closed=>audited; merge at 669 is downstream of close. TOCTOU lost-panel-on-retry closed because the failed run never closes the bead."},
+    {"id": "item2-mergemetadata-fail-closed", "disposition": "ADDRESSED", "detail": "Return error on read/parse failure, still merge on clean-empty read. Verified all 11 callers are best-effort warns except the new fatal refuted write; blast radius acceptable, no erasure path remains."},
+    {"id": "item3-dedup-slot-round", "disposition": "ADDRESSED", "detail": "Dedup at tally (first-wins, slot-sorted) and cross-matched-panel in panelGate; recovery-branch (547-554) dolt-verify-skip correctly excluded from the durability rationale, pinned by test B(vi)."},
+    {"id": "minor-appliedrefutations-availability", "disposition": "ADDRESSED", "detail": "panelGate signature change surfaces applied set at step 2.25 (line 375); CommitAll (2.5) is a no-op on a message-less recovery re-run so retry re-measures the same fresh tip and re-derives the same applied set — no staleness regression."}
+  ]
+}

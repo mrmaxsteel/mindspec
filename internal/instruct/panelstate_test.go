@@ -50,7 +50,13 @@ func sixApproves(round int) map[string]string {
 // reviewed_head_sha = sha. rejects/hardBlocks/malformed simulate the
 // halt and incomplete paths. The verdict slice length is the count of
 // present verdicts (approves + rejects + others), so MissingCount and
-// Complete behave like a real Tally.
+// Complete behave like a real Tally. Spec 114 R1: the verdicts carry REAL
+// canonical strings (VerdictApprove/VerdictReject for approves/rejects,
+// VerdictRequestChanges for otherPresent) rather than the empty-string
+// placeholders this fixture used pre-R1 — an empty string is itself
+// "unresolved" (unrecognized) under the new gate leg, so a placeholder
+// would silently block every row that doesn't already Block for another
+// reason.
 func beadPanel(beadID, sha string, round, expected, approves, rejects, hardBlocks, otherPresent int) *panel.Result {
 	p := &panel.Panel{
 		BeadID:            &beadID,
@@ -67,9 +73,14 @@ func beadPanel(beadID, sha string, round, expected, approves, rejects, hardBlock
 		Approves:    approves,
 		Rejects:     rejects,
 	}
-	total := approves + rejects + otherPresent
-	for i := 0; i < total; i++ {
-		res.Verdicts = append(res.Verdicts, panel.Verdict{Slot: "slot", Round: round})
+	for i := 0; i < approves; i++ {
+		res.Verdicts = append(res.Verdicts, panel.Verdict{Slot: "slot", Round: round, Verdict: panel.VerdictApprove})
+	}
+	for i := 0; i < rejects; i++ {
+		res.Verdicts = append(res.Verdicts, panel.Verdict{Slot: "slot", Round: round, Verdict: panel.VerdictReject})
+	}
+	for i := 0; i < otherPresent; i++ {
+		res.Verdicts = append(res.Verdicts, panel.Verdict{Slot: "slot", Round: round, Verdict: panel.VerdictRequestChanges})
 	}
 	for i := 0; i < hardBlocks; i++ {
 		res.HardBlocks = append(res.HardBlocks, "slot")
@@ -88,15 +99,25 @@ func TestPanelStateEntry_Verdict(t *testing.T) {
 		wantReason string
 	}{
 		{
-			// At threshold: 5/6 APPROVE, sha fresh → PASS.
+			// At threshold, WITHOUT a dissent: 6/6 APPROVE with a
+			// recorded approve_threshold of 6 (spec-109 override), sha
+			// fresh → PASS. Spec 114 R1 restructures this fixture: the
+			// prior 5 APPROVE + 1 REQUEST_CHANGES shape now Blocks (an
+			// unresolved dissent), so the at-threshold-boundary subject
+			// (approves == threshold) is preserved via a recorded lower
+			// threshold instead of a tolerated dissent.
 			name: "at_threshold_fresh",
 			entry: PanelStateEntry{
-				Slug:          "p",
-				Tally:         beadPanel("b.1", "abc1234", 1, 6, 5, 0, 0, 1),
+				Slug: "p",
+				Tally: func() *panel.Result {
+					r := beadPanel("b.1", "abc1234", 1, 6, 6, 0, 0, 0)
+					r.Panel.ApproveThresholdExpr = "6"
+					return r
+				}(),
 				LiveBranchSHA: "abc1234",
 			},
 			wantGate:   GatePass,
-			wantReason: "meets threshold 5/6",
+			wantReason: "meets threshold 6/6",
 		},
 		{
 			// Above threshold: 6/6 APPROVE → PASS.
@@ -264,10 +285,18 @@ func TestRenderPanelState_Block(t *testing.T) {
 }
 
 // TestRenderPanelState_Pass pins the PASS rendering and that the tally
-// line reflects the at-threshold state.
+// line reflects the at-threshold state. Spec 114 R1 restructures the
+// fixture (matching TestPanelStateEntry_Verdict's at_threshold_fresh): the
+// prior 5 APPROVE + 1 REQUEST_CHANGES shape now Blocks (an unresolved
+// dissent), so the at-threshold-boundary subject is preserved via a
+// recorded approve_threshold of 6 with 6/6 APPROVE and zero dissent.
 func TestRenderPanelState_Pass(t *testing.T) {
 	out := renderPanelState([]PanelStateEntry{
-		{Slug: "p", Tally: beadPanel("b.1", "abc1234", 1, 6, 5, 0, 0, 1), LiveBranchSHA: "abc1234"},
+		{Slug: "p", Tally: func() *panel.Result {
+			r := beadPanel("b.1", "abc1234", 1, 6, 6, 0, 0, 0)
+			r.Panel.ApproveThresholdExpr = "6"
+			return r
+		}(), LiveBranchSHA: "abc1234"},
 	})
 	if !strings.Contains(out, "gate would PASS") {
 		t.Errorf("expected PASS label\n%s", out)
@@ -275,7 +304,7 @@ func TestRenderPanelState_Pass(t *testing.T) {
 	if strings.Contains(out, "gate would BLOCK") {
 		t.Errorf("PASS panel must not also say BLOCK\n%s", out)
 	}
-	if !strings.Contains(out, "5 APPROVE (threshold 5)") {
+	if !strings.Contains(out, "6 APPROVE (threshold 6)") {
 		t.Errorf("expected at-threshold tally line\n%s", out)
 	}
 }
@@ -900,8 +929,19 @@ func TestPanelStateVerdict_DelegatesToPanelGateDecision(t *testing.T) {
 			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 4, 0, 0, 2), LiveBranchSHA: sha},
 		},
 		{
-			name:  "at_threshold",
-			entry: PanelStateEntry{Slug: "p", Tally: beadPanel(beadID, sha, 1, 6, 5, 0, 0, 1), LiveBranchSHA: sha},
+			// Spec 114 R1: with beadPanel now synthesizing real verdict
+			// strings, a 5A+1RC shape would Block (an unresolved dissent),
+			// flipping this row's PASS. This is a decision-PARITY row (it
+			// only asserts verdict()'s mapped gate equals
+			// mapGateAction(PanelGateDecision(facts)), so it stays green
+			// either way), but restated with a recorded approve_threshold
+			// of 6 + 6/6 APPROVE so "at_threshold" keeps meaning PASS.
+			name: "at_threshold",
+			entry: func() PanelStateEntry {
+				r := beadPanel(beadID, sha, 1, 6, 6, 0, 0, 0)
+				r.Panel.ApproveThresholdExpr = "6"
+				return PanelStateEntry{Slug: "p", Tally: r, LiveBranchSHA: sha}
+			}(),
 		},
 		{
 			name:  "above_threshold",

@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Adversarial mutation-probe in an absolute /tmp git-archive copy of ce9f5395 (shared worktree untouched, git status clean). Eight targeted mutations, every one caught RED by a named test: (1) marker-write failure silently clearing the RC -> TestPanelRefuted_MarkerWriteFailure_Blocks; (2) discharge keyed on bare gate-pass -> WarnPathDoesNotDischarge + CrossRun_PanelRemoved_Refuses; (3) pending marker bare-replace clobbering an older pending -> CrossRun_UnionReconcilesAll; (4) hatch/no-applied runs skipping reconciliation -> five tests incl. all three hatch variants; (5) MergeMetadata reverted to proceed-from-empty erasure -> TestMergeMetadata_FailClosedOnReadError; (6a) refuting unrecognized verdicts -> AC8 row; (6b) refuted RCs buying Approves past the floor -> AC7 row; (6c) case-insensitive slot match -> AC12 casing row; (7) reconcile read-error fail-open -> GetMetadataError_Refuses + hatch twin; (8) reconcile moved after close -> five tests. No lost-audit path, no false discharge, no hollow test found. Baseline, full 4-package sweep, -race, gofmt, vet all green; MergeMetadata blast-radius taxonomy matches the plan (fatal: repair/migrate; warn: complete/approve; ignore: release). Two minor fail-closed-direction observations recorded as findings, non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "reconcilePendingRefutations omits the plan's 'NOT already covered by a durable panel_refuted/refutation_discharged entry' pre-filter",
+      "detail": "internal/complete/panel_advisory.go reconcilePendingRefutations checks pending entries only against this run's applied set and dischargeEvidence, never against existing panel_refuted_entries/refutation_discharged_entries (plan L~560 says covered entries are skipped). Divergence is reachable only in a compound failure: panel_refuted durably written, completion fails LATER (post-reconcile close/verify/merge), then panel.json removed before retry -> the retry Refuses even though the satisfying audit already exists. Strictly fail-closed (over-refusal, recoverable by restoring the panel); the durable-audit invariant is never violated. Worth a follow-up note, not a block."
+    },
+    {
+      "severity": "minor",
+      "title": "decodePendingEntries treats a shape-corrupt refutation_pending_entries value as empty",
+      "detail": "A clean metadata read whose refutation_pending_entries value has a non-array/type-mismatched shape decodes to nil (no error), so obligations recorded there would silently vanish. Only reachable via out-of-band hand-surgery of bd metadata (the system writer always produces well-formed entries and bd JSON round-trips them); the same actor could simply delete the key, so this is inside the already-accepted trust boundary. Recorded for completeness."
+    },
+    {
+      "severity": "info",
+      "title": "Mutation-probe evidence summary",
+      "detail": "8 mutations in /tmp/f1-114b2 (git archive of ce9f5395), each verified RED then restored and re-verified byte-identical to the archive (diff -r clean). Empirical: go build OK; go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all ok; go test -race on panel/complete/bead ok; gofmt -l ./cmd ./internal empty; go vet clean. The three documented test deviations (Warn-discharge direct-drive, cross-package erasure-survival model, full-repo harness hang) leave no load-bearing claim unpinned: mutation 2 and mutation 5 prove the corresponding guards are test-enforced through other suites."
+    }
+  ]
+}

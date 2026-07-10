@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "At bc6d35d7, the core topology is grounded: gate.go leg 9 is 243-253 and threshold leg 10 is 255-262; tally.go counts only canonical APPROVE/REJECT and slot-sorts; complete.go closes at 546-650, calls the terminal merge at 667-672, and documents convergence at 695-708. All four named AC5 fixtures and the five listed incidental fixture groups are real, and the proposed message superset preserves the cited substring assertions. However, the claimed exhaustive AC5 reconciliation misses panel_decision_test.go:211-219, another real 2A+1RC Allow fixture that leg 9.5 would flip. The plan also falsely says leg-10 Block is unreachable without refutations despite the threshold-zero fixture at panel_test.go:260-277. Ordering prose overstates universal close verification: complete.go:547-554's already-closed path skips dolt commit/committed-state verify. Finally, config-disabled panels have no panel_gate_skipped audit, and abandon/skip Warn paths do merge. These are repairable plan-grounding defects, not a false design premise.",
+  "concrete_changes_required": [
+    "Add internal/panel/panel_decision_test.go:211-219 to Bead 1 step 6 as an outcome-preserving update: replace its RC filler with a third APPROVE, preserving the expected_reviewers=3/no-hardcoded-6 subject and Allow outcome.",
+    "Correct Bead 1 step 4: leg-10 Block remains reachable without refutations through the threshold > 0 guard, as pinned by internal/panel/panel_test.go:260-277.",
+    "Qualify Bead 2 step 5's close/durability rationale: the normal successful-close path forces dolt commit and committed-state verification, but the already-closed recovery path at complete.go:547-554 does not. Explicitly state/test that an audit-failure rerun still retries metadata before merge from that path.",
+    "Correct Bead 2 step 4 and step 5/Bead 3 prose: only the env skip has panel_gate_skipped metadata; config-disabled has no such audit, and abandon/skip are Warn/Allow paths that proceed to merge. Ground the durable asymmetry solely in refutation changing the gate outcome and AC11 requiring a durable trace."
+  ],
+  "findings": [
+    {
+      "id": "G1-1",
+      "severity": "major",
+      "title": "AC5 fixture reconciliation is not exhaustive",
+      "detail": "internal/panel/panel_decision_test.go:211-219 constructs ExpectedReviewers=3, two APPROVE verdicts, and an appended canonical REQUEST_CHANGES for slot z, then expects Allow. The proposed leg 9.5 necessarily changes it to Block. It is absent from both plan step 5's outcome flips and step 6's outcome-preserving input updates, contradicting plan.md:243-245 and :645-650 and spec AC5's no-outside-fixture-flips contract. Updating the filler to a third APPROVE preserves the fixture's no-hardcoded-6 purpose and expected outcome."
+    },
+    {
+      "id": "G1-2",
+      "severity": "minor",
+      "title": "Leg-10 zero-refutation unreachability claim is false",
+      "detail": "Plan.md:176-179 says leg 10's Block is unreachable with zero refutations. internal/panel/gate.go:255-262 also Blocks when threshold is zero because Allow requires threshold > 0. internal/panel/panel_test.go:260-277 pins exactly a complete 1/1 APPROVE panel with resolved threshold 0 reaching that Block, with no unresolved verdict or refutation."
+    },
+    {
+      "id": "G1-3",
+      "severity": "minor",
+      "title": "Step-4 durability premise is not universal",
+      "detail": "The planned insertion after complete.go:650 is physically before exec.CompleteBead at :667-672 and therefore enforces AC11. But plan.md:365-366 and :380-384 describe it unconditionally as after forced dolt commit plus committed-state verification. Those operations occur only after closeBeadFn succeeds and the reread is closed (:555-637). If closeBeadFn errors because the bead is already closed, :547-554 warns and proceeds without either operation. The closed-but-unmerged convergence mechanism at :695-708 remains plausible, but the precise audit-failure rerun path should be stated and tested."
+    },
+    {
+      "id": "G1-4",
+      "severity": "minor",
+      "title": "Audit-path rationale misstates current behavior",
+      "detail": "Plan.md:350-353 says skip-env and config-disabled paths have their own panel_gate_skipped audit, but internal/complete/panel_advisory.go:322-330 writes that audit only when panelSkipEnvFn() is true. Plan.md:388-391 also calls abandon/skip terminal non-merge exits, while gate.go:135-138 and :163-170 return Warn and panelGate continues to complete's merge. The intended best-effort-versus-durable implementation is still feasible; its rationale must be corrected."
+    },
+    {
+      "id": "G1-5",
+      "severity": "info",
+      "title": "Verified cited states",
+      "detail": "Confirmed at bc6d35d7: gate.go Decision is currently comparable (:48-51), leg 9 precedes leg 10 (:243-262); tally.go canonical constants are :18-22, the neither-counted contract :107-110, VoteDecision :180-214, latest-round-only tally :273-276, canonical counting :296-301, and slot sort :306. Named fixtures are real at panel_decision_test.go:184-194, panel_advisory_test.go:69-81, cmd/mindspec/panel_test.go:386-389, and votedecision_test.go:64-70 (the latter currently uses empty Verdict strings via makeVerdicts :94-99, so converting it to a genuine 5A+1RC row is necessary as planned). The five listed incidental groups are also real at panel_test.go:224/304/393, panel_gate_e2e_test.go:72-84, and panelstate_test.go:48-77; the latter has three at-threshold consumers at :91-99, :266-281, and :903-905. fae2bfb6 to bc6d35d7 has no code diff in the cited packages, so the stale plan pin does not alter these line meanings."
+    }
+  ]
+}

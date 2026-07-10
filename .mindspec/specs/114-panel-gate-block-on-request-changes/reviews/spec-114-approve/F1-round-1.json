@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Falsification clauses are genuinely strong: every R1/R2/R3 falsified-if names a constructible condition, and I verified against the pinned tree (472f9ed6) that the cited premises are real — gate.go leg 10 Allows on Approves>=threshold, leg 9 blocks REJECT/hard_block, tally.go counts RC as neither, the tally loop reads latest round only, Verdict.Slot is filename-derived. All 4 OQs are [x]-resolved with the resolution encoded back into R1/R2/Non-Goals; no synonym-dodge ('unresolved', 'refuted', 'genuine APPROVE' each get operational definitions). All 6 ACs carry runnable go test/grep proofs. The one hole: several load-bearing falsifiers have NO committed AC. The sub-threshold-all-RCs-refuted-still-blocks case — the OQ1 layered-model anti-gaming core — appears in R1's falsified-if but in no AC and in no named Validation Proofs case; likewise refuted-RC-never-increments-Approves, unrecognized-verdict-not-refutable, VoteDecision lockstep, and message-does-not-advertise-refutation. An implementer ticking AC1-AC6 literally could ship without ever proving the spec's central anti-gaming property. One small AC addition closes this.",
+  "concrete_changes_required": [
+    "Add explicit AC coverage (new AC or extend AC2/AC3) pinning the layered-model floor: a sub-threshold panel with ALL RCs refuted (e.g. 6 APPROVE + 2 refuted RC, threshold 7) still Blocks, and a refuted RC does not increment Result.Approves. Proof: named case in `go test ./internal/panel -run 'Refut'`.",
+    "Extend an AC (AC1 or AC3) to pin: (a) an unrecognized verdict string blocks and is NOT clearable by a refutation entry naming its slot; (b) VoteDecision moves in lockstep with PanelGateDecision on the new RC condition for the same tally.",
+    "Optionally pin the OQ4 no-advertise rule with a testable predicate (e.g. Block message must not contain 'refut'), paralleling the HC-7 never-print assertion — otherwise the 'paste-able incantation' falsifier has no operationalized test."
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "major",
+      "title": "Sub-threshold-refuted falsifier (OQ1 anti-gaming core) has no committed AC",
+      "detail": "R1's falsified-if names 'a sub-threshold panel whose RCs are ALL refuted yields Allow' and 'a refuted RC increments Approves', but AC1-AC6 never commit a test for either. Validation Proofs lists only 'the 5-APPROVE+1-RC Block and the refuted-RC Allow' as named cases. The spec's most game-able property is the only one without a pinned proof."
+    },
+    {
+      "id": "F1-2",
+      "severity": "minor",
+      "title": "Unrecognized-verdict and VoteDecision-lockstep falsifiers lack AC coverage",
+      "detail": "R1 falsifies on 'an unrecognized verdict string can pass the gate or be cleared by a refutation' and on VoteDecision/PanelGateDecision divergence, but no AC pins either; AC5 only preserves existing tests."
+    },
+    {
+      "id": "F1-3",
+      "severity": "minor",
+      "title": "'Paste-able refutation incantation' falsifier is not operationalized",
+      "detail": "Unlike HC-7 (a fixed string, MINDSPEC_SKIP_PANEL, whose absence is assertable), 'incantation' has no test predicate. Suggest the amendment or an AC fix a proxy (message contains no 'refut' substring / no refutations-JSON snippet)."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "title": "Falsifiers verified against pinned tree — premises real",
+      "detail": "Confirmed at 472f9ed6: gate.go legs 9/10 as cited; tally.go RC-as-neither (Approves/Rejects switch), latest-round-only loop, filename-derived Slot. The N-1+1-RC out-vote the falsifiers target is real and the block conditions are all constructible GateFacts table cases. All four OQs [x]; no unchecked grill item; no synonym-dodge detected."
+    }
+  ]
+}

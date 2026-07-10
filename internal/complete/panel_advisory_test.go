@@ -64,14 +64,34 @@ func TestPanelAdvisory_IncompletePanel_WouldBlock(t *testing.T) {
 	}
 }
 
-// TestPanelAdvisory_Passing_WouldPass: a complete, over-threshold panel
-// prints "would PASS".
-func TestPanelAdvisory_Passing_WouldPass(t *testing.T) {
+// TestPanelAdvisory_Dissent_WouldBlock: a complete, over-threshold panel
+// carrying an unresolved REQUEST_CHANGES prints "would BLOCK" (Spec 114 R1 —
+// an unresolved dissent is no longer out-voted by the approve count; renamed
+// from TestPanelAdvisory_Passing_WouldPass, whose RC-tolerated "would PASS"
+// this spec's R1 removes).
+func TestPanelAdvisory_Dissent_WouldBlock(t *testing.T) {
 	root := t.TempDir()
 	writePanel(t, root, "093-bd01", panel.Panel{
 		BeadID: bp("mindspec-bd01"), Spec: "093", Round: 1, ExpectedReviewers: 3,
 	}, map[string]string{
 		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "REQUEST_CHANGES",
+	})
+	var buf bytes.Buffer
+	panelAdvisory("mindspec-bd01", []string{root}, &buf)
+	if !strings.Contains(buf.String(), "would BLOCK") {
+		t.Errorf("advisory should say would-BLOCK on an unresolved dissent: %q", buf.String())
+	}
+}
+
+// TestPanelAdvisory_Passing_WouldPass: an all-APPROVE, over-threshold panel
+// still prints "would PASS" (pinning that Spec 114 R1 only removes RC
+// tolerance — a genuinely clean panel is unaffected).
+func TestPanelAdvisory_Passing_WouldPass(t *testing.T) {
+	root := t.TempDir()
+	writePanel(t, root, "093-bd01", panel.Panel{
+		BeadID: bp("mindspec-bd01"), Spec: "093", Round: 1, ExpectedReviewers: 3,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
 	})
 	var buf bytes.Buffer
 	panelAdvisory("mindspec-bd01", []string{root}, &buf)

@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Re-verified the round-4 additions on ADR fitness + testing. (1) All four named tests are runnable against real seams: completeGetMetadataFn is the new bead.GetMetadata read seam (parallel to the existing completeMergeMetadataFn=bead.MergeMetadata, complete.go:42); closeBeadFn=bead.Close (complete.go:29) and readStubMergeExecutor.completeCalled both exist as spies. MarkerWriteFailure_Blocks stubs the write to fail on refutation_pending → RC BLOCK (not abort-with-applied), no close; GetMetadataError_Refuses stubs the read → Refuse; NaturalResolution_Discharges drives a live all-APPROVE re-panel → refutation_discharged (plus a discharge-write-fail negative twin); PristineNoPanel_FailsOpen exercises the §6 no-op. applied≡persisted (marker folded into panelGate as part of the allow-decision) closes the round-3 one-step-earlier window coherently. (2) refutation_discharged is a coherent audit key structurally parallel to panel_abandoned (true/_at/_entries) landing on bead metadata via MergeMetadata — ADR-0023 single-authority fitness holds. (3) Spec §8 now correctly AMENDED (label softened to audit-durability) + §6 affirmative-evidence branch; AC6 enumerates both; ADR Fitness matches; all four ADRs resolve and cover workflow+execution; mindspec validate spec passes.",
+  "concrete_changes_required": [],
+  "findings": [
+    "APPROVE — no blocking findings. The round-4 additions are internally consistent, tests are named and runnable against real seams, and the ADR amendment surface is coherent.",
+    "Non-blocking (editorial): the same-run satisfy path writes the refutation_pending marker at step 2.25 then reads it back via GetMetadata at reconcile to write panel_refuted — a deliberate read-after-write that guarantees cross-run robustness; harmless but worth a one-line code comment so an implementer does not 'optimize' it into using in-memory AppliedRefutations directly and reopen the panel-removed window.",
+    "Non-blocking: refutation_discharged carries a synthetic fixed reason and no evidence field (unlike panel_refuted); appropriate for a natural-resolution audit — confirmed intentional, not an omission."
+  ]
+}

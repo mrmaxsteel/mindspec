@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.96,
+  "rationale": "Grounding verified at pinned commit 472f9ed63e04fa0c254610b0192faa57d8bd6836. The current out-vote is real: REQUEST_CHANGES is counted as neither APPROVE nor REJECT, and after incomplete/REJECT/hard_block checks the gate allows solely on Approves >= ApproveThreshold. The complete-side gate delegates to that same decision before mutation. The R2 abandon-audit mirror also exists: panel.json has parse-lenient abandoned/abandon_reason, abandonment is a Warn/Allow leg, and successful complete writes panel_abandoned metadata through the existing MergeMetadata seam. ADR-0037 matches the spec's amendment target: one dissent is currently tolerated, and skip/abandon are legitimate because audited, within an anti-footgun trust boundary. I found no cited line that fails to support the spec's load-bearing claims.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Out-vote confirmed: internal/panel/tally.go:107-111 says REQUEST_CHANGES is neither count; internal/panel/tally.go:296-301 increments only APPROVE/REJECT; internal/panel/gate.go:243-258 blocks REJECT/hard_block then allows Approves >= threshold.",
+    "Threshold grounding confirmed: internal/panel/panel.go:113-127 resolves ApproveThreshold with N-1 fallback, matching the spec's default-N-1 claim.",
+    "Authoritative complete path confirmed: internal/complete/panel_advisory.go:140-215 calls PanelGateDecision and returns guard failure on Block; internal/complete/complete.go:337-378 invokes it before mutation.",
+    "Abandon-audit precedent confirmed: internal/panel/panel.go:51-68 defines abandoned/abandon_reason parse-leniently; internal/panel/gate.go:160-170 Warn/Allows abandoned panels; internal/complete/panel_advisory.go:304-342 writes panel_abandoned/panel_gate_skipped metadata; internal/complete/complete.go:778-785 calls it after success through completeMergeMetadataFn/bead.MergeMetadata at internal/complete/complete.go:42 and internal/bead/bdcli.go:263-266.",
+    "ADR grounding confirmed: ADR-0037 lines 144-154 encode N-1/one-dissent plus REJECT/hard_block behavior, lines 217-240 encode audited skip/abandon hatches, and lines 244-270 define the anti-footgun, agent-writable-artifact trust boundary."
+  ],
+  "carried_forward": "round-1 APPROVE carried: findings were spec-quality (AC coverage/AC5/audit-durability) not design; this slot approved the core R1/R2 model which is unchanged"
+}

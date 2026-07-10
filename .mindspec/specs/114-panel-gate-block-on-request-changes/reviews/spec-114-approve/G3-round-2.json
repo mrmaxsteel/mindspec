@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.91,
+  "rationale": "ADDRESSED. The round-2 spec adds real AC pins, not just restatements. AC7 requires an internal/panel decision test for 6 APPROVE + 2 refuted REQUEST_CHANGES at expected_reviewers 8 / threshold 7, still Blocking on the approval floor with sub-threshold messaging. AC8 requires an internal/panel decision test for 5 APPROVE + 1 unrecognized verdict Blocking, and the same slot remaining Blocked when targeted by a refutation. AC9 separately asserts refuted RCs do not increment Result.Approves, closing the threshold-gaming loophole. AC10 pins the no-advertise block-message predicate with concrete forbidden substrings and go test proofs. These ACs are executable implementation contracts with runnable selectors and appear again in Validation Proofs.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "location": ".mindspec/specs/114-panel-gate-block-on-request-changes/spec.md:84",
+      "issue": "Round 1 requested AC coverage proving sub-threshold-after-refutation still blocks.",
+      "evidence": "AC7 now pins 6 APPROVE + 2 refuted REQUEST_CHANGES, expected_reviewers 8 / threshold 7, with Block on approval floor and runnable `go test ./internal/panel -run 'Refut|PanelGateDecision'` proof."
+    },
+    {
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "location": ".mindspec/specs/114-panel-gate-block-on-request-changes/spec.md:85",
+      "issue": "Round 1 requested AC coverage proving unrecognized latest-round verdicts block and are non-refutable.",
+      "evidence": "AC8 now pins 5 APPROVE + 1 unrecognized/non-standard verdict -> Block, plus a refutation targeting that slot still -> Block, with runnable internal/panel proof."
+    }
+  ]
+}

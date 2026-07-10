@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "S3 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "Scope fence holds. git diff 7de2c459..6f6634b4 --stat is exactly 2 files (internal/complete/panel_advisory.go, internal/complete/panel_refuted_test.go), one commit, no internal/panel, internal/bead, ADR, plan, doc, skill, or CLI-verb changes. panelGate's exported signature is byte-for-byte unchanged (func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer)) and every call site (complete.go:388, panel_gate_layout_test.go, panel_gate_e2e_test.go, panel_advisory_test.go) is untouched. The new Panels []string field lives on refutationPendingEntry (internal/complete, panel_advisory.go:302) — panel.Refutation and panel.Registration in internal/panel/panel.go are unmodified, confirming the origin binding is entirely complete-side as claimed. In /tmp: go build ./... clean; gofmt -l ./cmd ./internal empty; go vet ./... clean; full internal/complete + internal/panel + internal/bead sweep green; the two new tests (TestPanelRefuted_OriginRemoved_Refuses, TestPanelRefuted_OriginCorrupted_Refuses) pass on HEAD and I mutation-probed dischargeVerified by stripping the origin-loop/fail-closed check — both went RED with exactly the expected failure messages, then restored to identical bytes and re-verified green. No outcome flip found outside the origin-binding fix itself.",
+  "concrete_changes_required": [],
+  "findings": []
+}

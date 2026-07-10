@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Re-ran my round-1 mutation in an isolated /tmp archive of a2f2451 (never touched the shared worktree). Applied `false &&` to leg 9.5's UnresolvedVerdicts() check and re-ran `go test ./internal/panel -run UnresolvedRequestChanges -v`: all three rows now FAIL, including the previously-hollow 'two unresolved RC slots' row, which fails with exactly 'message missing \"revA\"' / 'message missing \"revB\"' — confirming revA/revB are NOT fixed substrings of the Block message (they only appear via the %s slot-list substitution) and the row now genuinely discriminates leg 9.5's multi-slot naming. Reverted the mutation (diff against a saved backup was identical) and confirmed all three rows PASS on real code, plus TestPanelGate_RequestChangesBlocksComplete passes and its new 'unresolved REQUEST_CHANGES' assertion matches gate.go's actual leg-9.5 message text verbatim. `git diff 4dfebbcb a2f2451 -- internal/panel/gate.go` is a single-word comment reword ('byte-superset' -> 'substring-set superset'), no logic change. go build/gofmt/vet all clean in the tmp copy. My round-1 finding is ADDRESSED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "medium",
+      "location": "internal/panel/panel_decision_test.go: 'two unresolved RC slots' subtest (round-1 finding)",
+      "status": "ADDRESSED",
+      "description": "Round-1: the row's mustHave checks for slot names 'x'/'y' were trivially satisfied by incidental substrings in every Block message ('/ms-bead-fix' contains 'x'; 'bypass'/'only' contain 'y'), so the row passed even with leg 9.5 fully disabled. Round-2 fix: slots renamed to 'revA'/'revB', which appear ONLY via the %s slot-list substitution and are not fixed substrings anywhere in the Block message format. Mutation-verified in an isolated /tmp copy of a2f2451: with leg 9.5 disabled (`false && len(unresolved) > 0`), the row now fails with 'message missing \"revA\"' and 'message missing \"revB\"'. With the mutation reverted, the row (and the other two) pass on real code. Fix confirmed genuine."
+    },
+    {
+      "severity": "low",
+      "location": "internal/complete/panel_gate_e2e_test.go:225-226 (TestPanelGate_RequestChangesBlocksComplete)",
+      "status": "ADDRESSED",
+      "description": "Round-1 low-severity robustness note: the e2e test's failure under mutation was previously masked by an unrelated doc-sync gate tripping on the same fixture, rather than pinning specifically to leg 9.5. Round-2 fix adds `assert msg contains \"unresolved REQUEST_CHANGES\"`. Verified this substring appears verbatim in gate.go's leg-9.5 message format (line ~279: \"...unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from...\"), and confirmed the e2e test still PASSES against real (unmutated) code in the /tmp copy — so the new assertion is sound and genuinely pins the block to leg 9.5."
+    }
+  ]
+}

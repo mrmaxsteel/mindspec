@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.78,
+  "rationale": "My round-2 blocking finding is ADDRESSED. In /tmp (git archive @6f6634b4; shared worktree untouched): all three repros Refuse — origin deleted + resolved decoy, origin panel.json corrupted (ForBead drops Err), and origin removed between the gate and reconcile scans (probe: Refuse names 'X@1 (origin panel(s): zzz-origin)', no discharge/close/merge). Positive controls (origin restored/repaired + resolved) discharge and complete. Revert mutation (drop origin loop + len check) turns BOTH new tests RED — not hollow. Origin recording exact: only zzz-origin, never the decoy. Panels:[\"\"] and legacy origin-less entries both Refuse. Satisfy-with-origin-gone requires a live RC plus an operator refutation with reason/evidence and writes panel_refuted — the honest audited escape, acceptable. Regression spot-mutations: marker-write-swallow RED, fail-open decode RED. build/gofmt/vet/full-suite/-race/internal-sweep all green. Residuals are non-blocking: three unpinned defense layers (len(Panels)==0 fail-closed, origin-set union additivity, round-1 all-matched conjunct — mutations survive; code verified correct today), and slug-keyed binding accepts a FABRICATED same-slug panel — proven, but strictly equivalent to recreating the origin in place, which no fs-trusting scheme prevents; every destruction-only attack Refuses.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "blocking": false,
+      "status": "ADDRESSED",
+      "title": "Round-2 blocking: false discharge on origin-evidence loss — ADDRESSED",
+      "detail": "Verified E2E in /tmp at 6f6634b4: (a) rm origin panel.json + decoy resolved -> Refuse, no refutation_discharged, no close/merge (TestPanelRefuted_OriginRemoved_Refuses, in-suite green); (b) corrupt origin panel.json -> Refuse (TestPanelRefuted_OriginCorrupted_Refuses); (c) origin removed between gate scan and reconcile scan via panelScanFn wrapper -> Refuse naming the origin. Positive controls discharge against the real origin and complete (close+merge+refutation_discharged=true). Mutation-proof: stripping the origin loop + len(Panels) check reverts to currently-matched-only and turns both new tests RED. Run-1 marker records exactly [\"zzz-origin\"] — the decoy is never recorded as an origin."
+    },
+    {
+      "severity": "minor",
+      "blocking": false,
+      "title": "Three origin-era guards are unpinned by tests (code correct, regression risk only)",
+      "detail": "(1) Deleting only `if len(p.Panels) == 0 { return false }` survives the ENTIRE TestPanelRefuted|TestPanelGate suite, yet my probe shows that mutation re-opens the round-2 false discharge for a LEGACY pending persisted by a pre-6f6634b4 binary (no `panels` field — a real migration state): origin gone + decoy resolved -> discharged/closed/merged. Shipped code Refuses the same probe. (2) Mutating unionPendingEntries' origin merge from union to replace-with-incoming survives the suite (additivity unpinned). (3) Post-origin-binding, deleting the round-1 every-other-matched-panel conjunct also survives (CrossPanel_NoFalseDischarge's live RC sits in the origin, so the origin loop subsumes it). Recommend a follow-up: add an origin-less-legacy-pending Refuse test, a cross-run origin-union assertion, and a non-origin-live-RC-under-skip Refuse test. Non-blocking: every BRIEF scenario verified green on shipped code; these pin against future refactors."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "Slug-keyed origin binding accepts a fabricated same-slug panel — inside the accepted fs-trust boundary",
+      "detail": "Proven in /tmp: corrupt review/zzz-origin, forge reviews/zzz-origin (same basename slug, panel.json + 6 APPROVE verdicts) -> resultsBySlug[\"zzz-origin\"] resolves via the impostor and the obligation discharges (err=nil, close+merge, discharged=true). However this is pure FABRICATION: recreating review/zzz-origin itself resolved-in-place discharges identically (also proven), and no fs-content-trusting binding scheme (slug, path, or otherwise) can prevent an operator who can author whole panels — round 2 already accepted verdict-file forgery as the boundary, and destruction-only attacks (delete/corrupt, no authoring) now all Refuse. Suggest one docstring qualifier on refutationPendingEntry.Panels: destruction alone can never settle the obligation; fabrication of panel content remains the documented fs-trust boundary."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "Verification record",
+      "detail": "Absolute /tmp git-archive copy @6f6634b4; shared worktree clean throughout. go build ./... OK; gofmt -l ./cmd ./internal empty; go vet panel/complete/bead OK; go test panel/complete/bead/cmd all ok; go test -race on the three ok; full ./internal/... sweep zero failures (IdleNoBeads passed this run). Mutations RED: origin-binding revert (both new tests), persistRefutationPending error-swallow (MarkerWriteFailure_Blocks), decodePendingEntries fail-open (MalformedPendingEntries_Refuses). Probes on shipped code all Refuse: legacy origin-less pending, Panels:[\"\"], between-scans removal. Satisfy path traced: applied-this-run requires a currently-matched panel whose tally has that slot+round as a latest-round RC covered by an operator refutation carrying reason+evidence; settlement writes panel_refuted (attributable audit), never a 'resolved naturally' discharge. Scope: delta 7de2c459..6f6634b4 = 2 files, internal/complete only, one commit, panelGate public signature unchanged."
+    }
+  ]
+}

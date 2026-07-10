@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Re-verified at 2b4fb8f0 in a fresh /tmp clone. Delta from 41d8e8af is exactly as briefed: spec.md gains two pure-append addenda (12 lines), plan.md gets the spec-wide broadening sentence appended to the existing Bead-2 DESIGN AMENDMENT plus the AC2 test-label fix (shipped `TestPanelRefuted_WriteMetadata` with the draft label preserved as provenance), plus round-1 artifacts. Zero .go files; build/gofmt/panel/complete/bead/cmd tests re-confirmed green in the clone. Finding A: RESOLVED — the addendum accurately describes the shipped design (I verified every claim against code: self-contained {slot,round,reason,evidence} marker, satisfy-from-marker on every path incl. hatches and panel-gone, no re-tally/no discharge, natural-resolution zero-ceremony; the three named falsifier tests exist at panel_refuted_test.go:301/372/1040; `refutation_discharged` survives only in explanatory comments), is forward-only (append/supersede, original text unedited), and unambiguously blankets every discharge/re-tally passage (lines 51/59/68/102 all covered). This directly discharges my round-1 F1-1. Finding B: the follow-up disposition is RIGHT — R1/R2 are textually `complete`-scoped, the FinalizeEpic path (executor.go:381-418, verified: only guardMergeLayout in front) is pre-existing, on a different verb, reachable only via the already-forbidden raw `bd close`, and 114 makes it no worse; o4fd (P1, verified OPEN, accurate description) plus the honest non-over-claiming Scope note is the correct completion path. No new problem introduced; round-1 APPROVE carries forward.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "low",
+      "hard_block": false,
+      "status": "ADDRESSED",
+      "title": "spec.md discharge language now superseded in-spec (round-1 F1-1)",
+      "detail": "The '## Amendment (2026-07-10 … DISCHARGE PATH DELETED)' addendum is exactly the in-spec supersession marker F1-1 asked for; verified accurate against the shipped code, ADR-0037, both SKILL copies, and consolidated-round-3.md. A literal reader can no longer take spec.md as claiming a discharge mechanism."
+    },
+    {
+      "id": "F1-2",
+      "severity": "cosmetic",
+      "hard_block": false,
+      "status": "OPEN",
+      "title": "Stale 'Bead 1 has none yet' phrasing in gate.go leg-9.5 comment and panel_decision_test.go",
+      "detail": "Unchanged (no code moved this round, correctly). Comment-only, no behavior; fold into any future comment tidy. Non-blocking."
+    },
+    {
+      "id": "F1-3",
+      "severity": "cosmetic",
+      "hard_block": false,
+      "status": "NEW-NONBLOCKING",
+      "title": "Addendum's 'notably' citation list over-includes AC5 and R1",
+      "detail": "The supersession blanket is defined by reference TYPE (discharge/refutation_discharged/verified-discharge/re-tally), which is correct and complete (grep-verified: spec.md hits are lines 51, 59, 68, 102 only, all covered). But the parenthetical 'notably' list also names AC5 and R1, neither of which contains any of those references (AC5 line 96 is the unchanged-paths carve-out; the trichotomy lives in R2 line 59). Over-inclusive citation is vacuous — nothing in AC5/R1 matches the superseded pattern, so nothing there is actually voided — hence cosmetic, not a new inaccuracy that misleads. Optional one-word tidy in any future amendment."
+    }
+  ]
+}

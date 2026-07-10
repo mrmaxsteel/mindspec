@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Tests-real lens on the 3 round-2 fixes, all mutation-probed in an isolated /tmp archive of 7de2c459 (shared worktree never touched; go build/gofmt/vet clean before and after each probe; suite restored green after every revert). (1) Reverted the all-panel re-scan to re-tally only regs[:1] (first matched panel) -> TestPanelRefuted_CrossPanel_NoFalseDischarge goes RED ('run 1 must REFUSE... discharging from aaa-first's APPROVE state is a false discharge') -- load-bearing, confirmed; this is exactly G1's round-1 blocking finding reproduced by omission. (2) Nulled the `covered` map in reconcilePendingRefutations (never populated from coveredRefuted/coveredDischarged) -> both covered subtests of TestPanelRefuted_AlreadyCoveredPending_Completes go RED ('must reconcile to a no-op and COMPLETE; got: unsatisfied refutation obligation...'), while the third (NON-covered control) subtest correctly stays green -- load-bearing and precisely targeted, confirmed. (3) Reverted decodePendingEntries to fail-open (marshal/unmarshal errors -> nil,nil instead of an error) -> the 'malformed refutation_pending_entries' subtest of TestPanelRefuted_MalformedPendingEntries_Refuses goes RED, while its sibling subtests (which exercise decodeRefutations/decodeDischargedEntries, untouched by this mutation) correctly stay green -- confirming per-subtest independence, not accidental overlap. For completeness I also reverted decodeRefutations alone (fail-open) and confirmed the 'malformed panel_refuted_entries' subtest flips RED on its own, with the other two staying green -- the fail-closed discipline is independently pinned per decode helper, not a single shared assertion. Read each new test's assertions against the BRIEF's description: CrossPanel test asserts Refuse containing 'X@1' + no close/merge/discharge-write while zzz-origin's RC is live, then asserts close+merge+discharged=true+entries=[X@1] once it resolves -- matches. AlreadyCovered test uses setupPanelGateRepo with NO panel dir for both coverage-kind subtests (comment: 'without coverage recognition this is exactly the CrossRun_PanelRemoved Refuse shape') and asserts BeadClosed+no cross-audit-write -- matches. Malformed test asserts Refuse containing 'could not be decoded' and no mutation, for all three keys -- matches. Full empirical sweep in /tmp: go build ./... clean, gofmt -l ./cmd ./internal empty, go vet ./... clean, go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all PASS, go test -race on the three PASS. No hollow test found; all three (plus the one adjacent helper I extra-probed) are load-bearing.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "Mutation probe 1 (regs := regs[:1] before the re-tally loop, i.e. revert to first-matched-panel-only) turns TestPanelRefuted_CrossPanel_NoFalseDischarge RED on run 1's Refuse assertion -- the all-panel discharge-verification fix for G1's blocking finding is genuinely test-pinned, not vacuous."
+    },
+    {
+      "severity": "info",
+      "description": "Mutation probe 2 (empty `covered` map, never populated from coveredRefuted/coveredDischarged) turns both covered-kind subtests of TestPanelRefuted_AlreadyCoveredPending_Completes RED, while the NON-covered control subtest correctly stays green -- the already-covered-pending no-op (plan L533-535) is real and precisely scoped, not a false-positive-prone catch-all."
+    },
+    {
+      "severity": "info",
+      "description": "Mutation probe 3 (decodePendingEntries reverted to fail-open) turns only the 'malformed refutation_pending_entries' subtest of TestPanelRefuted_MalformedPendingEntries_Refuses RED; a follow-up probe on decodeRefutations alone turns only the 'malformed panel_refuted_entries' subtest RED. Each of the three decode helpers' fail-closed discipline is independently pinned by its own subtest, not accidentally covered by another."
+    },
+    {
+      "severity": "info",
+      "description": "Empirical sweep (go build, gofmt -l, go vet, go test on internal/panel+internal/complete+internal/bead+cmd/mindspec, and go test -race on the first three) is clean in the isolated /tmp clone at 7de2c459; the shared worktree's git status remained clean throughout."
+    }
+  ]
+}

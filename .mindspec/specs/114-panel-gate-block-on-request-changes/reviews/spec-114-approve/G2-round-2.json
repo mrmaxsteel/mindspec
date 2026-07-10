@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "The round-2 spec directly addresses G2's round-1 concern. R2 now explicitly distinguishes refutation audit from the existing best-effort panel_abandoned/panel_gate_skipped path: because an applied refutation changes the gate outcome, mindspec complete must fail rather than complete successfully if panel_refuted metadata for the actually-applied slot+round refutation(s) cannot be written. The spec also requires PanelGateDecision/panelGate to plumb only actually-applied refutations into the audit write, preventing stale, invalid, REJECT-targeting, or unused entries from being recorded as genuine clears. AC11 is a concrete runnable proof: inject completeMergeMetadataFn/bead.MergeMetadata failure on an applied refutation and assert completion fails instead of silently merging without panel_refuted. The R2 falsifiers now include both swallowed metadata-write failure and non-clearing-refutation audit cases. I see no remaining path where a refuted REQUEST_CHANGES can clear the gate and complete without a durable panel_refuted audit.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G2-1",
+      "disposition": "ADDRESSED",
+      "summary": "Durable audit for applied refutations is explicit, testable via AC11, and tied to actually-applied gate-clearing refutations."
+    }
+  ]
+}

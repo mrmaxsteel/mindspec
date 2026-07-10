@@ -1,0 +1,28 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Provenance table maps all AC1-AC12 to beads with named runnable tests. AC11(a-h) each verified: (a) SatisfyWriteFailure, (b) MarkerWriteFailure_Blocks incl. union-read sub-case, (c) CrossRun_PanelRemoved_Refuses + restore, (d) CrossRun_UnionReconcilesAll (new), (e) NaturalResolution_Discharges + CrossRun_WarnPathDoesNotDischarge (new, three Warn variants), (f) HatchStillReconcilesPendingObligation (new, three hatch paths + GetMetadata-error refuse), (g) GetMetadataError_Refuses + AuditSurvivesLaterReadError + MergeMetadata_FailClosedOnReadError, (h) PristineNoPanel_FailsOpen. All three round-5 tests appear in steps 7(B)(va/vb/xii) AND the AC11 provenance row; proof commands match spec AC11. AC5 four-fixture set now consistent across spec AC5, Validation Proofs, plan step 5(a)-(d), and the diff-review verification (my prior note ADDRESSED). No AC orphaned by round-5; AC1-AC10/AC12 rows intact.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-r5-1",
+      "severity": "info",
+      "title": "AC mapping complete incl. round-5 additions",
+      "detail": "All 12 ACs map to a bead + named test in the Provenance table (plan.md:1130-1144). The three round-5 tests (TestPanelRefuted_CrossRun_UnionReconcilesAll, TestPanelRefuted_CrossRun_WarnPathDoesNotDischarge, TestPanelRefuted_HatchStillReconcilesPendingObligation) are defined in Bead 2 step 7(B) and listed in the AC11 row; spec AC11(a)-(h) each have a covering named test."
+    },
+    {
+      "id": "F1-r5-2",
+      "severity": "info",
+      "title": "AC5 four-flip reconciliation consistent (prior note addressed)",
+      "detail": "Spec AC5, spec Validation Proofs, plan Bead-1 step 5(a)-(d), and the Bead-1 diff-review verification all state the same four-fixture flip set (panel_decision_test 5A+1-dissent, panel_advisory_test WouldPass, cmd panel_test at-threshold, votedecision_test lockstep twin). Spec In Scope lists three and AC5 explicitly extends it with the twin ('four fixtures total'), so the documents no longer disagree."
+    },
+    {
+      "id": "F1-r5-3",
+      "severity": "info",
+      "title": "Minor cosmetic: In Scope fixture bullet not updated to four",
+      "detail": "Spec In Scope (line 61) still enumerates only the three original RC-tolerance fixtures; AC5 bridges this explicitly, so it is non-blocking cosmetic drift only. No change required."
+    }
+  ],
+  "carried_forward": "round-5 APPROVE carried: mechanism confirmed TOTAL/airtight; round-6 is a precision fix for F2 discharge-evidence acquisition (re-tally from panelReg.Dir) \u2014 no design/ADR/domain/AC change"
+}

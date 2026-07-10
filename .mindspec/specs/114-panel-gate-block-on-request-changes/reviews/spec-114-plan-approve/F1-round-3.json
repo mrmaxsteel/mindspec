@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-3 delta verified at 14fd3312. AC mapping complete: all twelve ACs (incl. updated AC11) map to a bead + runnable proof in Provenance; the new durable-obligation tests are all present — cross-run panel-removed retry REFUSES (Bead 2 step 7(B)(iv), with positive control), pending-marker-write-fails→abort (7(B)(iii)), TestGetMetadata + TestMergeMetadata_FailClosedOnReadError (7(B)(vi)), and the recovery-path audit as its own AC11-supporting row (7(B)(vii)). No AC orphaned; every round-3 addition (step-2.3 marker, fail-open override, fail-closed MergeMetadata, GetMetadata, §8 amend, execution domain) lands under AC11/AC6/AC5 provenance. Each new test is a real pass/fail proof: closeBeadFn spy + completeCalled flag + metadata-content asserts, with asymmetry/skip-env/unused-entry controls. AC11's falsifier is genuinely falsifiable: a concrete two-run scenario (fail write → remove panel.json → retry must refuse) plus the erasure-survival check. I code-verified the MergeMetadata proceed-from-empty hole is real. Three minor non-blocking findings below.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "disposition": "ADDRESSED",
+      "note": "Round-3 durable-obligation mechanism (step 2.3 refutation_pending pre-close, step 3.75 panel_refuted pre-close, fail-open override, fail-closed MergeMetadata) is fully mapped: AC11 Provenance row + AC11-supporting recovery-path row; net invariant stated with proof sketch in Bead 2 step 5."
+    },
+    {
+      "severity": "minor",
+      "disposition": "PARTIAL",
+      "note": "Bead 2 step 5(c) cites 'complete.go:152-156' for the fail-open proceed; at the pinned tree that range is verifyCommittedSameRead — the actual site is the panelGate call / nil-reg fall-through at complete.go:375-382 (which step 4 cites correctly). Stale line ref only; symbol-anchored, non-blocking."
+    },
+    {
+      "severity": "minor",
+      "disposition": "PARTIAL",
+      "note": "The cross-run panel-removed retry (7(B)(iv)) and pending-write-fail (7(B)(iii)) tests have concrete assertions and are covered by the -run 'PanelRefuted|PanelGate' pattern, but unlike TestPanelGate_RefutedAuditWriteFailure_FailsCompletion and TestGetMetadata they are not given Go function names. Implementer should name them under the PanelRefuted/PanelGate prefix so the Provenance run-pattern selects them."
+    },
+    {
+      "severity": "minor",
+      "disposition": "PARTIAL",
+      "note": "Testability nuance for the cross-run test: run 2's fail-open override reads via bead.GetMetadata while run 1 wrote via the completeMergeMetadataFn stub — the harness needs a coherent read seam (e.g. a completeGetMetadataFn var mirroring the write stub) so the override sees the pending marker. The plan names the write seam but not the read seam; a Bead-2 implementation detail, not a plan gap."
+    },
+    {
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "note": "AC11 falsifier is genuinely falsifiable: each clause is a constructible scenario with an observable outcome (non-zero exit, closeBeadFn not called, completeCalled false, panel_refuted present/absent in captured metadata); the 'ANY number of retries' universal is discharged by the stated invariant proof sketch (both merge routes gated) plus the two-run witness test."
+    },
+    {
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "note": "Code-verified at 14fd3312: bdcli.go MergeMetadata swallows the show read error (err == nil guard) and replace-writes from empty — the erasure hole the fail-closed fix targets is real. O3's divergence-gate fix (spec Impacted Domains now declares execution/internal/bead) is in the spec at this commit."
+    }
+  ]
+}

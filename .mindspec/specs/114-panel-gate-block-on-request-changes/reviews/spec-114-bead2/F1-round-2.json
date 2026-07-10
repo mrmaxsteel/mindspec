@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.72,
+  "rationale": "G1's crux is fixed: with both panels PRESENT, contradictory same-slot verdicts now Refuse under every hatch (repro re-run; first-panel-only mutation goes RED). All 3 fixes mutation-verified RED (covered no-op, all three malformed-decode subtests individually). Round-1 guards hold: marker-write-swallow RED, union-to-replace RED; dischargeEvidence nil-branch mutation survives but only because retallyOK subsumes it and panel.Tally never returns (nil,nil) — dead defense-in-depth, not hollowness. gateRoots shared-variable design makes gate/reconcile matched-set divergence structural-impossible; mid-run removal Refuses. Strictness never loses an audit; single-panel and both-resolved completions proceed. Scope: 1 commit, 3 files. build/vet/gofmt/tests/-race all green. BLOCKING residual (my lens item 1): the every-matched-panel conjunction quantifies only over SURVIVING registrations. Two /tmp repros: delete the origin panel dir, or corrupt its panel.json (ForBead drops Err regs — the exact hand-edit this feature invites), while a non-origin matched panel shows the slot resolved → pending DISCHARGES, bead closes+merges, false 'RC resolved naturally' audit written. Removing MORE evidence (all panels) Refuses; removing SOME discharges — inconsistent with the removal-Refuse contract ('restore the panel'). Fix or evidenced-refute as threat-model boundary.",
+  "concrete_changes_required": [
+    "Residual false discharge on origin-evidence loss: reconcilePendingRefutations discharges a pending from a non-origin survivor once the origin panel dir is deleted (adwu-style review/ cleanup deletes panels; selective loss leaves survivors) or its panel.json is corrupted (panel.ForBead drops Err!=nil registrations, so a botched refutations hand-edit silently removes the origin from the matched set). Repro: CrossPanel fixture (aaa-first X=APPROVE, zzz-origin X=RC, pending X@1, MINDSPEC_SKIP_PANEL); run 1 correctly Refuses; rm -rf review/zzz-origin (or truncate its panel.json) → run 2 completes, close+merge fire, refutation_discharged=true 'RC resolved naturally' written while the origin RC never resolved. EITHER (a) bind pending entries to their origin panel identity (dir slug) at persistRefutationPending time and require the origin panel present-with-evidence to discharge, Refusing when it is missing — consistent with CrossRun_PanelRemoved_Refuses and its 'restore the panel' recovery; OR (b) evidenced-refute: pin the survivor-discharge-after-origin-loss behavior with a test and scope the removal-Refuse contract in the reconcile docstring to 'no matched panel remains', documenting partial-evidence-loss as an accepted fs-trust boundary (fs forgery of a verdict file is a strictly easier equivalent). Either disposition resolves this."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "blocking": true,
+      "title": "Residual false-discharge when origin panel evidence is destroyed and a non-origin matched panel survives",
+      "detail": "dischargeVerified requires dischargeEvidence in every MATCHED panel, but the matched set is whatever panel.ForBead(panelScanFn(gateRoots...)) surfaces at reconcile time. Deleting the origin panel dir, or corrupting its panel.json (load() sets reg.Err; ForBead drops Err registrations), removes the veto: the surviving panel's APPROVE state alone discharges pending X@1, close+merge proceed, and a false refutation_discharged audit is recorded. Proven with two /tmp e2e repros through complete.Run (err=nil, closeCalled=true, merge=true, discharged=true in both). Not NEW (round-1 first-panel logic was strictly worse) but a residual false-discharge path per the round-2 lens; the protocol elsewhere treats panel removal as an in-model Refuse-and-restore event, so all-removed-Refuses vs one-removed-discharges is inconsistent."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "dischargeEvidence nil-result branch is unreachable from reconcile (dead defense-in-depth)",
+      "detail": "Mutating `if res == nil { return false }` to `return true` leaves WarnPathDoesNotDischarge and CrossRun_PanelRemoved_Refuses GREEN: retallyOK=false already covers the zero/erroring-panel cases and panel.Tally never returns (nil,nil). Harmless — keep the guard — but do not rely on tests to pin that branch."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "Verification record",
+      "detail": "Empirical (absolute /tmp git-archive copy @7de2c459; shared worktree untouched, git status clean): go build ./... OK; gofmt -l ./cmd ./internal empty; go vet panel/complete/bead OK; go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all ok; go test -race on the three ok. Mutations: first-panel-only dischargeVerified RED (CrossPanel_NoFalseDischarge); covered-skip removal RED (AlreadyCoveredPending); all three decoders fail-open RED (all three Malformed subtests); persistRefutationPending write-error swallow RED (MarkerWriteFailure_Blocks); union→replace RED (CrossRun_UnionReconcilesAll). Item 2: gateRoots computed once in Run and passed to both panelGate and reconcile through the same panelScanFn seam — divergence only via mid-run fs mutation, which Refuses unless it is the origin-loss case above. Item 3: strictness never loses an audit (Refuse writes nothing, close blocked); single-panel discharge, hatch reconciles, both-resolved multi-panel, and covered-retry completions all proceed. Item 4: covered pendings skip before satisfy/discharge (no double-write; test asserts no new audit); no production reader of the three entry keys exists outside panel_advisory.go and every decode site fails closed (persist path Blocks, audit writers fail pre-close, reconcile Refuses)."
+    }
+  ]
+}

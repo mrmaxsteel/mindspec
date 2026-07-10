@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At pinned 33a8ce8d, the false-discharge class is structurally gone. Reconciliation accepts only beadID, reads no panel directory, performs no tally/origin/discharge logic, and always flushes each uncovered valid self-contained marker to panel_refuted before close. End-to-end /tmp probes of wrong-panel, origin-removed, origin-corrupted, and basename-alias shapes all completed only after writing the honest marker-derived audit. Applied-is-persisted, union, exact covered no-op, hatch reconciliation, malformed/shape-invalid refusal, and fail-closed metadata guards remain intact. Swallowing the reconciliation audit-write error made two named tests RED. internal/panel is byte-identical to ce9f5395; panelGate two-result arity is consistent; the redesign is one scoped commit. Build, formatting, vet, focused/full tests, and three-package race tests pass with an isolated /tmp Go cache. No new unaudited-merge path was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "status": "OBVIATED",
+      "severity": "blocking",
+      "title": "Round-1 cross-panel false discharge",
+      "evidence": "The discharge/re-tally path and origin selection are deleted. The wrong-panel repro now writes panel_refuted from the marker before close/merge."
+    },
+    {
+      "status": "OBVIATED",
+      "severity": "blocking",
+      "title": "Round-2 historical-origin disappearance false discharge",
+      "evidence": "Reconciliation no longer consults current or historical panels. Removed and corrupted origin repros both write the honest marker-derived panel_refuted audit and complete."
+    },
+    {
+      "status": "OBVIATED",
+      "severity": "blocking",
+      "title": "Round-3 same-basename cross-root alias false discharge",
+      "evidence": "No origin identity or panel-result lookup remains in reconciliation; the basename-alias repro cannot influence settlement and writes panel_refuted from marker content."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "major",
+      "title": "Durable-obligation guards remain load-bearing",
+      "evidence": "Exact covered entries no-op; union retains slot/round obligations and backfills content; malformed and shape-invalid markers Refuse; hatches reconcile before close. Swallowing writePanelRefutedMetadata failure made TestPanelRefuted_SatisfyWriteFailure_FailsCompletion and TestPanelRefuted_SatisfyFromMarker_PanelGone fail."
+    },
+    {
+      "status": "PASS",
+      "severity": "info",
+      "title": "Pinned empirical and integrity checks",
+      "evidence": "go build ./... PASS; gofmt -l ./cmd ./internal empty; vet PASS; focused panel/complete/bead tests PASS; four-package sweep PASS (panel 0.264s, complete 5.889s, bead 4.989s, cmd/mindspec 12.733s); race PASS (panel 1.451s, complete 7.547s, bead 6.950s). internal/panel diff from ce9f5395 is empty; diff --check clean; one commit; two-result panelGate calls consistent."
+    }
+  ]
+}

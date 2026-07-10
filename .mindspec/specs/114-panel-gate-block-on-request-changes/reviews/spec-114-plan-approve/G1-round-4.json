@@ -1,0 +1,61 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Grounded at 2b159553d83e859f2d4f5f0bac74ed96ea624dc3. Round 4 correctly moves the pending-marker write into panelGate's Allow handling: the planned insertion is after PanelGateDecision at panel_advisory.go:192 and before panelGate's successful return at :214, using completeMergeMetadataFn; write failure returns guard.NewFailure before complete.go:395 CommitAll, so the refutation never becomes applied. Run-wide reconciliation is placed after the last ADR block (:542-544) and before close (:546), GetMetadata errors REFUSE through the new completeGetMetadataFn seam, and refutation_discharged is specified/tested. However, discharge assumes \"panel present + gate passed\" proves natural RC resolution. PanelGateDecision also passes via Warn for abandonment (:160-169), missing ref (:180-189), and transient Git error (:192-203), while the proposed panelGate tuple exposes no Allow-vs-Warn status. A carried pending obligation can therefore be falsely discharged and merged without verified natural resolution. Editorial fixes and corrected panel_advisory.go:153-155 / repair.go:86 citations landed.",
+  "concrete_changes_required": [
+    "Make refutation_discharged conditional on affirmative, verified vote-state evidence that each pending slot is no longer a latest-round REQUEST_CHANGES at/after its recorded round. Plumb an Allow/verified-resolution signal or equivalent tally facts from panelGate; do not infer this from non-nil registration plus nil error.",
+    "Add cross-run tests with an unsatisfied refutation_pending followed by each live-panel Warn path (at minimum abandoned, missing-ref, and transient Git error), proving the obligation is not generically discharged or merged without a defined, durable reconciliation audit."
+  ],
+  "findings": [
+    {
+      "id": "G1-R3-1",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "internal/bead scope contradiction removed",
+      "detail": "spec.md:65 now explicitly retains fail-closed MergeMetadata and GetMetadata in scope while excluding only underlying storage/CLI/seam-signature changes."
+    },
+    {
+      "id": "G1-R3-2",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "ADR-0037 section 8 amendment is contractual",
+      "detail": "spec.md:30, :39, :60 and AC6 at :85 now state the narrow operator-authorized audit-durability carve-out and re-affirm the otherwise unchanged anti-adversary posture."
+    },
+    {
+      "id": "G1-R3-3",
+      "disposition": "ADDRESSED",
+      "severity": "info",
+      "title": "Insertion points and citations corrected",
+      "detail": "The no-panel return exists at panel_advisory.go:153-155; Run calls panelGate at complete.go:375-378 before CommitAll; repairMergeMetadataFn is exactly cmd/mindspec/repair.go:86."
+    },
+    {
+      "id": "G1-R4-1",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "Applied refutation now requires durable marker",
+      "detail": "plan.md:471-485 puts the refutation_pending write inside panelGate's Allow decision and requires marker failure to return a guard Block naming the still-unresolved RC; AC11(b) and TestPanelRefuted_MarkerWriteFailure_Blocks pin no close, merge, or audit."
+    },
+    {
+      "id": "G1-R4-2",
+      "disposition": "PARTIAL",
+      "severity": "major",
+      "title": "Every-path reconciliation cannot distinguish verified Allow from Warn pass-through",
+      "detail": "plan.md:500-531 reaches reconciliation on panel-present and no-panel paths, but its discharge proof treats every non-blocking live panel as evidence the RC disappeared. Existing Warn/Allow short circuits do not establish that fact, and the planned (*Registration, []Refutation, error) return omits decision status. This leaves a false-discharge/merge path for a prior pending obligation."
+    },
+    {
+      "id": "G1-R4-3",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "GetMetadata read failure is fail-closed",
+      "detail": "plan.md:532-537 and :569-578 require read/parse errors to return a recoverable guard failure through completeGetMetadataFn; the named e2e test asserts neither closeBeadFn nor executor completion runs."
+    },
+    {
+      "id": "G1-R4-N1",
+      "disposition": "PARTIAL",
+      "severity": "info",
+      "title": "Config-disabled audit wording remains imprecise",
+      "detail": "The plan correctly states at :448-451 that enforcement.panel_gate:false writes no audit, but plan.md:544-547 and spec.md:47 say both hatches have their own panel_gate_skipped audit. This is a non-blocking editorial inconsistency, not the basis for REQUEST_CHANGES."
+    }
+  ]
+}

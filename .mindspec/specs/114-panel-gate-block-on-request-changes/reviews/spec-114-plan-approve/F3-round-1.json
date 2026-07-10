@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Plan is faithful to R1/R2/AC1-AC12 and internally consistent. I verified the AC5 reconciliation empirically at bc6d35d7: the leg-9.5 substring-superset design is sound — every asserted substring in the four sub-threshold fixtures (panel_decision_test.go:196-209/222-234 incl. mustNotHave '/6', votedecision_test.go:72-79, panelstate_test.go:113-123 where reason = d.Message) plus the unnamed sub-threshold users (e2e :131-160, layout tests, cmd 'sub-threshold' row) is carried by the planned message, with the fence kept as suffix for sanitizeNonBeadDecision's HasSuffix strip (cmd/mindspec/panel.go:829). The 5 step-6 fixtures genuinely flip without the prescribed input updates and preserve outcome with them. Durable-audit step-4.75 placement and the closed-but-unmerged recovery state match complete.go:546-650/667-672/695-708; exactly one Decision struct comparison exists (panel_test.go:255). ONE real gap: internal/panel/panel_decision_test.go:211-221 ('expected_reviewers:3 → 3/3 present, 2 APPROVE Allow (no hardcoded 6)') is 2 APPROVE + 1 RC → want Allow. It FLIPS to Block under R1 and appears in neither the step-5 flip list nor the step-6 preserving list, so Bead 1's AC5 diff-review proof fails as written. It must be classified.",
+  "concrete_changes_required": [
+    "Bead 1: add internal/panel/panel_decision_test.go:211-221 ('expected_reviewers:3 → 3/3 present, 2 APPROVE Allow (no hardcoded 6)' — 2 APPROVE + 1 RC slot z → Allow) to the AC5 reconciliation. It flips Allow→Block under R1 but is named in neither step 5 (intended flips) nor step 6 (outcome-preserving input updates). Either (a) step-6 it: replace the z RC with a third APPROVE (3/3 all-APPROVE, Approves=3, N=3) — note the 'at-threshold-below-N Allow' sub-subject cannot survive R1 (an Allow with unrefuted dissent is impossible), so the preserved subject becomes 'N=3 Allow, no hardcoded 6' with the adjacent 1/3-Block row still proving threshold scaling; or (b) step-5 it as a fourth intended flip. Update the Bead-1 verification bullet and AC5 diff-review named set accordingly."
+  ],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "major",
+      "summary": "Unclassified outcome-flipping fixture: panel_decision_test.go:211-221 (2 APPROVE + 1 RC, N=3, want Allow) flips to Block under R1; absent from both the step-5 flip list and the step-6 preserving list, so the plan's own AC5 diff-review proof ('outcome flips ONLY in the step-5 named set') is unsatisfiable as written."
+    },
+    {
+      "id": "F3-2",
+      "severity": "minor",
+      "summary": "Citation imprecision in Bead 1 step 6(c): the RC append for TestPanel_GateFieldDecisionInertAllEnumValues lives in the SHARED buildFacts helper (panel_test.go:417-428), used by both the 'allow' and 'block-stale-sha' scenarios — not '~404-410'. Replacing 5A+1RC with 6/6 also changes the stale scenario's input, which still Blocks at leg 6, so outcome-preserving; fix the pointer so the fixer edits the right lines."
+    },
+    {
+      "id": "F3-3",
+      "severity": "info",
+      "summary": "Verified coherences (no action): leg-9.5 superset message keeps all four named sub-threshold fixtures plus every unnamed sub-threshold user (e2e, layout, cmd, RenderPanelState_Block) green — they assert only 'APPROVE'/threshold/consolidated/fence substrings or action-level outcomes; mustNotHave '/6' unaffected. VoteDecision-twin flip (votedecision_test.go:64-70) is a mandated consequence of the spec's own R1 lockstep falsifier — the plan's extension of the spec's 3-fixture carve-out is the correct resolution of that internal spec tension and is recorded for the diff review. Step-4 'byte-unmodified' for votedecision:72-79 mildly tensions with Testing Strategy's makeVerdicts real-string upgrade, but the assertion stays green under both helper forms (verified both routes emit 'threshold is 5/6'). AppliedRefutations-only-on-leg-10-Allow is consistent with panelGate accumulation and the step-4.75 guard; AC7 falls out of leg 10 as claimed. Exactly one Decision struct comparison repo-wide (panel_test.go:255), as the plan asserts. Plan pin fae2bfb6 vs panel pin bc6d35d7 differ only by plan.md itself — all code refs valid."
+    }
+  ]
+}

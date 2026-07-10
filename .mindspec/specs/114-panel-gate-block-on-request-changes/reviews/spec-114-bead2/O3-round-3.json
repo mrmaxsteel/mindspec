@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Scope lens: git diff 7de2c459..6f6634b4 = EXACTLY 2 files (internal/complete/{panel_advisory.go, panel_refuted_test.go}), one commit, no panel/bead/ADR/doc edits. panelGate PUBLIC arity UNCHANGED — only the internal helpers persistRefutationPending (added origins map), unionPendingEntries (now merges refutationPendingEntry origin sets), and the local dischargeVerified closure changed; zero call-site ripple. Build/gofmt(./cmd ./internal empty)/vet(./internal/complete) all clean in /tmp. The 2 new tests exist and map to the fix: OriginRemoved_Refuses (delete zzz-origin, keep aaa-first APPROVE decoy → Refuse, no discharge/close/merge, +positive control) and OriginCorrupted_Refuses (parse-error panel.json under MINDSPEC_SKIP_PANEL → Refuse). MUTATION PROBE: neutralizing the origin-binding block in dischargeVerified turns BOTH new tests RED — they genuinely bite. No-regression: full sweep go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec = all ok; -race on panel/complete/bead = all ok; z4ps not triggered. Fixture updates intent-preserving: 6 discharge-intending seeds now carry origin slugs, 3 origin-less seeds all belong to AlreadyCoveredPending_Completes (covered path, no discharge → no origin needed). Shared worktree clean, HEAD unchanged.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "scope-2-files-one-commit", "status": "ADDRESSED", "note": "delta = internal/complete only, 2 files, single commit 6f6634b4; no cross-file/doc/ADR creep"},
+    {"id": "panelgate-arity-unchanged", "status": "ADDRESSED", "note": "public panelGate signature identical; only internal persistRefutationPending gained the origins param"},
+    {"id": "new-tests-real-and-bite", "status": "ADDRESSED", "note": "OriginRemoved/OriginCorrupted present, decoy+origin E2E, positive controls; both go RED under origin-binding-removal mutation"},
+    {"id": "no-regression-full-suite", "status": "ADDRESSED", "note": "full sweep + -race green; all 20 TestPanelRefuted_/TestPanelGate_ funcs pass"},
+    {"id": "fixture-intent-preserving", "status": "ADDRESSED", "note": "discharge seeds carry origin slug; the 3 origin-less seeds are all AlreadyCoveredPending (covered no-op, deliberately origin-less)"}
+  ]
+}
