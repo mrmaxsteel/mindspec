@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-10T06:44:02Z"
+approved_by: user
+status: Approved
 ---
 # Spec 114-panel-gate-block-on-request-changes: Panel gate blocks on any unresolved REQUEST_CHANGES, with audited-refutation escape
 
@@ -105,7 +105,7 @@ A REQUEST_CHANGES verdict is counted as *neither* an APPROVE nor a REJECT: the t
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-10
+- **Notes**: Approved via mindspec approve spec
