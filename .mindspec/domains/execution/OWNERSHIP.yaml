@@ -2,6 +2,5 @@ paths:
   - internal/executor/**
   - internal/bead/**
   - internal/gitutil/**
-  - internal/lifecycle/**
   - internal/safeio/**
   - internal/harness/**
