@@ -132,6 +132,22 @@ retirement deferred to a follow-up bead. See the amendment below.
 > fail-open/fail-closed, and the trust boundary are unaffected by recorded
 > metadata that no decision function reads.
 
+> **Amendment (2026-07-10, spec 114 — `refutations` array):** `panel.json`
+> gains one new **optional** recorded field, `refutations`
+> (`json:"refutations,omitempty"`) — an array of entries
+> `{slot, round, reason, evidence}`, each recording a human operator's
+> audited dismissal of one reviewer's unresolved REQUEST_CHANGES at one
+> round. Parse-lenient like `abandon_reason`: an absent array, an empty
+> array, or entries with missing/empty fields never set
+> `Registration.Err` — enforcement lives in the gate, not the parser.
+> Unlike 109's `approve_threshold` and 112's `gate` (the schema-addition
+> precedents this section records), this field is **NOT decision-inert**:
+> it is read by exactly one consumer, `internal/panel`'s
+> unresolved-verdict resolution (`tally.go`, the single home of the
+> matching rule), under the validation rules the §3 amendment below
+> records. There is no CLI verb to write one; /ms-panel-tally's
+> documented procedure is a hand edit of `panel.json`.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —
@@ -182,6 +198,26 @@ count (the lola-f4a8 artifact-gate rule, mechanized).
 > `panel.json` is what the gate actually reads, preserving "identical
 > decision over identical facts").
 
+> **Amendment (2026-07-10, spec 114 — the threshold is a floor, not a
+> sufficient condition):** The approve threshold remains a NECESSARY
+> floor on the count of genuine APPROVEs, but it is no longer SUFFICIENT
+> to pass the gate: every expected reviewer's latest-round verdict must
+> be either an APPROVE or an explicitly-refuted REQUEST_CHANGES (a §1
+> `refutations` entry naming exactly that slot and the latest round). An
+> unresolved REQUEST_CHANGES — one dissent or five, it does not matter —
+> blocks exactly like a REJECT, as does an unrecognized verdict string,
+> which is non-refutable. A refutation clears ONLY that slot's
+> latest-round REQUEST_CHANGES: never a REJECT, a `"hard_block": true`,
+> or an unrecognized verdict; never another slot; never staleness (§4),
+> incompleteness/malformed-as-missing, or the approve floor itself. A
+> refuted RC never counts toward the floor (`Approves` is never
+> incremented), so refutation cannot buy a sub-threshold panel past the
+> gate; and a re-RC at a newer round blocks again — the refutation is
+> round-pinned. Composition with ADR-0040 (the 2026-07-07 amendment
+> above): a recorded `approve_threshold` below N−1 still sets the
+> approve floor, but it no longer licenses unrefuted dissent — 109's
+> extension and 114's rule compose; they do not contradict.
+
 ### 4. Staleness: `reviewed_head_sha` must match the live ref
 
 An APPROVE attaches to a commit, not a bead. If the target ref no
@@ -214,6 +250,20 @@ solo/non-panel/harness flows must be structurally unaffected (the
 test harness completes beads constantly with no panels), while a
 panel, once registered, is a commitment.
 
+> **Amendment (2026-07-10, spec 114 — affirmative-evidence refusal
+> branch):** Fail-open without a panel is **UNCHANGED for pristine
+> beads** — no registered panel and no recorded obligation still means a
+> silent pass, and solo/harness flows still pay nothing. One narrow
+> branch is added: a bead carrying a durable, unsatisfied refutation
+> obligation (a `refutation_pending` marker on bead metadata — §7
+> amendment below) does NOT fail open. On the healthy path completion
+> simply satisfies the obligation (the `panel_refuted` audit is written
+> from the marker itself, needing no panel present) and proceeds; on a
+> fail-closed metadata read/parse error or a malformed marker it
+> Refuses rather than merging with the obligation unaudited —
+> affirmative evidence of a recorded obligation converts
+> absence-of-panel from "nothing to enforce" into "an audit still owed".
+
 ### 7. Escape hatches: env-only skip, audited abandonment, config toggle
 
 - **Skip (`MINDSPEC_SKIP_PANEL=1`)** is read via `os.Getenv` ONLY —
@@ -240,6 +290,62 @@ panel, once registered, is a commitment.
   the reason to bead metadata.
 - **Config toggle** (`enforcement.panel_gate: false`, default true)
   is the persistent opt-out, mirroring the pre-commit hook toggle.
+
+> **Amendment (2026-07-10, spec 114 — the audited refutation):** A
+> fourth legitimate exit joins skip/abandonment/config-toggle under the
+> same contract — legitimate precisely because it is always audited,
+> never silent. A human operator who has actually disproven a reviewer's
+> REQUEST_CHANGES records a `refutations` entry in `panel.json` (§1
+> amendment: `{slot, round, reason, evidence}`, hand-edited — there is
+> no CLI verb). The gate validates it under the §3 rules, and when a
+> refutation is APPLIED (it is what cleared the slot on an Allow), its
+> `panel_refuted` audit is **durable** where the abandon/env-skip audits
+> are best-effort. Ground that asymmetry correctly — NOT in any
+> "terminal non-merge exit" claim (abandonment is a Warn→Allow→merge,
+> and env-skip likewise merges; neither is a non-merge exit) — but
+> solely in what each hatch does: a refutation CHANGES the gate outcome
+> and thereby produces an applied-refutation OBLIGATION, whereas
+> abandon/skip change no verdict and produce none. The
+> durable-obligation protocol, as shipped:
+>
+> 1. **Applied ≡ durably persisted.** A refutation is "applied" ONLY
+>    once a **self-contained** `refutation_pending` marker carrying the
+>    full refutation content — `{slot, round, reason, evidence}` — is
+>    durably persisted on bead metadata as part of the allow-decision,
+>    UNIONed with any existing unsatisfied entries (never a bare
+>    replace). The marker read-or-write is part of the decision: a
+>    failure returns a BLOCK (the RC stays unresolved), making
+>    "applied ⟹ durable obligation" definitional, not best-effort.
+> 2. **Reconcile before close, on EVERY path.** Before the close, on
+>    every completion path — panel-present, no-panel, AND hatch —
+>    reconciliation SATISFIES every pending entry not already covered by
+>    a durable `panel_refuted` record, writing the honest
+>    `panel_refuted` audit (slot, round, reason, evidence, timestamp)
+>    FROM THE MARKER ITSELF. It needs no panel present and works after
+>    `panel.json` has been removed or changed, because the marker is
+>    self-contained — the audit is written from that record, never by
+>    re-reading mutable panel files, so it cannot be spoofed by
+>    panel-file manipulation. On a fail-closed metadata error or a
+>    malformed/shape-invalid marker it Refuses; it never silently
+>    ignores an entry.
+> 3. **Fail-closed metadata.** `bead.GetMetadata` and
+>    `bead.MergeMetadata` are fail-closed: a read/parse error Refuses
+>    rather than fail-opens, and no later write can erase a recorded
+>    audit.
+>
+> Like the skip hatch, the Block message never advertises a paste-able
+> refutation incantation; the escape is documented here and in
+> /ms-panel-tally only. Of the hatches, only env-skip and abandonment
+> carry a bead-metadata audit (`panel_gate_skipped` /
+> `panel_abandoned`); the `enforcement.panel_gate: false` config toggle
+> writes none. **Hatches except the GATE, not the obligation**: a hatch
+> lets a bead merge despite unresolved RCs, but a pre-existing durable
+> `refutation_pending` is STILL satisfied/audited before close on the
+> hatch path. §6 stays unchanged for pristine beads (no panel, no
+> recorded obligation → silent pass — see the §6 amendment); and natural
+> resolution — a re-panel where the dissenter flips to APPROVE and NO
+> refutation was ever applied — creates no marker, hence no obligation,
+> and completes with zero ceremony.
 
 ### 8. Trust boundary: anti-footgun, not anti-adversary
 
@@ -268,6 +374,40 @@ Per ADR-0023, panel.json and verdict JSONs are **review artifacts,
 not workflow state**: the gate reads them to decide whether a
 state-changing command may proceed and writes nothing to them; bead
 lifecycle state stays derived from bd statuses.
+
+> **Amendment (2026-07-10, spec 114 — operator-authorized
+> audit-durability carve-out):** This section's standing posture —
+> anti-footgun, not anti-adversary; do not "fix" perceived forgeability
+> at this layer — is amended with one NARROW carve-out, explicitly
+> authorized by the operator and labelled **audit-durability**, not
+> anti-tamper. A refutation is different in kind from the passive
+> footguns this section scopes out: it ACTIVELY clears a specific
+> reviewer's evidence-bearing finding, so allowing that clearance to
+> later vanish without a trace (the panel removed after a refutation was
+> applied) would defeat spec 114's whole purpose. Therefore the AUDIT of
+> an applied refutation is made **durable across retries and completion
+> paths**, via the self-contained-marker obligation, the every-path
+> (including hatch) satisfy reconciliation, and the fail-closed
+> `GetMetadata`/`MergeMetadata` (§7 amendment). Its companion is the §6
+> affirmative-evidence refusal branch: a bead carrying a durable,
+> unsatisfied refutation obligation does not fail open — it Refuses on a
+> fail-closed metadata/marker error rather than merging with the
+> obligation unaudited. The active-clearance-vs-passive-footgun
+> distinction is the rationale; the operator's explicit authorization is
+> the licence.
+>
+> The scope is precise, so the carve-out cannot be read as permission to
+> harden the rest: this is an audit-durability guarantee for an APPLIED
+> refutation ONLY — NOT general tamper-resistance — and the posture is
+> otherwise UNCHANGED. An empty `reason` still clears — a footgun, not
+> an endorsement, in deliberate parity with an empty `abandon_reason`;
+> reason + evidence carry the refutation's legitimacy, not any
+> mechanical check. The panel stays freely removable for a bead with NO
+> refutation applied; verdict JSONs and `panel.json` remain
+> agent-writable; no signing or hashing is added; a party who never
+> records a refutation is not the target. A future editor extending
+> "durability" beyond the applied-refutation audit is making a new
+> decision, not applying this one.
 
 ## Decision Details
 

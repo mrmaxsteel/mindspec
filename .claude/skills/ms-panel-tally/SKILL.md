@@ -83,16 +83,26 @@ When the matrix halts (REJECT, HARD block, or `max-rounds` exceeded):
 
 4. **Abandon procedure (legitimate exit).** To abandon a panel without merging (e.g. the bead is being reworked outside the panel loop): set `"abandoned": true` in `panel.json` AND record who/why in `"abandon_reason"`. Completion then writes a `panel_abandoned` audit entry (plus the reason) to the bead metadata. Abandonment is a plain repo-file edit and therefore agent-performable — it is legitimate precisely because it is always audited, never silent. Do NOT abandon to skip a HARD block; abandon only when the bead is genuinely leaving the panel flow.
 
+5. **Refutation procedure (per-slot, always audited).** To dismiss one reviewer's unresolved REQUEST_CHANGES that has been **actually disproven** (the gate now blocks on any unresolved RC — see § Anti-patterns): hand-edit `panel.json` (there is no CLI verb) and append one entry to the `refutations` array naming the filename-derived slot (the `<slot>` prefix of the `<slot>-round-<N>.json` verdict file, byte-exact), the latest round, a who/why `reason`, and `evidence` pointing at where the disproof lives (a commit, a comment, a doc):
+
+   ```json
+   "refutations": [
+     {"slot": "R4", "round": 2, "reason": "<who>: <why the finding is wrong>", "evidence": "<commit/comment/doc>"}
+   ]
+   ```
+
+   The gate validates the entry: it clears ONLY that slot's latest-round REQUEST_CHANGES — never a REJECT, `hard_block`, or unrecognized verdict, and never staleness, incompleteness, or the approve floor (a refuted RC never counts as an APPROVE, so refutation cannot buy a sub-threshold panel past the gate). A re-RC at a newer round blocks again. Completion durably records the obligation and writes the `panel_refuted` audit (slot/round/reason/evidence) to the bead metadata — a recorded refutation is never dropped silently, and a bead whose refutation obligation is unaudited will not complete even if the panel is later removed (the audit is written from a self-contained marker persisted at apply time, not by re-reading panel files). As with abandonment: do NOT refute to dodge a finding you have not actually disproven — a refutation is legitimate precisely because it is always audited, never silent, and the `reason` + `evidence` carry its legitimacy (an empty reason still clears — a footgun, not an endorsement).
+
 ## Escape hatch
 
 Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKIP_PANEL=1` in their own shell environment before launching the session; the in-binary `mindspec complete` gate reads that environment and passes the gate, emitting an audited Warn, and `mindspec complete` records `panel_gate_skipped: true` + timestamp on the bead metadata. The variable is env-only and never pasted into a command line — a blocked agent cannot set it via a Bash-line prefix (the gate never consults the command string for the hatch). This is the only place `MINDSPEC_SKIP_PANEL` is documented; the gate's Block message deliberately never prints a paste-able skip incantation.
 
 ## Anti-patterns
 
-- Don't auto-merge below the N−1 threshold. The threshold is N−1 (5/6 for the default panel), and you should still note family asymmetry.
+- Don't auto-merge below the N−1 threshold. The threshold is N−1 (5/6 for the default panel), and you should still note family asymmetry. Note the threshold is now a **floor, not a sufficient condition**: clearing it does not pass the gate while any latest-round REQUEST_CHANGES stays unresolved.
 - Don't pass raw verdict JSONs to the fix subagent — dedupe first. Six verdicts × ~3 items each = ~18 lines of duplicated asks otherwise.
 - Don't ignore `confidence`. A 0.96 REQUEST_CHANGES from one slot should outweigh a 0.70 APPROVE from another. `mindspec panel tally`'s printed table carries `verdict`/`hard_block` only, not `confidence` — read it from the underlying `<slot>-round-<N>.json` files when weighing verdicts, and note the weighting in the report.
-- Don't drop a REQUEST_CHANGES because "only one reviewer flagged it". A single empirically-grounded objection can be load-bearing — verify the claim before discarding.
+- Don't drop a REQUEST_CHANGES because "only one reviewer flagged it". A single empirically-grounded objection can be load-bearing — verify the claim before discarding — and the gate now BLOCKS on any unresolved REQUEST_CHANGES; the only per-slot escape is the audited refutation procedure (§ After a halt — recovery, item 5).
 - Don't satisfy an artifact-gate HARD block with a PR-body edit. The artifact must exist at the named path.
 
 ## Then
