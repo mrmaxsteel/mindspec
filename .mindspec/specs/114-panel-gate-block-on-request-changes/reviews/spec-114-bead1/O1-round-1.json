@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Leg 9.5 is placed exactly where the plan mandates: after leg (9) REJECT/hard_block (gate.go:246-256) and before leg (10) threshold (gate.go:283-290). It fires on f.Res.UnresolvedVerdicts() non-empty. That new tally.go method returns latest-round verdicts whose canonical Verdict is neither VerdictApprove nor VerdictReject (RC + unrecognized), correctly excluding REJECT (leg 9's business); r.Verdicts is latest-round-only by construction (Tally skips vf.round != LatestRound), so no stale-round RC can leak. Layering is intact: leg (10) is NOT removed and keeps its Approves >= threshold && threshold > 0 floor as a necessary condition; 9.5 only adds a second necessary condition ahead of it. The gate.go diff is pure additions (short-circuit comment + the 9.5 block); every other leg is byte-preserved. VoteDecision twin added in lockstep between REJECT and threshold. No refutation code, no internal/bead, no AppliedRefutations field — those are Bead 2. Exactly 9 files. build/vet clean; panel decision + vote + threshold-floor tests green. Diff matches plan Bead 1 author-of-record.",
+  "concrete_changes_required": [],
+  "findings": [
+    "gate.go:272-281 leg 9.5 correctly ordered after leg 9 (gate.go:248) and before leg 10 (gate.go:284); fires on UnresolvedVerdicts() non-empty.",
+    "Layering verified: leg 10 retained with Approves>=threshold && threshold>0 floor (gate.go:285); TestPanelGateDecision_ThresholdFloorIsLayered passes.",
+    "tally.go UnresolvedVerdicts() excludes APPROVE and REJECT; iterates r.Verdicts which is latest-round-scoped (tally loop skips earlier rounds) — deterministic slot-sorted.",
+    "All other legs byte-preserved: gate.go diff is additive only (comment block +3, leg 9.5 +25).",
+    "VoteDecision twin added between REJECT and threshold legs (tally.go:229-236) — vote-only twin cannot diverge from gate on the vote portion.",
+    "No refutation surface in Bead 1: only 'refut' occurrence is the AC10 documentary comment (gate.go:270); no Refutation struct, AppliedRefutations field, or internal/bead edit — correctly deferred to Bead 2.",
+    "Scope exact: 9 files changed, all in the plan's key_file_paths; go build ./... and go vet ./internal/panel clean."
+  ]
+}
