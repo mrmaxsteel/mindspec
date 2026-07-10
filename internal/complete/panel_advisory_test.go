@@ -169,7 +169,7 @@ func TestPanelAdvisory_ReviewerCountNote(t *testing.T) {
 		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
 	})
 
-	reg, _, err := panelGate("mindspec-bd04", []string{root}, "", false, nil)
+	reg, err := panelGate("mindspec-bd04", []string{root}, "", false, nil)
 	if err != nil {
 		t.Fatalf("panelGate returned an error; decision must be unaffected by the advisory: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
 		writePanel(t, root, "112-bead-match", panel.Panel{
 			BeadID: bp("mindspec-bead-match"), Spec: "112", Round: 1, ExpectedReviewers: 6,
 		}, map[string]string{"a-round-1.json": "APPROVE"})
-		reg, _, err := panelGate("mindspec-bead-match", []string{root}, "", false, nil)
+		reg, err := panelGate("mindspec-bead-match", []string{root}, "", false, nil)
 		if err != nil || reg == nil {
 			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
 		}
@@ -257,7 +257,7 @@ func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
 		writePanel(t, root, "112-bead-mismatch", panel.Panel{
 			BeadID: bp("mindspec-bead-mismatch"), Spec: "112", Round: 1, ExpectedReviewers: 4,
 		}, map[string]string{"a-round-1.json": "APPROVE"})
-		reg, _, err := panelGate("mindspec-bead-mismatch", []string{root}, "", false, nil)
+		reg, err := panelGate("mindspec-bead-mismatch", []string{root}, "", false, nil)
 		if err != nil || reg == nil {
 			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
 		}
@@ -306,7 +306,7 @@ func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
 
 	t.Run("panel-less complete stays advisory-silent and panic-free, gates configured", func(t *testing.T) {
 		root := t.TempDir()
-		reg, _, err := panelGate("", []string{root}, "", false, nil) // empty bead ID -> fail-open nil
+		reg, err := panelGate("", []string{root}, "", false, nil) // empty bead ID -> fail-open nil
 		if err != nil || reg != nil {
 			t.Fatalf("expected nil, nil for an empty bead ID (fail-open), got reg=%v err=%v", reg, err)
 		}
@@ -317,7 +317,7 @@ func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
 
 	t.Run("panel-less complete stays advisory-silent and panic-free, gates absent", func(t *testing.T) {
 		root := t.TempDir()
-		reg, _, err := panelGate("", []string{root}, "", false, nil)
+		reg, err := panelGate("", []string{root}, "", false, nil)
 		if err != nil || reg != nil {
 			t.Fatalf("expected nil, nil for an empty bead ID (fail-open), got reg=%v err=%v", reg, err)
 		}
@@ -331,7 +331,7 @@ func TestPanelAdvisory_GateAwareCompare(t *testing.T) {
 		writePanel(t, root, "112-global", panel.Panel{
 			BeadID: bp("mindspec-global"), Spec: "112", Round: 1, ExpectedReviewers: 4, Gate: "final_review",
 		}, map[string]string{"a-round-1.json": "APPROVE"})
-		reg, _, err := panelGate("mindspec-global", []string{root}, "", false, nil)
+		reg, err := panelGate("mindspec-global", []string{root}, "", false, nil)
 		if err != nil || reg == nil {
 			t.Fatalf("panelGate: reg=%v err=%v", reg, err)
 		}

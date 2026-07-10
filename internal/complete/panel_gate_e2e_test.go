@@ -345,7 +345,7 @@ func TestPanelGate_Hatch_ConfigToggle(t *testing.T) {
 	}, subThresholdVerdicts())
 
 	// panelGateEnabled=false → no block.
-	reg, _, err := panelGate(beadID, []string{root}, "", false, nil)
+	reg, err := panelGate(beadID, []string{root}, "", false, nil)
 	if err != nil {
 		t.Fatalf("enforcement.panel_gate=false must skip the gate; got: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestPanelGate_Hatch_ConfigToggle(t *testing.T) {
 
 	// Sanity: with the toggle ON, the same panel BLOCKS (proves the toggle is
 	// what suppressed the block, not a mis-wired fixture).
-	if _, _, blockErr := panelGate(beadID, []string{root}, "", true, nil); blockErr == nil {
+	if _, blockErr := panelGate(beadID, []string{root}, "", true, nil); blockErr == nil {
 		t.Error("with the gate enabled the same sub-threshold panel must block")
 	}
 }
@@ -370,7 +370,7 @@ func TestPanelGate_BlockNeverNamesSkipVar(t *testing.T) {
 		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
 	}, subThresholdVerdicts())
 
-	_, _, err := panelGate(beadID, []string{root}, "", true, nil)
+	_, err := panelGate(beadID, []string{root}, "", true, nil)
 	if err == nil {
 		t.Fatal("expected a block")
 	}
@@ -393,7 +393,7 @@ func TestPanelGate_SharedDecisionPin(t *testing.T) {
 		ReviewedHeadSHA: beadSHA,
 	}, subThresholdVerdicts())
 
-	_, _, err := panelGate(beadID, []string{root}, "", true, nil)
+	_, err := panelGate(beadID, []string{root}, "", true, nil)
 	if err == nil {
 		t.Fatal("expected a block")
 	}
