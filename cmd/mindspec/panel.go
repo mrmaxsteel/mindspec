@@ -756,8 +756,10 @@ func tallyExitActionNonBead(d panel.Decision, slug, target, gate string) error {
 // shellQuoteTarget renders s as a POSIX-shell single-quoted literal for
 // embedding in a copyable `mindspec panel create ... --target/--gate <s>`
 // recovery command (spec-113-final G2, finding 1): s is wrapped in single
-// quotes with any embedded single quote escaped as `'\''`, so a shell
-// metacharacter in s (`;`, `$`, a backtick, ...) can never execute when the
+// quotes with any embedded single quote escaped by the POSIX
+// close-quote/backslash-quote/reopen-quote technique, so a shell
+// metacharacter in s (semicolon, dollar, a backtick, and so on) can never
+// execute when the
 // printed recovery line is copied into a shell. s is ALWAYS quoted, even a
 // "safe" value with no metacharacters, for one predictable rendering —
 // mirrors internal/otel/config.go's own shellQuote (a different package;
