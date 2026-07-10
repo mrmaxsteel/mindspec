@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The round-2 panel_refuted-write retry hole is closed when refutation_pending was successfully recorded: step 3.75 aborts pre-close and the panel-less retry reads the durable obligation and refuses merge. But the claimed ‘ever applied’ invariant still fails one step earlier. panelGate first returns an applied refutation, then step 2.3 attempts the marker. If that marker write fails, the run aborts with no durable obligation; remove panel.json and the next run sees neither panel nor marker and follows ordinary fail-open to close/merge without panel_refuted. The new tests check only same-run abort for marker failure, not this cross-run variant. Separately, GetMetadata is specified to surface read errors, but the fail-open override and tests never require Run to treat that error as blocking; swallowing it would likewise hide a pending obligation. Thus the exact panel-removed-retry class remains partially open.",
+  "concrete_changes_required": [
+    "Specify and test marker-write-failure followed by panel removal and a second Run; that second run must not close or merge without panel_refuted. Redesign ordering/state so a refutation cannot become applied without a durable obligation, or conservatively block the indistinguishable no-panel state.",
+    "Explicitly require GetMetadata read/parse errors in the no-panel override to return a guard failure before close/merge, and add an end-to-end test asserting closeBeadFn and ex.completeCalled remain false."
+  ],
+  "findings": [
+    {
+      "disposition": "PARTIAL",
+      "severity": "load-bearing",
+      "defect": "Closed-state retry can discard the audit obligation",
+      "evidence": "The panel_refuted-write-failure variant is addressed by step 2.3 plus the cross-run test. The earlier refutation_pending-write-failure variant leaves no marker; after panel removal, the specified no-panel check has nothing to detect and can fail-open to merge."
+    },
+    {
+      "disposition": "MISSED",
+      "severity": "load-bearing",
+      "defect": "Metadata-read failure is not explicitly fail-closed at the no-panel override",
+      "evidence": "Step 6 says GetMetadata surfaces read errors, but step 5(c) only refuses when readable metadata shows an unsatisfied marker. No Run-level behavior or test requires a GetMetadata error to abort before close/merge."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "A later best-effort metadata write can erase the durable audit",
+      "evidence": "Fail-closed MergeMetadata and its read-error/no-replace-write plus erasure-survival tests remain specified."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "note",
+      "defect": "Applied refutations were not deterministically deduplicated",
+      "evidence": "The plan retains exact (slot, round) deduplication, stable first-wins selection, sorting, and within/across-panel coverage."
+    }
+  ]
+}

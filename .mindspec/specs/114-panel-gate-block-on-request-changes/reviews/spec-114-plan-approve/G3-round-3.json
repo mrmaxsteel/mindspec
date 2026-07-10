@@ -1,0 +1,40 @@
+{
+  "reviewer_id": "G3 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Round-2 G3's completeness finding remains ADDRESSED, and round-3 Provenance now maps the cross-run panel-removed refusal, pending-marker-write abort, GetMetadata, and already-closed recovery-path tests. However, the durable-obligation proof omits a third retry branch: after panel_refuted fails and leaves refutation_pending, a live panel can later require no applied refutation (for example, the reviewer changes RC to APPROVE). The plan checks pending only on the no-panel fail-open path; that live-panel retry writes neither satisfying audit nor override check and can close/merge despite the stated EVER-applied invariant. The check must fence every pre-close path, with a test for live-panel/no-longer-applied retry (and preferably skip/abandon/config-disabled variants). The execution-domain amendment is mechanically mapped, and ADR section 8 is mapped to Bead 3, but spec.md still simultaneously places internal/bead In Scope and Out of Scope as consumed as-is. That contradiction must be removed.",
+  "concrete_changes_required": [
+    "Enforce unsatisfied refutation_pending obligations on every completion path before close, not only the no-panel fail-open path; define how an existing pending entry is satisfied without relying on a currently applied refutation.",
+    "Add a cross-run test: run 1 records pending and fails panel_refuted; run 2 retains a live panel whose latest verdict is now all-APPROVE and must REFUSE until the prior obligation is audited. Cover or explicitly reason through skip, abandon, and config-disabled retries.",
+    "Delete or amend spec.md's stale Out-of-Scope internal/bead/MergeMetadata-as-is statement so it agrees with Impacted Domains and In Scope."
+  ],
+  "findings": [
+    {
+      "id": "G3-AC5-EXHAUSTIVENESS",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "The three round-1 omitted RC-filler fixtures remain explicitly classified and mapped in the Bead-1 verification inventory."
+    },
+    {
+      "id": "G3-DURABLE-OBLIGATION-LIVE-PANEL-BYPASS",
+      "severity": "blocking",
+      "disposition": "NEW",
+      "summary": "An unsatisfied pending obligation is fenced only when panel.json is absent; a live-panel retry with zero currently-applied refutations can close and merge without satisfying the earlier audit obligation.",
+      "evidence": [
+        "plan.md:495-508 scopes the obligation check to the no-panel fail-open path.",
+        "plan.md:509-519 proves only panel-present/currently-applied and no-panel branches, omitting panel-present/zero-applied retries.",
+        "plan.md:615-626 tests panel removal but not natural resolution to a live all-APPROVE panel after the failed audit write."
+      ]
+    },
+    {
+      "id": "G3-SPEC-INTERNAL-BEAD-SCOPE-CONTRADICTION",
+      "severity": "blocking",
+      "disposition": "NEW",
+      "summary": "The execution-domain amendment is contradicted by a stale Out-of-Scope declaration.",
+      "evidence": [
+        "spec.md:35 and :57 declare internal/bead changes in execution/In Scope.",
+        "spec.md:65 still says internal/bead is Out of Scope and MergeMetadata is consumed as-is."
+      ]
+    }
+  ]
+}

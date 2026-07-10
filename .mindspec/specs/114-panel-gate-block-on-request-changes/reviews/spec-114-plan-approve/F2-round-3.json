@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "All round-3 additions ground against 14fd3312. Step-2.3 insertion point is clean: gate at complete.go:337-378, CommitAll :395-405; step-3.75 gap between the ADR-divergence terminal (:543) and close (:546-547) exists; recovery branch (:548-554) skips the dolt-verify as claimed; step-5.6 audit (:783-785) is best-effort and writes no panel_refuted. GetMetadata does NOT yet exist in internal/bead/bdcli.go (correctly framed as an addition); MergeMetadata (:266-301) really swallows read errors via `if err == nil` and replace-writes from empty — the erasure hole is real. The no-panel fail-open return is panel_advisory.go:153-155 with a clean Run-side override point (panelReg nil, beadID guard). execution/OWNERSHIP.yaml:3 owns internal/bead/**. ADR-0037 §8 text matches the amendment's characterization verbatim; ADR-0037 (workflow, execution) and ADR-0035 (workflow, execution, core) cover execution. Spec Impacted Domains carries the execution bullet + amendment note; divergence.go:104/155-162/219-221 and ownership.go:373 pins all check out. Two cosmetic mis-pins only.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F2R3-1",
+      "severity": "minor",
+      "claim": "Bead 2 step 5(c): 'today panelGate returns (nil, nil, nil) and Run proceeds (complete.go:152-156)'",
+      "grounding": "The fail-open return lives in internal/complete/panel_advisory.go:153-155 (len(regs)==0 -> return nil, nil; plus beadID==\"\" at :141-143), not complete.go:152-156 — that span is inside verifyCommittedSameRead. Also today's arity is (nil, nil); (nil, nil, nil) is the post-change signature. The mechanism claim itself is TRUE and the Run-side insertion point (panelReg nil after complete.go:375-378, already nil-guarded at ~:388) is clean. Fix the citation in the bead-2 brief; no design impact."
+    },
+    {
+      "id": "F2R3-2",
+      "severity": "minor",
+      "claim": "Net-invariant comment: 'a bead that EVER has a refutation applied can never close or merge — across ANY number of retries — without a durable panel_refuted'",
+      "grounding": "The proof sketch enumerates (i) panel-present gated runs and (ii) the no-panel fail-open path, but a panel-PRESENT retry under MINDSPEC_SKIP_PANEL or enforcement.panel_gate:false returns a matched registration with an empty applied set and no obligation check fires (panel_advisory.go:169-179 equivalent paths), so an unsatisfied refutation_pending could merge via a hatch. This is consistent with the hatches' documented whole-gate-bypass semantics and the spec scopes the override to the §6 fail-open path only — but the in-code invariant comment should carry a one-line 'hatches excepted, as with every gate condition' qualifier so it does not over-claim. Non-blocking."
+    },
+    {
+      "id": "F2R3-3",
+      "severity": "info",
+      "claim": "MergeMetadata pinned at bdcli.go:263-290; GetMetadata 'the same bd show read MergeMetadata already does'",
+      "grounding": "Function actually spans :266-301 (doc comment from :263). Pattern-consistency confirmed: MergeMetadata's read is tracedOutput(\"show\", [show <id> --json]) + unmarshal of items[0].Metadata — exactly the body the new exported GetMetadata would extract, so the seam claim is grounded. Trivial span drift only."
+    },
+    {
+      "id": "F2R3-4",
+      "severity": "info",
+      "claim": "Grounded positives (recorded for the tally)",
+      "grounding": "(1) execution/OWNERSHIP.yaml line 3 is `- internal/bead/**` — exact. (2) ADR-0037 §8 (':244 Trust boundary: anti-footgun, not anti-adversary'; 'Every gate input is an agent-writable repo artifact'; 'must not fix perceived forgeability') matches the amendment's characterization, and the carve-out's no-signing/no-hashing scope statement is consistent with §8's standing fence. (3) ADR-0037 Domain(s) = workflow, execution; ADR-0035 = workflow, execution, core — the no-new-ADR coverage claim holds. (4) Spec ## Impacted Domains carries the execution bullet with the round-3 amendment note and drops the old 'no change lands there' scoping. (5) O3's mechanics verified: candidate domains come from the spec section (divergence.go ParseSpec -> normalizeImpactedDomains ~:155-162), attribution via attributeDomainCached (ownership.go:373), and an out-of-set file hard-errors 'adr-divergence-unowned' at divergence.go:219-221 before ADR-coverage — a brief-side OWNERSHIP note indeed could not have fixed it."
+    }
+  ]
+}

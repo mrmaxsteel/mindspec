@@ -1,0 +1,72 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Grounded at 14fd33128e2fc28218e8b9b40dfbccff12ac8074. The durable-obligation mechanism is insertable: panelGate's no-registration fail-open is at panel_advisory.go:153-155, Run receives nil at complete.go:375, and step-2.5 CommitAll follows at :395-404, leaving a real step-2.3 insertion point. MergeMetadata's existing show/parse logic at bdcli.go:263-280 supports extraction into GetMetadata and fail-closed reuse. The plan also specifies the narrow ADR-0037 §8 amendment, while the spec now declares execution/internal/bead in Impacted Domains. However, the spec remains self-contradictory: In Scope includes the MergeMetadata/GetMetadata changes, but Out of Scope still says internal/bead is consumed as-is; and ADR Touchpoints/AC6 still call §8 unchanged/re-affirmed despite the plan's operator-authorized §8 carve-out. These are contract-level scope/acceptance mismatches that must be reconciled before implementation. All G1 round-2 findings remain addressed.",
+  "concrete_changes_required": [
+    "Delete or rewrite spec.md:65 so internal/bead is not simultaneously In Scope and Out of Scope; explicitly retain the fail-closed MergeMetadata and new GetMetadata work in scope.",
+    "Update spec.md ADR Touchpoints and AC6 to require the narrow, operator-authorized ADR-0037 §8 durable-audit carve-out described by plan.md:766-787, while stating that the general anti-adversary posture remains unchanged.",
+    "Correct plan.md:496-497's fail-open citation from complete.go:152-156 to panel_advisory.go:153-155, with the caller insertion point at complete.go:375-378."
+  ],
+  "findings": [
+    {
+      "id": "G1-1",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "AC5 fixture reconciliation remains exhaustive",
+      "detail": "Round 3 preserves the explicit outcome-preserving treatment of panel_decision_test.go:211-219 and the other enumerated fixtures; no regression of the round-1 finding was found."
+    },
+    {
+      "id": "G1-2",
+      "disposition": "ADDRESSED",
+      "severity": "minor",
+      "title": "Leg-10 reachability remains correctly stated",
+      "detail": "The plan still preserves the threshold-zero route to leg 10 and cites panel_test.go:260-277."
+    },
+    {
+      "id": "G1-3",
+      "disposition": "ADDRESSED",
+      "severity": "minor",
+      "title": "Already-closed durability remains correctly handled",
+      "detail": "The new protocol strengthens the prior resolution: pending and satisfying audit writes are both planned before close, with explicit already-closed and cross-run tests."
+    },
+    {
+      "id": "G1-4",
+      "disposition": "ADDRESSED",
+      "severity": "minor",
+      "title": "Audit-path rationale remains corrected",
+      "detail": "The plan still grounds durable treatment in AppliedRefutations, states abandon/env-skip merge, and states config-disabled writes no audit."
+    },
+    {
+      "id": "G1-5",
+      "disposition": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-2 source grounding remains valid",
+      "detail": "The cited gate, close, merge, audit, and fixture seams remain present at the pinned SHA."
+    },
+    {
+      "id": "G1-R3-1",
+      "severity": "major",
+      "title": "Spec simultaneously includes and excludes internal/bead",
+      "detail": "spec.md:35 declares execution/internal/bead impacted; :57 puts fail-closed MergeMetadata and GetMetadata In Scope; but :65 says internal/bead is Out of Scope and MergeMetadata is consumed as-is. The latter is stale and directly contradicts Bead 2's required execution-domain change."
+    },
+    {
+      "id": "G1-R3-2",
+      "severity": "major",
+      "title": "ADR-0037 §8 amendment is not reflected in the spec contract",
+      "detail": "plan.md:766-787 requires a narrow operator-authorized §8 durable-refutation carve-out. Yet spec.md:39 describes §8 as unchanged/re-affirmed, In Scope :60 only names §6/§8 re-affirmation, and AC6 at :85 likewise requires re-affirming §8 rather than amending it. The plan and acceptance contract therefore disagree about the required ADR deliverable."
+    },
+    {
+      "id": "G1-R3-3",
+      "severity": "info",
+      "title": "Durable-obligation insertion points are mechanically grounded",
+      "detail": "panel_advisory.go:153-155 is the actual no-panel fail-open return; complete.go:375-378 is a valid caller-side place to check GetMetadata when panelReg is nil and beadID is non-empty; CommitAll is later at :395-404. bdcli.go:263-280 already contains the show/JSON/metadata read to extract into GetMetadata. The plan's complete.go:152-156 citation is a filename typo, not a design blocker."
+    },
+    {
+      "id": "G1-R3-4",
+      "severity": "info",
+      "title": "Execution-domain declaration is mechanically grounded",
+      "detail": "spec.md:35 now names execution/internal/bead; execution/OWNERSHIP.yaml:3 owns internal/bead/**; divergence.go:104,155,162 derives candidate domains from the spec and :212-221 rejects files outside them; ADR-0037 declares workflow and execution at line 5."
+    }
+  ]
+}
