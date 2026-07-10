@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "Durable-audit ordering is sound. Placing the non-swallowing writePanelRefutedMetadata at step 4.75 (after close+dolt-commit+verify 546-650, before the terminal exec.CompleteBead merge 667-672) makes AC11 structurally unfalsifiable: the merge at step 5 runs only if the 4.75 write succeeded, so a refutation-cleared gate can never merge un-audited. A write failure returns its own guard.NewFailure and lands in the already-documented closed-but-unmerged recoverable state (the 695-708 convergence contract): the close is idempotent, and on re-run panelGate (step 2.25) recomputes AppliedRefutations from the unchanged panel.json, so the write retries and converges before the merge. The bead worktree still exists at 4.75, so the bd metadata subprocess runs from a valid cwd (safer than 5.6's post-chdir position). Decision struct change is contained: I independently confirmed panel_test.go:255 is the ONLY whole-struct != comparison (all other sites — panel_decision_test 239/295, e2e 339, panelstate 939 — compare .Action/.Message fields), and there is no map[Decision] or []Decision use. Leg 9.5 (after leg 9 REJECT, before leg 10) correctly encodes the layered model: leg 9 fires first so a refutation never clears a REJECT; a refuted RC clears the 9.5 veto but never increments Approves, so leg 10's floor still blocks sub-threshold (AC7). Abandon/skip best-effort asymmetry is spec-mandated (AC11 durable vs AC5 preserved) and correctly implemented. Two minors only.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "area": "durable-audit rationale prose",
+      "detail": "Plan step 5 (and the ADR-0037 §7 text) justify the durable-vs-best-effort asymmetry by calling abandon/skip 'terminal non-merge exits'. Verified in gate.go: leg (3) abandoned -> Warn/Allow and skip-env -> Warn/Allow both PROCEED to the merge (they are not non-merge exits). The IMPLEMENTATION is correct and spec-faithful (durable panel_refuted per AC11; writePanelAuditMetadata byte-unchanged/best-effort per AC5), and the phrasing is spec-inherited (spec R2b uses the same words), so this is non-blocking. Recommend the Bead-3 ADR amendment ground the asymmetry in 'refutation changes the gate outcome and must leave a permanent trace' rather than the inaccurate 'non-merge exit', so the durable contract is not documented on a false premise."
+    },
+    {
+      "severity": "minor",
+      "area": "Bead 2 file-list completeness",
+      "detail": "The panelGate signature change to (*Registration, []Refutation, error) breaks compilation of every direct caller. I found 12 test call sites; two live in internal/complete/panel_gate_layout_test.go (lines 152, 162), which is NOT in Bead 2's key_file_paths. Step-4 prose ('update the call site in complete.Run and the direct panelGate callers in tests') covers it by description, and the go build ./... verification gate catches any miss, so this is non-blocking. Recommend adding panel_gate_layout_test.go to Bead 2's key_file_paths so the enumerated blast radius matches the actual signature-change fanout."
+    }
+  ]
+}

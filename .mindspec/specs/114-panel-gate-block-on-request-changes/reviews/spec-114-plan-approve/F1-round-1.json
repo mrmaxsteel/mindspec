@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.88,
+  "rationale": "All 12 spec ACs map in Provenance to a bead plus a NAMED runnable test with a concrete proof command — no orphan AC. Anti-gaming ACs are genuinely falsifiable: AC7 pins the exact leg-10 threshold message ('6/8 APPROVE', 'threshold is 7/8') PLUS a negative assertion against the unresolved-slot message; AC9 asserts Approves unchanged; AC10 is a fixed-string predicate re-asserted on the refutations-present case ('unresolved' not 'unrefuted' is deliberate hygiene); AC11 uses a selective stub failing only panel_refuted writes with ex.completeCalled==false (the strong pre-merge form) plus the abandon best-effort asymmetry control and the unused-entry-never-audited falsifier. Grounding verified at bc6d35d7 (code-identical to fae2bfb6): the 5A+1-dissent Allow fixture, cmd at-threshold exit-0, the panel_test.go got!=want comparison, beadPanel's empty-string verdicts, gate.go legs 9/10, complete.go steps 5/5.6 and the 695-708 convergence contract all match. I independently confirmed makeVerdicts emits EMPTY verdict strings, so the votedecision 'Pass' row genuinely flips — the plan's fourth flip is real and honestly enumerated in the AC5 diff-review proof (R1's lockstep falsifier mandates it beyond the spec's three named fixtures). Bead verification steps are real pass/fail checks. Minor non-blocking notes below.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "minor",
+      "title": "AC5 allowed-flip set is four, not the spec's three named fixtures",
+      "detail": "Spec AC5 says 'no fixture outside this named set [three] flips outcome', but the plan's diff-review proof correctly enumerates a FOURTH flip: votedecision_test.go:64-70 'threshold met 5/6 with 6 present -> Pass' -> VoteBlock. Verified real: makeVerdicts (votedecision_test.go:94) emits empty verdict strings, so under R1 the row must flip, and spec R1's lockstep falsifier mandates it. The plan records the deviation transparently ('Plus the VoteDecision lockstep twin the spec's R1 falsifier mandates'). No change required; the bead-1 panel should treat the four-fixture set (not three) as the AC5 carve-out when applying the diff-review gate."
+    },
+    {
+      "id": "F1-2",
+      "severity": "nit",
+      "title": "AC12 proof regex 'Refut|Dup' — the Dup alternative matches no planned test name",
+      "detail": "AC12 rows live inside TestPanelGateDecision_Refutations (matched by 'Refut'), so `go test ./internal/panel -run 'Refut|Dup'` still exercises them and the proof is runnable; but 'Dup' itself matches nothing. Suggestion for the implementer: name the duplicate-casing rows in a subtest or dedicated test containing 'Dup' (e.g. TestPanelGateDecision_DuplicateSlotCasing) so the spec's AC12 proof command bites on its own term. Cosmetic; not blocking."
+    },
+    {
+      "id": "F1-3",
+      "severity": "nit",
+      "title": "Suggested cheap test row: skip-env path with a refutations-carrying panel writes no panel_refuted",
+      "detail": "Bead 2 step 4 asserts the skip-env/config-disabled panelGate paths return nil applied refutations (so only panel_gate_skipped is audited), and the design makes this structurally true (those paths return before verdict evaluation). But no named test pins it. A one-row e2e (MINDSPEC_SKIP_PANEL set, panel has 5A+1RC + matching refutation entry -> completes, metadata has panel_gate_skipped and NO panel_refuted key) would make the 'only genuine clears are recorded' claim falsifiable on that path too. Non-blocking; step 7(iv) covers the adjacent plain-pass case."
+    }
+  ]
+}

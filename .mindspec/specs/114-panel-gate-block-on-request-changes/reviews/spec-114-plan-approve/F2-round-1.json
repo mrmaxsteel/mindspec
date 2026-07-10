@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Grounding is otherwise exemplary: I verified every cited symbol/line at bc6d35d7 (parent fae2bfb6, zero code diff) — gate.go legs 9 (243-253)/10 (255-262), Decision (48-51), tally.go 18-22/107-110/180-214/273-276/296-301/306, complete.go step 2.25 (337-378), step 4 (546-650), merge (667-672), closed-but-unmerged contract (695-708), step 5.6 (778-785), completeMergeMetadataFn (:42), panelGate (panel_advisory.go:140-215), writePanelAuditMetadata (304-342), MergeMetadata (bdcli.go), all named fixtures, the single Decision!=Decision at panel_test.go:255, sanitizeNonBeadDecision HasSuffix strip, ADR-0037 sections/5 amendments, SKILL.md item 4 + byte-identical mirror. The superset-message strategy holds against the actual mustHave/mustNotHave strings (incl. the \"/6\" mustNotHave). But the AC5 enumeration the plan calls exhaustive misses one genuine outcome flip: panel_decision_test.go:211-219 (\"expected_reviewers:3 → 3/3 present, 2 APPROVE Allow\") is 2 APPROVE + 1 appended slot-z REQUEST_CHANGES with want Allow — leg 9.5 flips it to Block, and it appears in neither step 5 nor step 6, so Bead 1's own diff-review proof fails as written and the implementer must make an unplanned classification on the spec's most gaming-sensitive surface. One-line fix.",
+  "concrete_changes_required": [
+    "Bead 1 step 6: add internal/panel/panel_decision_test.go:211-219 (\"expected_reviewers:3 → 3/3 present, 2 APPROVE Allow (no hardcoded 6)\" — currently 2 APPROVE + 1 appended slot-z REQUEST_CHANGES, want Allow) to the outcome-PRESERVING input-update list, e.g. replace the RC with a third APPROVE (3/3 APPROVE, threshold 2 — preserving the no-hardcoded-6 subject and the Allow outcome), keeping the spec's AC5 three-flip carve-out intact.",
+    "Bead 1 step 4: correct the reachability claim \"with zero refutations it [leg 10 Block] is unreachable\" — gate.go:257's `threshold > 0` guard makes leg-10 Block reachable with zero non-APPROVE verdicts (all-APPROVE panel whose resolved threshold is 0), pinned by the threshold-0 case in TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision (panel_test.go:260-277), which still routes to leg 10 post-Bead-1. Restate as: with zero refutations, leg-10 Block is reachable only via the threshold-0 guard."
+  ],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "major",
+      "title": "Unlisted AC5 outcome flip: panel_decision_test.go:211-219",
+      "detail": "Plan Bead 1 steps 5-6 are presented as the exhaustive fixture reconciliation (\"enumerated exhaustively in Bead 1 steps 5-6\"; verification step: \"outcome flips ONLY in the step-5 named set\"). The tree contradicts exhaustiveness: internal/panel/panel_decision_test.go:211-219 builds ExpectedReviewers:3 with result(p,2,0,1,nil,nil) (2 APPROVE verdicts) plus an appended Verdict{Slot:\"z\", Verdict: VerdictRequestChanges} and asserts want: Allow. Under the new leg 9.5 (len(UnresolvedVerdicts())>0 → Block) this fixture flips Allow→Block. It is in neither the step-5 flip carve-out (panel_decision_test.go:184-194, panel_advisory_test.go:69-81, cmd panel_test.go:386-389, votedecision_test.go:64-70) nor the step-6 outcome-preserving list. Spec AC5 says \"no fixture outside this named set flips outcome\", so the plan-conformant remedy is a step-6 input update (third APPROVE), not a fourth carve-out entry."
+    },
+    {
+      "id": "F2-2",
+      "severity": "minor",
+      "title": "False reachability claim: leg-10 Block with zero refutations",
+      "detail": "Bead 1 step 4 claims that after Bead 1, leg (10)'s Block \"with zero refutations ... is unreachable\". gate.go:256-262 blocks when `threshold > 0` fails even with zero non-APPROVE verdicts: an ExpectedReviewers:1 panel resolves ApproveThreshold()==0 (panel.go ApproveThreshold, ExpectedReviewers<=0 or fallback rules), and panel_test.go:260-277 pins exactly this — 1/1 APPROVE, Complete(), no unresolved verdicts, reaches leg 10 and Blocks. Post-Bead-1 that fixture still routes to leg 10 (no unresolved verdicts, leg 9.5 silent). The fixture stays green (asserts Action only), but the plan's claim is tree-contradicted and could mislead an implementer into asserting leg-10 Block unreachability in a test."
+    },
+    {
+      "id": "F2-3",
+      "severity": "info",
+      "title": "Config-disabled gate path has no audit, contrary to step-4 prose",
+      "detail": "Bead 2 step 4 says the skip-env and config-disabled paths (panel_advisory.go:169-179) return nil applied and \"their own panel_gate_skipped audit covers them\". Only the skip-env path is audited: writePanelAuditMetadata (panel_advisory.go:322-330) writes panel_gate_skipped iff panelSkipEnvFn(); the enforcement.panel_gate:false path writes no audit key at all. No design impact (returning nil applied is correct for both), but the justificatory prose overstates coverage."
+    },
+    {
+      "id": "F2-4",
+      "severity": "info",
+      "title": "Grounding confirmations (no action)",
+      "detail": "Verified and correct: pin equivalence fae2bfb6==bc6d35d7 for code; the delegation-pinned tests (cmd/mindspec/panel_test.go TestPanelVerbs_DecisionIsPanelGateDecision — want computed from panel.PanelGateDecision(tc.facts).Action, and internal/instruct TestPanelStateVerdict_DelegatesToPanelGateDecision) self-adjust to leg 9.5, so their RC-filler at-threshold rows are correctly absent from both AC5 lists; approveVerdicts really is n-1 APPROVE + 1 REQUEST_CHANGES (panel_gate_e2e_test.go:76-84); panelstate beadPanel really synthesizes empty-string verdicts (panelstate_test.go:58-79); the leg-9.5 substring-superset strategy keeps the four sub-threshold fixtures green against their actual mustHave/mustNotHave sets including mustNotHave \"/6\" at panel_decision_test.go:233; the step-4.75 insertion point (after complete.go:650, before :667-672) and the closed-but-unmerged convergence contract (:695-708, close idempotent at :546-554) support the AC11 write-before-merge design; MergeMetadata JSON-marshals the merged map so panel_refuted_entries round-trips; exactly one Decision struct-equality exists (panel_test.go:255); ADR-0037 carries §§1-8 and five prior amendments; both ms-panel-tally SKILL.md copies are byte-identical with the abandon procedure as item 4."
+    }
+  ]
+}

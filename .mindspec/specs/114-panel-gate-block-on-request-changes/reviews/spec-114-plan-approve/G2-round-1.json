@@ -1,0 +1,28 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "Step 4.75 blocks the immediate CompleteBead call when the audit write reports failure, but AC11 is not airtight. First, the failure leaves the bead closed; on retry, panelGate still fail-opens when the panel is absent, so removing/losing the panel lets the already-closed bead merge without ever persisting panel_refuted. The cited closed-but-unmerged convergence contract guarantees merge retry, not preservation of an audit obligation. Second, even a successful pre-merge audit can later be erased: bead.MergeMetadata ignores metadata-read errors and performs replace-style metadata update from an empty map; post-merge doc/ADR best-effort writes use that helper. A transient show failure followed by successful update therefore yields successful completion with panel_refuted lost. Abandon/skip may remain best-effort because those short-circuit paths produce no AppliedRefutations. The Decision plumbing is otherwise sound: only threshold-Allow exposes matches to canonical latest-round REQUEST_CHANGES, without changing Approves.",
+  "concrete_changes_required": [
+    "Make the refutation-audit obligation durable before the bead can become closed (for example, write and verify panel_refuted immediately before close), or persist a non-bypassable pending obligation that an already-closed retry must satisfy even if the panel later disappears; add a retry test that removes/makes the panel unavailable after the injected write failure and proves no unaudited merge.",
+    "Prevent later metadata writes from erasing panel_refuted: make MergeMetadata fail closed on an existing-metadata read failure (or use an atomic merge/patch primitive), include internal/bead in scope, and test a successful refutation completion where a post-merge best-effort metadata write encounters show failure but cannot replace away the audit.",
+    "Specify deterministic selection for duplicate refutation entries sharing slot+round and deduplicate AppliedRefutations across all matched panels before auditing."
+  ],
+  "findings": [
+    {
+      "severity": "load-bearing",
+      "defect": "Closed-state retry can discard the audit obligation",
+      "evidence": "The gate runs before close (internal/complete/complete.go:337-378), no registrations fail open (internal/complete/panel_advisory.go:152-155), close is already committed before proposed step 4.75 (internal/complete/complete.go:546-650), and the recovery contract only retries merge/cleanup (internal/complete/complete.go:695-708). Thus panel loss/removal between attempts permits a refutation-cleared first attempt to become an unaudited merge on retry."
+    },
+    {
+      "severity": "load-bearing",
+      "defect": "A later best-effort metadata write can erase the durable audit",
+      "evidence": "MergeMetadata ignores failure reading existing metadata (internal/bead/bdcli.go:269-280) and then performs the replace-style update (internal/bead/bdcli.go:282-299). Post-merge doc/ADR writes call this helper and swallow failures (internal/complete/complete.go:724-776). If show fails but update succeeds, panel_refuted is omitted and replaced after the merge has landed."
+    },
+    {
+      "severity": "note",
+      "defect": "Best-effort abandon/skip asymmetry is feasible",
+      "evidence": "Skip/config-disabled paths bypass fact evaluation (internal/complete/panel_advisory.go:165-179), and abandonment short-circuits as Warn before vote evaluation (internal/panel/gate.go:160-170). Neither can carry an applied refutation, so keeping their step-5.6 audit best-effort is coherent once metadata preservation is fixed."
+    }
+  ]
+}
