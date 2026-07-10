@@ -294,44 +294,49 @@ func pendingEntryKey(slot string, round int) string {
 	return slot + "\x00" + strconv.Itoa(round)
 }
 
-// decodePendingEntries tolerantly decodes the raw
-// `refutation_pending_entries` metadata value (nil, a []interface{} of
-// maps from a real bd JSON round-trip, or an already-typed slice from a
-// test double) via a marshal/unmarshal round-trip. A malformed/unexpected
-// shape decodes to nil (empty), never an error — GetMetadata already owns
-// the fail-closed read-error signal; this only reshapes an already-clean
-// read.
-func decodePendingEntries(raw interface{}) []refutationPendingEntry {
+// decodePendingEntries decodes the raw `refutation_pending_entries`
+// metadata value (nil, a []interface{} of maps from a real bd JSON
+// round-trip, or an already-typed slice from a test double) via a
+// marshal/unmarshal round-trip. A genuinely ABSENT value (nil raw) decodes
+// to (nil, nil) — no obligation, a no-op for every caller. A
+// PRESENT-but-malformed value (a marshal, unmarshal, or shape error)
+// returns an ERROR, never a silently-empty set: this array is the durable
+// obligation store, and treating a corrupt store as empty would DROP a
+// recorded obligation — the fail-OPEN direction this protocol exists to
+// close. Callers Refuse/Block on the error (fail-closed, symmetric with
+// the step-5(d) GetMetadata read-error rule).
+func decodePendingEntries(raw interface{}) ([]refutationPendingEntry, error) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("re-encoding refutation_pending_entries: %w", err)
 	}
 	var out []refutationPendingEntry
-	if json.Unmarshal(data, &out) != nil {
-		return nil
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding refutation_pending_entries: %w", err)
 	}
-	return out
+	return out, nil
 }
 
-// decodeRefutations tolerantly decodes a raw `panel_refuted_entries` value
-// into []panel.Refutation (same round-trip tolerance as
-// decodePendingEntries).
-func decodeRefutations(raw interface{}) []panel.Refutation {
+// decodeRefutations decodes a raw `panel_refuted_entries` value into
+// []panel.Refutation — same absent-is-empty / present-but-corrupt-is-error
+// discipline as decodePendingEntries (a corrupt satisfying-audit array must
+// Refuse, never read as "nothing covered").
+func decodeRefutations(raw interface{}) ([]panel.Refutation, error) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("re-encoding panel_refuted_entries: %w", err)
 	}
 	var out []panel.Refutation
-	if json.Unmarshal(data, &out) != nil {
-		return nil
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding panel_refuted_entries: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 // unionPendingEntries returns the deterministic (slot, round)-deduplicated
@@ -398,20 +403,21 @@ func unionRefutations(existing, add []panel.Refutation) []panel.Refutation {
 }
 
 // decodeDischargedEntries mirrors decodePendingEntries for
-// `refutation_discharged_entries`.
-func decodeDischargedEntries(raw interface{}) []dischargedEntry {
+// `refutation_discharged_entries`: absent is empty, present-but-corrupt is
+// an error (fail-closed).
+func decodeDischargedEntries(raw interface{}) ([]dischargedEntry, error) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("re-encoding refutation_discharged_entries: %w", err)
 	}
 	var out []dischargedEntry
-	if json.Unmarshal(data, &out) != nil {
-		return nil
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding refutation_discharged_entries: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 // unionDischargedEntries is unionPendingEntries's twin for
@@ -454,7 +460,14 @@ func persistRefutationPending(beadID string, applied []panel.Refutation) error {
 	if err != nil {
 		return fmt.Errorf("reading existing refutation obligations: %w", err)
 	}
-	merged := unionPendingEntries(decodePendingEntries(existingMeta["refutation_pending_entries"]), applied)
+	existing, decErr := decodePendingEntries(existingMeta["refutation_pending_entries"])
+	if decErr != nil {
+		// A present-but-corrupt obligation store cannot be safely unioned
+		// into — fail-closed, the refutation is NOT applied (panelGate
+		// Blocks), exactly like a read error above.
+		return fmt.Errorf("reading existing refutation obligations: %w", decErr)
+	}
+	merged := unionPendingEntries(existing, applied)
 	if err := completeMergeMetadataFn(beadID, map[string]interface{}{
 		"refutation_pending_entries": merged,
 	}); err != nil {
@@ -479,7 +492,13 @@ func writePanelRefutedMetadata(beadID string, entries []panel.Refutation) error 
 	if err != nil {
 		return fmt.Errorf("reading existing panel_refuted_entries: %w", err)
 	}
-	merged := unionRefutations(decodeRefutations(existingMeta["panel_refuted_entries"]), entries)
+	existing, decErr := decodeRefutations(existingMeta["panel_refuted_entries"])
+	if decErr != nil {
+		// Fail-closed: unioning into a corrupt audit array could lose an
+		// earlier satisfied entry — the completion fails pre-close instead.
+		return fmt.Errorf("reading existing panel_refuted_entries: %w", decErr)
+	}
+	merged := unionRefutations(existing, entries)
 	meta := map[string]interface{}{
 		"panel_refuted":         true,
 		"panel_refuted_at":      time.Now().UTC().Format(time.RFC3339),
@@ -504,7 +523,12 @@ func writeRefutationDischargedMetadata(beadID string, entries []dischargedEntry)
 	if err != nil {
 		return fmt.Errorf("reading existing refutation_discharged_entries: %w", err)
 	}
-	merged := unionDischargedEntries(decodeDischargedEntries(existingMeta["refutation_discharged_entries"]), entries)
+	existing, decErr := decodeDischargedEntries(existingMeta["refutation_discharged_entries"])
+	if decErr != nil {
+		// Fail-closed, mirroring writePanelRefutedMetadata.
+		return fmt.Errorf("reading existing refutation_discharged_entries: %w", decErr)
+	}
+	merged := unionDischargedEntries(existing, entries)
 	meta := map[string]interface{}{
 		"refutation_discharged":         true,
 		"refutation_discharged_at":      time.Now().UTC().Format(time.RFC3339),
@@ -545,35 +569,85 @@ func dischargeEvidence(res *panel.Result, slot string, round int) bool {
 // reconcilePendingRefutations enforces Spec 114 R2's durable-obligation
 // invariant: every `refutation_pending` entry recorded on bead metadata —
 // the FULL unioned set across every prior run, not just this run's — must
-// be Satisfied, verified-Discharged, or Refused BEFORE close, on EVERY
-// completion path (panel-present, no-panel, AND hatch). Called from
-// complete.Run AFTER the last blocking gate (ADR-divergence) and BEFORE the
-// step-4 close.
+// be Satisfied, verified-Discharged, already-Covered-of-record, or Refused
+// BEFORE close, on EVERY completion path (panel-present, no-panel, AND
+// hatch). Called from complete.Run AFTER the last blocking gate
+// (ADR-divergence) and BEFORE the step-4 close.
 //
-// panelReg is the matched registration panelGate returned (nil on the
-// no-panel / no-match paths — panelGate does NOT tally on the hatch paths,
-// so this function does its OWN re-tally of panelReg.Dir for discharge
-// evidence, uniformly across every path). applied is THIS run's
+// roots is the SAME layout-aware scan-root set panelGate used: this
+// function re-scans it (via the same panelScanFn seam) for EVERY matched
+// panel registration of the bead and re-tallies EACH of them for discharge
+// evidence — never just the first. panelGate aggregates applied refutations
+// across ALL matched panels, so a pending (slot, round) here cannot be
+// attributed to any single panel; discharging it from an arbitrary
+// first-matched panel's APPROVE state while its origin RC is still live in
+// another matched panel would be a FALSE discharge (the round-1 G1
+// blocking finding). Doing its own scan+tally also works uniformly on the
+// hatch paths, where panelGate never tallies. applied is THIS run's
 // AppliedRefutations set (panelGate's third return); a pending entry it
-// covers Satisfies. Discharge fires ONLY on affirmative re-tally evidence
-// (dischargeEvidence) — never on a bare Allow/Warn gate action, since Warn
-// paths (abandoned/missing-ref/transient-gitErr) pass WITHOUT the RC
-// resolving. No panel dir, an erroring re-tally, a re-tally that still
-// shows the RC live, or a completeGetMetadataFn read error all Refuse
-// (fail-closed, over-conservative: never a lost obligation, never a false
-// discharge). A bead with NO recorded pending reconciles to a no-op — §6
-// fail-open preserved for genuinely pristine beads.
-func reconcilePendingRefutations(beadID string, panelReg *panel.Registration, applied []panel.Refutation) error {
+// covers Satisfies. A pending already covered by a durable
+// `panel_refuted_entries` OR `refutation_discharged_entries` record on bead
+// metadata is discharged-of-record and reconciles to a no-op (plan
+// L533-535: a compound-failure retry — audit durably written, close
+// failed, panel removed — must not re-Refuse an already-met obligation).
+// Discharge fires ONLY on affirmative re-tally evidence
+// (dischargeEvidence) holding in EVERY matched panel — never on a bare
+// Allow/Warn gate action, since Warn paths (abandoned/missing-ref/
+// transient-gitErr) pass WITHOUT the RC resolving. No matched panel at
+// all, ANY erroring re-tally, ANY matched panel still showing the RC live
+// (or lacking affirmative evidence the slot resolved — the pending's
+// origin panel cannot be told apart from one whose verdicts were removed),
+// a completeGetMetadataFn read error, or a present-but-corrupt
+// entries value all Refuse (fail-closed, over-conservative: never a lost
+// obligation, never a false discharge). A bead with NO recorded pending
+// reconciles to a no-op — §6 fail-open preserved for genuinely pristine
+// beads.
+func reconcilePendingRefutations(beadID string, roots []string, applied []panel.Refutation) error {
+	refuse := func(msg string) error {
+		return guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+	}
 	meta, err := completeGetMetadataFn(beadID)
 	if err != nil {
-		return guard.NewFailure(fmt.Sprintf(
+		return refuse(fmt.Sprintf(
 			"bead %s metadata could not be read to verify its refutation obligations are satisfied — an unreadable metadata store cannot prove the bead is obligation-free (%v)",
-			beadID, err),
-			fmt.Sprintf("mindspec complete %s", beadID))
+			beadID, err))
 	}
-	pending := decodePendingEntries(meta["refutation_pending_entries"])
+	pending, decErr := decodePendingEntries(meta["refutation_pending_entries"])
+	if decErr != nil {
+		// PRESENT-but-malformed obligation store: fail-closed. Decoding it
+		// as empty would silently drop every recorded obligation (fail-OPEN);
+		// an ABSENT key (raw nil) is the genuine no-obligation no-op above.
+		return refuse(fmt.Sprintf(
+			"bead %s carries a refutation_pending_entries record that could not be decoded — a corrupt obligation store cannot prove the bead is obligation-free (%v)",
+			beadID, decErr))
+	}
 	if len(pending) == 0 {
 		return nil
+	}
+
+	// Plan L533-535: reconcile only the pending entries NOT already covered
+	// by a durable panel_refuted / refutation_discharged audit — those
+	// obligations are met of-record. The covering reads are fail-closed too:
+	// a present-but-corrupt audit array Refuses rather than reading as
+	// "nothing covered" (or worse, being trusted blindly).
+	coveredRefuted, decErr := decodeRefutations(meta["panel_refuted_entries"])
+	if decErr != nil {
+		return refuse(fmt.Sprintf(
+			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
+			beadID, decErr))
+	}
+	coveredDischarged, decErr := decodeDischargedEntries(meta["refutation_discharged_entries"])
+	if decErr != nil {
+		return refuse(fmt.Sprintf(
+			"bead %s carries a refutation_discharged_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already discharged (%v)",
+			beadID, decErr))
+	}
+	covered := make(map[string]bool, len(coveredRefuted)+len(coveredDischarged))
+	for _, c := range coveredRefuted {
+		covered[pendingEntryKey(c.Slot, c.Round)] = true
+	}
+	for _, c := range coveredDischarged {
+		covered[pendingEntryKey(c.Slot, c.Round)] = true
 	}
 
 	appliedIdx := make(map[string]panel.Refutation, len(applied))
@@ -581,15 +655,38 @@ func reconcilePendingRefutations(beadID string, panelReg *panel.Registration, ap
 		appliedIdx[pendingEntryKey(a.Slot, a.Round)] = a
 	}
 
-	// Re-tally the matched panel dir ONCE for discharge evidence (fs-only,
-	// no git). No panel dir, or a re-tally error, leaves res nil — discharge
-	// evidence is then UNAVAILABLE for every entry not covered by THIS run's
-	// applied set, so those Refuse (fail-closed).
-	var res *panel.Result
-	if panelReg != nil {
-		if r, tallyErr := panelTallyFn(panelReg.Dir); tallyErr == nil {
-			res = r
+	// Re-tally EVERY matched panel registration for discharge evidence
+	// (fs-only, no git) — the same scan seam and roots the gate used, so the
+	// two cannot diverge on which panels are "matched". No matched panel, or
+	// ANY re-tally error, makes the discharge vote-state UNAVAILABLE: every
+	// entry not satisfied by THIS run's applied set (and not covered above)
+	// then Refuses (fail-closed).
+	regs := panel.ForBead(panelScanFn(roots...), beadID)
+	retallyOK := len(regs) > 0
+	var results []*panel.Result
+	for i := range regs {
+		r, tallyErr := panelTallyFn(regs[i].Dir)
+		if tallyErr != nil {
+			retallyOK = false
+			break
 		}
+		results = append(results, r)
+	}
+	// dischargeVerified: the two-disjunct dischargeEvidence test must hold
+	// in EVERY matched panel, so a pending is never discharged from one
+	// panel's APPROVE state while ANY matched panel still shows (or cannot
+	// affirmatively deny) the slot as a live latest-round RC at/covering its
+	// round.
+	dischargeVerified := func(slot string, round int) bool {
+		if !retallyOK {
+			return false
+		}
+		for _, r := range results {
+			if !dischargeEvidence(r, slot, round) {
+				return false
+			}
+		}
+		return true
 	}
 
 	var toSatisfy []panel.Refutation
@@ -597,11 +694,16 @@ func reconcilePendingRefutations(beadID string, panelReg *panel.Registration, ap
 	var unresolved []string
 
 	for _, p := range pending {
-		if ref, ok := appliedIdx[pendingEntryKey(p.Slot, p.Round)]; ok {
+		key := pendingEntryKey(p.Slot, p.Round)
+		if covered[key] {
+			// Already covered by a durable audit — a no-op, not a re-write.
+			continue
+		}
+		if ref, ok := appliedIdx[key]; ok {
 			toSatisfy = append(toSatisfy, ref)
 			continue
 		}
-		if dischargeEvidence(res, p.Slot, p.Round) {
+		if dischargeVerified(p.Slot, p.Round) {
 			toDischarge = append(toDischarge, dischargedEntry{
 				Slot: p.Slot, Round: p.Round,
 				Reason: fmt.Sprintf("RC resolved naturally — the slot's latest-round verdict is no longer REQUEST_CHANGES at/after round %d", p.Round),

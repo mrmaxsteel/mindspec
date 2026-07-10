@@ -433,7 +433,8 @@ func TestPanelRefuted_CrossRun_NaturalResolution_Discharges(t *testing.T) {
 // latest-round REQUEST_CHANGES: reconciliation must REFUSE, never discharge,
 // proving discharge keys on the re-tally, not on a bare Allow/Warn gate
 // action. reconcilePendingRefutations does not even receive the gate's
-// action — it independently re-tallies panelReg.Dir via panel.Tally — so
+// action — it independently re-scans the roots and re-tallies every matched
+// panel dir via panel.Tally — so
 // this ONE assertion covers every Warn-producing shape uniformly (abandoned,
 // missing-ref, transient-gitErr all reach PanelGateDecision's Warn branch
 // and are pinned individually at the pure-decision layer,
@@ -445,10 +446,6 @@ func TestPanelRefuted_CrossRun_NaturalResolution_Discharges(t *testing.T) {
 // an orthogonal failure rather than this one.
 func TestPanelRefuted_WarnPathDoesNotDischarge(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "review", "warn-slug")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	writePanel(t, root, "warn-slug", panel.Panel{
 		BeadID: bp("mindspec-warn"), Round: 1, ExpectedReviewers: 6,
 		Abandoned: true, AbandonReason: "max: dropped mid-review",
@@ -468,8 +465,7 @@ func TestPanelRefuted_WarnPathDoesNotDischarge(t *testing.T) {
 	completeGetMetadataFn = store.Get
 	completeMergeMetadataFn = store.Merge
 
-	panelReg := &panel.Registration{Dir: dir}
-	err := reconcilePendingRefutations("mindspec-warn", panelReg, nil)
+	err := reconcilePendingRefutations("mindspec-warn", []string{root}, nil)
 	if err == nil {
 		t.Fatal("expected reconciliation to REFUSE: X is still a live RC in the re-tally, never affirmatively resolved")
 	}
@@ -884,6 +880,252 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		if meta["refutation_pending_entries"] != nil || meta["panel_refuted"] != nil || meta["refutation_discharged"] != nil {
 			t.Errorf("a pristine bead must write NO refutation audits, got %v", meta)
 		}
+	})
+}
+
+// --- (xiv) round-1 fix #1: cross-panel false discharge ---------------------
+
+// TestPanelRefuted_CrossPanel_NoFalseDischarge (G1 BLOCKING, round-1 fix 1):
+// TWO panel dirs register the SAME bead with CONTRADICTORY same-slot
+// verdicts — "aaa-first" (Scan sorts by dir, so it is the FIRST matched
+// registration) shows X as APPROVE, while "zzz-origin" still holds X as a
+// live latest-round REQUEST_CHANGES. Under the MINDSPEC_SKIP_PANEL hatch
+// (so the gate itself never blocks on zzz-origin's RC), a pre-existing
+// durable pending X@1 must NOT be discharged from aaa-first's APPROVE state:
+// reconciliation re-tallies EVERY matched panel, and any matched panel still
+// showing the RC live vetoes the discharge → Refuse. Once the origin
+// panel's slot resolves, the discharge fires and the completion proceeds.
+// RED-on-revert: a first-matched-panel-only reconciliation discharges from
+// aaa-first and run 1 wrongly completes.
+func TestPanelRefuted_CrossPanel_NoFalseDischarge(t *testing.T) {
+	const specID, beadID = "114-pr14", "mindspec-114pr.14"
+	root, _ := setupPanelGateRepo(t, specID, beadID)
+	origSkip := panelSkipEnvFn
+	t.Cleanup(func() { panelSkipEnvFn = origSkip })
+	panelSkipEnvFn = func() bool { return true }
+
+	store := newFakeMetadataStore()
+	store.data[beadID] = map[string]interface{}{
+		"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+	}
+	store.wire(t)
+
+	writePanel(t, root, "aaa-first", panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "X-round-1.json": "APPROVE",
+	})
+	writePanel(t, root, "zzz-origin", panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "X-round-1.json": "REQUEST_CHANGES",
+	})
+
+	closeCalled := false
+	closeBeadFn = func(...string) error { closeCalled = true; return nil }
+
+	// Run 1: X's RC is still LIVE in zzz-origin — the pending must REFUSE,
+	// never be discharged off aaa-first's APPROVE state.
+	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	_, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	if err == nil {
+		t.Fatal("run 1 must REFUSE: the pending's RC is still live in a matched panel (zzz-origin); discharging from aaa-first's APPROVE state is a false discharge")
+	}
+	if !strings.Contains(err.Error(), "X@1") {
+		t.Errorf("expected the Refuse to name X@1, got: %s", err.Error())
+	}
+	if closeCalled || ex1.completeCalled {
+		t.Error("nothing may mutate while the obligation is unverifiable across the matched panels")
+	}
+	if store.data[beadID]["refutation_discharged"] != nil {
+		t.Errorf("refutation_discharged must NOT be written while X's origin RC is live, got %v", store.data[beadID])
+	}
+
+	// Run 2: the ORIGIN panel's slot resolves — now every matched panel
+	// affirmatively shows X resolved at/after round 1 → verified discharge.
+	if err := os.WriteFile(filepath.Join(root, "review", "zzz-origin", "X-round-1.json"),
+		[]byte(`{"verdict":"APPROVE"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		t.Fatalf("run 2 must discharge (every matched panel now shows X resolved) and complete; got: %v", err)
+	}
+	if !closeCalled || !ex2.completeCalled {
+		t.Fatal("run 2 must close and merge")
+	}
+	if store.data[beadID]["refutation_discharged"] != true {
+		t.Errorf("expected refutation_discharged=true after the origin resolved, got %v", store.data[beadID])
+	}
+	entries, _ := store.data[beadID]["refutation_discharged_entries"].([]dischargedEntry)
+	if len(entries) != 1 || entries[0].Slot != "X" || entries[0].Round != 1 {
+		t.Errorf("expected the discharge entry to name X@1, got %+v", entries)
+	}
+}
+
+// --- (xv) round-1 fix #2: already-covered pending is a no-op ---------------
+
+// TestPanelRefuted_AlreadyCoveredPending_Completes (G1/O1/F1 MAJOR, plan
+// L533-535): a compound-failure retry — run 1 durably wrote the covering
+// audit but the CLOSE failed (2u0u non-durable close), then panel.json was
+// removed before the retry. The pending X@1 is ALREADY covered by a durable
+// panel_refuted_entries (or refutation_discharged_entries) record, so
+// reconciliation treats it as discharged-of-record (a no-op) and the retry
+// COMPLETES — it must not Refuse an obligation the audit trail proves met.
+func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
+	run := func(t *testing.T, specID, beadID string, seed map[string]interface{}) *fakeMetadataStore {
+		t.Helper()
+		root, _ := setupPanelGateRepo(t, specID, beadID)
+		store := newFakeMetadataStore()
+		store.data[beadID] = seed
+		store.wire(t)
+
+		closeCalled := false
+		closeBeadFn = func(...string) error { closeCalled = true; return nil }
+
+		// NO panel dir at all: without coverage recognition this is exactly
+		// the CrossRun_PanelRemoved Refuse shape — coverage is the ONLY
+		// thing letting it complete.
+		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+		res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		if err != nil {
+			t.Fatalf("an already-covered pending must reconcile to a no-op and COMPLETE; got: %v", err)
+		}
+		if !closeCalled || !ex.completeCalled || res == nil || !res.BeadClosed {
+			t.Fatalf("expected a normal completion, got close=%v merge=%v res=%+v", closeCalled, ex.completeCalled, res)
+		}
+		return store
+	}
+
+	t.Run("covered by a durable panel_refuted_entries record", func(t *testing.T) {
+		store := run(t, "114-pr15a", "mindspec-114pr.15a", map[string]interface{}{
+			"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+			"panel_refuted":              true,
+			"panel_refuted_entries":      []panel.Refutation{{Slot: "X", Round: 1, Reason: "dismissed", Evidence: "commit abc"}},
+		})
+		if store.data["mindspec-114pr.15a"]["refutation_discharged"] != nil {
+			t.Errorf("a covered pending is a NO-OP — no new discharge audit may be written, got %v", store.data["mindspec-114pr.15a"])
+		}
+	})
+
+	t.Run("covered by a durable refutation_discharged_entries record", func(t *testing.T) {
+		store := run(t, "114-pr15b", "mindspec-114pr.15b", map[string]interface{}{
+			"refutation_pending_entries":    []refutationPendingEntry{{Slot: "X", Round: 1}},
+			"refutation_discharged":         true,
+			"refutation_discharged_entries": []dischargedEntry{{Slot: "X", Round: 1, Reason: "RC resolved naturally"}},
+		})
+		if store.data["mindspec-114pr.15b"]["panel_refuted"] != nil {
+			t.Errorf("a covered pending is a NO-OP — no new satisfying audit may be written, got %v", store.data["mindspec-114pr.15b"])
+		}
+	})
+
+	t.Run("a NON-covered pending in the same shape still Refuses (control)", func(t *testing.T) {
+		const specID, beadID = "114-pr15c", "mindspec-114pr.15c"
+		root, _ := setupPanelGateRepo(t, specID, beadID)
+		store := newFakeMetadataStore()
+		store.data[beadID] = map[string]interface{}{
+			// A covering record for a DIFFERENT (slot, round) — Y@1 and X@2
+			// do not cover X@1.
+			"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+			"panel_refuted_entries":      []panel.Refutation{{Slot: "Y", Round: 1, Reason: "other slot"}, {Slot: "X", Round: 2, Reason: "other round"}},
+		}
+		store.wire(t)
+
+		closeCalled := false
+		closeBeadFn = func(...string) error { closeCalled = true; return nil }
+		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+			t.Fatal("coverage is (slot, round)-exact: X@1 is NOT covered by Y@1 or X@2 and must Refuse")
+		}
+		if closeCalled || ex.completeCalled {
+			t.Error("nothing may mutate on the Refuse")
+		}
+	})
+}
+
+// --- (xvi) round-1 fix #3: present-but-malformed entries fail CLOSED -------
+
+// TestPanelRefuted_MalformedPendingEntries_Refuses (F1 MINOR): a PRESENT-
+// but-malformed refutation_pending_entries value (a string where an array
+// is expected) must make reconciliation REFUSE (fail-closed, symmetric with
+// the (d) GetMetadata-read-error rule) — never decode to empty, which would
+// silently drop the recorded obligation (fail-OPEN). The same discipline
+// covers panel_refuted_entries / refutation_discharged_entries when they
+// are read for the already-covered subtraction: those two subtests would
+// otherwise COMPLETE (the panel affirmatively discharges X@1), so a decode
+// reverted to fail-open goes RED there. The genuinely ABSENT-key no-op is
+// pinned by TestPanelRefuted_PristineNoPanel_FailsOpen.
+func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
+	t.Run("malformed refutation_pending_entries", func(t *testing.T) {
+		const specID, beadID = "114-pr16a", "mindspec-114pr.16a"
+		root, _ := setupPanelGateRepo(t, specID, beadID)
+		store := newFakeMetadataStore()
+		store.data[beadID] = map[string]interface{}{
+			// Present but shape-corrupt: a fail-open decode reads this as
+			// EMPTY and the (panel-less) completion sails through §6.
+			"refutation_pending_entries": "corrupt-not-an-array",
+		}
+		store.wire(t)
+
+		closeCalled := false
+		closeBeadFn = func(...string) error { closeCalled = true; return nil }
+		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		if err == nil {
+			t.Fatal("a present-but-malformed obligation store must REFUSE (fail-closed), never decode to empty")
+		}
+		if !strings.Contains(err.Error(), "could not be decoded") {
+			t.Errorf("expected the corrupt-store Refuse, got: %s", err.Error())
+		}
+		if closeCalled || ex.completeCalled {
+			t.Error("nothing may mutate when the obligation store is corrupt")
+		}
+	})
+
+	// For the two covering-audit arrays the fixture is otherwise
+	// DISCHARGEABLE (a live panel shows X resolved at round 1), so a
+	// fail-open decode of the corrupt array would let the run complete —
+	// pinning that the corrupt value itself is what Refuses.
+	corruptAuditCase := func(t *testing.T, specID, beadID, corruptKey string) {
+		t.Helper()
+		root, beadSHA := setupPanelGateRepo(t, specID, beadID)
+		store := newFakeMetadataStore()
+		store.data[beadID] = map[string]interface{}{
+			"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+			corruptKey:                   "corrupt-not-an-array",
+		}
+		store.wire(t)
+
+		writePanel(t, root, specID+"-bd", panel.Panel{
+			BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+			ReviewedHeadSHA: beadSHA,
+		}, map[string]string{
+			"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+			"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "X-round-1.json": "APPROVE",
+		})
+
+		closeCalled := false
+		closeBeadFn = func(...string) error { closeCalled = true; return nil }
+		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		if err == nil {
+			t.Fatalf("a present-but-corrupt %s must REFUSE (fail-closed), not be read as \"nothing covered\"", corruptKey)
+		}
+		if !strings.Contains(err.Error(), "could not be decoded") {
+			t.Errorf("expected the corrupt-store Refuse, got: %s", err.Error())
+		}
+		if closeCalled || ex.completeCalled {
+			t.Errorf("nothing may mutate when %s is corrupt", corruptKey)
+		}
+	}
+
+	t.Run("malformed panel_refuted_entries", func(t *testing.T) {
+		corruptAuditCase(t, "114-pr16b", "mindspec-114pr.16b", "panel_refuted_entries")
+	})
+	t.Run("malformed refutation_discharged_entries", func(t *testing.T) {
+		corruptAuditCase(t, "114-pr16c", "mindspec-114pr.16c", "refutation_discharged_entries")
 	})
 }
 

@@ -380,7 +380,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
 	// tree it honors the co-located reviews ONLY (root review/ ignored once
 	// flat). panelGateRoots picks the set from workspace.DetectLayout.
-	panelReg, appliedRefutations, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
+	// gateRoots is computed ONCE and shared with the step-3.75 obligation
+	// reconciliation below, so the gate and the reconciliation scan the
+	// IDENTICAL matched-panel set (Spec 114 R2 fix: reconciliation verifies
+	// discharge against EVERY matched panel, never an arbitrary first).
+	gateRoots := panelGateRoots(root, wtPath, specID)
+	panelReg, appliedRefutations, panelGateErr := panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
 	if panelGateErr != nil {
 		return nil, panelGateErr
 	}
@@ -560,7 +565,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// pre-existing-obligation reconciliation (round-5 item 3 / G3). A bead
 	// with no recorded pending reconciles to a no-op (§6 fail-open
 	// preserved).
-	if err := reconcilePendingRefutations(beadID, panelReg, appliedRefutations); err != nil {
+	if err := reconcilePendingRefutations(beadID, gateRoots, appliedRefutations); err != nil {
 		return nil, err
 	}
 
