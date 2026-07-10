@@ -1,0 +1,26 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "The design is grounded and feasible: current tally treats REQUEST_CHANGES and unrecognized verdicts as neither approve nor reject, while PanelGateDecision allows on Approves >= ApproveThreshold, so the silent out-vote is real. R1/R2 are coherent and decomposable into gate/refutation-audit/docs-test beads; re-panel flip, multiple RCs, and newer-round re-RC are specified. The remaining defect is AC completeness: two load-bearing anti-gaming cases are required in R1/R2 but not explicitly pinned by ACs, so an implementation could pass the named ACs while letting refutation satisfy a sub-threshold floor or letting unrecognized verdict strings pass/be refuted.",
+  "concrete_changes_required": [
+    "Add or expand an acceptance criterion with runnable internal/panel tests proving a sub-threshold panel still Blocks after every REQUEST_CHANGES is refuted, e.g. 6 APPROVE + 2 refuted REQUEST_CHANGES with threshold 7 yields Block on the approval floor.",
+    "Add or expand an acceptance criterion with runnable tests proving an unrecognized latest-round verdict string Blocks and cannot be cleared by a refutation entry."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "location": ".mindspec/specs/114-panel-gate-block-on-request-changes/spec.md:77",
+      "issue": "AC1 pins N-1 APPROVE + 1 unresolved REQUEST_CHANGES, but no AC pins the R1 layered-model anti-gaming case where all RCs are refuted and genuine APPROVE count remains below the floor.",
+      "evidence": "R1 requires this at .mindspec/specs/114-panel-gate-block-on-request-changes/spec.md:45 and OQ1 restates it at spec.md:94. The existing code's threshold floor is single-homed in internal/panel/panel.go:113-127 and allowed by internal/panel/gate.go:255-262, so this needs an explicit regression test.",
+      "fix": "Add an AC/test row for sub-threshold-after-refutation, preferably under AC2 or AC3, and include it in the `go test ./internal/panel -run 'Refut|PanelGateDecision'` proof."
+    },
+    {
+      "severity": "blocking",
+      "location": ".mindspec/specs/114-panel-gate-block-on-request-changes/spec.md:77",
+      "issue": "The spec newly requires unrecognized verdict strings to block and be non-refutable, but AC1-AC5 do not require a runnable proof for that behavior.",
+      "evidence": "Current tally explicitly says REQUEST_CHANGES and unrecognized values are neither at internal/panel/tally.go:107-111 and only increments APPROVE/REJECT at internal/panel/tally.go:296-301; current gate then allows on threshold at internal/panel/gate.go:255-258. R1/R2 specify the new unrecognized-verdict rule at spec.md:45-46, but ACs at spec.md:77-81 omit it.",
+      "fix": "Add an AC/test row for 5 APPROVE + 1 unrecognized verdict -> Block, plus a refutation entry targeting that slot still -> Block."
+    }
+  ]
+}

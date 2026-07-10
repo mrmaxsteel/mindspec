@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.88,
+  "rationale": "The layered R1 model is implementable and anti-gaming for vote arithmetic: tally counts only APPROVE/REJECT (`internal/panel/tally.go:107-111`, `296-301`), `PanelGateDecision` already centralizes legs and can add unresolved-RC before the threshold Allow (`internal/panel/gate.go:231-262`), and `panelGate` delegates before mutation (`internal/complete/panel_advisory.go:181-203`; `complete.go:337-378`). But R2 is not yet a mandatory audit design. The spec says refutation is 'always audited, never silent' and falsifies silent clearing, while also requiring the audit write at step 5.6 after terminal mutation, 'best-effort' (`spec.md:46`; current path `complete.go:778-785`, `panel_advisory.go:304-342`). That permits a refuted RC to clear the gate, complete successfully, and lose `panel_refuted` if metadata write fails.",
+  "concrete_changes_required": [
+    "Resolve the contradiction by making refutation-audit durability explicit: either the gate must not complete successfully unless the `panel_refuted` metadata for the actually-applied slot+round refutation is written, or the spec must stop claiming mandatory/never-silent auditing. For this panel's stated anti-gaming goal, require the former.",
+    "Specify implementation plumbing that carries the validated/applied refutation(s) from `PanelGateDecision`/`panelGate` into `writePanelAuditMetadata`, so metadata records only refutations that actually cleared latest-round REQUEST_CHANGES and cannot audit stale, invalid, or unused entries.",
+    "Add tests for metadata-write failure on an applied refutation: it must not produce a silent successful completion without `panel_refuted`."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "title": "Mandatory refutation audit is contradicted by best-effort post-complete write",
+      "details": "R2 requires 'always audited, never silent' and says clearing without `panel_refuted` is falsifying, but also locates the write on the existing best-effort path after terminal mutation. Current `writePanelAuditMetadata` swallows metadata errors as warnings for skip/abandon (`internal/complete/panel_advisory.go:316-340`) and is called only after `completeErr == nil` (`internal/complete/complete.go:778-785`). Mirroring that unchanged for refutations leaves a gameable/non-audited pass whenever `MergeMetadata` fails."
+    },
+    {
+      "severity": "nonblocking",
+      "title": "Layered RC veto plus approve floor is otherwise sound",
+      "details": "Keeping `Approves` as genuine approvals only and adding an unresolved-RC/unrecognized-verdict block before the threshold Allow composes with existing legs. It preserves REJECT/hard_block, incomplete, stale, dirty, and sub-threshold blocks, and prevents a refuted RC from satisfying the floor."
+    }
+  ]
+}
