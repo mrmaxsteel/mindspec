@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "The round-4 composition-loss hole is closed. Before persisting a current run's applied refutations, panelGate must fail-closed read the existing refutation_pending_entries, union by slot+round, and write the full set; neither a read nor write failure can clear the RC or reach close/merge. Pre-close reconciliation then reads and processes every uncovered entry in that durable union on panel-present, no-panel, and hatch paths. Each entry must receive a durable panel_refuted audit, a tally-verified refutation_discharged audit, or force refusal. TestPanelRefuted_CrossRun_UnionReconcilesAll pins the exact prior counterexample: X@1 survives the B@2 marker, X is discharged, B is satisfied, and any intervening read/write failure leaves the bead in_progress. Fail-closed MergeMetadata also prevents a later write from erasing either audit. I find no residual sequential retry path that loses or overwrites a durable pending obligation.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "Cross-retry pending obligation could be discarded by a newer marker write",
+      "evidence": "Plan step 5(a) now requires read-then-UNION-then-write of existing and current refutation_pending_entries, never replacement; step 5(c), AC11(d), and TestPanelRefuted_CrossRun_UnionReconcilesAll require full-set reconciliation and both X@1 discharge and B@2 satisfaction before close."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "Metadata-read failure could fail open during obligation handling",
+      "evidence": "Steps 5(a), 5(c), and 5(d) make union and reconciliation reads fail-closed; the marker path blocks with the RC unresolved, while reconciliation refuses with closeBeadFn and ex.completeCalled false."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "A later metadata write could erase a durable refutation audit",
+      "evidence": "Step 6 retains fail-closed MergeMetadata behavior and the audit-survival test, preventing read failure from replacing metadata from an empty map."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "note",
+      "defect": "Applied refutations lacked deterministic deduplication",
+      "evidence": "The plan retains stable first-wins deduplication by exact slot+round within and across matched panels, with deterministic sorting and duplicate coverage."
+    }
+  ],
+  "carried_forward": "round-5 APPROVE carried: mechanism confirmed TOTAL/airtight; round-6 is a precision fix for F2 discharge-evidence acquisition (re-tally from panelReg.Dir) \u2014 no design/ADR/domain/AC change"
+}
