@@ -1,38 +1,675 @@
 ---
-status: Draft
+adr_citations:
+    - ADR-0037
+    - ADR-0035
+    - ADR-0040
+    - ADR-0023
 spec_id: 114-panel-gate-block-on-request-changes
+status: Draft
 version: "1"
-# adr_citations: cite the Accepted ADRs whose Domain(s) cover this plan's
-# impacted domains (drop the leading "# " and list them); leave empty only when
-# the ## ADR Fitness section explains why no ADR applies.
-# adr_citations:
-#   - ADR-XXXX
+work_chunks:
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/panel/gate.go
+        - internal/panel/tally.go
+        - internal/panel/panel_decision_test.go
+        - internal/panel/votedecision_test.go
+        - internal/panel/panel_test.go
+        - internal/complete/panel_advisory_test.go
+        - internal/complete/panel_gate_e2e_test.go
+        - internal/instruct/panelstate_test.go
+        - cmd/mindspec/panel_test.go
+    - depends_on: [1]
+      id: 2
+      key_file_paths:
+        - internal/panel/panel.go
+        - internal/panel/tally.go
+        - internal/panel/gate.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/complete.go
+        - internal/complete/panel_advisory_test.go
+        - internal/complete/panel_gate_e2e_test.go
+        - internal/panel/panel_test.go
+    - depends_on: [2]
+      id: 3
+      key_file_paths:
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
 ---
 # Plan: 114-panel-gate-block-on-request-changes
 
+Close the last silent out-vote in the authoritative `mindspec complete` panel
+gate: an unresolved REQUEST_CHANGES (or an unrecognized verdict string) now
+blocks exactly like a REJECT (R1), and the only per-slot escape is an
+explicit, audited, gate-validated **refutation** recorded on `panel.json`
+whose `panel_refuted` bead-metadata audit is **durable** — a metadata-write
+failure on an applied refutation fails the completion instead of being
+swallowed (R2/AC11). All line references below are pinned against HEAD
+`fae2bfb6`.
+
+## Decomposition and land order
+
+Three beads, serial chain **Bead 1 → Bead 2 → Bead 3** (longest chain 3,
+within the ≤3 bound; `work_chunks` declares the edges):
+
+- **Bead 1 (R1)** — the unresolved-non-APPROVE blocking leg in
+  `PanelGateDecision` + the `VoteDecision` lockstep twin, plus the repo-wide
+  test-fixture reconciliation (the three spec-named outcome flips and the
+  outcome-preserving input updates enumerated below). Big test diff, small
+  production diff.
+- **Bead 2 (R2)** — the `refutations` schema on `panel.json`, the
+  gate-validated per-slot clearing, the applied-refutation plumbing out of
+  `PanelGateDecision`/`panelGate`, and the **durable** `panel_refuted` audit
+  written BEFORE the terminal merge (the step-4.75 reorder — carry-forward
+  F3). Small test-fixture blast radius, subtle production ordering.
+- **Bead 3 (docs)** — the ADR-0037 amendment and the /ms-panel-tally
+  refutation procedure (both skill copies).
+
+**Why Bead 2 depends on Bead 1 (not parallel):** a refutation clears a block
+that only exists once R1 lands — AC2's "refutation unblocks" is meaningless
+before AC1's "RC blocks" (the spec's own ordering). **Why Bead 3 depends on
+Bead 2:** the ADR §1 amendment names the exact recorded schema and the §7
+text names the exact `panel_refuted` audit keys and the
+durable-vs-best-effort distinction; the AC6 grep proof should hit names that
+exist in code.
+
+**R_scope note (deliberate overlap, justified):** Beads 1 and 2 both touch
+`internal/panel/gate.go`, `internal/panel/tally.go`, and `internal/complete`
+tests. This overlap is real but SERIAL, not parallel: Bead 2 is implemented
+on top of Bead 1's merged state on the spec branch, so there is no
+cross-worktree conflict risk. They are kept separate anyway because (a) the
+AC5 diff-review proof ("only the named fixtures flipped outcome") is only
+tractable against Bead 1's isolated diff, and (b) the durable-audit reorder
+in Bead 2 is the subtlest change in the spec and deserves an isolated panel
+review. Merging them into one bead was considered and rejected for exactly
+those two review-surface reasons; splitting Bead 1 by package was rejected
+because the `VoteDecision` lockstep (R1's own falsifier) must land
+atomically with the gate leg.
+
+**Reviewer/fixer scratch discipline (inherit into every bead brief and
+reviewer prompt):** reviewers and fixers MUST use ABSOLUTE `/tmp` scratch
+paths (or `t.TempDir()` inside Go tests) for any file they create, and must
+NEVER write relative `.mindspec/` (or any relative repo) paths — the agent
+harness resets cwd between bash calls, and a relative write from a reviewer
+has previously corrupted SIBLING worktrees, which `mindspec complete` then
+auto-committed past review. Reviewer verdict paths must be ABSOLUTE. Verify
+the bead worktree is CLEAN (`git status --porcelain` empty) before every
+`mindspec complete`.
+
+**Toolchain note:** run the CI-matched `gofmt` (go.mod pins go 1.23.0 —
+Go 1.19+ gofmt reformats doc comments). In doc comments and skill prose,
+avoid backtick code spans containing shell-escape sequences (single-quote
+escapes and the like).
+
+## Bead 1: R1 — unresolved REQUEST_CHANGES / unrecognized verdict blocks the gate (internal/panel + fixture reconciliation)
+
+**Scope**
+
+The decision change lives entirely in `internal/panel` (`gate.go`,
+`tally.go`); every other surface inherits it by construction:
+`internal/complete`'s authoritative `panelGate`
+(`internal/complete/panel_advisory.go:140-215`, invoked at complete.Run step
+2.25, `internal/complete/complete.go:337-378`), the read-only
+`mindspec panel verify`/`panel tally` verbs (`cmd/mindspec/panel.go:7-10`,
+pinned by `TestPanelVerbs_DecisionIsPanelGateDecision`,
+`cmd/mindspec/panel_test.go:488-581`), and `mindspec instruct --panel-state`
+(`internal/instruct/panelstate.go:121`) all delegate to
+`panel.PanelGateDecision`; complete's advisory line renders
+`Result.VoteDecision` (`internal/complete/panel_advisory.go:65-75`). Zero
+production diff outside `internal/panel` in this bead.
+
+**Steps**
+
+1. **`internal/panel/tally.go` — the single home of unresolved-verdict
+   resolution.** Add a method `func (r *Result) UnresolvedVerdicts()
+   []Verdict` returning the latest-round verdicts whose canonical `Verdict`
+   is neither `VerdictApprove` nor `VerdictReject` (tally.go:18-22) — i.e.
+   REQUEST_CHANGES plus anything unrecognized, exactly the "neither" set the
+   `Result` doc names (tally.go:107-110). REJECTs are deliberately excluded:
+   they are leg (9)'s business (gate.go:243-253) and must never route
+   through the (later, Bead-2-refutable) unresolved leg even if leg ordering
+   were ever edited. `Verdicts` is already slot-sorted (tally.go:306), so
+   the returned slice — and every message built from it — is deterministic.
+   The tally counting switch (tally.go:296-301) is untouched: `Approves`
+   still counts only canonical APPROVE (load-bearing for AC9 later).
+2. **`internal/panel/gate.go` — the new leg (9.5).** In `PanelGateDecision`,
+   AFTER leg (9) REJECT/hard_block (gate.go:243-253) and BEFORE the leg (10)
+   threshold Allow (gate.go:255-262) — O1's confirmed ordering — insert: if
+   `len(f.Res.UnresolvedVerdicts()) > 0`, Block with EXACTLY this message
+   shape (the substrings are load-bearing, see step 4):
+   `"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE (threshold is %d/%d); every latest-round verdict must be APPROVE. Run /ms-bead-fix with %s, then re-panel (/ms-panel-run step 0)%s"`,
+   interpolating slug, round, the comma-joined unresolved slot ids,
+   `f.Res.Approves`, `n`, `p.ApproveThreshold()`, `n`,
+   `ConsolidatedName(round)`, and `RawMergeFence(f.BeadID)` as the SUFFIX.
+   Message constraints (AC10 + compatibility): (i) names each unresolved
+   slot id; (ii) contains NO `refut` substring anywhere (so no
+   "refutations", no "panel refute" — and note "unresolved", not
+   "unrefuted", precisely for this reason) and never `MINDSPEC_SKIP_PANEL`
+   (HC-7); (iii) the raw-merge fence is the message suffix because
+   `sanitizeNonBeadDecision` (cmd/mindspec/panel.go) strips
+   `RawMergeFence("")` by `strings.HasSuffix` for non-bead panels; (iv) the
+   `/ms-bead-fix` + `/ms-panel-run step 0` advice is the OQ4 primary
+   recovery (fix-and-re-panel), matching the existing leg-10 phrasing.
+   Update the short-circuit-order comment block (gate.go:110-127) to list
+   (9.5). Legs (0)-(9) and (10) stay byte-preserved.
+3. **`internal/panel/tally.go` — `VoteDecision` lockstep.** In
+   `Result.VoteDecision` (tally.go:180-214), between the REJECT/hard_block
+   leg (tally.go:206-208) and the threshold legs (tally.go:209-213), add the
+   same check returning
+   `VoteBlock, "round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE, threshold is %d/%d"`.
+   Same helper, same ordering — the vote-only twin can never disagree with
+   the gate on the vote portion (R1 falsifier).
+4. **Message compatibility (this is why AC5's blast radius stays at the
+   named set).** The leg-9.5 message deliberately carries a substring
+   SUPERSET of the leg-10 Block message ("X/N APPROVE", "threshold is T/N",
+   `consolidated-round-N.md`, the fence): every pre-existing sub-threshold
+   Block fixture whose panel carries RC/neutral filler now routes through
+   leg 9.5 instead of leg 10 but keeps its `mustHave` strings green
+   byte-unmodified — pinned sites: `internal/panel/panel_decision_test.go`
+   ~196-209 ("sub-threshold ... via neutral": "4/6 APPROVE", "threshold is
+   5/6", "consolidated-round-1.md") and ~221-234 ("1/3 APPROVE", "threshold
+   is 2/3", mustNotHave "/6"); `internal/panel/votedecision_test.go` ~72-79
+   (summary "threshold is 5/6"); `internal/instruct/panelstate_test.go`
+   ~113-123 (`below_threshold` wantReason "threshold is 5/6"). After this
+   bead, leg (10)'s own Block message remains reachable only when every
+   non-APPROVE is a refuted RC (Bead 2's AC7 sub-threshold-after-refutation
+   case) — with zero refutations it is unreachable, which is R1's intent
+   (the floor stays a necessary condition; the leg is kept, not removed).
+5. **The three spec-named outcome flips (AC5 carve-out — R1's intended
+   effect).** (a) `internal/panel/panel_decision_test.go:184-194` "threshold
+   met: 6/6 present, 5 APPROVE + 1 dissent → Allow" → expect **Block**,
+   mustHave the slot id "z" + the fence, mustNotHave any `refut` substring
+   (feeds the AC10 predicate). (b)
+   `internal/complete/panel_advisory_test.go:69-81`
+   `TestPanelAdvisory_Passing_WouldPass` (2 APPROVE + 1 REQUEST_CHANGES,
+   N=3) → expect **"would BLOCK"** (rename to
+   `TestPanelAdvisory_Dissent_WouldBlock`; add an all-APPROVE companion
+   pinning that "would PASS" still exists). (c)
+   `cmd/mindspec/panel_test.go:386-389` "passing (at-threshold) → exit 0"
+   (buildResult 5 approve / 6 total = 1 RC filler) → `wantErr: true` with a
+   final recovery line. Plus the VoteDecision lockstep twin the spec's R1
+   falsifier mandates: `internal/panel/votedecision_test.go:64-70`
+   "threshold met 5/6 with 6 present → Pass" becomes a 5A+1RC →
+   **VoteBlock** row, with a new all-APPROVE 6/6 → VotePass companion row.
+6. **Outcome-PRESERVING input updates (dissent filler → genuine APPROVE;
+   these do NOT flip any expected outcome and are named here for the AC5
+   diff review).** These pre-existing fixtures used a REQUEST_CHANGES (or
+   empty-string) filler verdict incidentally — their SUBJECT is not RC
+   tolerance — and must have inputs updated so their pinned outcome
+   survives: (a) `internal/panel/panel_test.go:224`
+   `TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision` — replace the
+   5A+1RC fixture (~230-243, Allow precondition) with 6/6 all-APPROVE; (b)
+   `internal/panel/panel_test.go:304` `TestPanel_GateFieldDecisionInert` —
+   same replacement (~316-325 asserts Allow); (c)
+   `internal/panel/panel_test.go:393`
+   `TestPanel_GateFieldDecisionInertAllEnumValues` — the "allow" scenario's
+   builder (~404-410) likewise; (d)
+   `internal/complete/panel_gate_e2e_test.go:76-84` `approveVerdicts(n)` —
+   change from "n-1 APPROVE + 1 REQUEST_CHANGES (the tolerated dissent)" to
+   n APPROVEs, updating its doc comment; `fresh_passes` (:200) keeps
+   passing and `stale_blocks` (:218) keeps blocking on staleness (leg 6
+   precedes 9.5; its "commits landed after review" message is unchanged);
+   (e) `internal/instruct/panelstate_test.go:54-79` `beadPanel` —
+   synthesize REAL verdict strings (`panel.VerdictApprove` for the approve
+   count, `panel.VerdictRequestChanges` for `otherPresent`) instead of
+   today's all-empty-string verdicts (empty = unrecognized = blocking under
+   R1); the `at_threshold_fresh` row (~91-99) and
+   `TestRenderPanelState_Pass` (~267-281) are restructured to at-threshold
+   WITHOUT a dissent — recorded `ApproveThresholdExpr: "6"` (the spec-109
+   override, internal/panel/panel.go:113-127) with 6/6 APPROVE — preserving
+   their at-threshold-boundary (approves == threshold) subject and PASS
+   outcome with zero dissent.
+7. **New tests (AC1, AC8 block-half, AC10 predicate) + the AC5 diff-review
+   proof.** In `internal/panel/panel_decision_test.go`, add table-driven
+   `TestPanelGateDecision_UnresolvedRequestChangesBlocks`: (i) 6 expected,
+   complete latest-round, fresh SHA, clean tree, 5 APPROVE + 1
+   REQUEST_CHANGES → Block, message names the RC slot (AC1); (ii) 5 APPROVE
+   + 1 unrecognized verdict (e.g. "MAYBE") → Block (AC8 first half); (iii)
+   two RC slots → Block naming both; (iv) the AC10 fixed-string predicate on
+   every row: message contains no `refute`, no `refutations`, no
+   `panel refute` substring, never `MINDSPEC_SKIP_PANEL`, and carries the
+   fence — mirroring `TestPanelGate_BlockNeverNamesSkipVar`
+   (`internal/complete/panel_gate_e2e_test.go:290-304`). In
+   `internal/complete/panel_gate_e2e_test.go`, add
+   `TestPanelGate_RequestChangesBlocksComplete` (AC1 end-to-end, alongside
+   the existing `TestPanelGate_*` suite on the real-repo harness,
+   `setupPanelGateRepo`): 5A+1RC fresh panel → `complete.Run` returns the
+   guard failure, `ex.completeCalled == false` (mutated nothing),
+   `guard.HasFinalRecoveryLine` true (ADR-0035, the recovery line appended
+   at panel_advisory.go:201-203), and the AC10 predicate re-asserted on the
+   full error text. Finally the AC5 proof: run the full four-package suite
+   and a `git diff` review asserting that the ONLY tests whose expected
+   outcome changed are the step-5 set, and every step-6 change preserves its
+   outcome (record the file list in the bead's completion notes for the
+   panel).
+
+**Verification**
+
+- [ ] `go test ./internal/panel -run 'PanelGateDecision'` — AC1 decision
+  table green, including the 5A+1RC Block, the unrecognized-verdict Block
+  (AC8 block-half), and the AC10 no-advertise predicate rows.
+- [ ] `go test ./internal/complete -run 'PanelGate'` — AC1 end-to-end Block
+  (`TestPanelGate_RequestChangesBlocksComplete`: non-zero, nothing mutated,
+  recovery line) plus the whole pre-existing `TestPanelGate_*` suite
+  (fail-open, hatches, staleness, HC-7, shared-decision pin) green.
+- [ ] `go build ./... && go test ./internal/panel ./internal/complete ./internal/instruct ./cmd/mindspec` — full AC5 sweep green.
+- [ ] Diff review (AC5 proof): `git diff` over `*_test.go` confirms outcome
+  flips ONLY in the step-5 named set (panel_decision_test "5 APPROVE + 1
+  dissent", panel_advisory_test `WouldPass`, cmd panel_test "at-threshold
+  exit 0", plus the votedecision lockstep-twin row); every other touched
+  fixture (step-6 list) preserves its expected outcome.
+- [ ] `gofmt -l ./cmd ./internal` prints nothing (CI-matched go 1.23 gofmt).
+
+**Acceptance Criteria**
+
+- 5 APPROVE + 1 unresolved REQUEST_CHANGES (complete, fresh, clean) yields
+  Block from `PanelGateDecision`, "would BLOCK" from `VoteDecision`, a
+  non-zero `mindspec complete` with nothing mutated, and a Block message
+  that names the slot, ends with a recovery line, carries the fence, and
+  contains no refutation incantation and no skip variable (AC1, AC10, R1).
+- An unrecognized verdict string blocks identically (AC8 block-half).
+- Every other gate behavior — skip-env Warn, abandoned Warn, stale-SHA
+  Block, incomplete Block, round-mismatch Block, dirty-tree Block,
+  missing-ref/transient-gitErr Warns, fail-open — passes its existing tests
+  with no semantic modification; only the named fixtures flip outcome (AC5).
+
+**Depends on**
+None (first bead).
+
+## Bead 2: R2 — audited refutation escape + DURABLE `panel_refuted` audit (schema, gate validation, step-4.75 reorder)
+
+**Scope**
+
+`internal/panel/panel.go` (schema), `internal/panel/tally.go` +
+`internal/panel/gate.go` (gate validation + applied-refutation plumbing),
+`internal/complete/panel_advisory.go` + `internal/complete/complete.go` (the
+durable audit write and its pre-merge placement). No `internal/bead` change:
+the write goes through the existing `completeMergeMetadataFn` seam
+(`internal/complete/complete.go:42`) → `bead.MergeMetadata`
+(`internal/bead/bdcli.go:263-290`, which JSON-marshals the merged map, so a
+nested entries array round-trips). No new CLI verb (OQ3: hand-edit
+`panel.json`; the gate carries the whole validation burden).
+
+**Steps**
+
+1. **Schema (`internal/panel/panel.go`).** Add a `Refutation` struct with
+   exactly the four R2 fields — `Slot string` (json `slot`), `Round int`
+   (json `round`), `Reason string` (json `reason`), `Evidence string` (json
+   `evidence`) — and `Refutations []Refutation` with
+   `json:"refutations,omitempty"` on `Panel` (panel.go:51-92), documented
+   parse-lenient EXACTLY like `AbandonReason` (panel.go:59-68): an absent
+   array, an empty array, or entries with missing/empty fields are consumer
+   concerns, never a parse error — enforcement lives in the gate. Note the
+   one asymmetry in the doc comment: a TYPE-mismatched entry (e.g. a string
+   `round`) fails `json.Unmarshal` of the whole file → `Registration.Err` →
+   leg (2) Block (gate.go:149-153) — the fail-CLOSED direction, which is
+   the safe one (the OQ2/R2 requirement is only that lenience never tips
+   fail-OPEN). Every pre-existing `panel.json` omits the field →
+   byte-identical behavior (the §1 precedent of 109's `approve_threshold`
+   and 112's `gate`).
+2. **Gate validation, single-homed (`internal/panel/tally.go`).** Extend the
+   Bead-1 resolution home: `UnresolvedVerdicts()` now treats a latest-round
+   verdict as RESOLVED iff its `Verdict == VerdictRequestChanges` AND some
+   `Refutations` entry has `Slot` byte-equal to the verdict's
+   filename-derived `Slot` and `Round == r.LatestRound` — and add
+   `func (r *Result) AppliedRefutations() []Refutation` returning exactly
+   the entries that matched a latest-round REQUEST_CHANGES verdict this way
+   (deduped: one applied record per cleared slot+round; entries matching
+   nothing — stale round, unknown slot, REJECT/hard_block/unrecognized
+   target — are NEVER returned). This encodes R2(c)/(d) by construction: a
+   refutation clears only canonical RC (REJECT is excluded from the
+   unresolved set at the source, and leg (9) fires first regardless;
+   unrecognized verdicts are not `VerdictRequestChanges` so stay blocking);
+   round-binding means a round-N entry never clears a round-N+1 re-RC (R3c,
+   AC4b); exact one-slot+round scope (no wildcard, no whole-panel form).
+   `Approves` is never touched — a refuted RC is removed from the BLOCKING
+   set only, never re-counted (AC9; the tally switch tally.go:296-301 stays
+   byte-identical) — so leg (10)'s floor is computed over genuine approvals
+   and AC7's sub-threshold-after-refutation Block falls out of the existing
+   leg-10 code with zero new logic.
+3. **Plumb applied refutations OUT of the decision
+   (`internal/panel/gate.go`).** Add `AppliedRefutations []Refutation` to
+   `Decision` (gate.go:48-51), populated ONLY on the leg-(10) threshold
+   Allow return — the only path where a refutation can have changed the
+   outcome (every applied refutation is outcome-relevant by construction:
+   without it, its RC would have blocked at 9.5; Warn/short-circuit paths
+   never evaluate refutations and return none). `VoteDecision` moves in
+   lockstep via the same `UnresolvedVerdicts()`. Mechanical consequence:
+   `Decision` gains a slice field and stops being Go-comparable — update
+   the ONE struct-equality comparison in the repo,
+   `internal/panel/panel_test.go` ~254 (`got != want` in
+   `TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision`), to compare
+   `Action`+`Message` fields (the AC5-permitted "mechanical fixture
+   addition where a struct gains fields"; every other caller already
+   compares fields — verified by grep).
+4. **`panelGate` returns the applied set
+   (`internal/complete/panel_advisory.go:140-215`).** Change the signature
+   to `(*panel.Registration, []panel.Refutation, error)`; accumulate
+   `d.AppliedRefutations` across evaluated matched panels. The skip-env and
+   config-disabled paths (panel_advisory.go:169-179) return nil applied —
+   the gate did not rely on any refutation there (their own
+   `panel_gate_skipped` audit covers them). Update the call site in
+   complete.Run (complete.go:375) and the direct panelGate callers in
+   tests.
+5. **The durable audit write + the F3 reorder (`complete.go`, new
+   step 4.75).** Add `writePanelRefutedMetadata(beadID string, applied
+   []panel.Refutation) error` in panel_advisory.go: builds
+   `panel_refuted: true`, `panel_refuted_at: <RFC3339 UTC>`, and
+   `panel_refuted_entries: [{slot, round, reason, evidence}, ...]` (keys
+   parallel to `panel_abandoned`, panel_advisory.go:332-341) and RETURNS
+   the `completeMergeMetadataFn` error — non-swallowing, unlike
+   `writePanelAuditMetadata` (panel_advisory.go:304-342) which stays
+   best-effort for abandon/skip byte-unchanged. Call it in `Run` at a new
+   **step 4.75**: AFTER the step-4 close + forced dolt-commit +
+   committed-state verification (complete.go:546-650) and BEFORE the step-5
+   terminal `exec.CompleteBead` merge (complete.go:667-672), guarded on a
+   non-empty applied set. On error, return a `guard.NewFailure` whose body
+   states that the gate passed by relying on recorded refutation(s) but the
+   durable `panel_refuted` audit could not be written, that the merge is
+   fenced and did NOT run, and that the state is recoverable (the close is
+   idempotent; re-running `mindspec complete <bead>` re-applies the
+   refutations and retries the write — the same closed-but-unmerged
+   convergence contract complete.go:695-708 already documents), with
+   recovery line `mindspec complete <bead>`. **Placement rationale
+   (carry-forward F3, the load-bearing design):** (a) writing BEFORE the
+   merge makes AC11 structurally unfalsifiable — the terminal mutation can
+   never land un-audited, strictly stronger than a post-merge non-swallowed
+   error (which would exit non-zero having already merged); (b) placing it
+   AFTER step 4 piggybacks on just-proven bd health (close + dolt-commit +
+   verify all succeeded moments earlier, so a write failure is genuinely
+   exceptional, and bd's embedded auto-commit mode — per the
+   complete.go:72-95 HONESTY-CLAUSE — makes the metadata write itself
+   durable) and avoids spurious audits from completions that fail the
+   earlier CommitAll/doc-sync/ADR/close gates (steps 2.5-4); (c) the
+   failure mode lands in the ALREADY-SUPPORTED closed-but-unmerged
+   recoverable state rather than inventing a new one. The step-5.6
+   `writePanelAuditMetadata` call (complete.go:778-785) is byte-unchanged
+   and does NOT write `panel_refuted` — abandon/skip are terminal-exit
+   audits that never change the merge outcome, and the asymmetry
+   (best-effort there, durable here) is asserted by test.
+6. **Tests — refutation semantics (`internal/panel`).** New table-driven
+   `TestPanelGateDecision_Refutations` (+ `TestVoteDecision_Refutations`
+   lockstep rows and `TestResult_AppliedRefutations` unit rows), all
+   synthetic `Result` fixtures (pure decision layer — no real files, so the
+   AC12 duplicate-casing rows cannot be flaky on a case-insensitive
+   filesystem): (i) **AC2 gate-half**: 5A+1RC plus an entry naming that
+   slot at the latest round → Allow, `AppliedRefutations` == that entry;
+   (ii) **AC3**: an entry targeting a REJECT slot or hard_block slot → leg
+   9 Block unchanged and the applied set empty; refuting slot A while slot
+   B holds an RC → Block naming B; (iii) **AC4**: (a) a round-2 all-APPROVE
+   re-panel with a round-1 RC on file → Allow with zero refutations (the
+   tally already reads only the filename-derived latest round,
+   tally.go:273-276 — pinned, zero-ceremony R3b) and (b) an entry with
+   round N does not clear the same slot's round-N+1 RC → Block; (iv)
+   **AC7**: expected 8 / threshold 7 (default N−1), 6A+2RC both refuted →
+   Block via leg (10) with the threshold message ("6/8 APPROVE", "threshold
+   is 7/8") and NOT the unresolved-slot message — refutation cannot buy
+   past the floor; (v) **AC8 non-refutable-half**: 5A+1 unrecognized
+   verdict + an entry naming that slot → still Block; (vi) **AC9**:
+   `Result.Approves` is identical before/after the decision and equals the
+   genuine-APPROVE count in every refutation row; (vii) **AC12** (the O1
+   test-note, recorded): duplicate slot files at the latest round are
+   impossible byte-identically (one directory, one filename) but
+   near-duplicates differing by case yield DISTINCT filename-derived slots
+   ("x" vs "X", tally.go:43-59); pin that matching is byte-exact — a
+   refutation naming slot "x" clears only slot "x"'s RC, never a REJECT
+   tallied under slot "X" (leg 9 still fires), and with both "x" and "X"
+   carrying RCs, refuting "x" leaves the gate blocked naming "X" —
+   deterministic resolution against the slot's tallied latest-round
+   verdict; (viii) the AC10 predicate re-asserted on the Block message of a
+   panel that HAS a refutations array (the tempting case): still no `refut`
+   substring.
+7. **Tests — durable audit (`internal/complete`).** (i) **AC2 audit-half**:
+   `TestWritePanelRefutedMetadata` beside
+   `TestWritePanelAuditMetadata_Abandoned` (panel_advisory_test.go:111-134):
+   captures the merged map — asserts `panel_refuted == true`, an RFC3339
+   `panel_refuted_at`, and the applied slot/round/reason/evidence entries —
+   and asserts the ERROR RETURN propagates (non-swallowing); plus e2e on
+   the `setupPanelGateRepo` harness: a 5A+1RC panel with a matching
+   `refutations` entry in the written panel.json → `Run` succeeds,
+   `ex.completeCalled == true`, and the captured metadata carries the
+   audit. (ii) **AC11**:
+   `TestPanelGate_RefutedAuditWriteFailure_FailsCompletion` — stub
+   `completeMergeMetadataFn` to fail ONLY on maps containing
+   `panel_refuted` (other metadata writes succeed); same
+   passing-by-refutation fixture → `Run` returns non-zero AND
+   `ex.completeCalled == false` (the merge never ran — the strong pre-merge
+   form). (iii) **Asymmetry control**: an ABANDONED panel with the same
+   failing stub still completes successfully with only a warning (the
+   best-effort abandon/skip semantics are preserved, distinguishing the
+   durable path). (iv) An applied-refutations-empty completion (plain
+   all-APPROVE pass) writes NO `panel_refuted` key — only genuine clears
+   are recorded (the "unused entry never audited" falsifier).
+
+**Verification**
+
+- [ ] `go test ./internal/panel -run 'Refut|Round|Dup|PanelGateDecision'` —
+  AC2(gate)/AC3/AC4/AC7/AC8/AC9/AC12 decision rows green.
+- [ ] `go test ./internal/complete -run 'PanelRefuted|PanelGate'` —
+  AC2(audit) write content, AC11 write-failure fence (non-zero, merge never
+  ran), the abandon/skip best-effort asymmetry control, and the whole
+  pre-existing `TestPanelGate_*` suite green.
+- [ ] `go build ./... && go test ./internal/panel ./internal/complete ./internal/instruct ./cmd/mindspec` — full sweep green; diff review confirms no fixture outside Bead 1's named set flipped outcome (this bead adds tests plus the one `Decision` comparability fix).
+- [ ] `gofmt -l ./cmd ./internal` prints nothing.
+
+**Acceptance Criteria**
+
+- Recording one `refutations` entry for the sole unresolved-RC slot at the
+  latest round unblocks `mindspec complete` (all else clean), and success
+  leaves a durable `panel_refuted` audit (slot, round, reason, timestamp)
+  on bead metadata (AC2).
+- A refutation can never clear a REJECT, hard_block, unrecognized verdict,
+  another slot, a newer-round re-RC, or any non-vote condition; each RC
+  must be refuted individually; a refuted RC never increments `Approves`,
+  so a sub-threshold panel still blocks on the floor after every RC is
+  refuted (AC3, AC4, AC7, AC8, AC9, AC12).
+- A `MergeMetadata` failure on an APPLIED refutation fails the completion
+  BEFORE the terminal merge — never a silent, un-audited, gate-cleared
+  merge — while abandon/skip audits stay best-effort (AC11).
+
+**Depends on**
+Bead 1 (the unresolved-RC block must exist before an escape from it is
+meaningful — AC1 before AC2).
+
+## Bead 3: Docs — ADR-0037 amendment + /ms-panel-tally refutation procedure (both skill copies)
+
+**Scope**
+
+`.mindspec/adr/ADR-0037-panel-gate-enforced-contract.md`,
+`plugins/mindspec/skills/ms-panel-tally/SKILL.md`, and its byte-identical
+mirror `.claude/skills/ms-panel-tally/SKILL.md` (verified identical at HEAD;
+no Go code embeds this skill — `internal/bootstrap/bootstrap.go:341/419`
+reference only the name). No production Go diff. The AC10 no-advertise CODE
+predicate landed in Beads 1-2 (a Go test inside a docs-only bead would cross
+review surfaces for no gain — a deliberate deviation from the suggested
+Bead-C contents, recorded here); this bead carries the no-advertise DOC
+contract.
+
+**Steps**
+
+1. **ADR-0037 §1 amendment** (dated 2026-07-10, spec 114, appended after the
+   spec-112 amendment): `panel.json` gains the optional `refutations` array
+   (entries `{slot, round, reason, evidence}`), parse-lenient like
+   `abandon_reason` — the same schema-addition precedent §1 records for
+   109's `approve_threshold` and 112's `gate`, except this field is NOT
+   decision-inert: it is read by exactly one consumer, `internal/panel`'s
+   unresolved-verdict resolution.
+2. **ADR-0037 §3 amendment** (after the spec-109 amendment): the threshold
+   remains a NECESSARY floor on genuine APPROVE count but is no longer
+   sufficient — every expected reviewer's latest-round verdict must be
+   APPROVE or an explicitly-refuted REQUEST_CHANGES; an unresolved RC (or
+   an unrecognized verdict, which is non-refutable) blocks exactly like a
+   REJECT; a refuted RC never counts toward the floor, so refutation cannot
+   buy past a sub-threshold panel. State the ADR-0040 interaction
+   explicitly: a recorded `approve_threshold` below N−1 still sets the
+   approve floor but no longer licenses unrefuted dissent — 109's extension
+   and 114's rule compose, they do not contradict.
+3. **ADR-0037 §7 amendment**: the **audited refutation** joins
+   skip/abandonment/config-toggle with the "legitimate precisely because it
+   is always audited, never silent" contract — and, because a refutation
+   CHANGES the gate outcome (unlike the terminal-exit abandonment/skip
+   audits, which stay best-effort), its `panel_refuted` audit is
+   **durable**: `mindspec complete` writes it BEFORE the terminal merge and
+   a write failure fails the completion. Like the skip hatch, the Block
+   message never advertises a paste-able refutation incantation (OQ4); the
+   escape is documented here and in /ms-panel-tally only, so it stays a
+   deliberate looked-up action. Re-affirm §6 (fail-open without a panel,
+   fail-closed with one — unchanged) and §8 (trust boundary unchanged: the
+   record is agent-writable by design; an **empty `reason` still clears — a
+   documented footgun in parity with empty `abandon_reason`**, not an
+   endorsed use; reason + evidence carry the refutation's legitimacy) — the
+   O1 minor, recorded.
+4. **/ms-panel-tally SKILL.md**: add item 5, "Refutation procedure
+   (per-slot, always audited)", directly beside the abandon procedure (item
+   4, SKILL.md:84): hand-edit `panel.json`, appending to `refutations` one
+   entry naming the filename-derived slot, the latest round, a who/why
+   `reason`, and `evidence` for where the disproof lives; the GATE
+   validates (it clears only that slot's latest-round REQUEST_CHANGES —
+   never a REJECT, hard_block, or unrecognized verdict, never
+   staleness/incompleteness/the approve floor; a re-RC at a newer round
+   blocks again); completion durably writes the `panel_refuted` audit.
+   Carry the abandon-parallel framing: do NOT refute to dodge a finding you
+   have not actually disproven — legitimate precisely because always
+   audited, never silent; reason + evidence carry its legitimacy (an empty
+   reason still clears — footgun, not endorsement). Update the two
+   now-stale anti-pattern bullets: "Don't drop a REQUEST_CHANGES because
+   'only one reviewer flagged it'" gains "— the gate now BLOCKS on any
+   unresolved REQUEST_CHANGES; the only per-slot escape is the audited
+   refutation above", and the N−1 bullet notes the threshold is now a
+   floor, not a sufficient condition. Copy the updated file byte-identically
+   to `.claude/skills/ms-panel-tally/SKILL.md`.
+5. **Proof pass**: run the AC6 grep and the mirror diff; run the build and
+   the two core test packages once to confirm the docs-only diff is clean.
+
+**Verification**
+
+- [ ] `grep -n 'refut' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md plugins/mindspec/skills/ms-panel-tally/SKILL.md` returns hits in BOTH files (AC6).
+- [ ] `diff -q plugins/mindspec/skills/ms-panel-tally/SKILL.md .claude/skills/ms-panel-tally/SKILL.md` reports identical (mirror in sync).
+- [ ] Manual review checklist for the bead panel: the amendment text names
+  the §1, §3, and §7 changes, re-affirms §6/§8 including the empty-reason
+  footgun, and states the durable-vs-best-effort audit distinction in §7.
+- [ ] `go build ./... && go test ./internal/panel ./internal/complete` still
+  green (docs-only diff; no code drift).
+
+**Acceptance Criteria**
+
+- ADR-0037 carries a dated 2026-07-10 amendment enumerating the §1
+  `refutations` schema, the §3 layered-threshold rule (with the explicit
+  ADR-0040 composition statement), and the §7 durable, non-advertised
+  refutation escape, re-affirming §6/§8 (AC6).
+- Both /ms-panel-tally copies document the refutation procedure beside the
+  abandon procedure with the reason+evidence-carry-legitimacy /
+  empty-reason-footgun framing (AC6, O1 minor).
+
+**Depends on**
+Bead 2 (documents the shipped schema, audit keys, and durable semantics so
+the AC6 grep hits real names).
+
 ## ADR Fitness
 
-No ADRs are relevant to this work. (Update this section if ADRs apply.)
+- **ADR-0037 (panel gate as enforced contract) — AMENDED; remains the right
+  home.** This spec is a §3/§7 semantics change plus a §1 schema addition
+  to the exact contract ADR-0037 records; Bead 3 amends it in place
+  following its own amendment convention (five prior dated amendments
+  already live in the file). Creating a new ADR was considered and
+  rejected: the single-home property ("this is the SINGLE home of the
+  panel-gate enforced contract", internal/panel/gate.go:10-17) is itself
+  part of the contract, and splitting the RC rule from the threshold rule
+  it layers on would recreate the two-sources drift the ADR exists to
+  prevent. §6 and §8 are deliberately NOT amended, only re-affirmed:
+  fail-open without a panel and the anti-footgun (not anti-adversary) trust
+  boundary are unchanged — the refutation record is exactly as
+  agent-writable as `abandoned`, and no bead adds signing/hashing (the §8
+  "do not fix forgeability" fence).
+- **ADR-0035 (agent error contract) — best choice, unchanged.** The new
+  leg-9.5 Block routes through the existing `guard.NewFailure` wiring
+  (panel_advisory.go:201-203) so the final line is a genuine `recovery:`
+  command, and the new step-4.75 failure constructs its own
+  `guard.NewFailure` with an idempotent-rerun recovery line — both
+  conforming to the convention `internal/guard/recovery_convention_test.go`
+  enforces. No amendment needed: the contract already covers new failure
+  modes by construction.
+- **ADR-0040 (orchestration layering ratchet) — best choice, unchanged;
+  composition made explicit.** The recorded `approve_threshold` stays the
+  sole per-panel floor interpreter (`panel.ApproveThreshold`,
+  internal/panel/panel.go:113-127 — this plan adds no second interpreter,
+  and leg 10 is byte-preserved); 114 layers a NEW necessary condition on
+  top. The Bead-3 §3 text states the interaction (a recorded threshold
+  below N−1 still sets the floor but no longer licenses unrefuted dissent)
+  so 109 and 114 cannot be read as contradicting — an ADR-0037 amendment
+  obligation, not an ADR-0040 change.
+- **ADR-0023 (beads as single state authority) — best choice, unchanged.**
+  The `refutations` array is a review artifact, not workflow state
+  (ADR-0037 §8 closing paragraph); the gate reads it and writes nothing to
+  it. Lifecycle state stays derived from bd: the durable audit lands on
+  bead METADATA via the existing `bead.MergeMetadata` seam, exactly like
+  `panel_abandoned` — and moving the audit write BEFORE the merge keeps
+  Dolt (the state authority) ahead of the git projection, consistent with
+  the close-before-merge ordering decision recorded at complete.go:695-708.
 
 ## Testing Strategy
 
-Unit tests will verify the implementation.
-
-## Bead 1: <Title>
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] `make test` passes
-
-**Depends on**
-None
+- **Unit — `internal/panel` (the decision table is the core surface).**
+  Extend the pure, fs-free decision fixtures (`panel_decision_test.go`'s
+  `result` helper, `votedecision_test.go`'s `makeVerdicts` — upgraded to
+  synthesize real verdict strings): Bead 1 adds the
+  unresolved-RC/unrecognized rows plus the AC10 no-advertise predicate;
+  Bead 2 adds the anti-gaming rows — refuted-RC Allow, REJECT/hard_block
+  non-clearable, per-slot scope, round-binding,
+  sub-threshold-after-refutation floor Block (AC7), refuted-never-counts
+  (AC9), unrecognized-non-refutable (AC8), and the duplicate-slot-casing
+  determinism rows (AC12) — built synthetically so case-insensitive
+  filesystems cannot flake them. `VoteDecision` lockstep rows mirror every
+  gate row that touches the vote portion (the R1 never-disagree falsifier).
+  `internal/config` is untouched (N/A — no new keys, per the spec's Out of
+  Scope).
+- **`internal/complete` — gate wiring + durable audit.** Reuse the two
+  existing harnesses: the real-temp-repo `setupPanelGateRepo` e2e suite
+  (panel_gate_e2e_test.go:43-70) for AC1's end-to-end Block and AC2's
+  passing-by-refutation completion, and the seam-stub pattern of
+  `TestWritePanelAuditMetadata_Abandoned` (panel_advisory_test.go:111-134,
+  swapping `completeMergeMetadataFn`) for the audit-content and
+  injected-MergeMetadata-failure tests (AC11), including the selective stub
+  that fails only `panel_refuted` writes and the abandon/skip best-effort
+  asymmetry control. The pre-merge fence is asserted via the harness's
+  `readStubMergeExecutor.completeCalled` flag (the merge never ran).
+- **`cmd/mindspec` + `internal/instruct` — inheritance surfaces.** No new
+  production code; `TestPanelVerbs_DecisionIsPanelGateDecision` and
+  `TestSanitizeNonBeadDecision` (equality-pinned against the shared
+  decision) plus the panel-state tests keep proving verify/tally/instruct
+  can never disagree with the gate. One e2e `panel tally` row (the Bead-1
+  carve-out fixture flipped to non-zero + recovery line) pins the CLI exit
+  code through the new leg.
+- **AC5 regression fence.** Every bead ends with the full
+  `go build ./... && go test ./internal/panel ./internal/complete ./internal/instruct ./cmd/mindspec`
+  sweep plus the Bead-1 diff-review proof that outcome flips are confined
+  to the named carve-out set and all other fixture edits are
+  outcome-preserving input updates (enumerated exhaustively in Bead 1
+  steps 5-6).
+- **Shared test infrastructure (named, reused, never forked):**
+  `setupPanelGateRepo` / `readStubMergeExecutor` / `approveVerdicts` /
+  `subThresholdVerdicts` (internal/complete/panel_gate_e2e_test.go),
+  `writePanel` (internal/complete/panel_advisory_test.go:17-29),
+  `result`/`regn` (internal/panel/panel_decision_test.go), `buildResult`
+  (cmd/mindspec/panel_test.go:113-146), `beadPanel`/`sixApproves`
+  (internal/instruct/panelstate_test.go), and the abandon/skip audit
+  fixtures (`TestWritePanelAuditMetadata_*`).
 
 ## Provenance
 
-| Acceptance Criterion | Verified By |
-|---------------------|-------------|
-| (map spec criteria) | Bead 1 verification |
+| Spec AC | Bead | Verification step (named, runnable) |
+|---|---|---|
+| AC1 (out-vote closed) | Bead 1 | `TestPanelGateDecision_UnresolvedRequestChangesBlocks` + `TestPanelGate_RequestChangesBlocksComplete`; `go test ./internal/panel -run 'PanelGateDecision' && go test ./internal/complete -run 'PanelGate'` |
+| AC2 (refutation unblocks + audit persists) | Bead 2 | `TestPanelGateDecision_Refutations` (Allow row) + `TestWritePanelRefutedMetadata` + the e2e passing-by-refutation run; `go test ./internal/complete -run 'PanelRefuted\|PanelGate' && go test ./internal/panel -run 'Refut'` |
+| AC3 (refutation scope: never REJECT/hard_block; per-slot) | Bead 2 | `TestPanelGateDecision_Refutations` REJECT/hard_block + two-slot rows; `go test ./internal/panel -run 'Refut'` |
+| AC4 (round-scoping: zero-ceremony re-panel; no round carry-forward) | Bead 2 | `TestPanelGateDecision_Refutations` round rows; `go test ./internal/panel -run 'Refut\|Round'` |
+| AC5 (unchanged paths + named carve-out) | Bead 1 (established), re-swept in Beads 2-3 | `go build ./... && go test ./internal/panel ./internal/complete ./internal/instruct ./cmd/mindspec` + the Bead-1 diff-review proof over the step-5 (outcome-flip) and step-6 (outcome-preserving) lists |
+| AC6 (ADR + skill doc) | Bead 3 | `grep -n 'refut' .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md plugins/mindspec/skills/ms-panel-tally/SKILL.md` hits in both + mirror `diff -q` |
+| AC7 (sub-threshold after refutation still blocks) | Bead 2 | `TestPanelGateDecision_Refutations` AC7 row (6A+2 refuted RC, threshold 7 → leg-10 Block with the threshold message); `go test ./internal/panel -run 'Refut\|PanelGateDecision'` |
+| AC8 (unrecognized verdict blocks and is non-refutable) | Bead 1 (blocks) + Bead 2 (non-refutable) | unrecognized rows in `TestPanelGateDecision_UnresolvedRequestChangesBlocks` and `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|PanelGateDecision'` |
+| AC9 (refuted RC never increments Approves) | Bead 2 | `TestResult_AppliedRefutations` + AC9 assertions in the refutation table; `go test ./internal/panel -run 'Refut'` |
+| AC10 (no-advertise Block-message predicate) | Bead 1 (predicate) + Bead 2 (re-asserted with refutations present) + Bead 3 (the doc-side no-advertise contract) | fixed-string predicate rows in both decision tables + `TestPanelGate_RequestChangesBlocksComplete` recovery-line assert; `go test ./internal/panel -run 'PanelGateDecision' && go test ./internal/complete -run 'PanelGate'` |
+| AC11 (durable audit: write failure must not silently complete) | Bead 2 | `TestPanelGate_RefutedAuditWriteFailure_FailsCompletion` (non-zero + merge never ran) + the abandon best-effort asymmetry control; `go test ./internal/complete -run 'PanelRefuted\|PanelGate'` |
+| AC12 (duplicate slot files at latest round — chosen behavior stated + pinned) | Bead 2 (behavior chosen in step 2: byte-exact slot matching against the slot's tallied latest-round verdict; a REJECT under a near-duplicate slot is never cleared) | AC12 rows in `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|Dup'` |
