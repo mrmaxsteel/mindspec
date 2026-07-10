@@ -445,9 +445,17 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    to `(*panel.Registration, []panel.Refutation, error)`; accumulate
    `d.AppliedRefutations` across evaluated matched panels, **deduplicated by
    (slot, round) across all matched panels** (item 3 — a slot+round cleared
-   in two matched panels audits once). The skip-env and config-disabled
-   paths (panel_advisory.go:169-179) return nil applied — the gate did not
-   evaluate facts or rely on any refutation there. NOTE (review item 7): of
+   in two matched panels audits once). **Signature scope (F2 resolution):**
+   panelGate returns the applied-refutation set (for the pending-marker write
+   in (a)) and the matched `*panel.Registration` (whose `Dir` reconciliation
+   re-tallies for discharge evidence) — it does NOT need to thread a `*Result`
+   through its return; `reconcilePendingRefutations` gets the vote-state by its
+   own `panel.Tally(panelReg.Dir)` (c), which works uniformly on the
+   panel-present, no-panel, and hatch paths without depending on whether
+   panelGate tallied. So the 3-tuple `(*Registration, []Refutation, error)`
+   stands; no 4th return value is added. The skip-env and config-disabled paths
+   (panel_advisory.go:169-179) return nil applied — the gate did not evaluate
+   facts or rely on any refutation there. NOTE (review item 7): of
    these two, ONLY the env-skip path has its own audit
    (`panel_gate_skipped`, written by `writePanelAuditMetadata` guarded on
    `panelSkipEnvFn()`, panel_advisory.go:322-330); the config-disabled
@@ -491,7 +499,13 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
      REQUEST_CHANGES from <slot> remains unresolved — retry, or resolve the
      finding"; bead stays `in_progress`, no CommitAll/close/merge) — a genuine
      Block, NOT an abort-with-applied. So applied-in-a-run ⟺ the entry is in the
-     durable unioned set.
+     durable unioned set. (This marker-failure Block message is an operational
+     write-failure, distinct from the leg-9.5 unresolved-RC gate Block that
+     AC10's no-advertise predicate governs — it is deliberately OUTSIDE AC10's
+     scope: AC10 keeps the gate from advertising the refutation ESCAPE at an
+     unresolved RC; this message reports that an already-attempted refutation
+     could not be recorded, and naming "refutation" there is correct, not an
+     advertised escape.)
    - **(b) `panel_refuted` satisfying audit (pre-close).** Add
      `writePanelRefutedMetadata(beadID, entries) error` in panel_advisory.go
      building `panel_refuted: true`, `panel_refuted_at: <RFC3339 UTC>`,
@@ -510,36 +524,50 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
      the step-4 close — reads bead metadata via `completeGetMetadataFn` (step 6,
      fail-closed) and, for EVERY recorded `refutation_pending` entry NOT already
      covered by a durable `panel_refuted`/`refutation_discharged` entry (the
-     full unioned set, not just this run's), applies exactly one of:
-     - **Satisfy** — the current run's `AppliedRefutations` (plumbed from
-       `panelGate`) covers the pending (slot, round): write `panel_refuted` for
-       it (b), reason/evidence from the current panel.json refutations entry.
-     - **Discharge — ONLY on VERIFIED vote-state, never a bare "gate passed"
-       (round-5 item 2 / G1+G3).** `PanelGateDecision` ALSO passes via **Warn**
-       — abandoned (gate.go:160-169), missing-ref (180-189), transient-gitErr
-       (192-203) — WITHOUT the RC resolving, so "gate passed ⟹ moot" would
-       FALSELY discharge a still-live RC. Discharge a pending (slot, round) ONLY
-       on affirmative evidence from the ACTUAL TALLY (the matched panel's
-       `panel.Result`, plumbed from `panelGate` into reconciliation) that the
-       slot is no longer a latest-round `REQUEST_CHANGES` at/after its recorded
-       round — i.e. the slot's latest-round verdict is not `REQUEST_CHANGES`, OR
-       `Result.LatestRound` > the pending round. Then write a
-       `refutation_discharged` audit (`refutation_discharged: true` + `_at` +
-       unioned `_entries: [{slot, round, reason: "RC resolved naturally — slot's
-       latest-round verdict is no longer REQUEST_CHANGES at/after round N"}]`).
-       A Warn panel (abandoned / missing-ref / transient-gitErr) whose tally
-       still shows the RC at the pending round does NOT satisfy this evidence →
-       it falls through to Refuse (the obligation is kept, never falsely
-       discharged).
-     - **Refuse** — the resolution cannot be affirmatively verified (no panel
-       present / no tally; a Warn panel whose tally still carries the RC; or a
-       `completeGetMetadataFn` read/parse error, (d)): a recoverable
-       `guard.NewFailure` ("this bead carries an unsatisfied refutation
-       obligation for <slot@round> that cannot be verified as satisfied or
-       resolved — restore the panel so the gate can satisfy or discharge it, or
-       restore the audit", recovery `mindspec complete <bead>`). A bead with NO
-       recorded pending reconciles to a no-op and completes exactly as today
-       (§6 fail-open preserved for genuinely pristine beads).
+     full unioned set, not just this run's), applies exactly one of. **How
+     reconciliation obtains the discharge vote-state (F2 precision fix — the
+     mechanism, made explicit):** `reconcilePendingRefutations` **re-tallies the
+     matched panel itself from `panelReg.Dir` via `panel.Tally` (fs-only, no
+     git)** to get each slot's latest-round verdict + `LatestRound`; it does NOT
+     rely on `panelGate` having tallied (`panelGate` does not tally on the hatch
+     paths — see (e) — and its 3-tuple return threads no `*Result`, so a direct
+     re-tally is the uniform, path-independent source; `panelReg` is the matched
+     registration `panelGate` already returns). If there is **no panel dir**
+     (no-panel path) OR the **re-tally errors / yields no readable verdicts**,
+     the discharge vote-state is UNAVAILABLE → discharge cannot fire → the entry
+     Refuses (fail-closed, over-conservative: never a lost obligation, never a
+     false discharge). The three cases:
+     - **Satisfy** — the current run's `AppliedRefutations` (the set `panelGate`
+       returns) covers the pending (slot, round): write `panel_refuted` for it
+       (b), reason/evidence from the current panel.json refutations entry.
+     - **Discharge — ONLY on VERIFIED re-tallied vote-state, never a bare "gate
+       passed" (round-5 item 2 / G1+G3).** `PanelGateDecision` ALSO passes via
+       **Warn** — abandoned (gate.go:160-169), missing-ref (180-189),
+       transient-gitErr (192-203) — WITHOUT the RC resolving, so "gate passed ⟹
+       moot" would FALSELY discharge a still-live RC. Discharge a pending (slot,
+       round) ONLY on affirmative evidence from the **re-tally of `panelReg.Dir`**
+       that the slot is no longer a latest-round `REQUEST_CHANGES` at/after its
+       recorded round — precisely the two-disjunct test: **(i)** the re-tallied
+       `LatestRound` > the pending round (a later round exists, superseding it),
+       OR **(ii)** at `LatestRound == pending round`, the slot's latest verdict
+       is present and is not `REQUEST_CHANGES` (the reviewer flipped). Then write
+       a `refutation_discharged` audit (`refutation_discharged: true` + `_at` +
+       unioned `_entries: [{slot, round, reason: <synthetic: "RC resolved
+       naturally — the slot's latest-round verdict is no longer REQUEST_CHANGES
+       at/after round N">}]`; the synthetic reason is intentional — a discharge
+       is a system-verified fact, not an operator-authored refutation, so it
+       needs no `evidence` field). A Warn panel (abandoned / missing-ref /
+       transient-gitErr) whose re-tally still shows the slot as a latest-round
+       RC at the pending round does NOT meet this test → Refuse.
+     - **Refuse** — the resolution cannot be affirmatively verified: no panel dir
+       / an unreadable or erroring re-tally; a re-tally that still shows the RC at
+       the pending round; or a `completeGetMetadataFn` read/parse error (d). A
+       recoverable `guard.NewFailure` ("this bead carries an unsatisfied
+       refutation obligation for <slot@round> that cannot be verified as
+       satisfied or resolved — restore the panel so it can be satisfied or
+       discharged, or restore the audit", recovery `mindspec complete <bead>`). A
+       bead with NO recorded pending reconciles to a no-op and completes exactly
+       as today (§6 fail-open preserved for genuinely pristine beads).
      Every pending entry must reach Satisfy or Discharge for the completion to
      proceed; if ANY entry Refuses, the whole completion refuses pre-close. All
      satisfy/discharge writes are fail-closed (a write failure fails completion
@@ -552,19 +580,27 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
      Refuses (nothing closed/merged), because an unreadable metadata store
      cannot prove the bead is obligation-free.
    - **(e) HATCH paths reconcile too — hatches except the GATE, not the
-     obligation (round-5 item 3 / G3).** The env-only `MINDSPEC_SKIP_PANEL` and
-     the config `enforcement.panel_gate: false` bypass the GATE DECISION (they
-     allow the merge despite unresolved RCs) but NOT a pre-existing durable
-     `refutation_pending` obligation from a prior non-hatch run. So the
-     reconciliation (c) runs before close on the hatch paths TOO: an existing
-     pending must be satisfied / validly-discharged / refused, never silently
-     merged. On a hatch path the current run applies no NEW refutation (gate
-     skipped), so satisfy is unavailable; discharge still requires the same
-     verified vote-state from the matched panel's tally (panelGate still scans +
-     tallies the matched panel for the `panel_gate_skipped` audit, so the
-     `Result` is available); otherwise Refuse — audit integrity overrides the
-     hatch (incl. a `GetMetadata` error → Refuse). The hatch's own
-     `panel_gate_skipped` audit is still written.
+     obligation (round-5 item 3 / G3; F2 hatch-tally correction).** The env-only
+     `MINDSPEC_SKIP_PANEL` and the config `enforcement.panel_gate: false` bypass
+     the GATE DECISION (they allow the merge despite unresolved RCs) but NOT a
+     pre-existing durable `refutation_pending` obligation from a prior non-hatch
+     run. So the reconciliation (c) runs before close on the hatch paths TOO: an
+     existing pending must be satisfied / validly-discharged / refused, never
+     silently merged. **Correction (F2):** `panelGate` does NOT tally on the
+     hatch paths — the skip-env branch builds a bare
+     `panel.GateFacts{BeadID, SkipEnv: true}` (panel_advisory.go:169-175) and the
+     config-disabled branch `continue`s before `ResolveGateFacts`
+     (panel_advisory.go:176-179), and `writePanelAuditMetadata` never tallies —
+     so an earlier draft's claim that "the `Result` is available" on hatch paths
+     was FALSE. Reconciliation instead uses the same uniform mechanism as every
+     other path: it re-tallies `panelReg.Dir` via `panel.Tally` (c). On a hatch
+     path the current run applies no NEW refutation (gate skipped), so Satisfy is
+     unavailable; Discharge fires only if that re-tally affirmatively shows the
+     slot resolved (config-disabled discharge is thus best-effort — the fail-
+     closed Refuse fallback is always safe); otherwise Refuse — audit integrity
+     overrides the hatch (a `GetMetadata` error, no panel dir, or an unverified
+     re-tally all → Refuse). The hatch's own `panel_gate_skipped` audit is still
+     written.
    **Net invariant (state it in the code comment):** a refutation that EVER
    durably clears an RC (its `refutation_pending` was persisted — the only way
    an RC is cleared, per (a)) can never let its bead close or merge — across ANY
@@ -697,18 +733,19 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    re-panel whose latest round is all-APPROVE (X flipped, or the round
    advanced) so the gate passes with NO applied refutation; assert `Run` does
    NOT silently merge but RECONCILES: it writes `refutation_discharged` for X
-   ONLY because the tally affirmatively shows X is no longer a latest-round RC
-   at/after round 1, then completes; assert the discharge entry names X@1. A
-   negative twin: the discharge write stubbed to fail leaves the bead
-   `in_progress` (`closeBeadFn` NOT called). (va) **AC11 round-5 item 2 — Warn
-   paths must NOT falsely discharge**:
+   ONLY because the **re-tally of `panelReg.Dir`** affirmatively shows X is no
+   longer a latest-round RC at/after round 1, then completes; assert the
+   discharge entry names X@1. A negative twin: the discharge write stubbed to
+   fail leaves the bead `in_progress` (`closeBeadFn` NOT called). (va) **AC11
+   round-5 item 2 — Warn paths must NOT falsely discharge**:
    `TestPanelRefuted_CrossRun_WarnPathDoesNotDischarge` (table over the three
    live-panel Warn variants — abandoned, missing-ref, transient-gitErr) — run 1
    leaves `refutation_pending` (X@1); run 2 presents a panel whose gate returns
-   a WARN while the tally STILL shows X as a latest-round `REQUEST_CHANGES` at
-   round 1; assert `Run` does NOT write `refutation_discharged` for X (no
-   affirmative resolution evidence) and REFUSES (`closeBeadFn` NOT called) —
-   proving discharge keys on the tally, not on the bare Allow/Warn action. (vb)
+   a WARN while its verdict files (the reconciliation **re-tally of
+   `panelReg.Dir`**) STILL show X as a latest-round `REQUEST_CHANGES` at round 1;
+   assert `Run` does NOT write `refutation_discharged` for X (no affirmative
+   resolution evidence) and REFUSES (`closeBeadFn` NOT called) — proving
+   discharge keys on the re-tally, not on the bare Allow/Warn gate action. (vb)
    **AC11 round-5 item 1 — UNION multi-entry reconciliation**:
    `TestPanelRefuted_CrossRun_UnionReconcilesAll` — run 1 refutes X@1, marker
    (X,1), `panel_refuted` fails (bead `in_progress`); run 2 is a round-2
@@ -1070,7 +1107,11 @@ the AC6 grep hits real names).
   `internal/config` is untouched (N/A — no new keys, per the spec's Out of
   Scope).
 - **`internal/complete` — gate wiring + durable-obligation protocol
-  (`TestPanelRefuted…` e2e family + `completeGetMetadataFn` seam).** Reuse the
+  (`TestPanelRefuted…` e2e family + `completeGetMetadataFn` seam; discharge
+  evidence comes from `reconcilePendingRefutations` re-tallying `panelReg.Dir`
+  via `panel.Tally`, so the e2e fixtures drive the discharge/refuse split by
+  writing the run-2 panel's verdict files — a flipped-to-APPROVE round for
+  discharge, a still-RC round for refuse — not by stubbing a tally).** Reuse the
   real-temp-repo `setupPanelGateRepo` e2e suite (panel_gate_e2e_test.go:43-70)
   for AC1's end-to-end Block, AC2's passing-by-refutation completion (asserting
   BOTH `refutation_pending` and `panel_refuted`), the AC11 `panel_refuted`-

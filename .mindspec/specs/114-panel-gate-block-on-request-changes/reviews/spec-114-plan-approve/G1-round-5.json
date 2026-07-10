@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "APPROVE",
+  "confidence": 0.98,
+  "rationale": "Grounded at 17d0b008ffd59f72015745749c2dfa4c2a0da002. The round-4 false-discharge finding is ADDRESSED: plan step 5(c) requires discharge only from the matched panel.Result's affirmative tally evidence, not a bare non-blocking gate result, and TestPanelRefuted_CrossRun_WarnPathDoesNotDischarge tables abandonment, missing-ref, and transient-gitErr while X@1 remains REQUEST_CHANGES, requiring Refuse, no discharge, and no close. G2's union hole is closed by read-union-write of every pending slot/round plus TestPanelRefuted_CrossRun_UnionReconcilesAll, which requires discharge X@1 and satisfy B@2 before close. The hatch hole is closed by pre-close reconciliation on env-skip, config-disabled, and abandoned paths, including fail-closed metadata reads. Thus every durable obligation is satisfied, affirmatively discharged, or refused. One non-blocking drafting note remains: step 4's explicit panelGate tuple omits the Result later required by step 5; implementation must extend that tuple (or an equivalent return struct).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G1-R4-2",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "Warn passes cannot falsely discharge a carried RC",
+      "detail": "Plan 5(c) keys discharge to the matched panel.Result and explicitly refuses when abandonment, missing-ref, or transient-gitErr Warns while the tally still carries the pending slot's REQUEST_CHANGES. The named cross-run Warn-path table asserts no refutation_discharged write and no close."
+    },
+    {
+      "id": "G1-R5-UNION",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "Pending obligations are unioned and fully reconciled",
+      "detail": "The marker path reads existing refutation_pending_entries, unions current applied slot/round pairs, writes fail-closed, and reconciles every uncovered entry. The X@1 plus B@2 cross-run test pins both discharge and satisfaction before close."
+    },
+    {
+      "id": "G1-R5-HATCH",
+      "disposition": "ADDRESSED",
+      "severity": "major",
+      "title": "Hatches bypass the gate but not durable-obligation reconciliation",
+      "detail": "The reconciliation is placed after the final blocking gate and before close on panel-present, no-panel, env-skip, config-disabled, and abandoned paths; unverifiable tally state or metadata read failure refuses completion."
+    },
+    {
+      "id": "G1-R4-N1",
+      "disposition": "PARTIAL",
+      "severity": "info",
+      "title": "Config-disabled audit wording remains locally imprecise",
+      "detail": "Step 4 correctly says config-disabled writes no panel_gate_skipped audit, while step 5(e)'s singular statement that the hatch's own audit is still written can be read as covering both hatches. This does not weaken obligation reconciliation."
+    },
+    {
+      "id": "G1-R5-N1",
+      "disposition": "NEW",
+      "severity": "info",
+      "title": "Earlier panelGate signature paragraph was not refreshed for tally plumbing",
+      "detail": "Step 4 still specifies (*panel.Registration, []panel.Refutation, error), but step 5(c), spec R2/Scope, AC11, and the Warn regression require the matched panel.Result to be plumbed into reconciliation. Treat the later normative requirement as controlling and extend the tuple or use an equivalent result struct."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "My round-4 residual is closed. Step 5(a) now makes the refutation_pending marker read-then-UNION-then-write (dedup by slot+round, never a bare replace), fail-closed: a read OR write failure returns a genuine Block (RC unresolved, bead in_progress), so applied<=>durably-in-the-unioned-set. The loss path (round-2 (B,2) clobbering an unsatisfied (X,1)) is eliminated and pinned by TestPanelRefuted_CrossRun_UnionReconcilesAll (discharge X@1 + satisfy B@2, no clobber, any mid-reconcile failure leaves in_progress). Companions sound: discharge fires ONLY on affirmative tally evidence (slot not a latest-round RC at/after its round, or LatestRound>pending), so a Warn-pass with a live RC refuses (5c, tests va); reconciliation of the FULL unioned set runs on every path incl. hatches before close (5c/5e/6), and every failure mode degrades fail-closed (Block/Refuse). I traced the reachable state space (clobber, later-read-erase, marker-fail, panel-removed, natural-resolution, hatch, GetMetadata-error, pristine, recovery-branch): NO un-audited-merge or lost-obligation path survives. Mechanism is now TOTAL.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "resolved",
+      "summary": "Round-4 residual (marker write replaced older entries) is closed: step 5(a) reads existing refutation_pending_entries via completeGetMetadataFn, unions the current run's applied (slot,round), writes the merged array; read-or-write failure => Block. panel_refuted/refutation_discharged audits also union. No persisted obligation can be overwritten; the pending set grows monotonically until each entry is satisfied/discharged. Pinned by TestPanelRefuted_CrossRun_UnionReconcilesAll."
+    },
+    {
+      "severity": "resolved",
+      "summary": "Codex companion 1 sound: discharge keys on VERIFIED tally vote-state (panel.Result), not a bare Allow/Warn. Since PanelGateDecision also passes via Warn (abandoned/missing-ref/transient-gitErr) without the RC resolving, discharge requires the slot's latest-round verdict be non-RC (or round advanced); a Warn-pass with a live RC falls through to Refuse (test va)."
+    },
+    {
+      "severity": "resolved",
+      "summary": "Codex companion 2 sound: reconcilePendingRefutations is a Run() step after the last blocking gate and before close, reached on panel-present, no-panel, AND hatch paths. Hatches except the GATE, not the obligation: a pre-existing pending is satisfied/verified-discharged/refused, never silently merged (5e, test xii). Reconciliation-before-close means every close (incl. the already-closed recovery branch) is preceded by a full-set reconcile."
+    },
+    {
+      "severity": "minor",
+      "summary": "Non-blocking clarity gap the implementer must resolve: discharge needs the matched panel's panel.Result, which 5(c) says is 'plumbed from panelGate', but the named panelGate signature in step 4 returns only (*Registration, []Refutation, error) with no *Result; and on hatch paths panelGate does not resolve facts, so 5(e)'s justification ('still tallies for panel_gate_skipped' - the audit does not tally) is factually off. The discharge tests (v/va/vb) force the implementer to plumb the Result or re-tally from panelReg.Dir. This is NOT a soundness hole: if the tally is unavailable, discharge cannot fire and the path Refuses (fail-closed) - over-conservative, never a lost obligation or false discharge."
+    },
+    {
+      "severity": "info",
+      "summary": "Marker-at-2.25 / reconcile-after-ADR-gate ordering is safe: a Block between them (doc-skew/ADR) means no close; the durable obligation survives to the next complete which reconciles it. Same-run happy path works because reconciliation reads fresh metadata (GetMetadata) including this run's just-written marker (read-after-write comment mandated, O2). MergeMetadata fail-closed (step 6) prevents a later best-effort write from erasing a recorded audit (test viii)."
+    }
+  ]
+}
