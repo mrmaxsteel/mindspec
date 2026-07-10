@@ -262,7 +262,7 @@ func PanelGateDecision(f GateFacts) Decision {
 	// 114 R1). This is LAYERED on top of the leg (10) threshold floor, not a
 	// replacement: leg (10) below still Blocks a sub-threshold panel even
 	// once every unresolved verdict is cleared. The message deliberately
-	// carries a substring SUPERSET of leg (10)'s message ("X/N APPROVE",
+	// carries a substring-set superset of leg (10)'s message ("X/N APPROVE",
 	// "threshold is T/N", the consolidated-round name, the fence) so
 	// pre-existing sub-threshold fixtures whose panels carry RC/neutral
 	// filler keep their pinned substring assertions green even where they

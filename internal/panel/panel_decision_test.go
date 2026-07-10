@@ -332,11 +332,19 @@ func TestPanelGateDecision_UnresolvedRequestChangesBlocks(t *testing.T) {
 				p := defaultPanel()
 				r := result(p, 4, 0, 1, nil, nil)
 				r.Verdicts = append(r.Verdicts,
-					Verdict{File: "x-round-1.json", Slot: "x", Round: 1, Verdict: VerdictRequestChanges},
-					Verdict{File: "y-round-1.json", Slot: "y", Round: 1, Verdict: VerdictRequestChanges})
+					// revA/revB (not "x"/"y"): those single letters are
+					// substrings of fixed text in every Block message (e.g.
+					// "/ms-bead-fix" contains "x"; "bypass"/"only" contain
+					// "y"), which made the mustHave assertion below pass even
+					// with leg 9.5's multi-slot naming fully disabled (round-1
+					// panel finding S2). revA/revB appear ONLY via the %s
+					// slot-list substitution, so this row genuinely
+					// discriminates leg 9.5.
+					Verdict{File: "revA-round-1.json", Slot: "revA", Round: 1, Verdict: VerdictRequestChanges},
+					Verdict{File: "revB-round-1.json", Slot: "revB", Round: 1, Verdict: VerdictRequestChanges})
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
-			mustHave: []string{"x", "y", "4/6 APPROVE", fence},
+			mustHave: []string{"revA", "revB", "4/6 APPROVE", fence},
 		},
 	}
 
@@ -423,7 +431,7 @@ func TestPanelGateDecision_ApprovesExcludesUnresolvedVerdicts(t *testing.T) {
 // additive, not a replacement; and (b) a panel that is BOTH sub-threshold
 // AND carries an unresolved RC still Blocks with a message that names the
 // dissent AND still reports the genuine sub-threshold tally (the leg-9.5
-// message is a byte-superset of leg-10's), so neither condition masks the
+// message is a substring-set superset of leg-10's), so neither condition masks the
 // other.
 func TestPanelGateDecision_ThresholdFloorIsLayeredNotReplaced(t *testing.T) {
 	t.Parallel()

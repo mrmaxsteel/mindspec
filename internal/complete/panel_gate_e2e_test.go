@@ -215,6 +215,16 @@ func TestPanelGate_RequestChangesBlocksComplete(t *testing.T) {
 	if !strings.Contains(msg, "5/6 APPROVE") {
 		t.Errorf("block message should name the genuine approve tally; got:\n%s", msg)
 	}
+	// Leg-9.5-distinctive substring (round-1 panel finding S2): under the
+	// leg-9.5-disabled mutation this test still failed, but for the WRONG
+	// reason (an unrelated doc-sync gate tripped on the fixture's
+	// undocumented change, while the panel gate itself would have Allowed at
+	// 5/6). Asserting this exact phrase pins that the block is genuinely the
+	// unresolved-REQUEST_CHANGES leg, not incidental message overlap with a
+	// different gate — RED-on-revert now catches a real leg-9.5 regression.
+	if !strings.Contains(msg, "unresolved REQUEST_CHANGES") {
+		t.Errorf("block message must be attributable to leg 9.5 (unresolved REQUEST_CHANGES), not an unrelated gate; got:\n%s", msg)
+	}
 	// AC10 (no-advertise predicate), re-asserted on the FULL e2e error text
 	// (not just the pure-decision message): no paste-able refutation
 	// incantation (Bead 1 has none yet), and never the skip variable (HC-7).
