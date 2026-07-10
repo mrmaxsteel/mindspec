@@ -1,0 +1,20 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The central code trace is otherwise grounded: FinalizeEpic:381-422 auto-merges non-ancestor bead worktree branches; guardMergeLayout is its sole explicit merge guard; ApproveImpl:220-242 accepts status=closed; the orphan predicate and recovery command match; already-closed complete reaches the panel gate and reconciliation before close tolerance; all named test surfaces exist; ADR-0037 has zero impl-approve mentions; and the pinned package suites pass. However, the absolute refusal guarantee is false at the specified placement. ApproveImpl calls phase.EnsureMigrated at :140 before the proposed post-phase gate, and EnsureMigratedWithCache writes mindspec_phase/mindspec_migrated_at for a legacy epic (internal/phase/migrate.go:49-67). Thus an orphan refusal can mutate phase metadata, contradicting Goal/R1/AC1's 'mutating nothing' claim. Background also incorrectly says complete.Run runs all listed gates before any mutation: it runs EnsureMigratedWithCache at :291, CommitAll at :414, artifact CommitAll at :469, and optional ADR creation at :546 before later gates/reconciliation. Merge/close/push non-mutation remains supported, but the draft must state and test the real boundary.",
+  "concrete_changes_required": [
+    "Either move the impl-approve refusal before EnsureMigrated and test that migration metadata is uncalled, or narrow every absolute 'mutating nothing' claim and AC to the exact forbidden terminal effects while explicitly allowing/documenting legacy migration.",
+    "Correct Background's complete.Run ordering: distinguish pre-terminal enforcement from literally pre-mutation behavior, and acknowledge the migration/commit/optional placeholder writes that precede later gates and reconciliation."
+  ],
+  "findings": [
+    {
+      "id": "G1-1",
+      "severity": "high",
+      "hard_block": true,
+      "title": "The claimed no-mutation refusal boundary is not grounded",
+      "evidence": "internal/approve/impl.go:136-142 calls phase.EnsureMigrated before the proposed gate; internal/phase/migrate.go:49-67 writes epic phase migration metadata when absent. internal/complete/complete.go:286-293, 407-416, 460-470, and 529-548 likewise show mutations before later gates/reconciliation.",
+      "impact": "A refusal can change durable epic metadata despite Goal/R1/AC1 promising no mutation, and the recovery-flow explanation asserts an ordering the real code does not have."
+    }
+  ]
+}

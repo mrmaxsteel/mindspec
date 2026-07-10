@@ -1,0 +1,37 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "REFUSE is structurally sound on healthy same-spec inputs: ApproveImpl can run both checks before phase/epic mutation; complete.Run gates an already-closed orphan before its close tolerance; completed branches are absent or ancestors; and covered obligations pass slot+round-exactly. But the draft does not close every binary un-gated-merge path. FindOrphanedClosedBeads deliberately converts bd and ancestry failures to no-orphans, while FinalizeEpic can independently list and merge that branch; a plain unresolved RC has no R3 marker. FinalizeEpic also iterates every bead worktree globally, while R1 checks only the finalizing epic, so another spec's ungated branch can still be merged. Finally, readPlanBeadIDs errors are currently ignored; without an explicit fail-closed rule, R3 can enumerate zero beads and miss an unsettled obligation. These contradict the headline no-unsettled-merge invariant. The ordinary completed-spec path itself has no false refusal under healthy reads.",
+  "concrete_changes_required": [
+    "Replace the R1 consumer's fail-open result with an error-preserving orphan query and make impl approve refuse on epic lookup, closed-child listing, branch-existence, or ancestry uncertainty before any mutation; add fault-injection ACs proving FinalizeEpic is uncalled.",
+    "Close or explicitly gate FinalizeEpic's global bead-worktree loop in this spec: scope candidates to the finalizing epic and require settlement proof for every branch it may merge. The blp6 exclusion is incompatible with the stated no residual un-gated-merge outcome.",
+    "Specify and test that plan.md/readPlanBeadIDs failure refuses before R3 enumeration, or enumerate lifecycle children authoritatively from beads; a missing/corrupt plan must not turn the durable-obligation scan into an empty pass."
+  ],
+  "findings": [
+    {
+      "id": "G2-1",
+      "severity": "critical",
+      "hard_block": true,
+      "title": "R1 infra fail-open still permits the o4fd merge",
+      "evidence": "internal/lifecycle/orphans.go:71-103 returns nil/skips on epic lookup, bd list, or ancestry errors. internal/executor/mindspec_executor.go:383-418 separately lists worktrees and merges a non-ancestor branch. internal/complete/panel_advisory.go:414-448 creates refutation_pending_entries only when a refutation is applied, so an ordinary unresolved RC has no R3 backstop.",
+      "bypass": "Unresolved RC -> raw bd close -> transient/induced orphan-query bd or ancestry error -> R1 reports no orphan -> no pending metadata -> ApproveImpl reaches FinalizeEpic -> branch merges without complete's gate."
+    },
+    {
+      "id": "G2-2",
+      "severity": "critical",
+      "hard_block": true,
+      "title": "Cross-spec FinalizeEpic auto-merge remains completely ungated",
+      "evidence": "internal/executor/mindspec_executor.go:383-418 filters only the global worktree branch prefix bead/. R1 is expressly scoped to FindOrphanedClosedBeads(specID, ...), which lists only children of that spec's epic. The draft acknowledges and excludes mindspec-blp6.",
+      "bypass": "While approving spec A, leave an unmerged bead worktree for spec B (including a raw-closed RC-bearing bead). A's R1 cannot see B, but A's FinalizeEpic can merge B's branch into A without any panel or obligation check."
+    },
+    {
+      "id": "G2-3",
+      "severity": "high",
+      "hard_block": true,
+      "title": "R3 bead enumeration can fail open on plan parsing",
+      "evidence": "internal/approve/impl.go:220-242 records planErr and silently skips the bead loop when readPlanBeadIDs fails; lines 452-472 show missing/malformed frontmatter is an error. R3 says to check every readPlanBeadIDs result but does not require plan-read failure to refuse.",
+      "bypass": "A merged-then-branch-deleted bead has an unsettled pending obligation, while plan.md is missing or malformed. R1 has no branch signal; an empty/skipped R3 enumeration misses the metadata; FinalizeEpic finalizes the spec."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.82,
+  "rationale": "REFUSE design is sound and closes o4fd. Traced at a0a06943: FinalizeEpic auto-merge loop (mindspec_executor.go:381-422) is guarded only by directional guardMergeLayout (layout_guard.go:74); ApproveImpl's bead gate (impl.go:220-242) checks only status=='closed', which raw `bd close` satisfies — the confirmed hole. R1 reuses lifecycle.FindOrphanedClosedBeads (orphans.go:74, branch-exists + not-ancestor), the exact signal complete step1.6/next:459/doctor already consume. Recovery genuinely re-gates: complete.Run for an already-closed bead runs the AUTHORITATIVE panel gate (2.25, panel_advisory.go:387) and reconcilePendingRefutations (3.75, :570) BEFORE its step-4 close tolerance (:575) — so `complete <bead>` re-fires the RC-block + obligation reconciliation, then merges; impl approve then passes. REFUSE-before-mutation is correct: the ordering (R1/AC4) sits before phase-reconcile write, MUTATION(1/3) epic close, phase-done write, and FinalizeEpic — nothing merged/closed/pushed on refusal, AST-pinned by TestApproveImplCallOrder (impl_test.go:714). ADR-0030 rationale is real: complete imports executor (verified), so RUN-in-executor cycles; go list -deps confirms complete does NOT depend on approve, so R3's approve->complete extraction is cycle-free and feasible. Hatches keep 114 semantics (4gsz-class bypass guard, not the gate decision). Happy path unchanged: pristine beads no-op R3, ancestor/deleted branches exempt R1. Grounding is accurate throughout; AC9's ADR-0037 grep is a genuine falsifier (0 'impl approve' today); AC10 correct (lifecycle unowned on main, one-line add pre-applied on branch, code byte-unchanged). Findings below are disclosed-residual precision items, not new holes or false-refusals.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O1-F1",
+      "severity": "medium",
+      "type": "completeness_language",
+      "summary": "Goal overclaims relative to two disclosed residual un-gated paths; R3's raw-git-merge coverage should be qualified.",
+      "detail": "Because impl approve REFUSEs and never reads panel vote state (by design), the gate relies wholly on R1 (unmerged orphan branch) + R3 (durable refutation_pending obligation). A bead made an ancestor of the spec branch via the fenced raw `git merge`, carrying an unresolved REQUEST_CHANGES that was NEVER recorded as a refutation_pending obligation, escapes R1 (ancestor-exempt, orphans.go:101-104), escapes R3 (reconcile core no-ops when len(pending)==0, panel_advisory.go:538-540), and is never panel-checked — so it rides an un-gated finalize to main. Separately, R1 is epic-scoped while the FinalizeEpic loop iterates ALL bead/* worktrees (:385), so a raw-closed orphan under a DIFFERENT epic (blp6) still merges un-gated. BOTH are honestly disclosed (Non-Goals :68-69, Out of Scope :62) and neither is a NEW hole — the o4fd path (raw `bd close`, branch still unmerged) IS fully closed by R1. But the Goal's absolute phrasing ('no lifecycle verb in the binary merges a bead branch that lacks proof of panel settlement', :12) reads as stronger than what R1+R3 deliver, and R3's Background line ':42' says it 'covers ... a bead whose branch was manually merged (the forbidden raw git merge)' without foregrounding that coverage holds ONLY when an unsettled durable obligation exists.",
+      "suggested_fix": "Soften the Goal (or add an explicit 'residual un-gated paths' sentence) so it and the Non-Goals disclosures do not read as contradictory, and tighten R3/:42 to state raw-git-merge coverage is scoped to beads carrying an unsettled refutation_pending obligation (an unresolved-but-never-refuted RC on a raw-merged branch is the disclosed out-of-reach residual, per Non-Goals :68).",
+      "blocking": false
+    },
+    {
+      "id": "O1-F2",
+      "severity": "low",
+      "type": "asymmetry_note",
+      "summary": "R1 fail-open compensation by R3's fail-closed leg is obligation-scoped, not universal.",
+      "detail": "OQ2 (R1 :40, OQ2 :97) accepts R1 fail-open on bd/ancestry infra error and cites R3's independent fail-closed obligation leg as the compensating asymmetry. Verified: GetMetadata fail-closes on `bd show` error (bdcli.go:315-316) and reconcilePendingRefutations refuses on read/decode/shape error (panel_advisory.go:523-564). But R3 only REFUSEs when the orphan carries a refutation_pending obligation; a partial-Dolt state where `bd list` (R1's listClosedBeadsFn) errors yet `bd show` (R3) succeeds and the orphan has no recorded obligation would fail-open, letting an orphan-bearing finalize proceed un-gated during that window. This is inside OQ2's accepted asymmetry and requires an infra fault, but the spec presents R3 as a blanket compensation for R1 fail-open, which it is not.",
+      "suggested_fix": "Note in R1/OQ2 that R3's fail-closed compensation covers only beads with a recorded durable obligation, not the general R1 fail-open window; optionally add an AC asserting the obligation-scoped nature so a future reader does not over-rely on the asymmetry.",
+      "blocking": false
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.86,
+  "rationale": "Lens: impacted-domains parity + decomposition. Verified every touched path against the four OWNERSHIP.yaml files. Parity is CORRECT: internal/approve (new gate), internal/complete (exports the check-only obligation predicate — a genuine code change, not read-only), internal/panel (read-only), cmd/**, plugins/mindspec/** all map to workflow; internal/executor (comment fix) and internal/lifecycle (ownership add + read-only) map to execution. So workflow IS genuinely impacted (approve + complete both change), not merely referenced. R3's cross-package extraction is feasible with no import cycle: approve does not import complete today and complete does not import approve (verified) — the executor->complete cycle that motivates REFUSE does not apply to approve->complete. The ownership add is exactly one line (+internal/lifecycle/**) with lifecycle code byte-unchanged vs main (git diff empty), matching AC10. Decomposition is a clean ~3 beads (R1 orphan-refuse + R2 advisory + call-order pin + executor comment; R3 obligation backstop extract+wire; ADR-0037 + skill + ownership docs) with all 10 ACs mapped. REFUSE is genuinely small — reuses FindOrphanedClosedBeads (already consumed by complete/next/doctor) plus one extracted predicate; no second panel gate. All cited file:line groundings (FinalizeEpic :349/:381-403, guardMergeLayout :74/:399, orphans.go :54/:71-74, ApproveImpl gate :220-242, TestApproveImplCallOrder :714) verified accurate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "low",
+      "summary": "Pre-existing ownership self-reference gap (non-blocking, out of 115 scope)",
+      "detail": ".mindspec/domains/execution/OWNERSHIP.yaml — the exact file 115 edits to add internal/lifecycle/** — is not itself claimed by any domain. Only core and workflow self-own their OWNERSHIP.yaml (context-system and execution do not). Since 115's OQ2 theme is closing load-bearing ownership gaps and it is already editing this file, adding '.mindspec/domains/execution/OWNERSHIP.yaml' to make it self-owned (matching core/workflow) would be trivial and coherent. Pre-existing, does not affect the shipped code, and the spec's mindspec-validate proof is claimed passing (advisory WARN acceptable), so NOT a blocker — an optional consistency improvement."
+    },
+    {
+      "severity": "info",
+      "summary": "Impacted-domains parity confirmed clean",
+      "detail": "No touched path is unowned or mis-declared: the workflow-domain paths (approve/complete/panel/cmd/plugins) and execution-domain paths (executor/lifecycle) all match .mindspec/domains/*/OWNERSHIP.yaml. Every AC (AC1-AC10) maps to a bead-sized unit; REFUSE avoids RUN's cross-package re-implementation. No decomposition or parity defect found."
+    }
+  ]
+}

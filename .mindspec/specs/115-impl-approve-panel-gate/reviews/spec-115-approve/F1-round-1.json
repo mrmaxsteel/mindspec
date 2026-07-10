@@ -1,0 +1,35 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Falsifiability lens, verified empirically at a0a06943. 9 of 10 ACs are genuinely runnable pass/fail proofs pinned to surfaces that exist: TestApproveImplCallOrder is real and AST-based (internal/approve/impl_test.go:714), TestApproveImpl_HappyPath (:75) and TestApproveImpl_FinalizeEpicCalled (:299) exist for AC2, finalize_orphan_test.go / merge_conflict_test.go / layout_guard_test.go exist for AC8, and AC8's grep target string 'same regression-only rule' is verbatim in mindspec_executor.go:396. The headline falsifier (AC1) is real: seam-recorded mocks are the established pattern in impl_test.go, and the recovery convergence claim checks out in code (complete.go step 2.25 gate at :345-405 runs before step-4 already-closed tolerance at :574-582; step 1.6 excludes the in-flight bead). ADR-0037 has zero 'impl approve' mentions today, so AC9's first grep is a genuine falsifier. Every cited file:line I checked (impl.go:132/:220-242/:327-348/:372/:452; orphans.go:54/:71-74; panel_advisory.go:162/:519/:624; gate.go:30/:143) is accurate. ONE defect: AC9's second proof and the Scope bullet name plugins/mindspec/skills/ms-impl-approve/SKILL.md, which does not exist and is architecturally the wrong surface — the skill is binary-embedded — and its grep string is already pre-satisfied, so that leg cannot falsify anything.",
+  "concrete_changes_required": [
+    "AC9 + Scope: replace 'plugins/mindspec/skills/ms-impl-approve/SKILL.md (and mirrored copies)' with the real surface. That path does not exist (verified: plugins/mindspec/skills/ contains only ms-bead-*, ms-panel-*, ms-spec-autopilot/final-review/grill). The four lifecycle-gate skills, including ms-impl-approve, are embedded in the binary via lifecycleSkillFiles() (internal/setup/claude.go:681; the ms-impl-approve literal starts at :736) and materialized to .claude/skills/ms-impl-approve/SKILL.md and .agents/skills/ms-impl-approve/SKILL.md — per spec 105's refresh convention for existing installs. Also strengthen the grep string: the current materialized SKILL.md ALREADY contains 'mindspec complete' (line 9, the review-mode transition note), so AC9's grep passes today without any change — it is a pre-satisfied non-falsifier. Pin it to refusal-specific language that has zero hits today (e.g. grep -n 'closed without' on the embedded literal and materialized copies)."
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "major",
+      "title": "AC9 names a non-existent skill-doc surface with a pre-satisfied grep",
+      "detail": "plugins/mindspec/skills/ms-impl-approve/SKILL.md does not exist at a0a06943; ms-impl-approve is embedded via lifecycleSkillFiles() at internal/setup/claude.go:681 (literal at :736) and materialized to .claude/skills/ and .agents/skills/. Editing/creating a plugins copy would be a dead file outside the distribution channel, letting AC9 'pass' without the real doc changing. Independently, grep -n 'mindspec complete' already hits the current SKILL.md (line 9), so the proof string cannot falsify the new refusal documentation even at the right path. Both legs of AC9's second proof need repointing (see concrete change)."
+    },
+    {
+      "id": "F1-2",
+      "severity": "minor",
+      "title": "AC10's ownership grep is already green at the review SHA (informational, no change required)",
+      "detail": "The one-line 'internal/lifecycle/**' add is already committed on the spec branch (.mindspec/domains/execution/OWNERSHIP.yaml:5) as the artifact under review, so AC10's first grep passes pre-implementation. It remains falsifiable (reverting the line fails it) and the second leg (git diff main --exit-code -- internal/lifecycle/, verified clean) is a real byte-unchanged falsifier. Acceptable as-is; noting so the tally does not mistake it for an unimplemented claim."
+    },
+    {
+      "id": "F1-3",
+      "severity": "minor",
+      "title": "AC7's 'AlreadyClosed' -run pattern matches no existing test (informational)",
+      "detail": "grep for 'func Test.*AlreadyClosed' in internal/complete finds nothing today; the pattern will only match the NEW integration test AC7 mandates. The surface (internal/complete gate suite: panel_gate_e2e_test.go, panel_refuted_test.go, closed_unmerged_test.go) exists and the underlying behavior is real in code (gate before close-tolerance), so the AC is falsifiable once the named test lands — no spec change required, but the implementer must actually name the new test to match the pattern."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "title": "Headline falsifier verified real and pinned",
+      "detail": "The o4fd hole is exactly as the spec claims: ApproveImpl's gate 1/3 (impl.go:220-242) checks only status == \"closed\"; FinalizeEpic's auto-merge loop (mindspec_executor.go:381-422) fronts only guardMergeLayout; no panel/orphan/obligation check fires on the path. The recovery convergence is code-true: complete.Run's step 1.6 excludeBeadID avoids the chicken-and-egg, step 2.25 gate precedes the step-4 already-closed tolerance, and reconcilePendingRefutations (step 3.75) runs on every path. AC1's blocks-naming-the-bead + nothing-mutated shape is testable with the existing seam/mocks pattern."
+    }
+  ]
+}
