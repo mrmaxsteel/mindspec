@@ -159,14 +159,78 @@ func (r *Result) Complete() bool {
 // "unresolved" even if leg ordering were ever edited. Verdicts is already
 // slot-sorted (see Tally), so the returned slice — and every message built
 // from it — is deterministic (Spec 114 R1).
+//
+// Spec 114 R2 (the audited-refutation escape): a latest-round
+// REQUEST_CHANGES is treated as RESOLVED — and excluded here — iff some
+// Panel.Refutations entry has a byte-equal Slot AND Round == r.LatestRound
+// (isRefuted, the single home of this matching rule). This is the ONLY
+// gate-validation home for refutations (tally.go, single-homed per the
+// plan): REJECT/hard_block/unrecognized verdicts are never
+// VerdictRequestChanges, so they can never be refuted here, and a
+// round-N refutation never clears a round-(N+1) re-RC because the check is
+// against the CURRENT r.LatestRound, not the verdict's own (always-latest)
+// round.
 func (r *Result) UnresolvedVerdicts() []Verdict {
 	var out []Verdict
 	for _, v := range r.Verdicts {
 		if v.Verdict == VerdictApprove || v.Verdict == VerdictReject {
 			continue
 		}
+		if v.Verdict == VerdictRequestChanges && r.isRefuted(v.Slot) {
+			continue
+		}
 		out = append(out, v)
 	}
+	return out
+}
+
+// isRefuted reports whether some recorded Panel.Refutations entry names
+// slot at the panel's CURRENT LatestRound (Spec 114 R2) — byte-exact Slot
+// match, exact Round match. The single home of the refutation-matching
+// rule; UnresolvedVerdicts and AppliedRefutations both call this so they
+// can never disagree.
+func (r *Result) isRefuted(slot string) bool {
+	if r.Panel == nil {
+		return false
+	}
+	for _, ref := range r.Panel.Refutations {
+		if ref.Slot == slot && ref.Round == r.LatestRound {
+			return true
+		}
+	}
+	return false
+}
+
+// AppliedRefutations returns exactly the recorded Panel.Refutations entries
+// that matched a latest-round REQUEST_CHANGES verdict via the same exact
+// rule isRefuted applies (Spec 114 R2): byte-equal Slot, Round ==
+// r.LatestRound. Entries matching nothing — a stale round, an unknown slot,
+// or a REJECT/hard_block/unrecognized-verdict slot (never
+// VerdictRequestChanges) — are NEVER returned. Deterministically
+// deduplicated by (slot, round): two refutations entries naming the same
+// slot+round collapse to ONE record, first-wins in the panel's recorded
+// array order (stable); the result is then slot-sorted for determinism,
+// mirroring Verdicts' own sort (Tally).
+func (r *Result) AppliedRefutations() []Refutation {
+	if r.Panel == nil || len(r.Panel.Refutations) == 0 {
+		return nil
+	}
+	rcSlots := make(map[string]bool)
+	for _, v := range r.Verdicts {
+		if v.Verdict == VerdictRequestChanges {
+			rcSlots[v.Slot] = true
+		}
+	}
+	seen := make(map[string]bool)
+	var out []Refutation
+	for _, ref := range r.Panel.Refutations {
+		if ref.Round != r.LatestRound || !rcSlots[ref.Slot] || seen[ref.Slot] {
+			continue
+		}
+		seen[ref.Slot] = true
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
 	return out
 }
 

@@ -89,6 +89,7 @@ func saveAndRestore(t *testing.T) {
 	origFetchBeadByID := fetchBeadByIDFn
 	origFetchBeadAsOf := fetchBeadAsOfFn
 	origMergeMeta := completeMergeMetadataFn
+	origGetMeta := completeGetMetadataFn
 	origGitEmail := gitUserEmailFn
 	origCheckDirty := checkDirtyTreeFn
 	origGetwd := completeGetwdFn
@@ -108,6 +109,7 @@ func saveAndRestore(t *testing.T) {
 		fetchBeadByIDFn = origFetchBeadByID
 		fetchBeadAsOfFn = origFetchBeadAsOf
 		completeMergeMetadataFn = origMergeMeta
+		completeGetMetadataFn = origGetMeta
 		gitUserEmailFn = origGitEmail
 		checkDirtyTreeFn = origCheckDirty
 		completeGetwdFn = origGetwd
@@ -152,6 +154,12 @@ func saveAndRestore(t *testing.T) {
 	// Spec 086 Bead 3: keep metadata + git-identity reads inert by
 	// default so the existing tests don't shell out to bd or git.
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error { return nil }
+	// Spec 114 R2/Bead 2: default the metadata READ seam to a clean empty
+	// map (no recorded refutation_pending) so reconcilePendingRefutations
+	// no-ops for every pre-existing test (§6 fail-open preserved) — the
+	// durable-obligation tests override this to drive pending/pending-fails
+	// scenarios.
+	completeGetMetadataFn = func(id string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 	gitUserEmailFn = func() string { return "test@example.invalid" }
 	// Spec 092 Reqs 6/7: the artifact-aware tree classification shells
 	// out to git/bd in production (next.CheckDirtyTreeDetail); default to
