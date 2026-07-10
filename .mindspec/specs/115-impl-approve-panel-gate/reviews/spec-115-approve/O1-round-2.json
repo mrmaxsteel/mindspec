@@ -1,0 +1,64 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.89,
+  "rationale": "Re-traced at eb6a2ed1: REFUSE still closes o4fd and the fail-closed refactor (my round-1 F2) is sound. orphans.go:74-112 is the fail-open wrapper (epic err/list err/ancestry err -> nil, parity comment :71-73, epic-scope :75-83); R1 adds an error-preserving core the GATE consumes and REFUSES on infra error, wrapper byte-identical for complete/next/doctor. Asymmetry is correct: lifecycle is a leaf (no cycle), the three consumers are pinned unchanged (AC1b), and a merge gate MUST fail closed on can't-prove-settlement. The only residual false-refusal is transient-infra-at-finalize -> retry, the accepted tradeoff I argued for. My round-1 F2 window (bd-list errors, no obligation -> R3 can't compensate) is now CLOSED because R1's own gate leg fails closed on bd-list error — stronger than my suggested fix. Recovery converges through complete.Run: gate step 2.25 + reconcilePendingRefutations (panel_advisory.go:519-584, no-op only when len(pending)==0) run before step-4 close tolerance. R3 fixes the impl.go:226-227 silent skip (fail-closed on unreadable plan). Ordering correct: gate before phase-reconcile :327 / epic close :343 / phase-done :352 / FinalizeEpic :372; EnsureMigrated:140 carved out. Both residuals (raw-git-merge'd never-refuted-RC; cross-spec blp6) honestly disclosed (Non-Goals 69-70); Goal (my F1) now qualified 'wherever its detection signal or a recorded obligation can see the gap.' Hatches keep 114's except-the-gate-not-the-obligation. AC8/AC9/AC10 discriminators verified honest (1/0/0/1-branch). No new hole.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "1",
+      "grade": "ADDRESSED",
+      "detail": "My round-1 F2. R1 (:40) specs an error-preserving core (ScanOrphanedClosedBeads returning ([]Orphan,error)) + FindOrphanedClosedBeads retained as fail-open wrapper; gate REFUSES on any epic-lookup/bd-list/ancestry error. Verified orphans.go:74-112 is today's fail-open wrapper (swallows all three error classes to nil) with parity contract :71-73 — the refactor is additive, non-regressing. OQ2 (:98) rewritten to advisory-fail-open / gate-fail-closed asymmetry; AC1(b) + R1 falsifier cover the infra-error refusal AND the wrapper's unchanged behavior. Asymmetry is sound (leaf pkg, no cycle)."
+    },
+    {
+      "id": "2",
+      "grade": "ADDRESSED",
+      "detail": "R3 (:42) refuses naming the plan path on unreadable bead IDs rather than inheriting gate-1/3's silent skip. Verified the skip is real at impl.go:226-227 (`if planErr == nil`). AC6(e) covers missing/corrupt plan.md."
+    },
+    {
+      "id": "3",
+      "grade": "ADDRESSED",
+      "detail": "R1 (:40) narrows the guarantee to 'no close/phase-write/merge/push' and explicitly carves out phase.EnsureMigrated at impl.go:140 as the one legitimate pre-existing pre-gate write. Background's complete.Run ordering corrected (:18)."
+    },
+    {
+      "id": "4",
+      "grade": "ADDRESSED",
+      "detail": "R1 (:40) + Background (:20, :24) state epic-scoped detection (orphans.go:75-83); AC2(c) proves a different-spec orphan does not refuse; blp6 global-loop fix explicitly DEFERRED P2 (Non-Goals :70, Out of Scope :62)."
+    },
+    {
+      "id": "5",
+      "grade": "ADDRESSED",
+      "detail": "Scope (:55) + AC9 repoint to the binary-embedded literal internal/setup/claude.go:681/:736 (verified ms-impl-approve entry at :736) + materialized .claude/skills/ + .agents/skills/ copies. AC9 grep uses refusal-specific 'closed without' (verified 0 hits in claude.go today) not the non-discriminating 'mindspec complete'."
+    },
+    {
+      "id": "6",
+      "grade": "ADDRESSED",
+      "detail": "AC8 uses single-line 'rule as CompleteBead' (:398). Verified exactly 1 occurrence in internal/executor/mindspec_executor.go — grep-matchable."
+    },
+    {
+      "id": "7",
+      "grade": "ADDRESSED",
+      "detail": "AC10 uses the execution-file negative discriminator (FALSE at round-1 SHA); AC7 names TestRecoveryConvergence_AlreadyClosedOrphan with an existence grep (`-run` matches zero tests at round-1 SHA). Both genuinely falsify."
+    },
+    {
+      "id": "8",
+      "grade": "ADDRESSED",
+      "detail": "Scope (:52) + Impacted Domains (:28-29) move internal/lifecycle/** to WORKFLOW and REMOVE it from execution. Verified at eb6a2ed1: workflow OWNERSHIP has it (1), execution does not (0) — exactly one claimant, pre-applied on branch per spec-095 branch-tip doc-sync."
+    },
+    {
+      "id": "9",
+      "grade": "ADDRESSED",
+      "detail": "My round-1 F1. Goal (:11-12) now qualified 'wherever its detection signal or a recorded obligation can see the gap' and explicitly discloses BOTH residuals. Non-Goals :69 scopes R3's raw-git-merge coverage to beads carrying a durable obligation (an unrefuted RC on a raw-merged branch is the disclosed out-of-reach residual). No longer contradicts the Non-Goals."
+    },
+    {
+      "id": "10",
+      "grade": "ADDRESSED",
+      "detail": "OQ2 rationale reworded to the asymmetry (dropped inoperative Dolt-hiccup framing); orphans.go references bounded (:74-112); Background loose sentences tightened."
+    },
+    {
+      "id": "4gsz",
+      "grade": "ADDRESSED",
+      "detail": "Background (:20) frames 115 as the impl-approve leg of 4gsz's detect-and-block floor sharing FindOrphanedClosedBeads; complete/next/doctor legs shipped under 4gsz; the CI leg stays 4gsz scope (Out of Scope :63). No other 4gsz leg pulled into 115."
+    }
+  ]
+}

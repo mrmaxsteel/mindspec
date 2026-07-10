@@ -1,0 +1,69 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "My round-1 finding (item 8) is fully ADDRESSED via the primary path I recommended: `internal/lifecycle/**` is REMOVED from execution OWNERSHIP (execution now claims only executor/bead/gitutil/safeio/harness) and ADDED to workflow OWNERSHIP — exactly one claimant, no dup, verified at eb6a2ed1. The workflow attribution is CORRECT: the package self-describes (orphans.go:1-13) as 'cross-command lifecycle-invariant detectors shared by mindspec next, complete, doctor' — all workflow verbs — and all four consumers (complete/approve/next/doctor) are workflow-owned. Impacted Domains + AC10 both point at workflow, and AC10's execution-negative discriminator (FALSE at round-1 SHA) genuinely falsifies. ADR fitness clears: ADR-0037 has ZERO 'impl approve'/'impl-approve' mentions (AC9 falsifier holds); the dated amendment extends the contract's REACH to every merging verb while keeping `complete` the single settlement surface — consistent with 114's single-authoritative-enforcement-point language, no contradiction. ADR-0030 verified: enforcement pkgs (validate/approve/complete/state/phase) route git through Executor, so the executor-cannot-import-complete cycle rationale for REFUSE-not-RUN is sound (cited, not amended). ADR-0023 (closed≠settled) and ADR-0035 (recovery-final-line, message shape matches complete step 1.6) correctly referenced. No misfit, no duplicate/wrong ownership, no contradicting amendment.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": 1,
+      "status": "ADDRESSED",
+      "note": "OQ2 rewritten to advisory-fail-open / gate-fail-CLOSED asymmetry; R1 specs error-preserving core + fail-open wrapper parity; AC1(b) covers infra-error refusal. Outside my lens (F1/O1 own it) but spec-consistent."
+    },
+    {
+      "item": 2,
+      "status": "ADDRESSED",
+      "note": "R3 + AC6(e) refuse on unreadable plan.md naming the plan path, no longer inheriting impl.go:226-227 silent skip."
+    },
+    {
+      "item": 3,
+      "status": "ADDRESSED",
+      "note": "Refuse guarantee narrowed to no close/phase-write/merge/push; EnsureMigrated (impl.go:140) explicitly carved out; complete ordering corrected in Background."
+    },
+    {
+      "item": 4,
+      "status": "ADDRESSED",
+      "note": "Epic-scoping stated (orphans.go:75-83); AC2(c) proves a different-spec orphan does not refuse; blp6 merge-loop fix explicitly DEFERRED P2 in Non-Goals."
+    },
+    {
+      "item": 5,
+      "status": "ADDRESSED",
+      "note": "Scope + AC9 repoint to embedded literal (claude.go:681/:736) + materialized .claude/skills + .agents/skills copies; AC9 grep uses refusal-specific 'closed without' (0 hits today), not the non-discriminating 'mindspec complete'."
+    },
+    {
+      "item": 6,
+      "status": "ADDRESSED",
+      "note": "AC8 targets single-line 'rule as CompleteBead' (:398), removed-line grep matchable; grep-count-0-after asserted."
+    },
+    {
+      "item": 7,
+      "status": "ADDRESSED",
+      "note": "AC10 has execution-file negative discriminator (FALSE at round-1 SHA); AC7 names TestRecoveryConvergence_AlreadyClosedOrphan with grep existence + -run pass (matches zero tests at round-1 SHA)."
+    },
+    {
+      "item": 8,
+      "status": "ADDRESSED",
+      "note": "MY FINDING, fully fixed on the primary path I recommended. Verified at eb6a2ed1: internal/lifecycle/** REMOVED from .mindspec/domains/execution/OWNERSHIP.yaml (execution = executor/bead/gitutil/safeio/harness only) and ADDED to .mindspec/domains/workflow/OWNERSHIP.yaml — exactly one claimant, no overlap. Impacted Domains reframes it as a NEW claim into WORKFLOW with the correct rationale (all four consumers workflow-owned; package self-describes as workflow-lifecycle detectors, orphans.go:1-13). AC10 pins workflow-only with a genuinely-falsifying execution-negative discriminator. Attribution is correct: complete/approve/next(cmd/**)/doctor are all workflow-owned; zero execution package consumes it. My round-1 rationale-weakness concern is moot — the reassign eliminated the 'composes execution plumbing' framing entirely."
+    },
+    {
+      "item": 9,
+      "status": "ADDRESSED",
+      "note": "Goal now discloses both residuals (raw-git-merge'd never-refuted-RC bead; cross-spec blp6 orphan) and R3 coverage is qualified 'only when a durable obligation was recorded'."
+    },
+    {
+      "item": 10,
+      "status": "ADDRESSED",
+      "note": "OQ2 rationale reframed to the asymmetry (Dolt-hiccup framing dropped); orphans.go bounds and Background tightened. Cosmetic."
+    },
+    {
+      "item": "4gsz",
+      "status": "ADDRESSED",
+      "note": "Background frames 115 as the impl-approve leg of 4gsz's detect-and-block floor (shared FindOrphanedClosedBeads predicate; complete/next/doctor legs shipped under 4gsz; CI leg stays 4gsz scope) without pulling other legs into 115. Consistent with orphans.go self-description."
+    },
+    {
+      "item": "ADR-0030-citation-precision",
+      "status": "ADDRESSED",
+      "note": "My round-1 info-note. ADR-0030 verified: it scopes enforcement pkgs (validate/approve/complete/state/phase) to route git through Executor. The spec's import-cycle claim is a correct DERIVATION (complete->executor, so executor->complete cycles), and it is now phrased as 'cited, not amended' with the boundary reason explicit. No change needed; resolved to my satisfaction."
+    }
+  ]
+}

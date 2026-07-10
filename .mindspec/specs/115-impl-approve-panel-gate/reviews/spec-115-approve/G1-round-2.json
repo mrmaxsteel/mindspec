@@ -1,0 +1,64 @@
+{
+  "reviewer_id": "G1 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At pinned SHA eb6a2ed1, every requested load-bearing citation is exact: FinalizeEpic's global bead-worktree loop and sole layout guard; ApproveImpl's fail-open plan-status gate, EnsureMigrated carve-out, deferred phase write, epic close, and FinalizeEpic call; the epic-scoped best-effort orphan predicate; complete's panel gate, reconciliation, merge-base, close tolerance, and recovery message; the setup skill literal/materialized copies; and bead.GetMetadata. ADR-0037 and all three skill surfaces have the claimed zero-hit baselines, AC8's old phrase occurs exactly once, workflow alone claims internal/lifecycle, and every named test surface exists. The AC grep/diff proofs are runnable and discriminating, including AC7's explicit existence guard. Baseline tests for approve, executor, complete, and lifecycle pass; spec validation reports only the expected pre-approval no-epic warning. The revision fully addresses my round-1 mutation-boundary objection by narrowing refusal effects to no epic close, phase write, merge, or push and explicitly carving out pre-existing EnsureMigrated.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "1",
+      "status": "ADDRESSED",
+      "evidence": "R1, AC1(b), and OQ2 specify an error-preserving orphan scan for impl-approve while preserving FindOrphanedClosedBeads fail-open parity."
+    },
+    {
+      "id": "2",
+      "status": "ADDRESSED",
+      "evidence": "R3 and AC6(e) explicitly refuse when plan bead IDs cannot be read, closing impl.go:226-227's current silent skip."
+    },
+    {
+      "id": "3",
+      "status": "ADDRESSED",
+      "evidence": "Goal/R1 now promise no epic close, phase write, merge, or push and explicitly identify EnsureMigrated at impl.go:140 as the pre-existing carve-out; Background accurately distinguishes pre-terminal ordering."
+    },
+    {
+      "id": "4",
+      "status": "ADDRESSED",
+      "evidence": "R1/AC2(c) use epic-scoped enumeration grounded at orphans.go:75-83 and explicitly defer the global FinalizeEpic loop issue to mindspec-blp6."
+    },
+    {
+      "id": "5",
+      "status": "ADDRESSED",
+      "evidence": "Scope and AC9 point to lifecycleSkillFiles at claude.go:681, the ms-impl-approve entry at :736, and both existing materialized skill files; the refusal-specific phrase is absent at the baseline."
+    },
+    {
+      "id": "6",
+      "status": "ADDRESSED",
+      "evidence": "AC8 targets the single-line phrase 'rule as CompleteBead'; it occurs exactly once at mindspec_executor.go:398 and the removed-line diff grep can match it."
+    },
+    {
+      "id": "7",
+      "status": "ADDRESSED",
+      "evidence": "AC10 includes the execution-file negative discriminator, and AC7 names TestRecoveryConvergence_AlreadyClosedOrphan with a grep existence check before go test."
+    },
+    {
+      "id": "8",
+      "status": "ADDRESSED",
+      "evidence": "At eb6a2ed1 internal/lifecycle/** appears only in workflow/OWNERSHIP.yaml and is absent from execution/OWNERSHIP.yaml."
+    },
+    {
+      "id": "9",
+      "status": "ADDRESSED",
+      "evidence": "The Goal and Non-Goals disclose both the raw-git-merged/no-marker residual and the cross-spec global-loop residual, while qualifying coverage by detectable signals and recorded obligations."
+    },
+    {
+      "id": "10",
+      "status": "ADDRESSED",
+      "evidence": "OQ2 now gives the operative advisory/gate asymmetry, the orphan bound is exactly :74-112, and Background's complete ordering is grounded."
+    },
+    {
+      "id": "4gsz",
+      "status": "ADDRESSED",
+      "evidence": "Background frames 115 solely as the impl-approve consumer of 4gsz's shared predicate, with complete/next/doctor already shipped and the CI leg retained in 4gsz scope."
+    }
+  ]
+}

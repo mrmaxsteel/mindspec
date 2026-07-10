@@ -1,0 +1,57 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.98,
+  "rationale": "The revision closes the named bd/list/ancestry and R3 plan/metadata fail-open legs, preserves the advisory wrapper contract, scopes refusal to the finalizing epic, keeps hatches non-bypassing, and honestly discloses the raw-merge and blp6 residuals. One fail-open residue remains in R1: branch existence is a load-bearing detection step, but lifecycle currently uses gitutil.BranchExists(name) bool, which maps every `git rev-parse --verify` error to false. Thus a branch-probe infrastructure error is indistinguishable from a cleanly deleted branch. For an ordinary unresolved RC there need be no R3 obligation; the gate can pass, then FinalizeEpic's independent worktree loop can see and merge the branch. This contradicts R1's `refuses when it cannot prove otherwise` and `any infra error` posture. The error-preserving core must preserve branch-probe errors too, while the legacy wrapper continues converting them to its existing fail-open result.",
+  "concrete_changes_required": [
+    "Make the ScanOrphanedClosedBeads branch-existence probe error-preserving (for example, add a `(bool, error)` git/ref seam) and make impl approve refuse on that error; keep FindOrphanedClosedBeads behavior unchanged by swallowing it in the wrapper.",
+    "Extend AC1 and lifecycle/approve fault-injection tests to prove a branch-existence probe error refuses before epic close, phase writes, FinalizeEpic, merge, or push, while the legacy wrapper remains fail-open."
+  ],
+  "findings": [
+    {
+      "id": "1",
+      "status": "PARTIAL",
+      "note": "Named epic lookup, bd-list, and ancestry failures are fail-closed, but BranchExists still erases git probe errors into false, leaving an o4fd-class pass-to-FinalizeEpic path."
+    },
+    {
+      "id": "2",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "3",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "4",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "5",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "6",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "7",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "8",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "9",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "10",
+      "status": "ADDRESSED"
+    },
+    {
+      "id": "4gsz",
+      "status": "ADDRESSED"
+    }
+  ]
+}

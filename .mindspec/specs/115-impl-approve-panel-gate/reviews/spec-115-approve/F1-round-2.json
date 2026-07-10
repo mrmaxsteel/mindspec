@@ -1,0 +1,82 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Falsifiability lens, all new/changed proofs verified empirically at eb6a2ed1 (only spec.md + the two OWNERSHIP.yaml files changed since a0a06943, so my round-1 code verifications carry over). My round-1 major (AC9 skill-doc surface) is fully fixed: Scope/AC9 now name the real binary-embedded literal (claude.go:681, ms-impl-approve entry verified at :736) plus the materialized .claude/skills/ and .agents/skills/ copies (both exist), and the grep string 'closed without' has 0 hits in all three files today — a genuine discriminator, unlike the pre-satisfied 'mindspec complete'. ADR-0037 'impl approve': 0 hits today. AC8's 'rule as CompleteBead' sits alone on line :398, exactly 1 occurrence in internal/executor — single-line-matchable as claimed. AC10's execution-file negative verified FALSE at a0a06943 (execution:5 held the claim, workflow 0) and TRUE now (workflow:9, execution clean, exactly one claimant). AC7's existence grep exits 1 today, so its && chain genuinely fails pre-implementation. AC1(b) is runnable: the four seam vars (findEpicBySpecIDFn/listClosedBeadsFn/branchExistsFn/isAncestorFn, orphans.go:28-41) support error injection, and the wrapper's fail-open contract (:71-83) is real. AC6(e)'s target ('if planErr == nil', impl.go:227) and AC2(c)'s epic scoping (orphans.go:75-83) are code-true. All 10 items + 4gsz ADDRESSED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-item1",
+      "round1_item": 1,
+      "grade": "ADDRESSED",
+      "detail": "R1 specs the error-preserving core (ScanOrphanedClosedBeads returning ([]Orphan, error)) with FindOrphanedClosedBeads retained as the byte-identical fail-open wrapper; OQ2 rewritten to the advisory-fail-open/gate-fail-closed asymmetry; AC1(b) pins both the infra-error refusal and wrapper parity, and the seam vars needed to force epic-lookup/bd-list/ancestry errors exist at orphans.go:28-41, so the proof can run as written."
+    },
+    {
+      "id": "F1-R2-item2",
+      "round1_item": 2,
+      "grade": "ADDRESSED",
+      "detail": "R3 refuses on unreadable plan bead IDs naming the plan path; AC6(e) covers missing/corrupt plan.md with a falsifier ('unreadable-plan-bead-IDs state lets the gate silently skip this leg'). The inherited fail-open it displaces is real: 'if planErr == nil' verified at internal/approve/impl.go:227."
+    },
+    {
+      "id": "F1-R2-item3",
+      "round1_item": 3,
+      "grade": "ADDRESSED",
+      "detail": "The mutation claim is narrowed everywhere (Goal, R1, AC1) to 'no epic close, no phase write, no merge, no push' with EnsureMigrated explicitly carved out and correctly cited at impl.go:140 (verified). Background's complete.Run ordering now correctly places steps 1.6/2.25 before the step-2.5 auto-commit and steps 3.5/3.75 after it but pre-terminal."
+    },
+    {
+      "id": "F1-R2-item4",
+      "round1_item": 4,
+      "grade": "ADDRESSED",
+      "detail": "R1 states epic-scoped detection grounded at orphans.go:75-83 (verified: findEpicBySpecIDFn(specID) then bd list by epic — scoped by construction); AC2(c) is a genuine discriminator (a global bead/* scan like FinalizeEpic's loop would fail it); the blp6 merge-loop deferral is explicit in Background, Out of Scope, and Non-Goals, with a falsifier for cross-spec false refusal in R1."
+    },
+    {
+      "id": "F1-R2-item5",
+      "round1_item": 5,
+      "grade": "ADDRESSED",
+      "detail": "My round-1 major, fully fixed. The nonexistent plugins/ path is gone; Scope names the embedded lifecycleSkillFiles() literal (claude.go:681, ms-impl-approve entry verified at :736) plus both materialized copies (verified present on disk), with an explicit round-1 correction note. AC9's grep repointed to 'closed without' — verified 0 hits today in internal/setup/claude.go, .claude/skills/ms-impl-approve/SKILL.md, and .agents/skills/ms-impl-approve/SKILL.md — so it can only pass if the refusal documentation actually lands on the real distribution surface."
+    },
+    {
+      "id": "F1-R2-item6",
+      "round1_item": 6,
+      "grade": "ADDRESSED",
+      "detail": "AC8's target 'rule as CompleteBead' verified single-line at mindspec_executor.go:398 with exactly 1 occurrence in internal/executor; the removed-line diff grep plus the post-change zero-count grep form a real before/after falsifier pair."
+    },
+    {
+      "id": "F1-R2-item7",
+      "round1_item": 7,
+      "grade": "ADDRESSED",
+      "detail": "AC10 gained the execution-file NEGATIVE discriminator, empirically verified FALSE at a0a06943 (git show: execution/OWNERSHIP.yaml:5 held internal/lifecycle/**, workflow had none) and TRUE at eb6a2ed1. AC7 names TestRecoveryConvergence_AlreadyClosedOrphan with an existence grep that exits 1 today, so the chained proof genuinely fails until the named test lands — this fixes the trivially-green go-test-run risk I flagged (round-1 F1-3)."
+    },
+    {
+      "id": "F1-R2-item8",
+      "round1_item": 8,
+      "grade": "ADDRESSED",
+      "detail": "The revision commit itself moves the claim: workflow/OWNERSHIP.yaml:9 now holds internal/lifecycle/**, execution's line is removed (both verified), exactly one claimant. Impacted Domains and AC10 consistently point at workflow with the four-consumer rationale."
+    },
+    {
+      "id": "F1-R2-item9",
+      "round1_item": 9,
+      "grade": "ADDRESSED",
+      "detail": "The Goal now scopes the outcome claim ('wherever its detection signal or a recorded obligation can see the gap') and names both residuals (never-refuted raw-merged RC bead; cross-spec blp6 orphans) with pointers to Non-Goals; R3's coverage is qualified with 'but only when a durable obligation was recorded'."
+    },
+    {
+      "id": "F1-R2-item10",
+      "round1_item": 10,
+      "grade": "ADDRESSED",
+      "detail": "OQ2's rationale is rewritten around the asymmetry argument with no Dolt-hiccup framing; orphans.go is cited with the accurate :74-112 bound; the Background loose-sentence and comment-scope phrasing are tightened (the :396-398 comment is now correctly described as referring to the layout guard only)."
+    },
+    {
+      "id": "F1-R2-4gsz",
+      "round1_item": "4gsz",
+      "grade": "ADDRESSED",
+      "detail": "Background frames 115 as the fourth (merging) consumer of 4gsz's shared FindOrphanedClosedBeads predicate, with complete/next/doctor legs credited to 4gsz and the CI leg explicitly retained in 4gsz's scope; Out of Scope repeats the boundary. No 4gsz legs are pulled into 115."
+    },
+    {
+      "id": "F1-R2-note1",
+      "severity": "info",
+      "grade": "NEW_ISSUE",
+      "title": "Informational, no change required: AC1-AC6 -run patterns match zero tests pre-implementation",
+      "detail": "Mechanically, 'go test ./internal/approve -run ApproveImpl_Orphan' exits 0 today because no test matches — the standard new-test-suite convention this repo's ACs have always used, and the assertions themselves (seam-recorded UNCALLED fns, refusal message shape) are concrete pass/fail claims the impl panel can hold the tests to. The one AC where trivial-green would have masked a headline claim (AC7's recovery convergence) got the explicit existence grep. AC10's greps passing at eb6a2ed1 is likewise expected: the OWNERSHIP edits are themselves the artifact under review per the brief, and the negative discriminator anchors falsifiability at the round-1 SHA. Neither warrants a change."
+    }
+  ]
+}

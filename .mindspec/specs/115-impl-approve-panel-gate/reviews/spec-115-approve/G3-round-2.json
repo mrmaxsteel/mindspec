@@ -1,0 +1,84 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The revised REFUSE design is coherent and decomposable into three reasonable beads: strict lifecycle/obligation helpers plus the approve gate, documentation/ownership, and focused tests. Consolidated items 1-6 and 8-10 are substantively addressed, and 4gsz is correctly bounded. Approval is blocked by AC runnability. At eb6a2ed1, AC1, AC3, AC5, and AC6's approve commands report '[no tests to run]' yet exit 0; AC2 passes on unrelated existing ApproveImpl tests; AC4 passes on the pre-extension CallOrder test. Thus six AC proofs are non-discriminating. AC7's requested seam-driven cross-package test is also underspecified after approve imports complete's exported predicate: current complete tests use package-private seams, while importing approve from package complete creates a cycle. Finally, the branchless R3 refusal still ends with `mindspec complete <bead>` although the spec admits that command fails before reconciliation; no runnable restoration procedure is specified, and h4n5 is absent from the pinned JSONL. AC10's command checks only two domains, not the asserted exactly-one claimant invariant.",
+  "concrete_changes_required": [
+    "Give AC1-AC6 new, explicitly named test functions/subtests and add existence checks (or another fail-on-zero-match discriminator) so every proof fails at eb6a2ed1; AC4 needs a new discriminator for the extended ordering assertion.",
+    "Resolve AC7's package/seam design: split convergence into package-local seam tests plus a named approve post-recovery test, or specify a cycle-free shared helper/test seam; retain an existence check for every named test.",
+    "Make branchless R3 recovery truthful and runnable by specifying and testing an exact safe branch-restoration prerequisite before `mindspec complete`, or bring branchless reconciliation into scope; persist the deferred h4n5 issue in pinned project state.",
+    "Strengthen AC10 to count `internal/lifecycle/**` claims across every domain OWNERSHIP.yaml and assert exactly one, while separately asserting that claimant is workflow."
+  ],
+  "findings": [
+    {
+      "id": "1",
+      "grade": "ADDRESSED",
+      "note": "R1 now uses an error-preserving lifecycle core and refuses on epic lookup, bd-list, or ancestry errors while preserving the fail-open wrapper."
+    },
+    {
+      "id": "2",
+      "grade": "ADDRESSED",
+      "note": "R3 explicitly refuses on missing or corrupt plan bead enumeration and AC6(e) states the falsifier."
+    },
+    {
+      "id": "3",
+      "grade": "ADDRESSED",
+      "note": "The mutation guarantee is correctly narrowed to no close, phase write, merge, or push, with EnsureMigrated disclosed."
+    },
+    {
+      "id": "4",
+      "grade": "ADDRESSED",
+      "note": "Detection is epic-scoped, AC2(c) covers a different-spec orphan, and blp6 remains explicitly deferred."
+    },
+    {
+      "id": "5",
+      "grade": "ADDRESSED",
+      "note": "Scope and AC9 now name the embedded literal and both real materialized skill copies with a refusal-specific discriminator."
+    },
+    {
+      "id": "6",
+      "grade": "ADDRESSED",
+      "note": "AC8 uses the single-line `rule as CompleteBead` removal discriminator; the pinned source contains exactly one occurrence."
+    },
+    {
+      "id": "7",
+      "grade": "PARTIAL",
+      "note": "AC7 adds the required named-test existence grep and AC10 adds the negative execution discriminator, but AC7's seam/package shape is unresolved and AC10 does not prove exactly one claimant across all domains."
+    },
+    {
+      "id": "8",
+      "grade": "ADDRESSED",
+      "note": "At eb6a2ed1 lifecycle ownership is removed from execution and added only to workflow; repository-wide inspection currently finds one claimant."
+    },
+    {
+      "id": "9",
+      "grade": "ADDRESSED",
+      "note": "The Goal and Non-Goals qualify coverage and disclose both raw-git/no-obligation and cross-spec residuals."
+    },
+    {
+      "id": "10",
+      "grade": "ADDRESSED",
+      "note": "OQ2 rationale, orphans.go bounds, Background ordering, and cited line references are materially corrected."
+    },
+    {
+      "id": "4gsz",
+      "grade": "ADDRESSED",
+      "note": "Background correctly frames 115 as only the impl-approve consumer of the shared 4gsz predicate and leaves CI in 4gsz scope."
+    },
+    {
+      "id": "G3-round-1-3",
+      "grade": "PARTIAL",
+      "note": "Manual branch restoration is acknowledged, but the emitted recovery remains non-runnable for the branchless state and h4n5 is not present in the pinned issues JSONL."
+    },
+    {
+      "id": "AC1-AC6-proof-discrimination",
+      "grade": "NEW_ISSUE",
+      "note": "All six proof commands exit 0 at eb6a2ed1 without the required new coverage; four explicitly report no tests to run."
+    },
+    {
+      "id": "AC7-cycle-free-test-shape",
+      "grade": "NEW_ISSUE",
+      "note": "The specified seam-driven complete-to-approve test lacks a cycle-free package and seam arrangement under the proposed approve-to-complete dependency."
+    }
+  ]
+}
