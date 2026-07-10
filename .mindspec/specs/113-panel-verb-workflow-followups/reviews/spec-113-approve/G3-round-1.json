@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "G3 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": "medium",
+  "rationale": "The spec is complete and right-sized for planning. AC1-AC4 plus AC-global pair observable behavior with runnable commands or named tests, and the cited seams exist at the pinned SHA. R1 covers both panel verify and panel tally, stale-target truth, missing/transient ref behavior, and reachable REJECT/incomplete/hard_block/threshold legs without changing complete. R2, R3, and R4 each have crisp proofs and stable scope. The four requirements decompose cleanly into about four independently landable beads: R1 panel CLI/facts/rendering, R2 workflow regex plus mirror, R3 create --gate writer defaults, R4 config validation pin. Non-goals correctly fence blp6/zty3 lifecycle-finalize work. No requirement relies on vague works/correctly language without an observable. Note: the requested BRIEF.md is not present in commit 0b82c1d29151e3a87e498c08622865c1deb0149e, so this review used the prompt lens plus the pinned spec.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G3-AC-RUNNABLE",
+      "disposition": "pass",
+      "detail": "AC1-AC4 and AC-global are runnable as written; their commands and named tests map to existing seams or packages at the pinned SHA."
+    },
+    {
+      "id": "G3-MISSING-SUBREQUIREMENTS",
+      "disposition": "pass",
+      "detail": "R1 covers both verbs and the non-staleness decision legs; R3 includes invalid-gate recovery naming all five keys; R4 pins both empty-model-with-family acceptance and empty-model-alone refusal."
+    },
+    {
+      "id": "G3-DECOMPOSITION",
+      "disposition": "pass",
+      "detail": "The scope maps cleanly to four beads with no hidden ordering dependency beyond normal same-file coordination between R1 and R3."
+    },
+    {
+      "id": "G3-NON-GOALS",
+      "disposition": "pass",
+      "detail": "The lifecycle-finalize bugs mindspec-blp6 and mindspec-zty3 are explicitly excluded, and R1 preserves complete's gate semantics."
+    },
+    {
+      "id": "G3-THINNESS",
+      "disposition": "pass",
+      "detail": "The requirements and ACs are falsifiable and specify concrete outputs, exit status, JSON fields, byte identity, or test commands."
+    },
+    {
+      "id": "G3-PROVENANCE",
+      "disposition": "non_blocking_note",
+      "detail": "Pinned read of BRIEF.md failed because the file is untracked/not present in commit 0b82c1d29151e3a87e498c08622865c1deb0149e."
+    }
+  ]
+}

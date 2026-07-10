@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "M5 finding ADDRESSED, verified empirically. (1) TestPanelVerify_NonBeadMissingTargetRef now asserts strings.Contains(out, \"no longer exists\") (panel_test.go:843). That phrase is emitted only by the leg-5 renderings (panel.go:444 verify summary; panel.go:696 sanitized decision); the leg-5b GitErr path renders \"could not verify target %s: %v\" and gitutil.ErrRefNotFound is \"ref not found\", so the %v cannot smuggle the phrase in. (2) Re-ran my M5 mutation in a /tmp copy — IsRefNotFound -> func(error)bool{return false} at panel.go:350 — the test goes RED on exactly the new assertion (mutant output shows the leg-5b transient rendering, no \"no longer exists\"); pristine passes. Classification genuinely pinned. (3) TestSanitizeNonBeadDecision gained leg (3) abandoned and leg (4) round-mismatch rows; buildResult sets RoundMismatch=p.Round!=round, so both route the real gate legs and the RawMergeFence(\"\") strip assertions are non-vacuous. TestPanelVerify_NonBeadIncompleteBlocks exists; both subtests pass. (4) git diff b641a9fe..15dab51b -- panel.go is zero lines; only panel_test.go changed (+85/-5), so my round-1 code review (no findings) stands. Full cmd/mindspec + internal/panel packages pass.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "severity": "info",
+      "round1_id": "M5",
+      "disposition": "ADDRESSED",
+      "detail": "IsRefNotFound classification now pinned: mutation IsRefNotFound->false in resolvePanelGateFacts turns TestPanelVerify_NonBeadMissingTargetRef RED (fails at panel_test.go:844 on the missing \"no longer exists\" phrase); pristine green. Phrase is exclusive to leg-5 rendering — leg-5b emits \"could not verify target ...: ref not found\"."
+    },
+    {
+      "id": "F1-R2-2",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "detail": "Amendment scope confirmed: panel.go byte-identical between round-1 commit b641a9fe and amended 15dab51b; panel_test.go only (+85/-5). New leg (3)/(4) sanitize rows exercise real gate legs (Abandoned flag / buildResult RoundMismatch) and the new E2E TestPanelVerify_NonBeadIncompleteBlocks (verify no-PASS + tally non-zero, no bead/ or mindspec-complete leak) passes."
+    }
+  ]
+}

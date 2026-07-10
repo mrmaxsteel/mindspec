@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "round_1_finding_disposition": "ADDRESSED",
+  "rationale": "Round-1 gap genuinely closed. At c92b3d26, subtest (b) now requires the exact literal `sets neither \"model\" nor \"family\"` — byte-for-byte the neither-set branch string at config.go:561. The count branch (config.go:565, `count must be >= 1`) does not contain that phrase, and a repo-wide grep confirms the quoted phrase appears in no other error path (the gate error at :603 says 'reviewers nor approve_threshold', which cannot match). Mutation probe in /tmp re-run: replacing the neither-set branch's message with a generic `panel.reviewers[0] ... recovery:` error — the exact shape that spuriously satisfied the round-1 assertions — now reds subtest (b) specifically on 'error message missing the neither-set phrase'. Both subtests PASS, full internal/config package green, go build ./... exit 0. Still exactly one commit past plan-approve touching two files; config.go additions are comments-only (zero non-comment added lines); subtest (a) unchanged. Worktree clean apart from the untracked reviews/ dir holding panel verdicts.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-R2-1",
+      "severity": "info",
+      "status": "resolved",
+      "summary": "Round-1 hollow-assertion gap (subtest (b) satisfiable by count-branch error) closed: distinctive phrase assertion pins config.go:561; mutation probe confirms the old loophole shape now fails the test."
+    }
+  ]
+}

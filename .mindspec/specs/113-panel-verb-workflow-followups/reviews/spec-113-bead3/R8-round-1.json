@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "R8 sonnet-sub",
+  "verdict": "APPROVE",
+  "confidence": 0.94,
+  "rationale": "Empirically drove the real binary (built from d327cdce) in /tmp scratch repos. `git show --name-only HEAD` = exactly the 5 declared files. `go test ./cmd/mindspec ./internal/panel ./internal/config ./internal/complete` all PASS incl. 112 pins (TestPanel_GateFieldDecisionInert, TestPanelVerbs_DecisionIsPanelGateDecision, TestPanelTally_ExitCodeTracksDecision). internal/instruct fails only the known pre-existing z4ps flake (TestRun_IdleNoBeads); all 40+ other instruct tests pass. AC3: `panel create --gate final_review` stamped panel.json with gate:final_review, expected_reviewers:12, approve_threshold:\"10\", matching `config show --gate final_review --json` exactly (vs global 6/n-1) — real per-gate mix config used. Invalid `--gate nonsense` and two control-byte variants (embedded \\x01 and bare \\a) all exited 1 with the 5-key recovery line BEFORE any write; before/after directory snapshots were byte-identical (no panel.json created). Omitting --gate: no `gate` key, and byte-for-byte identical (cmp+md5 match) to a binary built from the pre-bead-3 commit (08c7cbdf) run against the same repo state. Advisory read-through proven by mutating final_review's config after stamping: `config show` printed 'current config default is 10' (final_review's new total), not the global 6 — confirming the stamped gate drives ADVISORY selection while decision paths remain untouched. No second enum copy (grep clean); config-free leaf confirmed (go list -deps excludes internal/config).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "internal/instruct TestRun_IdleNoBeads fails identically on this commit and its parent — pre-existing z4ps flake per BRIEF, not attributable to this bead's diff. Not blocking."
+    },
+    {
+      "severity": "info",
+      "description": "Verified byte-identical-when-absent empirically via cmp/md5sum against a binary built from the immediate pre-bead-3 commit (08c7cbdf), not just JSON key inspection — stronger proof than a text diff."
+    }
+  ]
+}

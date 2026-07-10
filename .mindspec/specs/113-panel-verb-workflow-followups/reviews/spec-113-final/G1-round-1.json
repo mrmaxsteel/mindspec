@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "G1 gpt-5.5",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "Build is green and the real-binary R1-R4 probes pass: non-bead stale targets block without bead/ leakage, deleted targets warn against the named target, --gate stamps/resolves/rejects correctly, the JS $ regex and mirror check pass, R4 targeted test passes, and bead panels still behave as bead panels. However the required literal `go test ./...` run is red for failures beyond the brief's only allowed `internal/instruct TestRun_IdleNoBeads` failure, so I cannot approve the whole branch.",
+  "concrete_changes_required": [
+    "Make the default `go test ./...` run pass in this review environment, or change the LLM harness default skip/auth detection so unauthenticated Claude Code does not make the whole suite red; then rerun `go test ./...` successfully with no failures beyond any explicitly accepted flake."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Full suite fails outside the allowed internal/instruct flake",
+      "command": "GOMODCACHE=/tmp/mindspec-g1-33595/gomodcache GOCACHE=/tmp/mindspec-g1-33595/gocache go test ./...",
+      "output": "internal/harness failed multiple TestLLM_* scenarios with agent output `Not logged in · Please run /login`; the package then timed out after 10m while running TestLLM_SpecInit. internal/instruct TestRun_IdleNoBeads also failed as described in the brief. An initial internal/specgate failure was environmental module-cache warm-up and passed after copying local transitive module metadata.",
+      "evidence": "The full-suite command exited 1. A deterministic `go test -short ./...` rerun after warming module metadata failed only internal/instruct, and `go test ./internal/specgate -run TestNoAgentmindInDepGraph -v` passed."
+    }
+  ]
+}

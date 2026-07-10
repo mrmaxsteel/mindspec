@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "G2 gpt-5.5",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "GitErr leak disposition: ADDRESSED. I built the pinned 45b34ee72f8b2c345842fec5347eca43a261c300 binary in /tmp and hand-wrote non-bead panel.json fixtures. A target decoded to NUL+ESC+newline routed through GitErr for both panel verify and panel tally; xxd/grep confirmed no raw 0x00, no raw 0x1b, no attacker newline splitting a forged standalone recovery: line, and the wrapped rev-parse error text rendered through escapes. A separate MissingRef fixture with decoded ESC+newline+$HOME+single quote still rendered controls escaped and emitted the recovery --target as a single-quoted shell literal with embedded quote escaped. Code audit found non-bead verify/tally both sanitize the decision before stdout/stderr rendering, and tally non-bead Warn uses that sanitized message. No remaining non-bead facts.GitErr/MissingRef/target render path appears raw. The zero-internal-diff fence over internal/panel, internal/instruct, internal/complete is empty.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "spec-113-final-giterr-leak",
+      "disposition": "ADDRESSED",
+      "severity": "security",
+      "summary": "Non-bead GitErr output now escapes hostile target bytes in verify stdout and tally stdout/stderr."
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.85,
+  "rationale": "Mutation probes in a /tmp copy of b641a9fe: (M1) reverting nonBeadTargetRevParse reds TestPanelVerify_NonBeadStaleness + both NonBead tally tests — the fix IS pinned. (M2-M4) removing each sanitize rule (fence-strip, missing-ref rewrite, transient rewrites) reds TestSanitizeNonBeadDecision on the corresponding real-gate legs — not hardcoded, not hollow. Real binary: non-bead panel with 6/6 APPROVE Blocks (verify no PASS, tally exit 1) after target advance; REJECT exits 1; deleted target Warns naming the target; zero `references branch bead/`, `git merge bead/`, or `mindspec complete` anywhere. BUT (M5): `IsRefNotFound: func(error) bool { return false }` survives the ENTIRE ./cmd/mindspec suite green — TestPanelVerify_NonBeadMissingTargetRef cannot distinguish leg (5) MissingRef from leg (5b) GitErr (both Warn, name target, exit 0), so its 'real errors.Is classification exercised end to end' claim is executed but unpinned. One assertion (`no longer exists`) kills M5 and passes pristine (proven). Minor: sanitize table omits leg (4) round-mismatch, which the BRIEF enumerates.",
+  "concrete_changes_required": [
+    "cmd/mindspec/panel_test.go TestPanelVerify_NonBeadMissingTargetRef: add a leg-discriminating assertion, e.g. `if !strings.Contains(out, \"no longer exists\") { t.Errorf(\"missing-ref must take the MissingRef leg (5), not the transient GitErr leg (5b): %s\", out) }` — proven: mutating GateIO to `IsRefNotFound: func(error) bool { return false }` currently leaves the whole ./cmd/mindspec suite green; with this assertion the mutation reds and pristine code stays green.",
+    "cmd/mindspec/panel_test.go TestSanitizeNonBeadDecision: add a leg (4) round-mismatch row (facts with Res.RoundMismatch=true) — BRIEF check 2 enumerates leg 4 among the legs a non-bead panel can hit, but the table skips it; today it is clean via the shared fence-strip rule, but a future leg-4 template change with a bead-interpolated fragment would go unpinned. (minor)"
+  ],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "medium",
+      "title": "IsRefNotFound wiring mutation survives the full test suite",
+      "detail": "Replacing `IsRefNotFound: exec.IsRefNotFound` with an always-false func in resolvePanelGateFacts leaves `go test ./cmd/mindspec` fully green, including TestPanelVerify_NonBeadMissingTargetRef. The test does wrap the REAL gitutil.ErrRefNotFound (fmt.Errorf %w — not a fake sentinel), but its assertions (names target, no `references branch bead/,`, no `mindspec complete`) are all also satisfied by the leg (5b) GitErr rendering (`could not verify target spec/113-deleted: ...`), so the classification path is executed but not pinned. Behavioral blast radius is wording-only (both legs Warn, exit 0), hence medium not high. Fix is the one assertion above; verified red-under-mutation/green-on-pristine."
+    },
+    {
+      "id": "F1-2",
+      "severity": "low",
+      "title": "TestSanitizeNonBeadDecision table omits leg (4) round-mismatch",
+      "detail": "Rows cover legs (2)/(5)/(5b)/(6)/(8)/(9)/(10); the BRIEF's check 2 also lists leg (4). Leg (4)'s template only carries the trailing RawMergeFence (already pinned 5x by other rows), so the current behavior is clean, but the enumerated-leg pin is incomplete against future template drift."
+    },
+    {
+      "id": "F1-3",
+      "severity": "info",
+      "title": "Fix and sanitize rules are NOT hollow — all four core mutations red",
+      "detail": "M1 revert-closure: 3 tests red (real subprocess rev-parse of literal `bead/` resurfaces as GitErr, tests catch missing BLOCK / nil error). M2 remove fence-strip: TestSanitizeNonBeadDecision red on legs 2/6/8/9/10 plus all three behavior tests. M3 remove missing-ref rewrite: red on leg 5 + TestPanelVerify_NonBeadMissingTargetRef (bead/ leak caught). M4 remove transient rewrites: red on leg 5b. TestSanitizeNonBeadDecision builds its inputs from the real panel.PanelGateDecision, so it cannot drift from the gate templates."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "title": "No non-bead PASS-after-advance ordering found (real binary)",
+      "detail": "End-to-end in a scratch git repo: create non-bead panel --target main, seed 6/6 APPROVE, advance main one commit → verify prints BLOCK (no PASS, exit 0 per read-only contract); tally exits 1 with recovery `mindspec panel create demo --round <N+1> --spec <id> --target main` — no `mindspec complete`, no `git merge bead/`. REJECT at un-advanced target: tally exits 1. Deleted target: honest Warn naming the target, exit 0 — same documented fail-open leg-(5) posture bead panels have (leg 5/5b short-circuiting verdict legs 8-10 is pre-existing gate semantics, zero-internal-diff mandate keeps it out of scope here). Empty-target panel.json degenerates to the honest transient Warn as the code comment documents."
+    },
+    {
+      "id": "F1-5",
+      "severity": "info",
+      "title": "Zero-diff fence and Action-preservation confirmed",
+      "detail": "git show --name-only b641a9fe = exactly cmd/mindspec/panel.go, cmd/mindspec/panel_test.go, .mindspec/domains/workflow/interfaces.md — nothing under internal/panel, internal/instruct, internal/complete. sanitizeNonBeadDecision returns d with only Message rewritten; TestSanitizeNonBeadDecision asserts Action equality on every row. tallyExitAction stays 2-arg; non-bead exit routes through the new tallyExitActionNonBead in the RunE handler only."
+    }
+  ]
+}

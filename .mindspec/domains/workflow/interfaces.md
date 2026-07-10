@@ -145,7 +145,7 @@ class (a slug/flag value bearing a control byte can never forge an
 extra display line or a fake `recovery:` line).
 
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
-<id>] [--round N]`** stamps `expected_reviewers`/`approve_threshold`
+<id>] [--round N] [--gate <name>]`** stamps `expected_reviewers`/`approve_threshold`
 from the config resolvers (`config.PanelExpectedReviewers()` /
 `config.PanelApproveThresholdExpr()`, spec 109) and `reviewed_head_sha`
 from `--target`'s live commit (resolved via the executor at write
@@ -166,29 +166,72 @@ stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
 reads to learn the panel directory without re-deriving the layout
 logic above.
 
-**`mindspec panel verify <slug>`** is a READ-ONLY completeness/
-staleness report: verdicts present vs `expected_reviewers`, per-slot
-parse status (malformed files named), `reviewed_head_sha` vs the live
-target tip, and a PASS/BLOCK preview computed by
-`panel.PanelGateDecision` over facts gathered by
-`panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
-gate enforces. It writes no file and always exits `0` (a read-only
-report is not itself a gate).
+**`--gate <name>`** (spec 112 R9's deferred writer, completed by spec
+113 R3) is optional and validated against the closed enum
+`config.PanelGateKeys` (`spec_approve`, `plan_approve`, `bead`,
+`final_review`, `adhoc` — the single declaration,
+`internal/config/config.go:101`; the CLI never keeps a second copy) —
+same control-byte discipline as `--bead`/`--target`, checked before the
+enum-membership check. A value outside the enum is rejected with a
+`guard.NewFailure` whose recovery line names all five keys, BEFORE any
+filesystem write. When given, `panel.json`'s decision-inert `gate` field
+(`json:"gate,omitempty"`) is stamped with the value, and
+`expected_reviewers`/`approve_threshold` are resolved through spec 112
+R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
+`cfg.PanelGateApproveThresholdExpr(gate)`) instead of the global ones.
+When omitted, behavior is byte-identical to pre-spec-113 output: the
+global resolvers are used and no `gate` key is written. The field stays
+decision-inert end to end — neither `PanelGateDecision` nor
+`ApproveThreshold()` reads it — but it IS what `config
+show`/`mindspec complete`'s `PanelGateAdvisoryDefault` selection keys on
+for the reviewer-count advisory note, so a CLI-created `final_review`
+panel now selects that gate's per-gate default instead of being
+advisory-skipped.
 
-**`mindspec panel tally <slug>`** prints the per-slot verdict table
-(slot, verdict, `hard_block`), the aggregate APPROVE/REQUEST_CHANGES/
-REJECT counts + the resolved threshold, the `panel.PanelGateDecision`
-decision, and the aggregated `concrete_changes_required` — read
-presentation-only from each REQUEST_CHANGES/REJECT verdict file (a
-re-parse failure, an absent key, or a non-array-of-strings type
-attributes zero items to that slot with an advisory note, never fatal;
-this second-pass read never feeds the decision). The exit code is
-derived from the decision's `Action` ALONE — never re-derived from raw
-verdict counts (`res.Approves` etc.): `Allow` -> `0`; `Warn` -> `0` with
-the advisory printed (non-blocking, parity with `internal/complete`'s
-Warn handling); `Block` -> non-zero, carrying `PanelGateDecision`'s
-raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
-(`guard.HasFinalRecoveryLine`).
+**`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
+ALWAYS exits `0` — it is a report, never a gate. It prints verdicts
+present vs `expected_reviewers`, per-slot parse status (malformed files
+named), `reviewed_head_sha` vs the live target tip, and a PASS/BLOCK
+preview computed by `panel.PanelGateDecision` over facts gathered by
+`panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
+gate enforces.
+
+**`mindspec panel tally <slug>`** is ADVISORY-BUT-BLOCK-CAPABLE: its
+exit code tracks the `panel.PanelGateDecision` decision alone, and is
+non-zero on `Block`. Do not describe `verify`/`tally` as both
+"read-only/advisory" — `verify` never blocks; `tally` can. `tally`
+prints the per-slot verdict table (slot, verdict, `hard_block`), the
+aggregate APPROVE/REQUEST_CHANGES/REJECT counts + the resolved
+threshold, the `panel.PanelGateDecision` decision, and the aggregated
+`concrete_changes_required` — read presentation-only from each
+REQUEST_CHANGES/REJECT verdict file (a re-parse failure, an absent key,
+or a non-array-of-strings type attributes zero items to that slot with
+an advisory note, never fatal; this second-pass read never feeds the
+decision). The exit code is derived from the decision's `Action` ALONE
+— never re-derived from raw verdict counts (`res.Approves` etc.):
+`Allow` -> `0`; `Warn` -> `0` with the advisory printed (non-blocking,
+parity with `internal/complete`'s Warn handling); `Block` -> non-zero,
+carrying `PanelGateDecision`'s raw-`git merge` fence plus a genuine
+ADR-0035 `recovery:` line (`guard.HasFinalRecoveryLine`).
+
+**Non-bead staleness (spec 113 R1).** For a non-bead panel (`bead_id`
+null), `panel verify`/`panel tally` resolve staleness from the panel's
+RECORDED `panel.json.target` — rev-parsed in `cmd/mindspec` via the
+same `revParseForPanelFn` seam `panel create` uses to capture
+`reviewed_head_sha` at write time — fed through the SAME
+`panel.PanelGateDecision` legs a bead panel uses (internal/panel takes
+a zero-byte diff). Previously the CLI left `beadID` empty for a
+non-bead panel and `panel.ResolveGateFacts` rev-parsed the literal,
+always-absent ref `bead/`, so every non-bead panel short-circuited at
+the missing-ref leg with a malformed `references branch bead/` message
+and reported PASS even after its target advanced past
+`reviewed_head_sha`, or with a REJECT verdict on file. The fix un-shadows
+staleness and the incomplete/REJECT/threshold legs for non-bead panels;
+a `sanitizeNonBeadDecision` CLI-layer rewrite (never touching
+`Decision.Action`) replaces the empty-bead-interpolation fragments and
+the empty `git merge bead/` fence with target-naming text, and never
+emits a `mindspec complete <bead>` recovery line for a panel that is not
+complete-gated.
 
 ## Consumed Interfaces
 
@@ -208,9 +251,9 @@ raw-`git merge` fence plus a genuine ADR-0035 `recovery:` line
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
-| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1) |
-| `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing (spec 110 R2) |
-| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; exit code tracks the decision alone (spec 110 R3) |
+| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the decision-inert `gate` field + that gate's creation-time defaults (spec 113 R3) |
+| `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
+| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
 
 ## Agent Skills

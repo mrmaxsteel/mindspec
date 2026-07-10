@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "No contradiction found, grounded live at 0b82c1d2. R1's fence is internally consistent: gate.go leg (5) really interpolates an empty BeadID for non-bead panels, and internal/instruct/panelstate.go already leaves non-bead staleness facts zero — so instruct ALREADY reaches the vote legs for non-bead panels; R1 brings the CLI verbs into line with instruct rather than fighting fbel.3. The fence pins bead-panel FACT-SET outcomes byte-identical while In Scope admits internal/panel non-bead message rendering (mechanism deferred to plan) — carefully worded, not contradictory. complete's panelGate early-returns on empty beadID + ForBead excludes non-bead, so the complete fence holds by construction. R4 is coherent: with a plain string, {model:'',family:f} is indistinguishable from {family:f} (112-R1-blessed) and {model:''} alone IS the neither-set case — resolve-to-family plus refuse-alone is the only consistent pair without a *string rework. Scope: 4 Rs map 1:1 to 4 named beads; blp6/zty3 exclusion is self-consistent (they change complete/impl-approve, which R1's fence forbids); R3 is exactly 112's deferred writer work, not creep. No thin requirement, no synonym-dodge, both OQs resolved. ADR-0030 budget claim verified: today's code already spends the rev-parse on the garbage 'bead/' ref.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "info",
+      "title": "R1 fence verified coherent against live code",
+      "detail": "gate.go:186-189 interpolates f.BeadID (empty for non-bead) exactly as claimed; internal/instruct/panelstate.go:108-119 leaves non-bead HeadSHA/MissingRef zero, so instruct already evaluates vote legs for non-bead panels — the R1 fix makes panel verify/tally consistent with instruct, and the fbel.3-inertness fence requires no instruct change. internal/complete/panel_advisory.go panelGate returns nil for empty beadID, so complete is fenced by construction."
+    },
+    {
+      "id": "F3-2",
+      "severity": "info",
+      "title": "R4 resolve-to-family vs refuse-alone is the unique coherent pair",
+      "detail": "Given Reviewer.Model is a plain string, {model:'',family:f} == {family:f} and {model:''} alone == neither-set. Accepting the first (112 R1 family-fallback) and refusing the second (existing neither-set branch) is the only pair achievable without a *string/UnmarshalYAML change; the spec's supersession of 112 R4's one phrase is stated explicitly in Non-Goals rather than silently."
+    },
+    {
+      "id": "F3-3",
+      "severity": "info",
+      "title": "Scope right-sized; exclusions self-consistent",
+      "detail": "Four requirements map 1:1 to beads mindspec-4d9m/lczt/zw81/cthj (~4 beads). Non-Goals exclude blp6/zty3 coherently — both alter impl-approve/complete behavior that R1's own fence declares untouchable in this wave. The ms-panel.js --gate pass-through Out-of-Scope correctly protects spec 111's pinned ALLOWED_CLI/buildCommand floor. R3 is feature-shaped but is verbatim the writer-side stamping 112's Out of Scope deferred."
+    },
+    {
+      "id": "F3-4",
+      "severity": "info",
+      "title": "Minor: 'read-only/advisory verbs' phrasing vs tally Block exit",
+      "detail": "The Goal calls verify/tally 'read-only/advisory' while R1 makes tally exit non-zero (Block) on stale/REJECT non-bead panels. Not a contradiction — 'advisory' refers to the reviewer-count advisory and tally already exits non-zero for bead-panel Blocks — but the plan could keep the wording 'read-only (no repo mutation)' to avoid reviewers re-litigating this. No spec change required."
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Goal is crisp: four bead-named, bounded fixes with an explicit operator-outcome paragraph and Non-Goals fencing blp6/zty3 by name. Every R carries a real, testable 'Falsified if' clause — no tautologies, no synonym-dodges (requirement bodies use rejects/stamps/resolves/stays-refused, each paired with a runnable proof). Both resolved OQs are pinned distinguishably from their rejected alternatives: OQ1 mark-unsupported would leave verify PASSing after target advance (R1's first falsification condition catches it); OQ2 refuse would fail AC4's load+slot-expand test. Verified live at 0b82c1d2: panel.json has no timestamp fields (grep CreatedAt/time.Now empty in internal/panel/create.go+panel.go), so R3's 'byte-identical when --gate omitted' clause is genuinely golden-testable; and all AC-named symbols exist (revParseForPanelFn panel.go:37, PanelGateAdvisoryDefault config.go:832 + both call sites, PanelGateReviewerSlots config.go:777, reviewerCountNotesFor/reviewerCountAdvisory), so the proofs are runnable as written. Minor non-blocking notes below; none impairs falsifiability.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "minor",
+      "requirement": "R1",
+      "note": "The final fence clause ('if internal/complete's or internal/instruct's non-bead handling changes') is falsified by diff inspection, not a runnable test; AC-global's 'existing tests pass unmodified' is the behavioral proxy. Acceptable — fences on absence-of-change are inherently diff-scoped."
+    },
+    {
+      "id": "F1-2",
+      "severity": "nit",
+      "requirement": "AC1",
+      "note": "'output contains no PASS' is a substring assertion that could collide with unrelated report text; the named cmd/mindspec tests should assert on the decision line specifically. Plan-level detail, not a spec defect."
+    },
+    {
+      "id": "F1-3",
+      "severity": "nit",
+      "requirement": "R4",
+      "note": "'the superseding comment is absent' is grep-observable but non-behavioral; fine as documentation pinning since it rides alongside the behavioral TestLoad_EmptyStringModel pin."
+    },
+    {
+      "id": "F1-4",
+      "severity": "positive",
+      "requirement": "R3",
+      "note": "Verified at 0b82c1d2 that panel.json carries no timestamp/nondeterministic fields, so the 'omitting --gate changes any byte of the panel.json produced today' falsification condition is literally testable via golden comparison."
+    }
+  ]
+}

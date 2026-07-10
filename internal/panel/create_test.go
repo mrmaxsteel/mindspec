@@ -343,6 +343,83 @@ func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 	}
 }
 
+// TestCreate_StampsGate pins spec 113 R3's writer-side completion of the
+// spec-112-R9 stable contract: Create(in) with a non-empty Gate stamps
+// panel.json's "gate" key with that exact value, and Create(in) with
+// Gate == "" (the default zero value, i.e. --gate omitted) produces
+// panel.json bytes with NO "gate" key at all — byte-identical to the
+// marshal a pre-spec-113 Create (which had no Gate field) would have
+// produced over the same other fields, because Panel.Gate carries
+// `json:"gate,omitempty"`.
+func TestCreate_StampsGate(t *testing.T) {
+	base := CreateInput{
+		Spec:                 "113-panel-verb-workflow-followups",
+		Target:               "spec/113-x",
+		Round:                1,
+		ExpectedReviewers:    3,
+		ApproveThresholdExpr: "n-1",
+		ReviewedHeadSHA:      "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+	}
+
+	t.Run("gate set", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "reviews", "demo")
+		in := base
+		in.Gate = "final_review"
+		if err := Create(dir, in); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, FileName))
+		if err != nil {
+			t.Fatalf("read panel.json: %v", err)
+		}
+		if !strings.Contains(string(data), `"gate": "final_review"`) {
+			t.Fatalf("panel.json missing stamped gate key:\n%s", data)
+		}
+		var p Panel
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatalf("unmarshal panel.json: %v", err)
+		}
+		if p.Gate != "final_review" {
+			t.Errorf("p.Gate = %q, want %q", p.Gate, "final_review")
+		}
+	})
+
+	t.Run("gate omitted is byte-identical to the pre-spec-113 field set", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "reviews", "demo")
+		in := base // Gate left at its zero value ""
+		if err := Create(dir, in); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, FileName))
+		if err != nil {
+			t.Fatalf("read panel.json: %v", err)
+		}
+		if strings.Contains(string(data), `"gate"`) {
+			t.Fatalf("panel.json wrote a gate key for an omitted --gate:\n%s", data)
+		}
+
+		// Reconstruct the pre-spec-113 Panel value by hand (the same
+		// fields Create wrote before CreateInput.Gate existed) and assert
+		// its marshal is byte-for-byte identical to what Create just
+		// wrote — the R9 stable "byte-identical-when-absent" contract.
+		legacy := Panel{
+			Spec:                 in.Spec,
+			Target:               in.Target,
+			Round:                in.Round,
+			ExpectedReviewers:    in.ExpectedReviewers,
+			ReviewedHeadSHA:      in.ReviewedHeadSHA,
+			ApproveThresholdExpr: in.ApproveThresholdExpr,
+		}
+		want, err := json.MarshalIndent(legacy, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal legacy Panel: %v", err)
+		}
+		if string(data) != string(want) {
+			t.Fatalf("panel.json not byte-identical to the pre-spec-113 field set:\ngot:  %s\nwant: %s", data, want)
+		}
+	})
+}
+
 // assertCreateRejectedWithNeitherFileTouched seeds dir/BRIEF.md with a
 // corrupt-marker body, calls Create, and asserts it errors while
 // leaving both panel.json (absent) and BRIEF.md (its exact pre-call

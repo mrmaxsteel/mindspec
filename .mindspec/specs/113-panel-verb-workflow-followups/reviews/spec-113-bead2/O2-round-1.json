@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.98,
+  "rationale": "Regex-correctness/monotonicity/no-false-positive lens, all pass. (1) Rejects bare `$`: node matrix confirms `/[\\x60;|&\\n$]/.test` is true for `$HOME`, `${x}`, `$x` — so validateShellSafe now throws on variable-expansion. (2) MONOTONE: brute-forced all 128 ASCII code points plus the `$(` digraph against old `/[\\x60;|&\\n]|\\$\\(/` — zero cases the old regex rejected that the new one accepts; the prior class members backtick/`;`/`|`/`&`/`\\n` are retained verbatim and `$(` is subsumed because it contains `$`. (3) Char class well-formed: `$` inside `[...]` is a literal (not an end-anchor); node parses and matches it correctly. (4) NO over-rejection: `p113`, `113-panel-verb-workflow-followups`, `bead/mindspec-x.1`, `spec/113-...`, `mindspec-r6hk.2` all pass (no `$` in repo slug/spec/target/bead conventions). Routing confirmed: validateArgs (L455) runs before every buildCommand callsite (465/518/532) and calls validateShellSafe on slug/spec/bead_id/target; round is an integer, mix.family is enum-checked — no `$`-bearing value reaches the shell string. Tightening applied where it matters.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O2-1",
+      "severity": "info",
+      "title": "Bare `$` correctly rejected",
+      "detail": "/[\\x60;|&\\n$]/.test returns true for $HOME, ${x}, $x, and $(x); validateShellSafe throws on all. Bare `$` alone also matches (true)."
+    },
+    {
+      "id": "O2-2",
+      "severity": "info",
+      "title": "Monotone tightening verified",
+      "detail": "Brute-force over all 128 ASCII chars + the $( digraph: 0 cases where old regex rejected but new accepts. No regression; strict superset of rejected inputs."
+    },
+    {
+      "id": "O2-3",
+      "severity": "info",
+      "title": "Char class well-formed, no false positives",
+      "detail": "$ inside [...] is a literal, not an anchor. All real repo conventions (p113, 113-panel-verb-workflow-followups, bead/mindspec-x.1, spec/113-..., mindspec-r6hk.2) pass. No legit slug/spec/target/bead ID contains $."
+    }
+  ]
+}

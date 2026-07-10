@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "R1 correctness + zero-internal-diff net fence hold on the merged branch. (1) `git diff 45ae7577 12c02de1 -- internal/panel/gate.go internal/instruct internal/complete` is EMPTY: PanelGateDecision, instruct's verdict(), and complete's gate are byte-unchanged. The only internal/panel non-test change is create.go's +13 CreateInput.Gate + p.Gate stamp — decision-inert metadata, never read by any decision path. (2) sanitizeNonBeadDecision covers every non-bead leg: strips the trailing RawMergeFence(\"\") suffix (legs 2/4/6/7/8/9/10), wholesale-replaces the missing-ref sentence (matches `references branch bead/,`), and renames the transient `panel for : `/`could not verify branch bead/` fragments — all mutually exclusive, no `bead/` residue, and it only ever assigns d.Message (Action untouched). (3) Real binary (fresh git repo, target advanced past reviewed_head_sha): verify prints BLOCK naming the recorded target with no PASS and no bead/ leak; tally exits 1 with a target-naming re-panel recovery and NO `mindspec complete` instruction. (4) tallyExitAction stays 2-arg; the non-bead leg routes through the new tallyExitActionNonBead. `go test ./cmd/mindspec ./internal/panel ./internal/config` green. No decision-logic regression; no non-bead PASS-after-advance.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Zero-diff fence VERIFIED: git diff of gate.go/internal/instruct/internal/complete between base 45ae7577 and 12c02de1 is empty; create.go's +13 is solely the decision-inert Gate field.",
+    "sanitizeNonBeadDecision leak-free across all PanelGateDecision legs: fence-suffix strip + missing-ref full-replace (leg 5) + transient dual-replace (leg 5b) are order-safe and mutually exclusive; d.Action never mutated.",
+    "Real-binary scenario (advancing non-bead target): verify=BLOCK/no-PASS/no-bead-leak; tally exit=1 with target-named recovery and no `mindspec complete` instruction. LOAD-BEARING promise met.",
+    "tallyExitAction confirmed 2-arg (panel.go:685); non-bead recovery isolated in tallyExitActionNonBead (:708) so the pinned helper stays byte-identical."
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Round-1 finding addressed. TestPanelVerify_NonBeadIncompleteBlocks (panel_test.go:756-806) is new: nonBeadPanelFixture always seeds exactly one R1-round-1.json verdict, and the test passes expected_reviewers=2 at an un-advanced target (stubNonBeadRevParse returns the recorded sha unchanged), so 1/2 present triggers leg 8 incomplete. Subtest 'verify does not PASS' calls runPanelVerbCmd(\"verify\",\"demo\") -> rootCmd.Execute() (the real panelVerifyCmd RunE, not a unit helper) and asserts output lacks PASS, contains BLOCK, and lacks 'references branch bead/' and 'mindspec complete'. Subtest 'tally exits non-zero' does the same via runPanelVerbCmd(\"tally\",\"demo\"), asserting err != nil, guard.HasFinalRecoveryLine(err), and no 'mindspec complete'/'bead/' leak. Ran go test ./cmd/mindspec -run 'NonBead' -v: all 5 NonBead-prefixed tests pass, subtests included. Confirmed git diff b641a9fe..15dab51b -- cmd/mindspec/panel.go is empty (zero-byte); only panel_test.go changed (+85/-5), matching the commit's 'zero internal diff' claim. Working tree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Round-1 finding (leg 8 lacked a full E2E CLI test) is ADDRESSED: TestPanelVerify_NonBeadIncompleteBlocks drives runPanelVerbCmd end-to-end for both verify and tally, exercising the real cobra command dispatch rather than sanitizeNonBeadDecision/panel.GateFacts directly.",
+    "panel.go byte-identical to round 1 (git diff b641a9fe..15dab51b -- cmd/mindspec/panel.go produces no output); the amendment is scoped entirely to the new test.",
+    "go test ./cmd/mindspec -run 'NonBead' -v: TestPanelVerify_NonBeadStaleness, TestPanelTally_NonBeadStaleBlocks, TestPanelVerify_NonBeadIncompleteBlocks (both subtests), TestPanelVerify_NonBeadMissingTargetRef all PASS."
+  ]
+}

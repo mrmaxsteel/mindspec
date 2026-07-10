@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounded every BRIEF/spec claim against `git diff 45ae7577 12c02de1`. R1: lives entirely in cmd/mindspec \u2014 internal/instruct and internal/complete have ZERO diff; internal/panel's only non-test change is create.go's +13 (R3's decision-inert CreateInput.Gate + stamp, no decision logic); tallyExitAction is unchanged 2-arg with tallyExitActionNonBead added in the RunE handler; nonBeadTargetRevParse routes through the existing revParseForPanelFn seam; sanitizeNonBeadDecision rewrites only Message, applied only on the non-bead render path. R2: SHELL_METACHAR_RE is now /[\\x60;|&\\n$]/ (bare $ folded, $( subsumed, monotone); node matrix over $HOME/${x}/$x plus all legacy metachars PASSES; `cmp` confirms the .claude mirror byte-identical. R3: --gate validated by iterating config.PanelGateKeys (no second enum copy), stamps 112's pre-existing Panel.Gate (json omitempty), resolves via 112's pre-existing gate-scoped resolvers; byte-identical-when-omitted pinned by TestCreate_StampsGate. R4: config.go's +18 are comments only (zero code lines changed) + TestLoad_EmptyStringModel pins resolve-to-family and the neither-set refusal. Test files are pure additions except one benign flag-reset helper line adding \"gate\". go build + tests in all four touched packages green. AC1\u2013AC4 named tests all exist. No claim contradicted by the diff.",
+  "concrete_changes_required": [],
+  "findings": [
+    "R1 fence grounded: git diff 45ae7577 12c02de1 -- internal/panel internal/instruct internal/complete shows only create.go (+13 Gate metadata), create_test.go, panel_test.go; no gate.go/instruct/complete changes.",
+    "R2 grounded empirically: extracted regex from ms-panel.js at 12c02de1, matched $HOME/${x}/$x and all prior metachars under node; cmp plugins/mindspec/workflows/ms-panel.js .claude/workflows/ms-panel.js exits 0.",
+    "R3 grounded: isValidPanelGateKey iterates config.PanelGateKeys (single enum, pre-existing at base config.go:101); Panel.Gate pre-exists at base panel.go:91; reject-before-write with five-key recovery line confirmed in panel.go RunE.",
+    "R4 grounded: internal/config/config.go hunks are 100% comment lines; behavior (r.model() family fallback) pre-existing; TestLoad_EmptyStringModel pins both legs.",
+    "Targeted suite green at 12c02de1: cmd/mindspec, internal/panel, internal/config, plugins/mindspec all ok; go build ./... clean.",
+    "Sole test deletion is resetPanelCreateFlags gaining \"gate\" in its reset list \u2014 the pinned tests (TestPanelTally_ExitCodeTracksDecision, TestPanelVerbs_DecisionIsPanelGateDecision) are byte-unmodified."
+  ],
+  "carried_forward": "round-1 APPROVE carried: lens (spec-goal/grounding/R3-inertness/ADR/doc-artifacts) unaffected by the G2 render-layer escaping fix + .beads data regen"
+}

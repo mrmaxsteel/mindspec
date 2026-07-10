@@ -370,3 +370,88 @@ func TestPanel_GateFieldDecisionInert(t *testing.T) {
 		t.Errorf("legacy Panel mismatch: got %+v, want %+v", got, want)
 	}
 }
+
+// TestPanel_GateFieldDecisionInertAllEnumValues (Spec 113 R3) extends 112's
+// TestPanel_GateFieldDecisionInert to ALL FIVE real gate enum values that
+// spec 113's `panel create --gate` newly makes CLI-writable. 112's pin only
+// looped {"", "bead", "weird"}, so a mutation keyed to a specific enum value
+// the CLI can now write — e.g. ApproveThreshold or PanelGateDecision
+// behaving differently when Gate == "final_review" — would SURVIVE the whole
+// suite, since spec_approve/plan_approve/final_review/adhoc never reach the
+// decision path anywhere. This pins that PanelGateDecision's Action+Message
+// AND ApproveThreshold() are IDENTICAL across every enum value (plus "") on
+// an OTHERWISE-IDENTICAL panel + fact set, over both an Allow and a Block
+// scenario.
+//
+// The five gate strings are hardcoded (with the empty string appended)
+// rather than looped from config.PanelGateKeys so this test — like the whole
+// internal/panel package — imports no internal/config, preserving the
+// config-free-leaf invariant with zero ambiguity. config.PanelGateKeys
+// (internal/config/config.go, "the one place the enum is declared") is the
+// source of truth these literals must mirror; a drift there is caught by
+// cmd/mindspec's enum-membership tests that DO reference config.PanelGateKeys.
+func TestPanel_GateFieldDecisionInertAllEnumValues(t *testing.T) {
+	// Mirror of config.PanelGateKeys (the single enum declaration), plus ""
+	// (the --gate-omitted case) — see the doc comment above.
+	gateValues := []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", ""}
+
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	staleSHA := "999000999000999000999000999000999000beef"
+
+	// Each scenario builds an OTHERWISE-IDENTICAL panel + fact set; only
+	// Gate varies within a scenario. buildFacts takes the gate so the panel
+	// value (and thus ApproveThreshold's input) is identical bar Gate.
+	scenarios := []struct {
+		name    string
+		headSHA string
+		wantAct GateAction
+	}{
+		// Allow: 5 APPROVE + 1 dissent = 6/6 present, 5/6 meets the N-1
+		// threshold, SHA current (mirrors 112's pin).
+		{name: "allow", headSHA: sha, wantAct: Allow},
+		// Block: identical votes but a stale reviewed_head_sha — the
+		// staleness leg blocks regardless of gate.
+		{name: "block-stale-sha", headSHA: staleSHA, wantAct: Block},
+	}
+
+	buildFacts := func(gate, headSHA string) GateFacts {
+		p := Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
+		p.Gate = gate
+		r := result(&p, 5, 0, 1, nil, nil)
+		r.Verdicts = append(r.Verdicts,
+			Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+		return GateFacts{
+			BeadID:  "mindspec-bd01",
+			Reg:     regn("/wt/review/slug"),
+			Res:     r,
+			HeadSHA: headSHA,
+		}
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			// Baseline: the empty-gate decision + threshold every enum
+			// value must match byte-for-byte.
+			baseFacts := buildFacts("", sc.headSHA)
+			baseDecision := PanelGateDecision(baseFacts)
+			baseThreshold := baseFacts.Res.Panel.ApproveThreshold()
+			if baseDecision.Action != sc.wantAct {
+				t.Fatalf("scenario %q: baseline Action = %v, want %v (fixture bug)", sc.name, baseDecision.Action, sc.wantAct)
+			}
+
+			for _, gate := range gateValues {
+				facts := buildFacts(gate, sc.headSHA)
+				got := PanelGateDecision(facts)
+				if got.Action != baseDecision.Action {
+					t.Errorf("gate=%q: PanelGateDecision Action = %v, want %v (Gate must not affect the decision)", gate, got.Action, baseDecision.Action)
+				}
+				if got.Message != baseDecision.Message {
+					t.Errorf("gate=%q: PanelGateDecision Message = %q, want %q (Gate must not affect the message)", gate, got.Message, baseDecision.Message)
+				}
+				if th := facts.Res.Panel.ApproveThreshold(); th != baseThreshold {
+					t.Errorf("gate=%q: ApproveThreshold() = %d, want %d (Gate must not affect it)", gate, th, baseThreshold)
+				}
+			}
+		})
+	}
+}

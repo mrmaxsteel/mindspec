@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Core invariant holds. PanelGateDecision (internal/panel/gate.go:131) reads only resolved GateFacts — Abandoned, RoundMismatch, MissingRef/GitErr, ReviewedHeadSHA, UserDirt, Complete(), Rejects/HardBlocks, ApproveThreshold() — never p.Gate. ApproveThreshold() (panel.go:113) reads only ExpectedReviewers/ApproveThresholdExpr, never Gate. The ONLY two consumer reads of Panel.Gate are the PanelGateAdvisoryDefault call sites (cmd/mindspec/config.go:541 config-show; internal/complete/complete.go:390) — both explicitly advisory and computed AFTER the final Allow/Block ('the decision above is already final'). Gate-scoped resolver correctness verified: --gate g routes creation defaults through cfg.PanelGateExpectedReviewers(g)/PanelGateApproveThresholdExpr(g) (panel.go:168-177); omitted uses the globals — byte-identical (112 R9). Per-gate-mix stamping pinned by TestPanelCreate_GateStampsPerGateDefaults (green). Leaf stays config-free (go list -deps: no internal/config; exit 1), single enum (no second spec_approve literal), 112 pins unmodified (panel_test.go delta is only 'gate' added to resetPanelCreateFlags). Targeted tests green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O2-1",
+      "severity": "info",
+      "summary": "DECISION-INERT confirmed: PanelGateDecision and ApproveThreshold() never reference p.Gate; only PanelGateAdvisoryDefault (config.go:541, complete.go:390) reads it, and it is advisory-only, evaluated after the final decision."
+    },
+    {
+      "id": "O2-2",
+      "severity": "info",
+      "summary": "Gate-scoped resolvers used correctly at create-time: cmd/mindspec/panel.go:168-177 calls PanelGateExpectedReviewers(g)/PanelGateApproveThresholdExpr(g) only when gate!=\"\", else the global resolvers; per-gate-mix values stamp correctly (TestPanelCreate_GateStampsPerGateDefaults)."
+    },
+    {
+      "id": "O2-3",
+      "severity": "info",
+      "summary": "Byte-identity-when-absent preserved: Gate \"\" + json omitempty writes no gate key; enum membership (isValidPanelGateKey iterating config.PanelGateKeys) validated before any write; no second enum copy; internal/panel remains a config-free leaf."
+    }
+  ]
+}

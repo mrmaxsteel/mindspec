@@ -33,7 +33,12 @@ var panelCmd = &cobra.Command{
 
 // revParseForPanelFn resolves ref's commit SHA in root — the seam `panel
 // create` uses to capture reviewed_head_sha AT WRITE TIME (swappable in
-// tests, mirroring internal/complete's gateRevParseFn).
+// tests, mirroring internal/complete's gateRevParseFn). Spec 113 R1 routes
+// a SECOND caller through this same seam: `nonBeadTargetRevParse` (below)
+// uses it to rev-parse a non-bead panel's RECORDED panel.json.target for
+// `panel verify`/`panel tally` staleness — so both the write-time capture
+// and the read-time non-bead staleness check are stubbable at one place in
+// tests, and never spawn a real git subprocess.
 var revParseForPanelFn = func(root, ref string) (string, error) {
 	return newExecutor(root).RevParseRef(root, ref)
 }
@@ -65,7 +70,16 @@ A --bead <id> panel expects --target bead/<id> — the exact ref
 ` + "`mindspec complete`'s gate rev-parses for staleness. A --target that" + `
 diverges from bead/<id> can only FAIL SAFE: at gate time the recorded
 reviewed_head_sha will not match the live bead/<id> tip, producing a
-stale-SHA Block, never a false-PASS.`,
+stale-SHA Block, never a false-PASS.
+
+An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
+decision-inert panel.json "gate" field and resolves expected_reviewers/
+approve_threshold from that gate's creation-time defaults
+(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr) instead
+of the global panel.reviewers/approve_threshold. --gate must be one of
+the five config.PanelGateKeys (spec_approve, plan_approve, bead,
+final_review, adhoc); omitting it is byte-identical to today: the global
+defaults are used and no "gate" key is written.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -77,15 +91,22 @@ stale-SHA Block, never a false-PASS.`,
 		target, _ := cmd.Flags().GetString("target")
 		beadID, _ := cmd.Flags().GetString("bead")
 		round, _ := cmd.Flags().GetInt("round")
+		gate, _ := cmd.Flags().GetString("gate")
 
 		// Control-byte discipline (spec-109-final-review G2): a --bead/
 		// --target value carrying a control byte must never reach
 		// panel.json or a rendered/recovery message. Same check
-		// validatePanelSlug applies to the slug itself.
+		// validatePanelSlug applies to the slug itself. --gate (spec 113
+		// R3) gets the same discipline, applied BEFORE the enum-membership
+		// check below so a control-byte value never reaches a rendered
+		// message either way.
 		if err := rejectControlBytes("--bead", beadID); err != nil {
 			return err
 		}
 		if err := rejectControlBytes("--target", target); err != nil {
+			return err
+		}
+		if err := rejectControlBytes("--gate", gate); err != nil {
 			return err
 		}
 		if strings.TrimSpace(specID) == "" {
@@ -96,6 +117,18 @@ stale-SHA Block, never a false-PASS.`,
 		}
 		if round <= 0 {
 			round = 1
+		}
+		// --gate membership, validated BEFORE any filesystem write or
+		// root/config resolution side effect (spec 113 R3): a value
+		// outside config.PanelGateKeys — the single enum declaration,
+		// internal/config/config.go:101 — is rejected with a recovery
+		// line naming all five keys (ADR-0035), never a second copy of
+		// the enum.
+		if gate != "" && !isValidPanelGateKey(gate) {
+			keys := strings.Join(config.PanelGateKeys, ", ")
+			return guard.NewFailure(
+				fmt.Sprintf("--gate %q is not one of the five valid panel gate keys (%s)", gate, keys),
+				fmt.Sprintf("pass one of %s to --gate", keys))
 		}
 
 		root, err := findRoot()
@@ -122,14 +155,36 @@ stale-SHA Block, never a false-PASS.`,
 			beadPtr = &beadID
 		}
 
+		// Spec 113 R3: when --gate is set, resolve the creation-time
+		// defaults through 112 R3's gate-scoped resolvers instead of the
+		// global ones; when omitted, EXACTLY today's global-resolver
+		// calls with Gate: "" — preserving the 112-R9
+		// byte-identical-when-absent contract. The resolver errors are
+		// unreachable post-validation (gate is already confirmed a
+		// member of PanelGateKeys above) but returned defensively rather
+		// than ignored.
+		expectedReviewers := cfg.PanelExpectedReviewers()
+		approveThresholdExpr := cfg.PanelApproveThresholdExpr()
+		if gate != "" {
+			expectedReviewers, err = cfg.PanelGateExpectedReviewers(gate)
+			if err != nil {
+				return err
+			}
+			approveThresholdExpr, err = cfg.PanelGateApproveThresholdExpr(gate)
+			if err != nil {
+				return err
+			}
+		}
+
 		in := panel.CreateInput{
 			BeadID:               beadPtr,
 			Spec:                 specID,
 			Target:               target,
 			Round:                round,
-			ExpectedReviewers:    cfg.PanelExpectedReviewers(),
-			ApproveThresholdExpr: cfg.PanelApproveThresholdExpr(),
+			ExpectedReviewers:    expectedReviewers,
+			ApproveThresholdExpr: approveThresholdExpr,
 			ReviewedHeadSHA:      sha,
+			Gate:                 gate,
 		}
 		if err := panel.Create(dir, in); err != nil {
 			return err
@@ -203,7 +258,22 @@ recovery line (ADR-0035).`,
 		changes := collectSlotChanges(reg, facts.Res)
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)
-		return tallyExitAction(d, slug)
+
+		// Spec 113 R1: a non-bead panel is not complete-gated, so its exit
+		// path must never route through tallyExitAction's bead-templated
+		// recovery (whose `<bead>` literal would re-introduce a forbidden
+		// `mindspec complete <bead>` instruction on a panel with no bead to
+		// complete). tallyExitAction itself stays 2-arg and byte-identical
+		// (its sole test caller, TestPanelTally_ExitCodeTracksDecision, is
+		// unmodified) — the non-bead recovery is rendered HERE instead.
+		if reg.Err == nil && reg.Panel.IsBead() {
+			return tallyExitAction(d, slug)
+		}
+		target := ""
+		if facts.Res != nil && facts.Res.Panel != nil {
+			target = facts.Res.Panel.Target
+		}
+		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate)
 	},
 }
 
@@ -212,6 +282,7 @@ func init() {
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for global defaults)")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)
@@ -263,6 +334,20 @@ func rejectControlBytes(label, value string) error {
 	return nil
 }
 
+// isValidPanelGateKey reports whether gate is a member of
+// config.PanelGateKeys — the SINGLE enum declaration
+// (internal/config/config.go:101). This iterates that slice rather than
+// duplicating its literal values, per spec 113 R3: `panel create --gate`
+// must never carry a second copy of the five-key enum.
+func isValidPanelGateKey(gate string) bool {
+	for _, k := range config.PanelGateKeys {
+		if k == gate {
+			return true
+		}
+	}
+	return false
+}
+
 // panelDirFor resolves the panel directory for slug, layout-aware —
 // reusing the same workspace.DetectLayout + workspace.SpecDir logic
 // internal/complete.panelGateRoots uses: flat -> co-located
@@ -299,6 +384,18 @@ func findPanelRegistration(root, slug string) (panel.Registration, error) {
 // (empty for a non-bead panel), scanRoot the panel dir's grandparent, and
 // the git I/O wired through the executor. facts.Res is always non-nil
 // (panel.ResolveGateFacts tallies reg.Dir internally).
+//
+// Spec 113 R1: for a NON-BEAD panel (beadID == ""), internal/panel.
+// ResolveGateFacts unconditionally rev-parses "bead/"+beadID — the
+// always-absent literal ref "bead/" when beadID is empty. Rather than let
+// that doomed rev-parse run (it always fails ErrRefNotFound, short-
+// circuiting PanelGateDecision at the missing-ref leg and shadowing
+// staleness/incomplete/REJECT/threshold), the bead-path's
+// exec.RevParseRef is swapped for nonBeadTargetRevParse, which ignores the
+// "bead/"-derived ref argument ResolveGateFacts passes and instead
+// rev-parses the panel's RECORDED reg.Panel.Target. internal/panel itself
+// is untouched (zero-byte diff) — this is purely caller-side fact
+// gathering through the GateIO seam ADR-0037 designed for exactly this.
 func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts {
 	beadID := ""
 	if reg.Err == nil && reg.Panel.IsBead() {
@@ -306,12 +403,51 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	}
 	scanRoot := panel.PanelDirScanRoot(reg.Dir)
 	exec := newExecutor(root)
+
+	revParse := exec.RevParseRef
+	if beadID == "" {
+		revParse = nonBeadTargetRevParse(reg)
+	}
+
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
-		RevParse:      exec.RevParseRef,
+		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
 		Worktree:      panelBeadWorktreePath(beadID),
 	})
+}
+
+// nonBeadTargetRevParse builds the GateIO.RevParse closure a non-bead
+// panel's `panel verify`/`panel tally` uses (Bead 1 Half 1, R1): it IGNORES
+// the "bead/"+beadID ref argument panel.ResolveGateFacts always passes
+// (beadID == "" for a non-bead panel, so that ref is the literal,
+// always-absent "bead/") and instead rev-parses reg.Panel's RECORDED
+// Target in the caller-supplied scanRoot, through the SAME
+// revParseForPanelFn seam `panel create` uses to capture reviewed_head_sha
+// at write time. This un-shadows PanelGateDecision's staleness (leg 6) and
+// incomplete/REJECT/threshold legs (8)-(10) for a non-bead panel: a stale
+// target now Blocks, a genuinely-deleted target (exec.IsRefNotFound, still
+// wired to errors.Is(err, gitutil.ErrRefNotFound)) still gets the honest
+// missing-ref Warn, and a transient git error still gets the honest
+// transient Warn (leg 5b) — never a false MissingRef.
+//
+// When the registration itself is unparsed (reg.Err != nil) or its Target
+// is empty (a panel.json that, however it was produced, records no target
+// ref), this returns a plain non-ErrRefNotFound error so the facts surface
+// as the honest transient GitErr Warn rather than a false "target deleted"
+// claim — though an unreadable registration Blocks first regardless, at
+// leg (2), before this closure is ever invoked.
+func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (string, error) {
+	return func(scanRoot, _ string) (string, error) {
+		if reg.Err != nil {
+			return "", fmt.Errorf("panel.json records no target ref: %w", reg.Err)
+		}
+		target := strings.TrimSpace(reg.Panel.Target)
+		if target == "" {
+			return "", fmt.Errorf("panel.json records no target ref")
+		}
+		return revParseForPanelFn(scanRoot, target)
+	}
 }
 
 // panelBeadWorktreePath resolves the bead worktree path for the dirty-tree
@@ -351,6 +487,15 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		slug = facts.Reg.Slug()
 	}
 
+	nonBead := res == nil || res.Panel == nil || !res.Panel.IsBead()
+	target := ""
+	if res != nil && res.Panel != nil {
+		target = res.Panel.Target
+	}
+	if nonBead {
+		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "panel %s: %d/%d verdict(s) present", slug, len(res.Verdicts), res.ExpectedReviewers())
 	if len(res.Malformed) > 0 {
@@ -359,11 +504,33 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	b.WriteString("\n")
 
 	if res.Panel != nil && res.Panel.ReviewedHeadSHA != "" {
+		// displayTarget renders target (read RAW from a repo-write-
+		// attacker-poisonable panel.json) via escapeConfigValue
+		// (config.go, spec 109 G2's escaper) so a control byte/ANSI
+		// sequence/embedded newline in a hand-edited panel.json's
+		// "target" can never forge extra terminal lines here (spec-113-
+		// final G2, finding 2). A no-op for any clean target (every
+		// printable-ASCII value, including every real branch/spec ref).
+		displayTarget := escapeConfigValue(target)
 		switch {
+		case facts.MissingRef && nonBead:
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (target %s no longer exists)\n", res.Panel.ReviewedHeadSHA, displayTarget)
 		case facts.MissingRef:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (target branch no longer exists — assumed merged)\n", res.Panel.ReviewedHeadSHA)
+		case facts.GitErr != nil && nonBead:
+			// facts.GitErr wraps "rev-parse %s: %w" (gitutil.RevParseRef)
+			// with the RAW target — a NUL byte in target defeats the
+			// ErrRefNotFound sentinel match, routing here instead of the
+			// escaped MissingRef leg above (spec-113-final S2, empirically
+			// confirmed with the real binary: a NUL/ESC/newline-bearing
+			// target re-leaked through this exact %v). Render the error's
+			// STRING through escapeConfigValue, never raw, so those
+			// control bytes can never reach the terminal here either.
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %s)\n", res.Panel.ReviewedHeadSHA, displayTarget, escapeConfigValue(facts.GitErr.Error()))
 		case facts.GitErr != nil:
 			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify live tip: %v)\n", res.Panel.ReviewedHeadSHA, facts.GitErr)
+		case facts.HeadSHA != "" && nonBead:
+			fmt.Fprintf(&b, "reviewed_head_sha: %s — target %s live tip: %s\n", res.Panel.ReviewedHeadSHA, displayTarget, facts.HeadSHA)
 		case facts.HeadSHA != "":
 			fmt.Fprintf(&b, "reviewed_head_sha: %s — live tip: %s\n", res.Panel.ReviewedHeadSHA, facts.HeadSHA)
 		}
@@ -461,6 +628,14 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		slug = facts.Reg.Slug()
 	}
 
+	if res == nil || res.Panel == nil || !res.Panel.IsBead() {
+		target := ""
+		if res != nil && res.Panel != nil {
+			target = res.Panel.Target
+		}
+		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "panel %s — per-slot verdicts:\n", slug)
 	if len(res.Verdicts) == 0 {
@@ -534,4 +709,155 @@ func tallyExitAction(d panel.Decision, slug string) error {
 	default:
 		return nil
 	}
+}
+
+// tallyExitActionNonBead mirrors tallyExitAction's Action -> exit contract
+// for a NON-BEAD panel (Bead 1 step 4, R1), rendered here in the RunE
+// handler rather than inside the pinned 2-arg tallyExitAction so that
+// helper — and its sole test caller, TestPanelTally_ExitCodeTracksDecision
+// — stays byte-identical. d.Message has ALREADY been sanitized by
+// renderPanelTally/sanitizeNonBeadDecision, so it carries no bead/<empty>
+// fragment and no RawMergeFence. This function's own Block recovery line
+// names a genuine re-panel command against the recorded target and NEVER
+// emits `mindspec complete <bead>` — a non-bead panel is not
+// complete-gated, so that instruction would be actively wrong here.
+//
+// The recovery line embeds a copyable `mindspec panel create ...` command,
+// so target and gate — both read RAW from a repo-write-attacker-poisonable
+// panel.json — go through escapeConfigValue (kills a control byte/embedded
+// newline reaching stdout, spec-113-final G2 finding 2) THEN
+// shellQuoteTarget (single-quotes the result so a shell metacharacter like
+// `;`/`$`/a backtick can never execute if the printed line is copied into a
+// shell, finding 1). When target is empty (the unreadable-registration
+// tally edge, F3-2), the `--target` flag is OMITTED entirely rather than
+// rendering a dangling `--target ` with nothing after it. gate (F3-1) is
+// included only when the panel recorded one, so the re-panel recovery
+// preserves that gate's creation-time defaults.
+func tallyExitActionNonBead(d panel.Decision, slug, target, gate string) error {
+	switch d.Action {
+	case panel.Warn:
+		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
+		return nil
+	case panel.Block:
+		var cmd strings.Builder
+		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1> --spec <id>", slug)
+		if target != "" {
+			fmt.Fprintf(&cmd, " --target %s", shellQuoteTarget(escapeConfigValue(target)))
+		}
+		if gate != "" {
+			fmt.Fprintf(&cmd, " --gate %s", shellQuoteTarget(escapeConfigValue(gate)))
+		}
+		return guard.NewFailure(d.Message, "re-run the panel: "+cmd.String())
+	default:
+		return nil
+	}
+}
+
+// shellQuoteTarget renders s as a POSIX-shell single-quoted literal for
+// embedding in a copyable `mindspec panel create ... --target/--gate <s>`
+// recovery command (spec-113-final G2, finding 1): s is wrapped in single
+// quotes with any embedded single quote escaped by the POSIX
+// close-quote/backslash-quote/reopen-quote technique, so a shell
+// metacharacter in s (semicolon, dollar, a backtick, and so on) can never
+// execute when the
+// printed recovery line is copied into a shell. s is ALWAYS quoted, even a
+// "safe" value with no metacharacters, for one predictable rendering —
+// mirrors internal/otel/config.go's own shellQuote (a different package;
+// this trivial helper is duplicated locally rather than imported across an
+// unrelated dependency boundary).
+func shellQuoteTarget(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// sanitizeNonBeadDecision rewrites d's Message for a NON-BEAD panel (Bead 1
+// Half 2, R1). panel.PanelGateDecision's shared templates are keyed by
+// f.BeadID; a non-bead panel's BeadID is always "" (Bead 1 Half 1 feeds it
+// the recorded target instead of a doomed "bead/"+beadID rev-parse), which
+// produces malformed empty-interpolation fragments in three of its
+// templates: the missing-ref leg's `references branch bead/,`, the
+// transient-git-error leg's `panel for : ` / `could not verify branch
+// bead/`, and the trailing RawMergeFence("") (`git merge bead/ ` with
+// nothing to name) appended by legs (2)/(4)/(6)/(8)/(9)/(10). This
+// function renames all three to the panel's recorded slug/target and NEVER
+// introduces a `mindspec complete` instruction — a non-bead panel is not
+// complete-gated.
+//
+// It NEVER touches d.Action, and it never mutates the shared
+// panel.Decision internal/instruct/internal/complete read for BEAD panels
+// — those callers never reach this function (it is applied only in this
+// package's render layer, gated strictly on non-bead), so the shared
+// Decision.Message stays byte-identical for every bead panel (the
+// TestPanelVerbs_DecisionIsPanelGateDecision /
+// TestPanelTally_ExitCodeTracksDecision pins, and the AC-global
+// internal/instruct + internal/complete unmodified-test fence).
+//
+// target is rendered here TWICE with two different disciplines (spec-113-
+// final G2, both findings): as plain display text ("target %s no longer
+// exists") it is escapeConfigValue'd so a control byte/embedded newline in
+// a hand-edited panel.json can never forge extra output lines (finding 2);
+// inside the parenthetical copyable `mindspec panel create ... --target
+// <target>` advisory it is ADDITIONALLY shell single-quoted
+// (shellQuoteTarget) so a shell metacharacter (`;`, `$`, backtick, ...) in
+// target can never execute if that line is copied into a shell (finding
+// 1). Leg (5) is only reachable with a non-empty target (an empty target
+// never rev-parses to a real gitutil.ErrRefNotFound — see
+// nonBeadTargetRevParse), so no dangling/empty `--target` case arises
+// here; that edge belongs to tallyExitActionNonBead (F3-2).
+//
+// gitErr is facts.GitErr (leg (5b) only): internal/panel's shared
+// PanelGateDecision template interpolates f.GitErr RAW (%v) into
+// d.Message BEFORE this function ever runs. A hostile target containing a
+// NUL byte defeats gitutil.RevParseRef's ErrRefNotFound sentinel match (a
+// non-*exec.ExitError wrap), routing the panel to this leg (5b) INSTEAD
+// of the escaped leg (5) missing-ref path above — and the wrapped error
+// string ("rev-parse <target>: <err>") re-embeds the target's raw control
+// bytes (spec-113-final S2, empirically confirmed: a captured stderr held
+// a raw NUL, a raw ESC/ANSI sequence, and a bare newline splitting the
+// advisory into a forged extra line). Rather than patch substrings of the
+// already-interpolated message (fragile if gitErr.Error() ever collided
+// with template text), leg (5b) rebuilds its whole sentence from scratch
+// with gitErr.Error() run through escapeConfigValue — never raw.
+func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error) panel.Decision {
+	msg := d.Message
+	if msg == "" {
+		return d
+	}
+
+	// Legs (2)/(4)/(6)/(8)/(9)/(10): strip the trailing empty-bead fence.
+	// A non-bead panel is not complete-gated and must not carry
+	// `git merge bead/ ` advice with an empty interpolation.
+	if fence := panel.RawMergeFence(""); strings.HasSuffix(msg, fence) {
+		msg = strings.TrimSuffix(msg, fence)
+	}
+
+	displayTarget := escapeConfigValue(target)
+
+	// Leg (5) missing-ref: the whole sentence is malformed when BeadID is
+	// "" ("panel for  references branch bead/, which no longer exists —
+	// ..."); replace it wholesale with a target-naming missing-ref
+	// advisory (the Warn Action is preserved — only the Message changes).
+	if strings.Contains(msg, "references branch bead/,") {
+		msg = fmt.Sprintf(
+			"panel %s target %s no longer exists — the reviewed ref was deleted; "+
+				"re-create the panel against a live ref (mindspec panel create %s --spec <id> --target %s)",
+			slug, displayTarget, slug, shellQuoteTarget(displayTarget))
+	}
+
+	// Leg (5b) transient git error: the shared template's message is
+	// "panel for : could not verify branch bead/ (transient git error:
+	// <RAW gitErr>) — staleness check skipped; ..." (BeadID == ""). Detect
+	// it by its stable "could not verify branch bead/" fragment and
+	// rebuild the ENTIRE sentence — renaming the empty bead/ fragments to
+	// the recorded slug/target AND re-interpolating gitErr through
+	// escapeConfigValue instead of carrying forward its already-raw %v
+	// text (spec-113-final S2).
+	if gitErr != nil && strings.Contains(msg, "could not verify branch bead/") {
+		msg = fmt.Sprintf(
+			"panel %s: could not verify target %s (transient git error: %s) — staleness check skipped; "+
+				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
+			slug, displayTarget, escapeConfigValue(gitErr.Error()))
+	}
+
+	d.Message = msg
+	return d
 }

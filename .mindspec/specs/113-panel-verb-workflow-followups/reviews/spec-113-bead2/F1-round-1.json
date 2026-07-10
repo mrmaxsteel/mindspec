@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Adversarial lens, all probes empirical on a /tmp copy pinned to 52d052d0. (1) Pin is NOT hollow: reverting line 141 to the old /[\\x60;|&\\n]|\\$\\(/ makes TestMsPanelWorkflow_ShellMetacharRejectsBareDollar go RED ('found 0'); pinned tree is green. (2) Node matrix: NEW /[\\x60;|&\\n$]/ rejects $HOME/${x}/$x/`/;/|/&/\\n/$(x) and false-positives on none of p113, 113-panel-verb-workflow-followups, bead/mindspec-x.1, spec/113-x, main. OLD regex leaks $HOME/${x}/$x — the exact regression the matrix also catches. Monotone: `;|&\\n all still rejected, $( subsumed. (3) Bypass hunt: buildCommand has 4 call sites — codex(no values), create(slug/spec/target/bead_id/round), verify(slug), tally(slug). validateArgs(args) at L455 runs before every caller and routes slug/spec/bead_id/target through validateShellSafe; round is Number.isInteger so cannot carry $. No $-bearing user value reaches the shell string unchecked. (4) $ inside [...] is literal, class well-formed. Mirror cmp OK. Worktree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Mutation-probe: reverting SHELL_METACHAR_RE to /[\\x60;|&\\n]|\\$\\(/ turns TestMsPanelWorkflow_ShellMetacharRejectsBareDollar RED (found 0) — pin is genuine, not hollow.",
+    "Node matrix confirms OLD regex would have leaked $HOME/${x}/$x while NEW rejects all metachar rows with zero false positives on repo-convention slugs/specs/targets/bead-ids.",
+    "No bypass: validateArgs (L455) applies validateShellSafe to slug/spec/target/bead_id before any of the 4 buildCommand call sites; round is integer-validated; codex slot passes no values. Every $-capable user value is regex-checked.",
+    "Monotone + well-formed: `;|&\\n unchanged, $( subsumed via bare $, and $ is a literal (not anchor) inside the character class. Mirror byte-identical (cmp exit 0)."
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Re-mutation-probed a /tmp clone at 18b2624a. F1-1 ADDRESSED exactly as required: new TestPanel_GateFieldDecisionInertAllEnumValues (panel_test.go:393) covers all five enum values plus \"\" — verified to literally mirror config.PanelGateKeys (config.go:101, same values, same order) via deliberate hardcoding so internal/panel stays a config-free leaf (go list -deps: 0 internal/config). Asserts PanelGateDecision Action AND Message AND ApproveThreshold() against an empty-gate baseline over both an Allow and a Block (stale-SHA) scenario. My exact round-1 surviving mutant — `if p.Gate == \"final_review\" { return 1 }` atop ApproveThreshold — now reds the new test in BOTH scenarios; a second variant keyed inside PanelGateDecision (final_review→Block) also reds it (Action+Message legs both fire). Both mutants still pass 112's old test alone, proving the new test is precisely what closes the gap. diff d327cdce..18b2624a is 85 pure-additive test lines in one hunk after 112's test — prod code byte-identical, 112 pin untouched. go test ./internal/panel ./cmd/mindspec green uncached. Worktree clean at pinned SHA.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "severity": "major",
+      "class": "hollow-pin (mutation survives)",
+      "disposition": "ADDRESSED",
+      "evidence": "In /tmp clone at 18b2624a: (a) round-1 surviving mutant `if p.Gate == \"final_review\" { return 1 }` at top of Panel.ApproveThreshold → TestPanel_GateFieldDecisionInertAllEnumValues FAILS in allow AND block-stale-sha subtests (\"ApproveThreshold() = 1, want 5\"); (b) decision-path variant `if Gate == \"final_review\" return Block` injected at top of PanelGateDecision (gate.go:131) → same test FAILS on both Action and Message assertions; (c) under BOTH mutants, 112's TestPanel_GateFieldDecisionInert alone still PASSES — the new test is what kills them; (d) pristine 18b2624a: full ./internal/panel green. Test loops {spec_approve, plan_approve, bead, final_review, adhoc, \"\"} — confirmed identical set+order to config.PanelGateKeys — with a doc comment explaining the hardcode preserves the config-free leaf and that cmd/mindspec enum-membership tests catch drift. New test is additive-only; 112's pin unmodified (0 deletions in the d327cdce→18b2624a diff)."
+    },
+    {
+      "id": "F1-4",
+      "severity": "info",
+      "class": "amendment-scope verified",
+      "disposition": "NEW (no action)",
+      "evidence": "git diff d327cdce 18b2624a --stat: internal/panel/panel_test.go +85/-0 only; panel.go, create.go, gate.go, cmd/mindspec, internal/config, internal/complete all byte-identical to the round-1 reviewed tree, so all round-1 F1-2/F1-3 verifications (byte-identity pins, gate-scoped defaults, no-gate-bypass defense-in-depth, advisory-only readers) carry over unchanged."
+    }
+  ]
+}
