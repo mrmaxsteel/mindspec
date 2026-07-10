@@ -2,6 +2,8 @@ package panel
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -182,7 +184,10 @@ func TestPanelGateDecision(t *testing.T) {
 			mustHave: []string{"HARD block / REJECT", "hard_block from reva", fence},
 		},
 		{
-			name: "threshold met: 6/6 present, 5 APPROVE + 1 dissent → Allow",
+			// Spec 114 R1 (one of the FOUR intended outcome flips): an
+			// unresolved REQUEST_CHANGES is no longer out-voted by the
+			// approve count. Was Allow.
+			name: "threshold met: 6/6 present, 5 APPROVE + 1 dissent → Block (Spec 114 R1)",
 			facts: func() GateFacts {
 				p := defaultPanel()
 				r := result(p, 5, 0, 1, nil, nil)
@@ -190,7 +195,9 @@ func TestPanelGateDecision(t *testing.T) {
 					Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
-			want: Allow,
+			want:        Block,
+			mustHave:    []string{"z", fence},
+			mustNotHave: []string{"refut", "refutations", "panel refute"},
 		},
 		{
 			name: "sub-threshold 4/6 (complete? no) — covered above; here 6 present 4 approve via neutral",
@@ -208,12 +215,14 @@ func TestPanelGateDecision(t *testing.T) {
 			mustHave: []string{"4/6 APPROVE", "threshold is 5/6", "consolidated-round-1.md", fence},
 		},
 		{
-			name: "expected_reviewers:3 → 3/3 present, 2 APPROVE Allow (no hardcoded 6)",
+			// Outcome-preserving update (Spec 114 R1 step 6f): this fixture's
+			// SUBJECT is "no hardcoded 6", not RC tolerance, so the incidental
+			// REQUEST_CHANGES filler is replaced with a genuine third APPROVE
+			// to keep the Allow outcome under the new unresolved-RC leg.
+			name: "expected_reviewers:3 → 3/3 present, 3 APPROVE Allow (no hardcoded 6)",
 			facts: func() GateFacts {
 				p := &Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 3, ReviewedHeadSHA: sha}
-				r := result(p, 2, 0, 1, nil, nil)
-				r.Verdicts = append(r.Verdicts,
-					Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+				r := result(p, 3, 0, 1, nil, nil)
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
 			want: Allow,
@@ -256,6 +265,191 @@ func TestPanelGateDecision(t *testing.T) {
 				t.Errorf("Block message must never print %s:\n%s", SkipPanelEnv, got.Message)
 			}
 		})
+	}
+}
+
+// TestPanelGateDecision_UnresolvedRequestChangesBlocks (Spec 114 R1, AC1 +
+// AC8 block-half + AC10 predicate): the new leg (9.5) — any unresolved
+// REQUEST_CHANGES or unrecognized verdict Blocks the gate exactly like a
+// REJECT, regardless of the approve count, since a mechanical gate cannot
+// out-vote a reviewer's dissent by arithmetic. Table-driven over three
+// shapes: a single unresolved RC (AC1), an unrecognized/non-standard verdict
+// string (AC8 block-half — "not an APPROVE"), and two unresolved RC slots
+// (naming both, per R3's multiplicity requirement). Every row re-asserts the
+// AC10 no-advertise predicate: the message never contains a paste-able
+// refutation incantation (Bead 1 has no refutation escape yet — ANY
+// unresolved verdict blocks unconditionally) nor the skip variable (HC-7),
+// and always carries the raw-merge fence.
+func TestPanelGateDecision_UnresolvedRequestChangesBlocks(t *testing.T) {
+	t.Parallel()
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+
+	defaultPanel := func() *Panel {
+		return &Panel{
+			BeadID: ptr("mindspec-bd01"), Spec: "093", Target: "bead",
+			Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha,
+		}
+	}
+
+	tests := []struct {
+		name     string
+		facts    GateFacts
+		mustHave []string
+	}{
+		{
+			// AC1: 6 expected reviewers, complete latest-round verdicts,
+			// fresh SHA, clean tree, 5 APPROVE + 1 REQUEST_CHANGES, no
+			// refutation → Block naming the RC slot.
+			name: "5 APPROVE + 1 REQUEST_CHANGES → Block naming the RC slot",
+			facts: func() GateFacts {
+				p := defaultPanel()
+				r := result(p, 5, 0, 1, nil, nil)
+				r.Verdicts = append(r.Verdicts,
+					Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
+			}(),
+			mustHave: []string{"z", "5/6 APPROVE", "threshold is 5/6", fence},
+		},
+		{
+			// AC8 (block-half): an unrecognized/non-standard verdict string
+			// is "not an APPROVE" (tally.go's Approves/Rejects doc) and
+			// Blocks identically to a REQUEST_CHANGES.
+			name: `5 APPROVE + 1 unrecognized verdict ("MAYBE") → Block`,
+			facts: func() GateFacts {
+				p := defaultPanel()
+				r := result(p, 5, 0, 1, nil, nil)
+				r.Verdicts = append(r.Verdicts,
+					Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: "MAYBE"})
+				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
+			}(),
+			mustHave: []string{"z", "5/6 APPROVE", fence},
+		},
+		{
+			// Two unresolved RC slots → Block naming BOTH (R3a's
+			// multiplicity requirement: each must be addressed individually).
+			name: "two unresolved RC slots → Block naming both",
+			facts: func() GateFacts {
+				p := defaultPanel()
+				r := result(p, 4, 0, 1, nil, nil)
+				r.Verdicts = append(r.Verdicts,
+					Verdict{File: "x-round-1.json", Slot: "x", Round: 1, Verdict: VerdictRequestChanges},
+					Verdict{File: "y-round-1.json", Slot: "y", Round: 1, Verdict: VerdictRequestChanges})
+				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
+			}(),
+			mustHave: []string{"x", "y", "4/6 APPROVE", fence},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PanelGateDecision(tt.facts)
+			if got.Action != Block {
+				t.Fatalf("action = %v, want Block\nmsg: %s", got.Action, got.Message)
+			}
+			for _, s := range tt.mustHave {
+				if !strings.Contains(got.Message, s) {
+					t.Errorf("message missing %q:\n%s", s, got.Message)
+				}
+			}
+			// AC10 (no-advertise predicate): the message names the
+			// unresolved slot(s) and ends with a recovery-shaped fence, but
+			// never prints a paste-able refutation incantation (Bead 1 has
+			// no refutation escape) nor the skip variable (HC-7).
+			for _, s := range []string{"refute", "refutations", "panel refute", SkipPanelEnv} {
+				if strings.Contains(got.Message, s) {
+					t.Errorf("message must NOT contain %q (AC10/HC-7):\n%s", s, got.Message)
+				}
+			}
+			if !strings.Contains(got.Message, fence) {
+				t.Errorf("message must carry the raw-merge fence:\n%s", got.Message)
+			}
+		})
+	}
+}
+
+// TestPanelGateDecision_ApprovesExcludesUnresolvedVerdicts (Spec 114 R1/OQ1,
+// AC9 Bead-1 precursor): a REQUEST_CHANGES verdict never increments
+// Result.Approves — the tally counts only canonical APPROVE/REJECT
+// (tally.go:107-111), asserted against the REAL Tally() reader (not a
+// hand-built Result), so the counting switch itself is pinned, not just the
+// decision layer above it. This is the Bead-1-visible half of AC9 (a
+// REFUTED RC never increments Approves either, once Bead 2 adds refutation
+// — the invariant this pins is what makes that possible: the counting
+// switch never treated RC as APPROVE in the first place, so a refutation
+// can only ever remove a slot from the BLOCKING set, never add it to the
+// approve count).
+func TestPanelGateDecision_ApprovesExcludesUnresolvedVerdicts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, f := range []struct{ name, verdict string }{
+		{"a-round-1.json", `{"verdict":"APPROVE"}`},
+		{"b-round-1.json", `{"verdict":"APPROVE"}`},
+		{"c-round-1.json", `{"verdict":"APPROVE"}`},
+		{"d-round-1.json", `{"verdict":"APPROVE"}`},
+		{"e-round-1.json", `{"verdict":"APPROVE"}`},
+		{"z-round-1.json", `{"verdict":"REQUEST_CHANGES"}`},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte(f.verdict), 0o644); err != nil {
+			t.Fatalf("seed verdict file %s: %v", f.name, err)
+		}
+	}
+
+	res, err := Tally(dir)
+	if err != nil {
+		t.Fatalf("Tally: %v", err)
+	}
+	if res.Approves != 5 {
+		t.Fatalf("Approves = %d, want 5 (the RC slot must never be counted as APPROVE)", res.Approves)
+	}
+	unresolved := res.UnresolvedVerdicts()
+	if len(unresolved) != 1 || unresolved[0].Slot != "z" {
+		t.Fatalf("UnresolvedVerdicts() = %+v, want exactly the \"z\" RC slot", unresolved)
+	}
+}
+
+// TestPanelGateDecision_ThresholdFloorIsLayeredNotReplaced (Spec 114
+// R1/OQ1, AC7 Bead-1 precursor — layered model): the approve_threshold/N−1
+// floor (leg 10) and the new unresolved-verdict leg (9.5) are TWO
+// INDEPENDENT necessary conditions, not a replacement of one by the other.
+// Bead 1 has no refutation yet, so AC7's full falsifier (a sub-threshold
+// panel where every RC has been refuted still Blocks on the floor) is
+// Bead 2's — refuting an RC is what could otherwise "buy past" the floor,
+// and there is no refutation mechanism to attempt that with here. What
+// Bead 1 DOES pin, as the necessary precondition for that later guarantee
+// to mean anything: (a) leg (10)'s threshold floor remains independently
+// reachable and blocking when NO unresolved verdict is present (proven
+// by the resolved-threshold-0 case in
+// TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision) — leg 9.5 is
+// additive, not a replacement; and (b) a panel that is BOTH sub-threshold
+// AND carries an unresolved RC still Blocks with a message that names the
+// dissent AND still reports the genuine sub-threshold tally (the leg-9.5
+// message is a byte-superset of leg-10's), so neither condition masks the
+// other.
+func TestPanelGateDecision_ThresholdFloorIsLayeredNotReplaced(t *testing.T) {
+	t.Parallel()
+	sha := "abc1234def5678abc1234def5678abc1234def56"
+	p := &Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha}
+
+	// 3 APPROVE + 3 REQUEST_CHANGES: sub-threshold (3 < 5) AND carrying
+	// unresolved dissent — both conditions independently would Block; the
+	// gate must Block via leg 9.5 (it precedes leg 10) while the message
+	// still reflects the genuine 3/6 approve tally, proving the floor
+	// information is not lost under the new leg.
+	r := result(p, 3, 0, 1, nil, nil)
+	r.Verdicts = append(r.Verdicts,
+		Verdict{File: "x-round-1.json", Slot: "x", Round: 1, Verdict: VerdictRequestChanges},
+		Verdict{File: "y-round-1.json", Slot: "y", Round: 1, Verdict: VerdictRequestChanges},
+		Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
+	facts := GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
+
+	got := PanelGateDecision(facts)
+	if got.Action != Block {
+		t.Fatalf("action = %v, want Block\nmsg: %s", got.Action, got.Message)
+	}
+	for _, want := range []string{"x", "y", "z", "3/6 APPROVE", "threshold is 5/6", fence} {
+		if !strings.Contains(got.Message, want) {
+			t.Errorf("message missing %q (both the dissent AND the genuine sub-threshold tally must survive):\n%s", want, got.Message)
+		}
 	}
 }
 

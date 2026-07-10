@@ -123,6 +123,9 @@ type GateFacts struct {
 //	(7) dirty tree    → Block  (CommitAll bypass; skipped when worktree absent)
 //	(8) incomplete    → Block  (verdicts < expected_reviewers)
 //	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
+//	(9.5) unresolved  → Block  (unresolved REQUEST_CHANGES / unrecognized
+//	                    verdict(s) — Spec 114 R1; layered ON TOP of the
+//	                    threshold floor, not a replacement for it)
 //	(10) threshold    → Allow iff APPROVE ≥ N−1, else Block
 //
 // false POSITIVES (a wrongful Block) are the pinned bug class (Req 9); the
@@ -250,6 +253,31 @@ func PanelGateDecision(f GateFacts) Decision {
 		return Decision{Action: Block, Message: fmt.Sprintf(
 			"panel %s round %d: %s — HARD block / REJECT recorded — halt path, see /ms-panel-tally%s",
 			slug, round, detail, RawMergeFence(f.BeadID))}
+	}
+
+	// (9.5) Unresolved non-APPROVE — any latest-round verdict that is neither
+	// a canonical APPROVE nor a canonical REJECT (i.e. REQUEST_CHANGES, or an
+	// unrecognized/non-standard verdict string — both are "not an APPROVE")
+	// Blocks, exactly like a REJECT, regardless of the approve count (Spec
+	// 114 R1). This is LAYERED on top of the leg (10) threshold floor, not a
+	// replacement: leg (10) below still Blocks a sub-threshold panel even
+	// once every unresolved verdict is cleared. The message deliberately
+	// carries a substring SUPERSET of leg (10)'s message ("X/N APPROVE",
+	// "threshold is T/N", the consolidated-round name, the fence) so
+	// pre-existing sub-threshold fixtures whose panels carry RC/neutral
+	// filler keep their pinned substring assertions green even where they
+	// now route through this leg instead of leg (10). It never contains
+	// "refut" (no refutation escape is advertised here — Bead 1 has none
+	// yet; AC10) and never MINDSPEC_SKIP_PANEL (HC-7).
+	if unresolved := f.Res.UnresolvedVerdicts(); len(unresolved) > 0 {
+		slots := make([]string, len(unresolved))
+		for i, v := range unresolved {
+			slots[i] = v.Slot
+		}
+		threshold := p.ApproveThreshold()
+		return Decision{Action: Block, Message: fmt.Sprintf(
+			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE (threshold is %d/%d); every latest-round verdict must be APPROVE. Run /ms-bead-fix with %s, then re-panel (/ms-panel-run step 0)%s",
+			slug, round, strings.Join(slots, ", "), f.Res.Approves, n, threshold, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
 
 	// (10) Threshold — N−1 (Req 12, single home in panel.ApproveThreshold).

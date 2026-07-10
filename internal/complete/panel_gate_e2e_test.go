@@ -69,11 +69,27 @@ func setupPanelGateRepo(t *testing.T, specID, beadID string) (root, beadSHA stri
 	return root, beadSHA
 }
 
-// approveVerdicts returns N COMPLETE round-1 verdicts that MEET the N−1
-// threshold: N-1 APPROVE plus one REQUEST_CHANGES (the tolerated dissent).
-// Complete (len==N) and over-threshold, so the only remaining block clause is
+// approveVerdicts returns N COMPLETE round-1 verdicts, all APPROVE (Spec 114
+// R1: an unresolved REQUEST_CHANGES now blocks the gate exactly like a
+// REJECT, so a fixture whose SUBJECT is staleness/dirty-tree/fail-open — not
+// RC tolerance — must feed a genuinely clean, all-APPROVE panel). Complete
+// (len==N) and over-threshold, so the only remaining block clause is
 // staleness / dirty tree.
 func approveVerdicts(n int) map[string]string {
+	m := map[string]string{}
+	letters := "abcdefghij"
+	for i := 0; i < n; i++ {
+		m[string(letters[i])+"-round-1.json"] = "APPROVE"
+	}
+	return m
+}
+
+// atThresholdWithOneDissentVerdicts returns N COMPLETE round-1 verdicts:
+// N-1 APPROVE (over the default N−1 threshold on its own) plus ONE
+// REQUEST_CHANGES (Spec 114 R1, AC1's e2e fixture) — the exact shape the
+// out-vote used to tolerate: the approve count alone meets the floor, but
+// an unresolved dissent must now Block anyway.
+func atThresholdWithOneDissentVerdicts(n int) map[string]string {
 	m := map[string]string{}
 	letters := "abcdefghij"
 	for i := 0; i < n-1; i++ {
@@ -156,6 +172,56 @@ func TestPanelGate_SubThreshold_Blocks(t *testing.T) {
 	}
 	if !strings.Contains(msg, "APPROVE") {
 		t.Errorf("block message should name the threshold tally; got:\n%s", msg)
+	}
+}
+
+// TestPanelGate_RequestChangesBlocksComplete (Spec 114 R1, AC1 end-to-end):
+// a fresh, complete, otherwise-passing panel (5 APPROVE meets the default
+// N−1 threshold on its own) carrying ONE unresolved REQUEST_CHANGES BLOCKS
+// complete.Run exactly like a REJECT — the approve count no longer
+// out-votes the dissent. Alongside the existing TestPanelGate_* suite on
+// the real-repo harness (setupPanelGateRepo): proves complete.Run returns
+// the guard failure having mutated NOTHING (CompleteBead never runs), the
+// message ends with an ADR-0035 recovery line, carries the raw-merge
+// fence, and re-asserts the AC10 no-advertise predicate on the full error
+// text (no refutation incantation, no skip variable).
+func TestPanelGate_RequestChangesBlocksComplete(t *testing.T) {
+	const specID, beadID = "099-pgrc", "mindspec-099pg.7"
+	root, beadSHA := setupPanelGateRepo(t, specID, beadID)
+	writePanel(t, root, specID+"-bd07", panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+		ReviewedHeadSHA: beadSHA, // fresh, so the BLOCK is the unresolved-RC clause
+	}, atThresholdWithOneDissentVerdicts(6))
+
+	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
+	if err == nil {
+		t.Fatal("an unresolved REQUEST_CHANGES must BLOCK complete even when Approves alone meets the threshold (RED-on-revert to R1)")
+	}
+	if ex.completeCalled {
+		t.Error("block must be PRE-merge: CompleteBead must not run (nothing mutated)")
+	}
+	if res != nil {
+		t.Errorf("a blocked complete returns nil result; got %+v", res)
+	}
+
+	msg := err.Error()
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("block message must end with a recovery line (ADR-0035); got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "git merge bead/"+beadID) {
+		t.Errorf("block message must carry the raw-`git merge` fence; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "5/6 APPROVE") {
+		t.Errorf("block message should name the genuine approve tally; got:\n%s", msg)
+	}
+	// AC10 (no-advertise predicate), re-asserted on the FULL e2e error text
+	// (not just the pure-decision message): no paste-able refutation
+	// incantation (Bead 1 has none yet), and never the skip variable (HC-7).
+	for _, s := range []string{"refute", "refutations", "panel refute", panel.SkipPanelEnv} {
+		if strings.Contains(msg, s) {
+			t.Errorf("block message must NOT contain %q (AC10/HC-7); got:\n%s", s, msg)
+		}
 	}
 }
 

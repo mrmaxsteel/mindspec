@@ -384,8 +384,19 @@ func TestPanelTally_ExitCodeTracksDecision(t *testing.T) {
 		wantWarn bool
 	}{
 		{
-			name:  "passing (at-threshold) → exit 0",
-			facts: panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(basePanel(), 5, 0, 6, 1, nil), HeadSHA: sha},
+			// Spec 114 R1 (one of the FOUR intended outcome flips): this row
+			// used to carry an implicit tolerated dissent (5 APPROVE + 1
+			// REQUEST_CHANGES filler to reach `total`); an unresolved RC now
+			// blocks exactly like a REJECT, so it no longer passes.
+			name:    "at-threshold WITH an unresolved dissent → non-zero + recovery (Spec 114 R1)",
+			facts:   panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(basePanel(), 5, 0, 6, 1, nil), HeadSHA: sha},
+			wantErr: true,
+		},
+		{
+			// Companion row: a genuinely clean at-threshold panel (no
+			// dissent) still passes.
+			name:  "passing (at-threshold, all-APPROVE) → exit 0",
+			facts: panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(basePanel(), 6, 0, 6, 1, nil), HeadSHA: sha},
 		},
 		{
 			name:    "stale SHA despite Approves alone satisfying threshold → non-zero + recovery",
@@ -554,8 +565,20 @@ func TestPanelVerbs_DecisionIsPanelGateDecision(t *testing.T) {
 			facts: panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(basePanel(), 4, 0, 6, 1, nil), HeadSHA: sha},
 		},
 		{
-			name:  "at-threshold",
-			facts: panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(basePanel(), 5, 0, 6, 1, nil), HeadSHA: sha},
+			// Spec 114 R1: this row used to be 5 APPROVE + 1 REQUEST_CHANGES
+			// filler (an implicit tolerated dissent) at the default N-1
+			// threshold. It stays green as a decision-PARITY row either way
+			// (it only asserts the CLI adapter equals the live
+			// PanelGateDecision), but "at-threshold" now lies once RC
+			// tolerance is removed — restated as a genuinely clean 6/6
+			// all-APPROVE panel with a recorded approve_threshold of 6, so
+			// "at-threshold" keeps meaning Allow.
+			name: "at-threshold",
+			facts: func() panel.GateFacts {
+				p := basePanel()
+				p.ApproveThresholdExpr = "6"
+				return panel.GateFacts{BeadID: beadID, Reg: reg, Res: buildResult(p, 6, 0, 6, 1, nil), HeadSHA: sha}
+			}(),
 		},
 		{
 			name:  "above-threshold",
