@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "G3 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Round-3’s natural-resolution leak is addressed for the ordinary live-panel path: run 2 all-APPROVE now writes refutation_discharged, with a named cross-run test and AC11 provenance. The normal matrix is otherwise complete: a still-blocked panel cannot reach close/merge; no-panel plus pending refuses; GetMetadata error refuses. But the claimed every-path rule still has bypasses. The plan explicitly makes reconciliation a no-op for env-skip and config-disabled retries, so a durable stale pending can merge without panel_refuted/refutation_discharged; config-disabled writes no skip audit at all. Also, “panel present + gate passed” is not sufficient discharge evidence: abandonment passes before leg 9.5 and can retain the same unresolved RC, yet the rule would falsely discharge it as naturally resolved. Thus the core G3 finding is only partially addressed and the new test provenance omits these residual combinations. The internal/bead scope contradiction is addressed.",
+  "concrete_changes_required": [
+    "Run pending-obligation reconciliation before close even when MINDSPEC_SKIP_PANEL or enforcement.panel_gate=false bypasses panel evaluation; an existing pending must be satisfied, validly discharged, or refused, never ignored.",
+    "Make discharge depend on the pending slot’s actual latest-round verdict/round state, not merely panel presence plus a passing gate; abandoned/other early-pass panels with the RC still present must not receive a natural-resolution discharge.",
+    "Add and provenance-map cross-run tests for stale pending with env-skip, config-disabled, and abandoned-panel retries, asserting no close/merge unless a covering durable audit is written."
+  ],
+  "findings": [
+    {
+      "id": "G3-AC5-EXHAUSTIVENESS",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "The RC-tolerance fixture inventory and provenance remain explicit."
+    },
+    {
+      "id": "G3-DURABLE-OBLIGATION-LIVE-PANEL-BYPASS",
+      "severity": "blocking",
+      "disposition": "PARTIAL",
+      "summary": "The live all-APPROVE retry is fixed, but early bypass/pass variants can still merge or falsely discharge a stale pending obligation.",
+      "evidence": [
+        "plan.md:495-531 adds every-path reconciliation and correctly maps the all-APPROVE natural-resolution discharge.",
+        "plan.md:543-548 explicitly makes env-skip/config-disabled obligation checking a no-op despite a pending marker potentially surviving from an earlier run.",
+        "plan.md:445-451 confirms config-disabled returns no applied set and writes no panel_gate_skipped audit.",
+        "plan.md:510-529 infers natural resolution from gate passage, but an abandoned panel passes at an earlier gate leg while its RC may remain unresolved."
+      ]
+    },
+    {
+      "id": "G3-SPEC-INTERNAL-BEAD-SCOPE-CONTRADICTION",
+      "severity": "blocking",
+      "disposition": "ADDRESSED",
+      "summary": "Spec scope now consistently declares the GetMetadata and fail-closed MergeMetadata execution-domain changes."
+    },
+    {
+      "id": "G3-ROUND4-BYPASS-PROVENANCE",
+      "severity": "blocking",
+      "disposition": "NEW",
+      "summary": "AC11 provenance maps normal satisfy/discharge/refuse cases but has no stale-pending coverage for env-skip, config-disabled, or abandoned-panel completion paths."
+    }
+  ]
+}

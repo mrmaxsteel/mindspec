@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The exact round-3 one-step-earlier hole is closed: a failed marker write now leaves the RC unresolved and blocks before close/merge, so no refutation is applied without a durable obligation. GetMetadata fail-closed behavior and later-write erasure protection are also explicit. A different cross-retry loss remains. panelGate writes the current run's refutation_pending_entries before reconcilePendingRefutations. MergeMetadata merges only top-level keys, so that write replaces any older pending entries. Example: run 1 durably records pending A, then panel_refuted fails; run 2 has A naturally APPROVE and a newly refuted RC B. panelGate replaces [A] with [B]; reconciliation sees only B, writes panel_refuted for B, and can close/merge without panel_refuted or refutation_discharged for A. Thus a refutation that durably cleared A can still lose its audit. Existing tests cover panel removal, same refutation, and natural resolution alone, but not old-pending plus new-applied composition.",
+  "concrete_changes_required": [
+    "Make the marker write preserve/union all existing unsatisfied pending entries, or reorder/atomically compose marker persistence and reconciliation so a new applied set cannot replace an older obligation before that obligation is satisfied or discharged.",
+    "Add a cross-run test: run 1 persists pending A then fails panel_refuted; run 2 presents A as naturally resolved plus newly refuted B. Require durable refutation_discharged for A and panel_refuted for B before close/merge; any read or write failure must leave closeBeadFn and completeCalled false."
+  ],
+  "findings": [
+    {
+      "disposition": "PARTIAL",
+      "severity": "load-bearing",
+      "defect": "Cross-retry pending obligation can still be discarded",
+      "evidence": "Plan step 5(a) writes refutation_pending_entries for the current AppliedRefutations inside panelGate, before step 5(c) reconciliation. Existing MergeMetadata applies updates by assigning merged[k] = v, so a current [B] replaces durable unsatisfied [A]. Reconciliation then cannot audit or discharge A, permitting an un-audited merge. The round-3 marker-write-failure variant itself is addressed, but the broader retry invariant is not."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "Metadata-read failure was not explicitly fail-closed at reconciliation",
+      "evidence": "Step 5(d) now mandates guard failure on GetMetadata read/parse error before close/merge, with TestPanelRefuted_GetMetadataError_Refuses asserting both mutation spies remain false."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "load-bearing",
+      "defect": "A later metadata write could erase a durable audit",
+      "evidence": "Step 6 makes MergeMetadata fail closed on read/parse failure before replace-write and retains the post-audit erasure-survival test."
+    },
+    {
+      "disposition": "ADDRESSED",
+      "severity": "note",
+      "defect": "Applied refutations lacked deterministic deduplication",
+      "evidence": "The plan retains exact slot-round deduplication, stable first-wins selection, sorting, and within/across-panel coverage."
+    }
+  ]
+}

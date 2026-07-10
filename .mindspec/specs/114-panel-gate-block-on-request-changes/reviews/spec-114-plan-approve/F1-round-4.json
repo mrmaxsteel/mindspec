@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Round-4 delta verified at 2b159553. AC mapping stays complete: all twelve ACs map to a bead + named runnable test in Provenance, including the updated AC11 (applied≡persisted (b), every-path reconcile (d), fail-closed reads (e), pristine fail-open (f)). The 4 new round-4 tests — TestPanelRefuted_GetMetadataError_Refuses, _MarkerWriteFailure_Blocks, _PristineNoPanel_FailsOpen, _CrossRun_NaturalResolution_Discharges — are named in Bead 2 step 7(B)(iii/v/vi/vii), listed in the AC11 Provenance row, and selected by the -run 'PanelRefuted|PanelGate' pattern. No AC orphaned by the redesign; refutation_discharged has direct AC coverage (spec AC11(d)+falsifier → the Discharges test plus its discharge-write-fail negative twin). All three of my round-3 minors are addressed: tests now named under TestPanelRefuted_, the stale complete.go:152-156 ref is gone (step 5(c) now cites 542-544, code-verified as the ADR-divergence gate; :375 panelGate also verified), and the completeGetMetadataFn read seam is explicit in step 6 and Testing Strategy.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "disposition": "ADDRESSED",
+      "note": "Round-3 minor #1 (stale line ref): fixed. Step 5(c) now anchors the reconciliation placement at the ADR-divergence gate, complete.go:542-544, verified correct at the pinned tree; the panelGate caller ref :375 also verified. No '152-156' remains in the plan."
+    },
+    {
+      "severity": "minor",
+      "disposition": "ADDRESSED",
+      "note": "Round-3 minor #2 (unnamed tests): fixed. All durable-obligation e2e tests carry Go function names under the TestPanelRefuted_ prefix (11 mentions), incl. the four round-4 additions, so the Provenance run patterns actually select them."
+    },
+    {
+      "severity": "minor",
+      "disposition": "ADDRESSED",
+      "note": "Round-3 minor #3 (harness read seam): fixed. Step 6 introduces completeGetMetadataFn = bead.GetMetadata as a swappable seam mirroring completeMergeMetadataFn, and the Testing Strategy names it; TestPanelRefuted_GetMetadataError_Refuses drives it directly."
+    },
+    {
+      "severity": "info",
+      "disposition": "ADDRESSED",
+      "note": "AC11 redesign coherence: 'applied ≡ durably-persisted' makes the round-3 marker-window hole definitional (marker-write failure ⇒ gate BLOCK, RC unresolved), and reconcilePendingRefutations runs on BOTH paths after the last blocking gate and before close, closing the G3 natural-resolution bypass via the refutation_discharged audit. Spec AC11 (a)-(f) and the Bead 2 step-7(B) tests correspond one-to-one."
+    },
+    {
+      "severity": "info",
+      "disposition": "PARTIAL",
+      "note": "Editorial, non-blocking: the Decomposition Bead-2 summary (plan.md:66-75, :100-112) still describes the round-3 'fail-open-path override' rather than the round-4 every-path reconciliation it evolved into (step 5(c) states the supersession correctly). The summary reads as a subset of the shipped design, not a contradiction; a one-line rewording would tidy it."
+    }
+  ]
+}

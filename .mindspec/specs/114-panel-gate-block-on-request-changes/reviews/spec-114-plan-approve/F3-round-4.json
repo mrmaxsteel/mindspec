@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.87,
+  "rationale": "All three round-3 findings ADDRESSED at 2b159553. F3-R3-1: the Out-of-Scope internal/bead bullet is rewritten ('NOT consumed read-only'), affirming the fail-closed MergeMetadata + GetMetadata edit and scoping out only bd/Dolt storage, the bd CLI surface, and the seam signature — no longer both required and forbidden. F3-R3-2: ADR Touchpoints, In Scope, and AC6 now state §8 AMENDED (narrow audit-durability carve-out, posture otherwise unchanged) and §6 gains the affirmative-evidence refusal branch, matching plan Bead-3 and ADR Fitness; no 'consumed as-is'/'unchanged and re-affirmed' residue greps. F3-R3-3: plan now cites cmd/mindspec/repair.go:86 — verified against repairMergeMetadataFn (repair.go:22-25,86). The round-4 redesign (applied≡persisted marker as part of the allow-decision, every-path satisfy/discharge/refuse, refutation_discharged) is stated identically in spec R2/AC11/§6-§7 touchpoints and plan step 5/tests/Provenance, and introduces no new contradiction with R1, the OQs, AC5, the message-superset, or §6.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-R4-1",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "summary": "F3-R3-1 fixed: spec Out of Scope now opens 'internal/bead is NOT consumed read-only', names the fail-closed MergeMetadata + GetMetadata helper as In-Scope, and excludes only the bd/Dolt storage, the bd show/update CLI surface, and the completeMergeMetadataFn seam SIGNATURE (the plan's new completeGetMetadataFn is an added var, not a signature change — consistent). No fixture of the contradiction survives (grep 'consumed as-is' empty). Impacted Domains, In Scope, and R2 all agree on the execution-domain edit."
+    },
+    {
+      "id": "F3-R4-2",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "summary": "F3-R3-2 fixed: ADR Touchpoints now says '§8 is AMENDED by a narrow, operator-authorized audit-durability carve-out ... re-affirm the otherwise-unchanged §8 posture' and '§6 gains one affirmative-evidence refusal branch' (pristine beads still fail open); In Scope's ADR bullet and AC6 enumerate the same §8 carve-out + §6 branch; Background's 'almost entirely unchanged' framing is consistent. Matches plan Bead-3 steps 3-4, the verification checklist, and ADR Fitness ('§8 is amended, not merely re-affirmed'); the 'anti-tamper' label survives only as the softened-per-O2 provenance note."
+    },
+    {
+      "id": "F3-R4-3",
+      "severity": "resolved",
+      "disposition": "ADDRESSED",
+      "summary": "F3-R3-3 fixed: plan Bead-2 step 6 blast-radius taxonomy now cites cmd/mindspec/repair.go:86 (repairMergeMetadataFn) — verified in code: the seam is declared at repair.go:22-25 (var repairMergeMetadataFn = bead.MergeMetadata) and the fatal guard.NewFailure caller is at repair.go:86. Class assignment (already-fatal) remains correct."
+    },
+    {
+      "id": "F3-R4-4",
+      "severity": "info",
+      "disposition": "VERIFIED",
+      "summary": "Round-4 redesign contradiction sweep: (a) applied≡persisted is stated identically in spec R2(b)(i)/§7 touchpoint/AC11(b) and plan step 5(a)/test 7(B)(iii)/Provenance — marker-write failure returns a genuine Block leaving the RC unresolved, so 'applied ⟹ durable obligation' is definitional and closes the round-3 abort-with-applied hole without touching R1's leg-9.5 semantics; (b) satisfy/discharge/refuse reconciliation matches point-for-point between spec R2(b)(ii) and plan step 5(c), with §6's affirmative-evidence refusal branch scoped to a recorded unsatisfied obligation (pristine beads fail open, preserving AC5's fail-open row and R3b's zero-ceremony natural resolution — a no-marker bead reconciles to a no-op); discharge writes a durable refutation_discharged audit, so 'never silent' holds; (c) hatch exception (skip-env/config-toggle bypass, no obligation, no reconciliation) is stated identically in spec and plan step 5 + test (xii); (d) the asymmetry stays grounded solely in AppliedRefutations (both artifacts repeat the not-a-non-merge-exit correction); (e) message-superset/AC10 unaffected: leg 9.5's message is untouched by round-4, and the marker-failure Block message ('the refutation could not be durably recorded...') passes even the strict AC10 predicate (contains no 'panel refute', no 'refutations', no 'refute' substring) while firing only after an operator has already recorded a refutation — no OQ4 conflict."
+    },
+    {
+      "id": "F3-R4-5",
+      "severity": "info",
+      "disposition": "PRE-EXISTING (not round-4; non-blocking)",
+      "summary": "Latent spec-vs-plan count mismatch, unchanged since the round-1 rework (a1194682): spec AC5/Validation Proofs say 'the three named RC-tolerance fixtures' flip outcome, while plan Bead-1 step 5 declares FOUR intended flips — adding the votedecision_test.go:64-70 lockstep twin, which the spec's own R1 falsifier (VoteDecision may never disagree with the gate on the vote portion) mandates. Not introduced by the round-4 redesign and reviewed without objection in rounds 1-3; the plan is the more complete artifact. Cheapest reconciliation if desired at Bead-1 time: either convert the votedecision row to an outcome-preserving all-APPROVE update plus a NEW VoteBlock row (the (f)-(h) pattern), or note the fourth flip in the bead's completion notes so the AC5 diff-review grader does not mis-grade it. Info only."
+    },
+    {
+      "id": "F3-R4-6",
+      "severity": "info",
+      "disposition": "NOTE",
+      "summary": "Micro-nit in the canned discharge reason: plan step 5(c) words it 'slot's latest-round verdict is no longer REQUEST_CHANGES at/after the recorded round', but one discharge sub-case (pending at round N, slot re-RCs at round N+1 and THAT RC is refuted in the current run) has the slot's latest-round verdict still literally REQUEST_CHANGES — just refuted, hence no longer unresolved (the leg-9.5 pass condition both artifacts actually key on). The mechanism is sound (the old obligation is durably audited either way; the new refutation gets its own pending+satisfy); only the canned reason string slightly over-narrows. Cosmetic; fixable in Bead 2's string."
+    }
+  ]
+}

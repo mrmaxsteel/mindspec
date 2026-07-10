@@ -65,14 +65,16 @@ within the ≤3 bound; `work_chunks` declares the edges):
 - **Bead 2 (R2)** — the `refutations` schema on `panel.json`, the
   gate-validated per-slot clearing, the applied-refutation plumbing out of
   `PanelGateDecision`/`panelGate`, and the full **durable-obligation
-  protocol**: a fail-closed `refutation_pending` marker on bead metadata
-  written the moment the gate decides to apply a refutation (pre-close), the
-  satisfying `panel_refuted` audit (pre-close), a **fail-open-path override**
-  that refuses to merge an in-progress bead carrying an unsatisfied
-  obligation even when the `panel.json` is gone, a **fail-closed
-  `bead.MergeMetadata`** so no later read-failure can erase the audit, and
-  deduplicated applied-refutation selection. This bead edits `internal/bead`
-  (execution domain — see the amendment note below).
+  protocol**: a fail-closed `refutation_pending` marker on bead metadata whose
+  persistence is what makes a refutation "applied" at all (UNIONED into any
+  existing unsatisfied pending, never a bare replace), and a pre-close
+  **every-path reconciliation** (panel-present, no-panel, AND hatch) that
+  satisfies (`panel_refuted`), verified-discharges (`refutation_discharged`,
+  only on affirmative tally evidence the RC resolved), or refuses EVERY entry
+  in the unioned pending set, plus fail-closed `bead.GetMetadata`/`MergeMetadata`
+  so no read-failure fails open or erases an audit, and deduplicated
+  applied-refutation selection. This bead edits `internal/bead` (execution
+  domain — see the amendment note below).
 - **Bead 3 (docs)** — the ADR-0037 amendment and the /ms-panel-tally
   refutation procedure (both skill copies).
 
@@ -98,9 +100,10 @@ because the `VoteDecision` lockstep (R1's own falsifier) must land
 atomically with the gate leg.
 
 **Durable-obligation stays IN Bead 2 (not a new Bead 4) — decomposition
-decision (round-3 G2).** The round-3 durable-obligation protocol (the early
-`refutation_pending` marker, the fail-open-path override, the fail-closed
-`MergeMetadata`) is folded into Bead 2 rather than split into a Bead 4. The
+decision (round-3 G2).** The durable-obligation protocol (the applied≡persisted
+`refutation_pending` marker, the every-path satisfy/discharge/refuse
+reconciliation, the fail-closed `GetMetadata`/`MergeMetadata`) is folded into
+Bead 2 rather than split into a Bead 4. The
 protocol is inseparable from the `panel_refuted` audit it enforces: a Bead 2
 that shipped `panel_refuted` WITHOUT the obligation would itself carry the
 exact G2 hole round-2 rejected (a panel-removed retry merging un-audited), so
@@ -451,110 +454,136 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    (`enforcement.panel_gate: false`) path writes NO audit at all — do not
    claim it does. The signature change ripples to every `panelGate(...)`
    caller: the one production site complete.Run (complete.go:375) and the
-   13 test call sites across `internal/complete/panel_gate_e2e_test.go`
+   12 test call sites across `internal/complete/panel_gate_e2e_test.go`
    (:272,:282,:297,:320), `internal/complete/panel_advisory_test.go`
    (:152,:226,:240,:289,:300,:314), and
    `internal/complete/panel_gate_layout_test.go` (:152,:162) — all
    mechanical `reg, err :=` → `reg, _, err :=` updates (AC5-permitted
    struct/return additions; no outcome changes).
 5. **The DURABLE-OBLIGATION protocol (`complete.go` + `panel_advisory.go`;
-   round-4 redesign — "applied" ≡ durably-persisted; reconciled on EVERY
-   path).** Round-3's step-2.3 marker (applied-in-memory THEN write the
-   marker) left the hole one step earlier: a marker-write-failure aborted with
-   the refutation "applied" in memory but NO durable obligation, so a
-   panel-removed retry fail-opened. Round-4 makes the marker write PART of the
-   allow-decision so "applied ⟹ durable marker" is DEFINITIONAL, and
-   reconciles any recorded obligation on EVERY completion path. All three
-   metadata writes go through the (now fail-closed, step 6)
-   `completeMergeMetadataFn` seam; all are fail-closed; all happen BEFORE the
-   step-4 close.
-   - **(a) "Applied" ≡ durably-persisted (the O1#2/G2 redesign).** A refutation
-     is "applied" (clears its RC) ONLY once its `refutation_pending` marker is
-     durably on bead metadata. Fold the marker write INTO `panelGate`
+   round-4 "applied" ≡ durably-persisted + round-5 TOTAL reconciliation — the
+   full unioned pending SET, verified-vote-state discharge, every path incl.
+   hatches).** A refutation is "applied" (clears its RC) ONLY once its
+   obligation is durably on bead metadata; and the FULL set of recorded
+   obligations is reconciled — satisfied, verified-discharged, or refused —
+   before EVERY close (panel-present, no-panel, AND hatch). All metadata writes
+   go through the (now fail-closed, step 6) `completeMergeMetadataFn` seam; the
+   read through `completeGetMetadataFn`; all writes are fail-closed; all happen
+   BEFORE the step-4 close.
+   - **(a) "Applied" ≡ durably-persisted, UNION not replace (O1#2/G2 + round-5
+     item 1).** A refutation is "applied" ONLY once its `refutation_pending`
+     entry is durably persisted. Fold the marker write INTO `panelGate`
      (`panel_advisory.go`, at the step-2.25 decision, caller
      complete.go:375-378): when `PanelGateDecision` returns an Allow carrying a
-     non-empty `AppliedRefutations`, `panelGate` writes `refutation_pending:
-     true` + `refutation_pending_entries: [{slot, round}, ...]` (deduped)
-     fail-closed. If that write FAILS, the refutation is NOT applied → the RC
-     is NOT cleared → `panelGate` returns a **Block** (a `guard.NewFailure`:
-     "the refutation could not be durably recorded, so the REQUEST_CHANGES
-     from <slot> remains unresolved — retry, or resolve the finding"; bead
-     stays `in_progress` with the RC, no CommitAll/close/merge). This is a
-     genuine Block, NOT an abort-with-applied. Consequence:
-     applied-in-a-run ⟺ the marker is durably persisted; there is no window
-     where an RC is cleared without the obligation on metadata.
+     non-empty `AppliedRefutations`, `panelGate` **reads the existing
+     `refutation_pending_entries` via `completeGetMetadataFn` (fail-closed),
+     UNIONS the current run's applied (slot, round) entries into that set
+     (dedup by slot+round; never a bare replace), and writes the merged array**
+     — because `bead.MergeMetadata` replaces at top-level key granularity, a
+     naive write of only the current entries would OVERWRITE an older
+     unsatisfied pending (the loss path: run-1 refutes X@1, marker (X,1), its
+     `panel_refuted` fails, bead stays `in_progress`; a round-2 re-panel's
+     marker write of (B,2) would clobber (X,1), which then never gets audited).
+     Reading-then-unioning-then-writing preserves every still-unsatisfied
+     obligation. If ANY part (the read OR the write) FAILS, the refutation is
+     NOT applied → the RC is NOT cleared → `panelGate` returns a **Block** (a
+     `guard.NewFailure`: "the refutation could not be durably recorded, so the
+     REQUEST_CHANGES from <slot> remains unresolved — retry, or resolve the
+     finding"; bead stays `in_progress`, no CommitAll/close/merge) — a genuine
+     Block, NOT an abort-with-applied. So applied-in-a-run ⟺ the entry is in the
+     durable unioned set.
    - **(b) `panel_refuted` satisfying audit (pre-close).** Add
      `writePanelRefutedMetadata(beadID, entries) error` in panel_advisory.go
      building `panel_refuted: true`, `panel_refuted_at: <RFC3339 UTC>`,
      `panel_refuted_entries: [{slot, round, reason, evidence}, ...]` (keys
-     parallel to `panel_abandoned`, panel_advisory.go:332-341), RETURNING the
-     merge error (non-swallowing, unlike `writePanelAuditMetadata`,
-     panel_advisory.go:304-342, best-effort for abandon/skip). It runs inside
-     the reconciliation step (c), before the step-4 close; a failure fails the
-     completion pre-close.
-   - **(c) RECONCILE on EVERY completion path, before close (the G3 fix).**
-     The round-3 override only guarded the no-panel path — a live-panel retry
-     where the reviewer flipped RC→APPROVE (natural resolution) had no applied
-     refutation in run-2 yet still carried run-1's unsatisfied
-     `refutation_pending`, bypassing the check and merging un-audited. Round-4
-     adds a `reconcilePendingRefutations` step in `Run` — reached on BOTH the
-     panel-present and the no-panel path, AFTER the last blocking gate
-     (ADR-divergence, complete.go:542-544) and BEFORE the step-4 close — that
-     reads bead metadata via `bead.GetMetadata` (step 6) and, for each
-     recorded unsatisfied `refutation_pending` entry (present with no covering
-     `panel_refuted`/`refutation_discharged`), applies the precise
-     **satisfy-vs-discharge-vs-refuse** rule:
-     - **Satisfy** — the current run's `AppliedRefutations` (from `panelGate`)
-       covers the pending (slot, round): write `panel_refuted` for it (b). The
-       reason/evidence come from the current panel.json's refutations entry.
-     - **Discharge** — a panel IS present and the gate PASSED (so, per leg 9.5,
-       the pending's slot is no longer an unresolved latest-round RC — the
-       reviewer flipped to APPROVE, or the round advanced past the pending
-       round): the refutation is MOOT, so write a `refutation_discharged`
-       audit (`refutation_discharged: true` + `_at` + `_entries: [{slot, round,
-       reason: "RC resolved naturally — slot's latest-round verdict is no
-       longer REQUEST_CHANGES at/after the recorded round"}]`). Never silently
-       ignored — the recorded obligation always gets a durable audit entry.
-     - **Refuse** — the resolution cannot be verified (the **no-panel path**,
-       where there is no current tally to prove natural resolution; OR a
-       `GetMetadata` read/parse error, see (d)): return a recoverable
+     parallel to `panel_abandoned`, panel_advisory.go:332-341); like the marker,
+     it UNIONS into any existing `panel_refuted_entries` (read-then-union,
+     fail-closed) so a later satisfy never clobbers an earlier one. It RETURNS
+     the merge error (non-swallowing, unlike `writePanelAuditMetadata`,
+     panel_advisory.go:304-342, best-effort for abandon/skip). Runs inside the
+     reconciliation step (c), before close; a failure fails completion
+     pre-close.
+   - **(c) RECONCILE the ENTIRE unioned pending SET on EVERY path, before close
+     (G3 + round-5 items 1 & 3).** A `reconcilePendingRefutations` step in `Run`
+     — reached on the panel-present, the no-panel, AND the hatch paths, AFTER
+     the last blocking gate (ADR-divergence, complete.go:542-544) and BEFORE
+     the step-4 close — reads bead metadata via `completeGetMetadataFn` (step 6,
+     fail-closed) and, for EVERY recorded `refutation_pending` entry NOT already
+     covered by a durable `panel_refuted`/`refutation_discharged` entry (the
+     full unioned set, not just this run's), applies exactly one of:
+     - **Satisfy** — the current run's `AppliedRefutations` (plumbed from
+       `panelGate`) covers the pending (slot, round): write `panel_refuted` for
+       it (b), reason/evidence from the current panel.json refutations entry.
+     - **Discharge — ONLY on VERIFIED vote-state, never a bare "gate passed"
+       (round-5 item 2 / G1+G3).** `PanelGateDecision` ALSO passes via **Warn**
+       — abandoned (gate.go:160-169), missing-ref (180-189), transient-gitErr
+       (192-203) — WITHOUT the RC resolving, so "gate passed ⟹ moot" would
+       FALSELY discharge a still-live RC. Discharge a pending (slot, round) ONLY
+       on affirmative evidence from the ACTUAL TALLY (the matched panel's
+       `panel.Result`, plumbed from `panelGate` into reconciliation) that the
+       slot is no longer a latest-round `REQUEST_CHANGES` at/after its recorded
+       round — i.e. the slot's latest-round verdict is not `REQUEST_CHANGES`, OR
+       `Result.LatestRound` > the pending round. Then write a
+       `refutation_discharged` audit (`refutation_discharged: true` + `_at` +
+       unioned `_entries: [{slot, round, reason: "RC resolved naturally — slot's
+       latest-round verdict is no longer REQUEST_CHANGES at/after round N"}]`).
+       A Warn panel (abandoned / missing-ref / transient-gitErr) whose tally
+       still shows the RC at the pending round does NOT satisfy this evidence →
+       it falls through to Refuse (the obligation is kept, never falsely
+       discharged).
+     - **Refuse** — the resolution cannot be affirmatively verified (no panel
+       present / no tally; a Warn panel whose tally still carries the RC; or a
+       `completeGetMetadataFn` read/parse error, (d)): a recoverable
        `guard.NewFailure` ("this bead carries an unsatisfied refutation
-       obligation and its panel is absent — restore the panel so the gate can
-       satisfy or discharge it, or restore the audit", recovery `mindspec
-       complete <bead>`). A bead with NO recorded obligation reconciles to a
-       no-op and completes exactly as today (§6 fail-open preserved for
-       genuinely pristine beads — dogfooding safety).
-     Because the live-panel PASS guarantees every latest-round RC is either
-     refuted-and-applied (→ satisfy) or gone (→ discharge), reconciliation on
-     the panel-present path never reaches Refuse; Refuse is reserved for the
-     no-panel/unverifiable path. Both the satisfy write and the discharge write
-     are fail-closed: a failure fails the completion pre-close.
-   - **(d) `GetMetadata` read-error ⟹ REFUSE (fail-closed, the O1#1 fix).** The
-     reconciliation read must itself be fail-closed: a `bead.GetMetadata`
-     read/parse error is NOT a licence to fail-open — it returns the (c) Refuse
-     `guard.NewFailure` (nothing closed/merged), because an unreadable metadata
-     store cannot prove the bead is obligation-free. Only a clean read showing
-     no unsatisfied `refutation_pending` proceeds.
+       obligation for <slot@round> that cannot be verified as satisfied or
+       resolved — restore the panel so the gate can satisfy or discharge it, or
+       restore the audit", recovery `mindspec complete <bead>`). A bead with NO
+       recorded pending reconciles to a no-op and completes exactly as today
+       (§6 fail-open preserved for genuinely pristine beads).
+     Every pending entry must reach Satisfy or Discharge for the completion to
+     proceed; if ANY entry Refuses, the whole completion refuses pre-close. All
+     satisfy/discharge writes are fail-closed (a write failure fails completion
+     pre-close). Because these audit reads/writes read-then-union (a/b), a
+     same-run satisfy that immediately follows this run's own marker write sees
+     the just-written entry (add a read-after-write comment on that path — O2).
+   - **(d) `completeGetMetadataFn` read-error ⟹ REFUSE (fail-closed, O1#1).**
+     The reconciliation read (and the (a) union read) are fail-closed: a
+     `bead.GetMetadata` read/parse error is NOT a licence to proceed — it
+     Refuses (nothing closed/merged), because an unreadable metadata store
+     cannot prove the bead is obligation-free.
+   - **(e) HATCH paths reconcile too — hatches except the GATE, not the
+     obligation (round-5 item 3 / G3).** The env-only `MINDSPEC_SKIP_PANEL` and
+     the config `enforcement.panel_gate: false` bypass the GATE DECISION (they
+     allow the merge despite unresolved RCs) but NOT a pre-existing durable
+     `refutation_pending` obligation from a prior non-hatch run. So the
+     reconciliation (c) runs before close on the hatch paths TOO: an existing
+     pending must be satisfied / validly-discharged / refused, never silently
+     merged. On a hatch path the current run applies no NEW refutation (gate
+     skipped), so satisfy is unavailable; discharge still requires the same
+     verified vote-state from the matched panel's tally (panelGate still scans +
+     tallies the matched panel for the `panel_gate_skipped` audit, so the
+     `Result` is available); otherwise Refuse — audit integrity overrides the
+     hatch (incl. a `GetMetadata` error → Refuse). The hatch's own
+     `panel_gate_skipped` audit is still written.
    **Net invariant (state it in the code comment):** a refutation that EVER
    durably clears an RC (its `refutation_pending` was persisted — the only way
-   an RC is cleared, per (a)) can never let its bead close or merge — across
-   ANY number of `mindspec complete` retries, including after the panel.json is
-   removed — without a durable `panel_refuted` (satisfied) or
-   `refutation_discharged` (naturally-moot) audit on bead metadata. **Hatches
-   excepted (F2):** the env-only `MINDSPEC_SKIP_PANEL` and the config
-   `enforcement.panel_gate: false` bypass the panel gate ENTIRELY by design
-   (their own `panel_gate_skipped` audit records the bypass), so a hatch path
-   applies no refutation, records no `refutation_pending`, and the obligation
-   check is a no-op there — the invariant is scoped to non-hatch completions.
-   The step-5.6 `writePanelAuditMetadata` call (complete.go:778-785) is
-   byte-unchanged and does NOT write `panel_refuted`. **The durable-vs-best-
-   effort asymmetry is grounded SOLELY in AppliedRefutations (round-2 item 5):**
-   a refutation produces a non-empty `AppliedRefutations` set and thus a
-   durable obligation; abandon and env-skip both Warn→Allow→MERGE too (they are
-   NOT "terminal non-merge exits") but produce NO `AppliedRefutations`, so they
-   carry no obligation and stay best-effort.
+   an RC is cleared, per (a)) can never let its bead close or merge — across ANY
+   number of `mindspec complete` retries, ANY completion path (panel-present,
+   no-panel, or hatch), and even after the panel.json is removed — without a
+   durable `panel_refuted` (satisfied) or VERIFIED `refutation_discharged`
+   (naturally-moot) audit for that entry on bead metadata. **Hatches except the
+   GATE, NOT the obligation reconciliation (round-5):** a hatch lets a bead
+   merge despite unresolved RCs, but a pre-existing durable refutation
+   obligation is still reconciled/audited before close. The step-5.6
+   `writePanelAuditMetadata` call (complete.go:778-785) is byte-unchanged and
+   does NOT write `panel_refuted`. **The durable-vs-best-effort asymmetry is
+   grounded SOLELY in AppliedRefutations (round-2 item 5):** a refutation
+   produces a non-empty `AppliedRefutations` set and thus a durable obligation;
+   abandon and env-skip both Warn→Allow→MERGE too (they are NOT "terminal
+   non-merge exits") but produce NO `AppliedRefutations`, so they add no NEW
+   obligation (a PRE-EXISTING one is still reconciled per (e)).
 6. **Fail-closed `bead.MergeMetadata` + `GetMetadata` read helper
-   (`internal/bead/bdcli.go:263-290`; carry-forward #1 / review item 2 —
+   (`internal/bead/bdcli.go:266-300`; carry-forward #1 / review item 2 —
    closes the post-write erasure hole).** Today `MergeMetadata` IGNORES a
    metadata-READ failure: on a `bd show` error it proceeds from an EMPTY
    `merged` map and replace-writes, ERASING every existing key — so a
@@ -580,8 +609,9 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    correction; do NOT claim "all best-effort"):** the change makes a read-error
    fatal where it was silently swallowed. By class, no caller regresses: (1)
    **already-fatal** callers — `cmd/mindspec/repair.go:86`
-   (`repairMergeMetadataFn`), and `phase.EnsureMigrated` (reached fatally from
-   `complete.go:283` and both approve paths) — already propagate write errors
+   (`repairMergeMetadataFn`), and `phase.EnsureMigrated` (the migration write;
+   entered at `complete.go:283` via `EnsureMigratedWithCache`, and from both
+   approve paths) — already propagate write errors
    fatally; making the rare read-error also fatal is strictly safer (a
    swallowed read-error there was a latent silent corruption). (2)
    **best-effort/warn** callers — complete's
@@ -646,13 +676,13 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    `completeMergeMetadataFn` to fail ONLY on maps containing `panel_refuted`
    (the pending write + others succeed) → `Run` returns non-zero,
    `ex.completeCalled == false`, `closeBeadFn` NOT called. (iii) **AC11
-   applied≡persisted — marker-write-fails ⟹ RC BLOCKS, not abort-with-applied
-   (round-4 redesign)**: `TestPanelRefuted_MarkerWriteFailure_Blocks` — stub
-   the write to fail on `refutation_pending` → `Run` returns non-zero with a
-   BLOCK naming the still-unresolved RC slot (guard failure), `closeBeadFn`
-   NOT called, and NO `panel_refuted` written; assert the message is the
-   RC-unresolved Block, NOT an "aborted with refutation applied" — pinning
-   that a non-persisted marker means the refutation never cleared the RC.
+   applied≡persisted — marker-write OR union-read fails ⟹ RC BLOCKS, not
+   abort-with-applied (round-4 + round-5 item 1)**:
+   `TestPanelRefuted_MarkerWriteFailure_Blocks` — stub the marker write (and,
+   in a sub-case, the union `completeGetMetadataFn` read) to fail → `Run`
+   returns non-zero with a BLOCK naming the still-unresolved RC slot (guard
+   failure), `closeBeadFn` NOT called, NO `panel_refuted` written; assert the
+   message is the RC-unresolved Block, NOT an "aborted with refutation applied".
    (iv) **AC11 CROSS-RUN panel-removed retry (G2's strong assertion)**:
    `TestPanelRefuted_CrossRun_PanelRemoved_Refuses` — run 1 fails its
    `panel_refuted` write (bead `in_progress`, `refutation_pending` durably
@@ -661,17 +691,32 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    every-path reconciliation (no-panel + unsatisfied pending → Refuse):
    non-zero, `closeBeadFn` NOT called, `ex.completeCalled == false`. Positive
    control: RESTORE the panel (RC still present) → run 3 satisfies (writes
-   `panel_refuted`) and completes. (v) **AC11 G3 every-path reconciliation —
-   live all-APPROVE retry with a stale pending must not silently merge**:
+   `panel_refuted`) and completes. (v) **AC11 G3 verified-vote-state discharge**:
    `TestPanelRefuted_CrossRun_NaturalResolution_Discharges` — run 1 records
-   `refutation_pending` then fails `panel_refuted`; run 2 presents a live
-   re-panel whose latest round is all-APPROVE (the dissenter flipped) so the
-   gate passes with NO applied refutation → assert `Run` does NOT silently
-   merge the un-audited obligation but RECONCILES it: it writes a
-   `refutation_discharged` audit for the recorded pending (RC resolved
-   naturally) and then completes; assert the discharge entry names the pending
-   slot+round. A negative twin: if the discharge write is stubbed to fail →
-   `Run` refuses pre-close (`closeBeadFn` NOT called). (vi) **AC11 O1#1 —
+   `refutation_pending` (X@1) then fails `panel_refuted`; run 2 presents a live
+   re-panel whose latest round is all-APPROVE (X flipped, or the round
+   advanced) so the gate passes with NO applied refutation; assert `Run` does
+   NOT silently merge but RECONCILES: it writes `refutation_discharged` for X
+   ONLY because the tally affirmatively shows X is no longer a latest-round RC
+   at/after round 1, then completes; assert the discharge entry names X@1. A
+   negative twin: the discharge write stubbed to fail leaves the bead
+   `in_progress` (`closeBeadFn` NOT called). (va) **AC11 round-5 item 2 — Warn
+   paths must NOT falsely discharge**:
+   `TestPanelRefuted_CrossRun_WarnPathDoesNotDischarge` (table over the three
+   live-panel Warn variants — abandoned, missing-ref, transient-gitErr) — run 1
+   leaves `refutation_pending` (X@1); run 2 presents a panel whose gate returns
+   a WARN while the tally STILL shows X as a latest-round `REQUEST_CHANGES` at
+   round 1; assert `Run` does NOT write `refutation_discharged` for X (no
+   affirmative resolution evidence) and REFUSES (`closeBeadFn` NOT called) —
+   proving discharge keys on the tally, not on the bare Allow/Warn action. (vb)
+   **AC11 round-5 item 1 — UNION multi-entry reconciliation**:
+   `TestPanelRefuted_CrossRun_UnionReconcilesAll` — run 1 refutes X@1, marker
+   (X,1), `panel_refuted` fails (bead `in_progress`); run 2 is a round-2
+   re-panel where X is now APPROVE and a NEW slot B is refuted; assert the run-2
+   marker write UNIONS (does not clobber (X,1)) and reconciliation writes BOTH
+   `refutation_discharged` for X@1 AND `panel_refuted` for B@2 before close; any
+   read/write failure mid-reconcile leaves the bead `in_progress` (no partial
+   close). (vi) **AC11 O1#1 —
    GetMetadata read-error ⟹ REFUSE (fail-closed)**:
    `TestPanelRefuted_GetMetadataError_Refuses` — a bead reaching the
    reconciliation with `completeGetMetadataFn` stubbed to return a read error
@@ -701,15 +746,25 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
    recovery branch; `TestPanelRefuted_RecoveryPath_AuditPresent` drives a
    pre-closed bead with a live refutation panel and asserts `panel_refuted` is
    present after completion. (xi) **Asymmetry control**: an ABANDONED panel
-   with the same `panel_refuted`-failing stub still completes successfully with
-   only a warning (abandon produces no `AppliedRefutations` → no obligation, no
-   marker). (xii) **skip-env-with-refutations e2e (round-2 item 10 / F2
-   hatch-excepted)**: a `MINDSPEC_SKIP_PANEL` complete over a panel carrying a
-   `refutations` array → gate skipped, no `refutation_pending`, no
-   reconciliation, completion succeeds, NO `panel_refuted` (only
-   `panel_gate_skipped`). (xiii) An applied-refutations-empty completion
-   (plain all-APPROVE pass, no prior pending) writes neither
-   `refutation_pending` nor `panel_refuted` — only genuine clears are recorded.
+   with the same `panel_refuted`-failing stub and NO prior pending still
+   completes successfully with only a warning (abandon adds no
+   `AppliedRefutations` → no NEW obligation, no marker). (xii)
+   **HATCH-reconciliation (round-5 item 3 / G3)**:
+   `TestPanelRefuted_HatchStillReconcilesPendingObligation` — a table over the
+   hatch paths (`MINDSPEC_SKIP_PANEL`, `enforcement.panel_gate: false`, and an
+   abandoned panel) each run against a bead that ALREADY carries a durable
+   unsatisfied `refutation_pending` (X@1) from a prior run: assert the hatch
+   still allows the gate merge BUT the completion does NOT close/merge unless
+   the pending is reconciled — it must write a covering `panel_refuted`/
+   `refutation_discharged` (when the tally affirmatively shows X resolved) or
+   REFUSE (`closeBeadFn` NOT called); and a `completeGetMetadataFn` read error
+   on a hatch path REFUSES (audit integrity overrides the hatch). A
+   companion no-obligation control: the SAME hatch over a pristine bead (no
+   pending) completes and writes only `panel_gate_skipped` (round-2 item 10 —
+   the hatch excepts the GATE, not the obligation). (xiii) An
+   applied-refutations-empty completion (plain all-APPROVE pass, no prior
+   pending) writes neither `refutation_pending` nor `panel_refuted` — only
+   genuine clears are recorded.
 
 **Verification**
 
@@ -717,15 +772,16 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
   AC2(gate)/AC3/AC4/AC7/AC8/AC9/AC12 decision rows + the (slot,round) dedup
   row green.
 - [ ] `go test ./internal/complete -run 'PanelRefuted|PanelGate'` —
-  AC2(audit) `refutation_pending`+`panel_refuted` write content; the AC11
-  `panel_refuted`-write-fail fence; the applied≡persisted marker-write-fail ⟹
-  RC-BLOCKS test; the CROSS-RUN panel-removed retry (run 2 REFUSES) + restore
-  positive control; the G3 every-path natural-resolution DISCHARGE test; the
-  GetMetadata-read-error ⟹ REFUSE test; the pristine-no-panel §6 fail-open
-  boundary; the post-write erasure-survival test; the already-closed
-  recovery-path audit test; the skip-env-with-refutations (no `panel_refuted`)
-  row; the abandon best-effort asymmetry control; and the whole pre-existing
-  `TestPanelGate_*` suite green.
+  AC2(audit) write content; the AC11 `panel_refuted`-write-fail fence; the
+  applied≡persisted marker-write / union-read-fail ⟹ RC-BLOCKS test; the
+  CROSS-RUN panel-removed retry (run 2 REFUSES) + restore control; the
+  verified-vote-state DISCHARGE test; the Warn-paths-do-NOT-falsely-discharge
+  table; the UNION multi-entry reconcile-all test; the GetMetadata-read-error
+  ⟹ REFUSE test; the pristine-no-panel §6 fail-open boundary; the
+  HATCH-still-reconciles table (env-skip / config-disabled / abandoned +
+  read-error refuse); the post-write erasure-survival test; the already-closed
+  recovery-path audit test; and the whole pre-existing `TestPanelGate_*` suite
+  green.
 - [ ] `go test ./internal/bead -run 'MergeMetadata|GetMetadata'` — the
   fail-closed read-error test (returns error, no replace-write) and the
   `GetMetadata` read-helper test green.
@@ -748,20 +804,22 @@ hand-edit `panel.json`; the gate carries the whole validation burden).
   so a sub-threshold panel still blocks on the floor after every RC is
   refuted; duplicate refutation entries collapse to one audited record
   (AC3, AC4, AC7, AC8, AC9, AC12, item 3).
-- **The durable-obligation invariant (round-4, airtight):** a refutation that
+- **The durable-obligation invariant (round-5, TOTAL):** a refutation that
   EVER durably clears an RC (its `refutation_pending` was persisted — the only
-  way an RC is cleared, since a non-persisted marker returns a Block) can never
-  let its bead close or merge — across ANY number of `mindspec complete`
-  retries, including after `panel.json` removal — without a durable
-  `panel_refuted` (satisfied) or `refutation_discharged` (naturally-moot)
-  audit. Enforced by: applied≡durably-persisted (marker write is part of the
-  allow-decision; failure ⟹ Block), pre-close reconciliation on EVERY path
-  (satisfy / discharge / refuse), and fail-closed `GetMetadata` + `MergeMetadata`.
-  **Hatches excepted:** `MINDSPEC_SKIP_PANEL` / `enforcement.panel_gate: false`
-  bypass the gate entirely (no refutation applied, own `panel_gate_skipped`
-  audit), so the invariant is scoped to non-hatch completions.
-  abandon/env-skip stay best-effort (grounded in their empty
-  `AppliedRefutations`, not in any "non-merge exit" claim) (AC11).
+  way an RC clears, since a non-persisted marker returns a Block) can never let
+  its bead close or merge — across ANY number of retries, ANY completion path
+  (panel-present, no-panel, OR hatch), and after `panel.json` removal — without
+  a durable `panel_refuted` (satisfied) or VERIFIED `refutation_discharged`
+  (tally-proven moot) audit for that entry. Enforced by: applied≡durably-
+  persisted (marker write, UNIONED not replaced, is part of the allow-decision;
+  read-or-write failure ⟹ Block), pre-close reconciliation of the FULL unioned
+  pending set on EVERY path (satisfy / verified-discharge / refuse), and
+  fail-closed `GetMetadata` + `MergeMetadata`. **Hatches except the GATE, NOT
+  the obligation:** `MINDSPEC_SKIP_PANEL` / `enforcement.panel_gate: false`
+  bypass the gate decision (merge despite unresolved RCs) but a pre-existing
+  durable pending is STILL reconciled/audited before close. abandon/env-skip
+  add no NEW obligation (empty `AppliedRefutations`) but do not exempt an
+  existing one (AC11).
 - A written `panel_refuted`/`refutation_discharged` audit cannot be erased by
   a later transient metadata read failure: `bead.MergeMetadata` is fail-closed
   (item 2).
@@ -812,26 +870,30 @@ contract.
    leg 3, and env-skip likewise merges — neither is a non-merge exit), but
    solely in the fact that a refutation CHANGES the gate outcome and
    produces an applied-refutation obligation, whereas abandon/skip produce
-   none. Concretely, the round-4 DURABLE-OBLIGATION protocol: (1) a refutation
-   is "applied" ONLY once its fail-closed `refutation_pending` marker is
-   durably persisted — the marker write is part of the allow-decision, so a
-   marker-write failure returns a BLOCK (the RC stays unresolved), making
-   "applied ⟹ durable obligation" definitional; (2) reconciliation runs BEFORE
-   the close on EVERY completion path (panel-present AND no-panel), satisfying
-   the obligation (`panel_refuted`), discharging it (`refutation_discharged`,
-   when a live panel shows the RC resolved naturally), or refusing (no-panel /
-   unverifiable), never silently ignoring it; (3) `bead.GetMetadata` and
-   `bead.MergeMetadata` are fail-closed so a read error refuses rather than
-   fail-opens, and no later write can erase a recorded audit. Like the skip
-   hatch, the Block message never advertises a paste-able refutation
-   incantation (OQ4); the escape is documented here and in /ms-panel-tally
-   only. State (review item 7) that of the hatches only env-skip and
-   abandonment carry a bead-metadata audit (`panel_gate_skipped` /
+   none. Concretely, the round-5 DURABLE-OBLIGATION protocol: (1) a refutation
+   is "applied" ONLY once its fail-closed `refutation_pending` entry is durably
+   persisted, UNIONED with any existing unsatisfied entries (never a bare
+   replace) — the marker read-or-write is part of the allow-decision, so a
+   failure returns a BLOCK (the RC stays unresolved), making "applied ⟹ durable
+   obligation" definitional; (2) reconciliation of the FULL unioned pending set
+   runs BEFORE the close on EVERY completion path (panel-present, no-panel, AND
+   hatch), satisfying (`panel_refuted`), VERIFIED-discharging
+   (`refutation_discharged`, ONLY on affirmative tally evidence the slot is no
+   longer a latest-round REQUEST_CHANGES at/after its round — never a bare
+   Warn/gate-pass), or refusing, never silently ignoring any entry; (3)
+   `bead.GetMetadata` and `bead.MergeMetadata` are fail-closed so a read error
+   refuses rather than fail-opens, and no later write can erase a recorded
+   audit. Like the skip hatch, the Block message never advertises a paste-able
+   refutation incantation (OQ4); the escape is documented here and in
+   /ms-panel-tally only. State (review item 7) that of the hatches only env-skip
+   and abandonment carry a bead-metadata audit (`panel_gate_skipped` /
    `panel_abandoned`); the `enforcement.panel_gate: false` config toggle writes
-   no audit; and the hatches are EXCEPTED from the obligation (they bypass the
-   gate, apply no refutation). Re-affirm §6 (fail-open without a panel —
-   UNCHANGED for pristine beads with no recorded obligation; the reconciliation
-   only refuses/discharges a bead that carries a durable unsatisfied
+   no audit. **Crucially (round-5 item 3): hatches except the GATE, NOT the
+   obligation** — a hatch lets a bead merge despite unresolved RCs but a
+   pre-existing durable `refutation_pending` is STILL reconciled/audited before
+   close on the hatch path. Re-affirm §6 (fail-open without a panel — UNCHANGED
+   for pristine beads with no recorded obligation; the reconciliation only
+   refuses/discharges a bead that carries a durable unsatisfied
    `refutation_pending`).
 4. **ADR-0037 §8 amendment (operator-authorized — the durable-refutation
    AUDIT-DURABILITY carve-out; label softened from "anti-tamper" per O2 to
@@ -842,10 +904,11 @@ contract.
    it ACTIVELY clears a specific reviewer's evidence-bearing finding, so
    allowing that clearance to later vanish without a trace (panel removed after
    a refutation was applied) would defeat 114's whole purpose. Therefore the
-   AUDIT of an applied refutation is made **durable across retries** via the
-   bead-metadata obligation (applied≡persisted marker + every-path
-   reconciliation + fail-closed `GetMetadata`/`MergeMetadata`). Also record the
-   companion **§6 affirmative-evidence refusal branch**: a bead carrying a
+   AUDIT of an applied refutation is made **durable across retries and paths**
+   via the bead-metadata obligation (applied≡persisted+unioned marker +
+   every-path — incl. hatch — verified-discharge reconciliation + fail-closed
+   `GetMetadata`/`MergeMetadata`). Also record the companion **§6
+   affirmative-evidence refusal branch**: a bead carrying a
    durable, unsatisfied refutation obligation does not fail open. State the
    scope precisely so the carve-out does not over-claim: this is an
    audit-durability guarantee for an applied refutation ONLY — NOT general
@@ -893,9 +956,10 @@ contract.
   the §1, §3, §7, §8, and §6 changes (§8 AMENDED with the narrow
   audit-durability carve-out — label softened from "anti-tamper" per O2; §6
   gains the affirmative-evidence refusal branch), re-affirms the §8
-  empty-reason footgun, and states the round-4 durable-obligation protocol
-  (applied≡persisted marker + every-path satisfy/discharge/refuse
-  reconciliation + fail-closed GetMetadata/MergeMetadata) in §7/§8.
+  empty-reason footgun, and states the round-5 durable-obligation protocol
+  (applied≡persisted+UNIONED marker + FULL-set every-path — incl. hatch —
+  satisfy/verified-discharge/refuse reconciliation + fail-closed
+  GetMetadata/MergeMetadata) in §7/§8.
 - [ ] `go build ./... && go test ./internal/panel ./internal/complete` still
   green (docs-only diff; no code drift).
 
@@ -933,20 +997,23 @@ the AC6 grep hits real names).
   carve-out (label softened from "anti-tamper" per O2 to match the delivered
   guarantee) for an applied refutation's audit — a refutation actively clears a
   finding (unlike the passive footguns §8 scopes out), so its audit is durable
-  across retries via the applied≡persisted marker + every-path reconciliation +
-  fail-closed `GetMetadata`/`MergeMetadata`. The general §8 posture is otherwise
-  UNCHANGED (empty `reason` still clears; the panel is freely removable for a
-  bead with NO refutation; verdicts/panel.json stay agent-writable; no
-  signing/hashing — the "do not fix general forgeability" fence still holds; a
-  party that never records a refutation is not the target). The §7 amendment
-  records the round-4 durable-obligation protocol (applied≡persisted marker,
-  every-path satisfy/discharge/refuse reconciliation, fail-closed metadata).
+  across retries and paths via the applied≡persisted+unioned marker + full-set
+  every-path (incl. hatch) verified-discharge reconciliation + fail-closed
+  `GetMetadata`/`MergeMetadata`. The general §8 posture is otherwise UNCHANGED
+  (empty `reason` still clears; the panel is freely removable for a bead with
+  NO refutation; verdicts/panel.json stay agent-writable; no signing/hashing —
+  the "do not fix general forgeability" fence still holds; a party that never
+  records a refutation is not the target). The §7 amendment records the round-5
+  durable-obligation protocol (applied≡persisted+unioned marker, full-set
+  every-path incl. hatch satisfy/verified-discharge/refuse reconciliation,
+  fail-closed metadata).
 - **ADR-0035 (agent error contract) — best choice, unchanged.** The new
   leg-9.5 Block routes through the existing `guard.NewFailure` wiring
   (panel_advisory.go:201-203) so the final line is a genuine `recovery:`
-  command, and every new pre-close failure — the marker-write-fails BLOCK (RC
-  unresolved), the satisfy/discharge write failures, and the reconciliation
-  Refuse (no-panel / GetMetadata read error) — constructs its own
+  command, and every new pre-close failure — the marker read-or-write-fails
+  BLOCK (RC unresolved), the satisfy/discharge write failures, and the
+  reconciliation Refuse (no-panel / unverified-Warn / GetMetadata read error /
+  hatch with an unsatisfiable obligation) — constructs its own
   `guard.NewFailure` with an idempotent-rerun recovery line (restore the panel
   / the audit, then re-run), all conforming to the convention
   `internal/guard/recovery_convention_test.go` enforces. No amendment needed:
@@ -969,11 +1036,13 @@ the AC6 grep hits real names).
   `bead.MergeMetadata` seam, exactly like `panel_abandoned`. Three refinements
   from the plan-approve panel: (1) the obligation marker + audit are written
   BEFORE the bead CLOSE (not merely before the merge) — and applied≡persisted
-  makes the marker part of the allow-decision — so the state authority never
-  records a closed bead whose refutation obligation is unwritten; (2) EVERY
-  completion path reconciles the obligation against bead metadata (satisfy /
-  discharge / refuse) so it is enforced even when the panel artifact is gone —
-  bead metadata (the state authority) is the durable record, not the removable
+  makes the marker part of the allow-decision, UNIONED so no re-panel round
+  clobbers an older obligation — so the state authority never records a closed
+  bead whose refutation obligation is unwritten; (2) EVERY completion path
+  (panel-present, no-panel, AND hatch) reconciles the FULL obligation set
+  against bead metadata (satisfy / verified-discharge / refuse) so it is
+  enforced even when the panel artifact is gone or a hatch is used — bead
+  metadata (the state authority) is the durable record, not the removable
   review artifact, which is exactly ADR-0023's division of labor; (3)
   `bead.GetMetadata`/`bead.MergeMetadata` are made fail-closed (the
   `internal/bead` execution-domain edit) so the single state authority's
@@ -1005,15 +1074,17 @@ the AC6 grep hits real names).
   real-temp-repo `setupPanelGateRepo` e2e suite (panel_gate_e2e_test.go:43-70)
   for AC1's end-to-end Block, AC2's passing-by-refutation completion (asserting
   BOTH `refutation_pending` and `panel_refuted`), the AC11 `panel_refuted`-
-  write-fail fence, the **applied≡persisted** marker-write-fail ⟹ RC-BLOCKS
-  test, the **cross-run panel-removed** retry (run 2 REFUSES) + restore
-  positive control, the **G3 every-path natural-resolution DISCHARGE** test
-  (live all-APPROVE run reconciles a stale pending via `refutation_discharged`,
-  not a silent merge), the **GetMetadata-read-error ⟹ REFUSE** test, the
-  **pristine-no-panel §6 fail-open** boundary, the post-write erasure-survival
-  test, the already-closed recovery-path audit test, and the
-  skip-env-with-refutations (no `refutation_pending`) row; and the seam-stub
-  pattern of `TestWritePanelAuditMetadata_Abandoned`
+  write-fail fence, the **applied≡persisted** marker-write / union-read-fail ⟹
+  RC-BLOCKS test, the **cross-run panel-removed** retry (run 2 REFUSES) +
+  restore control, the **verified-vote-state DISCHARGE** test, the
+  **Warn-paths-do-NOT-falsely-discharge** table (abandoned/missing-ref/
+  transient with the RC still present), the **UNION multi-entry** reconcile-all
+  test (discharge X + satisfy B, no clobber), the **HATCH-still-reconciles**
+  table (env-skip / config-disabled / abandoned + read-error refuse), the
+  **GetMetadata-read-error ⟹ REFUSE** test, the **pristine-no-panel §6
+  fail-open** boundary, the post-write erasure-survival test, and the
+  already-closed recovery-path audit test; and the seam-stub pattern of
+  `TestWritePanelAuditMetadata_Abandoned`
   (panel_advisory_test.go:111-134, swapping `completeMergeMetadataFn` and the
   new `completeGetMetadataFn`) for the audit-content, the selective
   `panel_refuted`-only / `refutation_pending`-only / `refutation_discharged`-only
@@ -1068,6 +1139,6 @@ the AC6 grep hits real names).
 | AC8 (unrecognized verdict blocks and is non-refutable) | Bead 1 (blocks) + Bead 2 (non-refutable) | unrecognized rows in `TestPanelGateDecision_UnresolvedRequestChangesBlocks` and `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|PanelGateDecision'` |
 | AC9 (refuted RC never increments Approves) | Bead 2 | `TestResult_AppliedRefutations` + AC9 assertions in the refutation table; `go test ./internal/panel -run 'Refut'` |
 | AC10 (no-advertise Block-message predicate) | Bead 1 (predicate) + Bead 2 (re-asserted with refutations present) + Bead 3 (the doc-side no-advertise contract) | fixed-string predicate rows in both decision tables + `TestPanelGate_RequestChangesBlocksComplete` recovery-line assert; `go test ./internal/panel -run 'PanelGateDecision' && go test ./internal/complete -run 'PanelGate'` |
-| AC11 (durable-obligation: applied≡persisted; reconciled on every path; fail-closed) | Bead 2 | `TestPanelRefuted_SatisfyWriteFailure_FailsCompletion` + `TestPanelRefuted_MarkerWriteFailure_Blocks` (applied≡persisted: marker-fail ⟹ RC BLOCKS, not merge) + `TestPanelRefuted_CrossRun_PanelRemoved_Refuses` (+ restore control) + `TestPanelRefuted_CrossRun_NaturalResolution_Discharges` (G3) + `TestPanelRefuted_GetMetadataError_Refuses` + `TestPanelRefuted_PristineNoPanel_FailsOpen` + `TestPanelRefuted_AuditSurvivesLaterReadError` + `TestMergeMetadata_FailClosedOnReadError` + `TestGetMetadata` + the abandon asymmetry control; `go test ./internal/complete -run 'PanelRefuted\|PanelGate' && go test ./internal/bead -run 'MergeMetadata\|GetMetadata'` |
+| AC11 (durable-obligation: applied≡persisted+unioned; TOTAL reconciliation; verified discharge; every path incl. hatches; fail-closed) | Bead 2 | `TestPanelRefuted_SatisfyWriteFailure_FailsCompletion` + `TestPanelRefuted_MarkerWriteFailure_Blocks` (marker-write/union-read-fail ⟹ RC BLOCKS) + `TestPanelRefuted_CrossRun_PanelRemoved_Refuses` (+ restore) + `TestPanelRefuted_CrossRun_NaturalResolution_Discharges` (verified) + `TestPanelRefuted_CrossRun_WarnPathDoesNotDischarge` (item 2) + `TestPanelRefuted_CrossRun_UnionReconcilesAll` (item 1) + `TestPanelRefuted_HatchStillReconcilesPendingObligation` (item 3) + `TestPanelRefuted_GetMetadataError_Refuses` + `TestPanelRefuted_PristineNoPanel_FailsOpen` + `TestPanelRefuted_AuditSurvivesLaterReadError` + `TestMergeMetadata_FailClosedOnReadError` + `TestGetMetadata`; `go test ./internal/complete -run 'PanelRefuted\|PanelGate' && go test ./internal/bead -run 'MergeMetadata\|GetMetadata'` |
 | AC11 supporting — already-closed recovery-path audit (round-3 O3 minor) | Bead 2 | `TestPanelRefuted_RecoveryPath_AuditPresent` (pre-closed bead + live refutation panel → audit present after completion, step 7(B)(x)); `go test ./internal/complete -run 'PanelRefuted\|PanelGate'` |
 | AC12 (duplicate slot files at latest round — chosen behavior stated + pinned; dedup extended into the audit path) | Bead 2 (step 2: byte-exact slot matching against the slot's tallied latest-round verdict; a REJECT under a near-duplicate slot is never cleared; same-slot+round entries collapse to one applied record) | `Dup`-named rows in `TestPanelGateDecision_Refutations`; `go test ./internal/panel -run 'Refut\|Dup'` |
