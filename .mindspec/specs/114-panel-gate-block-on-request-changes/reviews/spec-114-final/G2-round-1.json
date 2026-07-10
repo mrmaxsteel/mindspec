@@ -1,0 +1,20 @@
+{
+  "reviewer_id": "G2 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Pinned 41d8e8af review: the complete.Run path itself is sound. Leg 9.5 blocks unresolved RC/unrecognized verdicts; refutations match only byte-exact latest-round RC slots, never alter Approves, and leave the threshold floor intact. Applied entries are union-persisted with full content; read/write/decode failures block; every complete path reconciles pending entries from the marker to panel_refuted before close, without re-tally/discharge, including retry, hatch, and removed-panel cases. However, the whole lifecycle still has an unaudited merge path: ApproveImpl accepts a planned bead merely because bd reports closed, then FinalizeEpic explicitly auto-merges unmerged bead branches closed via raw bd close. That route never calls panelGate or reconcilePendingRefutations. Thus an unresolved RC can be followed by bd close and mindspec impl approve, landing the bead without panel_refuted (or any panel audit). Focused tests passed: go test ./internal/panel ./internal/complete ./internal/bead.",
+  "concrete_changes_required": [
+    "Before impl finalization, fail closed on every closed-but-unmerged planned bead and direct recovery through mindspec complete, which tolerates an already-closed bead and runs the panel gate/reconciliation.",
+    "Remove or equivalently gate FinalizeEpic's closed-via-bd-close bead auto-merge so it cannot merge a bead lacking proof of successful completion/panel settlement.",
+    "Add an end-to-end regression: unresolved REQUEST_CHANGES -> raw bd close -> mindspec impl approve must not merge; recovery via mindspec complete must still block until resolution or durable refutation audit."
+  ],
+  "findings": [
+    {
+      "id": "G2-1",
+      "severity": "critical",
+      "hard_block": true,
+      "location": "internal/approve/impl.go:220-242,371-375; internal/executor/mindspec_executor.go:381-419",
+      "detail": "ApproveImpl verifies only that plan beads have status closed. FinalizeEpic then intentionally auto-merges any unmerged bead/* worktree branch, specifically including beads closed via bd close without mindspec complete. Neither site invokes the authoritative panel gate nor durable-obligation reconciliation. A bead carrying an unresolved RC can therefore be raw-closed and merged by mindspec impl approve with no refutation_pending and no panel_refuted audit."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Grounding + scope verified in a /tmp clone pinned to 41d8e8af. SCOPE: the substantive delta vs the true merge-base 71398a68 is EXACTLY 23 files matching the BRIEF list (7 internal/panel, 6 internal/complete, 2 internal/bead, cmd/mindspec/panel_test.go, internal/instruct/panelstate_test.go, ADR-0037, 2 identical SKILL copies, spec.md, plan.md, .beads/issues.jsonl whose 4 added records are the mvp8 epic + 3 beads); all reviews/ additions live under the spec-114 reviews dir; no stray/debug code in added non-test lines. GROUNDING: every claim traced to real code — leg 9.5 layered between leg 9 and the threshold floor (gate.go:267-290), VoteDecision lockstep (tally.go:293-299), refutations schema {slot,round,reason,evidence} parse-lenient (panel.go:109), isRefuted byte-exact slot + LatestRound-exact (tally.go:192-202), AppliedRefutations RC-only+dedup, Approves never incremented by refutation, persistRefutationPending read-union-write fail-closed with panelGate returning Block on failure (panel_advisory.go:244-256), reconcilePendingRefutations satisfy-from-marker with NO discharge/re-tally, unconditional at step 3.75 before close (complete.go:570), MergeMetadata fail-closed + GetMetadata (bdcli.go). The internal/bead execution-domain edit is declared in spec.md Impacted Domains with the operator amendment note. Plan carries the Bead-2 DESIGN AMENDMENT + amended AC11 row; every named AC11 test exists; ADR/SKILL contain zero discharge references. EMPIRICAL: go build, gofmt -l (empty), go vet all clean; go test PASS on all 5 spec packages; -race PASS on panel/complete/bead.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "spec.md R2/AC11 retain the superseded discharge language without an in-file supersession pointer",
+      "detail": "spec.md still describes the verified-discharge/refutation_discharged mechanism deleted by the operator-approved Bead-2 DESIGN AMENDMENT; the supersession is recorded only in plan.md (L379-380 + the AC11 row) and reviews/spec-114-bead2/consolidated-round-3.md. Consistent with the forward-only lifecycle and pre-adjudicated by the operator decision the BRIEF cites; no code/doc artifact that governs the shipped design (ADR-0037, SKILL) claims a discharge mechanism. Non-blocking; a future spec-doc amendment note would aid archaeology."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "title": "Stale comment phrasing in gate.go leg 9.5",
+      "detail": "internal/panel/gate.go:279-280 comment says the Block message never contains 'refut' because 'Bead 1 has none yet' — Bead 2 shipped the escape, so the phrasing is stale, though the behavior (no-advertise, AC10) is correct and pinned by panel_decision_test.go:200 mustNotHave. Cosmetic only."
+    }
+  ]
+}
