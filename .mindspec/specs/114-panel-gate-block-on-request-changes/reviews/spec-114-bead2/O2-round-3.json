@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Anti-gaming/strictness lens: origin-binding is purely ADDITIVE strictness and opens no new hole. (1) Empty/redirected origin cannot bypass: the pending entry is GATE-written from the real matched regs[i].Slug() (never from panel.json's refutations array); a fabricated all-APPROVE panel is never recorded as origin (no AppliedRefutations), and len(Panels)==0 fails closed (never discharges). Directly forging bead metadata is pre-existing/out-of-model and would already collapse the audit; origin-binding makes the delete+decoy attack STRICTLY harder. (2) Cross-run union is strictly additive — unionPendingEntries unions origin sets (dedupe-sorted), never drops; extra origins only add veto conditions. (3) Satisfy needs a gate-validated this-run refutation and writes the honest panel_refuted audit — correct, no origin check needed, not a bypass. (4) tally.go/gate.go byte-unchanged since ce9f5395 → AC3/7/8/9/12 hold; panel/complete/bead/cmd sweep + -race all green. The origin check is conjunctively ANDed onto the round-1 all-panel guard (both loops run) → discharge strictly harder, never easier. Mutation-probe: stripping origin-binding turns TestPanelRefuted_OriginRemoved/Corrupted_Refuses RED — genuinely load-bearing. Build/gofmt/vet clean. All work in /tmp; shared worktree left clean at 6f6634b4.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "origin-empty-or-redirect-bypass", "status": "ADDRESSED", "detail": "Pending origin set is gate-recorded from actual matched registration slugs, not operator-settable via panel.json; len(Panels)>0 fails closed; fabricated resolved panels never recorded as origins. No sanctioned bypass; forging metadata is pre-existing out-of-model."},
+    {"id": "union-drops-origin", "status": "ADDRESSED", "detail": "unionPendingEntries merges origin sets (union, dedupe-sorted) on key collision; strictly additive across runs; extra origins only add discharge veto conditions."},
+    {"id": "satisfy-path-origin-bypass", "status": "ADDRESSED", "detail": "Satisfy fires only for a this-run gate-validated applied refutation and writes the honest panel_refuted reason/evidence audit; needs no origin check; not a bypass."},
+    {"id": "tally-gate-unchanged", "status": "ADDRESSED", "detail": "git diff ce9f5395..6f6634b4 for internal/panel/tally.go+gate.go is empty; go test ./internal/panel -run 'Refut|Round|Dup|PanelGateDecision' PASS — AC3/7/8/9/12 preserved."},
+    {"id": "new-tests-load-bearing", "status": "ADDRESSED", "detail": "Reverting origin-binding in dischargeVerified turns both TestPanelRefuted_OriginRemoved_Refuses and _OriginCorrupted_Refuses RED; tests assert origin recorded (zzz-origin only, decoy applied nothing), Refuse on removal/corruption with no discharge/close/merge, and positive-control discharge on restore."}
+  ]
+}

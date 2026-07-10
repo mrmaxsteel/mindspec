@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The stable two-panel repro now Refuses and its positive APPROVE flip discharges; normal single-panel completion, all focused/full/race checks, build, vet, and formatting pass. Both required mutations make their named tests RED. However, the round-1 blocking invariant is still incomplete: pending X@1 is not bound to its origin panel/source set. If zzz-origin/panel.json is removed before a retry while aaa-first/X=APPROVE remains, both gate and reconciliation scan the same singleton set, reconciliation writes refutation_discharged, then closes and merges. A /tmp end-to-end probe reproduced this. Independent rescans also permit the same loss if the origin disappears between gate and reconciliation. Every-currently-matched-panel strictness is conservative and safe only while the complete matched set persists; slot absence Refuses and normal single-panel resolution succeeds, but whole-origin absence with another match still false-discharges.",
+  "concrete_changes_required": [
+    "Durably bind each pending obligation to its originating panel identity/source set (or preserve equivalent source evidence). Reconciliation must Refuse if any required origin is absent or unreadable, and discharge only when every required origin affirmatively resolves/advances the slot.",
+    "Add end-to-end guards for origin panel removal before a retry while a contradictory matching panel remains, and for matched-set change between gate and reconciliation. Both must Refuse without close, merge, or discharge audit."
+  ],
+  "findings": [
+    {
+      "status": "MISSED",
+      "severity": "blocking",
+      "title": "Cross-panel false discharge remains when the origin registration disappears",
+      "evidence": "internal/complete/panel_advisory.go:664 re-scans only currently present registrations; pending metadata stores only slot+round. /tmp probe: aaa-first/X=APPROVE remained, zzz-origin/X=REQUEST_CHANGES panel.json was removed before retry, MINDSPEC_SKIP_PANEL was set; Run returned success, wrote refutation_discharged X@1, called close, and merged. Both scans saw the identical singleton set, so shared gateRoots/seam does not fix historical-origin loss. A second probe reproduced the same result when zzz-origin disappeared between the two scans."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "major",
+      "title": "Already-covered pending obligations reconcile as a no-op",
+      "evidence": "Both panel_refuted_entries and refutation_discharged_entries exact-match cases complete without a new audit; different slot/round Refuses. Disabling covered[key] made TestPanelRefuted_AlreadyCoveredPending_Completes fail in both positive subtests."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "minor",
+      "title": "Malformed durable-entry arrays fail closed",
+      "evidence": "All three malformed stores Refuse, while absent metadata remains a no-op. Restoring fail-open decode made all three TestPanelRefuted_MalformedPendingEntries_Refuses subtests fail."
+    },
+    {
+      "status": "ADDRESSED",
+      "severity": "info",
+      "title": "Mandated empirical and regression checks",
+      "evidence": "go build ./... passed with isolated GOCACHE; gofmt output empty; vet passed; focused panel/complete/bead tests passed; all TestPanelRefuted_*/TestPanelGate_* passed; full panel/complete/bead/cmd suite passed; race tests passed for panel, complete, and bead."
+    }
+  ]
+}

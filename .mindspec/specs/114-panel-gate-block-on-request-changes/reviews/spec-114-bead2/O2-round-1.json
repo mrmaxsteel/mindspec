@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Anti-gaming layered floor + AC10 no-advertise verified by code trace and mutation probes in a /tmp clone (shared worktree untouched, HEAD ce9f5395, git status clean). tally.go single-homes the matching rule: isRefuted() removes an RC from UnresolvedVerdicts ONLY on byte-exact Slot AND Round==LatestRound; AppliedRefutations() builds rcSlots from genuine latest-round RC verdicts only, so REJECT/hard_block/APPROVE/unrecognized slots are never applied. AC3: gate.go leg 9 (Rejects>0 || HardBlocks>0) fires BEFORE leg 9.5/10 — a REJECT/hard_block never refutable. AC8: unrecognized verdicts are not VerdictRequestChanges, so isRefuted is never consulted for them (guarded at tally.go:179) — they stay blocking. AC4b: round-binding against r.LatestRound blocks a round-N entry clearing a round-N+1 re-RC. AC9/AC7: Approves is computed only from APPROVE verdicts in Tally and never touched by refutation logic; a refuted RC leaves the blocking set but is not re-counted, so leg 10 floor (Approves>=threshold) blocks a sub-threshold panel with ALL RCs refuted with zero new logic. AC12: byte-exact Slot compare + seen[] first-wins dedup collapses two same-slot entries to one. AC10: leg-9.5 message contains no 'refut' substring even with a refutations array present. Empirical: build/gofmt/vet clean; panel/complete/bead/cmd full sweep + -race green. Mutations killed the right tests: case-insensitive slot->AC12 RED; drop round check->AC4b RED; inject 'refut' in leg9.5->AC10 RED; bypass floor->AC7 RED; remove dedup->dedup RED. No path found where the floor is bypassed or a wrong verdict cleared.",
+  "concrete_changes_required": [],
+  "findings": [
+    "AC3/AC8/AC9/AC7/AC12/AC4b/AC10 all hold by construction and are each pinned by a load-bearing test (verified via 5 mutation probes that each turned the corresponding test RED).",
+    "Single-home consistency confirmed: isRefuted (UnresolvedVerdicts) and AppliedRefutations can never disagree — both require slot to be a genuine latest-round RC at Round==LatestRound; no divergence path exists (an RC removed from unresolved is always in the applied set and vice versa).",
+    "AC7 'zero new logic' claim verified: Approves flows solely from Tally's APPROVE count; refutation removes from the blocking set only, so leg-10's pre-existing floor computation is unchanged and blocks sub-threshold panels after all RCs refuted.",
+    "AC10 distinction honored: the leg-9.5 gate Block message is refut-free; only the operational marker-write-failure Block (panel_advisory) may name 'refutation', which is outside AC10 scope per plan L510-516."
+  ]
+}

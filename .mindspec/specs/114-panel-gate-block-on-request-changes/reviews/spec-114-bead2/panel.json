@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-mvp8.2",
+  "spec": "114-panel-gate-block-on-request-changes",
+  "target": "bead/mindspec-mvp8.2",
+  "round": 4,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "e209aa02fde4dd9f7e0759a86cd4ec67fe87b0c6"
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "S3 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Scope fence holds. `git diff ce9f5395 7de2c459 --stat` is exactly 3 files, all internal/complete/ (complete.go, panel_advisory.go, panel_refuted_test.go), one commit. No internal/panel, internal/bead, cmd/, ADR/plan/doc/skill edits, and no CLI verb changes (confirmed via --name-only and grep for external callers of the changed unexported functions). panelGate's 3-tuple return is byte-identical; complete.go only hoists panelGateRoots(...) into a `gateRoots` local shared by both panelGate and reconcilePendingRefutations via the same panelScanFn seam (panel.Scan, pre-existing, also used by panelGate's own scan) -- exactly the re-scan design over arity change the plan called for. Verified no outcome flip outside the 3 intended fixes: the only edited existing test is TestPanelRefuted_WarnPathDoesNotDischarge, updated mechanically (roots []string instead of *panel.Registration, drops now-unneeded manual dir creation) with its Refuse assertion unchanged; the other 3 new tests are pure additions. In an absolute /tmp git-archive copy (never the shared worktree): go build ./... clean, gofmt -l ./cmd ./internal empty, go vet ./... clean, go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all ok, go test -race on the three all ok. Worktree git status left clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "Scope confirmed minimal and correctly fenced: 3 files / 1 commit, all internal/complete/, no cross-package or CLI-verb/doc/ADR edits. panelGate 3-tuple arity unchanged; reconciliation now shares gateRoots with the gate via the identical panelScanFn seam, ruling out matched-set divergence between the two call sites in complete.go."
+    },
+    {
+      "severity": "info",
+      "description": "No outcome flip beyond the 3 documented fixes: only pre-existing test touched is TestPanelRefuted_WarnPathDoesNotDischarge, and only its call signature changed (roots slice replaces panelReg, plus removal of now-superfluous manual registration-dir setup); its Refuse assertion is byte-identical, and no other existing TestPanelRefuted_*/TestPanelGate_* function was renamed, removed, or had its assertions altered."
+    },
+    {
+      "severity": "info",
+      "description": "Build/format/vet/tests all green in an isolated /tmp git-archive copy of 7de2c459 (go build, gofmt -l, go vet, go test on internal/panel, internal/complete, internal/bead, cmd/mindspec, plus -race on the first three). No external (non-test) callers of the modified unexported decode*/reconcilePendingRefutations functions exist outside internal/complete."
+    }
+  ]
+}

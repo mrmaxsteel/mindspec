@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Origin-binding fix verified in a /tmp archive of 6f6634b4 (build/gofmt/vet/tests/-race all clean). (1) Origin recording is correct+complete: panelGate's per-registration Allow loop does appliedOrigins[key]=append(...,regs[i].Slug()) for EACH d.AppliedRefutations entry — capturing exactly the matched panels that cleared that slot+round, appending even for already-seen keys so multi-panel origins are all recorded; persistRefutationPending threads origins[key] into each refutationPendingEntry.Panels; unionPendingEntries MERGES origin sets on a shared key (never drops), dedupeSortedSlugs-normalized. (2) dischargeVerified is fail-closed: retallyOK AND len(p.Panels)>0 AND every origin slug present in resultsBySlug (panel.ForBead drops Err!=nil regs, catching corruption) AND dischargeEvidence in every origin's re-tally AND (round-1 guard preserved) in every other matched panel. Empty/absent/corrupt origin never discharges. (3) reconcile-before-close ordering intact (complete.go untouched; L568 reconcile precedes L573 closeBeadFn / L695 CompleteBead; signature unchanged). (4) Legit natural resolution (AC4b) still fires — both new tests' positive controls + NaturalResolution/Union tests pass, single-panel unaffected. Mutation probe (strip the origin-check block) turns BOTH TestPanelRefuted_OriginRemoved_Refuses AND OriginCorrupted RED via false decoy discharge, while NaturalResolution stays green — tests are load-bearing, not hollow. No residual origin-unbound discharge, no dropped origin, no wrongly-blocked legit completion.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-G1F1-origin-unbound-discharge",
+      "status": "ADDRESSED",
+      "detail": "Round-2 blocking hole (origin panel deleted/corrupted while a decoy resolved panel remained → false 'naturally moot' discharge). Now closed: pending entries carry Panels origin set, and dischargeVerified requires every origin present+resolving in the current matched set. E2E-reproduced: OriginRemoved and OriginCorrupted tests Refuse with X@1+zzz-origin named, no discharge/close/merge; positive controls (restore+resolve origin) discharge correctly."
+    },
+    {
+      "id": "origin-recording-completeness",
+      "status": "ADDRESSED",
+      "detail": "appliedOrigins accumulates all matched-panel slugs per cleared slot+round; cross-run union merges (never drops); malformed/missing Panels → fail-closed (never discharges, may Satisfy/be-covered). Verified in code + TestPanelRefuted_CrossRun_UnionReconcilesAll."
+    },
+    {
+      "id": "reconcile-before-close-ordering",
+      "status": "ADDRESSED",
+      "detail": "complete.go untouched this round; reconcilePendingRefutations (L568) still precedes closeBeadFn (L573) and exec.CompleteBead (L695) on every path; reconcile signature (beadID, gateRoots, applied) unchanged, sharing the same panelScanFn/gateRoots seam as panelGate so matched sets cannot diverge."
+    },
+    {
+      "id": "natural-resolution-preserved",
+      "status": "ADDRESSED",
+      "detail": "AC4b zero-ceremony discharge still fires when the origin persists and advances/flips APPROVE; single-panel completion unaffected. Confirmed by positive controls in both new tests and by NaturalResolution/Union tests remaining green even under the mutation probe."
+    },
+    {
+      "id": "slug-basename-binding-note",
+      "status": "OBSERVATION",
+      "detail": "Origin binding keys on Slug()=filepath.Base(dir), not full path. A same-basename substitution would still have to be a genuinely resolving panel for that slot+round — i.e. the RC actually resolved — so it is the legitimate natural-resolution path, not a bypass of the audit intent. Not blocking."
+    }
+  ]
+}

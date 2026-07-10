@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Scope/signature/no-regression + provenance lens all clear. SCOPE: full-bead delta (1906e39e..33a8ce8d) is 100% within internal/panel|complete|bead; redesign is ONE commit (33a8ce8d), no ADR/plan/doc edits (deferred to Bead 3/orchestrator as designed). SIGNATURE: panelGate 3-tuple (*Registration,[]Refutation,error) -> 2-tuple (*Registration,error) confirmed; ALL call sites consistent (1 prod complete.go:387 destructures 2 values; every test site in panel_advisory_test/panel_gate_e2e_test/panel_gate_layout_test uses 2-tuple); zero orphaned appliedRefutations/appliedOrigins references; outcome-preserving. PROVENANCE: reconcilePendingRefutations is now (beadID string) error, reads ONLY bead metadata, opens NO panel dir; all deleted symbols grep-clean; marker struct self-contained {Slot,Round,Reason,Evidence}, origin/Panels dropped. AC2/AC4b/AC11 map to named passing tests (SatisfyFromMarker_PanelGone, NaturalResolution_NoObligation, MarkerCarriesReasonEvidence, Hatch/AlreadyCovered/Malformed); AC11 satisfy-from-marker language shift is the intended operator decision and tests reflect it; AC3/7/8/9/12 anti-gaming preserved — internal/panel byte-unchanged vs ce9f5395. NO-REGRESSION: build+gofmt+vet clean; panel/complete/bead/cmd tests + -race all green in /tmp; mutation swallowing the reconcile write error turns exactly 4 named tests RED — tests are real.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "O3-R3-scope", "status": "ADDRESSED", "note": "Redesign lands as one commit within the fenced dirs; no ADR/plan/doc leakage."},
+    {"id": "O3-signature-arity", "status": "ADDRESSED", "note": "3-tuple->2-tuple panelGate change consistent across the single prod call site and all six+ test call sites; no half-applied edit, no orphaned deleted-symbol references."},
+    {"id": "O3-provenance-AC", "status": "ADDRESSED", "note": "AC2/AC4b/AC11 satisfy-from-marker semantics backed by named passing tests; AC3/7/8/9/12 preserved via byte-unchanged internal/panel."}
+  ]
+}

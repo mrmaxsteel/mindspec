@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "No un-audited-merge path found. In /tmp (git archive @33a8ce8d; shared worktree untouched, clean): every failure mode Blocks/Refuses or satisfies-from-marker — marker-write-fail Blocks (mutation-pinned), GetMetadata-fail Refuses even under env-skip, panel_refuted-write-fail fails pre-close (swallow mutation turns 4 named tests RED: SatisfyWriteFailure, SatisfyFromMarker_PanelGone, CrossRun_UnionReconcilesAll, MarkerCarriesReasonEvidence — matching the fixer), malformed/shape-invalid markers Refuse (fail-open-decode and guard-drop mutations each RED), hatches still reconcile, panel-gone satisfies with the honest audit. Marker content: probe proves a retried run with a REWRITTEN panel.json cannot retroactively alter the persisted marker (union keeps existing — audit carries the original reason/evidence). Empty-reason clears but the durable audit still lands — the plan's documented footgun (L960–986), in byte-unchanged internal/panel (0-line diff ce9f5395→33a8ce8d). NaturalResolution_NoObligation is NOT hollow: a phantom-obligation-on-Allow mutation turns it RED. Structural: zero repo-wide hits for all deleted discharge symbols/keys; reconcile reads only metadata seams (panel reads exist solely in panelAdvisory/panelGate); reconcile at complete.go:570 precedes the single close site (:575) and merge; panelGate 2-tuple arity consistent across 14 sites. build/gofmt/vet/full-suite/-race all green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "major",
+      "blocking": false,
+      "status": "OBVIATED",
+      "title": "Round-2 blocking (origin-evidence-loss false discharge) — OBVIATED by deletion",
+      "detail": "The discharge-by-re-tally mechanism my round-2 repros attacked no longer exists. reconcilePendingRefutations(beadID) takes no roots, reads no panel directory (verified: the only panel.ForBead/panelScanFn/panelTallyFn call sites in internal/complete are panelAdvisory and panelGate), and repo-wide grep for dischargeVerified/dischargeEvidence/dischargedEntry/decodeDischargedEntries/unionDischargedEntries/writeRefutationDischargedMetadata/dedupeSortedSlugs/refutation_discharged/appliedOrigins returns zero hits. Origin deletion, corruption, and basename-aliasing can no longer influence settlement: the round-2/3 attack shape (pending + panel destroyed) now lands the honest panel_refuted from the self-contained marker (TestPanelRefuted_SatisfyFromMarker_PanelGone, re-verified green) instead of a false 'resolved naturally' claim."
+    },
+    {
+      "severity": "minor",
+      "blocking": false,
+      "status": "OBVIATED",
+      "title": "Round-3 minor (three unpinned origin-era guards) — OBVIATED; the surviving guards ARE pinned",
+      "detail": "The unpinned defenses I flagged (len(Panels)==0 fail-closed, origin-set union additivity, round-1 all-matched conjunct) were deleted along with the origin mechanism, so the regression risk is gone with them. The kept guards are all mutation-pinned today: reconcile write-error swallow RED (4 tests), persistRefutationPending swallow RED (MarkerWriteFailure_Blocks, both subtests), unionPendingEntries bare-replace RED (CrossRun_UnionReconcilesAll), decodePendingEntries and decodeRefutations fail-open each individually RED (MalformedPendingEntries subtests), shape-invalid-entry guard drop RED (empty-slot subtest)."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "status": "OBVIATED",
+      "title": "Round-3 info (fabricated same-slug panel) — OBVIATED for settlement; gate posture unchanged",
+      "detail": "Reconciliation ignores panel content entirely, so panel fabrication can no longer influence how an obligation settles. Fabrication/removal can still steer the GATE (§6 fail-open: no matched registration → pass), but that is the pre-existing, plan-documented freely-removable-panel posture, byte-unchanged in internal/panel and outside this bead's fence — and even then a pre-existing pending still settles as the honest audit before close (hatch/no-panel tests xii/xv)."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "Marker is tamper-resistant against retroactive rewrite (positive property, probe-verified)",
+      "detail": "Probe: run 1 persists marker X@1 with 'ORIGINAL honest reason' (panel_refuted write stubbed to fail); operator rewrites panel.json's refutation to 'TAMPERED reason'/'forged' and retries; run 2 completes and the panel_refuted audit carries the ORIGINAL content — unionPendingEntries keeps the existing entry and only back-fills EMPTY reason/evidence. First-applied content wins; a later panel edit cannot rewrite an already-persisted obligation. Companion probe: an empty-reason refutation clears the RC (isRefuted matches Slot+Round only) but the durable panel_refuted audit still lands ({X 1 '' ''}) — never un-audited; this is the plan's explicitly documented footgun (plan.md L960-986, parity with empty abandon_reason), in byte-unchanged internal/panel, dispositioned in prior rounds. Not a change request."
+    },
+    {
+      "severity": "info",
+      "blocking": false,
+      "title": "Verification record",
+      "detail": "Absolute /tmp git-archive copy @33a8ce8d; shared worktree clean at 33a8ce8d throughout, no writes outside /tmp and this verdict file. go build ./... OK; gofmt -l ./cmd ./internal empty; go vet panel/complete/bead OK; targeted runs (panel 'Refut|Round|Dup|PanelGateDecision', complete 'PanelRefuted|PanelGate', bead 'MergeMetadata|GetMetadata') ok; full go test panel/complete/bead/cmd/mindspec ok; go test -race on the three ok. git diff ce9f5395 33a8ce8d -- internal/panel/ EMPTY (anti-gaming AC3/7/8/9/12 byte-preserved). Six mutations, all RED against named tests; mutation tree diffed back byte-identical to pristine before verdict. NaturalResolution_NoObligation hollow-check: appending a phantom AppliedRefutations entry on Allow turns it RED via both its no-marker assertion and its failMerge('panel_refuted') tripwire — it genuinely proves zero-ceremony (no marker, no audit write attempted). panelGate 2-tuple consistent: 1 prod call site (complete.go:387) + 13 test sites, no orphaned symbols (build green)."
+    }
+  ]
+}

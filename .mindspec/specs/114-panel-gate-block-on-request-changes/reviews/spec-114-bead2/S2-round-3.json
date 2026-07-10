@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "S2 sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Tests-real lens on the round-3 origin-binding fix, mutation-probed in an isolated /tmp archive of 6f6634b4 (shared worktree never touched; git status confirmed clean throughout; go build/vet clean before/after every probe, file diffed byte-identical to the untouched original after each restore). Mutation 1 (revert origin-binding: strip the len(p.Panels)==0 guard AND the per-origin resultsBySlug loop from dischargeVerified, leaving only the round-1 all-currently-matched-panels check): TestPanelRefuted_OriginRemoved_Refuses AND TestPanelRefuted_OriginCorrupted_Refuses BOTH go RED ('run 2 must REFUSE: a decoy resolved panel can never substitute for the removed origin panel' / 'a corrupted origin panel must REFUSE...'). Both tests are load-bearing, not vacuous, and precisely target the round-2 G1+F1 hole. Confirmed each test's assertions match the BRIEF: OriginRemoved asserts Refuse naming X@1+zzz-origin, no close/merge, no refutation_discharged/panel_refuted write on the Refuse, THEN a positive control restores+resolves the SAME origin and asserts close+merge+discharged=true+entries=[X@1]. OriginCorrupted writes a genuinely unparseable panel.json (`{\"bead_id\": corrupt`, a JSON syntax error -> Registration.Err != nil -> dropped by panel.ForBead) with a decoy resolved panel present under MINDSPEC_SKIP_PANEL, asserts Refuse, then repairs+resolves for a matching positive control. Natural resolution (TestPanelRefuted_CrossRun_NaturalResolution_Discharges) still passes unmodified -- origin persists, re-tally advances, discharge fires; zero-ceremony re-panel is not blocked. Mutation 2 (remove ONLY the len(p.Panels)==0 guard, keep the origin loop -- which is then vacuous over an empty slice): the full ./internal/complete suite (107 tests) stays 100% green, and an ad-hoc /tmp-only probe test confirms an origin-less pending against a genuinely-resolved, non-covered panel DOES wrongly discharge+close+merge under this mutation (err=nil, discharged=true) while it correctly Refuses ('origin panel unrecorded') with the guard restored. This is a real but non-blocking gap: no test in the round-3 delta exercises the missing-panels fail-closed line in isolation (the AlreadyCoveredPending fixtures use origin-less entries but resolve via the covered-no-op branch before reaching dischargeVerified). Production behavior is correct; only a defense-in-depth regression test is missing. Neither of my two required stop conditions (a hollow one of the 2 headline tests, or broken natural resolution) is met, so I approve with a recommended non-blocking follow-up.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "description": "Mutation 1 (strip origin-binding from dischargeVerified back to a currently-matched-panels-only check, matching round-2's shape) turns BOTH TestPanelRefuted_OriginRemoved_Refuses and TestPanelRefuted_OriginCorrupted_Refuses RED. Both new tests are load-bearing, precisely target the round-2 G1+F1 origin-substitution hole, and each carries a genuine positive control (restore/repair the origin with X resolved -> discharge+close+merge) proving they are not merely testing 'always Refuse'."
+    },
+    {
+      "severity": "info",
+      "description": "TestPanelRefuted_OriginCorrupted_Refuses's corruption is a real unparseable panel.json (`{\"bead_id\": corrupt`, a JSON syntax error), not a semantic stand-in -- confirmed this makes panel.Scan/ForBead register the panel with Err != nil and drop it from the matched set, exactly the 'origin becomes unreadable' scenario the fix is meant to close."
+    },
+    {
+      "severity": "info",
+      "description": "TestPanelRefuted_CrossRun_NaturalResolution_Discharges (the legitimate zero-ceremony re-panel path: origin panel persists, its re-tally advances/resolves) still passes unmodified against the round-3 code -- the origin-binding fix does not regress natural resolution."
+    },
+    {
+      "severity": "minor",
+      "description": "Mutation-probed the len(p.Panels)==0 fail-closed guard in isolation (removed only that check, leaving the now-vacuous per-origin loop and the round-1 all-matched-panels loop intact): the full internal/complete suite (107 tests) stays 100% GREEN -- no existing test, including the 2 new round-3 tests (whose fixtures always seed Panels: []string{\"zzz-origin\"}), exercises an origin-less pending entry that reaches dischargeVerified against a genuinely-resolved, non-covered panel. Confirmed via an ad-hoc /tmp-only probe (not committed, not part of the suite) that this exact scenario DOES wrongly discharge+close+merge under the mutation, and correctly Refuses ('origin panel unrecorded') with the guard restored -- so the shipped code is correct, but this specific fail-closed line has no direct regression test. The AlreadyCoveredPending fixtures use origin-less entries but resolve via the covered-no-op branch, never reaching this guard. Recommend (non-blocking, can be a fast-follow): add a subtest seeding a Panels-less pending against a panel that has genuinely resolved the slot and is NOT covered by any durable audit array, asserting Refuse containing 'origin panel unrecorded'."
+    },
+    {
+      "severity": "info",
+      "description": "Empirical sweep in the isolated /tmp clone at 6f6634b4: go build ./... clean, go vet ./... clean, go test ./internal/panel ./internal/complete ./internal/bead ./cmd/mindspec all PASS. The shared worktree's git status remained clean throughout; every mutation was applied to and reverted from the /tmp copy only, verified byte-identical to the pristine original via diff after each restore."
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Traced the durable-obligation protocol against my lens (a)-(e); the net invariant holds. (a) applied≡persisted: the marker write is folded into panelGate; persistRefutationPending returns on read OR write failure, and panelGate turns that into a genuine Block (guard.NewFailure) returning applied=nil so the RC stays unresolved — no abort-with-applied. (b) reconcilePendingRefutations runs at complete.go:563, and every early return between panelGate (383) and close (568) is an error/Block path, so reconcile is reached before close on panel-present, no-panel, AND both hatches (env-skip/config-disabled continue but still set panelReg and fall through). (c) discharge keys strictly on dischargeEvidence over a re-tally of panelReg.Dir (LatestRound>round, or ==round & slot verdict!=RC) — never the gate Action; nil res (no panel / tally error) ⇒ false ⇒ Refuse. (d) unionPendingEntries/unionRefutations/unionDischargedEntries all keep existing entries (existing-wins) then append, so an older unsatisfied pending survives a newer marker write. (e) reconcile GetMetadata read-error ⇒ guard Refuse; MergeMetadata/GetMetadata are fail-closed (bdcli.go:276-279/315-322), closing the erasure hole. Build/gofmt/vet clean; targeted+full+race suites green in /tmp. Mutation-probed 4 load-bearing claims (swallow marker Block; dischargeEvidence=true; reconcile read-error no-refuse; MergeMetadata proceed-from-empty) — each drove the corresponding test RED, so the safety tests are real. Found no lost-audit-while-merge-lands path. One non-blocking deviation noted (safe direction).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "area": "reconcilePendingRefutations (panel_advisory.go:599-612)",
+      "note": "Plan L534 says reconcile should act on pending entries 'NOT already covered by a durable panel_refuted/refutation_discharged entry', but the code re-evaluates ALL pending entries without consulting existing panel_refuted_entries/refutation_discharged_entries. Effect is strictly MORE conservative (extra Refuse), never less: an already-satisfied entry gets harmlessly re-satisfied/re-discharged when the panel is present, but on the narrow recovery window (close didn't persist per 2u0u AND panel.json removed before retry) an already-satisfied X@1 false-REFUSES. This can never cause a lost-audit-while-merge-lands — the net safety invariant is upheld (over-enforced). NON-BLOCKING per my lens; recovery is 'restore the panel'. Optional hardening: treat entries already in panel_refuted_entries/refutation_discharged_entries as resolved and skip them, matching the plan text and avoiding the false-refuse."
+    },
+    {
+      "severity": "info",
+      "area": "TestPanelRefuted_AuditSurvivesLaterReadError (documented deviation #2)",
+      "note": "This test models the erasure-survival contract at the complete layer (stubbed seam), so it did NOT go RED when I reopened the bead.MergeMetadata erasure hole (MUT-4). That is fine: the REAL fail-closed guarantee is pinned by internal/bead TestMergeMetadata_FailClosedOnReadError, which DID go RED under MUT-4. The load-bearing claim is genuinely pinned; the survival test is a complementary cross-package model, not the sole guard. Legitimate."
+    },
+    {
+      "severity": "info",
+      "area": "empirical",
+      "note": "go build ./... OK; gofmt -l ./cmd ./internal empty; go vet panel/complete/bead OK. go test panel(Refut|Round|Dup|PanelGateDecision), complete(PanelRefuted|PanelGate), bead(MergeMetadata|GetMetadata) all ok. Full sweep panel/complete/bead/cmd/mindspec ok; -race on panel/complete/bead ok. Scope = 14 files (panel/complete/bead), one commit ce9f5395, no ADR edits. Blast-radius grep: release.go ignores (_=), approve/spec.go propagates, repair.go/phase.EnsureMigrated already-fatal — no class regresses. Shared worktree left clean; all work done in /tmp clone."
+    }
+  ]
+}
