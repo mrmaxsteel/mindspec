@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.9,
+  "rationale": "The round-4 fix re-grounds BranchExistsE on `git show-ref --verify refs/heads/<name>` WITHOUT --quiet, asserting a three-way BY EXIT CODE ALONE: 0=present, 1=genuinely-absent (false,nil), else(128)=infra error (refuse). I reproduced the exit codes on the two git binaries actually on PATH in this worktree — homebrew git 2.51.2 and /usr/bin Apple git 2.50.1 — and the exit-1-absent leg DOES NOT EXIST: genuine absence returns exit 128 (`fatal: '...' - not a valid ref`), the SAME code as an existing-branch-with-unreadable-store. So exit 128 CONFLATES genuine-absence and unreadable-store; the discriminator the whole fix depends on is not present on the real toolchain. Consequences: (a) impl-per-spec (128->error->refuse) FALSE-REFUSES every normal merged-and-deleted branch — the exact round-3 false-refusal the spec claims to avoid 'by construction'; (b) treating 128 as absent RE-OPENS the o4fd fail-open. The two mandated tests are mutually unsatisfiable (ThreeWay needs absent from 128; UnreadableRefStore needs error from 128). Either the orchestrator's round-4 table (absent->1) came from a different git, in which case the discriminator is git-version-dependent for a security-critical gate — still blocking. The gate design core is fine; only the branch-probe primitive is mis-grounded.",
+  "concrete_changes_required": [
+    "Re-verify the round-4 exit-code table on the project's real git toolchain: on git 2.50.1 (Apple) AND 2.51.2 (homebrew), `git show-ref --verify refs/heads/<absent>` WITHOUT --quiet returns exit 128, NOT 1 (fatal: '...' - not a valid ref); an existing branch with `chmod 000 .git/refs/heads` also returns 128. Exit code alone cannot separate genuine-absence from unreadable-store on these versions.",
+    "Re-ground BranchExistsE's three-way on a primitive/classification that empirically distinguishes genuine-absent from unreadable-store on git >= 2.50 — e.g. classify `show-ref --verify` exit 128 by stderr (`- not a valid ref` => genuine absence => (false,nil); any other stderr / permission error => infra error => (false,non-nil)), or make the load-bearing infra-refusal the ref-store-readability check (MergeBase at impl.go:249 currently only 'defense-in-depth') rather than the probe exit code. The spec must not depend on `show-ref --verify` returning exit 1 for absence.",
+    "Update the AC1(c) contract for TestBranchExistsE_ThreeWay and TestBranchExistsE_UnreadableRefStore so they are jointly satisfiable on the real toolchain: both a genuinely-absent branch and an existing-branch-unreadable-store yield exit 128, so any test/impl mapping must classify beyond the raw exit code.",
+    "Correct the spec claims 'the only probe whose exit code alone distinguishes all three states' / 'the unambiguous 0/1/128 three-way by exit code alone' / 'exit 1 for genuine absence' in R1, the Scope gitutil bullet, and OQ2 — these are empirically false on git 2.50.1 and 2.51.2."
+  ],
+  "findings": [
+    {
+      "id": "O1-R5-1",
+      "grade": "MISSED",
+      "severity": "blocking",
+      "lens": "anti-gaming completeness",
+      "summary": "The round-4 fix does not close the branch-probe masking class and introduces a happy-path false-refusal. `git show-ref --verify refs/heads/<name>` WITHOUT --quiet returns exit 128 for BOTH genuine absence AND an unreadable ref store on git 2.51.2 (homebrew) and 2.50.1 (Apple) — the two binaries on PATH here. The spec's core three-way (exit 1 -> genuinely-absent (false,nil); else 128 -> infra error -> refuse) is therefore empirically wrong: the exit-1-absent leg is unreachable, exit 128 conflates absence and infra failure, so following the spec refuses every normal merged-and-deleted branch (false-refusal), while treating 128 as absent re-opens the o4fd fail-open. TestBranchExistsE_ThreeWay (128 must read as absent) and TestBranchExistsE_UnreadableRefStore (128 must read as error) are mutually unsatisfiable by exit code alone.",
+      "evidence": "In a throwaway /tmp repo on git 2.51.2 AND git 2.50.1: `git show-ref --verify refs/heads/bead/foo` (exists) -> exit 0; `git show-ref --verify refs/heads/bead/deleted` (absent) -> exit 128 `fatal: 'refs/heads/bead/deleted' - not a valid ref`; existing branch + `chmod 000 .git/refs/heads` -> exit 128. `--quiet` variant: absent -> exit 1, unreadable -> exit 1 (as spec notes). The claimed 0/1/128 three-way requires --quiet-off absence to be exit 1, which neither git binary produces."
+    }
+  ]
+}

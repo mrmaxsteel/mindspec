@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "O3 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.88,
+  "rationale": "My assigned lens (decomposition + impacted-domains parity) is CLEAN: the round-4 fix keeps bead-1 as the one `BranchExistsE` gitutil seam plus one added test case (`TestBranchExistsE_UnreadableRefStore`), touches no new file/function/package, the Impacted Domains section is byte-untouched, `internal/gitutil` stays under execution with no undeclared path, and the general-principle / defense-in-depth notes add no new work surface (they describe existing impl.go:249/:372 behavior). Spec still cleaves into ~2-3 pannellable beads. However, BRIEF item 2 asked me to confirm the exit codes myself, and I reproduced (git 2.51.2, three clean /tmp repos) that the fix's central empirical claim is FALSE: `git show-ref --verify refs/heads/<name>` WITHOUT `--quiet` exits **128** for a GENUINELY ABSENT ref, not 1. So the contract's `exit 1 -> (false,nil) absent` branch is never taken; genuine absence (128) falls into `any other exit -> non-nil error -> gate REFUSES` = a false-refusal on the normal merged-and-deleted happy path (the round-3 G2 regression the spec claims to avoid 'by construction'). Worse, absent(128) and unreadable-store(128) are indistinguishable by exit code, so no discrimination is achieved. Per 'findings never out-voted,' I must flag this.",
+  "concrete_changes_required": [
+    "Correct the empirically-false exit-code table. On git 2.51.2, `git show-ref --verify refs/heads/<name>` WITHOUT `--quiet` yields: present->0, GENUINELY ABSENT->128 (fatal 'not a valid ref'), unreadable-store->128 — reproduced in three clean /tmp repos. The spec's claim 'show-ref --verify without --quiet exits 128 [for unreadable] vs 1 for genuine absence' (Requirement 1, Scope gitutil bullet, OQ2) is false: genuine absence is 128, NOT 1. Only the `--quiet` variant returns 1 for absent (and, per the round-4 table, 1 for unreadable = the masking the fix set out to close).",
+    "Re-ground BranchExistsE on a primitive that actually satisfies its own falsifier ('a genuinely-absent branch must yield (false,nil), an infra error must yield non-nil error'). A single show-ref exit-code invocation cannot separate all three: `--quiet` masks absent==unreadable==1; no-`--quiet` masks absent==unreadable==128 AND turns the happy-path deletion into a refuse. A working design needs either (a) `show-ref --verify --quiet` (absent->1->(false,nil)) PLUS an explicit `refs/heads` readability/stat pre-check to catch the masked-unreadable case, or (b) stderr/error-class discrimination of the 128 'not a valid ref' (absent) vs a permission/corrupt-store error (refuse), not exit code alone.",
+    "Update TestBranchExistsE_ThreeWay / TestBranchExistsE_UnreadableRefStore AC wording so the asserted exit codes match the corrected primitive (the current AC1 pins exit 1 for genuine absence, which will not reproduce)."
+  ],
+  "findings": [
+    {
+      "id": "decomposition-parity",
+      "grade": "ADDRESSED",
+      "note": "Bead-1 not over-scoped: same single `BranchExistsE` gitutil seam, one added test case only. In-Scope gitutil bullet still names only gitops.go + the one seam. Spec still cleaves into ~2-3 pannellable beads."
+    },
+    {
+      "id": "impacted-domains-parity",
+      "grade": "ADDRESSED",
+      "note": "Impacted Domains section byte-untouched by the fix (word-diff confined to Req1/Scope-gitutil/OQ2/AC1/Validation). internal/gitutil under execution; defense-in-depth note cites only already-declared impl.go:249/:372 and executor. No path touched-but-undeclared."
+    },
+    {
+      "id": "scope-creep-principle-and-did",
+      "grade": "ADDRESSED",
+      "note": "General principle (fail-closed on any non-0/1 outcome) and defense-in-depth note (MergeBase@:249 already aborts) are clarifications/observations of existing code, adding no new edit surface. No scope creep."
+    },
+    {
+      "id": "showref-noquiet-genuine-absent-is-128-not-1",
+      "grade": "NEW_ISSUE",
+      "note": "Reproduced git 2.51.2 (3x clean /tmp repos): `git show-ref --verify refs/heads/<absent>` (no --quiet) exits 128, not 1. The fix's exit-0/1/128 three-way does not exist: genuine absence (128) maps to the contract's error branch -> gate REFUSES on the normal merged-and-deleted happy path (round-3 G2 false-refusal regression the spec claims to avoid 'by construction'), and absent(128)==unreadable(128) are indistinguishable so the masking the fix targets is not actually closed. The round-4 orchestrator table appears to have combined the `--quiet` absent code (1) with the no-`--quiet` unreadable code (128) into a three-way no single invocation produces."
+    }
+  ]
+}
