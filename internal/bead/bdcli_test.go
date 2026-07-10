@@ -686,3 +686,123 @@ func TestMergeMetadata_WriteFailureMessageOmitsRawCommand(t *testing.T) {
 		t.Errorf("plumbing error quotes the banned raw command (Req 19): %v", err)
 	}
 }
+
+// --- Fail-closed MergeMetadata / GetMetadata tests (Spec 114 R2/Bead 2) ---
+
+// TestMergeMetadata_FailClosedOnReadError is the carry-forward #1 / review
+// item 2 pin: a metadata-READ failure (`bd show` erroring) must RETURN the
+// error and perform NO replace-write — the old behavior proceeded from an
+// empty map and replace-wrote, ERASING every existing key. Asserted here by
+// confirming the `update` command is never even invoked.
+func TestMergeMetadata_FailClosedOnReadError(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	updateCalled := false
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("false") // simulate a bd show read failure
+		}
+		if len(args) > 0 && args[0] == "update" {
+			updateCalled = true
+		}
+		return exec.Command("echo", "unexpected")
+	}
+
+	err := MergeMetadata("epic-92", map[string]interface{}{"mindspec_phase": "review"})
+	if err == nil {
+		t.Fatal("expected an error on a metadata read failure (fail-closed)")
+	}
+	if updateCalled {
+		t.Error("a read failure must NOT proceed to a replace-write — existing keys must never be erased (fail-closed)")
+	}
+}
+
+// TestMergeMetadata_CleanEmptyReadStillMergesFromEmpty is the companion
+// control: a GENUINELY empty (but clean, non-erroring) `bd show` result is
+// NOT a read failure — MergeMetadata still merges from empty and writes,
+// unchanged from before this fix.
+func TestMergeMetadata_CleanEmptyReadStillMergesFromEmpty(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	var capturedUpdate []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("echo", "[]") // genuinely empty, clean read
+		}
+		if len(args) > 0 && args[0] == "update" {
+			capturedUpdate = append([]string{name}, args...)
+			return exec.Command("echo", "updated")
+		}
+		t.Fatalf("unexpected command: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+
+	if err := MergeMetadata("epic-92", map[string]interface{}{"mindspec_phase": "review"}); err != nil {
+		t.Fatalf("MergeMetadata: %v", err)
+	}
+	if len(capturedUpdate) < 5 || capturedUpdate[3] != "--metadata" {
+		t.Fatalf("expected the write to still proceed from an empty base: %v", capturedUpdate)
+	}
+	var after map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedUpdate[4]), &after); err != nil {
+		t.Fatalf("parse written metadata: %v", err)
+	}
+	if after["mindspec_phase"] != "review" || len(after) != 1 {
+		t.Errorf("expected the update alone in the merged map, got %v", after)
+	}
+}
+
+// TestGetMetadata exercises the read helper the durable-obligation
+// reconciliation (internal/complete, Spec 114 R2) consults: it returns the
+// parsed metadata map on a clean read (including a genuinely empty one,
+// non-error) and surfaces a read/parse error rather than a silent empty map.
+func TestGetMetadata(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	t.Run("parses metadata", func(t *testing.T) {
+		execCommand = func(name string, args ...string) *exec.Cmd {
+			return exec.Command("echo", `[{"metadata":{"mindspec_phase":"implement","spec_num":92}}]`)
+		}
+		got, err := GetMetadata("epic-92")
+		if err != nil {
+			t.Fatalf("GetMetadata: %v", err)
+		}
+		if got["mindspec_phase"] != "implement" {
+			t.Errorf("mindspec_phase = %v, want implement", got["mindspec_phase"])
+		}
+	})
+
+	t.Run("genuinely absent metadata returns an empty map, no error", func(t *testing.T) {
+		execCommand = func(name string, args ...string) *exec.Cmd {
+			return exec.Command("echo", "[]")
+		}
+		got, err := GetMetadata("epic-92")
+		if err != nil {
+			t.Fatalf("GetMetadata: %v", err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Errorf("got %v, want a non-nil empty map", got)
+		}
+	})
+
+	t.Run("bd show failure surfaces a read error", func(t *testing.T) {
+		execCommand = func(name string, args ...string) *exec.Cmd {
+			return exec.Command("false")
+		}
+		if _, err := GetMetadata("epic-92"); err == nil {
+			t.Fatal("expected an error on a bd show failure")
+		}
+	})
+
+	t.Run("unparseable JSON surfaces a parse error", func(t *testing.T) {
+		execCommand = func(name string, args ...string) *exec.Cmd {
+			return exec.Command("echo", "not json")
+		}
+		if _, err := GetMetadata("epic-92"); err == nil {
+			t.Fatal("expected an error on unparseable bd show output")
+		}
+	})
+}

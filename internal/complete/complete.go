@@ -40,7 +40,15 @@ var (
 	fetchBeadAsOfFn         = next.FetchBeadAsOf
 	findEpicForBeadFn       = phase.FindEpicForBead
 	completeMergeMetadataFn = bead.MergeMetadata
-	gitUserEmailFn          = bead.GitUserEmail
+	// completeGetMetadataFn is the read half of the metadata seam pair (Spec
+	// 114 R2/Bead 2, carry-forward #1): the durable-obligation marker write
+	// (panelGate's persistRefutationPending) and the pre-close
+	// reconciliation (reconcilePendingRefutations) both read bead metadata
+	// through this seam BEFORE unioning/deciding. A read/parse error is
+	// fail-closed by construction (bead.GetMetadata) — never a licence to
+	// proceed as if the store were empty.
+	completeGetMetadataFn = bead.GetMetadata
+	gitUserEmailFn        = bead.GitUserEmail
 	// checkDirtyTreeFn is the ADR-0025 artifact-aware tree classification
 	// shared with `mindspec next` (spec 092 Req 6, DQ-2: direct reuse of
 	// next's classifier — internal/complete already imports internal/next).
@@ -372,7 +380,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
 	// tree it honors the co-located reviews ONLY (root review/ ignored once
 	// flat). panelGateRoots picks the set from workspace.DetectLayout.
-	panelReg, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
+	panelReg, appliedRefutations, panelGateErr := panelGate(beadID, panelGateRoots(root, wtPath, specID), wtPath, panelGateEnabled, advisoryOut)
 	if panelGateErr != nil {
 		return nil, panelGateErr
 	}
@@ -541,6 +549,19 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// flag is set.
 	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
 		return nil, adrDivergenceFailure(beadID, joinResultErrorMessages(adrResult))
+	}
+
+	// 3.75. DURABLE-OBLIGATION reconciliation (Spec 114 R2, Bead 2): every
+	// refutation_pending entry recorded on bead metadata — the FULL unioned
+	// set across every prior run, not just this run's — must be satisfied,
+	// verified-discharged, or refused BEFORE the close below. Runs on EVERY
+	// completion path (panel-present, no-panel, AND hatch): the env-skip and
+	// config-disabled hatches bypass the GATE DECISION above, but NOT this
+	// pre-existing-obligation reconciliation (round-5 item 3 / G3). A bead
+	// with no recorded pending reconciles to a no-op (§6 fail-open
+	// preserved).
+	if err := reconcilePendingRefutations(beadID, panelReg, appliedRefutations); err != nil {
+		return nil, err
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)

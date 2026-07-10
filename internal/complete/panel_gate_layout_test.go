@@ -149,7 +149,7 @@ func TestPanelGate_FlatIgnoresRootReview_CoLocatedDrives(t *testing.T) {
 
 	// On a flat tree the repo-root panel is NOT scanned → no registration →
 	// fail-open: the gate does NOT block.
-	if _, err := panelGate(beadID, roots, "", true, nil); err != nil {
+	if _, _, err := panelGate(beadID, roots, "", true, nil); err != nil {
 		t.Fatalf("a root review/ panel must be IGNORED on a flat tree (not block); got: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestPanelGate_FlatIgnoresRootReview_CoLocatedDrives(t *testing.T) {
 		ReviewedHeadSHA: beadSHA,
 	}, subThresholdVerdicts())
 
-	_, err := panelGate(beadID, roots, "", true, nil)
+	_, _, err := panelGate(beadID, roots, "", true, nil)
 	if err == nil {
 		t.Fatal("a sub-threshold CO-LOCATED panel must BLOCK on a flat tree")
 	}

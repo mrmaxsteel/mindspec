@@ -45,9 +45,18 @@ const (
 // Decision is the panel gate's outcome: an action plus the message to surface.
 // The caller maps it to its own protocol (the hook -> hook.Result, the
 // in-binary gate -> guard.NewFailure for Block).
+//
+// AppliedRefutations (Spec 114 R2) is populated ONLY on the leg-(10)
+// threshold Allow return — the only path where a refutation can have
+// changed the outcome (every applied refutation is outcome-relevant by
+// construction: without it, its RC would have blocked at leg 9.5).
+// Warn/short-circuit paths never evaluate refutations and return nil. Note:
+// Decision is no longer comparable with ==/!= (this field is a slice) —
+// callers needing equality must compare Action+Message instead.
 type Decision struct {
-	Action  GateAction
-	Message string
+	Action             GateAction
+	Message            string
+	AppliedRefutations []Refutation
 }
 
 // RawMergeFence is appended to every Block message (Spec 093 Req 12 / G3-1,
@@ -281,9 +290,13 @@ func PanelGateDecision(f GateFacts) Decision {
 	}
 
 	// (10) Threshold — N−1 (Req 12, single home in panel.ApproveThreshold).
+	// Spec 114 R2: this is the ONLY leg that returns AppliedRefutations — a
+	// refutation only ever changes the outcome by clearing leg 9.5's block,
+	// so this Allow is the sole point where "what got applied" is
+	// outcome-relevant.
 	threshold := p.ApproveThreshold()
 	if f.Res.Approves >= threshold && threshold > 0 {
-		return Decision{Action: Allow}
+		return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations()}
 	}
 	return Decision{Action: Block, Message: fmt.Sprintf(
 		"panel %s round %d: %d/%d APPROVE — threshold is %d/%d. Run /ms-bead-fix with %s, then re-panel%s",

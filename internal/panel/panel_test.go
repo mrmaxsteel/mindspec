@@ -251,7 +251,10 @@ func TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision(t *testing.T) {
 		}
 
 		got := PanelGateDecision(facts)
-		if got != want {
+		// Spec 114 R2: Decision gained an AppliedRefutations slice field and
+		// is no longer Go-comparable with != — compare the Action+Message
+		// fields every other caller already compares.
+		if got.Action != want.Action || got.Message != want.Message {
 			t.Errorf("PanelGateDecision changed after ReviewerCountNote(_, %d): got %+v, want %+v", configDefault, got, want)
 		}
 	}

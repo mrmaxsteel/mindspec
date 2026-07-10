@@ -89,6 +89,43 @@ type Panel struct {
 	// and parse-lenience are a STABLE CONTRACT (spec 112 R9) — no follow-up
 	// may change any of the four silently.
 	Gate string `json:"gate,omitempty"`
+
+	// Refutations is the audited-refutation escape (Spec 114 R2, OQ3): each
+	// entry records a human operator's dismissal of one reviewer's
+	// unresolved REQUEST_CHANGES at one round. There is no CLI verb to
+	// write one (OQ3 — /ms-panel-tally's procedure is to hand-edit
+	// panel.json); the gate carries the whole validation burden
+	// (tally.go's UnresolvedVerdicts / AppliedRefutations, the single home
+	// of the matching rule). Parse-lenient EXACTLY like AbandonReason
+	// above: an absent array, an empty array, or entries with
+	// missing/empty fields are consumer concerns, never a parse error —
+	// enforcement lives in the gate. The one asymmetry: a TYPE-mismatched
+	// entry (e.g. a string `round`) fails json.Unmarshal of the WHOLE
+	// panel.json → Registration.Err → gate leg (2) Block (gate.go) — the
+	// fail-CLOSED direction, which is the safe one (the OQ2/R2 requirement
+	// is only that lenience never tips fail-OPEN). Every pre-existing
+	// panel.json omits this field → byte-identical behavior (the §1
+	// precedent of 109's approve_threshold and 112's gate).
+	Refutations []Refutation `json:"refutations,omitempty"`
+}
+
+// Refutation is one audited dismissal of a reviewer's unresolved
+// REQUEST_CHANGES (Spec 114 R2). It clears exactly one (Slot, Round) pair —
+// never a REJECT, hard_block, or unrecognized verdict, never another slot,
+// and never a later re-RC at a newer round (tally.go's AppliedRefutations
+// is the sole interpreter of this matching rule).
+type Refutation struct {
+	// Slot is the reviewer slot this refutation targets — matched
+	// byte-exactly (case-sensitive) against a Verdict.Slot.
+	Slot string `json:"slot"`
+	// Round is the round this refutation targets — matched exactly
+	// against the panel's LatestRound; a round-N entry never clears a
+	// later round-N+1 re-RC on the same slot.
+	Round int `json:"round"`
+	// Reason is the human-authored justification (who/why).
+	Reason string `json:"reason,omitempty"`
+	// Evidence points to supporting evidence (a commit, a comment, a doc).
+	Evidence string `json:"evidence,omitempty"`
 }
 
 // ApproveThreshold is the single home of the panel-approval threshold rule

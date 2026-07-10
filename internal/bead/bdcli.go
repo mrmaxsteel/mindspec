@@ -263,23 +263,25 @@ func ListJSON(args ...string) ([]byte, error) {
 // MergeMetadata reads an issue's existing metadata, merges in the given key-value
 // pairs, and writes the merged metadata back. This is the standard pattern for
 // updating metadata without losing existing fields (Spec 080).
+//
+// FAIL-CLOSED (Spec 114 R2/Bead 2, carry-forward #1 / review item 2): a
+// read/parse FAILURE of the existing metadata now RETURNS the error instead
+// of silently proceeding from an empty map and replace-writing — a prior
+// read failure used to ERASE every existing key on the next write. A
+// genuinely-absent-but-clean read (the bead exists but carries no metadata
+// yet, or `bd show` reports an empty items array) still merges from empty,
+// unchanged — only a genuine READ/PARSE failure now aborts. See GetMetadata,
+// the read half this shares.
 func MergeMetadata(issueID string, updates map[string]interface{}) error {
-	merged := make(map[string]interface{})
-
-	// Read existing metadata
-	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
-	if err == nil {
-		var items []struct {
-			Metadata map[string]interface{} `json:"metadata"`
-		}
-		if json.Unmarshal(out, &items) == nil && len(items) > 0 && items[0].Metadata != nil {
-			for k, v := range items[0].Metadata {
-				merged[k] = v
-			}
-		}
+	existing, err := GetMetadata(issueID)
+	if err != nil {
+		return fmt.Errorf("bd metadata merge-read failed for %s: %w", issueID, err)
 	}
 
-	// Apply updates
+	merged := make(map[string]interface{}, len(existing)+len(updates))
+	for k, v := range existing {
+		merged[k] = v
+	}
 	for k, v := range updates {
 		merged[k] = v
 	}
@@ -297,6 +299,35 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 		return fmt.Errorf("bd metadata merge-write failed for %s: %w", issueID, err)
 	}
 	return nil
+}
+
+// GetMetadata reads issueID's current metadata via `bd show <id> --json` and
+// returns the parsed map (Spec 114 R2/Bead 2, carry-forward #1). A
+// genuinely-absent metadata field (an existing bead with no metadata, or an
+// empty `bd show` items array) returns an empty, non-nil map and a nil
+// error — NOT an error condition. Only a genuine command failure (bd itself
+// erroring) or an unparseable response returns an error — the fail-closed
+// signal MergeMetadata above, and the complete-side durable-obligation
+// reconciliation (internal/complete), both rely on: a read error is never a
+// licence to proceed as if the store were empty.
+func GetMetadata(issueID string) (map[string]interface{}, error) {
+	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
+	if err != nil {
+		return nil, fmt.Errorf("bd show %s failed: %w", issueID, err)
+	}
+	var items []struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := json.Unmarshal(out, &items); err != nil {
+		return nil, fmt.Errorf("parsing bd show %s output: %w", issueID, err)
+	}
+	merged := make(map[string]interface{})
+	if len(items) > 0 && items[0].Metadata != nil {
+		for k, v := range items[0].Metadata {
+			merged[k] = v
+		}
+	}
+	return merged, nil
 }
 
 // tracedOutput runs a bd command via cmd.Output() with trace instrumentation.
