@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "G1 gpt-5.6-sol",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "Pinned review at 38ee213c found the ADR and both SKILL copies accurate to shipped code: Refutation is {slot,round,reason,evidence}; only a latest-round REQUEST_CHANGES is cleared; Approves remains unchanged; leg 9.5 remains layered above the threshold floor; applied refutations are union-persisted as self-contained pending metadata and reconciled from that marker on every pre-close path, including hatches, with fail-closed metadata operations. No discharge design is reintroduced. Section 8 expressly limits durability to applied-refutation audit records, reaffirms the empty-reason footgun, and disclaims general tamper resistance. Hygiene passed: exactly three docs changed, SKILL mirrors match, refutation grep hits both required files, build exited successfully (with a non-fatal Go stat-cache permission warning), panel and complete tests passed, and the bead worktree stayed clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G1-accuracy",
+      "disposition": "pass",
+      "detail": "ADR/SKILL claims match internal/panel and internal/complete behavior at 38ee213c, including satisfy-from-marker and fail-closed GetMetadata/MergeMetadata."
+    },
+    {
+      "id": "G1-no-discharge",
+      "disposition": "pass",
+      "detail": "grep -rin 'refutation_discharged|discharge' over the three pinned docs produced no output."
+    },
+    {
+      "id": "G1-scope",
+      "disposition": "pass",
+      "detail": "Section 8 is narrowly scoped to applied-refutation audit durability; it retains the anti-footgun/not-anti-adversary posture and adds no signing, hashing, or broad tamper-resistance claim."
+    },
+    {
+      "id": "G1-hygiene",
+      "disposition": "pass",
+      "detail": "diff -q was silent; changed-file count was 3 and all were docs; grep -n refut hit ADR and plugin SKILL; go build ./... exited 0 after a non-fatal stat-cache permission warning; go test reported ok for internal/panel (cached) and internal/complete (4.886s); post-status was empty."
+    }
+  ]
+}

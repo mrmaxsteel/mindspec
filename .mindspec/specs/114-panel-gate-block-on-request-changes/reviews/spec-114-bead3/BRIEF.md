@@ -1,0 +1,32 @@
+# spec-114-bead3 — Round 1 Bead Panel (8 reviewers) — DOCS: ADR-0037 amendment + refutation procedure
+
+**Bead**: `mindspec-mvp8.3` (spec 114, Bead 3 = docs). **Worktree**: `/Users/Max/replit/mindspec/.worktrees/worktree-spec-114-panel-gate-block-on-request-changes/.worktrees/worktree-mindspec-mvp8.3`
+**Branch**: `bead/mindspec-mvp8.3` @ **38ee213ca901b93b1577e7fade7810401e80c5fd**.
+**Panel**: 8 slots — O1–O3 Opus, S1–S3 Sonnet, F1 Fable, **G1 codex (gpt-5.6-sol)**. **Pass = 8/8 UNANIMOUS APPROVE.** Findings fixed or evidenced-refuted, never out-voted.
+
+**READ-ONLY RULE**: verdict JSON only; pin reads to `38ee213c`; scratch under ABSOLUTE /tmp only; leave `git status` clean. Verdict ONLY to the absolute path at bottom.
+
+## What this bead does (DOCS-ONLY — no Go code)
+Spec 114 made `mindspec complete` block on any unresolved REQUEST_CHANGES (Bead 1) with the only per-slot escape being an audited refutation (Bead 2). Bead 3 documents that in the living contract: it amends **ADR-0037** and adds the refutation procedure to BOTH `ms-panel-tally` SKILL copies. The 3 files (the ONLY files touched, +140/+14 lines):
+- `.mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` — four dated `Amendment (2026-07-10, spec 114 …)` blocks (§1 schema, §3 threshold-as-floor, §7 audited-refutation escape + durable-obligation, §8 audit-durability carve-out, §6 refusal branch).
+- `plugins/mindspec/skills/ms-panel-tally/SKILL.md` — new "Refutation procedure" item + 2 anti-pattern bullet updates.
+- `.claude/skills/ms-panel-tally/SKILL.md` — byte-identical mirror.
+
+## ⚠️ The docs MUST describe the SHIPPED no-discharge design (NOT the plan's original discharge text)
+During Bead-2 review the discharge-by-re-tally path was DELETED (operator decision — 3 panel rounds found it spoofable). The shipped mechanism, which the ADR/SKILL MUST match:
+- A refutation is recorded by hand-editing `panel.json`'s `refutations` array `{slot, round, reason, evidence}`. The GATE validates it (clears ONLY that slot's latest-round REQUEST_CHANGES — never REJECT/hard_block/unrecognized, never staleness/incompleteness/the approve floor; a newer-round re-RC blocks again; `Approves` never incremented).
+- When applied, a **self-contained `refutation_pending` marker** `{slot,round,reason,evidence}` is durably persisted as part of the allow-decision (UNION not replace; read-or-write failure ⟹ BLOCK). Before close, on EVERY path incl. hatch, reconciliation writes the honest **`panel_refuted`** audit FROM THE MARKER (works with panel.json removed). Fail-closed `GetMetadata`/`MergeMetadata`; malformed marker ⟹ Refuse. Natural resolution (no refutation applied) → no marker → zero ceremony.
+- There is **NO `refutation_discharged`, NO discharge, NO re-tally**. The docs must NOT reintroduce that concept (a one-line "audit written from a self-contained marker, not by re-reading panels" rationale is fine).
+
+## What to verify (each concern → a disposition)
+1. **Accuracy vs shipped code (G1 codex + O1 — the core)** — every claim in the ADR amendments + SKILL procedure matches the ACTUAL shipped behavior. Ground against: `internal/panel/panel.go` (`Refutation` schema), `internal/panel/tally.go` (`UnresolvedVerdicts`/`AppliedRefutations`, refute-only-latest-round-RC, Approves-untouched), `internal/panel/gate.go` (leg 9.5 layered on the threshold floor), `internal/complete/panel_advisory.go` (`persistRefutationPending` self-contained marker, `reconcilePendingRefutations` satisfy-from-marker, fail-closed), `internal/bead/bdcli.go` (fail-closed MergeMetadata/GetMetadata). Any doc claim the code doesn't support (over-claim or wrong mechanism) = REQUEST_CHANGES.
+2. **NO discharge language (G1/S2/F1)** — `grep -rin 'refutation_discharged|discharge'` across the 3 files returns nothing describing a discharge audit (a "not by re-reading panels" rationale phrase is acceptable). The §7/§8 text describes satisfy-from-marker, not verified-discharge. Confirm.
+3. **§ amendment completeness (O2)** — the ADR carries the §1, §3, §7, §8, and §6 changes as dated 2026-07-10 spec-114 blocks in the file's house style; §3 states the ADR-0040 composition (approve_threshold floor still meaningful, no longer sufficient); §8 is a NARROW audit-durability carve-out (applied refutations only; empty-reason footgun re-affirmed; general anti-adversary posture UNCHANGED — no over-claim of tamper-resistance); §6 refusal branch (durable unsatisfied obligation doesn't fail open; pristine beads unchanged). No over- or under-claim.
+4. **SKILL procedure correct + framing (O3/S1)** — the "Refutation procedure" item sits beside the abandon procedure, names the exact schema `{slot,round,reason,evidence}`, the filename-derived slot, the gate-validates-not-record contract, the durable `panel_refuted` audit, and the abandon-parallel "legitimate because always audited, never silent / reason+evidence carry legitimacy / empty-reason footgun" framing; the example slot format matches real verdict filenames. The 2 anti-pattern bullets updated (any-unresolved-RC-blocks + refutation as the only per-slot escape; N−1 now a floor). Does NOT advertise a paste-able incantation beyond the documented procedure.
+5. **Mirror + hygiene (S3 + G1 empirical)** — `diff -q` the two SKILL copies (byte-identical); exactly the 3 files, one commit, no Go code; `grep -n 'refut'` hits both ADR + plugins SKILL (AC6); `go build ./... && go test ./internal/panel ./internal/complete` green (docs-only, no code drift).
+6. **Scope (S3)** — only the 3 doc files; no plan.md/other edits (the plan amendment was handled separately by the orchestrator); no stray files.
+
+## Per-slot lens
+- **G1 codex** — empirical: grep/mirror-diff/build/test + ground the ADR claims against the real shipped code (does the doc match what the binary does?). **O1** accuracy of the durable-obligation description (satisfy-from-marker, fail-closed, hatch) vs code. **O2** ADR §-completeness + no over-claim (§8 carve-out scope). **O3** SKILL procedure correctness + framing + anti-pattern updates. **S1** codebase-pin (the cited symbols/behaviors exist). **S2** no-discharge-language + no-stale-references. **S3** scope fence + mirror-identical. **F1** adversarial (any doc claim the code contradicts; any reintroduced discharge concept; any over-claim of tamper-resistance).
+
+Verdict: APPROVE / REQUEST_CHANGES / REJECT. Output JSON to `<this-dir>/<your-slot>-round-1.json` — keys `reviewer_id`, `verdict`, `confidence`, `rationale` (≤180 words), `concrete_changes_required`, `findings`.
