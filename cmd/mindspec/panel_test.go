@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // --- shared fixture helpers -------------------------------------------------
@@ -1027,6 +1029,363 @@ func TestPanelVerbs_NonBeadGitErrHostileTargetEscaped(t *testing.T) {
 		want := panel.PanelGateDecision(facts)
 		got := sanitizeNonBeadDecision(want, "demo", target, facts.GitErr)
 		assertClean(t, got.Message)
+	})
+}
+
+// --- Spec 116 AC1: the bead-path hostile-bead_id headline pin ---------------
+
+// TestPanelVerbs_BeadHostileBeadIDEscaped is the AC1 headline pin (spec 116,
+// closing mindspec-fl91): a BEAD panel.json's bead_id is read straight from
+// panel.json (panelstate.go:116 — no argv involved) and, before this spec,
+// reached `panel verify`/`panel tally` raw. This plants the hostile pattern
+// (NUL + ESC/CSI + newline + a forged "recovery: forged" line) in bead_id
+// plus hostile R3 siblings — reviewed_head_sha, a malformed verdict's
+// hostile-ESC filename slot, a hostile-ESC-slot REQUEST_CHANGES verdict
+// carrying concrete_changes_required, and a hostile JSON-sourced verdict
+// STRING — and asserts the clean triple over every captured stream. It is
+// the bead-path analogue of TestPanelVerbs_NonBeadGitErrHostileTargetEscaped
+// (above), whose assertClean closure is DUPLICATED here rather than hoisted
+// (spec 116 plan, Bead 3a helper discipline) so that AC5-pinned function
+// stays byte-untouched.
+//
+// The BEAD-path rev-parse has no stub seam (resolvePanelGateFacts hard-wires
+// newExecutor(root).RevParseRef), so this test drives the round-mismatch (4)
+// and abandoned (3) Block/Warn legs through the REAL CLI — both
+// short-circuit in internal/panel.ResolveGateFacts BEFORE any git call, so
+// they are reachable deterministically with a hostile bead_id and no git
+// repo — and drives the transient-GitErr (5b) leg (the R3(a) site) via
+// direct panel.GateFacts construction against the pure renderers, mirroring
+// TestPanelVerbs_DecisionIsPanelGateDecision's precedent (no I/O, no
+// reliance on exec.Command's NUL-argv pre-spawn behavior).
+func TestPanelVerbs_BeadHostileBeadIDEscaped(t *testing.T) {
+	const hostileBeadID = "mindspec-x\x00\x1b[31m\nrecovery: forged"
+	const hostileSHA = "deadbeef\x1b[31m\x00\nrecovery: sha-forged"
+	const hostileVerdictString = "APPROVE\x1b[31m\nrecovery: verdict-forged"
+	const hostileAbandonReason = "max: superseded\x1b[31m\x00\nrecovery: reason-forged"
+	// Filename-derived slots (verdictFileRE's slot group): ESC/CSI bytes
+	// only — NUL is filesystem-impossible and a newline would silently
+	// defeat the regex, skipping the file (a vacuous fixture). The full
+	// hostile pattern rides in the JSON-sourced fields above instead
+	// (spec 116 plan's fixture-physics discipline).
+	const malformedSlot = "RMalformed\x1b[31mSlot"
+	const rcSlot = "RChanges\x1b[33mSlot"
+	const cleanVerdictSlot = "RClean"
+
+	assertClean := func(t *testing.T, combined string) {
+		t.Helper()
+		if strings.ContainsRune(combined, 0x00) {
+			t.Errorf("rendered output contains a raw NUL byte:\n%q", combined)
+		}
+		if strings.ContainsRune(combined, 0x1b) {
+			t.Errorf("rendered output contains a raw ESC control byte:\n%q", combined)
+		}
+		for _, line := range strings.Split(combined, "\n") {
+			if line == "recovery: forged" {
+				t.Errorf("a forged standalone `recovery: forged` line reached the output — an embedded control byte/newline was not escaped:\n%q", combined)
+			}
+		}
+	}
+
+	// verdictFilenames returns the three verdict-file basenames for round —
+	// shared by writeHostileVerdictFiles and the presence assertions below,
+	// so a filename never drifts out of sync between writer and checker.
+	verdictFilenames := func(round int) (malformedFile, rcFile, cleanFile string) {
+		return fmt.Sprintf("%s-round-%d.json", malformedSlot, round),
+			fmt.Sprintf("%s-round-%d.json", rcSlot, round),
+			fmt.Sprintf("%s-round-%d.json", cleanVerdictSlot, round)
+	}
+
+	// writeHostileVerdictFiles seeds three verdict files in dir at round:
+	// (1) a malformed file (invalid JSON) with a hostile-ESC filename slot,
+	// forcing res.Malformed to render (R3(c) — panel.go's malformed-file
+	// escapes); (2) a valid REQUEST_CHANGES verdict at a hostile-ESC
+	// filename slot carrying concrete_changes_required, forcing
+	// collectSlotChanges to attribute a sc.Slot label (R3(d)'s
+	// concrete_changes_required-aggregation site); (3) a valid verdict at
+	// a CLEAN filename slot whose JSON "verdict" string itself carries the
+	// hostile pattern (R3(d)'s per-slot v.Verdict render site) — a
+	// JSON-body field, so it carries the FULL hostile pattern.
+	writeHostileVerdictFiles := func(t *testing.T, dir string, round int) {
+		t.Helper()
+		malformedFile, rcFile, cleanFile := verdictFilenames(round)
+		if err := os.WriteFile(filepath.Join(dir, malformedFile), []byte("not valid json {"), 0o644); err != nil {
+			t.Fatalf("seed malformed verdict file: %v", err)
+		}
+		rcBody := `{"verdict":"REQUEST_CHANGES","concrete_changes_required":["fix the frobnicator"]}`
+		if err := os.WriteFile(filepath.Join(dir, rcFile), []byte(rcBody), 0o644); err != nil {
+			t.Fatalf("seed RC verdict file: %v", err)
+		}
+		cleanBody, err := json.Marshal(map[string]string{"verdict": hostileVerdictString})
+		if err != nil {
+			t.Fatalf("marshal hostile-verdict-string body: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, cleanFile), cleanBody, 0o644); err != nil {
+			t.Fatalf("seed hostile-verdict-string file: %v", err)
+		}
+	}
+
+	// wantHostileVerdict mirrors panel.Tally's own transform
+	// (strings.ToUpper(strings.TrimSpace(...))) before escaping, so this
+	// presence assertion tracks the real parsed value rather than the raw
+	// JSON literal.
+	wantHostileVerdict := termsafe.Escape(strings.ToUpper(strings.TrimSpace(hostileVerdictString)))
+
+	// gitRunPanelTest runs a git subcommand in dir, failing the test on a
+	// non-zero exit — the minimal local repo setup the stale-SHA (leg 6)
+	// subtest below needs: the BEAD-path rev-parse has no stub seam
+	// (resolvePanelGateFacts hard-wires newExecutor(root).RevParseRef), so
+	// a real branch is the only way to reach that leg deterministically.
+	gitRunPanelTest := func(t *testing.T, dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.local",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.local")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	t.Run("round mismatch (Block) via full CLI — hostile bead_id + R3 siblings", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		withTestChdir(t, root)
+		stubWorktreeListEmpty(t)
+
+		p := panel.Panel{
+			BeadID: ptrStr(hostileBeadID), Spec: "116-test", Target: "bead/clean-target",
+			Round: 1, ExpectedReviewers: 3, ReviewedHeadSHA: hostileSHA,
+		}
+		dir := writePanelFixture(t, root, "hostile-a", p)
+		writeHostileVerdictFiles(t, dir, 2) // verdict files at round 2 vs panel.json round 1 → RoundMismatch
+		malformedFile, _, _ := verdictFilenames(2)
+		wantMalformed := termsafe.Escape(malformedFile)
+
+		// Round mismatch short-circuits internal/panel.ResolveGateFacts
+		// BEFORE any rev-parse (no HeadSHA/GitErr/MissingRef fact is ever
+		// set), so renderPanelVerify's reviewed_head_sha block — gated on
+		// one of those three facts — never renders here; R3(b) is proven
+		// by the "stale SHA" subtest below instead, where the rev-parse
+		// actually runs.
+
+		t.Run("panel verify", func(t *testing.T) {
+			out, err := runPanelVerbCmd("verify", "hostile-a")
+			if err != nil {
+				t.Fatalf("panel verify: unexpected error (always exits 0): %v\noutput=%s", err, out)
+			}
+			assertClean(t, out)
+			if !strings.Contains(out, "BLOCK") {
+				t.Fatalf("expected the round-mismatch Block leg to render, got:\n%s", out)
+			}
+			if !strings.Contains(out, termsafe.Escape(hostileBeadID)) {
+				t.Errorf("expected the escaped bead_id (via RawMergeFence) present:\n%s", out)
+			}
+			if !strings.Contains(out, "malformed") || !strings.Contains(out, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, out)
+			}
+		})
+
+		t.Run("panel tally", func(t *testing.T) {
+			out, err := runPanelVerbCmd("tally", "hostile-a")
+			if err == nil {
+				t.Fatalf("expected a non-nil error (Block) for a round-mismatch panel:\noutput=%s", out)
+			}
+			if !guard.HasFinalRecoveryLine(err.Error()) {
+				t.Errorf("expected a final recovery line, got: %v", err)
+			}
+			combined := out + err.Error()
+			assertClean(t, combined)
+			if !strings.Contains(combined, termsafe.Escape(hostileBeadID)) {
+				t.Errorf("expected the escaped bead_id (via RawMergeFence) present:\n%s", combined)
+			}
+			if !strings.Contains(combined, "malformed") || !strings.Contains(combined, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, combined)
+			}
+			if !strings.Contains(combined, termsafe.Escape(rcSlot)) {
+				t.Errorf("expected the escaped RC hostile-slot label present:\n%s", combined)
+			}
+			if !strings.Contains(combined, wantHostileVerdict) {
+				t.Errorf("expected the escaped hostile verdict string present:\n%s", combined)
+			}
+		})
+	})
+
+	t.Run("abandoned (Warn) via full CLI — hostile bead_id + R3 siblings", func(t *testing.T) {
+		root := mkPanelTestRoot(t, "")
+		withTestChdir(t, root)
+		stubWorktreeListEmpty(t)
+
+		p := panel.Panel{
+			BeadID: ptrStr(hostileBeadID), Spec: "116-test", Target: "bead/clean-target",
+			Round: 1, ExpectedReviewers: 3, ReviewedHeadSHA: hostileSHA,
+			Abandoned: true, AbandonReason: hostileAbandonReason,
+		}
+		dir := writePanelFixture(t, root, "hostile-b", p)
+		writeHostileVerdictFiles(t, dir, 1) // round matches panel.json — Abandoned fires before round-mismatch regardless
+		malformedFile, _, _ := verdictFilenames(1)
+		wantMalformed := termsafe.Escape(malformedFile)
+
+		wantReason := termsafe.Escape(hostileAbandonReason)
+
+		// Abandoned, like round mismatch, short-circuits before any
+		// rev-parse — no HeadSHA/GitErr/MissingRef fact is ever set, so
+		// reviewed_head_sha never renders here either (see the round-
+		// mismatch subtest's note above; R3(b) is proven by "stale SHA").
+
+		t.Run("panel verify", func(t *testing.T) {
+			out, err := runPanelVerbCmd("verify", "hostile-b")
+			if err != nil {
+				t.Fatalf("panel verify: unexpected error (always exits 0): %v\noutput=%s", err, out)
+			}
+			assertClean(t, out)
+			if !strings.Contains(out, "advisory") {
+				t.Fatalf("expected the abandoned Warn leg to render, got:\n%s", out)
+			}
+			if !strings.Contains(out, wantReason) {
+				t.Errorf("expected the escaped abandon_reason present:\n%s", out)
+			}
+			if !strings.Contains(out, "malformed") || !strings.Contains(out, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, out)
+			}
+		})
+
+		t.Run("panel tally", func(t *testing.T) {
+			var warnBuf bytes.Buffer
+			origWarnOut := tallyWarnOut
+			tallyWarnOut = &warnBuf
+			t.Cleanup(func() { tallyWarnOut = origWarnOut })
+
+			out, err := runPanelVerbCmd("tally", "hostile-b")
+			if err != nil {
+				t.Fatalf("expected a nil error (Warn) for an abandoned panel: %v\noutput=%s", err, out)
+			}
+			if warnBuf.Len() == 0 {
+				t.Fatal("expected the Warn advisory to be written to tallyWarnOut (tallyExitAction's Warn branch)")
+			}
+			combined := out + warnBuf.String()
+			assertClean(t, combined)
+			if !strings.Contains(combined, wantReason) {
+				t.Errorf("expected the escaped abandon_reason present:\n%s", combined)
+			}
+			if !strings.Contains(combined, "malformed") || !strings.Contains(combined, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, combined)
+			}
+			if !strings.Contains(combined, termsafe.Escape(rcSlot)) {
+				t.Errorf("expected the escaped RC hostile-slot label present:\n%s", combined)
+			}
+			if !strings.Contains(combined, wantHostileVerdict) {
+				t.Errorf("expected the escaped hostile verdict string present:\n%s", combined)
+			}
+		})
+	})
+
+	t.Run("stale SHA (Block) via full CLI + real git — clean bead_id, hostile R3 siblings", func(t *testing.T) {
+		const cleanBeadID = "mindspec-clean01"
+		root := mkPanelTestRoot(t, "")
+		gitRunPanelTest(t, root, "init", "-q", "-b", "main")
+		if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# fixture\n"), 0o644); err != nil {
+			t.Fatalf("write fixture file: %v", err)
+		}
+		gitRunPanelTest(t, root, "add", "-A")
+		gitRunPanelTest(t, root, "commit", "-q", "-m", "base")
+		gitRunPanelTest(t, root, "branch", "bead/"+cleanBeadID)
+
+		withTestChdir(t, root)
+		stubWorktreeListEmpty(t)
+
+		p := panel.Panel{
+			BeadID: ptrStr(cleanBeadID), Spec: "116-test", Target: "bead/" + cleanBeadID,
+			Round: 1, ExpectedReviewers: 3, ReviewedHeadSHA: hostileSHA,
+		}
+		dir := writePanelFixture(t, root, "hostile-d", p)
+		writeHostileVerdictFiles(t, dir, 1)
+		malformedFile, _, _ := verdictFilenames(1)
+		wantMalformed := termsafe.Escape(malformedFile)
+		wantSHA := termsafe.Escape(hostileSHA)
+
+		// This time the rev-parse actually runs (leg 6, stale SHA — the
+		// recorded hostileSHA can never match a real commit SHA), so
+		// facts.HeadSHA is set and renderPanelVerify's reviewed_head_sha
+		// block (R3(b)) renders.
+
+		t.Run("panel verify", func(t *testing.T) {
+			out, err := runPanelVerbCmd("verify", "hostile-d")
+			if err != nil {
+				t.Fatalf("panel verify: unexpected error (always exits 0): %v\noutput=%s", err, out)
+			}
+			assertClean(t, out)
+			if !strings.Contains(out, "BLOCK") {
+				t.Fatalf("expected the stale-SHA Block leg to render, got:\n%s", out)
+			}
+			if !strings.Contains(out, "reviewed_head_sha") || !strings.Contains(out, wantSHA) {
+				t.Errorf("expected the escaped reviewed_head_sha (%q) present:\n%s", wantSHA, out)
+			}
+			if !strings.Contains(out, "malformed") || !strings.Contains(out, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, out)
+			}
+		})
+
+		t.Run("panel tally", func(t *testing.T) {
+			out, err := runPanelVerbCmd("tally", "hostile-d")
+			if err == nil {
+				t.Fatalf("expected a non-nil error (Block) for a stale-SHA panel:\noutput=%s", out)
+			}
+			if !guard.HasFinalRecoveryLine(err.Error()) {
+				t.Errorf("expected a final recovery line, got: %v", err)
+			}
+			combined := out + err.Error()
+			assertClean(t, combined)
+			if !strings.Contains(combined, "malformed") || !strings.Contains(combined, wantMalformed) {
+				t.Errorf("expected the malformed hostile-slot filename escaped (%q) and present:\n%s", wantMalformed, combined)
+			}
+			if !strings.Contains(combined, termsafe.Escape(rcSlot)) {
+				t.Errorf("expected the escaped RC hostile-slot label present:\n%s", combined)
+			}
+			if !strings.Contains(combined, wantHostileVerdict) {
+				t.Errorf("expected the escaped hostile verdict string present:\n%s", combined)
+			}
+		})
+	})
+
+	t.Run("leg 5b bead-path transient git error (Warn) via direct GateFacts", func(t *testing.T) {
+		beadPanel := &panel.Panel{
+			BeadID: ptrStr(hostileBeadID), Spec: "116-test", Target: "bead/" + hostileBeadID,
+			Round: 1, ExpectedReviewers: 3, ReviewedHeadSHA: hostileSHA,
+		}
+		res := buildResult(beadPanel, 3, 0, 3, 1, nil)
+		reg := &panel.Registration{Dir: "/wt/review/hostile-c"}
+		// Mirrors gitutil.RevParseRef's real wrap shape ("rev-parse %s: %w")
+		// without spawning a real NUL-byte git subprocess — no bead-path
+		// rev-parse stub seam exists (resolvePanelGateFacts hard-wires
+		// newExecutor(root).RevParseRef).
+		simulated := fmt.Errorf("rev-parse bead/%s: simulated", hostileBeadID)
+		facts := panel.GateFacts{BeadID: hostileBeadID, Reg: reg, Res: res, GitErr: simulated}
+
+		verifyLine, verifyAction := renderPanelVerify(facts.Res, facts)
+		if verifyAction != panel.Warn {
+			t.Fatalf("expected the transient-GitErr Warn leg to fire, got action=%v", verifyAction)
+		}
+		assertClean(t, verifyLine)
+		if !strings.Contains(verifyLine, "could not verify live tip") {
+			t.Fatalf("expected the bead-path GitErr branch (R3(a)) to render, got:\n%s", verifyLine)
+		}
+		if !strings.Contains(verifyLine, termsafe.Escape(simulated.Error())) {
+			t.Errorf("expected the escaped GitErr text present:\n%s", verifyLine)
+		}
+
+		tallyBody, tallyDecision := renderPanelTally(facts.Res, facts, nil)
+		if tallyDecision.Action != panel.Warn {
+			t.Fatalf("expected Warn from renderPanelTally, got %v", tallyDecision.Action)
+		}
+		assertClean(t, tallyBody)
+
+		var warnBuf bytes.Buffer
+		origWarnOut := tallyWarnOut
+		tallyWarnOut = &warnBuf
+		t.Cleanup(func() { tallyWarnOut = origWarnOut })
+		if err := tallyExitAction(tallyDecision, "hostile-c"); err != nil {
+			t.Fatalf("expected a nil error for a Warn decision, got: %v", err)
+		}
+		assertClean(t, warnBuf.String())
 	})
 }
 
