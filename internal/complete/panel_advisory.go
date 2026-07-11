@@ -510,11 +510,15 @@ type uncoveredPendingEntry struct {
 //
 // Fail-closed throughout, matching Spec 114 R2's discipline exactly: a
 // metadata read error, a present-but-corrupt refutation_pending_entries or
-// panel_refuted_entries value, or a shape-invalid entry (empty slot / round
-// < 1) all return a non-nil error — NEVER decode-as-empty, which would drop a
-// recorded obligation (the fail-OPEN direction this protocol exists to
-// close). A bead with no recorded pending entries returns (nil, nil) — a
-// genuine no-op, §6 fail-open preserved for pristine beads.
+// panel_refuted_entries value (INCLUDING a present key whose JSON value is
+// null — the R8 finding: plain map indexing cannot distinguish that from a
+// genuinely absent key, so both fields are read via the comma-ok idiom and a
+// present-but-null value errors explicitly), or a shape-invalid entry (empty
+// slot / round < 1) all return a non-nil error — NEVER decode-as-empty,
+// which would drop a recorded obligation (the fail-OPEN direction this
+// protocol exists to close). A bead with no recorded pending entries
+// returns (nil, nil) — a genuine no-op, §6 fail-open preserved for pristine
+// beads.
 func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string]interface{}, error)) ([]uncoveredPendingEntry, error) {
 	meta, err := getMeta(beadID)
 	if err != nil {
@@ -522,7 +526,20 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			"bead %s metadata could not be read to verify its refutation obligations are satisfied — an unreadable metadata store cannot prove the bead is obligation-free (%v)",
 			beadID, err)
 	}
-	pending, decErr := decodePendingEntries(meta["refutation_pending_entries"])
+	// Distinguish an ABSENT refutation_pending_entries key (the genuine
+	// no-obligation no-op below) from a PRESENT key whose JSON value is
+	// null: map indexing alone (meta["refutation_pending_entries"]) returns
+	// nil for BOTH, and decodePendingEntries(nil) reads a present-null the
+	// same as absent — a fail-OPEN hole (Spec 115 Bead 1 R8 finding). A
+	// present-but-null value IS a present-but-corrupt value under the R3
+	// fail-closed contract, so it must error, never decode-as-empty.
+	rawPending, presentPending := meta["refutation_pending_entries"]
+	if presentPending && rawPending == nil {
+		return nil, fmt.Errorf(
+			"bead %s carries a present-but-null refutation_pending_entries value — a present-but-corrupt obligation store cannot prove the bead is obligation-free",
+			beadID)
+	}
+	pending, decErr := decodePendingEntries(rawPending)
 	if decErr != nil {
 		// PRESENT-but-malformed obligation store: fail-closed. Decoding it
 		// as empty would silently drop every recorded obligation (fail-OPEN);
@@ -538,8 +555,15 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 	// Settle only the pending entries NOT already covered by a durable
 	// panel_refuted audit — those obligations are met of-record. The
 	// covering read is fail-closed too: a present-but-corrupt audit array
-	// errors rather than reading as "nothing covered".
-	coveredRefuted, decErr := decodeRefutations(meta["panel_refuted_entries"])
+	// errors rather than reading as "nothing covered". Same present-null vs
+	// absent distinction as above, for contract symmetry.
+	rawRefuted, presentRefuted := meta["panel_refuted_entries"]
+	if presentRefuted && rawRefuted == nil {
+		return nil, fmt.Errorf(
+			"bead %s carries a present-but-null panel_refuted_entries value — a present-but-corrupt audit store cannot prove which obligations are already satisfied",
+			beadID)
+	}
+	coveredRefuted, decErr := decodeRefutations(rawRefuted)
 	if decErr != nil {
 		return nil, fmt.Errorf(
 			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",

@@ -508,6 +508,57 @@ func TestPendingObligationPredicate(t *testing.T) {
 			t.Errorf("expected the malformed-entry message, got: %v", err)
 		}
 	})
+
+	// --- Spec 115 Bead 1 R8 fix (round 2): present-but-JSON-null must ------
+	// error, never decode-as-empty like an absent key. A JSON document
+	// containing `"refutation_pending_entries": null` decodes (via
+	// encoding/json into map[string]interface{}) to a map that HAS the key
+	// with a nil value — exactly modeled here by a map literal with an
+	// explicit `nil` value, which is indistinguishable from a real
+	// bd.GetMetadata JSON-null round-trip from the comma-ok idiom's
+	// perspective.
+
+	t.Run("present-but-null refutation_pending_entries → error, never decode-as-empty", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": nil,
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a present-but-null refutation_pending_entries to error (RED-on-revert: fails if the comma-ok guard is removed)")
+		}
+		if !strings.Contains(err.Error(), "present-but-null") {
+			t.Errorf("expected a present-but-null message, got: %v", err)
+		}
+	})
+
+	t.Run("absent refutation_pending_entries key → still nil (no-op preserved)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"some_other_key": "irrelevant",
+			}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil for a genuinely absent key, got: %v", err)
+		}
+	})
+
+	t.Run("present-but-null panel_refuted_entries → error, never read as nothing-covered", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+				"panel_refuted_entries":      nil,
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a present-but-null panel_refuted_entries to error (RED-on-revert: fails if the comma-ok guard is removed)")
+		}
+		if !strings.Contains(err.Error(), "present-but-null") {
+			t.Errorf("expected a present-but-null message, got: %v", err)
+		}
+	})
 }
 
 // --- Spec 115 Bead 1: AC7(a) — complete.Run re-gates an already-closed -----
