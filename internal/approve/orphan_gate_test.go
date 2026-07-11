@@ -597,9 +597,11 @@ func TestApproveImpl_UnreadableRefStoreAbortsPreScan(t *testing.T) {
 	}
 
 	mock := &executor.MockExecutor{
-		// exec.MergeBase("main", specBranch) at impl.go:249 is the FIRST
-		// ref-store touch — the equivalent of a real `git merge-base`
-		// hitting an unreadable refs/heads (exit 128).
+		// exec.MergeBase("main", specBranch), currently at impl.go:294
+		// (the spec's Fact-1 pin cited impl.go:249 against the pre-115
+		// tree; Bead 2's insertions above it shifted the line), is the
+		// FIRST ref-store touch — the equivalent of a real
+		// `git merge-base` hitting an unreadable refs/heads (exit 128).
 		MergeBaseErr: fmt.Errorf("exit status 128: fatal: unable to read refs/heads: Permission denied"),
 	}
 

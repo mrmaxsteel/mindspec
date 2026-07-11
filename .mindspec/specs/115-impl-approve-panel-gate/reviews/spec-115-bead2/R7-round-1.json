@@ -1,0 +1,62 @@
+{
+  "reviewer_id": "R7 Fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.9,
+  "rationale": "Scope, fences, and design are clean: only the 3 approve files changed; `git diff main -- internal/gitutil/` empty; Bead-1 logic imported, never edited; BranchExistsE/show-ref 0-hit; gofmt/vet clean; all 4 suites green. No contradiction: the bool probe stays unchanged (implBranchExistsFn is Leg-3 recovery-selection only, fail-open), Option B is additive (FindOrphanedClosedBeads/ScanOrphanedClosedBeads untouched), the gate computes no Allow/Block and writes no panel metadata (Tally/UnresolvedVerdicts reads only), no executor seam (ADR-0030; approve→gitutil direct edge is plan-sanctioned). Recovery lines conform to ADR-0035 (NewFailure is variadic; final line asserted). One grounding defect blocks: the new TestApproveImpl_NoCommitsNoBeads doc comment claims the \"no commits beyond main\" message remains reachable \"via a spec that DOES have a valid plan\" — false. Post-gate, planErr==nil implies len(beadIDs)>0 (readPlanBeadIDs errors on empty bead_ids), so impl.go:424's `count == 0 && (planErr != nil || len(beadIDs) == 0)` is unsatisfiable: the :425 refusal is now dead code, unpinned by any test. Same misleading-comment class Bead 1's AC8 existed to fix. Second, minor: orphan_gate_test.go cites `impl.go:249` for MergeBase; this commit's own insertions moved it to :294 (spec-inherited citation, semantic claim verified: 294 < 369).",
+  "concrete_changes_required": [
+    "internal/approve/impl_test.go (TestApproveImpl_NoCommitsNoBeads doc comment): delete or correct the false claim that the \"no commits beyond main\" message is reachable \"via a spec that DOES have a valid plan (see the sibling AllGood-family tests)\". With the gate in place, planErr==nil guarantees len(beadIDs)>0 (readPlanBeadIDs returns an error on empty bead_ids), so the impl.go:424 condition can never be true — state truthfully that the no-commits refusal branch is now unreachable/vestigial (subsumed by Leg 3's fail-closed plan-read refusal), and optionally file a follow-up bead to remove or re-scope the dead branch (removal itself is out of this bead's minimal scope).",
+    "internal/approve/orphan_gate_test.go (TestApproveImpl_UnreadableRefStoreAbortsPreScan comment): the `exec.MergeBase(\"main\", specBranch) at impl.go:249` citation is stale in this very commit (the call sits at impl.go:294 after the gate's insertions; :249 is the spec's Fact-1 pin against the pre-115 tree). Cite the call symbolically (e.g. \"the pre-scan exec.MergeBase call, spec Fact 1\") or update/SHA-qualify the line number."
+  ],
+  "findings": [
+    {
+      "id": "R7-1",
+      "severity": "medium",
+      "summary": "New doc comment on TestApproveImpl_NoCommitsNoBeads makes a factually false reachability claim: the \"no commits beyond main\" refusal (impl.go:424-426) is now dead code, not \"reachable only via a valid plan\". readPlanBeadIDs errors on missing plan.md, missing/corrupt frontmatter, AND empty bead_ids, and Leg 3 refuses on any planErr — so past the gate, planErr==nil and len(beadIDs)>0 always hold, making the branch's condition unsatisfiable. TestApproveImpl_AllGood (impl_test.go:607) is a count=5 happy path and pins nothing about it. A maintainer reading the comment would believe the preflight refusal still fires; this repo treats misleading comments as real defects (Bead 1 AC8)."
+    },
+    {
+      "id": "R7-2",
+      "severity": "low",
+      "summary": "orphan_gate_test.go AC11 comment cites impl.go:249 for exec.MergeBase; verified :249 at base 075fd630 (and in the spec's Fact-1 text), but this commit's +45 insertions above it move the call to :294 at 8b664359. Semantic claim independently verified: MergeBase (:294) precedes the gate call (:369), so the pre-scan abort ordering the test pins is real."
+    },
+    {
+      "id": "R7-scope",
+      "severity": "info",
+      "summary": "Scope/fences verified empirically: diff 075fd630..8b664359 touches exactly impl.go/impl_test.go/orphan_gate_test.go; `git diff main -- internal/gitutil/` empty; no lifecycle/complete/executor/docs/ADR/skill change; BranchExistsE and show-ref 0 hits in internal/approve; gofmt -l empty; go vet clean; go build + go test -count=1 on approve/executor/complete/lifecycle all green; worktree left clean."
+    },
+    {
+      "id": "R7-grounding",
+      "severity": "info",
+      "summary": "Grounding verified: all consumed symbols resolve (lifecycle.ScanOrphanedClosedBeads/ClosedEpicBeadIDs/Orphan.RecoveryCommand, complete.CheckPendingObligations:653/PanelGateRoots:674, bead.WorktreeList:202/GetMetadata:313, gitutil.BranchExists:94/IsAncestor:446, workspace.BeadBranchPrefix/BeadBranch, panel.Scan/ForBead/Tally/UnresolvedVerdicts). guard.NewFailure(msg, commands ...string) is variadic — the two-command restoration-prerequisite recourse is valid and ADR-0035-conformant (final line = bare `mindspec complete <bead>`, asserted verbatim in tests plus guard.HasFinalRecoveryLine). Base-SHA citations :226-227 (gate-1/3 silent skip) and :355/:369 (ADR gate / gate call) all resolve. The BRIEF's 11 named tests all exist and map to AC1a/1b, AC2/2d, AC3, AC5, AC6/6e, AC7b, AC11, AC13; the AC4 anchor label contains the literal `lifecycle.ScanOrphanedClosedBeads` discriminator."
+    },
+    {
+      "id": "R7-contradiction",
+      "severity": "info",
+      "summary": "No design contradiction: (1) round-6 C+B intact — the branch-existence trigger stays the unchanged bool gitutil.BranchExists inside the Bead-1 core; no exit-code classifier reintroduced; the new implBranchExistsFn seam feeds ONLY Leg 3's recovery-line selection, fail-open, exactly as plan step 4's \"seam-consistent check\" wording anticipates. (2) Option B is ADDED, not replacing — the shared FindOrphanedClosedBeads/ScanOrphanedClosedBeads predicates are byte-untouched; the worktree-enum leg lives entirely in approve and never consults branchExistsFn. (3) Single settlement home — the gate never computes Allow/Block (no VoteDecision/gate-decision call), never writes panel metadata, never applies a refutation; implAdvisorySlotLine is read-only decoration that degrades to omission and prints neither MINDSPEC_SKIP_PANEL nor any 'refut' substring (HC-7, test-pinned case-insensitively). (4) ADR-0030 — no executor seam among the 7; the approve→gitutil edge is direct and plan-sanctioned; no executor git-I/O enters approve."
+    },
+    {
+      "id": "R7-deviation-A",
+      "severity": "info",
+      "summary": "Deviation A — ADDRESSED/legitimate. The ~13 writePlanWithBeads fixture additions are the mechanical consequence of Leg 3's spec-mandated fail-closed plan read (AC6e): every real spec has a plan.md at impl-approve, and each test's assertions are unchanged. Not a mask."
+    },
+    {
+      "id": "R7-deviation-B",
+      "severity": "info",
+      "summary": "Deviation B — ADDRESSED/legitimate. With plan.md now present, the previously-skipped gate-1/3 bead-status loop actually runs; open-status defaults would refuse at gate 1/3 before the code under test. closed-status models a genuinely ready-for-impl-approve spec; the pinned behavior (clean spec reaches FinalizeEpic exactly once) is unchanged, satisfying AC2(b)'s intent and its literal proof (the function is not deleted/renamed)."
+    },
+    {
+      "id": "R7-deviation-C",
+      "severity": "medium",
+      "summary": "Deviation C — the assertion change itself is a correct, spec-mandated tightening (AC6e: a missing plan.md must refuse naming the plan enumeration, before the CommitCount preflight; the new test additionally pins the recovery line and FinalizeEpic-uncalled — strictly stronger). NOT a masked regression. However its replacement doc comment overstates the residual reachability of the old message (see R7-1) — fix the comment, not the assertion."
+    },
+    {
+      "id": "R7-deviation-D",
+      "severity": "info",
+      "summary": "Deviation D — ADDRESSED/legitimate. The now-present plan.md arms the previously-dormant ADR-divergence gate for the uncovered cmd/ fixture; OverrideADR confines that unrelated gate while the test still pins exactly what it always pinned (doc-sync WARN rendering + one FinalizeEpic call). The removed line 'The gate passed without override' honestly no longer applies."
+    },
+    {
+      "id": "R7-deviation-E",
+      "severity": "info",
+      "summary": "Deviation E — ADDRESSED/legitimate. The 7th seam implBranchExistsFn = gitutil.BranchExists is exactly plan step 4's 'gitutil.BranchExists via a seam-consistent check' for the branch-state-truthful recovery; the step-1 seam list of six simply omitted it. Follows the implXxxFn convention, saved/restored in saveAndRestore, used by no detection leg."
+    }
+  ]
+}

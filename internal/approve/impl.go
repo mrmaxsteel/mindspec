@@ -419,6 +419,19 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// Pinned between phase-metadata write and FinalizeEpic per panel
 	// CONSENSUS revision 9 so a future regression that re-shuffles
 	// this line is caught by TestApproveImplCallOrder.
+	//
+	// R7 (Spec 115 Bead 2 round 1): readPlanBeadIDs errors on an empty
+	// bead_ids list, so len(beadIDs)==0 and planErr!=nil are
+	// equivalent here, and the disjunction below collapses to just
+	// planErr!=nil. Leg 3 above (runOrphanObligationGate) already
+	// refuses whenever planErr!=nil, before this preflight runs — so
+	// past that gate, planErr==nil and len(beadIDs)>0 always hold and
+	// this disjunction is always false. The refusal below is therefore
+	// unreachable in normal flow; it is retained as a defensive
+	// backstop and to preserve the CONSENSUS-revision-9 call-order pin
+	// (see TestApproveImplCallOrder), not because it fires today. A
+	// valid-plan, zero-commit spec is the legitimate cleanup path and
+	// passes this check (see TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup).
 	count, countErr := exec.CommitCount("main", specBranch)
 	if countErr == nil {
 		if count == 0 && (planErr != nil || len(beadIDs) == 0) {

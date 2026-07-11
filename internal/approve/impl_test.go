@@ -489,10 +489,13 @@ func saveAndRestore(t *testing.T) {
 // CommitCount preflight ever runs (the new gate sits earlier in the
 // call order — AC4). This is a deliberate, spec-mandated tightening: a
 // missing plan.md must never again be silently tolerated by a
-// downstream check (R3's whole point), so the "no commits beyond main"
-// message is no longer reachable via a missing-plan.md input — only via
-// a spec that DOES have a valid plan (see the sibling AllGood-family
-// tests). FinalizeEpic must still never run.
+// downstream check (R3's whole point). This test pins that Leg 3
+// intercepts the missing-plan state before the CommitCount preflight is
+// ever reached, so FinalizeEpic must still never run. (The preflight's
+// own degenerate-plan disjunction is now fully subsumed by Leg 3 and
+// unreachable in normal flow — see the comment at the preflight call
+// site in impl.go — so this test does not exercise that message at
+// all.)
 func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
