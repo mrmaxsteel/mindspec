@@ -22,6 +22,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -474,6 +475,20 @@ func panelBeadWorktreePath(beadID string) func() string {
 	}
 }
 
+// escapeEach returns vals with each element passed through
+// termsafe.Escape (Spec 116 R3(c)/(d)) — the per-field-not-per-message
+// discipline: every render site below that joins a slice of panel-dir-
+// sourced strings (malformed verdict filenames) escapes PER ELEMENT
+// before joining, since escaping the already-joined whole would also
+// quote the ", " separators.
+func escapeEach(vals []string) []string {
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = termsafe.Escape(v)
+	}
+	return out
+}
+
 // renderPanelVerify renders `panel verify`'s read-only completeness/
 // staleness report from res/facts (Bead 4 step 2). It is PURE: no I/O. The
 // returned action is panel.PanelGateDecision(facts).Action — the identical
@@ -499,7 +514,11 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	var b strings.Builder
 	fmt.Fprintf(&b, "panel %s: %d/%d verdict(s) present", slug, len(res.Verdicts), res.ExpectedReviewers())
 	if len(res.Malformed) > 0 {
-		fmt.Fprintf(&b, " (malformed: %s)", strings.Join(res.Malformed, ", "))
+		// R3(c): each malformed filename is panel-dir-sourced (the
+		// verdictFileRE slot group admits ESC/CSI bytes) — escape PER
+		// ELEMENT before joining, never the joined whole (which would
+		// also quote the ", " separators).
+		fmt.Fprintf(&b, " (malformed: %s)", strings.Join(escapeEach(res.Malformed), ", "))
 	}
 	b.WriteString("\n")
 
@@ -512,11 +531,16 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		// final G2, finding 2). A no-op for any clean target (every
 		// printable-ASCII value, including every real branch/spec ref).
 		displayTarget := escapeConfigValue(target)
+		// headSHA (R3(b)) renders res.Panel.ReviewedHeadSHA — read RAW
+		// from the same attacker-poisonable panel.json — through
+		// termsafe.Escape at this one shared render site, covering
+		// every branch of the switch below (bead and non-bead alike).
+		headSHA := termsafe.Escape(res.Panel.ReviewedHeadSHA)
 		switch {
 		case facts.MissingRef && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (target %s no longer exists)\n", res.Panel.ReviewedHeadSHA, displayTarget)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (target %s no longer exists)\n", headSHA, displayTarget)
 		case facts.MissingRef:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (target branch no longer exists — assumed merged)\n", res.Panel.ReviewedHeadSHA)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (target branch no longer exists — assumed merged)\n", headSHA)
 		case facts.GitErr != nil && nonBead:
 			// facts.GitErr wraps "rev-parse %s: %w" (gitutil.RevParseRef)
 			// with the RAW target — a NUL byte in target defeats the
@@ -526,13 +550,17 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 			// target re-leaked through this exact %v). Render the error's
 			// STRING through escapeConfigValue, never raw, so those
 			// control bytes can never reach the terminal here either.
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %s)\n", res.Panel.ReviewedHeadSHA, displayTarget, escapeConfigValue(facts.GitErr.Error()))
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify target %s: %s)\n", headSHA, displayTarget, escapeConfigValue(facts.GitErr.Error()))
 		case facts.GitErr != nil:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify live tip: %v)\n", res.Panel.ReviewedHeadSHA, facts.GitErr)
+			// R3(a): the BEAD-path twin of the non-bead branch above —
+			// facts.GitErr wraps "rev-parse bead/<BeadID>: …", re-embedding
+			// a hostile bead ID. Render the error's STRING through
+			// termsafe.Escape, never raw via %v.
+			fmt.Fprintf(&b, "reviewed_head_sha: %s (could not verify live tip: %s)\n", headSHA, termsafe.Escape(facts.GitErr.Error()))
 		case facts.HeadSHA != "" && nonBead:
-			fmt.Fprintf(&b, "reviewed_head_sha: %s — target %s live tip: %s\n", res.Panel.ReviewedHeadSHA, displayTarget, facts.HeadSHA)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s — target %s live tip: %s\n", headSHA, displayTarget, facts.HeadSHA)
 		case facts.HeadSHA != "":
-			fmt.Fprintf(&b, "reviewed_head_sha: %s — live tip: %s\n", res.Panel.ReviewedHeadSHA, facts.HeadSHA)
+			fmt.Fprintf(&b, "reviewed_head_sha: %s — live tip: %s\n", headSHA, facts.HeadSHA)
 		}
 	}
 
@@ -646,10 +674,15 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		if v.HardBlock {
 			hb = " hard_block"
 		}
-		fmt.Fprintf(&b, "  %s: %s%s\n", v.Slot, v.Verdict, hb)
+		// R3(d): v.Slot (filename-derived) and v.Verdict (the raw JSON
+		// "verdict" string, ToUpper+TrimSpace — a control byte survives
+		// both) are both panel-dir-sourced; escape each at this render
+		// site.
+		fmt.Fprintf(&b, "  %s: %s%s\n", termsafe.Escape(v.Slot), termsafe.Escape(v.Verdict), hb)
 	}
 	if len(res.Malformed) > 0 {
-		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(res.Malformed, ", "))
+		// R3(c): per-element, same discipline as renderPanelVerify above.
+		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(escapeEach(res.Malformed), ", "))
 	}
 
 	expected := res.ExpectedReviewers()
@@ -674,12 +707,16 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	if len(changes) > 0 {
 		b.WriteString("\nconcrete_changes_required (aggregated):\n")
 		for _, sc := range changes {
+			// R3(d): sc.Slot is the same filename-derived label as v.Slot
+			// above — the *changes*/*DecodeErr* text is already escaped
+			// via escapeConfigValue; only the label was unescaped.
+			slot := termsafe.Escape(sc.Slot)
 			if sc.DecodeErr != "" {
-				fmt.Fprintf(&b, "  %s: (advisory) %s\n", sc.Slot, escapeConfigValue(sc.DecodeErr))
+				fmt.Fprintf(&b, "  %s: (advisory) %s\n", slot, escapeConfigValue(sc.DecodeErr))
 				continue
 			}
 			for _, c := range sc.Changes {
-				fmt.Fprintf(&b, "  %s: %s\n", sc.Slot, escapeConfigValue(c))
+				fmt.Fprintf(&b, "  %s: %s\n", slot, escapeConfigValue(c))
 			}
 		}
 	}
