@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "The round-2 delta is seam-transparent and introduces no new fail-open. uncoveredPendingObligations and the four gate legs are untouched. In internal/approve, only the defaults for implIsAncestorFn and implBranchExistsFn change from direct gitutil functions to lifecycle.IsAncestor and lifecycle.BranchExists. The new lifecycle functions preserve the exact signatures and directly delegate to the same gitutil implementations without transforming arguments, results, or errors. Existing injection points and fail-closed behavior therefore remain unchanged, including corrupt-metadata refusal, orphan infrastructure errors, worktree-enumeration errors, ancestry errors, the Option-B probe-miss closure, and the obligation backstop. The required focused tests passed for internal/complete and internal/approve, including obligation, orphan, worktree enumeration, and pending cases. The round-1 conclusion remains valid: the implementation is exhaustively fail-closed with no corrupt-metadata bypass.",
+  "concrete_changes_required": [],
+  "findings": []
+}

@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "O2 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "ADR/import-edge/blast-radius lens, all clean at 21374bb8. (1) IMPORT EDGES: `go list -deps` on lifecycle, complete, gitutil, bead each shows NO `internal/approve` — the 3 new edges (approve->lifecycle/complete/gitutil) are acyclic; approve->bead pre-existed. (2) ADR-0030: executor diff is comment-only (AC8, no FinalizeEpic seam); gitutil byte-unchanged; zero BranchExistsE/show-ref hits (C+B structural); the gate in internal/approve is read-only — no Merge/Write/Push/metadata-write, only complete.PanelGateRoots + ScanOrphaned/CheckPending reads. ADR-0030 file unchanged. (3) ADR HOME: 0037 §1 amendment (2026-07-11, 48 lines) is correctly a REACH extension not an enforcement home — 'single settlement surface remains mindspec complete', respects ADR-0030 layering, hatches keep semantics, both residuals disclosed, refusal scoped to DETECTABLE. ADR-0035/0023 unchanged. (4) BLAST RADIUS: FindOrphanedClosedBeads is now a thin fail-open wrapper over ScanOrphanedClosedBeads — behavior byte-for-byte preserved incl. MIXED-list parity; its 3 consumers (complete/next/doctor) are BYTE-UNCHANGED. panelGateRoots untouched (PanelGateRoots pure pass-through). Build OK, vet clean, all 6 touched pkgs+consumers green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O2-1",
+      "severity": "info",
+      "title": "reconcilePendingRefutations corrupt-metadata handling is now stricter (deliberate), happy-path preserved",
+      "detail": "The refactor onto the shared uncoveredPendingObligations core changes reconcilePendingRefutations in the fail-CLOSED direction only: present-null refutation_pending/panel_refuted now error, panel_refuted validation moved BEFORE the len(pending)==0 early return, and per-element refuted shape-check added. For legitimately system-written metadata (writePanelRefutedMetadata output) the observable toSatisfy result is identical, so no legitimate flow regresses; the deltas are the spec's documented R8 round-2/3 hardening, covered by panel_advisory_test.go (+413 lines, green). Not a regression — noted so the 'behavior-preserved' claim is read as happy-path-preserved + adversarial-path-hardened."
+    },
+    {
+      "id": "O2-2",
+      "severity": "info",
+      "title": "Shared predicate error-parity verified structurally",
+      "detail": "ScanOrphanedClosedBeads propagates the 3 infra errors (epic-lookup, bd-list, per-bead ancestry) while the FindOrphanedClosedBeads wrapper discards them; the empty-epic case returns (nil,nil) and the ancestry-error case records firstErr but keeps walking — exactly reproducing the old `if ancErr != nil || isAnc { continue }` fail-open loop for the 3 unchanged consumers. branchExistsFn (bool trigger) is unchanged, so the C+B fail-open probe semantics are intact."
+    }
+  ]
+}

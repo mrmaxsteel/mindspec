@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "F3 Fable-sub (opus)",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Round-1 APPROVE (contradiction/completeness). The only delta is the seam-transparent reroute 389fcc41: two files. internal/approve/impl.go drops the direct internal/gitutil import and points implIsAncestorFn/implBranchExistsFn at new thin lifecycle.IsAncestor/BranchExists wrappers with identical signatures; the injection-seam names/types/points are unchanged, so every AC (1-13) test asserts against byte-identical gate behavior. No contradiction: the C+B fail-closed direction, Option-B TOCTOU closure, single-settlement-home, and o4fd guarantee are behavior-invariant. ADR-0030 is honored MORE cleanly, not less — git-I/O now routes through the non-enforcement lifecycle package (which legitimately owns gitutil access), eliminating the enforcement-package import the boundary lint flagged. Spec/ADR docs describe the design at contract level, not the import mechanism, so they still hold. Verified: git status clean (only untracked reviews dir), `go list ./internal/approve` shows no gitutil import, `go build ./...` clean, TestEnforcementHasNoGitLeaks PASSES. No import cycle (approve->lifecycle pre-existed; lifecycle already consumed gitutil). The 3 disclosed pre-existing residuals (8ud6 G115x2, z4ps worktree-only) are unchanged and out of scope. No new contradiction; APPROVE holds.",
+  "concrete_changes_required": [],
+  "findings": []
+}

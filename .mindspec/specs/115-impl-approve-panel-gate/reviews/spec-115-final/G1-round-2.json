@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "G1 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "Commit 389fcc41 introduces no realizable fail-open. The only executable change in internal/approve is rebinding implIsAncestorFn and implBranchExistsFn from gitutil functions to lifecycle wrappers with identical signatures and direct, unconditional delegation to those same gitutil functions. The gate body and ordering are unchanged: all four legs retain their prior fail-directions, the Option-B worktree-enumeration TOCTOU closure is intact, and FinalizeEpic remains unreachable until the gate passes. Thus the o4fd un-gated-merge guarantee and my round-1 conclusion—no un-gated path beyond the three disclosed residuals—remain unchanged. The requested uncached approve/lifecycle tests pass; the enforcement-boundary lint test also passes and approve no longer imports gitutil.",
+  "concrete_changes_required": [],
+  "findings": []
+}

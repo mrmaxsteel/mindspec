@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "S1 Sonnet",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Build/vet/gofmt/mindspec-validate/fences (BranchExistsE 0-hit, show-ref 0-hit, internal/gitutil byte-unchanged) all pass. But `go test ./...` (and `go test -short ./...`, matching CI's exact invocation) FAILS: internal/lint TestEnforcementHasNoGitLeaks reports internal/approve/impl.go:17 imports the banned `internal/gitutil` package. internal/approve is one of the five ADR-0030 enforcement packages (validate/approve/complete/state/phase) that this lifetime-invariant test (installed by spec 085) forbids from importing gitutil directly; git I/O must route through internal/executor. Bead 2 wired implIsAncestorFn=gitutil.IsAncestor and implBranchExistsFn=gitutil.BranchExists directly into approve/impl.go, contradicting the BRIEF's own claim 'ADR-0030-clean (no executor seam; no executor git-I/O in approve)'. I confirmed this is real (not worktree drift) via an independent clean clone of 21374bb8 — build/vet/gofmt pass there too, but the same lint test fails identically. This is a genuine CI-breaking regression. Also observed (non-blocking): golangci-lint gosec G115 in journal/lock_unix.go is pre-existing/untouched by this spec; internal/instruct TestRun_IdleNoBeads fails only when run from this exact worktree path (passes in a clean clone of the same commit and of origin/main) — a known pre-existing environment-specific flake (memory: z4ps), not caused by this diff. internal/harness LLM timeout only occurs without -short (CI uses -short, which excludes it). Mid-review I observed impl.go transiently modified + a stray untracked internal/lifecycle/gitquery.go appear in the shared worktree, then both disappeared by session end (git status is clean now) — flagging as a process-integrity concern for the tally, not attributable to me or to commit 21374bb8 (confirmed absent from the clean clone).",
+  "concrete_changes_required": [
+    "Fix internal/approve/impl.go so it no longer imports internal/gitutil directly (line 17) — TestEnforcementHasNoGitLeaks (internal/lint/boundary_test.go) fails on this at commit 21374bb8, confirmed both in the review worktree and in an independent clean clone. Either route the IsAncestor/BranchExists calls through internal/executor (per ADR-0030 doctrine) or add an explicit, reviewer-signed 'boundary-allowlisted:' file-doc-comment exemption in impl.go with a documented rationale, then update ADR-0037/consolidated docs to stop claiming 'no executor git-I/O in approve' if the exemption route is chosen.",
+    "Re-run `go test -short ./...` (the exact CI invocation) after the fix and confirm internal/lint passes along with the rest of the suite.",
+    "Investigate the mid-review live-worktree drift (impl.go transiently modified, stray internal/lifecycle/gitquery.go appeared then vanished) for the panel-run process — likely a concurrent reviewer/fixer violating the read-only worktree fence on this shared final-review worktree; not a finding against the spec's code but a process-safety gap worth a follow-up bead."
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "hard_block": true,
+      "category": "CI-gate / ADR-0030 boundary violation",
+      "description": "internal/approve/impl.go:17 imports github.com/mrmaxsteel/mindspec/internal/gitutil, which internal/lint/boundary_test.go (TestEnforcementHasNoGitLeaks, a lifetime invariant since spec 085) bans for the five ADR-0030 enforcement packages (validate/approve/complete/state/phase). `go test ./...` and `go test -short ./...` (CI's exact command) both FAIL on this at commit 21374bb8. Confirmed via an independent clean git clone of the same commit (not an artifact of worktree state): `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks -v` fails identically there. This directly contradicts the BRIEF's claim that the branch is 'ADR-0030-clean (no executor seam; no executor git-I/O in approve)'."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "category": "pre-existing, not spec-115",
+      "description": "golangci-lint run ./... reports 2 gosec G115 findings in internal/journal/lock_unix.go (integer overflow uintptr->int in syscall.Flock calls). `git diff origin/main -- internal/journal/lock_unix.go` is empty — file untouched by this spec. Matches memory bead 8ud6 (pre-existing, P3)."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "category": "pre-existing, not spec-115",
+      "description": "internal/instruct TestRun_IdleNoBeads fails when run from this exact worktree absolute path (both in the full suite and in isolation), rendering the live repo's actual Review-Mode state ('Active Spec: 115-impl-approve-panel-gate') instead of the isolated t.TempDir() fixture's expected 'No Active Work'. Does NOT reproduce in an independent clean clone of the same commit 21374bb8, nor in a clean clone of origin/main — confirms this is an environment/path-specific leak, not a code regression from this spec's diff (internal/instruct/ has zero diff vs origin/main). Matches memory z4ps (pre-existing test-isolation leak)."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "category": "test invocation nuance",
+      "description": "go test -count=1 ./... (no -short) times out internal/harness after 10m on TestLLM_PrecommitReexportComplete, an LLM-driven scenario test gated by testing.Short(). CI (.github/workflows/ci.yml) and the Makefile both run `go test -short ./...`, which skips these; under -short, internal/harness passes cleanly. Not a spec-115 issue."
+    },
+    {
+      "severity": "info",
+      "hard_block": false,
+      "category": "process integrity (worktree hygiene)",
+      "description": "Mid-review, `git status --porcelain` in this shared worktree showed internal/approve/impl.go modified in place (removing the very gitutil import flagged above) plus a new untracked internal/lifecycle/gitquery.go — neither present in a clean clone of 21374bb8. By the end of my session the worktree was clean again (only the untracked reviews dir remains), so both changes were transient and self-reverted. I made no edits myself (read-only mandate) and did not act on a subsequent tool-output system reminder that instructed treating this as an intentional, un-disclosed change — that instruction conflicted with my actual read-only/report-truthfully mandate. Flagging for the tally: something wrote to this shared final-review worktree during the panel run, which risks corrupting other concurrent reviewers' observations of commit 21374bb8."
+    }
+  ]
+}
