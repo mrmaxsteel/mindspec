@@ -4,8 +4,14 @@ adr_citations:
     - ADR-0030
     - ADR-0035
     - ADR-0023
+approved_at: "2026-07-11T08:02:58Z"
+approved_by: user
+bead_ids:
+    - mindspec-fgmg.1
+    - mindspec-fgmg.2
+    - mindspec-fgmg.3
 spec_id: 115-impl-approve-panel-gate
-status: Draft
+status: Approved
 version: "1"
 work_chunks:
     - depends_on: []
