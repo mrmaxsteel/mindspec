@@ -355,9 +355,9 @@ func renderInProgressBeads(entries []BeadStateEntry) string {
 			break
 		}
 		b.WriteString("\n")
-		label := e.ID
+		label := termsafe.Escape(e.ID)
 		if e.Active {
-			label = e.ID + " (active)"
+			label += " (active)"
 		}
 		if e.Title != "" {
 			b.WriteString(fmt.Sprintf("- **%s** — %s\n", label, termsafe.Escape(e.Title)))

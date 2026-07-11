@@ -93,12 +93,13 @@ func TestInstructPanelState_HostilePanelEscaped(t *testing.T) {
 
 	t.Run("R3(h) stale-worktree + in-progress-bead hostile renders — renderFullPanelState clean", func(t *testing.T) {
 		hostilePath := "/repo/.worktrees/worktree-ms.evil" + hostilePattern
+		hostileID := "mindspec-x\x1b[31m\x00\nrecovery: forged"
 		hostileTitle := "do the thing" + hostilePattern
 		hostileWorktree := "/wt/ms.evil" + hostilePattern
 		hostileLastCommit := "abc1234 did the thing" + hostilePattern
 
 		inProgress := []BeadStateEntry{
-			{ID: "ms.1", Title: hostileTitle, Worktree: hostileWorktree, LastCommit: hostileLastCommit, Active: true},
+			{ID: hostileID, Title: hostileTitle, Worktree: hostileWorktree, LastCommit: hostileLastCommit, Active: true},
 		}
 		stale := []StaleWorktreeEntry{
 			{Path: hostilePath, Source: "worktree-list"},
@@ -106,6 +107,7 @@ func TestInstructPanelState_HostilePanelEscaped(t *testing.T) {
 
 		out := renderFullPanelState(inProgress, nil, stale)
 		assertInstructClean(t, out)
+		assertInstructEscapedPresent(t, out, hostileID)
 		assertInstructEscapedPresent(t, out, hostileTitle)
 		assertInstructEscapedPresent(t, out, hostileWorktree)
 		assertInstructEscapedPresent(t, out, hostileLastCommit)
