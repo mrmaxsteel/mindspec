@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "GROUNDING lens, empirically re-run in absolute /tmp throwaway repos on this machine (git 2.51.2, loose AND packed-refs AND reftable backends): `git show-ref --verify refs/heads/<absent>` WITHOUT --quiet exits 128 (`fatal: '...' - not a valid ref`), NOT 1. Exit 1 occurs only WITH --quiet (confirmed). The unreadable-store leg (existing loose branch, chmod 000 .git/refs/heads) does exit 128 as claimed — but with the IDENTICAL exit code and identical fatal-message shape as genuine absence. So the spec's central claim ('the only probe whose exit code alone distinguishes all three states', 'orchestrator-reproduced') is false: plain show-ref --verify is a 0/128 two-way that cannot separate absent from infra at all. Under the contract as written, every merged-and-cleaned (genuinely absent) bead branch yields (false, non-nil error) -> the gate REFUSES on the normal happy path — the exact round-3 G2 false-refusal regression the spec claims this probe avoids 'by construction', and it trips the spec's own falsifier ('genuinely-absent ... yields anything but (false, nil)'). TestBranchExistsE_ThreeWay's absent->exit-1 leg is unimplementable against real git. All line citations, RED discriminators, diff scope, --quiet-masking and for-each-ref-empty reproductions verified correct.",
+  "concrete_changes_required": [
+    "Re-ground BranchExistsE's contract on an EMPIRICALLY VERIFIED discriminator — plain `show-ref --verify` does NOT exit 1 on genuine absence (verified exit 128 on git 2.51.2 across loose/packed/reftable). One verified direction: `show-ref --verify --quiet` (0 -> present; 1 -> absent-or-infra) disambiguated by a store-health probe of a known-existing ref (verified: with .git/refs/heads unreadable, probing the existing HEAD branch also exits 1; healthy store exits 0 — note a packed known-ref could dodge this, so the chosen mechanism's three states must each be reproduced in a /tmp repo before the spec cites them).",
+    "Update R1, the Scope internal/gitutil bullet, OQ2, and AC1 (TestBranchExistsE_ThreeWay + TestBranchExistsE_UnreadableRefStore) to the verified contract; strike the false 'exit 1 -> genuinely absent, orchestrator-reproduced' claim for the no-quiet probe.",
+    "Re-verify the round-4 evidence table itself: its 'show-ref --verify (NO --quiet): genuine absent -> 1' row does not reproduce; the orchestrator likely tested pattern-mode `show-ref <ref>` (no --verify) or a --quiet variant."
+  ],
+  "findings": [
+    {
+      "grade": "NEW_ISSUE",
+      "severity": "blocker",
+      "title": "Fix's core exit-code claim is empirically false: plain `show-ref --verify` exits 128 (not 1) on genuine absence -> contract refuses every cleanly-deleted branch",
+      "detail": "Reproduced on git 2.51.2 in /tmp throwaway repos, all three ref backends (loose, packed-refs, reftable): existing -> 0; ABSENT -> 128 with `fatal: 'refs/heads/bead/absent' - not a valid ref`; existing + chmod 000 .git/refs/heads -> 128 with the identical fatal message. git only returns exit 1 for a missing ref WITH --quiet (die() otherwise). Consequences: (1) the claimed 0/1/128 three-way does not exist — absence and infra failure are indistinguishable by exit code and by stderr shape; (2) per the specified mapping (any non-0/1 exit -> (false, non-nil error) -> gate REFUSES), the NORMAL merged-and-cleaned deleted-branch state errors -> false-refusal on every finalize, tripping the spec's own falsifier and re-opening the round-3 G2 regression; (3) TestBranchExistsE_ThreeWay's absent->exit-1 assertion cannot pass against real git. R1, Scope gitutil bullet, OQ2, and AC1 all restate the false claim."
+    },
+    {
+      "grade": "ADDRESSED",
+      "severity": "info",
+      "title": "Everything except the exit-1-absent claim verifies",
+      "detail": "Fail-closed intent for the unreadable store is correct (128 there, reproduced). --quiet masking reproduced: rev-parse --verify --quiet and show-ref --verify --quiet both exit 1 on existing-branch-unreadable-store; for-each-ref exits 0 EMPTY there. Line citations exact: BranchExists gitops.go:94-100 (plain rev-parse --verify at :98, `cmd.Run() == nil`); exec.MergeBase('main', specBranch) impl.go:249 with fail-closed error return; exec.FinalizeEpic impl.go:372; RevParseRef/ErrRefNotFound gitops.go:13-19/:524-542 (correctly demoted to ancestry precedent). Diff 4cbf437b..f07cce6a touches spec.md only (~5 changed lines) plus round-4 artifacts at e6dfa4cf. Discriminators RED: BranchExistsE, TestBranchExistsE_ThreeWay, TestBranchExistsE_UnreadableRefStore, TestApproveImpl_BranchProbeErrorFailsClosed, ScanOrphanedClosedBeads, and any show-ref usage = 0 hits in Go code. The general fail-closed principle and defense-in-depth note are sound and grounded; only the probe primitive itself must be re-specified on true evidence."
+    }
+  ]
+}

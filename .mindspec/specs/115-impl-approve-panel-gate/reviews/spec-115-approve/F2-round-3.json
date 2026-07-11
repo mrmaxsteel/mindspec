@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Every round-3 claim verified against the tree at 77d8a1a9. Diff eb6a2ed1..77d8a1a9 touches ONLY spec.md, .beads/issues.jsonl (the h4n5 persist commit), and panel artifacts — no code — so carried-over anchors hold (spot-re-verified: executor :349/:381-402/:396-398 with 'rule as CompleteBead' exactly once at :398; impl.go :132/:140/:220-227/:327/:343-348/:372/:452; impl_test :75/:299/:714; complete.go :307-321/:387/:558/:574-582; gate.go :30/:143; layout_guard.go :74; claude.go :681/:736; 114 spec :40-42). New grounding exact: BranchExists gitops.go:94-100 'return cmd.Run() == nil'; BranchExistsE 0 hits (to-be-added); branchExistsFn orphans.go:40/:95; gitutil execution-owned at execution/OWNERSHIP.yaml:4; no approve<->complete import either way, comment-only complete.go:486; merge-base error :492-495 is genuinely the first failure for a branch-less bead (beadHead is a bare branch string, :329); 'already closed' :576-579; h4n5 grep -c == 1; lifecycle claimed by exactly one domain == workflow (:9). All AC discriminators empirically RED: 12 named tests 0 hits, ScanOrphanedClosedBeads 0 code hits, 'closed without' 0 hits in all three AC9 files, 'impl approve' 0 hits in ADR-0037, and go test -run '<nomatch>' confirmed to exit 0.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": 1,
+      "title": "G2 branch-probe fails open",
+      "grade": "ADDRESSED",
+      "evidence": "R1 + In Scope now specify gitutil.BranchExistsE(name)(bool,error) beside the unchanged BranchExists (gitops.go:94-100, 'return cmd.Run() == nil' verified verbatim; BranchExistsE 0 hits at 77d8a1a9); branch-existence probe listed as the 4th fail-closed leg of the error-preserving core; gate refuses, FindOrphanedClosedBeads wrapper stays byte-identical for complete/next/doctor; AC1(b) adds TestApproveImpl_BranchProbeErrorFailsClosed (absent today); internal/gitutil/** declared under execution (OWNERSHIP.yaml:4, cited line verified) and added to In Scope."
+    },
+    {
+      "item": 2,
+      "title": "G3 non-discriminating AC proofs",
+      "grade": "ADDRESSED",
+      "evidence": "Empirically confirmed go test -run '<nomatch>' exits 0 with '[no tests to run]'. Every AC1-AC7 proof now chains grep -q 'func Test<Name>' existence discriminators; all 12 named tests have 0 hits in internal/ at 77d8a1a9; AC4 anchors on ScanOrphanedClosedBeads (0 Go-code hits repo-wide; the discriminator greps impl_test.go which is clean). Each proof FAILS today as required."
+    },
+    {
+      "item": 3,
+      "title": "G3 AC7 import cycle",
+      "grade": "ADDRESSED",
+      "evidence": "Grounding verified: internal/approve imports no internal/complete and vice versa (0 import hits both directions; only a comment at complete.go:486 mentions approve). AC7 split into (a) TestCompleteRun_RegatesAlreadyClosedOrphan package-local in internal/complete and (b) TestApproveImpl_PassesAfterOrphanSettled in internal/approve, each with its own existence check — no cross-package cycle."
+    },
+    {
+      "item": 4,
+      "title": "G3 branchless recovery untruthful",
+      "grade": "ADDRESSED",
+      "evidence": "R3, ADR-0035 touchpoint, and AC6(a) now give the branch-less refusal a DISTINCT recourse naming the restoration prerequisite (restore bead/<id> ref, then mindspec complete <bead>, or settle out-of-band); AC6(a) asserts it. Grounding exact: beadHead is a bare branch-name string (complete.go:329) so exec.MergeBase at :492-495 is the first hard failure for a missing branch — a bare 'mindspec complete <bead>' is truly not runnable there. Branchless reconciliation stays deferred to mindspec-h4n5."
+    },
+    {
+      "item": 5,
+      "title": "G3 persist mindspec-h4n5",
+      "grade": "ADDRESSED",
+      "evidence": "grep -c mindspec-h4n5 .beads/issues.jsonl == 1 at 77d8a1a9; landed as the dedicated commit 77d8a1a9 'chore(beads): sync issues.jsonl (persist mindspec-h4n5)'."
+    },
+    {
+      "item": 6,
+      "title": "G3 AC10 exactly-one claimant",
+      "grade": "ADDRESSED",
+      "evidence": "AC10 upgraded to the whole-set invariant: [ \"$(grep -l 'internal/lifecycle' .mindspec/domains/*/OWNERSHIP.yaml)\" = workflow path ]. Verified it holds today — only workflow/OWNERSHIP.yaml claims the package (line 9); execution file has no lifecycle entry. A third-domain claim would fail the check as intended."
+    },
+    {
+      "item": 7,
+      "title": "O3 cmd/** over-declaration + execution self-ownership",
+      "grade": "ADDRESSED",
+      "evidence": "Round-2 dispositions paragraph drops cmd/** from the workflow declaration (no cmd/ change surface — skill text lives in internal/setup/claude.go:681/:736 embedded literal plus the two materialized copies, all verified; next.go:459 citation is descriptive) and evidence-refutes the execution self-ownership gap as pre-existing/out-of-scope (verified: execution OWNERSHIP.yaml lists no self path, unlike workflow/OWNERSHIP.yaml:27 which does)."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "At pinned SHA 77d8a1a9, all 12 requested named tests are absent (each existence grep exits 1), the AC4 ScanOrphanedClosedBeads anchor is absent from internal code, and every full AC1-AC7 proof chain exits 1. AC7 is correctly split without a cross-package cycle; branchless recovery names branch-ref restoration; h4n5 occurs exactly once; and AC10 enumerates all ownership files and resolves solely to workflow. One strict runnability requirement remains unmet: AC1 existence-checks TestScanOrphanedClosedBeads_ErrorPreserving but follows it with package-wide `go test ./internal/lifecycle`, not the required exact-named `go test -run 'TestScanOrphanedClosedBeads_ErrorPreserving'`. The validation-proofs claim that every named test has an exact-named run is therefore false. This is a small proof correction, but the panel brief makes it approval-blocking.",
+  "concrete_changes_required": [
+    "Amend AC1 so the TestScanOrphanedClosedBeads_ErrorPreserving existence grep is chained to `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v`; retain an additional full-package lifecycle test if desired."
+  ],
+  "findings": [
+    {
+      "id": "1",
+      "grade": "ADDRESSED",
+      "note": "The spec adds BranchExistsE, makes branch probing the fourth error-preserving fail-closed leg, preserves the swallowing wrapper, adds the named approve fault test, and scopes internal/gitutil to execution."
+    },
+    {
+      "id": "2",
+      "grade": "PARTIAL",
+      "note": "All requested existence greps and all AC1-AC7 proof chains are RED at 77d8a1a9, but AC1 does not exact-run the named lifecycle test after checking its existence."
+    },
+    {
+      "id": "3",
+      "grade": "ADDRESSED",
+      "note": "AC7 is split into package-local complete and approve tests, with separate existence checks and exact-named runs; current source imports show no reverse package edge."
+    },
+    {
+      "id": "4",
+      "grade": "ADDRESSED",
+      "note": "The branchless obligation refusal has distinct recourse requiring restoration of bead/<id> before mindspec complete, and AC6 explicitly asserts that prerequisite."
+    },
+    {
+      "id": "5",
+      "grade": "ADDRESSED",
+      "note": "grep -c mindspec-h4n5 .beads/issues.jsonl returns exactly 1 at the pinned SHA."
+    },
+    {
+      "id": "6",
+      "grade": "ADDRESSED",
+      "note": "AC10 greps the complete .mindspec/domains/*/OWNERSHIP.yaml set and asserts the sole output is workflow; the proof passes at the pinned SHA."
+    },
+    {
+      "id": "7",
+      "grade": "ADDRESSED",
+      "note": "cmd/** is dropped as a change surface, and the execution self-ownership gap is explicitly dispositioned as pre-existing and out of scope."
+    }
+  ]
+}

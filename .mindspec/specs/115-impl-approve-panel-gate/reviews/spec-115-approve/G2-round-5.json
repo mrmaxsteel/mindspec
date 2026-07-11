@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The no-quiet show-ref fix does make unreadable loose and packed ref stores loud (128), and exact full refs avoid ambiguity. However, it does not provide the specified three-way: in a brand-new clean absolute-/tmp repository, both Git 2.51.2 and Apple Git 2.50.1 returned 128, not 1, for `git show-ref --verify refs/heads/bead/absent`. Present returned 0, while unreadable loose/packed stores also returned 128. Thus genuine absence and infrastructure failure collide, so the prescribed mapping treats every normally deleted bead branch as an error and falsely refuses impl approval. Symref loops, dangling symrefs, malformed refs, and permission failures were loud; no deeper exit-1 masking case was found. Empirically, `show-ref --exists` distinguished present=0, absent=2, unreadable=1 on both installed Git versions, but compatibility must be pinned if adopted.",
+  "concrete_changes_required": [
+    "Replace the `show-ref --verify` 0/1/else contract with an empirically valid existence primitive and update R1, Scope, OQ2, falsifiers, and tests. Reproduction: initialize `/tmp/mindspec-g2-round5-clean-absence`, make an empty commit and `bead/existing`, then run `git -C /tmp/mindspec-g2-round5-clean-absence show-ref --verify refs/heads/bead/absent`; Git 2.51.2 and Apple Git 2.50.1 both exit 128, while chmod 000 on an existing loose refs/heads store also exits 128. If adopting `show-ref --exists`, pin the tested mapping present=0, absent=2, other=error and required Git-version compatibility."
+  ],
+  "findings": [
+    {
+      "id": "round-4-branch-probe-fix",
+      "status": "PARTIAL",
+      "note": "The active primitive, general fail-closed principle, defense-in-depth note, and RED test names are present, and unreadable stores are no longer masked. But no-quiet `show-ref --verify` returns 128 for genuine absence as well as ref-store failure on both installed Git versions, introducing a deterministic false-refusal on the normal deleted-branch path."
+    }
+  ]
+}

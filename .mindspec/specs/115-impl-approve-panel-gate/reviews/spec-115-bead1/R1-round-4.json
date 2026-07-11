@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Author-of-record / scope lens on delta e71a7991..a8da895a. Confined exactly: only internal/complete/panel_advisory.go (+27) and its test (+71). `git diff main -- internal/gitutil/` empty; no approve/docs/Bead-2/3 files; no seam-signature change. Faithful to the consolidated round-3 fix: a per-element loop (lines 596-602) validates EVERY decoded panel_refuted_entries element (Slot==\"\" || Round<1 -> error), placed after decodeRefutations and BEFORE the len(pending)==0 early return (line 604) — symmetric with the pre-existing pending shape-check (lines 619-626). Purely additive; no existing expectation edited. 4 new subtests added (refuted:[null], empty-slot, round<1 all RED-on-revert; plus a valid-covered no-false-refuse pin), 20 total. No-regression: reconcile/consumer VALID-input paths byte-identical; new loop fires only on malformed covering entries valid beads never carry. go build ./... + go test ./internal/complete green; git tree clean (only untracked reviews dir). My rounds-1/2/3 APPROVE (all 7 plan Bead-1 steps, scope fence) is undisturbed.",
+  "concrete_changes_required": [],
+  "findings": []
+}

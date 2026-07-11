@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.82,
+  "rationale": "ADR/ownership lens is CLEAN: internal/gitutil stays execution-owned (only execution/OWNERSHIP.yaml claims it; rev-parse->show-ref is a gitops.go primitive swap, no new ownership claim); internal/lifecycle has exactly one claimant (workflow); no ADR-0030/0035/0037/0023 principle is disturbed (primitive choice is a git-IO impl detail); RevParseRef/ErrRefNotFound are cleanly demoted to 'ancestry-check precedent' without invention. On my lens: ADDRESSED. BUT the fix introduces a NEW empirical defect. I reproduced on the repo's git (2.51.2, /tmp throwaway) that `git show-ref --verify refs/heads/<absent>` WITHOUT `--quiet` exits **128** (fatal: not a valid ref), NOT 1 as the round-4 orchestrator table and spec claim. The exit-1 'genuine absent' signal only appears WITH `--quiet`. So under the spec's contract (exit1->(false,nil) absent; any-other->error->REFUSE), every cleanly-deleted bead branch (128) maps to the ERROR branch => the gate FALSE-REFUSES the normal post-complete state (round-3 G2 regression re-opened). Worse: absent(128) and unreadable-store(128) are INDISTINGUISHABLE, so the claimed 0/1/128 three-way collapses to 0/128 on this git. The fix is grounded on a factual error about show-ref exit codes.",
+  "concrete_changes_required": [
+    "Correct the empirical exit-code claim: on the repo's git (2.51.2), `git show-ref --verify refs/heads/<name>` WITHOUT `--quiet` returns exit 128 (fatal 'not a valid ref') for a GENUINELY-ABSENT ref, not exit 1. Exit 1 for absence only occurs WITH `--quiet`. Verify with a /tmp throwaway repo before re-grounding.",
+    "Re-ground BranchExistsE's contract on a primitive that actually distinguishes the three states on real git. As specified (no --quiet, absent->1), the probe never yields exit 1 for genuine absence, so every merged-and-deleted bead branch hits the 'any other exit -> error -> gate REFUSES' branch = a catastrophic false-refusal of the normal post-`complete` finalize path.",
+    "Address that absent(128) and unreadable-store(128) are indistinguishable by exit code alone under `show-ref --verify` (no --quiet) on git 2.51.2 — the claimed clean 0/1/128 three-way does not hold. Consider `show-ref --quiet --verify` (0 present / 1 absent) paired with an explicit unreadable-store detector, and note the defense-in-depth MergeBase at impl.go:249 already fails closed on an unreadable refs/heads before the scan."
+  ],
+  "findings": [
+    {"item": "ADR fitness (0030/0035/0037/0023) — primitive swap is a git-IO impl detail, no new principle; ADR references in diff unchanged", "grade": "ADDRESSED"},
+    {"item": "internal/gitutil/** ownership unchanged (execution) — rev-parse->show-ref both gitops.go primitives, no ownership disturbance", "grade": "ADDRESSED"},
+    {"item": "lifecycle->workflow exactly-one-claimant invariant untouched (workflow sole claimant of internal/lifecycle)", "grade": "ADDRESSED"},
+    {"item": "RevParseRef/ErrRefNotFound correctly demoted to ancestry-check precedent (not the existence probe), no invention", "grade": "ADDRESSED"},
+    {"item": "show-ref --verify (no --quiet) exit code for GENUINE ABSENCE is 128 on git 2.51.2, not 1 as spec/orchestrator-table claim -> contract false-refuses every cleanly-deleted branch; and absent(128)==unreadable(128) so no exit-code three-way exists. Fix's central premise empirically wrong.", "grade": "NEW_ISSUE"}
+  ]
+}

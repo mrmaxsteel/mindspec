@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The structural reorder closes both round-2 inputs: both keys are comma-ok/null checked and decoded before the sole pending-empty early return. Valid absent/empty inputs and valid exact coverage remain unchanged; the complete package, named PanelRefuted suites, and all 16 predicate subtests pass. However, the broader corrupt-shape class remains open inside panel_refuted_entries: encoding/json accepts a null array element as a zero-valued panel.Refutation, and covered-entry shape is never validated. The realizable metadata {\"panel_refuted_entries\":[null]} with pending absent returns nil; an absolute-/tmp overlay probe fails because CheckPendingObligations accepts it. Likewise a missing/empty slot or round in a refuted element is silently tolerated when pending is empty. This violates the unconditional present-but-corrupt REFUSES contract even though such an entry cannot cover a valid pending obligation. Pending elements are shape-checked, but only after the pending-empty return; refuted elements have no equivalent validation at all.",
+  "concrete_changes_required": [
+    "Validate every decoded panel_refuted_entries element (non-empty slot and round >= 1) before the pending-empty early return, and add tests for a null element and missing/zero slot/round with absent or empty pending."
+  ],
+  "findings": {
+    "section_1": "ADDRESSED: both exact round-2 corrupt inputs now error; both top-level keys are validated before the only early return.",
+    "section_2": "NEW_ISSUE: {\"panel_refuted_entries\":[null]} is realizable and returns nil with pending absent. Null decodes to a zero-valued Refutation, and refuted elements receive no shape validation.",
+    "section_3": "ADDRESSED: valid absent arrays, valid empty arrays, and exact valid coverage remain accepted; package and named regression suites pass, including 16 predicate subtests."
+  }
+}

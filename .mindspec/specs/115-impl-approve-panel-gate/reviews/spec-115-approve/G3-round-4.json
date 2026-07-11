@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At pinned SHA 4cbf437b, Fix 1 fully specifies and grounds BranchExistsE's present/absent/infra-error contract, adds the anti-false-refusal falsifier, two existence-discriminated exact-named tests, and mixed-list wrapper parity. Fix 2 changes AC1 to exact-run TestScanOrphanedClosedBeads_ErrorPreserving while retaining the package no-regression run. I audited AC1-AC7: every named test is paired with an exact-named -run. In an absolute /tmp archive, all 14 new named tests were absent (grep exit 1), including TestBranchExistsE_ThreeWay and TestApproveImpl_DeletedBranchNoRefusal; BranchExistsE and ScanOrphanedClosedBeads had zero internal Go-code hits; the AC4 anchor was absent; and every complete AC1-AC7 proof chain exited 1. The round diff contains only spec.md and panel artifacts, all four OQs remain resolved, and no new defect was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "fix-1a",
+      "grade": "ADDRESSED",
+      "note": "R1, OQ2, and Scope state the three-way BranchExistsE contract and accurately cite the RevParseRef/ErrRefNotFound exit-1-versus-128 precedent."
+    },
+    {
+      "id": "fix-1b",
+      "grade": "ADDRESSED",
+      "note": "R1's falsified-if clause now rejects any genuinely absent branch result other than (false, nil), pinning the deleted-branch happy path."
+    },
+    {
+      "id": "fix-1c",
+      "grade": "ADDRESSED",
+      "note": "AC1 adds an existence-discriminated exact-named TestBranchExistsE_ThreeWay proof; its existence grep exits 1 at 4cbf437b."
+    },
+    {
+      "id": "fix-1d",
+      "grade": "ADDRESSED",
+      "note": "AC2 adds an existence-discriminated exact-named TestApproveImpl_DeletedBranchNoRefusal proof; its existence grep exits 1 at 4cbf437b."
+    },
+    {
+      "id": "fix-1e",
+      "grade": "ADDRESSED",
+      "note": "AC1 requires a mixed closed-bead list where the core errors on one bead while the fail-open wrapper still returns later provable orphans byte-identically."
+    },
+    {
+      "id": "fix-2",
+      "grade": "ADDRESSED",
+      "note": "AC1 now chains the lifecycle existence grep to go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v; all AC1-AC7 named tests have exact-named runs."
+    }
+  ]
+}

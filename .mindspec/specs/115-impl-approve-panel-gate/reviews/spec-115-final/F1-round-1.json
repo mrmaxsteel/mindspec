@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "F1 Fable-sub (opus)",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Falsifiability lens, whole branch @21374bb8. Walked AC1-AC13: every named test exists (grep -q confirmed for all 16 new tests + extended TestApproveImplCallOrder anchor) and passes with its exact -run (approve/executor/complete/lifecycle all green individually and as suites). RED-on-revert genuinely holds: at the four discriminator SHAs (eb6a2ed1, 77d8a1a9, 18cc59d9, bcb255eb) each named test/anchor has ZERO code hits (git grep -c = none). Not tautologies: AC13 WorktreeEnum forces scan->no-orphans yet refuses on a non-ancestor enumerated worktree with FinalizeEpic uncalled, fails closed on list-error, no false positives (ancestor + different-spec); AC11 MergeBase(:294) precedes the gate(:369) which precedes epic-close/phase-write(:387,:411)/FinalizeEpic(:443); AC10 uses production validate.GlobMatch, asserts exactly-one=workflow (claim lands only in workflow/OWNERSHIP.yaml:9). AC8 diff-grep removed=1/after=0, comment corrected. AC9: ADR 'impl approve'=5, 'closed without'=2 in all three surfaces, ADR dated 2026-07-11. Negative pins clean: no BranchExistsE, no show-ref in Go, gitutil byte-unchanged. CI-ready: build/gofmt/vet/golangci-lint(0 issues)/mindspec validate all pass. Git left clean. No non-discriminating proof found.",
+  "concrete_changes_required": [],
+  "findings": [
+    "AC1-AC7,AC10-AC13: all named tests present + pass exact -run; discriminator SHAs confirm absence (RED-on-revert).",
+    "AC4 anchor 'ScanOrphanedClosedBeads' at impl_test.go:809-813, 0 hits at eb6a2ed1.",
+    "AC8: git diff removed-line grep=1, post-change grep=0; :396-398 parity phrase gone.",
+    "AC9: ADR-0037 amendment dated 2026-07-11 (5x 'impl approve'); 'closed without' >=1 in claude.go + both materialized SKILL.md.",
+    "AC10: TestLifecycleOwnershipExactlyOneWorkflowClaimant parses all domain manifests via production validate.GlobMatch; claim present only in workflow.",
+    "AC11 Fact1: exec.MergeBase at impl.go:294 precedes runOrphanObligationGate at :369, which precedes epic close / phase-write / FinalizeEpic.",
+    "AC12/AC13: executor real-git structural pin + approve worktree-enum race pin both green and genuinely discriminating.",
+    "Invariants honored: no BranchExistsE / show-ref Go code (0 hits), internal/gitutil byte-unchanged, build+gofmt+vet+golangci-lint(0)+validate pass.",
+    "git status left clean (only the review output dir untracked)."
+  ]
+}

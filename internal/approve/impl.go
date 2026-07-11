@@ -11,9 +11,12 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -43,6 +46,46 @@ var (
 	// and plan-bead gate failures (spec 092, mindspec-tjat). Tests swap
 	// it to pin the worktree kind regardless of where `go test` runs.
 	implGetwdFn = os.Getwd
+
+	// --- Spec 115 Bead 2: the pre-terminal orphan/obligation refusal
+	// gate's seams. All default to the real functions so every existing
+	// test — which never touches these vars — exercises production
+	// behavior unchanged; the new gate's own tests override them.
+	//
+	// implScanOrphansFn is R1's error-preserving orphan scan (fail-
+	// closed on the three cleanly-signaled infra legs: epic-lookup,
+	// bd-list, ancestry). The branch-existence trigger inside it stays
+	// the unchanged bool gitutil.BranchExists (round-6 C+B, via
+	// lifecycle's own internal seam) — absent-or-probe-failure reads as
+	// "no trigger", never a false refusal.
+	implScanOrphansFn = lifecycle.ScanOrphanedClosedBeads
+	// implClosedEpicBeadIDsFn and implWorktreeListFn back the round-7
+	// Option B worktree-enumeration merge-prevention leg (AC13): the
+	// SAME epic-scoped closed-bead set the orphan scan uses, and the
+	// SAME `bd worktree list` enumeration FinalizeEpic itself merges
+	// from, so a transient branch-existence-probe miss can never hide a
+	// merge candidate the merge loop will see.
+	implClosedEpicBeadIDsFn = lifecycle.ClosedEpicBeadIDs
+	implWorktreeListFn      = bead.WorktreeList
+	// implIsAncestorFn drives the worktree-enum leg's ancestry check —
+	// routed through lifecycle.IsAncestor, a thin wrapper over
+	// gitutil.IsAncestor, so this ADR-0030 enforcement package never
+	// imports the git-plumbing package directly (internal/lint
+	// boundary; internal/lifecycle already consumes it the same way).
+	implIsAncestorFn = lifecycle.IsAncestor
+	// implBranchExistsFn feeds ONLY the R3 obligation backstop's
+	// branch-state-truthful recovery line (round-2 G3) — never the
+	// orphan-detection trigger, which stays inside implScanOrphansFn.
+	// Routed through lifecycle.BranchExists (thin wrapper over
+	// gitutil.BranchExists) for the same ADR-0030 boundary reason as
+	// implIsAncestorFn above.
+	implBranchExistsFn = lifecycle.BranchExists
+	// implGetMetadataFn and implCheckObligationsFn back R3's durable-
+	// obligation backstop: the SAME check-only coverage predicate
+	// (Spec 114 R2 discipline) `mindspec complete` itself settles,
+	// exported by Bead 1 so this gate never re-implements it.
+	implGetMetadataFn      = bead.GetMetadata
+	implCheckObligationsFn = complete.CheckPendingObligations
 )
 
 // implContextLine renders the Req 8 worktree-context line for impl
@@ -118,16 +161,23 @@ type ImplResult struct {
 //  1. readBeadStatus loop (bead-status verification, non-mutating)
 //  2. validate.ValidateDocs (doc-sync gate; honors AllowDocSkew override)
 //  3. validate.CheckADRDivergence (ADR-divergence gate; NOT covered by override)
-//  4. implPhaseMetadataFn(epicID, mindspec_phase=<derived>) — Spec 092
+//  4. Spec 115 Bead 2: runOrphanObligationGate — the pre-terminal
+//     refusal gate (R1 orphan scan + the worktree-enumeration merge-
+//     prevention leg + R3 durable-obligation backstop), fail-closed on
+//     every cleanly-signaled infra error on all three legs; hatches
+//     bypass NOTHING here (this is a 4gsz-class lifecycle-bypass guard,
+//     not the panel-gate decision). A refusal here performs no epic
+//     close, no phase write, no merge, no push.
+//  5. implPhaseMetadataFn(epicID, mindspec_phase=<derived>) — Spec 092
 //     Req 1 deferred stale-phase reconcile; runs ONLY when the stored
 //     phase failed the review/done gate but the child-derived phase
-//     passed it, after the LAST pre-terminal gate (step 3) and before
-//     the first mutation (step 5); never after step 6's done write
-//  5. implRunBDCombinedFn("close", epicID) (EPIC CLOSE — first mutation)
-//  6. implPhaseMetadataFn(epicID, mindspec_phase=done) (PHASE METADATA)
-//  7. exec.CommitCount (pre-flight)
-//  8. exec.FinalizeEpic (TERMINAL MUTATION)
-//  9. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
+//     passed it, after the LAST pre-terminal gate (step 4) and before
+//     the first mutation (step 6); never after step 7's done write
+//  6. implRunBDCombinedFn("close", epicID) (EPIC CLOSE — first mutation)
+//  7. implPhaseMetadataFn(epicID, mindspec_phase=done) (PHASE METADATA)
+//  8. exec.CommitCount (pre-flight)
+//  9. exec.FinalizeEpic (TERMINAL MUTATION)
+//  10. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
 //     AllowDocSkew set AND FinalizeEpic returned nil
 func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) (*ImplResult, error) {
 	if err := validate.SpecID(specID); err != nil {
@@ -312,6 +362,19 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			joinResultErrorMessages(adrResult))
 	}
 
+	// Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate.
+	// Runs AFTER every read-only gate above (the ADR-divergence gate
+	// immediately above is the last of them) and BEFORE the Spec 092
+	// deferred phase-reconcile write, MUTATION (1/3) epic close, the
+	// mindspec_phase=done write, the CommitCount preflight, and
+	// exec.FinalizeEpic below — so a refusal here performs NO epic
+	// close, NO phase write, NO merge, NO push. Hatches
+	// (MINDSPEC_SKIP_PANEL, enforcement.panel_gate: false) bypass
+	// NOTHING here.
+	if err := runOrphanObligationGate(root, specID, specBranch, beadIDs, planErr); err != nil {
+		return nil, err
+	}
+
 	// Spec 092 Req 1: deferred forward reconcile of the stale phase
 	// cache. Placement is panel-pinned: AFTER the last pre-terminal
 	// gate (the ADR-divergence gate above, the last of phase gate /
@@ -361,6 +424,19 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// Pinned between phase-metadata write and FinalizeEpic per panel
 	// CONSENSUS revision 9 so a future regression that re-shuffles
 	// this line is caught by TestApproveImplCallOrder.
+	//
+	// R7 (Spec 115 Bead 2 round 1): readPlanBeadIDs errors on an empty
+	// bead_ids list, so len(beadIDs)==0 and planErr!=nil are
+	// equivalent here, and the disjunction below collapses to just
+	// planErr!=nil. Leg 3 above (runOrphanObligationGate) already
+	// refuses whenever planErr!=nil, before this preflight runs — so
+	// past that gate, planErr==nil and len(beadIDs)>0 always hold and
+	// this disjunction is always false. The refusal below is therefore
+	// unreachable in normal flow; it is retained as a defensive
+	// backstop and to preserve the CONSENSUS-revision-9 call-order pin
+	// (see TestApproveImplCallOrder), not because it fires today. A
+	// valid-plan, zero-commit spec is the legitimate cleanup path and
+	// passes this check (see TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup).
 	count, countErr := exec.CommitCount("main", specBranch)
 	if countErr == nil {
 		if count == 0 && (planErr != nil || len(beadIDs) == 0) {
@@ -477,6 +553,206 @@ func isAlreadyClosedErr(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "already closed")
+}
+
+// --- Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate ---
+//
+// runOrphanObligationGate closes the last un-gated merge path in the
+// binary (spec 115's Goal): a bead closed via a raw `bd close` — or one
+// whose durable refutation obligation was never settled — must not ride
+// `impl approve`'s auto-merge un-gated. Three legs, all fail-CLOSED on
+// their own cleanly-signaled infra errors:
+//
+//  1. R1 — implScanOrphansFn (lifecycle.ScanOrphanedClosedBeads): any
+//     closed epic bead whose bead/<id> branch exists and is NOT an
+//     ancestor of the spec branch was closed without `mindspec
+//     complete`. The branch-existence trigger inside it stays the
+//     unchanged bool gitutil.BranchExists (round-6 C+B, via lifecycle's
+//     own internal seam): absent, or a probe-infra failure, both read
+//     as "no trigger" — a genuinely deleted (merged-and-cleaned) branch
+//     never false-refuses.
+//  2. The round-7 Option B worktree-enumeration merge-prevention leg
+//     (AC13): keyed off the SAME `bd worktree list` enumeration
+//     FinalizeEpic itself merges from, so a transient branch-existence-
+//     probe miss (the round-6 G2 race) can never hide a merge candidate
+//     the merge loop will see.
+//  3. R3 — the durable-obligation backstop: every plan bead's recorded
+//     refutation_pending obligations must be (slot, round)-exactly
+//     covered by a durable panel_refuted record, via the SAME check-
+//     only predicate `mindspec complete` uses to settle it.
+//
+// Hatches (MINDSPEC_SKIP_PANEL, enforcement.panel_gate: false) are never
+// consulted here — this is a 4gsz-class lifecycle-bypass guard, not the
+// panel-gate decision; they keep their exact 114 semantics inside the
+// `mindspec complete <bead>` recovery run this gate always recommends.
+func runOrphanObligationGate(root, specID, specBranch string, planBeadIDs []string, planErr error) error {
+	// Leg 1 (R1): the error-preserving orphan scan. Any of the three
+	// cleanly-signaled infra errors (epic-lookup, bd-list, ancestry)
+	// refuses fail-closed — an unreadable store cannot prove the epic
+	// is settled.
+	orphans, err := implScanOrphansFn(specID, root, "")
+	if err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("could not verify every closed bead under spec %s's epic is merged (orphan scan failed): %v", specID, err),
+			fmt.Sprintf("mindspec impl approve %s", specID),
+		)
+	}
+	if len(orphans) > 0 {
+		return implOrphanRefusal(root, specID, orphans[0])
+	}
+
+	// Leg 2 (R1 round-7 Option B): the worktree-enumeration merge-
+	// prevention leg. Fail-closed on its own infra (WorktreeList,
+	// ClosedEpicBeadIDs, ancestry) — deliberate asymmetry vs
+	// FinalizeEpic itself, whose equivalent failures merge-SKIP (the
+	// safe direction there; refusing is the safe direction here).
+	if err := runWorktreeEnumerationLeg(root, specID, specBranch); err != nil {
+		return err
+	}
+
+	// Leg 3 (R3): the durable-obligation backstop. Fail-CLOSED on an
+	// unreadable plan-bead enumeration too — unlike gate (1/3) above in
+	// ApproveImpl, which silently skips on the same planErr (unchanged,
+	// on purpose: that gate's contract predates this one). A corrupt or
+	// missing plan.md must not make this leg's unique coverage (raw-
+	// merged or branch-deleted beads carrying an unsettled obligation)
+	// silently vanish.
+	if planErr != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("spec %s's plan bead list could not be read to verify every durable refutation obligation is settled: %v", specID, planErr),
+			fmt.Sprintf("mindspec impl approve %s", specID),
+		)
+	}
+	for _, bid := range planBeadIDs {
+		if obErr := implCheckObligationsFn(bid, implGetMetadataFn); obErr != nil {
+			return implObligationRefusal(bid, obErr)
+		}
+	}
+	return nil
+}
+
+// runWorktreeEnumerationLeg is the round-7 Option B worktree-
+// enumeration merge-prevention leg (AC13): it enumerates the SAME `bd
+// worktree list` source FinalizeEpic itself merges from
+// (defaultWorktreeOps.List(), mindspec_executor.go), filters to real
+// bead/<id> branch lines (the same filter FinalizeEpic applies), scopes
+// to the finalizing spec's own closed-epic-bead set (so a different
+// spec's worktree neither triggers nor suppresses this leg — blp6
+// unchanged), and refuses if any such branch is NOT an ancestor of the
+// spec branch — regardless of what the branch-existence probe inside
+// implScanOrphansFn reported. Because the gate and the merge loop key
+// off the identical enumeration, a transient branch-existence-probe
+// miss can no longer hide a merge candidate the loop will see.
+func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
+	entries, err := implWorktreeListFn()
+	if err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("could not enumerate worktrees to verify spec %s's closed epic beads are all merged: %v", specID, err),
+			fmt.Sprintf("mindspec impl approve %s", specID),
+		)
+	}
+	closedIDs, err := implClosedEpicBeadIDsFn(specID)
+	if err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("could not enumerate spec %s's closed epic beads to verify they are all merged: %v", specID, err),
+			fmt.Sprintf("mindspec impl approve %s", specID),
+		)
+	}
+	closed := make(map[string]bool, len(closedIDs))
+	for _, id := range closedIDs {
+		closed[id] = true
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
+			continue
+		}
+		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if beadID == "" || !closed[beadID] {
+			continue
+		}
+		isAnc, ancErr := implIsAncestorFn(root, e.Branch, specBranch)
+		if ancErr != nil {
+			return guard.NewFailure(
+				fmt.Sprintf("could not verify worktree branch %s is merged into %s: %v", e.Branch, specBranch, ancErr),
+				fmt.Sprintf("mindspec impl approve %s", specID),
+			)
+		}
+		if isAnc {
+			continue
+		}
+		return implOrphanRefusal(root, specID, lifecycle.Orphan{
+			BeadID:     beadID,
+			BeadBranch: e.Branch,
+			SpecBranch: specBranch,
+		})
+	}
+	return nil
+}
+
+// implOrphanRefusal renders the (a)/(b)/(c)-shaped refusal shared by
+// Leg 1 and Leg 2: (a) names the bead ID, its unmerged bead/<id>
+// branch, and the spec branch; (b) states it was closed without
+// `mindspec complete`; (c) ends with o.RecoveryCommand() as the FINAL
+// line (ADR-0035; internal/guard/recovery_convention_test.go enforces
+// the final-line shape). The advisory slot line (R2) is best-effort
+// decoration ONLY — never load-bearing, never printed if unreadable.
+func implOrphanRefusal(root, specID string, o lifecycle.Orphan) error {
+	msg := fmt.Sprintf(
+		"bead %s (branch %s) was closed without running mindspec complete and is not merged into %s",
+		o.BeadID, o.BeadBranch, o.SpecBranch,
+	)
+	if slot := implAdvisorySlotLine(root, specID, o.BeadID); slot != "" {
+		msg += "\n" + slot
+	}
+	return guard.NewFailure(msg, o.RecoveryCommand())
+}
+
+// implAdvisorySlotLine is Spec 115 R2: best-effort naming of the
+// unresolved reviewer slot(s) from beadID's registered panel, decorating
+// an orphan refusal. Strictly advisory and read-only: an unreadable,
+// missing, or removed panel simply omits the line — never a pass, never
+// a crash, no gate decision computed here, no metadata written. The
+// returned line never contains MINDSPEC_SKIP_PANEL (HC-7) or a paste-
+// able refutation incantation.
+func implAdvisorySlotLine(root, specID, beadID string) string {
+	roots := complete.PanelGateRoots(root, "", specID)
+	regs := panel.ForBead(panel.Scan(roots...), beadID)
+	if len(regs) == 0 {
+		return ""
+	}
+	res, err := panel.Tally(regs[0].Dir)
+	if err != nil {
+		return ""
+	}
+	unresolved := res.UnresolvedVerdicts()
+	if len(unresolved) == 0 {
+		return ""
+	}
+	slots := make([]string, 0, len(unresolved))
+	for _, v := range unresolved {
+		slots = append(slots, v.Slot)
+	}
+	return fmt.Sprintf("panel advisory: bead %s carries unresolved reviewer slot(s) %s on its registered panel", beadID, strings.Join(slots, ", "))
+}
+
+// implObligationRefusal wraps an uncovered-obligation error (Leg 3, R3)
+// with a branch-state-truthful recovery (round-2 G3): when beadID's
+// bead/<id> branch still exists, a bare `mindspec complete <bead>` is
+// runnable and settles the obligation at step 3.75; when the branch is
+// genuinely absent, a bare complete would die at the step-3.5 merge-base
+// BEFORE reaching that reconciliation, so the recourse names the
+// restoration prerequisite first — the message must never present a
+// command known to fail.
+func implObligationRefusal(beadID string, cause error) error {
+	branch := workspace.BeadBranch(beadID)
+	if implBranchExistsFn(branch) {
+		return guard.NewFailure(cause.Error(), fmt.Sprintf("mindspec complete %s", beadID))
+	}
+	return guard.NewFailure(
+		cause.Error(),
+		fmt.Sprintf("restore the %s branch ref (it no longer exists) so 'mindspec complete' can reach its reconciliation step, or settle the obligation out-of-band", branch),
+		fmt.Sprintf("mindspec complete %s", beadID),
+	)
 }
 
 // buildImplSkewMetadata returns the override metadata for the spec

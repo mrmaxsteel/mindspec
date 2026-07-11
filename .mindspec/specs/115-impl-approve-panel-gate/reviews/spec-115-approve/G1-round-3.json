@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "G1 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At pinned SHA 77d8a1a9, every requested grounding anchor matches the tree. BranchExists remains the bool-only cmd.Run wrapper at gitops.go:94-100; branchExistsFn is declared at orphans.go:40 and used at :95; neither BranchExistsE nor ScanOrphanedClosedBeads exists in Go code yet. Every named AC1-AC7 test and the AC4 ScanOrphanedClosedBeads anchor is absent with grep exit 1, so all new discriminators are genuinely RED. The approve/complete import-cycle grounding, FinalizeEpic loop and parity comment, ApproveImpl mutation boundaries, epic-scoped orphan enumeration, complete merge-base failure and already-closed tolerance, ADR/skill zero-hit baselines, GetMetadata anchor, exactly-one workflow ownership claim, and single h4n5 export entry all verify. The revision closes the branch-probe fail-open specification gap, splits AC7 safely, makes branchless recovery truthful, strengthens AC10, and disposes of O3 scope nits without introducing a new empirical inconsistency.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "1",
+      "status": "ADDRESSED",
+      "evidence": "R1, AC1, Scope, and OQ2 specify new BranchExistsE plus four-leg error propagation and fail-closed refusal, while preserving the existing fail-open wrapper; BranchExistsE has 0 Go-code hits today as required."
+    },
+    {
+      "id": "2",
+      "status": "ADDRESSED",
+      "evidence": "AC1-AC7 contain chained function-existence discriminators. All 12 named new test functions and AC4's ScanOrphanedClosedBeads anchor have grep exit 1 at 77d8a1a9."
+    },
+    {
+      "id": "3",
+      "status": "ADDRESSED",
+      "evidence": "AC7 is split between TestCompleteRun_RegatesAlreadyClosedOrphan in internal/complete and TestApproveImpl_PassesAfterOrphanSettled in internal/approve. Neither package imports the other today; complete.go:486 is comment-only."
+    },
+    {
+      "id": "4",
+      "status": "ADDRESSED",
+      "evidence": "R3, ADR-0035, AC6, and OQ3 distinguish branchless recovery and require restoring bead/<id> before complete (or out-of-band settlement), accurately grounded by complete.go:492-495."
+    },
+    {
+      "id": "5",
+      "status": "ADDRESSED",
+      "evidence": "mindspec-h4n5 occurs exactly once in the pinned .beads/issues.jsonl."
+    },
+    {
+      "id": "6",
+      "status": "ADDRESSED",
+      "evidence": "AC10 enumerates all .mindspec/domains/*/OWNERSHIP.yaml files and requires the sole result to be workflow; the pinned tree yields exactly that one claimant."
+    },
+    {
+      "id": "7",
+      "status": "ADDRESSED",
+      "evidence": "Impacted Domains explicitly drops cmd/** from the change declaration and evidence-refutes the execution manifest's pre-existing self-ownership gap as out of scope."
+    }
+  ]
+}

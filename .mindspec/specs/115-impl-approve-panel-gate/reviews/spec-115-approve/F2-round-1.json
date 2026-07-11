@@ -1,0 +1,47 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.86,
+  "rationale": "Grounding lens, every citation traced at a0a06943. The design core verifies completely: FinalizeEpic auto-merge loop (mindspec_executor.go:349, :381-422) with guardMergeLayout (:399, layout_guard.go:74) as sole guard and the ':396-398 same regression-only rule as CompleteBead' comment verbatim; ApproveImpl :132-428 with the status-only bead gate :220-242, phase-reconcile :327-340, epic close :343-348, FinalizeEpic :372, and ApproveImpl confirmed the SOLE production caller; FindOrphanedClosedBeads orphans.go:74 with the :71-73 fail-open contract and RecoveryCommand :54; complete.go steps 1.6 (:307-321), 2.25 (:345-405, panelGate :387), merge-base :492-495, 3.75 (:558-572), step-4 tolerance :574-582; SkipPanelEnv gate.go:30, PanelGateDecision :143; TestApproveImplCallOrder impl_test.go:714 (AST-based); ADR-0037 has ZERO 'impl approve' mentions; the OWNERSHIP add is the exact one-line diff and main claims internal/lifecycle nowhere; o4fd/h4n5/blp6 all exist with the quoted content (o4fd carries the 'or refuse' branch verbatim); executor's internal/complete mentions are comments only, so the ADR-0030 cycle rationale holds. Two AC proofs fail against the real tree: AC9 names a nonexistent skill path whose real counterpart already matches the grep, and AC8's grep pattern spans a line break so it can never match. Both are exactly-fixable; the design grounding is otherwise flawless.",
+  "concrete_changes_required": [
+    "AC9 + In Scope: `plugins/mindspec/skills/ms-impl-approve/SKILL.md` does not exist (plugins/mindspec/skills/ holds only ms-bead-*, ms-panel-*, ms-spec-autopilot/final-review/grill). The ms-impl-approve skill lives at `.claude/skills/ms-impl-approve/SKILL.md` and `.agents/skills/ms-impl-approve/SKILL.md`, with the CANONICAL source the embedded literal in `internal/setup/claude.go:736` (lifecycleSkillFiles pattern — an existing-install refresh needs the literal updated, as spec 105 did). Additionally the grep pattern is non-discriminating: `.claude/skills/ms-impl-approve/SKILL.md:9` ALREADY contains 'mindspec complete', so AC9's proof passes today with no change. Repoint the In Scope bullet and AC9 to the real files (incl. the claude.go literal) and grep for a discriminating string of the new refusal doc (e.g. 'closed without `mindspec complete`').",
+    "AC8 proof: the target comment splits across lines — mindspec_executor.go:397 ends '…same regression-only' and :398 starts 'rule as CompleteBead…' — so `git diff main -- internal/executor | grep -c '^-.*same regression-only rule'` matches 0 lines even after a correct fix (verified against the tree). Use a single-line pattern, e.g. `grep -c '^-.*rule as CompleteBead'`."
+  ],
+  "findings": [
+    {
+      "id": "F2-1",
+      "severity": "medium",
+      "claim": "In Scope + AC9 cite `plugins/mindspec/skills/ms-impl-approve/SKILL.md`",
+      "reality": "Path does not exist at a0a06943. Skill copies: .claude/skills/ms-impl-approve/SKILL.md, .agents/skills/ms-impl-approve/SKILL.md; canonical embedded literal internal/setup/claude.go:736. The .claude copy already contains 'mindspec complete' (line 9), making AC9's second grep non-discriminating even at a corrected path. Risk: implementer creates a NEW plugins/ skill duplicating the embedded one (drift), or AC9 passes vacuously.",
+      "load_bearing": true
+    },
+    {
+      "id": "F2-2",
+      "severity": "minor",
+      "claim": "AC8 proof `grep -c '^-.*same regression-only rule'` shows the comment updated",
+      "reality": "The phrase spans a line break (:397 'same regression-only' / :398 'rule as CompleteBead'), so the grep yields 0 in any diff — the proof cannot demonstrate the change it pins.",
+      "load_bearing": true
+    },
+    {
+      "id": "F2-3",
+      "severity": "cosmetic",
+      "claim": "FindOrphanedClosedBeads cited as orphans.go:74-115",
+      "reality": "File is 113 lines; the function spans :74-112. Off-by-3 on the end bound; start and content exact.",
+      "load_bearing": false
+    },
+    {
+      "id": "F2-4",
+      "severity": "cosmetic",
+      "claim": "Background: 'complete.Run runs, before any mutation: … steps 3.5 … step 3.75'",
+      "reality": "Step 2.5 auto-commit (exec CommitAll path, complete.go:407) precedes the 3.5/3.75 legs and is a mutation when a commit message is provided. The precise load-bearing ordering (gate before CommitAll, reconcile before close) is stated correctly elsewhere in the same spec (OQ1/Background rationale); this sentence's 'before any mutation' is loose for the 3.5/3.75 legs.",
+      "load_bearing": false
+    },
+    {
+      "id": "F2-5",
+      "severity": "confirmation",
+      "claim": "All other grounding claims",
+      "reality": "VERIFIED: o4fd description contains '(or refuse to auto-merge a bead lacking proof of panel settlement)' verbatim and the :398-comment NOTE; h4n5 (P3) and blp6 (P2) filed as described; ADR-0037 zero 'impl approve' hits (AC9's ADR grep IS a genuine falsifier) with 114 amendments present (§7 hatches, §8 agent-writable, any-unresolved-RC-blocks); ADR-0030/0035/0023 resolve at the cited relative paths; recovery_convention_test.go enforces the final 'recovery:' line rule; workflow OWNERSHIP.yaml:3 = internal/approve/**; execution OWNERSHIP.yaml:2 = internal/executor/**; the internal/lifecycle/** add is the exact one-line diff vs main and main's domains grep is empty; refutation_pending_entries/panel_refuted_entries keys and fail-closed bead.GetMetadata (bdcli.go:313) real; spec 114 scope note at spec.md:40-42; next.go:459 and doctor/orphaned_beads.go:48-79 consume the predicate as claimed; panelAdvisory :52-81, panelGate :162-262, reconcilePendingRefutations :519-584, panelGateRoots :624-633 all exact.",
+      "load_bearing": false
+    }
+  ]
+}

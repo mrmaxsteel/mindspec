@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "O3 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "TIEBREAKER: O1 is right; G3's finding is a taxonomy artifact, not a decomposition defect. AC1/AC6/AC7 are COMPOUND ACs the SPEC ITSELF authored to span the substrate/consumer edge: AC1 names TestScanOrphanedClosedBeads_ErrorPreserving (lifecycle) beside two TestApproveImpl_* proofs; AC6 names TestPendingObligationPredicate (complete); AC7 the spec EXPLICITLY splits into two named tests citing the import cycle. Each NAMED proof-test has exactly ONE bead home (the bead owning its package) — no test is authored twice; nothing is double-owned. What spans two beads is the AC-to-test mapping, inherent to a spec-written compound AC. G3's literal fix is INFEASIBLE: I verified approve does not import complete today; Bead 2 adds approve->complete, so a white-box package-complete test calling ApproveImpl cycles (complete->approve->complete). TestCompleteRun_RegatesAlreadyClosedOrphan drives complete.Run (a complete concern) and physically cannot move to Bead 2's approve-only scope without either the cycle or dragging internal/complete test files into an internal/approve bead. The substrate proofs cannot move. Independently: AC1-AC13 all homed, no phantom proofs, R1 four legs + R2 + R3 + Option-B homed, chain=2<=3, 3 work_chunks. The table's '(x half lands in Bead 1)' annotations already state this honestly.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "area": "AC provenance parity (G3 vs O1 adjudication)",
+      "status": "ADDRESSED",
+      "detail": "G3's REQUEST_CHANGES is OVERRULED as a taxonomy artifact. AC1/AC6/AC7 are compound acceptance criteria the approved spec itself wrote to span two packages (spec AC1 names the lifecycle test; AC6 names the complete predicate test; AC7's own text mandates a two-test split with the explicit import-cycle reason). Each individual proof test maps to exactly one bead (its package owner); none is authored in two beads. The plan designates Bead 2 as the AC completion/verification owner (the gate is the headline behavior, verifiable only once Bead 2 lands) and lands Bead 1's tests as prerequisite substrate — which is precisely O1's honest reading. No real double-ownership exists."
+    },
+    {
+      "area": "AC7(a) import-cycle feasibility (the decisive test)",
+      "status": "ADDRESSED",
+      "detail": "Verified at 57d043fb: internal/approve imports {adr,bead,executor,frontmatter,guard,phase,recording,state,validate,workspace} and NOT internal/complete (only a comment at complete.go:486 references approve, and complete does not import approve). Bead 2 adds approve->complete for CheckPendingObligations/PanelGateRoots. A white-box test in package complete calling ApproveImpl would compile internal/approve into complete's test binary, forming complete->approve->complete — a genuine Go build cycle. TestCompleteRun_RegatesAlreadyClosedOrphan tests complete.Run's re-gate/converge flow (a complete-package concern, driving complete's seams), so it cannot be an approve-side ApproveImpl test nor move into Bead 2's internal/approve-only scope. G3's fix ('make Bead 2 run every proof') is therefore physically infeasible for AC7(a); the substrate test cannot relocate."
+    },
+    {
+      "area": "No AC dropped / no phantom proof",
+      "status": "ADDRESSED",
+      "detail": "Provenance table rows exist for AC1-AC13; every named proof matches a test the spec's Acceptance Criteria / Validation Proofs section names (TestApproveImpl_OrphanRefuses, _OrphanInfraErrorFailsClosed, _OrphanExemptions, _DeletedBranchNoRefusal, _HatchDoesNotBypassOrphan, _AdvisorySlotNaming, _ObligationBackstop, _CorruptPlanRefuses, _PassesAfterOrphanSettled, _UnreadableRefStoreAbortsPreScan, _WorktreeEnumRefusesDespiteProbeMiss; TestScanOrphanedClosedBeads_ErrorPreserving; TestPendingObligationPredicate; TestCompleteRun_RegatesAlreadyClosedOrphan; TestFinalizeEpic_MergesOnlyWorktreeRealBranches; TestLifecycleOwnershipExactlyOneWorkflowClaimant; extended TestApproveImplCallOrder anchor). No phantom, none unnamed by the spec."
+    },
+    {
+      "area": "Requirement leg homing + chain + work_chunks",
+      "status": "ADDRESSED",
+      "detail": "R1's legs all homed: orphan error-preserving scan (Bead2 leg1/AC1), worktree-enum Option-B leg (Bead2 leg2/AC13), probe fail-open never-false-refuse (AC2d), structural Facts 1&2 (AC11 Bead2 / AC12 Bead1). R2 advisory (Bead2 step5/AC5). R3 obligation backstop (Bead2 leg3/AC6 with predicate substrate in Bead1). Longest chain 1->2 = 2, within <=3. Frontmatter work_chunks = 3 (deps: 1=[], 2=[1], 3=[]); G3 confirmed `mindspec validate plan` exit 0 and 1:1 chunk-to-section alignment. Package-per-bead decomposition is the correct minimal split; the alternative (substrate tests in Bead 2) is strictly worse."
+    },
+    {
+      "area": "Optional clarity note (non-blocking)",
+      "status": "ADDRESSED",
+      "detail": "The Provenance table's inline annotations ('lifecycle half lands in Bead 1', 'predicate half lands in Bead 1', '(a) lands in Bead 1') already disclose the substrate/consumer split honestly and are the correct description. A one-line legend stating 'compound ACs spanning the substrate/consumer edge name the completion-owner (later) bead in the Bead column and annotate the prerequisite half inline' would marginally aid a reader but is pure polish, NOT required to approve. I do not condition my APPROVE on it."
+    }
+  ]
+}

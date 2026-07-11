@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "O2 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "ADR/ownership lens on the two round-3 fixes at 4cbf437b: no misfit, no disturbance. (1) internal/gitutil/** stays execution-owned (execution/OWNERSHIP.yaml:4 lists it); BranchExistsE is added beside the unchanged BranchExists in the same package — no new ownership claim (spec line 29 states so). A workflow-owned gate consuming the execution-owned git-IO seam is the same cross-domain pattern as today's branchExistsFn and is ADR-0030-consistent (executor/gitutil is the git-IO boundary; enforcement stays in internal/approve). (2) Exactly-one-claimant intact: only workflow/OWNERSHIP.yaml claims internal/lifecycle/**; execution does not — round-3 edits did not touch this, AC10's whole-set invariant still pins it. (3) No ADR touchpoint (0030/0035/0037/0023) contradicted — the three-way contract is an implementation-detail refinement of the git-IO seam, not a new principle. (4) RevParseRef/ErrRefNotFound is an existing gitutil primitive (gitops.go:13-19,:524-545, verified: --verify --quiet exit-1 vs exit-128), reused without a new claim. Diff 77d8a1a9..4cbf437b touches only spec.md (+13/-3) + panel artifacts; no OWNERSHIP or ADR file changed. Both new discriminators are 0-hits RED.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "fix": "Fix 1 — BranchExistsE three-way contract",
+      "grade": "ADDRESSED",
+      "detail": "All 5 sub-parts present. (a) R1 branch-probe leg (line 42), OQ2 asymmetry note (line 102), and Scope execution gitutil bullet (line 29) all state the three-way contract and cite the RevParseRef/ErrRefNotFound exit-1-vs-128 precedent (gitops.go:13-19, :524-542), verified accurate against source: --verify --quiet exits 1 (ErrRefNotFound) vs exit-128 infra class, plain --verify exits 128 for missing ref. (b) Falsified-if gained the anti-false-refusal falsifier ('genuinely-absent branch yields anything but (false,nil) -> falsified', line 42). (c) AC1 gained TestBranchExistsE_ThreeWay in internal/gitutil (lines 80, 94). (d) AC2 gained TestApproveImpl_DeletedBranchNoRefusal normal-path pin (line 81). (e) AC1(b) wrapper-parity tightened to a MIXED closed-bead list (line 80). Ownership: BranchExistsE lands in execution-owned gitutil beside BranchExists, no new claim — ADR-consistent. Both new test names + BranchExistsE symbol 0-hits RED at 4cbf437b (verified)."
+    },
+    {
+      "fix": "Fix 2 — AC1 lifecycle proof exact-named",
+      "grade": "ADDRESSED",
+      "detail": "AC1 now runs 'go test ./internal/lifecycle -run TestScanOrphanedClosedBeads_ErrorPreserving -v' as the discriminating named run, with the bare 'go test ./internal/lifecycle' retained explicitly as a no-regression pin (lines 80, 94). Validation-Proofs line 94 states every named test has an exact-named -run and no package-wide run stands in — now true. No ownership impact."
+    },
+    {
+      "fix": "ADR fitness / ownership (O2 lens)",
+      "grade": "ADDRESSED",
+      "detail": "internal/gitutil/** attribution to execution unchanged and correct; internal/lifecycle/** claimed by exactly one domain (workflow) and untouched by round-3; no ADR-0030/0035/0037/0023 touchpoint contradicted by the three-way contract (it is a git-IO seam implementation refinement, not a new principle); RevParseRef/ErrRefNotFound reused as an existing execution primitive with no new claim. git status left clean (read-only)."
+    }
+  ]
+}

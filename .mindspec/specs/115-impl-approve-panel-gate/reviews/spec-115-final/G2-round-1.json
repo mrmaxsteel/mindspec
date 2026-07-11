@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.98,
+  "rationale": "The merged gate is exhaustively fail-closed for this lens. uncoveredPendingObligations distinguishes absent from present-null for both metadata keys, validates both stores before the empty-pending return, rejects wrong types, null/shape-invalid elements, and preserves only pristine or valid-empty no-ops. Leg 1 propagates orphan-scan infrastructure errors; Leg 2 propagates WorktreeList, ClosedEpicBeadIDs, and ancestry errors; Leg 3 refuses on plan enumeration and CheckPendingObligations errors. All refusal paths precede terminal mutation. The BranchExists bool remains intentionally fail-open only for branch-state/recovery decoration or the shared orphan trigger, avoiding false refusal on deleted branches. Option B closes the identified branch-probe desynchronization because both production paths source candidates from bead.WorktreeList; the separate-call concurrent mutation interval remains honestly disclosed and lifecycle-serialization-bounded. The requested focused test command passed completely in internal/complete and internal/approve.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "grade": "PASS",
+      "area": "obligation predicate",
+      "finding": "All realizable absent, null, wrong-typed, null-element, and invalid slot/round shapes are either rejected or legitimate no-ops; no decode-as-empty fail-open found."
+    },
+    {
+      "grade": "PASS",
+      "area": "gate legs",
+      "finding": "Orphan scan, worktree enumeration, closed-epic enumeration, ancestry, plan enumeration, and obligation-check errors all refuse before terminal mutation; BranchExists remains fail-open by design."
+    },
+    {
+      "grade": "PASS",
+      "area": "Option B TOCTOU",
+      "finding": "Gate and FinalizeEpic production implementations both delegate candidate enumeration to bead.WorktreeList, closing the round-6 probe/list desynchronization within the documented serialization model."
+    },
+    {
+      "grade": "PASS",
+      "area": "empirical",
+      "finding": "go test -count=1 ./internal/complete ./internal/approve -run 'Obligation|Orphan|WorktreeEnum|Pending' -v passed."
+    }
+  ]
+}

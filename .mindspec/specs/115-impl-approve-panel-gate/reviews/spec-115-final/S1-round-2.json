@@ -1,0 +1,11 @@
+{
+  "reviewer_id": "S1 Sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "My round-1 blocker (internal/approve importing internal/gitutil directly, violating ADR-0030's internal/lint enforcement boundary) is fixed at 389fcc41. go test ./internal/lint/ -run TestEnforcementHasNoGitLeaks passes both subtests. go list confirms internal/approve no longer imports internal/gitutil. The 2-file diff (internal/lifecycle/gitquery.go new + internal/approve/impl.go) is exactly as described: thin IsAncestor/BranchExists wrappers in lifecycle delegating to gitutil, with implIsAncestorFn/implBranchExistsFn seams keeping identical names/types/signatures -- seam-transparent, no behavior change, all AC tests unaffected. Whole-tree go build, go vet, gofmt all clean. golangci-lint shows only the 2 pre-existing G115 gosec issues in internal/journal/lock_unix.go (bead 8ud6, untouched by spec 115). go test ./... has exactly 2 failures, both matching the corrected out-of-scope list: internal/instruct.TestRun_IdleNoBeads (z4ps, worktree-only) and internal/harness (LLM-timeout, only without -short, which CI always uses). No NEW issue introduced by the reroute. Fences hold: git diff origin/main -- internal/gitutil/ is empty; no BranchExistsE/show-ref hits in internal/approve. Flipping to APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    "RESOLVED (round-1 S1 finding): internal/approve no longer imports internal/gitutil directly; ADR-0030 boundary restored via internal/lifecycle.IsAncestor/BranchExists thin wrappers. TestEnforcementHasNoGitLeaks passes.",
+    "Confirmed pre-existing/out-of-scope (not blocking): internal/journal/lock_unix.go gosec G115 x2 (bead 8ud6); internal/instruct.TestRun_IdleNoBeads fails only in this active worktree (bead z4ps); internal/harness fails on LLM timeout only without -short (CI uses -short)."
+  ]
+}

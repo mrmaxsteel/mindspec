@@ -1,0 +1,48 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.96,
+  "rationale": "The revision closes the original branch-probe fail-open in intent: BranchExistsE feeds the error-preserving core, all four R1 infrastructure legs and both R3 legs are fail-closed, advisory slot naming alone is fail-open, hatches do not bypass obligations, and the two residuals remain honestly scoped. But the new seam leaves a concrete false-refusal ambiguity. Current `git rev-parse --verify refs/heads/<missing>` exits 128; if BranchExistsE merely preserves that error as specified, every normally deleted bead branch becomes an infrastructure failure and impl approve refuses. The spec never requires genuine absence to return `(false, nil)` or pins that behavior in gitutil/approve tests. It also does not pin mixed-list wrapper parity: an error-preserving scan that aborts on one bead and a wrapper that swallows the scan error returns no later provable orphans, unlike today's per-bead skip-and-continue behavior. Both are branch-fix residues. AC discriminators are RED, h4n5 is persisted, AC7 is cycle-safe, AC10 is exactly-one, and item 7 is properly disposed.",
+  "concrete_changes_required": [
+    "Define BranchExistsE's three-way contract explicitly: present => (true, nil), genuinely absent => (false, nil), and transient/structural git failure => non-nil error. Ground the distinction using the existing RevParseRef/ErrRefNotFound exit-1-versus-exit-128 precedent (or an equally reliable primitive).",
+    "Add a named gitutil test for present/absent/infra outcomes and extend AC2 or AC1 with an ApproveImpl deleted-branch normal-path test proving a legitimately absent bead branch does not refuse.",
+    "Pin byte-identical FindOrphanedClosedBeads behavior with a mixed closed-bead list: a branch-probe or ancestry error for one bead must still allow later provable orphans to be returned, while ScanOrphanedClosedBeads reports the error and the impl-approve gate refuses."
+  ],
+  "findings": [
+    {
+      "id": "1",
+      "status": "PARTIAL",
+      "note": "The fourth fail-closed leg is added, but genuine ref absence is not distinguished from probe failure and the fail-open wrapper's per-bead skip-and-continue parity is not pinned, creating false-refusal/regression risk."
+    },
+    {
+      "id": "2",
+      "status": "ADDRESSED",
+      "note": "AC1-AC7 now use exact named-test existence discriminators; all named tests and the AC4 ScanOrphanedClosedBeads anchor are absent at 77d8a1a9, so the proofs are RED."
+    },
+    {
+      "id": "3",
+      "status": "ADDRESSED",
+      "note": "AC7 is split between package-local complete coverage and an approve post-settlement test, avoiding complete -> approve -> complete."
+    },
+    {
+      "id": "4",
+      "status": "ADDRESSED",
+      "note": "Branchless-obligation recovery now requires restoring bead/<id> before complete, or out-of-band settlement; AC6 asserts the prerequisite."
+    },
+    {
+      "id": "5",
+      "status": "ADDRESSED",
+      "note": "mindspec-h4n5 appears exactly once in the pinned .beads/issues.jsonl."
+    },
+    {
+      "id": "6",
+      "status": "ADDRESSED",
+      "note": "AC10 enumerates all domain ownership manifests and requires workflow to be the sole lifecycle claimant."
+    },
+    {
+      "id": "7",
+      "status": "ADDRESSED",
+      "note": "cmd/** is dropped from declared scope and the execution self-ownership gap is explicitly evidenced as pre-existing and out of scope."
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "reviewer_id": "F2 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounding lens, re-traced at eb6a2ed1. Code files are byte-identical to the round-1 SHA (diff touches only spec.md, the two OWNERSHIP.yamls, and panel artifacts), so my round-1 F2-5 full-grounding confirmation carries over; every NEW or re-grounded citation was verified fresh. My two round-1 required changes are genuinely fixed: (item 5) Scope/AC9 now point at the real skill surfaces — lifecycleSkillFiles at claude.go:681 with the ms-impl-approve entry at :736, plus both materialized copies which exist on disk — and the AC9 grep target 'closed without' has 0 hits in all three files today (verified), while 'mindspec complete' pre-exists exactly as the spec discloses; (item 6) 'rule as CompleteBead' sits alone on mindspec_executor.go:398, exactly 1 occurrence in internal/executor, so AC8's removed-line grep is single-line-matchable. AC10's execution-file negative discriminator is genuinely FALSE at a0a06943 (execution:5 carried the claim) and TRUE now; workflow claims internal/lifecycle/** as the sole claimant. AC7's named test has 0 matches today. orphans.go:74-112 is now exact (112-line file); the bd list --parent --status=closed claim matches orphans.go:30. All 10 items + 4gsz ADDRESSED; no new grounding defect found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": 1,
+      "grade": "ADDRESSED",
+      "evidence": "R1 specs the error-preserving core (ScanOrphanedClosedBeads ([]Orphan, error)) with FindOrphanedClosedBeads retained as the fail-open wrapper; the parity contract comment verified at orphans.go:71-73; OQ2 rewritten to the advisory-fail-open / gate-fail-closed asymmetry; AC1(b) pins the infra-error refusal with a seam-forced-error falsifier plus a consumer-parity falsifier in R1."
+    },
+    {
+      "item": 2,
+      "grade": "ADDRESSED",
+      "evidence": "R3 refuses on unreadable plan bead IDs, correctly citing the inherited silent skip — verified `beadIDs, planErr := readPlanBeadIDs` at impl.go:226 and `if planErr == nil` at :227; AC6(e) covers missing plan.md and corrupt frontmatter with a never-silent-skip falsifier."
+    },
+    {
+      "item": 3,
+      "grade": "ADDRESSED",
+      "evidence": "Claim narrowed to 'no epic close, no phase write, no merge, no push' with EnsureMigrated explicitly carved out (verified at impl.go:140, preceding every gate). Background ordering corrected: steps 1.6/2.25 'BEFORE even the step-2.5 auto-commit' verified against complete.go (panelGate :387 with the BEFORE-CommitAll comment at :347; CommitAll :414); 3.5/3.75 correctly placed after the auto-commit but pre-terminal. Also resolves my round-1 cosmetic F2-4."
+    },
+    {
+      "item": 4,
+      "grade": "ADDRESSED",
+      "evidence": "Background states the epic-scoping with correct grounding — epic lookup at orphans.go:75, `bd list --parent <epic> --status=closed` verified verbatim at orphans.go:30; R1 carries the epic-scope requirement and the different-spec-orphan falsifier; AC2(c) is the proof; blp6 deferral explicit in Background, Out of Scope, and Non-Goals."
+    },
+    {
+      "item": 5,
+      "grade": "ADDRESSED",
+      "evidence": "MY round-1 finding (F2-1). The nonexistent plugins/ path is gone; Scope names the binary-embedded literal (verified: lifecycleSkillFiles() at internal/setup/claude.go:681, \"ms-impl-approve\" entry at :736) plus .claude/skills/ms-impl-approve/SKILL.md and .agents/skills/ms-impl-approve/SKILL.md (both exist), with an explicit round-1 correction note. AC9's grep now targets 'closed without' — verified 0 hits in all three files at eb6a2ed1 (genuinely discriminating), and the spec correctly discloses that 'mindspec complete' pre-exists in each."
+    },
+    {
+      "item": 6,
+      "grade": "ADDRESSED",
+      "evidence": "MY round-1 finding (F2-2). AC8 now greps '^-.*rule as CompleteBead' — verified the phrase sits alone on mindspec_executor.go:398 (':397 same regression-only' / ':398 rule as CompleteBead'), exactly 1 occurrence in internal/executor, with the complementary post-change zero-count grep. Single-line-matchable and falsifiable in both directions."
+    },
+    {
+      "item": 7,
+      "grade": "ADDRESSED",
+      "evidence": "AC10's execution-file negative discriminator verified genuinely FALSE at the round-1 SHA (git show a0a06943 execution OWNERSHIP.yaml line 5 = internal/lifecycle/**) and TRUE at eb6a2ed1. AC7 names TestRecoveryConvergence_AlreadyClosedOrphan with an existence grep; verified 0 matches in internal/complete today, so the AC's zero-tests-at-round-1-SHA caveat is accurate and the existence check is load-bearing."
+    },
+    {
+      "item": 8,
+      "grade": "ADDRESSED",
+      "evidence": "Verified at eb6a2ed1: workflow OWNERSHIP.yaml adds internal/lifecycle/** (the exact one-line diff vs main); execution OWNERSHIP.yaml is byte-identical to main (grill's add removed); git grep on main shows no domain claims the package — exactly one claimant, workflow. Impacted Domains and AC10 both point at workflow; the workflow:3 = internal/approve and execution:2 = internal/executor line cites are exact."
+    },
+    {
+      "item": 9,
+      "grade": "ADDRESSED",
+      "evidence": "Goal's headline claim is scoped ('wherever its detection signal or a recorded obligation can see the gap') and its second paragraph discloses both residuals — raw-merged never-refuted bead and cross-spec blp6 — with R3's coverage qualified in-requirement ('but only when a durable obligation was recorded') and Non-Goals carrying the worst-case walkthrough."
+    },
+    {
+      "item": 10,
+      "grade": "ADDRESSED",
+      "evidence": "OQ2's inoperative Dolt-hiccup framing is gone (sole remaining 'Dolt' mention is the Out-of-Scope storage bullet); orphans.go bound corrected to :74-112 (exact — file is 112 lines, function starts :74; my round-1 cosmetic F2-3); the loose Background 'before any mutation' sentence replaced with the precise step-2.5-relative ordering."
+    },
+    {
+      "item": "4gsz",
+      "grade": "ADDRESSED",
+      "evidence": "Background frames 115 as the fourth (merging) consumer of 4gsz's shared predicate — complete/next/doctor legs shipped under 4gsz, CI leg explicitly retained as 4gsz scope in Out of Scope — without pulling any other 4gsz leg into 115. Consumer cites verified round 1 (next.go:459, doctor/orphaned_beads.go:48-79) and unchanged."
+    }
+  ]
+}

@@ -139,3 +139,126 @@ func TestFindOrphanedClosedBeads_NoEpic(t *testing.T) {
 		t.Fatalf("no epic must yield no orphans; got %+v", orphans)
 	}
 }
+
+// --- Spec 115 Bead 1: ScanOrphanedClosedBeads, the error-preserving core ---
+//
+// TestScanOrphanedClosedBeads_ErrorPreserving pins that the core PROPAGATES
+// each of the three cleanly-signaled infra errors (epic-lookup, bd-list,
+// ancestry) while the fail-open FindOrphanedClosedBeads wrapper stays
+// byte-identical for its existing consumers (complete/next/doctor) — pinned
+// on a MIXED list, not merely an all-error list, per AC1's lifecycle half.
+func TestScanOrphanedClosedBeads_ErrorPreserving(t *testing.T) {
+	t.Run("epic-lookup error propagates", func(t *testing.T) {
+		origEpic := findEpicBySpecIDFn
+		t.Cleanup(func() { findEpicBySpecIDFn = origEpic })
+		findEpicBySpecIDFn = func(specID string) (string, error) {
+			return "", errors.New("bd show epic: transient failure")
+		}
+
+		orphans, err := ScanOrphanedClosedBeads("008-test", ".", "")
+		if err == nil {
+			t.Fatal("expected the epic-lookup error to propagate")
+		}
+		if len(orphans) != 0 {
+			t.Errorf("expected no orphans alongside the epic-lookup error, got %+v", orphans)
+		}
+		if got := FindOrphanedClosedBeads("008-test", ".", ""); len(got) != 0 {
+			t.Errorf("fail-open wrapper must still yield no orphans, got %+v", got)
+		}
+	})
+
+	t.Run("bd-list error propagates", func(t *testing.T) {
+		origEpic := findEpicBySpecIDFn
+		origList := listClosedBeadsFn
+		t.Cleanup(func() {
+			findEpicBySpecIDFn = origEpic
+			listClosedBeadsFn = origList
+		})
+		findEpicBySpecIDFn = func(specID string) (string, error) { return "epic-1", nil }
+		listClosedBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
+			return nil, errors.New("bd list: transient failure")
+		}
+
+		orphans, err := ScanOrphanedClosedBeads("008-test", ".", "")
+		if err == nil {
+			t.Fatal("expected the bd-list error to propagate")
+		}
+		if len(orphans) != 0 {
+			t.Errorf("expected no orphans alongside the bd-list error, got %+v", orphans)
+		}
+		if got := FindOrphanedClosedBeads("008-test", ".", ""); len(got) != 0 {
+			t.Errorf("fail-open wrapper must still yield no orphans, got %+v", got)
+		}
+	})
+
+	t.Run("single-bead ancestry error propagates and wrapper stays fail-open", func(t *testing.T) {
+		stubPredicate(t, "epic-1",
+			[]string{"bead-1"},
+			map[string]bool{"bead/bead-1": true},
+			map[string]bool{},
+		)
+		origAnc := isAncestorFn
+		t.Cleanup(func() { isAncestorFn = origAnc })
+		isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+			return false, errors.New("transient git failure")
+		}
+
+		orphans, err := ScanOrphanedClosedBeads("008-test", ".", "")
+		if err == nil {
+			t.Fatal("expected the ancestry error to propagate")
+		}
+		if len(orphans) != 0 {
+			t.Errorf("expected no orphans alongside a single-bead ancestry error, got %+v", orphans)
+		}
+		if got := FindOrphanedClosedBeads("008-test", ".", ""); len(got) != 0 {
+			t.Errorf("fail-open wrapper must still yield no orphans (ancestry-error skip), got %+v", got)
+		}
+	})
+
+	// MIXED-list parity (round-3 G2): bead-A's ancestry check errors, but
+	// bead-B (LATER in the list) is a provable orphan. The core must not
+	// abandon the scan on A's error — it returns bead-B's orphan alongside
+	// the propagated error, so the fail-open wrapper (which discards the
+	// error) reproduces bead-B byte-identically, exactly as it did before
+	// this refactor.
+	t.Run("mixed list: later provable orphan survives an earlier ancestry error", func(t *testing.T) {
+		origEpic := findEpicBySpecIDFn
+		origList := listClosedBeadsFn
+		origExists := branchExistsFn
+		origAnc := isAncestorFn
+		t.Cleanup(func() {
+			findEpicBySpecIDFn = origEpic
+			listClosedBeadsFn = origList
+			branchExistsFn = origExists
+			isAncestorFn = origAnc
+		})
+
+		findEpicBySpecIDFn = func(specID string) (string, error) { return "epic-1", nil }
+		listClosedBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
+			return []bead.BeadInfo{{ID: "bead-a", Status: "closed"}, {ID: "bead-b", Status: "closed"}}, nil
+		}
+		branchExistsFn = func(name string) bool {
+			return name == "bead/bead-a" || name == "bead/bead-b"
+		}
+		isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+			if ancestor == "bead/bead-a" {
+				return false, errors.New("transient git failure on bead-a")
+			}
+			// bead-b: a provable orphan (branch exists, not an ancestor).
+			return false, nil
+		}
+
+		orphans, err := ScanOrphanedClosedBeads("008-test", ".", "")
+		if err == nil {
+			t.Fatal("expected bead-a's ancestry error to propagate from the core")
+		}
+		if len(orphans) != 1 || orphans[0].BeadID != "bead-b" {
+			t.Fatalf("expected the core to still surface bead-b's orphan alongside the error, got %+v", orphans)
+		}
+
+		got := FindOrphanedClosedBeads("008-test", ".", "")
+		if len(got) != 1 || got[0].BeadID != "bead-b" {
+			t.Fatalf("fail-open wrapper must return bead-b byte-identically (ignoring bead-a's error), got %+v", got)
+		}
+	})
+}

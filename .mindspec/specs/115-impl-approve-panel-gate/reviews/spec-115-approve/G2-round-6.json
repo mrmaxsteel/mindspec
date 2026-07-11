@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "G2 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.96,
+  "rationale": "Fact 1's ordering is correct: MergeBase at impl.go:249 precedes the proposed scan and aborts if the whole ref store is already unreadable. Fact 2 is also correct for a persistently missing/corrupt bead ref: FinalizeEpic only considers WorktreeOps.List entries, skips on ancestry error, and MergeInto fails if the source remains unresolvable. The refutation is nevertheless incomplete for ordinary flow because these checks are temporally separated. MergeBase can succeed, BranchExists can then transiently fail open, and the ref can recover before FinalizeEpic. The ordinary bead worktree remains enumerated; IsAncestor can then report false and MergeInto can merge the ungated branch. This requires no tag, symref, manual merge, or other raw-git tamper. AC11 pins only failure already present at MergeBase; AC12 pins no-worktree and persistently invalid-ref cases. Neither falsifies a post-MergeBase transient probe failure followed by recovery. Therefore C+B does not establish the claimed no-ungated-merge invariant.",
+  "concrete_changes_required": [
+    "Revise the refutation/design so a transient BranchExists failure occurring after MergeBase cannot later reach FinalizeEpic's merge loop, without false-refusing a genuinely absent branch.",
+    "Add a RED-on-revert acceptance test covering: MergeBase succeeds, the orphan branch-existence probe returns false due to a transient failure, the same ordinary bead worktree is enumerated, the ref becomes resolvable before finalize, and no ungated merge occurs."
+  ],
+  "findings": [
+    {
+      "grade": "MISSED",
+      "title": "Temporal probe failure bypasses both structural facts",
+      "detail": "A transient ref-probe failure after the successful pre-scan MergeBase can mask an ordinary orphan, then recover before FinalizeEpic. Its existing bead worktree is enumerated and the now-resolvable branch can pass IsAncestor and be merged by MergeInto. Fact 1 only covers failure present earlier; Fact 2 only excludes unenumerated or still-unresolvable refs. AC11 and AC12 therefore pin the wrong temporal slices and do not prove the claimed invariant."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.78,
+  "rationale": "Coherence verified at a0a06943: R1 (fail-open orphan REFUSE) / R2 (advisory, never load-bearing) / R3 (fail-closed obligation backstop) compose without contradiction — R2 is explicitly subordinate to R1's predicate, and R3 covers exactly the complement of R1's ancestry exemption, with the asymmetry pinned in both falsifiers. All 4 OQs are [x], sound, and mutually consistent: OQ1 REFUSE matches ADR-0030 and Non-Goals; OQ3's deleted-branch manual recourse is candidly acknowledged inside R3 itself and h4n5 is verified filed (P3, OPEN); OQ4 no-seam matches the comment-only executor scope and blp6 (verified P2). No synonym-dodge — every 'best-effort' is bounded by falsifiers. Scope decomposes cleanly into ~3 beads. One real thinness gap forces RC: R3 enumerates via readPlanBeadIDs (impl.go:452) but never pins the posture when plan.md is unreadable — the adjacent gate 1/3 today silently skips on planErr (impl.go:226 'if planErr == nil'), so the default implementation outcome is the R3 leg silently vanishing on a corrupt/missing plan: fail-open in the exact class this spec exists to close, while R1 (epic-enumerated) is unaffected. Minor second finding: OQ2's 'wedge finalize on transient Dolt hiccups' clause is overstated, since R3's fail-closed GetMetadata leg wedges finalize on the same outage anyway; the operative (and sufficient) rationale is shared-predicate parity.",
+  "concrete_changes_required": [
+    {
+      "id": "F3-1",
+      "severity": "major",
+      "section": "Requirement 3 (+ AC6)",
+      "change": "Pin R3's enumeration-failure posture: state explicitly what the new gate does when readPlanBeadIDs (impl.go:452) errors (missing plan.md, corrupt/space-padded frontmatter). Today's adjacent gate 1/3 silently skips on planErr (impl.go:226), so absent a pinned decision the R3 leg silently disappears — fail-open for exactly its target scenario (unsettled obligation + deleted branch) reached via a trivially-achievable corrupt plan. Either fail-closed (refuse: an unreadable plan cannot prove the obligation set is empty) or an explicitly-argued tolerance — but the spec must decide, and add the matching 'Falsified if' clause (e.g. 'falsified if a corrupt/missing plan.md lets impl approve exit 0 while a plan bead carries an unsettled refutation_pending entry') plus an AC6 sub-case."
+    },
+    {
+      "id": "F3-2",
+      "severity": "minor",
+      "section": "R1 / OQ2 rationale",
+      "change": "Tighten the OQ2 fail-open rationale: drop or qualify 'fail-closing here would wedge finalize ... on transient Dolt hiccups', since R3's fail-closed bead.GetMetadata leg already wedges finalize on a bd/Dolt outage — the clause is inoperative as stated. Keep the load-bearing (and sufficient) rationale: shared-predicate parity (fail-closing FindOrphanedClosedBeads would change semantics for complete/next/doctor) and 'an infra error is not evidence of an unsettled RC'. Prose-only; no design change."
+    }
+  ],
+  "findings": [
+    {
+      "id": "F3-A",
+      "severity": "major",
+      "title": "R3 enumeration source failure mode unspecified (thinness in the fail-closed leg)",
+      "detail": "R3 is meticulously fail-closed on metadata reads and decode errors, but its bead enumeration (readPlanBeadIDs, impl.go:452) has no specified failure posture. Existing code at impl.go:226 ('if planErr == nil') makes silent-skip the default; an implementer mirroring that pattern ships a fail-open R3. R1 is immune (epic-based enumeration via FindOrphanedClosedBeads), so the residual hole is precisely R3's unique coverage. See F3-1."
+    },
+    {
+      "id": "F3-B",
+      "severity": "minor",
+      "title": "OQ2 'wedge finalize' clause overstated (rationale inconsistency, not a behavioral contradiction)",
+      "detail": "R1's stated reason for fail-open detection partially contradicts R3's behavior under the same failure: a bd/Dolt outage causes GetMetadata errors on every plan bead, so R3 refuses and finalize is wedged regardless. Both behaviors are correctly and separately pinned with falsifiers, so this is prose-level only. See F3-2."
+    },
+    {
+      "id": "F3-C",
+      "severity": "info",
+      "title": "OQ3 recovery-line tension is acknowledged, not hidden — verified consistent",
+      "detail": "For the deleted-branch R3 sub-case, the ADR-0035 recovery line 'mindspec complete <bead>' points at a command the spec itself says errors at the step-3.5 merge-base (complete.go:492-495, verified) before the step-3.75 reconciliation. This would be a contradiction if silent, but R3 and OQ3 state it outright, document the manual recourse (restore branch ref / settle out-of-band), file mindspec-h4n5 (verified OPEN, P3), and give a re-open condition. Adjudicated as candid limitation, no change required."
+    },
+    {
+      "id": "F3-D",
+      "severity": "info",
+      "title": "Grounding spot-checks for coherence claims all pass",
+      "detail": "Verified at a0a06943: orphans.go:71-73 best-effort contract + :54 RecoveryCommand; complete.go step 1.6 (:307-321), merge-base (:492-495), step 3.75 (:558-572), step-4 already-closed tolerance (:574-582); impl.go status-only gate (:219-242), mutation ordering (:327-372); executor loop :381-422 with the misleading :396-398 comment; reconcilePendingRefutations fail-closed shape (panel_advisory.go:519+); ADR-0037 has zero 'impl approve' hits (AC9 genuinely falsifiable); OWNERSHIP add on branch tip with internal/lifecycle byte-unchanged vs main (AC10 green); TestApproveImplCallOrder at impl_test.go:714; h4n5/o4fd/blp6 all exist in bd."
+    }
+  ]
+}

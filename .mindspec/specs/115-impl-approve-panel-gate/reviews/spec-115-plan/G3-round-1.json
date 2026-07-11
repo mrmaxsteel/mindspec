@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "Plan validation passes (exit 0), the three work_chunks align 1:1 with the three Bead sections, approval creates them under the supplied lifecycle epic in section order, and only Bead 2 depends on Bead 1. All repository files edited by each chunk's steps are declared in that chunk's key_file_paths; the Bead 3 pre-draft is expected external scratch. The 2-after-1 edge is real because Bead 2 consumes Bead 1 exports, while Bead 3 consumes no produced state; longest chain is 2. Requirements R1 (including all four detection concerns and Option B), R2, and R3 all have homes. However, the load-bearing exactly-one-bead provenance rule is violated for AC1, AC6, and AC7: each row nominally assigns Bead 2 while explicitly landing one or more spec-mandated named proof tests in Bead 1. Thus those AC proofs are split/double-owned rather than mapped to exactly one bead. No AC is dropped and no proof is unsupported by the spec.",
+  "concrete_changes_required": [
+    "Rewrite AC1, AC6, and AC7 provenance/acceptance ownership so each AC has exactly one bead owner. A valid minimal fix is to make Bead 2 the sole verification owner after its Bead 1 dependency lands, require Bead 2 to run each complete spec-named chained proof, and describe Bead 1's tests only as prerequisite artifacts rather than separate AC ownership/proof completion."
+  ],
+  "findings": [
+    {
+      "area": "plan-approve readiness",
+      "status": "ADDRESSED",
+      "detail": "mindspec validate plan 115-impl-approve-panel-gate passed with exit code 0. Three aligned chunks/sections create exactly three children under the supplied lifecycle epic; dependency wiring is only chunk 2 -> chunk 1."
+    },
+    {
+      "area": "key_file_paths coverage",
+      "status": "ADDRESSED",
+      "detail": "Every repository production, test, ADR, and skill file named by a chunk's steps is included in that chunk's key_file_paths. The Bead 3 docs pre-draft is an external job-tmp input, not a repository edit."
+    },
+    {
+      "area": "AC provenance parity",
+      "status": "MISSED",
+      "detail": "AC1, AC6, and AC7 are nominally assigned to Bead 2 but their exact spec-named proof chains explicitly land tests in both Bead 1 and Bead 2. This fails the required exactly-one-bead proof ownership rule. AC2-AC5 and AC8-AC13 each have one owner and use proofs named by the approved spec."
+    },
+    {
+      "area": "requirements coverage",
+      "status": "ADDRESSED",
+      "detail": "R1's error-preserving orphan scan, unchanged bool probe posture, structural backstops, and Option-B worktree enumeration are homed; R2 advisory naming and R3 durable-obligation backstop are homed. No AC1-AC13 row is dropped and no plan proof is phantom relative to the spec."
+    },
+    {
+      "area": "dependency implementability",
+      "status": "ADDRESSED",
+      "detail": "Bead 2 genuinely consumes Bead 1 exports including ScanOrphanedClosedBeads, so 2-after-1 is a data edge. Bead 3 edits only ADR/skill/ownership-test surfaces and consumes no produced state. The longest serial chain is 2, within the <=3 bound; no phantom dependency found."
+    }
+  ]
+}

@@ -482,6 +482,199 @@ func writePanelRefutedMetadata(beadID string, entries []panel.Refutation) error 
 	return nil
 }
 
+// --- Spec 115 Bead 1: the shared uncovered-obligation core -----------------
+//
+// uncoveredPendingEntry pairs a still-outstanding refutation_pending_entries
+// record with its full content: a SETTLING caller (reconcilePendingRefutations)
+// needs the reason/evidence to write a truthful panel_refuted audit, while a
+// CHECK-ONLY caller (CheckPendingObligations) only needs the (slot, round)
+// identity to name in its refusal. Carrying both costs nothing and keeps the
+// two callers thin wrappers over one decode+coverage core.
+type uncoveredPendingEntry struct {
+	Slot     string
+	Round    int
+	Reason   string
+	Evidence string
+}
+
+// uncoveredPendingObligations is the SHARED core both CheckPendingObligations
+// (the exported check-only predicate) and reconcilePendingRefutations (the
+// settle path) are thin wrappers over — extracted from what was previously
+// reconcilePendingRefutations' own inline decode+coverage logic, with the
+// settle step (writePanelRefutedMetadata) left OUT of this function. It reads
+// beadID's metadata via the caller-supplied getMeta (dependency-injected so
+// internal/approve can pass its own bead.GetMetadata seam without reaching
+// into internal/complete's completeGetMetadataFn) and returns every pending
+// entry NOT (slot, round)-exactly covered by a durable panel_refuted_entries
+// record.
+//
+// Fail-closed throughout, matching Spec 114 R2's discipline exactly: a
+// metadata read error, a present-but-corrupt refutation_pending_entries or
+// panel_refuted_entries value (INCLUDING a present key whose JSON value is
+// null — the R8 finding: plain map indexing cannot distinguish that from a
+// genuinely absent key, so both fields are read via the comma-ok idiom and a
+// present-but-null value errors explicitly), or a shape-invalid entry (empty
+// slot / round < 1) all return a non-nil error — NEVER decode-as-empty,
+// which would drop a recorded obligation (the fail-OPEN direction this
+// protocol exists to close). A bead with no recorded pending entries
+// returns (nil, nil) — a genuine no-op, §6 fail-open preserved for pristine
+// beads.
+func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string]interface{}, error)) ([]uncoveredPendingEntry, error) {
+	meta, err := getMeta(beadID)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"bead %s metadata could not be read to verify its refutation obligations are satisfied — an unreadable metadata store cannot prove the bead is obligation-free (%v)",
+			beadID, err)
+	}
+	// Distinguish an ABSENT refutation_pending_entries key (the genuine
+	// no-obligation no-op below) from a PRESENT key whose JSON value is
+	// null: map indexing alone (meta["refutation_pending_entries"]) returns
+	// nil for BOTH, and decodePendingEntries(nil) reads a present-null the
+	// same as absent — a fail-OPEN hole (Spec 115 Bead 1 R8 finding). A
+	// present-but-null value IS a present-but-corrupt value under the R3
+	// fail-closed contract, so it must error, never decode-as-empty.
+	rawPending, presentPending := meta["refutation_pending_entries"]
+	if presentPending && rawPending == nil {
+		return nil, fmt.Errorf(
+			"bead %s carries a present-but-null refutation_pending_entries value — a present-but-corrupt obligation store cannot prove the bead is obligation-free",
+			beadID)
+	}
+	pending, decErr := decodePendingEntries(rawPending)
+	if decErr != nil {
+		// PRESENT-but-malformed obligation store: fail-closed. Decoding it
+		// as empty would silently drop every recorded obligation (fail-OPEN);
+		// an ABSENT key (raw nil) is the genuine no-obligation no-op below.
+		return nil, fmt.Errorf(
+			"bead %s carries a refutation_pending_entries record that could not be decoded — a corrupt obligation store cannot prove the bead is obligation-free (%v)",
+			beadID, decErr)
+	}
+
+	// Read + validate panel_refuted_entries UNCONDITIONALLY, BEFORE the
+	// len(pending)==0 early return below (Spec 115 Bead 1 R8 round-2
+	// finding): the round-2 fix placed this validation AFTER that early
+	// return, so a present-but-corrupt panel_refuted_entries value (e.g.
+	// present-null, or a wrong-typed value) silently passed whenever
+	// refutation_pending_entries was absent or empty — a fail-OPEN hole in
+	// exactly the case a corrupt-metadata attacker would prefer (no pending
+	// obligations to notice the audit store is broken). Validating BOTH
+	// metadata keys up front, order-independent, before ANY early return
+	// closes the whole corrupt-shape class in one structural move (the
+	// spec-114 "structural, not sibling-by-sibling patch" lesson) rather
+	// than adding another conditional check for this one sibling.
+	rawRefuted, presentRefuted := meta["panel_refuted_entries"]
+	if presentRefuted && rawRefuted == nil {
+		return nil, fmt.Errorf(
+			"bead %s carries a present-but-null panel_refuted_entries value — a present-but-corrupt audit store cannot prove which obligations are already satisfied",
+			beadID)
+	}
+	coveredRefuted, decErr := decodeRefutations(rawRefuted)
+	if decErr != nil {
+		return nil, fmt.Errorf(
+			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
+			beadID, decErr)
+	}
+
+	// Validate EVERY decoded panel_refuted_entries element's shape (Spec 115
+	// Bead 1 R8 round-3 finding): encoding/json decodes a null array element
+	// as a zero-valued panel.Refutation{Slot:"", Round:0}, which the bare
+	// json.Unmarshal in decodeRefutations lets through silently. Pending
+	// entries are already shape-checked below (empty slot / round < 1 ->
+	// error); refuted (covering) entries were NOT — an asymmetry. A
+	// malformed covering entry cannot over-cover a valid pending obligation
+	// (its coverage key pendingEntryKey("", 0) can never equal a VALID
+	// pending entry's key, since a pending entry with empty slot/round<1 is
+	// itself rejected below before the coverage check), so this is
+	// defense-in-depth, not a live fail-open. But the R3 contract states a
+	// present-but-corrupt value REFUSES unconditionally, and a shape-invalid
+	// covering element is a corrupt value — so exhaustive, symmetric
+	// per-element validation of BOTH arrays is the convergent structural
+	// close: every field of every element of both arrays is now validated
+	// before any early return, definitively closing the corrupt-shape
+	// class. Validated up front, before the len(pending)==0 early return
+	// below, so an absent/empty pending array can never mask a
+	// shape-invalid refuted entry.
+	for _, c := range coveredRefuted {
+		if c.Slot == "" || c.Round < 1 {
+			return nil, fmt.Errorf(
+				"bead %s carries a malformed panel_refuted_entries entry (slot %q, round %d) — a shape-invalid audit store cannot prove which obligations are already satisfied",
+				beadID, c.Slot, c.Round)
+		}
+	}
+
+	if len(pending) == 0 {
+		return nil, nil
+	}
+
+	// Settle only the pending entries NOT already covered by a durable
+	// panel_refuted audit — those obligations are met of-record. Both
+	// metadata keys are already validated above, so this coverage walk
+	// never needs its own early return.
+	covered := make(map[string]bool, len(coveredRefuted))
+	for _, c := range coveredRefuted {
+		covered[pendingEntryKey(c.Slot, c.Round)] = true
+	}
+
+	var out []uncoveredPendingEntry
+	for _, p := range pending {
+		if p.Slot == "" || p.Round < 1 {
+			// A shape-invalid marker cannot be settled (or checked) as a
+			// truthful entry — error (fail-closed), symmetric with the
+			// decode error above.
+			return nil, fmt.Errorf(
+				"bead %s carries a malformed refutation_pending entry (slot %q, round %d) — a shape-invalid obligation store cannot prove the bead is obligation-free",
+				beadID, p.Slot, p.Round)
+		}
+		if covered[pendingEntryKey(p.Slot, p.Round)] {
+			// Already covered by a durable audit — a no-op, not re-flagged.
+			continue
+		}
+		out = append(out, uncoveredPendingEntry{Slot: p.Slot, Round: p.Round, Reason: p.Reason, Evidence: p.Evidence})
+	}
+	return out, nil
+}
+
+// CheckPendingObligations is the exported CHECK-ONLY obligation predicate
+// (Spec 115 R3's single-home reuse): a dependency-injected reader over the
+// SAME uncoveredPendingObligations core reconcilePendingRefutations uses, so
+// internal/approve's impl-approve gate can check a bead's durable
+// refutation_pending_entries obligations without importing
+// internal/complete's completeGetMetadataFn seam or reaching into any
+// complete-package internals. It NEVER settles anything — no metadata write,
+// no panel read, no origin matching — unlike reconcilePendingRefutations
+// (below), which consumes the identical core to SETTLE.
+//
+// Returns nil when the bead has no recorded pending entries, or every entry
+// is (slot, round)-exactly covered by a durable panel_refuted_entries
+// record. Returns a non-nil error naming the first uncovered slot@round
+// otherwise, and a non-nil error (never decode-as-empty) on a metadata read
+// error, a present-but-corrupt entries value, or a shape-invalid entry
+// (empty slot / round < 1) — the identical fail-closed discipline
+// reconcilePendingRefutations already enforces, single-sourced here.
+func CheckPendingObligations(beadID string, getMeta func(string) (map[string]interface{}, error)) error {
+	uncovered, err := uncoveredPendingObligations(beadID, getMeta)
+	if err != nil {
+		return err
+	}
+	if len(uncovered) == 0 {
+		return nil
+	}
+	e := uncovered[0]
+	return fmt.Errorf(
+		"bead %s carries an unresolved refutation_pending obligation (%s@round %d) not yet covered by a durable panel_refuted record",
+		beadID, e.Slot, e.Round)
+}
+
+// PanelGateRoots is the exported thin wrapper over panelGateRoots (Spec 115
+// R2's single-home reuse): it returns the SAME layout-aware scan roots the
+// authoritative panel gate itself uses, so a consumer decorating a refusal
+// with the panel's unresolved slots (the impl-approve gate's advisory slot
+// naming) reads the identical registered panel the gate would — never a
+// second, potentially-diverging root order. No behavior change; every
+// existing caller of panelGateRoots (this file) is untouched.
+func PanelGateRoots(root, wtPath, specID string) []string {
+	return panelGateRoots(root, wtPath, specID)
+}
+
 // reconcilePendingRefutations enforces Spec 114 R2's durable-obligation
 // invariant: every `refutation_pending` entry recorded on bead metadata —
 // the FULL unioned set across every prior run, not just this run's — is
@@ -520,58 +713,26 @@ func reconcilePendingRefutations(beadID string) error {
 	refuse := func(msg string) error {
 		return guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
 	}
-	meta, err := completeGetMetadataFn(beadID)
+
+	// Spec 115 Bead 1: the decode + (slot, round)-coverage walk (Plan
+	// L533-535) is now the SHARED uncoveredPendingObligations core, single-
+	// homed with the exported check-only CheckPendingObligations predicate.
+	// This function remains the only one that SETTLES the result.
+	uncovered, err := uncoveredPendingObligations(beadID, completeGetMetadataFn)
 	if err != nil {
-		return refuse(fmt.Sprintf(
-			"bead %s metadata could not be read to verify its refutation obligations are satisfied — an unreadable metadata store cannot prove the bead is obligation-free (%v)",
-			beadID, err))
+		return refuse(err.Error())
 	}
-	pending, decErr := decodePendingEntries(meta["refutation_pending_entries"])
-	if decErr != nil {
-		// PRESENT-but-malformed obligation store: fail-closed. Decoding it
-		// as empty would silently drop every recorded obligation (fail-OPEN);
-		// an ABSENT key (raw nil) is the genuine no-obligation no-op below.
-		return refuse(fmt.Sprintf(
-			"bead %s carries a refutation_pending_entries record that could not be decoded — a corrupt obligation store cannot prove the bead is obligation-free (%v)",
-			beadID, decErr))
-	}
-	if len(pending) == 0 {
+	if len(uncovered) == 0 {
 		return nil
 	}
 
-	// Plan L533-535: settle only the pending entries NOT already covered by
-	// a durable panel_refuted audit — those obligations are met of-record.
-	// The covering read is fail-closed too: a present-but-corrupt audit
-	// array Refuses rather than reading as "nothing covered".
-	coveredRefuted, decErr := decodeRefutations(meta["panel_refuted_entries"])
-	if decErr != nil {
-		return refuse(fmt.Sprintf(
-			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
-			beadID, decErr))
-	}
-	covered := make(map[string]bool, len(coveredRefuted))
-	for _, c := range coveredRefuted {
-		covered[pendingEntryKey(c.Slot, c.Round)] = true
-	}
-
-	var toSatisfy []panel.Refutation
-	for _, p := range pending {
-		if p.Slot == "" || p.Round < 1 {
-			// A shape-invalid marker cannot be settled as a truthful audit
-			// entry — Refuse (fail-closed), symmetric with the decode error.
-			return refuse(fmt.Sprintf(
-				"bead %s carries a malformed refutation_pending entry (slot %q, round %d) — a shape-invalid obligation store cannot prove the bead is obligation-free",
-				beadID, p.Slot, p.Round))
-		}
-		if covered[pendingEntryKey(p.Slot, p.Round)] {
-			// Already covered by a durable audit — a no-op, not a re-write.
-			continue
-		}
+	toSatisfy := make([]panel.Refutation, 0, len(uncovered))
+	for _, u := range uncovered {
 		toSatisfy = append(toSatisfy, panel.Refutation{
-			Slot:     p.Slot,
-			Round:    p.Round,
-			Reason:   p.Reason,
-			Evidence: p.Evidence,
+			Slot:     u.Slot,
+			Round:    u.Round,
+			Reason:   u.Reason,
+			Evidence: u.Evidence,
 		})
 	}
 

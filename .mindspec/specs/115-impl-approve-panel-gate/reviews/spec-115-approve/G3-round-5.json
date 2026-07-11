@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "G3 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "AC runnability is intact at pinned SHA e6dfa4cf: every AC1-AC7 proof chain exits 1; TestBranchExistsE_UnreadableRefStore's existence grep exits 1; BranchExistsE, ScanOrphanedClosedBeads, TestBranchExistsE_ThreeWay, and Go show-ref usage have zero code hits; and every named test is paired with an exact-name -run. However, the replacement probe's claimed three-way is empirically false on Git 2.51.2. `git show-ref --verify refs/heads/bead/absent` without `--quiet` exits 128, not 1, while present exits 0 and an unreadable loose-ref store also exits 128. Mapping 128 to infrastructure error therefore makes the normal merged-and-deleted branch refuse, contradicting AC2 and R1's no-false-refusal contract. The round-4 masking fix consequently introduces a blocking false refusal.",
+  "concrete_changes_required": [
+    "Replace or version-gate the existence primitive with one that actually distinguishes present, genuinely absent, and infrastructure failure across supported Git versions; update R1, Scope, OQ2, and the exit-code mapping accordingly. On Git 2.51.2, `git show-ref --exists` produced 0 for present, 2 for absent, and 1 for unreadable, but compatibility must be established.",
+    "Keep exact-named tests for the real three-way and unreadable-store case, and retain TestApproveImpl_DeletedBranchNoRefusal so genuine absence cannot be classified as infrastructure failure."
+  ],
+  "findings": [
+    {
+      "id": "round-4-fix",
+      "grade": "NEW_ISSUE",
+      "severity": "blocking",
+      "note": "The no-quiet show-ref probe exposes unreadable storage, but genuine absence also exits 128 on Git 2.51.2. The specified 0/1/else mapping therefore creates a false refusal on the ordinary deleted-branch path. Evidence: present=0, absent=128, unreadable-existing=128 in an absolute /tmp repository."
+    },
+    {
+      "id": "ac-runnability",
+      "grade": "ADDRESSED",
+      "severity": "none",
+      "note": "TestBranchExistsE_UnreadableRefStore has its own existence grep and is included by exact name in the internal/gitutil -run alternation. All AC1-AC7 named tests have exact-name runs, all seven chained proofs are RED at e6dfa4cf, and the requested code discriminators remain at zero hits."
+    }
+  ]
+}

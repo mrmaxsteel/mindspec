@@ -1,0 +1,25 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "Textually the fix landed everywhere the brief requires (R1, Scope gitutil bullet, OQ2 all specify show-ref --verify without --quiet; all 4 OQs [x]; discriminators RED at e6dfa4cf; diff 4cbf437b..f07cce6a is 5 lines, spec.md only; wrapper fail-open and general principle are internally consistent as written). But the brief's item-2 self-verification FAILS: on git 2.51.2 (this dev machine, /tmp throwaway repo) `git show-ref --verify refs/heads/<absent>` exits 128, NOT 1 — the same exit code AND the same 'fatal: not a valid ref' message as the existing-branch-with-chmod-000-store case. The claimed 0/1/128 three-way is empirically false: the probe conflates genuine absence with infra failure. Under the contract as written (exit 1 -> (false,nil); any other exit -> error -> refuse), every cleanly-deleted (merged-and-cleaned) bead branch yields 128 -> non-nil error -> the gate refuses on the NORMAL post-complete path — directly contradicting R1's own falsifier, AC2(d) TestApproveImpl_DeletedBranchNoRefusal, R5 no-regression, and the spec's 'avoids that by construction' claim. The correct primitive exists: `git show-ref --exists` (git >= 2.43) — verified 0 present / 2 missing / non-0-non-2 on lookup failure (1 'Permission denied' on the unreadable store here; 128 per docs for other errors).",
+  "concrete_changes_required": [
+    "Re-ground BranchExistsE's contract on `git show-ref --exists refs/heads/<name>` (git >= 2.43): exit 0 -> (true,nil) present; exit 2 -> (false,nil) genuinely absent; ANY other exit (observed 1 'failed to look up reference: Permission denied' on an unreadable store; docs specify 128 for other lookup errors) or spawn failure -> (false, non-nil error) -> gate refuses. Absence has a UNIQUE exit code (2) no observed failure mode shares — this genuinely closes the fail-open without the false-refusal.",
+    "Correct the R1/Scope/OQ2 empirical claims: `show-ref --verify` WITHOUT --quiet exits 128 for BOTH genuine absence and the unreadable store (identical 'fatal: not a valid ref' message — indistinguishable even by stderr), so it must be listed among the WITHDRAWN probes (it fails closed on the normal deleted-branch path), not adopted. Restate the general principle's unambiguous-absent code as exit 2 (--exists), not exit 1.",
+    "State the minimum-git-version constraint (`show-ref --exists` requires git >= 2.43, released Nov 2023) or specify the fallback if older git must be supported; update TestBranchExistsE_ThreeWay / TestBranchExistsE_UnreadableRefStore wording to the --exists exit-code contract (0/2/else).",
+    "Re-verify and correct the round-4 orchestrator evidence table's 'genuine absent = 1' row for `show-ref --verify` (no --quiet) — reproduced here as 128; the exit-1 result likely came from pattern-mode `show-ref <ref>` or the --quiet variant."
+  ],
+  "findings": [
+    {
+      "grade": "NEW_ISSUE",
+      "severity": "blocking",
+      "summary": "Round-4 fix's probe grounding is empirically wrong on the genuine-absence leg: `git show-ref --verify` (no --quiet) exits 128 for an absent ref on git 2.51.2, not 1 — conflating absence with the unreadable-store infra case (also 128, identical fatal message). The specified 0/1/else mapping therefore turns every normal cleanly-deleted bead branch into a non-nil error -> gate refusal: a false-refusal-by-construction that contradicts R1's falsifier ('genuinely-absent branch yields anything but (false,nil)'), AC2(d), and R5 no-regression. The fix swaps the round-4 fail-open for a universal fail-closed on the happy path. `git show-ref --exists` (0 present / 2 missing / else error, verified in /tmp) is the primitive that actually provides the unambiguous three-way and should replace it.",
+      "evidence": "git 2.51.2, /tmp throwaway repo: --verify present=0; --verify absent=128 ('fatal: not a valid ref'); --verify existing+chmod-000-refs/heads=128 (same message); --verify --quiet absent=1, unreadable=1 (masks, as spec says); --exists present=0, absent=2, existing+unreadable=1 ('error: failed to look up reference: Permission denied')."
+    },
+    {
+      "grade": "ADDRESSED",
+      "severity": "note",
+      "summary": "All textual/coherence checks pass: the show-ref-no-quiet contract is the ACTIVE primitive consistently in R1, Scope, and OQ2 with rev-parse --quiet explicitly WITHDRAWN; the general principle is scoped to the gate path and does not contradict the fail-open wrapper's byte-identical complete/next/doctor behavior, R2's advisory fail-open, or R3; all 4 OQs [x] with OQ2 scoping fail-closed to INFRA not absence; the one gitutil test does not over-scope; all five discriminators (BranchExistsE, ScanOrphanedClosedBeads, and the three test names) are 0 code hits at e6dfa4cf; diff is spec.md-only. Had the exit-code table been correct, this would be APPROVE — the defect is solely the empirical grounding of the chosen probe."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "F1 Fable",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Every proof empirically RED at 57d043fb. All 16 new test names (11 approve, 2 complete, 2 lifecycle, 1 executor) are 0-hit in *_test.go at HEAD and at all four discriminator SHAs (eb6a2ed1/77d8a1a9/18cc59d9/bcb255eb, all resolvable). Every AC proof chains grep -q 'func Test<Name>' with the exact-named -run — Bead 1/3 bullets restate the pairs verbatim; Bead 2 incorporates the spec's AC1-AC7/AC11/AC13 proofs 'EXACTLY as written', and I verified those spec texts each carry the chained pair. AC10 demotion is correct: the grep -l one-liner is GREEN today (workflow/OWNERSHIP.yaml:9 sole claimant), correctly retained as non-discriminating pin, with TestLifecycleOwnershipExactlyOneWorkflowClaimant as the discriminating proof. AC8: 'rule as CompleteBead' exists exactly once, alone on :398; diff-vs-main empty today, so the removed-line grep is RED. AC9: all three 'closed without' greps and the ADR 'impl approve' grep are 0 at HEAD. Negative fences 0-hit; gitutil diff empty. AC4 anchor 'ScanOrphanedClosedBeads' has 0 code hits at eb6a2ed1 and HEAD; the file-scoped grep is the discriminator. One prose nit only, non-blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-1",
+      "status": "ADDRESSED",
+      "note": "Chained proofs: every AC verification bullet pairs an existence discriminator (grep -q 'func Test<Name>') with the exact-named go test -run; no bare -run or package-wide run stands in for a named run (Bead 1's package sweep is a no-regression pin on top of, not instead of, the named runs)."
+    },
+    {
+      "id": "F1-2",
+      "status": "ADDRESSED",
+      "note": "New-test absence verified empirically: all 16 named new tests are absent from *_test.go at 57d043fb and at eb6a2ed1/77d8a1a9/18cc59d9/bcb255eb (all four SHAs resolve on the branch); TestApproveImpl_DeletedBranchNoRefusal separately confirmed 0-hit at 77d8a1a9 per the spec's pin."
+    },
+    {
+      "id": "F1-3",
+      "status": "ADDRESSED",
+      "note": "AC10 demotion correct: grep -l one-liner returns only .mindspec/domains/workflow/OWNERSHIP.yaml (claim at :9, GREEN/pre-applied at HEAD), retained explicitly as a non-discriminating regression pin; the discriminating RED-on-revert proof is the new TestLifecycleOwnershipExactlyOneWorkflowClaimant with its grep+run chain, matching the spec's round-7 AC10 wording."
+    },
+    {
+      "id": "F1-4",
+      "status": "ADDRESSED",
+      "note": "AC8 diff-grep pair sound: 'rule as CompleteBead' occurs exactly once in internal/executor, alone on mindspec_executor.go:398 (single-line-matchable by '^-.*rule as CompleteBead'); git diff main -- the file is empty today, so the pair is RED at 57d043fb and discriminates the comment fix."
+    },
+    {
+      "id": "F1-5",
+      "status": "ADDRESSED",
+      "note": "Negative fence verified 0-hit at 57d043fb: grep -rn 'BranchExistsE' --include='*.go' . and grep -rn 'show-ref' --include='*.go' internal/ both empty; git diff main -- internal/gitutil/ empty. Fence restated in every bead's verification, so no bead can pass with a classifier present."
+    },
+    {
+      "id": "F1-6",
+      "status": "ADDRESSED",
+      "note": "AC9 greps RED today: 'impl approve' 0 hits in ADR-0037; 'closed without' 0 hits in internal/setup/claude.go and both materialized SKILL.md copies. AC4 anchor host TestApproveImplCallOrder exists at impl_test.go:714; HappyPath:75 and FinalizeEpicCalled:299 confirmed; new exports (ScanOrphanedClosedBeads/ClosedEpicBeadIDs/CheckPendingObligations/PanelGateRoots) all 0-hit in code at HEAD, so Bead 1/2 proofs cannot be pre-satisfied."
+    },
+    {
+      "id": "F1-7",
+      "status": "NEW_ISSUE",
+      "note": "Non-blocking prose nit: Bead 2 step 6 repeats the spec's 'ScanOrphanedClosedBeads — ZERO hits repo-wide at eb6a2ed1'; literally there is 1 hit at eb6a2ed1 — the spec.md prose itself names the export. Code/*.go hits are 0 and the operative AC4 discriminator is file-scoped to internal/approve/impl_test.go (0 hits), so the proof remains RED and correct; suggest 'zero code hits' wording if a fixup round happens anyway. No change required."
+    }
+  ]
+}

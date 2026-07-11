@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.98,
+  "rationale": "Author-of-record lens on delta 75e82b52..19bc8114. The fix is confined EXACTLY to internal/complete/panel_advisory.go + panel_advisory_test.go (git diff --name-only confirms only these two); no scope creep into Bead 2/3, no internal/approve/internal/gitutil/docs change (git diff main -- internal/gitutil empty), and the only untracked path is the expected panel reviews dir. It faithfully implements the consolidated round-1 change: comma-ok idiom (rawPending, presentPending := meta[...]) so a PRESENT key with a nil/JSON-null value returns a non-nil 'present-but-null' error for BOTH refutation_pending_entries and panel_refuted_entries symmetrically, while the ABSENT-key path (present==false) falls through to the (nil,nil) no-op exactly as before. Doc comment updated to name the present-null case. 3 new RED-on-revert subtests pin present-null→error (both keys) and absent→nil no-op. The shared uncoveredPendingObligations core is undisturbed for valid inputs; reconcile does not call the erroring predicate. My round-1 APPROVE (all 7 plan Bead-1 steps, scope fence) is undisturbed by this confined fix. Faithful, confined, no regression.",
+  "concrete_changes_required": [],
+  "findings": []
+}

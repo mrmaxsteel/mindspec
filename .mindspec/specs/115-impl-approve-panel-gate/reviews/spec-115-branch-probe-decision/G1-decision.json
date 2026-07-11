@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "G1 codex",
+  "chosen_approach": "C+B",
+  "confidence": 0.96,
+  "rationale": "Choose C+B: use the version-portable quiet existence probe so genuine deletion never refuses, but do not claim it classifies infrastructure errors. Ground the gate's store-wide fail-closed behavior in ApproveImpl's already-prior MergeBase call, and pin the single-corrupt-ref residual with real-git tests showing that FinalizeEpic cannot merge that ref (merge fails, or no matching worktree is enumerated). This closes the actual risk—an unsettled orphan being auto-merged—without another brittle exit-code classifier. Approach A is technically excellent on Git >=2.43, but that floor is not reasonable to introduce silently here: README/user guides require only Git with worktree support, installers do not check a Git version, and CI has no minimum-Git job. Official Git 2.42 documentation lacks --exists while 2.43 documents the 0/2/1 contract, so A would exclude still-plausible installations and require a project-wide compatibility decision. Tests should assert deleted-branch passage, whole-store failure before scanning, and no merge/terminal mutation for a corrupt enumerated ref; they must not fabricate a per-ref absent/error distinction on pre-2.43 Git.",
+  "rejected": {
+    "A": "Correct 0/2/1 primitive, but requires an undocumented and unenforced Git >=2.43 product floor.",
+    "B": "A new generic health probe adds surface and still cannot prove every individual ref healthy; reuse the existing MergeBase signal instead.",
+    "C": "Pure C is safe, but the existing MergeBase precondition and residual integration tests should be made explicit rather than left only as narrative.",
+    "D": "Worktree alignment is attractive but changes the shared epic-scoped predicate and has unnecessary blast radius for this fix."
+  },
+  "empirical_exit_codes": {
+    "environment": "git version 2.51.2; absolute /tmp throwaway repositories",
+    "show_ref_exists": {
+      "present": 0,
+      "absent": 2,
+      "corrupt_loose_ref": 1,
+      "unreadable_refs_heads": 1
+    },
+    "show_ref_verify_no_quiet": {
+      "present": 0,
+      "absent": 128,
+      "corrupt_loose_ref": 128,
+      "unreadable_refs_heads": 128
+    },
+    "show_ref_verify_quiet": {
+      "present": 0,
+      "absent": 1,
+      "corrupt_loose_ref": 1,
+      "unreadable_refs_heads": 1
+    },
+    "structural_checks": {
+      "merge_base_with_single_corrupt_bead_ref": 0,
+      "merge_single_corrupt_bead_ref": 1,
+      "merge_base_with_whole_heads_store_unreadable": 128,
+      "worktree_list_with_unattached_corrupt_ref": "exit 0; corrupt bead ref not enumerated"
+    },
+    "version_floor": {
+      "introduced": "Git 2.43.0",
+      "evidence": "Official git-show-ref 2.42.0 documentation has no --exists form; 2.43.0 documentation adds --exists and specifies present=0, missing=2, lookup-error=1.",
+      "project_floor": "No Git version floor found; README and user docs state only Git/Git worktree support, installers do not version-check Git, and CI does not exercise a minimum Git version."
+    }
+  }
+}

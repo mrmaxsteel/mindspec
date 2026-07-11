@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R2 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Traced every control path through uncoveredPendingObligations at a8da895a. EXHAUSTIVE CLOSURE confirmed: both keys are read comma-ok (present-null -> error), decode-validated (wrong-typed / malformed-array values fail the Marshal+Unmarshal-into-slice round-trip -> error), and now EVERY element of BOTH arrays is shape-validated (Slot=='' || Round<1 -> error). The new refuted-element loop sits after decodeRefutations and BEFORE the len(pending)==0 early return, so an absent/empty pending array can no longer mask a corrupt refuted store. Pending elements are validated as the first statement in the coverage loop (before the covered check), reachable for every realizable non-empty pending. No decode-as-empty / fail-open shape survives in either key ({refuted:[null]} now errors as required). NO FALSE-REFUSE / no over-correction: {}->nil, {pending:[],refuted:[]}->nil (empty slice != nil), and a valid pending covered by a valid covering entry (Slot!='' , Round>=1) passes the new loop -> covered -> nil (pinned by the added subtest). The loop rejects only malformed elements. Prior fail-closed branches intact and correctly ordered. Delta additive; TestPendingObligationPredicate green; tree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Exhaustive: every field of every element of both refutation_pending_entries and panel_refuted_entries is now validated before any early return; the pending/refuted element-validation asymmetry is closed.",
+    "No realizable corrupt shape decodes-as-empty: present-null (comma-ok), wrong-typed (decode error), null/partial/empty elements (Slot=='' || Round<1) all fail-close in both keys.",
+    "No false-refuse: valid empties and a valid pending fully covered by a valid covering entry still return nil; the new loop rejects only Slot=='' || Round<1, never a valid covering entry.",
+    "Ordering preserved: new loop after decodeRefutations, before len(pending)==0 return; pending shape-check is the first loop statement, before the coverage lookup, so a malformed pending entry cannot be spuriously treated as covered."
+  ]
+}

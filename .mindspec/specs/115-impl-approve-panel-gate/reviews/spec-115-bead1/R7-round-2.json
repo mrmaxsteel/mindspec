@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R7 Fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Scope: `git diff 75e82b52..19bc8114` touches ONLY internal/complete/panel_advisory.go (+40/-8, doc comment + two comma-ok guards) and panel_advisory_test.go (+51, three subtests). No internal/approve, internal/gitutil, docs, ADR, or skill change; `git diff main -- internal/gitutil/` is empty; BranchExistsE/show-ref grep over internal/complete + internal/approve is 0-hit. Grounding: new error strings sit in the pre-existing fail-closed message family ('present-but-corrupt ... cannot prove the bead is obligation-free' / 'cannot prove which obligations are already satisfied', em-dash style matching the untouched L526 message); gofmt -l clean and the reworded doc comment is plain prose with no backtick code span containing shell escapes, so the gofmt doc-comment gotcha does not apply. F3-1 holds: uncoveredPendingObligations remains the single shared core; CheckPendingObligations (L614) and reconcilePendingRefutations (L681) both call it directly, reconcile still bypassing the erroring wrapper. No contradiction: the guard tightens the R3 fail-closed contract for the present-null class while the absent-key §6 pristine no-op is explicitly preserved and pinned by a subtest. Build green; all 12 TestPendingObligationPredicate subtests pass. Round-1 APPROVE lens undisturbed.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Delta confined to panel_advisory.go + panel_advisory_test.go; stat confirms 2 files, 83 insertions, 8 deletions.",
+    "Fences intact: gitutil diff vs main empty; BranchExistsE/show-ref 0-hit in non-test complete/approve sources.",
+    "New present-but-null error messages stylistically consistent with the existing 'cannot prove' fail-closed family.",
+    "Shared core preserved: reconcilePendingRefutations calls uncoveredPendingObligations directly (L681); the present-null guard lives in the core, consistent with how present-but-corrupt values already errored there pre-fix — a strengthening, not a behavioral contradiction.",
+    "Absent-key no-op path unchanged (comma-ok present==false falls through) and now explicitly regression-pinned by the 'absent key → still nil' subtest.",
+    "gofmt clean; doc comment ASCII-safe prose — no code-span/gofmt corruption risk."
+  ]
+}

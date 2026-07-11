@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R7 Fable",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Both of my round-1 findings are truthfully addressed at 196f07d2, and the fix is genuinely comment-only. (1) R7-1 FIXED: the TestApproveImpl_NoCommitsNoBeads doc comment no longer claims the no-commits refusal is \"reachable via a spec that DOES have a valid plan\"; it now correctly states the test pins Leg 3 intercepting the missing-plan state before the CommitCount preflight, and that the preflight's degenerate-plan disjunction is fully subsumed by Leg 3. The new impl.go call-site comment is accurate on every claim I can check: readPlanBeadIDs errors on empty bead_ids (so len(beadIDs)==0 ⟺ planErr!=nil), Leg 3 refuses on planErr!=nil first, hence the disjunction is always false past the gate; retention justified by the CONSENSUS-revision-9 call-order pin; the cited TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup exists (impl_test.go:531). (2) R7-2 FIXED: `grep -n MergeBase impl.go` → :294, matching the new citation; :249 is preserved and explicitly labeled as the spec's pre-115 Fact-1 pin, not conflated. Comment-only verified mechanically: every +/- line in the three .go files begins with `//` (test assertions byte-unchanged). go build, go test -count=1 ./internal/approve, gofmt, go vet all green; worktree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R7r2-1",
+      "severity": "info",
+      "summary": "R7-1 resolved: false reachability clause deleted; replacement comments (impl_test.go:492-498 and the new impl.go:422-434 block) truthfully state Leg-3 subsumption, unreachability in normal flow, defensive-backstop + call-order-pin retention rationale, and the valid-plan zero-commit cleanup path. Cross-reference TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup verified to exist at impl_test.go:531. The unsatisfiability argument in the comment matches my own round-1 derivation exactly."
+    },
+    {
+      "id": "R7r2-2",
+      "severity": "info",
+      "summary": "R7-2 resolved: orphan_gate_test.go now cites impl.go:294 (verified: `exec.MergeBase(\"main\", specBranch)` is at impl.go:294) and explicitly SHA-qualifies :249 as the spec's Fact-1 pin against the pre-115 tree — the exact remedy I requested. The semantic claim (MergeBase is the first ref-store touch, preceding the gate) is unchanged and remains true."
+    },
+    {
+      "id": "R7r2-comment-only",
+      "severity": "info",
+      "summary": "Comment-only fix verified mechanically: filtering `git diff 8b664359..196f07d2 -- internal/approve/*.go` to changed lines and excluding `//`-prefixed lines leaves nothing. No executable line, no assertion, no fixture changed; TestApproveImpl_NoCommitsNoBeads assertions identical to round 1. Diff --stat confirms only the 3 approve files plus round-1 review artifacts."
+    },
+    {
+      "id": "R7r2-regression",
+      "severity": "info",
+      "summary": "No regression: go build ./... clean; go test -count=1 ./internal/approve PASS (8.5s); gofmt -l empty; go vet clean; git status clean in the code tree. Round-1 verified properties (four legs, fail-directions, 11 tests, AC4 anchor, deviations A-E, fences) undisturbed by construction."
+    },
+    {
+      "id": "R7r2-followup",
+      "severity": "info",
+      "summary": "The BRIEF states a follow-up mindspec issue was filed for removing the vestigial preflight (touches the call-order pin; out of scope for this comment fix). This matches the optional remedy in my round-1 change list; the comment itself documents the retention rationale, which suffices for this bead."
+    }
+  ]
+}

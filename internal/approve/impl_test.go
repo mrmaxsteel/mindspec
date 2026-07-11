@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
@@ -75,6 +76,10 @@ func writeSpecDir(t *testing.T, root, specID string) {
 func TestApproveImpl_HappyPath(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	// Spec 115 Bead 2: the plan-bead gate + the obligation-backstop leg
+	// both now require a readable plan.md — a mechanical fixture
+	// addition (AC2(b)); the assertions below are unchanged.
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
@@ -82,7 +87,7 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "show" {
-			payload := []map[string]string{{"status": "open"}}
+			payload := []map[string]string{{"status": "closed"}}
 			return json.Marshal(payload)
 		}
 		return nil, fmt.Errorf("unexpected args: %v", args)
@@ -186,12 +191,13 @@ func TestApproveImpl_WrongSpec(t *testing.T) {
 func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
+		payload := []map[string]string{{"status": "closed"}}
 		return json.Marshal(payload)
 	}
 
@@ -228,12 +234,13 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 func TestApproveImpl_PushAndCleanup(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
+		payload := []map[string]string{{"status": "closed"}}
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
@@ -269,12 +276,13 @@ func TestApproveImpl_PushAndCleanup(t *testing.T) {
 func TestApproveImpl_NoRemoteSkipsPush(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
+		payload := []map[string]string{{"status": "closed"}}
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
@@ -299,12 +307,16 @@ func TestApproveImpl_NoRemoteSkipsPush(t *testing.T) {
 func TestApproveImpl_FinalizeEpicCalled(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	// Spec 115 Bead 2: the obligation-backstop leg now requires a
+	// readable plan.md — a mechanical fixture addition (AC2(b)); the
+	// assertions below are unchanged.
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
+		payload := []map[string]string{{"status": "closed"}}
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
@@ -398,6 +410,14 @@ func saveAndRestore(t *testing.T) {
 	origGitEmail := implGitUserEmailFn
 	origPhaseMeta := implPhaseMetadataFn
 	origGetwd := implGetwdFn
+	// Spec 115 Bead 2: the pre-terminal orphan/obligation gate's seams.
+	origScanOrphans := implScanOrphansFn
+	origClosedEpicBeadIDs := implClosedEpicBeadIDsFn
+	origWorktreeList := implWorktreeListFn
+	origIsAncestor := implIsAncestorFn
+	origBranchExists := implBranchExistsFn
+	origGetMetadata := implGetMetadataFn
+	origCheckObligations := implCheckObligationsFn
 	t.Cleanup(func() {
 		implRunBDFn = origRunBD
 		implRunBDCombinedFn = origRunBDCombined
@@ -405,6 +425,13 @@ func saveAndRestore(t *testing.T) {
 		implGitUserEmailFn = origGitEmail
 		implPhaseMetadataFn = origPhaseMeta
 		implGetwdFn = origGetwd
+		implScanOrphansFn = origScanOrphans
+		implClosedEpicBeadIDsFn = origClosedEpicBeadIDs
+		implWorktreeListFn = origWorktreeList
+		implIsAncestorFn = origIsAncestor
+		implBranchExistsFn = origBranchExists
+		implGetMetadataFn = origGetMetadata
+		implCheckObligationsFn = origCheckObligations
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into approve-impl) shells to
@@ -421,7 +448,7 @@ func saveAndRestore(t *testing.T) {
 
 	// Deterministic defaults for tests that don't care about specifics.
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "open"}}
+		payload := []map[string]string{{"status": "closed"}}
 		return json.Marshal(payload)
 	}
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
@@ -435,8 +462,40 @@ func saveAndRestore(t *testing.T) {
 	// kind does not depend on where `go test` runs (the repo checkout
 	// itself may be a bead worktree).
 	implGetwdFn = func() (string, error) { return "/testcwd", nil }
+	// Spec 115 Bead 2: the pre-terminal orphan/obligation gate's seams
+	// default to inert no-ops — no orphans, no worktrees, no recorded
+	// obligations — so every test that doesn't care about this gate
+	// (the overwhelming majority) reaches its own assertions exactly as
+	// before. Tests exercising the gate itself override these.
+	implScanOrphansFn = func(specID, workdir, excludeBeadID string) ([]lifecycle.Orphan, error) {
+		return nil, nil
+	}
+	implClosedEpicBeadIDsFn = func(specID string) ([]string, error) { return nil, nil }
+	implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	implIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
+	implBranchExistsFn = func(name string) bool { return false }
+	implGetMetadataFn = func(id string) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	}
+	implCheckObligationsFn = func(beadID string, getMeta func(string) (map[string]interface{}, error)) error {
+		return nil
+	}
 }
 
+// TestApproveImpl_NoCommitsNoBeads: with NO plan.md AND zero commits
+// beyond main, ApproveImpl still errors — but Spec 115 Bead 2's R3
+// obligation-backstop leg (fail-closed on an unreadable plan-bead
+// enumeration) now intercepts this degenerate state BEFORE the
+// CommitCount preflight ever runs (the new gate sits earlier in the
+// call order — AC4). This is a deliberate, spec-mandated tightening: a
+// missing plan.md must never again be silently tolerated by a
+// downstream check (R3's whole point). This test pins that Leg 3
+// intercepts the missing-plan state before the CommitCount preflight is
+// ever reached, so FinalizeEpic must still never run. (The preflight's
+// own degenerate-plan disjunction is now fully subsumed by Leg 3 and
+// unreachable in normal flow — see the comment at the preflight call
+// site in impl.go — so this test does not exercise that message at
+// all.)
 func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
@@ -456,10 +515,16 @@ func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
 
 	_, err := ApproveImpl(tmp, "010-test", mock)
 	if err == nil {
-		t.Fatal("expected error when spec branch has no commits beyond main")
+		t.Fatal("expected an error for a spec with no readable plan.md")
 	}
-	if !strings.Contains(err.Error(), "no commits beyond main") {
-		t.Errorf("error should mention no commits: %v", err)
+	if !strings.Contains(err.Error(), "plan bead list could not be read") {
+		t.Errorf("error should mention the unreadable plan-bead enumeration: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must end with a recovery line: %v", err)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must not run when the plan is unreadable: %d calls", len(calls))
 	}
 }
 
@@ -578,6 +643,7 @@ func TestApproveImpl_MockExecutorNoBD(t *testing.T) {
 	// Verify that a mock executor can drive ApproveImpl without any git operations.
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -636,6 +702,7 @@ func TestApproveImplBlocksOnSpecDocSkew(t *testing.T) {
 func TestApproveImplOverrideRecordsToEpic(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -736,6 +803,16 @@ func TestApproveImplCallOrder(t *testing.T) {
 		}},
 		{label: "validate.CheckADRDivergence", match: func(c *ast.CallExpr) bool {
 			return isSelectorCall(c.Fun, "validate", "CheckADRDivergence")
+		}},
+		// Spec 115 Bead 2: the pre-terminal orphan/obligation refusal
+		// gate — runOrphanObligationGate wraps implScanOrphansFn, which
+		// defaults to lifecycle.ScanOrphanedClosedBeads (the R1 error-
+		// preserving core). It must sit after the last read-only gate
+		// (CheckADRDivergence above) and BEFORE the deferred phase-
+		// reconcile write, MUTATION (1/3), and FinalizeEpic below.
+		{label: "runOrphanObligationGate (Spec 115 Bead 2 — wraps lifecycle.ScanOrphanedClosedBeads)", match: func(c *ast.CallExpr) bool {
+			id, ok := c.Fun.(*ast.Ident)
+			return ok && id.Name == "runOrphanObligationGate"
 		}},
 		{label: "implPhaseMetadataFn(reconcile, mindspec_phase only)", match: func(c *ast.CallExpr) bool {
 			id, ok := c.Fun.(*ast.Ident)
@@ -1303,6 +1380,7 @@ func captureStderr(t *testing.T, fn func()) string {
 func TestApproveImpl_StalePhaseReconcilesForward(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -1401,6 +1479,7 @@ func TestApproveImpl_StalePhaseReconcilesForward(t *testing.T) {
 func TestApproveImpl_OpenBugChildReachesReview(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -1456,6 +1535,7 @@ func TestApproveImpl_OpenBugChildReachesReview(t *testing.T) {
 func TestApproveImpl_StoredFreshSkipsReconcile(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -1658,6 +1738,7 @@ func TestApproveImpl_PhaseGateFailureNamesBothPhasesWithRecovery(t *testing.T) {
 func TestApproveImpl_ReconcileWriteFailureHasRecoveryLine(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -1788,6 +1869,7 @@ func TestApproveImplWarnStreamDefaultsToStderr(t *testing.T) {
 func TestApproveImplPrintsDocSyncWarningAndProceeds(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)
@@ -1802,11 +1884,17 @@ func TestApproveImplPrintsDocSyncWarningAndProceeds(t *testing.T) {
 		ChangedFilesResult: []string{"cmd/mindspec/foo.go", "docs/notes.md"},
 	}
 
-	_, err := ApproveImpl(tmp, "010-test", mock)
+	// Spec 115 Bead 2: the plan.md this fixture now carries (for the
+	// obligation-backstop leg) also switches ON the previously-dormant
+	// ADR-divergence gate (it no-ops on a MISSING plan.md, pre-115); this
+	// fixture declares no domain/ownership coverage for cmd/, so
+	// --override-adr keeps that unrelated gate out of THIS test's way —
+	// the doc-sync WARN rendering + FinalizeEpic-call assertions below
+	// are what this test actually pins, unchanged.
+	_, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{OverrideADR: "adr-divergence coverage is out of scope for this doc-sync-warning fixture"})
 	if err != nil {
 		t.Fatalf("warning-only doc-sync result must not block approval, got: %v", err)
 	}
-	// The gate passed without override: FinalizeEpic ran.
 	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 1 {
 		t.Errorf("expected 1 FinalizeEpic call, got %d", len(calls))
 	}
@@ -1830,6 +1918,7 @@ func TestApproveImplPrintsDocSyncWarningAndProceeds(t *testing.T) {
 func TestApproveImplNoWarningsPrintsNothing(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 
 	saveAndRestore(t)

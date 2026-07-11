@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "As author-of-record I traced the diff at 8b664359 against plan Bead-2 steps 1-8. runOrphanObligationGate is placed exactly per AC4 (impl.go:~369, after the ADR-divergence refusal, before phase-reconcile/epic-close/phase-done/CommitCount/FinalizeEpic); the call-order doc comment is updated. All four legs are faithful and fail-directions exact: Leg1 R1 orphan scan fail-closed via implScanOrphansFn(specID,root,\"\"), refusal names bead/branch/spec-branch + RecoveryCommand final line; Leg2 worktree-enum fail-closed on WorktreeList/ClosedEpicBeadIDs/ancestry, epic-scoped, never consults branchExistsFn; Leg3 planErr fail-closed naming the plan + per-bead implCheckObligationsFn with branch-state-truthful recovery; R2 advisory omits the slot line on any read failure, never prints MINDSPEC_SKIP_PANEL or a refut incantation. The AC4 AST anchor references runOrphanObligationScanOrphanedClosedBeads label. All 11 named tests present and mapping to AC1a/1b/2/2d/3/5/6/6e/7b/11/13. Scope confined to the 3 approve files; gitutil diff empty; fences 0-hit. build + 4-pkg test + AC4 anchor + gofmt + vet all green; worktree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "legs-1-4",
+      "severity": "info",
+      "summary": "All four legs faithfully implement plan steps 2-5 with exact fail-directions. Leg1 fail-closed on infra error / refuses on any orphan; Leg2 (runWorktreeEnumerationLeg) fail-closed on its own infra, filters workspace.BeadBranchPrefix, membership-scopes to implClosedEpicBeadIDsFn(specID), refuses non-ancestor regardless of the probe; Leg3 fail-closed on planErr and per-bead obligation; R2 (implAdvisorySlotLine) strictly best-effort, returns \"\" on any read failure. Hatches never consulted. Placement (AC4) and the call-order doc comment are correct."
+    },
+    {
+      "id": "eleven-tests",
+      "severity": "info",
+      "summary": "orphan_gate_test.go carries exactly the 11 named tests mapping 1:1 to AC1a/1b/2/2d/3/5/6/6e/7b/11/13, plus the extended TestApproveImplCallOrder AST anchor grep-discriminated on ScanOrphanedClosedBeads. All 11 + NoCommitsNoBeads pass; four-package sweep green."
+    },
+    {
+      "id": "deviation-A",
+      "severity": "info",
+      "summary": "ADDRESSED. ~13 existing tests gained writePlanWithBeads(...). Pure mechanical accommodation: Leg 3 reads plan.md fail-closed, and every real spec has a plan.md at impl-approve. Assertions unchanged; no behavior hidden."
+    },
+    {
+      "id": "deviation-B",
+      "severity": "info",
+      "summary": "ADDRESSED. Default bead-status stub open->closed. Legitimate fixture correction: with a plan.md now present the pre-existing bead-status gate (:220-242) actually runs, and a spec ready for impl-approve has all beads closed. Models real state, masks nothing."
+    },
+    {
+      "id": "deviation-C",
+      "severity": "info",
+      "summary": "ADDRESSED (the key deviation). TestApproveImpl_NoCommitsNoBeads assertion change from 'no commits beyond main' to 'plan bead list could not be read' + recovery line + FinalizeEpic uncalled is a correct, spec-mandated tightening: with no plan.md, R3 Leg 3's fail-closed enumeration (AC6e / Req 3) now intercepts BEFORE the CommitCount preflight (AC4 ordering). The 'no commits' path in production is unchanged and still reachable via a valid-plan-but-no-commits spec; the test still pins FinalizeEpic uncalled. Not a masked regression."
+    },
+    {
+      "id": "deviation-D",
+      "severity": "info",
+      "summary": "ADDRESSED. TestApproveImplPrintsDocSyncWarningAndProceeds gained ImplOpts{OverrideADR:...}. The now-present plan.md activates the previously-dormant ADR-divergence gate against the fixture's uncovered cmd/ change; OverrideADR targets that unrelated gate, NOT doc-sync. The test still pins the doc-sync WARN rendering + exactly-1 FinalizeEpic call. Nothing under test is masked."
+    },
+    {
+      "id": "deviation-E",
+      "severity": "info",
+      "summary": "ADDRESSED. 7th seam implBranchExistsFn = gitutil.BranchExists is consistent with plan Step 4, which explicitly calls for the recovery-line branch check 'gitutil.BranchExists via a seam-consistent check'; the implXxxFn convention and Leg-3 testability require the seam. Used only by implObligationRefusal's branch-state-truthful recovery, defaults benign, saved/restored. Not scope creep."
+    },
+    {
+      "id": "scope",
+      "severity": "info",
+      "summary": "Scope clean: git diff --stat 075fd630..8b664359 touches only impl.go/impl_test.go/orphan_gate_test.go; git diff main -- internal/gitutil/ empty; no re-touch of Bead-1 orphans.go/panel_advisory.go logic; no Bead-3 docs. BranchExistsE/show-ref fences 0-hit. Three new import edges (lifecycle/complete/gitutil) acyclic; ADR-0030 intact (no executor seam). gofmt/vet clean; worktree porcelain clean."
+    }
+  ]
+}

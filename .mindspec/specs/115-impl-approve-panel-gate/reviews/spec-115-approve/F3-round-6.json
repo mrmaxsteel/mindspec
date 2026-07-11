@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "F3 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.85,
+  "rationale": "The C+B split is internally consistent. R1's posture is precisely qualified ('gate fail-CLOSED on every cleanly-signalled leg', with cleanly-signalled defined in-text and verified against IsAncestor's exit-1 discrimination at gitops.go:446-463), and both R1 and OQ2 explicitly name the branch-existence leg as the proven exception, backstopped by Facts 1&2 (AC11/AC12). I scanned every fail-open/fail-closed occurrence in the spec: each is leg-scoped and no unqualified 'gate fail-closed on infra' claim survives. The Non-Goals audited refutation matches R1 verbatim in substance; the Goal correctly keeps two disclosed residuals (the probe ambiguity is refuted-closed, not a third open gap); ref-name-ambiguity and the blp6 AC12-invariant constraint cohere with 'loop untouched behaviorally' (R5 is comment-only; parity phrase = exactly 1 occurrence at HEAD). Never-false-refuse is preserved by construction plus AC2(d) and the R1 falsified-if clause. All 4 OQs [x]. Empirically at 8b07e89f: zero Go-code hits for BranchExistsE, show-ref in internal/, and all four new test anchors; all Fact 1/2 line cites verify; AC10 exactly-one-claimant already holds; gitutil dropped from Impacted Domains, Scope, and negative-pinned. Scope stays ~2-3 beads. No contradiction, unresolved OQ, or scope defect found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "grade": "ADDRESSED",
+      "note": "R1+OQ2 split precision: both now state the branch-existence leg is the sole exception to the fail-closed gate posture, backstopped by Facts 1&2; 'cleanly-signalled' is defined and code-grounded (findEpicBySpecIDFn/listClosedBeadsFn error returns at orphans.go:28-39; IsAncestor 0/1/other at gitops.go:446-463). No residual unqualified fail-closed claim anywhere in the spec."
+    },
+    {
+      "id": "F3-2",
+      "grade": "ADDRESSED",
+      "note": "Audited refutation (Non-Goals) does not contradict R1/R2/R3: Facts 1&2 identical in substance across R1 and Non-Goals, cite AC11/AC12; R2 stays advisory-fail-open ('R1 fail-closed posture does NOT extend to this leg'); R3 fail-closed is a separate metadata/enumeration leg. Goal's two disclosed residuals remain two — the probe ambiguity is correctly framed as refuted-closed, consistent with the audited-refutation escape."
+    },
+    {
+      "id": "F3-3",
+      "grade": "ADDRESSED",
+      "note": "Ref-name-ambiguity + blp6-invariant Non-Goals coherent: tag/symref classed as raw-git tamper AND shown unreachable via FinalizeEpic (AC12 pins tag subtests b and symref c); blp6 constraint (future merge-loop changes must preserve the worktree-enumeration invariant) coheres with AC12's RED-on-revert purpose and with the loop being behaviorally untouched (verified: 'rule as CompleteBead' comment phrase = 1 occurrence at HEAD, comment-only R5 change)."
+    },
+    {
+      "id": "F3-4",
+      "grade": "ADDRESSED",
+      "note": "Never-false-refuse preserved: absent-or-infra -> false -> no trigger by construction (BranchExists verified at gitops.go:94-100, bool cmd.Run()==nil), R1 falsified-if retains the genuinely-absent clause, AC2(d) TestApproveImpl_DeletedBranchNoRefusal retained. All 4 OQs [x] with resolutions matching the body (OQ2 rewritten to carry the rounds-2->6 history and the structural-backstop asymmetry)."
+    },
+    {
+      "id": "F3-5",
+      "grade": "ADDRESSED",
+      "note": "Scope: gitutil dropped cleanly from Impacted Domains (execution bullet), In Scope (explicit 'NO internal/gitutil change lands'), and Validation Proofs (negative pin). Empirically 0 Go hits for BranchExistsE and show-ref in internal/ at 8b07e89f; 0 code hits for AC11/AC12 test names and the ScanOrphanedClosedBeads anchor (genuinely RED). Remaining surface (approve gate, lifecycle refactor, complete predicate export, executor pin+comment, docs) fits ~2-3 beads. AC10 exactly-one-claimant invariant already holds at HEAD (workflow only)."
+    },
+    {
+      "id": "F3-6",
+      "grade": "ADDRESSED",
+      "note": "Fact 1/Fact 2 ordering coherence: MergeBase at impl.go:249 (verified exact line) precedes the HC-4 gate placement (after last read-only gate, before impl.go:327-340), so 'pre-scan abort' is consistent with AC4's ordering anchor; Fact 2's partition (no-worktree -> unenumerated; enumerated-but-corrupt -> MergeInto fails) matches the verified loop code at mindspec_executor.go:383/385/399/402 and does not conflict with the :394 ancestor-skip (ancErr!=nil skips the merge)."
+    }
+  ]
+}

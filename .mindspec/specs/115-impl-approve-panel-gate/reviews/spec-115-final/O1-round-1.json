@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "O1 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Anti-gaming/security lens: the fail-closed guarantee is delivered end-to-end. runOrphanObligationGate is called unconditionally at impl.go:369, BEFORE epic close (:401), phase writes, CommitCount, and FinalizeEpic (:443) — a refusal performs no close/phase-write/merge/push. (1) Leg 1 (ScanOrphanedClosedBeads) refuses an orphaned closed bead (branch exists, non-ancestor) and fail-CLOSES on all three cleanly-signalled infra legs; verified TestApproveImpl_OrphanInfraErrorFailsClosed. (2) Leg 2 keys off bead.WorktreeList() — the SAME enumeration FinalizeEpic merges from (:383) — epic-scoped, ancestry-checked, closing the round-6 TOCTOU (TestApproveImpl_WorktreeEnumRefusesDespiteProbeMiss green). (3) Leg 3 (CheckPendingObligations) catches merged/deleted beads with durable uncovered obligations and exhaustively refuses on present-null / corrupt / shape-invalid pending AND refuted metadata, fail-closed on unreadable plan enumeration. (4) Hatches consulted nowhere in the gate; override flags touch only doc-sync/ADR gates. (5) Advisory only appends text; refusal returned unconditionally. Hunted for un-gated ordinary-flow merge paths beyond the 3 disclosed residuals (raw-merge-no-obligation; blp6 cross-spec; two-List window) — Fact 2 (worktree-only merge) blocks the no-worktree probe-miss case; found none. gitutil byte-unchanged; BranchExistsE/show-ref 0 hits; build/vet/gofmt clean; golangci-lint 0 issues; touched-pkg tests green. No false 'no behavior change' claim: FindOrphanedClosedBeads wrapper is byte-identical for complete/next/doctor.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "summary": "Non-blocking, pre-existing: on the --supersede-adr path implCreateWithIDFn writes a placeholder ADR file to disk (impl.go:349) BEFORE the orphan gate at :369, so a subsequent refusal leaves a stray placeholder ADR. This predates spec 115 (Spec 087) and is NOT one of the four operations the refusal guarantee protects (close/phase-write/merge/push); it is not an un-gated-merge path. No action required for 115."
+    },
+    {
+      "severity": "info",
+      "summary": "Verified fail-closed completeness of uncoveredPendingObligations: both refutation_pending_entries and panel_refuted_entries are read via comma-ok, present-null errors, decode errors error, and EVERY element of BOTH arrays is shape-validated (slot!='' , round>=1) BEFORE the len(pending)==0 early return — no corrupt-metadata decode-as-empty bypass remains."
+    },
+    {
+      "severity": "info",
+      "summary": "Verified the 3 disclosed residuals are the only ordinary-flow gaps: (a) raw-git-merged bead with no durable obligation (R1 ancestor-exempt + R3 marker-absent) — disclosed; (b) cross-spec/global-loop orphans = blp6 — disclosed, epic-scoping keeps 115's refusal correct; (c) gate-vs-FinalizeEpic two-List window = concurrent-mutation, bounded by serialized-lifecycle model — disclosed. Fact 2 (FinalizeEpic merges only worktree-enumerated real branches, AC12) prevents a persistent probe-miss + no-worktree bead from riding the merge even when the gate cannot see it."
+    }
+  ]
+}

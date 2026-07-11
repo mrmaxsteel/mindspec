@@ -1,0 +1,9 @@
+{
+  "reviewer_id": "G2 codex",
+  "chosen_option": "synthesis",
+  "confidence": 0.94,
+  "rationale": "Option B closes the specific BranchExists-vs-WorktreeOps.List transient: a ref-probe failure can no longer hide an entry already returned by the gate's worktree enumeration, and ancestry errors remain fail-closed. But two calls to the same live List() are not one snapshot. ApproveImpl itself performs no bead-worktree creation between the proposed gate and FinalizeEpic (only phase/epic metadata work and CommitCount; FinalizeEpic auto-commits the spec worktree before listing), so the sequential bd close -> impl approve flow cannot change the list internally. External concurrency can: an ordinary bd/mindspec worktree creation completed after the gate's List() but before FinalizeEpic's List(), coupled with closing that bead, can introduce a merge candidate the gate never saw. Therefore adopt B only with lifecycle serialization, snapshot handoff to FinalizeEpic, or fail-closed per-entry revalidation before merge. A is not honestly worded as non-operator-controllable: sequential ordinary flow supplies no plausible transient, and ref-lock contention is a weak example for read-only ref lookup, but concurrent Git ref maintenance/mutation, permission or filesystem faults, and resource failures can be operator/environment induced and recover within the pass.",
+  "option_b_closes_toctou": false,
+  "residual_repro": "With two ordinary CLI processes and no raw-git edits: let the gate's WorktreeOps.List() finish; then another process creates a bead worktree and closes that epic child before FinalizeEpic calls WorktreeOps.List(). The later list contains an unscanned, non-ancestor bead branch that FinalizeEpic can merge.",
+  "rejected": "A as drafted understates operator/environment reachability; bare B mistakes a shared enumerator for an atomic shared snapshot."
+}

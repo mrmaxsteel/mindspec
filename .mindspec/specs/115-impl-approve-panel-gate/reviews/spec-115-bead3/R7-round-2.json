@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R7 Fable-sub (opus)",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Grounding/contradiction lens: every scoped claim now resolves against runOrphanObligationGate (internal/approve/impl.go). The DETECTABLE guarantee maps 1:1 to the shipped code: 'unmerged non-ancestor bead/<id> branch (closed without mindspec complete)' = Leg 1 implScanOrphansFn + Leg 2 worktree-enumeration (both refuse iff branch exists AND !IsAncestor(specBranch)); 'durable refutation obligation not covered by a durable panel_refuted record' = Leg 3 implCheckObligationsFn. The 'Disclosed residual' (raw-git-merged-then-bd-close, no obligation) is truly undetectable: post-merge the branch IS an ancestor so Legs 1/2 never trigger, and no obligation clears Leg 3 — consistent with ADR-0037 §8's two-residual disclosure (lines 192-197), no longer contradicted by the old 'any closed bead' overclaim. The softened 'orphan/obligation gate no longer blocks impl approve (subject to its remaining gates)' is truthful: doc-sync (306) and ADR-divergence (330) gates run earlier and can still refuse. Recovery text (complete tolerates already-closed, re-runs gate, merges; branch-deleted → restoration prerequisite) matches implObligationRefusal (740-750). No new contradiction with C+B/Option B/single-settlement-home/ADR-0030. AC9 substrings present in all 3 surfaces; no validate→lifecycle import cycle. Read-only; git clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R7-r2-1",
+      "severity": "info",
+      "status": "resolved",
+      "summary": "Round-1 overclaim closed: opening scoped from 'any closed bead closed without mindspec complete' to the DETECTABLE guarantee (unmerged non-ancestor branch OR uncovered durable obligation), which excludes the raw-merged-ancestor residual and so no longer contradicts the ADR/skill residual disclosure."
+    },
+    {
+      "id": "R7-r2-2",
+      "severity": "info",
+      "status": "resolved",
+      "summary": "'Disclosed residual' note grounded: raw-git-merged bead branch becomes an ancestor of the spec branch (Legs 1/2 no-trigger) and carries no obligation (Leg 3 no-trigger), so the gate genuinely cannot detect it. Matches ADR-0037 §8 residual #1."
+    },
+    {
+      "id": "R7-r2-3",
+      "severity": "info",
+      "status": "resolved",
+      "summary": "'impl approve finalizes subject to its remaining/other gates' is truthful: ApproveImpl runs doc-sync and ADR-divergence gates (lines 306/330) plus later phase/commit/FinalizeEpic steps that can still refuse after the orphan gate clears."
+    }
+  ]
+}

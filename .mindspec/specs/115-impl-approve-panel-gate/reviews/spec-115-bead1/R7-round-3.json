@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "R7 Fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Scope: delta 19bc8114..e71a7991 touches exactly internal/complete/panel_advisory.go + panel_advisory_test.go — no approve/gitutil/docs/ADR/skill files; `git diff main -- internal/gitutil/` empty; BranchExistsE/show-ref 0-hit repo-wide. Grounding: the reorder validates BOTH metadata keys (comma-ok present-null + decode) before the single len(pending)==0 early return, so a present-but-corrupt EITHER key refuses unconditionally — this MORE completely satisfies the spec R3 fail-closed contract than r2, with no contradiction of the pristine no-op (both-absent → nil and valid-empty-both → nil are pinned by new subtests). Error wording unchanged from r2 and stays in the \"cannot prove … obligation-free / … already satisfied\" family. F3-1 intact: reconcilePendingRefutations calls the shared unexported uncoveredPendingObligations core directly (line 694), CheckPendingObligations remains a thin wrapper. No gofmt doc-comment gotcha: new comments are plain ASCII plus em-dashes matching file style, no backtick code spans; gofmt -l empty, vet clean. Empirical: go build ./... green; lifecycle/complete/executor tests pass -count=1; TestPendingObligationPredicate now 16 subtests as the BRIEF states. My rounds 1-2 lenses are undisturbed by a fix confined to validation ordering in the obligation core.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R7-r3-scope",
+      "severity": "info",
+      "note": "Delta file list is exactly panel_advisory.go + panel_advisory_test.go; all fences (gitutil empty vs main, BranchExistsE/show-ref 0-hit) verified clean at e71a7991."
+    },
+    {
+      "id": "R7-r3-structure",
+      "severity": "info",
+      "note": "Both key validations now precede the only early return; corrupt-shape class closed structurally, order-independent, with pristine-absent no-op preserved and pinned by the two no-false-refuse subtests."
+    }
+  ]
+}

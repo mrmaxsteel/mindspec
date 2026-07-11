@@ -1,0 +1,17 @@
+{
+  "reviewer_id": "G1 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The round-4 fix is only partial because its central empirical premise is false. In two absolute /tmp repositories on Git 2.51.2, `git show-ref --verify refs/heads/bead/loose` returned 0 for an existing branch, but the genuinely absent ref returned 128 (fatal: not a valid ref), not 1; the existing branch with `.git/refs/heads` chmod 000 also returned 128. Thus the specified 0/1/else mapping cannot distinguish normal absence from infrastructure failure and would false-refuse the normal merged-and-deleted path. The masking evidence did reproduce: unreadable-store `rev-parse --verify --quiet` and `show-ref --verify --quiet` returned 1, while `for-each-ref` returned 0 empty. All tree citations are supported: BranchExists at gitops.go:94-100 (plain rev-parse at :98), MergeBase at impl.go:249, FinalizeEpic at :372, and ErrRefNotFound/RevParseRef at gitops.go:13-19/:524-542. The three named tests and both new symbols have zero code hits. Diff 4cbf437b..f07cce6a is spec.md only, 5 insertions/5 deletions.",
+  "concrete_changes_required": [
+    "Replace the false `show-ref --verify` 0/1/else contract throughout Requirement 1, Scope, OQ2, falsifiers, and ACs with an empirically valid three-way. On Git 2.51.2, `git show-ref --exists` produced present=0, absent=2, unreadable=1; if selected, establish its compatibility with the project's supported Git-version floor and map only its documented absent status to `(false, nil)`.",
+    "Make the named three-way and unreadable-store tests exercise genuine Git subprocess outcomes and pin both normal absence as non-refusal and unreadable storage as a non-nil error."
+  ],
+  "findings": [
+    {
+      "id": "round4_show_ref_verify_three_way",
+      "status": "PARTIAL",
+      "evidence": "The revision correctly withdraws quiet probes, states fail-closed ambiguity handling, adds the defense-in-depth citations, and specifies RED tests. However, plain `show-ref --verify` returns 128 for both an absent ref and an unreadable existing loose ref here, so its claimed absent=1 discriminator and resulting no-false-refusal contract are invalid."
+    }
+  ]
+}

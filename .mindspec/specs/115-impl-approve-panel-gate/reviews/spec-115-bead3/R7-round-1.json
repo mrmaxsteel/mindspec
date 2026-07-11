@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "R7 Fable-sub (opus)",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Every factual claim in the ADR-0037 amendment and the 3 skill surfaces resolves against the shipped runOrphanObligationGate with no contradiction. RECOVERY TRUTHFUL: the orphan case recovery `mindspec complete <bead>` matches Orphan.RecoveryCommand(); the branch-LESS case names the restoration prerequisite (restore ref / settle out-of-band), matching Leg 3's implObligationRefusal — never a bare command known to die at the step-3.5 merge-base. NO DESIGN CONTRADICTION: amendment extends REACH not enforcement home (Option B, added-not-replacing); asserts single settlement surface = `mindspec complete`; explicitly disclaims impl-approve doing settlement/reconciliation (never Allow/Block, never writes panel metadata, never applies refutation) — matches C+B (no exit-code classifier mentioned) and ADR-0030 (executor houses no enforcement). REACH claim consistent with the Goal + gate placement (pre-terminal, no epic close/phase write/merge/push on refusal). ALL CROSS-REFS RESOLVE: §3 (2026-07-10/114 RC-blocks), §7 (2026-07-10/114 refutation_pending marker), §6/§8/§§2-5, and cited 2026-06-14/2026-06-17 amendments all exist and mean what's cited. Skill prose content-identical across all 3 surfaces. Ownership test grounds: workflow is sole internal/lifecycle claimant; test passes; git clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "GROUNDED: ADR amendment 'no epic close, no phase write, no merge, no push' matches runOrphanObligationGate placement in ApproveImpl (impl.go:369) — before phase-reconcile write, MUTATION 1/3 epic close, done write, CommitCount, FinalizeEpic.",
+    "GROUNDED: 'single settlement surface remains mindspec complete; never computes Allow/Block, never writes panel audit metadata, never applies a refutation' matches gate code (implScanOrphansFn + check-only implCheckObligationsFn, no metadata writes). Consistent with Non-Goals.",
+    "TRUTHFUL RECOVERY: skill's branch-less recourse ('restore the branch ref ... so mindspec complete can reach its reconciliation step') matches implObligationRefusal's two-line recovery for the absent-branch case; orphan case uses bare `mindspec complete <bead>` via RecoveryCommand() (runnable — orphan branch exists by predicate).",
+    "CROSS-REFS RESOLVE: §3 amendment (2026-07-10 spec 114 RC-blocks, line 246), §7 amendment (2026-07-10 spec 114 refutation_pending marker, line 340), §6/§8, plus 2026-06-14 (099, line 70) and 2026-06-17 (102, line 85 — 'single authoritative enforcement point', line 97) all exist. No dangling reference.",
+    "GROUNDED: hatch claim ('MINDSPEC_SKIP_PANEL / config toggle do NOT bypass this refusal; hatches except the gate, not the obligation') matches gate comment 'Hatches ... bypass NOTHING here' and AC3.",
+    "GROUNDED: two disclosed residuals in the amendment (raw-git-merged bead with un-refuted RC leaves no obligation; raw bd close stays possible) match spec Non-Goals verbatim in substance.",
+    "AC10 test grounds: internal/lifecycle/** claimed ONLY by workflow/OWNERSHIP.yaml:9; TestLifecycleOwnershipExactlyOneWorkflowClaimant passes; RED-on-revert by construction (second claimant or workflow-revert fails). No OWNERSHIP.yaml edited.",
+    "Skill append content-consistent across .claude, .agents, and the claude.go embedded literal (identical prose modulo backtick-escape mechanics). Pre-existing verb-order/marker drift is out of scope per BRIEF, not introduced here.",
+    "git status clean (only the untracked reviews/spec-115-bead3 panel dir)."
+  ]
+}

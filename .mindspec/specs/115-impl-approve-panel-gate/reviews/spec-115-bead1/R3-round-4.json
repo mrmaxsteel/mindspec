@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Lens: RED-on-revert of the 3+1 new subtests. All 3 corrupt-shape subtests are genuinely discriminating. Traced each: refuted array present+non-nil so present-null check passes; pending absent/empty so decode yields empty pending; WITH the new per-element loop the zero-valued/empty-slot/round<1 covering element trips `c.Slot==\"\" || c.Round<1` → error; WITHOUT the loop, control falls to `len(pending)==0` → return nil,nil → CheckPendingObligations returns nil → each 'expect error' assertion FAILS. Confirmed empirically: a standalone replica of decodeRefutations shows `[]interface{}{nil}` (the faithful model of GetMetadata json-decoding a stored JSON `[null]` into map[string]interface{}) decodes to exactly one zero-valued Refutation{Slot:\"\",Round:0} — modeling is faithful, no mismatch. The empty-slot/round<1 subtests use typed []panel.Refutation directly, equally valid post-decode shapes. No-false-refuse pin asserts nil for a valid pending fully covered by a valid (slot X, round 3) covering entry — loop passes it, coverage unchanged. Ran `go test -count=1 ./internal/complete -run TestPendingObligationPredicate -v`: all 20 subtests PASS. git clean at a8da895a. Rounds 1-3 lenses undisturbed.",
+  "concrete_changes_required": [],
+  "findings": []
+}

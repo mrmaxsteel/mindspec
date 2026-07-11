@@ -1,0 +1,45 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Anti-gaming completeness lens. Option B is soundly implemented. The worktree-enum leg genuinely closes the round-6 TOCTOU: FinalizeEpic merges from g.WorktreeOps.List() (mindspec_executor.go:383), whose production impl (:44-46) IS bead.WorktreeList() (bdcli.go:202) — the exact source the new gate leg enumerates. Because gate-scan and merge key off one source, a transient BranchExists miss can no longer desync scan from merge; any candidate the loop sees, the gate vetted. approve already imports bead (impl.go:13) — bd query, ADR-0030 clean; shared FindOrphanedClosedBeads predicate untouched for complete/next/doctor. The ordinary-flow coverage set is complete: enumerated closed-epic orphan→leg; branchy-worktreeless orphan→probe leg; merged/deleted+obligation→R3; whole-store failure→Fact 1 (:249); persistently masked single ref→Fact 2. The three residuals (raw-merge no-obligation; cross-spec blp6; two-List() window) are disclosed and correctly scoped. Fact 2's re-scope to PERSISTENTLY missing/corrupt is accurate — the transient case truly moved to AC13. AC13 pins the leg RED-on-revert (probe-forced-miss + enumerated non-ancestor→refuse; revert-to-probe-only→RED) plus fail-closed and no-false-positive subcases. All round-6/7 test names verified 0 code hits at 50165d81. No overclaim, no un-gated ordinary-flow path left uncaught.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "O1-R7-1",
+      "topic": "Option B grade — soundly implemented",
+      "status": "ADDRESSED",
+      "detail": "Worktree-enum leg is ADDED (not replacing) to R1: keys off bead.WorktreeList() (bdcli.go:202-217), the same source defaultWorktreeOps.List() (mindspec_executor.go:44-46) feeds FinalizeEpic's loop at :383. Fail-CLOSED on list/ancestry error, epic-scoped to the finalizing epic's closed-bead set, never consults branchExistsFn. approve imports bead (impl.go:13) so no new import edge / ADR-0030 intact; shared predicate byte-unchanged."
+    },
+    {
+      "id": "O1-R7-2",
+      "topic": "Round-6 TOCTOU genuinely closed for the ordinary flow",
+      "status": "ADDRESSED",
+      "detail": "Verified same-source coupling: transient BranchExists miss after a successful :249 MergeBase that clears before FinalizeEpic no longer helps — the enumerated, now-resolvable bead/<id> worktree the merge loop would consume is the exact entry the gate leg refuses on (non-ancestor, epic-closed). Scan and merge cannot desync. Airtight for the ordinary (no-raw-tamper) flow."
+    },
+    {
+      "id": "O1-R7-3",
+      "topic": "Disclosed residual honestly + completely bounded",
+      "status": "ADDRESSED",
+      "detail": "Non-Goals no longer claims total closure. The narrower two-call window (a bead/<id> worktree CREATED between the gate's List() and FinalizeEpic's List()) is disclosed as concurrent lifecycle mutation, out of scope under mindspec's serialized one-mutator-per-repo model — the same single-operator assumption every complete gate ordering rests on. Single-snapshot handoff noted as optional future hardening; OQ4 no-executor-seam stands. Bounded, not overclaimed."
+    },
+    {
+      "id": "O1-R7-4",
+      "topic": "No OTHER ordinary-flow un-gated-merge path uncaught",
+      "status": "ADDRESSED",
+      "detail": "Enumerated case → worktree-enum leg; branchy-but-worktreeless orphan → probe/shared-predicate leg; merged/deleted bead w/ unsettled obligation → R3; whole-store unreadable → Fact 1/AC11 (:249); persistently masked single ref → Fact 2/AC12. The two remaining gaps both require raw tamper or a separate bug: raw-git-merge with no recorded obligation (residual #1) and cross-spec global-loop orphan (residual #2 = blp6). Both disclosed. No non-tamper path escapes the union."
+    },
+    {
+      "id": "O1-R7-5",
+      "topic": "Fact 2 re-scope to PERSISTENT is accurate",
+      "status": "ADDRESSED",
+      "detail": "The transient case is genuinely excluded from Fact 2: when the ref recovers, the worktree IS enumerated and its branch IS resolvable, so Fact 2's 'no worktree / fails its own MergeInto' guarantee does not cover it — it correctly moved to the worktree-enum leg (AC13). The deleted overclaim ('no probe misclassification can produce an un-gated merge') was the right thing to drop."
+    },
+    {
+      "id": "O1-R7-6",
+      "topic": "AC13 pins the leg RED-on-revert; discriminators absent",
+      "status": "ADDRESSED",
+      "detail": "AC13 subtest (a) forces probe MISS + enumerated non-ancestor worktree → refuse with terminal fns UNCALLED, explicitly RED on revert-to-probe-only; (b) list-error → refuse (fail-closed); (c) ancestor and different-epic worktrees → no trigger (no false positive). Verified at HEAD 50165d81: TestApproveImpl_WorktreeEnumRefusesDespiteProbeMiss, TestLifecycleOwnershipExactlyOneWorkflowClaimant, ScanOrphanedClosedBeads, TestApproveImpl_UnreadableRefStoreAbortsPreScan, TestFinalizeEpic_MergesOnlyWorktreeRealBranches all have ZERO code hits; BranchExistsE and internal/ show-ref both 0 hits. Genuinely falsifiable."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Anti-gaming completeness lens: the C+B fail-open probe plus the two structural facts leave NO ordinary-flow (bd close -> impl approve, no raw git) un-gated-merge path. BranchExists returns false only for '-'-prefixed names (impossible for bead/<id>) or genuinely-unresolvable refs (which are then unmergeable), so refs partition cleanly: resolvable -> flagged -> gate refuses; unresolvable -> Facts 1/2 catch it. Fact 1 verified at impl.go:249 (MergeBase pre-scan, fail-closed on exit-128, before all terminal mutations at :327/:343/:352/:372). Fact 2 verified stronger than spec claims: a masked single bead ref hits THREE backstops in FinalizeEpic (never-enumerated if no worktree; IsAncestor errors at :394 -> merge skipped since it needs ancErr==nil; MergeInto fails at :402). A ref cannot be both masked-absent and mergeable. AC11 pins Fact 1 as RED-on-revert (terminal fns uncalled on unreadable store). AC12(a) pins Fact 2 AND the blp6 invariant (no-worktree branch never merged). Classifier fully deleted (BranchExistsE=0, show-ref/internal=0); AC11/AC12/ScanOrphanedClosedBeads all 0 hits at 8b07e89f (genuinely RED). Refutation genuinely holds; not re-litigating A vs C+B.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "ordinary-flow-ungated-merge-completeness",
+      "grade": "ADDRESSED",
+      "note": "No non-tamper ordinary-flow path where a masked orphan gets merged. Whole-store unreadable -> Fact 1 aborts at MergeBase impl.go:249 (verified before scan + terminals). Single-ref corruption -> Fact 2: FinalizeEpic (mindspec_executor.go:383-402) merges only worktree-enumerated real bead/ branches; the masked ref is either unenumerated, skipped because IsAncestor(:394) returns a non-nil error, or fails MergeInto(:402). Masked-absent and mergeable are mutually exclusive."
+    },
+    {
+      "id": "AC11-pins-fact1",
+      "grade": "ADDRESSED",
+      "note": "TestApproveImpl_UnreadableRefStoreAbortsPreScan asserts abort at/before :249 with epic-close/phase/FinalizeEpic seams uncalled. Removing the pre-scan store touch (letting the masked scan fail-open) would reach FinalizeEpic -> test RED. Converts Fact 1 from emergent to asserted. 0 hits at HEAD (RED)."
+    },
+    {
+      "id": "AC12-pins-fact2-and-blp6",
+      "grade": "ADDRESSED",
+      "note": "TestFinalizeEpic_MergesOnlyWorktreeRealBranches subtest (a) (no-worktree branch never merged) pins the 'merge only worktree-enumerated' invariant; a future loop iterating git branch --list instead of WorktreeOps.List would go RED. Subtests (b)/(c) pin tag/symref non-enumeration. The blp6 future-fix constraint is genuinely load-bearing and test-backed. 0 hits at HEAD (RED)."
+    },
+    {
+      "id": "classifier-deletion-coherence",
+      "grade": "ADDRESSED",
+      "note": "BranchExistsE=0, show-ref in internal/=0 at 8b07e89f; gitutil.BranchExists (gitops.go:94-100) unchanged; gitutil dropped from Impacted Domains + Scope; the three cleanly-signalled legs (epic-lookup/bd-list/IsAncestor at gitops.go:446-463, clean 0/1/other) stay fail-closed while only the existence leg reverts to the fail-open bool. Split stated precisely and internally consistent."
+    }
+  ]
+}

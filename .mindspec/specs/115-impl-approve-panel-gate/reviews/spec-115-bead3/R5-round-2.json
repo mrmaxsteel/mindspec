@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R5 Sonnet",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Verified the qualified 'REFUSES' sentence and 'Disclosed residual' note are word-for-word identical (modulo Go string-escaping of backticks) across all 3 surfaces: .claude/skills/ms-impl-approve/SKILL.md, .agents/skills/ms-impl-approve/SKILL.md, and the internal/setup/claude.go string literal. Concatenating the claude.go `\"...\" + \"`x`\" + \"...\"` segments reproduces the exact skill-file prose, including 'DETECTABLY unsettled', the softened 'orphan/obligation gate no longer blocks... (which then finalizes subject to its other gates)', and the new 'Disclosed residual: a bead branch already raw-`git merge`d and then `bd close`d... see ADR-0037' sentence. `go build ./...` succeeds cleanly at 997e2a9e. `gofmt -l ./cmd ./internal` returns empty (no files need formatting). Checked specifically for the known Go 1.19+ gofmt doc-comment backtick/shell-escape gotcha (`'\\''`) near this literal — not present; this text lives in a raw string literal, not a doc comment, and no such escape sequence appears. AC9 substring `closed without` is present in both skill files and the claude.go literal (grep -c = 2 each); `impl approve` also present in all three plus ADR-0037. Diff is confined to the 5 expected files (ADR, 2 skills, claude.go, ownership_test.go). No content divergence, compile break, or gofmt issue found.",
+  "concrete_changes_required": [],
+  "findings": []
+}

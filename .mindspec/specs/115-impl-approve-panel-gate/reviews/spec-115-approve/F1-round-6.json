@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "F1 fable",
+  "verdict": "APPROVE",
+  "confidence": 0.93,
+  "rationale": "Falsifiability fully verified at 8b07e89f. Both new structural discriminators are genuinely RED: 'func TestApproveImpl_UnreadableRefStoreAbortsPreScan' and 'func TestFinalizeEpic_MergesOnlyWorktreeRealBranches' greps exit 1, with 0 repo-wide Go hits at HEAD and at its parent 18cc59d9 (the SHA the spec pins). BranchExistsE, show-ref (internal/ and repo-wide), and ScanOrphanedClosedBeads are 0 Go-code hits; the deleted-classifier negative pin passes exactly as written. All 14 Validation-Proofs named tests plus the AC4 anchor are RED; every named test pairs an existence grep with an exact-named -run (walked AC1-AC12); AC8/AC9 discriminators RED ('rule as CompleteBead' count 1, alone on :398; ADR/skill greps 0). No dangling TestBranchExistsE_* or BranchProbeError reference survives in spec.md — classifier mentions are historical/negative only. AC11 falsifies the right behavior (MergeBase at impl.go:249 verified, early error return, terminal fns seam-recorded; scan-after-:249 ordering doubly pinned via AC4's after-last-read-only-gate anchor). AC12's three subtests pin Fact 2 at :383/:385/:402 and the blp6 invariant. AC10 is green by design as a declared invariant pin (round-2 settled). All five pinned SHAs resolve.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1-6-1",
+      "status": "ADDRESSED",
+      "summary": "AC11 discriminator genuinely RED: TestApproveImpl_UnreadableRefStoreAbortsPreScan has 0 hits in internal/approve/*_test.go and repo-wide at 8b07e89f and 18cc59d9."
+    },
+    {
+      "id": "F1-6-2",
+      "status": "ADDRESSED",
+      "summary": "AC12 discriminator genuinely RED: TestFinalizeEpic_MergesOnlyWorktreeRealBranches has 0 hits in internal/executor/*_test.go and repo-wide at 8b07e89f and 18cc59d9."
+    },
+    {
+      "id": "F1-6-3",
+      "status": "ADDRESSED",
+      "summary": "Deleted-classifier negative pin present and correct: '! grep -rn BranchExistsE --include=*.go . && ! grep -rn show-ref --include=*.go internal/' passes at HEAD (both 0 hits; show-ref also 0 repo-wide in Go); ScanOrphanedClosedBeads 0 Go hits, so the AC1/AC4 discriminators are non-degenerate."
+    },
+    {
+      "id": "F1-6-4",
+      "status": "ADDRESSED",
+      "summary": "Classifier deletion is clean: spec.md's only BranchExistsE/show-ref mentions are historical/negative (rounds-2..5 narrative + negative pin); no dangling TestBranchExistsE_ThreeWay / TestBranchExistsE_UnreadableRefStore / TestApproveImpl_BranchProbeErrorFailsClosed reference remains; gitutil dropped from Impacted Domains and Scope with explicit 'NO gitutil change lands' statements."
+    },
+    {
+      "id": "F1-6-5",
+      "status": "ADDRESSED",
+      "summary": "Validation-Proofs claim is true: all 14 named tests (10 approve, 2 complete, 1 lifecycle, 1 executor) are RED at HEAD; every AC1-AC7 + AC11-AC12 proof chains an existence grep with an exact-named -run; AC8 (phrase count exactly 1, single-line-matchable at mindspec_executor.go:398) and AC9 (0 'impl approve' hits in ADR-0037, 0 'closed without' hits in all three skill surfaces) are RED; pinned SHAs eb6a2ed1/77d8a1a9/18cc59d9 all resolve and 18cc59d9 is HEAD's parent."
+    },
+    {
+      "id": "F1-6-6",
+      "status": "ADDRESSED",
+      "summary": "AC11 falsifies the right behavior: impl.go:249 is exactly 'base, mbErr := exec.MergeBase(\"main\", specBranch)' with an immediate error return; the test's abort-before-scan claim plus seam-recorded uncalled epic-close/phase/FinalizeEpic pins Fact 1, and a reorder of the scan above :249 is additionally caught by AC4's AST anchor (scan after the last read-only gate). Terminal cites :327-340, :343-348, :372 all verify."
+    },
+    {
+      "id": "F1-6-7",
+      "status": "ADDRESSED",
+      "summary": "AC12 falsifies the right behavior: FinalizeEpic's loop consumes g.WorktreeOps.List() at :383, HasPrefix bead/ filter at :385, gitutil.MergeInto at :402 (func at gitops.go:152); subtests (a) no-worktree branch never merged, (b) tag-only detached checkout filtered, (c) dangling-symref worktree-add fails, pin Fact 2 and the blp6 merge-loop invariant RED-on-revert. Residual transient-probe-failure timing tail is within the settled C+B decision record (stress-tested by the decision panel), not a pinnable AC gap."
+    },
+    {
+      "id": "F1-6-8",
+      "status": "ADDRESSED",
+      "summary": "No regression to the validated core: TestApproveImpl_DeletedBranchNoRefusal and all prior round-1..5 named tests remain RED with exact-named runs; AC10's exactly-one-claimant check holds (workflow/OWNERSHIP.yaml alone claims internal/lifecycle) as the declared invariant pin; all four OQs [x]; FindOrphanedClosedBeads wrapper contract (orphans.go:74-112) cited accurately, branchExistsFn at orphans.go:40 consumed at :95 verified."
+    }
+  ]
+}

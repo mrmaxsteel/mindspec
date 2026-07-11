@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R2 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "R8 finding-1 is fixed. The amended opening no longer promises refusal for 'any closed bead closed without mindspec complete' (which literally swallowed the undetectable raw-git-merged-no-obligation residual). It is now scoped to the DETECTABLE guarantee: refuses while a closed epic bead is 'DETECTABLY unsettled' via either (a) its bead/<id> branch still an unmerged non-ancestor of the spec branch, or (b) a durable refutation_pending obligation uncovered by a panel_refuted record. This precisely matches runOrphanObligationGate (internal/approve/impl.go): leg 1 ScanOrphanedClosedBeads + leg 2 worktree-enumeration both fire on non-ancestor bead/<id> branches; leg 3 is the obligation backstop. The §8 residual disclosure (raw-git-merged branch = ancestor, no obligation to see; raw bd close cannot ride an impl-approve merge without settlement) is now CONSISTENT with the scoped opening — no contradiction. 'impl approve finalizes' is correctly softened to 'the orphan/obligation gate no longer blocks impl approve (which then finalizes subject to its remaining gates).' Refusal envelope (exit non-zero, no close/phase/merge/push) matches the pre-FinalizeEpic guard.NewFailure. No new overclaim; amendment stays contract-level. git status clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R8-finding-1",
+      "status": "resolved",
+      "note": "Opening scoped to unmerged non-ancestor bead branch OR uncovered refutation_pending — the exact detectable surface of runOrphanObligationGate. Undetectable raw-merged-no-obligation residual removed from the guarantee and disclosed consistently in §8. impl-approve finalize softened to acknowledge remaining gates."
+    }
+  ]
+}

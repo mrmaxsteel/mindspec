@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.98,
+  "rationale": "Build, package tests, four named tests, vet, gofmt, lint, AC8, and negative fences passed. The four exports match the pinned signatures; approve can pass bead.GetMetadata directly, and future approve→lifecycle/complete imports are acyclic. The historical fail-open orphan behavior is preserved for lookup/list errors, empty lists, and mixed ancestry errors. However, CheckPendingObligations is not fully fail-closed on a realizable corrupt metadata shape: a present refutation_pending_entries key whose JSON value is null reaches GetMetadata as a present key with nil value, but uncoveredPendingObligations indexes without checking presence and decodePendingEntries(nil) returns an empty set. The gate therefore passes corrupt-present null exactly like an absent key, contradicting the plan's present-but-corrupt contract. The shared core/reconcile structure and AC12(a) assertion are sound.",
+  "concrete_changes_required": [
+    "Distinguish an absent refutation_pending_entries key from a present key with nil/JSON null; return an error for present null, and add a predicate test proving it fails closed. Preserve absent-key no-op behavior."
+  ],
+  "findings": {
+    "section_1_empirical": "ADDRESSED: required build/tests/named tests/vet all exited 0; gofmt and fences were empty; AC8 counts were 1 and 0; golangci-lint reported 0 issues. go build emitted a non-fatal module stat-cache permission warning.",
+    "section_2_next_bead_integration": "ADDRESSED: all four signatures match the plan; errors are distinguishable from clean empty results; imports remain acyclic; CheckPendingObligations accepts bead.GetMetadata directly without private seam access.",
+    "section_3_adversarial": "NEW_ISSUE: present JSON null for refutation_pending_entries decodes as no obligations and passes. Fail-open orphan parity, shared reconcile core, and AC12(a)'s no-worktree non-merge proof otherwise hold."
+  }
+}

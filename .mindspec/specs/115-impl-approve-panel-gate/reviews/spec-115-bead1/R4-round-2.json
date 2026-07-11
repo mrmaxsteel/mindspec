@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R4 Sonnet",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "Ran everything on the fixed tip 19bc8114 (matches BRIEF). go build ./... clean. go test -count=1 ./internal/lifecycle ./internal/complete ./internal/executor all ok. TestPendingObligationPredicate -v: 12/12 subtests PASS, including the 3 new ones (present-null refutation_pending_entries -> error, absent key -> nil no-op preserved, present-null panel_refuted_entries -> error). TestCompleteRun_RegatesAlreadyClosedOrphan -v PASS. Fences: BranchExistsE grep 0 hits, show-ref grep in internal/ 0 hits, git diff main -- internal/gitutil/ empty. gofmt -l ./cmd ./internal empty. go vet ./internal/complete clean. golangci-lint run ./internal/complete/... reports 0 issues. git diff --stat 75e82b52..19bc8114 touches only internal/complete/panel_advisory.go (+40/-8) and panel_advisory_test.go (+51) -- no out-of-scope files. git status --porcelain shows only the untracked reviews dir; worktree otherwise clean. Read the actual diff: both refutation_pending_entries and panel_refuted_entries now use comma-ok present/absent distinction symmetrically, erroring on present-null while preserving the absent-key no-op fallthrough exactly as before. R8's finding is closed; no sibling corrupt-shape hole visible.",
+  "concrete_changes_required": [],
+  "findings": []
+}

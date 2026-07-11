@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "G1 codex",
+  "chosen_option": "B",
+  "confidence": 0.93,
+  "rationale": "The desync is real: lifecycle detection calls the boolean branchExistsFn/BranchExists before ancestry, while FinalizeEpic independently obtains merge candidates from WorktreeOps.List, filters Branch by bead/, then runs IsAncestor and MergeInto. A transient false result from BranchExists can therefore hide a worktree that the later list returns. Worktree enumeration is sufficient for this merge-prevention gate: the merge loop cannot reach a branch-only ref, tag, dangling symref, or any other name absent from its successful List result; every branch it can merge is necessarily a listed bead/<id> entry. The gate can intersect those entries with the fail-closed epic lookup and closed-bead list, then run ancestry; ancestry errors must remain refusal, while true ancestors remain exempt. No internal ApproveImpl step creates bead worktrees between gate and FinalizeEpic. However, two independent List calls are not an atomic construction against external concurrent worktree creation. Implement B by carrying the successfully scanned candidate snapshot/set into finalization (or enforcing that FinalizeEpic may merge only members of it), rather than merely re-listing and assuming equality. Worktree-list errors at the gate must fail closed. This is a small executor query/contract extension and removes the demonstrated probe race without false-refusing cleanly deleted branches.",
+  "rejected": "A accepts a demonstrated ordinary-code-path un-gated merge even though the merge candidate source provides a structural fix.",
+  "empirical_notes": {
+    "source_desync": "internal/lifecycle/orphans.go:95 uses branchExistsFn; internal/executor/mindspec_executor.go:383 uses WorktreeOps.List independently.",
+    "merge_reachability": "HasPrefix(bead/) at :385 dominates IsAncestor at :394 and MergeInto at :402; no listed worktree entry means no FinalizeEpic bead merge.",
+    "no_worktree_orphan": "A closed unmerged bead branch may exist without a worktree, but it is not FinalizeEpic-mergeable and therefore is irrelevant to this gate's binary-merge prevention purpose.",
+    "ancestry": "gitutil.IsAncestor errors must propagate from the approval gate as refusal; only isAncestor=true is the benign merged-but-undeleted exemption.",
+    "implementation_caveat": "Expose listing through the executor boundary and bind FinalizeEpic to the gate's admitted snapshot/set; same-source re-enumeration alone leaves an external-create interval."
+  }
+}

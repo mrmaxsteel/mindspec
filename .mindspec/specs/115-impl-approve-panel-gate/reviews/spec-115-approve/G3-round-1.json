@@ -1,0 +1,42 @@
+{
+  "reviewer_id": "G3 gpt-5.6-sol",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "REFUSE is the right single-gate-home design and the work decomposes cleanly into three beads: orphan/advisory refusal, durable-obligation check, and docs/ADR/no-regression. The execution ownership addition is minimal and correctly groups lifecycle's bead/git/branch plumbing. But OQ2 is unsound: FindOrphanedClosedBeads suppresses bd and ancestry errors, and R3 cannot compensate for an ordinary unresolved RC because pending metadata exists only after a refutation was applied. A transient detector failure followed by a successful FinalizeEpic ancestry check can therefore still auto-merge the raw-closed branch. R3 also silently loses coverage when readPlanBeadIDs fails, because ApproveImpl currently ignores planErr. OQ3 knowingly emits a recovery that fails for the branchless state, and the claimed h4n5 issue is absent from the pinned JSONL. Finally AC9 names a nonexistent plugin skill path and does not pin the two existing, non-identical skill copies. These are falsifiability/security gaps, not implementation details.",
+  "concrete_changes_required": [
+    "Make impl-approve orphan detection fail closed on bd/list/ancestry errors (for example, add a strict error-returning lifecycle API while preserving best-effort wrappers for next/doctor/complete), and add error-path ACs proving FinalizeEpic and all mutations remain uncalled.",
+    "Specify authoritative R3 bead enumeration and its error posture: fail closed when plan bead IDs cannot be read, or enumerate lifecycle children from the epic per ADR-0023. Add missing/corrupt-plan tests with a branchless unsettled obligation.",
+    "Make OQ3 recovery truthful and runnable: either reconcile branchless already-closed beads in scope, or specify/test the safe manual branch-restoration/obligation-settlement procedure before complete. Commit evidence for the deferred h4n5 issue if it remains the scope justification.",
+    "Correct AC9's skill paths and enumerate all intended copies. The pinned tree has only .agents/skills/ms-impl-approve/SKILL.md and .claude/skills/ms-impl-approve/SKILL.md, they are not identical, and plugins/mindspec/skills/ms-impl-approve/SKILL.md does not exist; add runnable parity/content proofs for the chosen sources."
+  ],
+  "findings": [
+    {
+      "id": "G3-1",
+      "severity": "blocker",
+      "title": "OQ2 fail-open detection preserves the silent auto-merge bypass",
+      "evidence": "internal/lifecycle/orphans.go:71-73,75-83,101-103 converts epic lookup, closed-child listing, and ancestry failures into an empty result. internal/executor/mindspec_executor.go:394-402 independently retries ancestry and merges when that later probe succeeds. R3 only examines refutation_pending_entries, which internal/complete/panel_advisory.go:244-256 creates after an applied refutation; an unresolved RC that simply blocked has no such marker. Thus detector error -> empty R1 -> no R3 marker -> later successful FinalizeEpic probe -> ungated merge remains possible.",
+      "required_change": "Use a strict, error-returning detection path for the merge-terminal impl-approve consumer and test each infrastructure failure as a pre-mutation refusal. The existing best-effort API may remain for advisory/non-terminal consumers."
+    },
+    {
+      "id": "G3-2",
+      "severity": "blocker",
+      "title": "R3 coverage disappears when plan.md cannot be parsed",
+      "evidence": "internal/approve/impl.go:225-242 calls readPlanBeadIDs but deliberately continues when planErr != nil; impl.go:452-472 returns errors for missing files/frontmatter/bead_ids. R3 says it checks every plan bead using this same list but neither the requirement nor AC6 defines a fail-closed enumeration error. A branchless/manually-merged bead with an unsettled marker is then never passed to GetMetadata and impl approve may finalize.",
+      "required_change": "Define and test fail-closed enumeration, preferably from authoritative epic lifecycle children or by refusing any plan read/parse error before mutation."
+    },
+    {
+      "id": "G3-3",
+      "severity": "major",
+      "title": "OQ3's advertised recovery is knowingly non-convergent",
+      "evidence": "The spec admits a branchless bead fails complete at complete.go:492-495 before reconciliation at :558-572, yet R3 still mandates final recovery 'mindspec complete <bead>' and R4 calls complete the converging recourse. That is not a genuine ADR-0035 recovery without an explicit prerequisite. At pinned a0a06943, git show a0a06943:.beads/issues.jsonl contains o4fd and blp6 but no mindspec-h4n5; live bd verification was unavailable because the sandbox could not open the Dolt LOCK.",
+      "required_change": "State and test a safe, actionable manual prerequisite or bring branchless reconciliation into scope; ensure the deferred issue is durably present in the pinned artifact."
+    },
+    {
+      "id": "G3-4",
+      "severity": "major",
+      "title": "AC9 is not grounded in the pinned skill tree",
+      "evidence": "plugins/mindspec/skills/ms-impl-approve/SKILL.md does not exist at a0a06943. The actual files are .agents/skills/ms-impl-approve/SKILL.md and .claude/skills/ms-impl-approve/SKILL.md, and cmp reports they are not byte-identical. AC9 greps only the nonexistent plugin path, while Scope says 'and mirrored copies' without enumerating or proving them.",
+      "required_change": "Choose and name the canonical/generated skill locations, explicitly say whether a new plugin skill is created, update every intended copy, and make AC9 verify each copy or its required parity."
+    }
+  ]
+}

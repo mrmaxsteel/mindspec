@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "F2 Fable-sub (sonnet)",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Grounded every load-bearing citation in spec.md + the ADR-0037 amendment against 21374bb8. Exact matches: FinalizeEpic:349, WorktreeOps.List():383, HasPrefix filter:385, commitWithExport:390, IsAncestor:394, guardMergeLayout call, MergeInto:410 (comment-shift caused the 399/402 vs 407/410 drift, expected since AC8 lengthened the corrected comment); ScanOrphanedClosedBeads/ClosedEpicBeadIDs/Orphan/branchExistsFn/isAncestorFn all in internal/lifecycle/orphans.go as described; CheckPendingObligations, PanelGateRoots, panelGateRoots, uncoveredPendingObligations, reconcilePendingRefutations all present in internal/complete/panel_advisory.go with correct signatures/roles (cited ranges 519-584/624-633 land ~50-150 lines off due to R8 hardening insertions but still resolve inside the same functions the spec names); bead.WorktreeList at bdcli.go:202 matches exactly; validate.GlobMatch present; internal/lifecycle/** claimed exactly once, by workflow, not execution. AC8's diff-grep (1 hit removed, 0 remain), the BranchExistsE/show-ref 0-hit negative pins, and gitutil byte-unchanged all verified live. All 17 named AC tests exist in the files the spec/AC text implies, and `go build ./...` plus the four touched packages' tests pass. No citation pointed at the wrong code or a nonexistent symbol.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "description": "internal/complete/panel_advisory.go line citations in spec Requirement 2 (panelGateRoots at :52-81,:624-633) and Requirement 3 (reconcilePendingRefutations at :519-584) have drifted ~50-150 lines from their current locations (panelAdvisory is at 52, panel.ForBead at 56 — matches; but panelGateRoots is actually at 674/785, and :624-633 lands inside uncoveredPendingObligations's tail, not panelGateRoots) because the R8 fail-closed hardening rounds inserted ~150 lines of validation logic earlier in the file. The named symbols and their described roles are all correct and locatable by grep; this is line-number staleness, not a wrong-code citation.",
+      "hard_block": false
+    }
+  ]
+}

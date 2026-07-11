@@ -1,0 +1,29 @@
+{
+  "reviewer_id": "O1 opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Narrow anti-gaming verification at 4cbf437b. Fix 1 (BranchExistsE three-way contract) ADDRESSED, all 5 sub-parts present: (a) three-way contract + RevParseRef/ErrRefNotFound exit-1-vs-128 precedent (gitops.go:13-19,:524-542) cited in R1's branch-probe leg, OQ2, and both Scope+Impacted-Domains gitutil bullets; (b) R1 Falsified-if gained the anti-false-refusal falsifier ('genuinely-absent branch yields anything but (false,nil) -> falsified'); (c) AC1 added existence-discriminated TestBranchExistsE_ThreeWay (internal/gitutil, exact -run); (d) AC2 added TestApproveImpl_DeletedBranchNoRefusal deleted-branch normal-path pin; (e) AC1(b) tightened to a MIXED closed-bead list (probe/ancestry error on ONE bead -> Scan errors + gate refuses, wrapper still returns later provable orphans, byte-identical for complete/next/doctor). Fix 2 ADDRESSED: AC1 lifecycle clause is now the exact-named `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v` with the bare package run kept as no-regression pin; Validation-Proofs 'every named test has an exact-named run' is now true. Traced both failure modes: exit-128 infra probe -> error -> gate REFUSES before FinalizeEpic (o4fd residue closed); exit-1 deleted branch -> (false,nil) -> proceeds (no false-refusal). No masquerade gap. Diff = spec.md + r3 artifacts only; all 4 discriminators 0 Go-file hits. No new defect.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "item": "Fix 1 - BranchExistsE three-way contract (no deleted-branch false-refusal)",
+      "grade": "ADDRESSED",
+      "detail": "All five sub-parts a-e present and grounded. Anti-gaming completeness holds: infra exit-128 -> non-nil error -> core propagates -> gate refuses before exec.FinalizeEpic (impl.go:372), so the worktree merge loop never silently merges the un-gated orphan (original o4fd residue). Genuine absence via --verify --quiet exit 1 -> (false,nil), read as 'branch absent', so the normal merged-and-deleted post-complete branch does NOT refuse. Spec explicitly mandates the --verify --quiet exit-1-vs-128 discrimination and forbids a naive error-wrap of plain --verify BranchExists (which exits 128 on a missing ref); citation of gitops.go:13-19 + :524-542 + BranchExists at :94-100 verified accurate against source. No gap where infra error masquerades as absence or vice versa: the contract inherits the already-shipped, gate-trusted RevParseRef/ErrRefNotFound primitive, so no NEW discrimination risk is introduced by 115."
+    },
+    {
+      "item": "Fix 2 - AC1 lifecycle proof exact-named",
+      "grade": "ADDRESSED",
+      "detail": "AC1's lifecycle clause is now `go test ./internal/lifecycle -run 'TestScanOrphanedClosedBeads_ErrorPreserving' -v` (exact-named discriminating run) with the bare `go test ./internal/lifecycle` retained as an explicit no-regression pin, not a substitute. Validation-Proofs bullet now states every named test pairs its existence grep with an EXACT-named -run and calls out the bare lifecycle run as 'on top of, not instead of' — the statement is now true."
+    },
+    {
+      "item": "Discriminators genuinely RED at 4cbf437b",
+      "grade": "ADDRESSED",
+      "detail": "TestBranchExistsE_ThreeWay, TestApproveImpl_DeletedBranchNoRefusal, and the symbols BranchExistsE / ScanOrphanedClosedBeads each return 0 Go-file hits at 4cbf437b — non-degenerate discriminators that fail RED pre-implementation."
+    },
+    {
+      "item": "No new defect from round-3 edits",
+      "grade": "ADDRESSED",
+      "detail": "git diff 77d8a1a9..4cbf437b touches only spec.md plus the separately-committed round-3 panel artifacts. Design core unchanged, all 4 OQs remain [x], OQ2 asymmetry now correctly scopes fail-closed to INFRA errors (exit-128 class) and NOT to legitimate absence. No AC regressed."
+    }
+  ]
+}
