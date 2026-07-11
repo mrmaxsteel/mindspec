@@ -23,12 +23,17 @@ import (
 // later — exactly like a real `bd show` reading back a prior `bd update`.
 // failGet / failMerge let a test simulate a read/write failure on a
 // SPECIFIC call without touching the underlying store (mirroring the
-// fail-closed contract: a failed call never mutates state).
+// fail-closed contract: a failed call never mutates state). mergeErr lets a
+// test supply the EXACT error a triggered failMerge returns (default nil
+// falls back to the fixed "simulated bd metadata write failure" text) — the
+// seam a caller needs to drive hostile bytes through a real merge-error's
+// text at its render site.
 type fakeMetadataStore struct {
 	data map[string]map[string]interface{}
 
 	failGet   func(id string) bool
 	failMerge func(id string, updates map[string]interface{}) bool
+	mergeErr  error
 }
 
 func newFakeMetadataStore() *fakeMetadataStore {
@@ -48,6 +53,9 @@ func (s *fakeMetadataStore) Get(id string) (map[string]interface{}, error) {
 
 func (s *fakeMetadataStore) Merge(id string, updates map[string]interface{}) error {
 	if s.failMerge != nil && s.failMerge(id, updates) {
+		if s.mergeErr != nil {
+			return s.mergeErr
+		}
 		return errors.New("simulated bd metadata write failure")
 	}
 	if s.data[id] == nil {
