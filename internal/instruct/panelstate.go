@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -174,7 +175,7 @@ func renderPanelState(entries []PanelStateEntry) string {
 	for _, e := range entries {
 		v, reason := e.verdict()
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("- **%s** — %s\n", e.Slug, gateLabel(v)))
+		b.WriteString(fmt.Sprintf("- **%s** — %s\n", termsafe.Escape(e.Slug), gateLabel(v)))
 		b.WriteString(fmt.Sprintf("  - %s\n", reason))
 		if e.Tally != nil && e.Tally.Panel != nil {
 			b.WriteString(fmt.Sprintf("  - latest round %d · %d/%d verdicts · %d APPROVE (threshold %d)\n",
@@ -354,22 +355,22 @@ func renderInProgressBeads(entries []BeadStateEntry) string {
 			break
 		}
 		b.WriteString("\n")
-		label := e.ID
+		label := termsafe.Escape(e.ID)
 		if e.Active {
-			label = e.ID + " (active)"
+			label += " (active)"
 		}
 		if e.Title != "" {
-			b.WriteString(fmt.Sprintf("- **%s** — %s\n", label, e.Title))
+			b.WriteString(fmt.Sprintf("- **%s** — %s\n", label, termsafe.Escape(e.Title)))
 		} else {
 			b.WriteString(fmt.Sprintf("- **%s**\n", label))
 		}
 		if e.Worktree != "" {
-			b.WriteString(fmt.Sprintf("  - worktree: `%s`\n", e.Worktree))
+			b.WriteString(fmt.Sprintf("  - worktree: `%s`\n", termsafe.Escape(e.Worktree)))
 		} else {
 			b.WriteString("  - worktree: (none checked out)\n")
 		}
 		if e.LastCommit != "" {
-			b.WriteString(fmt.Sprintf("  - last commit: %s\n", e.LastCommit))
+			b.WriteString(fmt.Sprintf("  - last commit: %s\n", termsafe.Escape(e.LastCommit)))
 		} else {
 			b.WriteString("  - last commit: (branch unresolved)\n")
 		}
@@ -515,7 +516,7 @@ func renderStaleWorktrees(entries []StaleWorktreeEntry) string {
 	b.WriteString("candidates for cleanup (left behind after a merge/abandon).\n\n")
 
 	for _, e := range entries {
-		b.WriteString(fmt.Sprintf("- `%s` (%s)\n", e.Path, e.Source))
+		b.WriteString(fmt.Sprintf("- `%s` (%s)\n", termsafe.Escape(e.Path), e.Source))
 	}
 
 	return b.String()

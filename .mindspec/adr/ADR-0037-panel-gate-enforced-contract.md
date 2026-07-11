@@ -196,6 +196,72 @@ retirement deferred to a follow-up bead. See the amendment below.
 > `bd close` itself stays possible — it simply cannot ride an
 > `impl approve` merge without settlement.
 
+> **Amendment (2026-07-11, spec 116 — construction-boundary message
+> escaping; the `internal/panel` leaf invariant's LETTER, not its
+> purpose):** `internal/panel/gate.go` closes `mindspec-fl91`: an
+> attacker-influenceable string planted in a panel artifact (`bead_id`,
+> the panel slug, `abandon_reason`, `reviewed_head_sha`, worktree/dirty-tree
+> paths, verdict filenames, hard-block/unresolved-verdict slot names) could
+> forge a raw control byte or a standalone forged line — a fake `recovery:`
+> instruction, a fake terminal prompt — in any of the four sinks that render
+> `Decision.Message` (`panel verify`/`panel tally`, the `internal/complete`
+> gate error/advisory text, and the `internal/instruct` SessionStart
+> transcript composite). Every such field now escapes through a new
+> stdlib-only, pure-string package, `internal/termsafe` (`Escape(s string)
+> string`: printable-ASCII `[0x20, 0x7e]` renders unchanged; anything else —
+> control bytes, DEL, invalid UTF-8, Trojan-Source bidi/zero-width runes —
+> quotes the whole string onto one `strconv.Quote` line that cannot itself
+> emit a raw control byte or a literal newline) at its construction site in
+> `gate.go`, including inside `RawMergeFence`. This is the leaf's OWN
+> discipline change, not the decision matrix's: the escaping happens
+> **exactly once per field, at the point it is interpolated**, and the
+> decision matrix, the N−1 threshold (§3), staleness (§4), the dirty-tree
+> rule (§5), the fail-open/fail-closed asymmetry (§6), the §7 hatches, and
+> the §8 trust boundary are all byte-unchanged — this is output hygiene
+> **inside** the trust boundary (§8 rules out tamper-proofing — signing or
+> hashing agent-writable files — not the accidental-footgun class of a
+> panel artifact forging terminal or transcript lines, which is squarely
+> what this contract exists to stop).
+>
+> **The leaf invariant's letter changes; its recorded purpose does not.**
+> Since the 2026-06-14 amendment above, this ADR has recorded that
+> `internal/panel` is a dependency-clean LEAF: it imports NO internal
+> package (`gate.go:19-23` pre-116; `panel_test.go`'s "config-free-leaf"
+> note). As of this amendment, `internal/panel` imports exactly ONE
+> internal package: the stdlib-only, pure-string `internal/termsafe`. The
+> invariant's recorded PURPOSE — no config coupling, no git/status I/O,
+> decision purity (the package remains a pure function of `GateFacts`, with
+> zero env/fs/git calls of its own) — is fully preserved; only the letter
+> ("imports NO internal package") admits this one escaping leaf. The
+> amended invariant is now MACHINE-CHECKED, not comment-only:
+> `TestPanelLeafImports_StdlibPlusTermsafeOnly` (`internal/panel`) parses
+> the package's non-test files (`go/parser`, imports-only) and fails if any
+> future edit adds a second internal import — the same discipline
+> `internal/lint/boundary_test.go` gives ADR-0030's executor boundary.
+>
+> **Option A′ — the leaf's own local-copy precedent — was weighed and
+> REJECTED.** `gate.go` already carries two local-copy precedents for
+> avoiding an import: `artifactPaths` (`gate.go:520-526`, "a local copy
+> rather than importing internal/next") and the inlined `"bead/"` literal
+> in place of importing `internal/workspace` (`gate.go:27-28`). The same
+> pattern was considered here — a ~7-line local copy of the safe-set/quote
+> loop inside `internal/panel`, avoiding the import and this amendment
+> entirely. It was rejected: those precedents duplicate **inert data** (a
+> one-entry path list, a prefix literal) whose drift is low-stakes and
+> visible on inspection; the safe-set/quote rule is a **security
+> predicate**, and a security predicate duplicated in two homes drifts
+> silently, weakening the escaping guarantee at all four sinks at once the
+> moment one copy is patched and the other is not. `internal/termsafe`'s
+> AC6 single-home grep (exactly one non-test implementation of the
+> `r < 0x20 || r > 0x7e` loop, machine-verified to live in
+> `internal/termsafe`) and this amendment's AC7 import-pin test together
+> replace the comment-only invariant with two machine checks; a mirrored
+> local copy could satisfy neither.
+>
+> No other part of this contract moves: §§1–7 and the Decision Details,
+> Consequences, and Alternatives Considered sections below are unchanged in
+> substance. This is an amendment, not a supersession.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —

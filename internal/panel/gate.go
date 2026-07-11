@@ -5,22 +5,32 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // ADR-0037 AMENDMENT NOTE (Spec 099): this is the SINGLE home of the
 // panel-gate enforced contract (registration §1, round derivation §2, N−1
 // threshold §3, staleness §4, dirty-tree §5, fail-open/fail-closed asymmetry
 // §6, escape hatches §7, trust boundary §8). It was relocated here from
-// internal/hook/precomplete.go so that BOTH the in-binary `mindspec complete`
-// gate (the AUTHORITATIVE enforcement point, Spec 099 Bead 2) and the
-// PreToolUse hook (now a defense-in-depth BACKSTOP) invoke the IDENTICAL
-// decision over IDENTICAL facts — they cannot disagree by construction.
+// internal/hook/precomplete.go so that the in-binary `mindspec complete` gate
+// — the SOLE panel-gate enforcement point — reads one decision over one set
+// of facts. The PreToolUse hook this note once described as a
+// defense-in-depth backstop is RETIRED (spec 102): the in-binary gate is the
+// only enforcer now (internal/complete/panel_advisory.go:45-47), so there is
+// no second invoker left to keep in sync.
 //
-// internal/panel is a dependency-clean LEAF: this file imports NO internal
-// package. The git/status/ref-not-found I/O is supplied by the CALLER through
-// the GateIO seam (function closures), and the bead-branch prefix is inlined
-// as the literal "bead/" (== workspace.BeadBranchPrefix) rather than importing
-// internal/workspace, so the leaf invariant holds.
+// internal/panel is a dependency-clean LEAF: this file imports exactly ONE
+// internal package, the stdlib-only, pure-string internal/termsafe (spec
+// 116's construction-boundary field escaping; ADR-0037 amendment,
+// 2026-07-11). The git/status/ref-not-found I/O is still supplied by the
+// CALLER through the GateIO seam (function closures), and the bead-branch
+// prefix is still inlined as the literal "bead/" (== workspace.BeadBranchPrefix)
+// rather than importing internal/workspace. The invariant's recorded purpose
+// — no config coupling, no git/status I/O, decision purity — is preserved;
+// only its letter ("imports NO internal package") changes, to admit this one
+// stdlib-only escaping leaf, and it is now machine-checked (not just
+// documented) by TestPanelLeafImports_StdlibPlusTermsafeOnly (AC7).
 
 // SkipPanelEnv is the env-only escape hatch for the panel gate (Spec 093
 // Req 13a, ADR-0037 §7). It is read via os.Getenv ONLY by callers — the
@@ -68,7 +78,7 @@ func RawMergeFence(beadID string) string {
 	return fmt.Sprintf(
 		"\nDo NOT bypass with raw `git merge bead/%s` — it skips bd closure, "+
 			"worktree cleanup, and this gate; only `mindspec complete` merges bead branches.",
-		beadID)
+		termsafe.Escape(beadID))
 }
 
 // GateFacts is the fully-resolved, I/O-free input to PanelGateDecision. Every
@@ -146,7 +156,7 @@ func PanelGateDecision(f GateFacts) Decision {
 	// keep the message hatch-name-free except for this legitimate audit).
 	if f.SkipEnv {
 		return Decision{Action: Warn, Message: fmt.Sprintf(
-			"panel gate skipped via %s for %s", SkipPanelEnv, f.BeadID)}
+			"panel gate skipped via %s for %s", SkipPanelEnv, termsafe.Escape(f.BeadID))}
 	}
 
 	// (1) Fail-open: no registered panel for the bead.
@@ -154,7 +164,11 @@ func PanelGateDecision(f GateFacts) Decision {
 		return Decision{Action: Allow}
 	}
 
-	slug := f.Reg.Slug()
+	// slug is escaped once here (Spec 116 R2): it is a disk directory name
+	// (filepath.Base(dir)), validated for the CLI verbs' argv but NOT for
+	// internal/complete's/internal/instruct's scan-matched dirs, and every
+	// leg below (2/3/4/8/9/9.5/10) interpolates this same escaped value.
+	slug := termsafe.Escape(f.Reg.Slug())
 
 	// (2) A panel.json exists but could not be parsed — registered but
 	// malformed. It must NOT read as "no panel".
@@ -176,6 +190,8 @@ func PanelGateDecision(f GateFacts) Decision {
 		reason := strings.TrimSpace(p.AbandonReason)
 		if reason == "" {
 			reason = "(no reason recorded — abandon_reason is required; /ms-panel-tally abandon procedure)"
+		} else {
+			reason = termsafe.Escape(reason)
 		}
 		return Decision{Action: Warn, Message: fmt.Sprintf(
 			"panel %s round %d abandoned: %s — completing per the recorded abandonment", slug, round, reason)}
@@ -196,9 +212,10 @@ func PanelGateDecision(f GateFacts) Decision {
 	// "bead/"+BeadID (== workspace.BeadBranchPrefix) is inlined to keep
 	// internal/panel a leaf (no internal/workspace import).
 	if f.MissingRef {
+		escBeadID := termsafe.Escape(f.BeadID)
 		return Decision{Action: Warn, Message: fmt.Sprintf(
 			"panel for %s references branch bead/%s, which no longer exists — assuming the merge already landed; "+
-				"deferring to mindspec complete's own handling", f.BeadID, f.BeadID)}
+				"deferring to mindspec complete's own handling", escBeadID, escBeadID)}
 	}
 
 	// (5b) Transient/structural git error — the staleness rev-parse could not
@@ -209,20 +226,23 @@ func PanelGateDecision(f GateFacts) Decision {
 	// closes the round-2 false-clear (a transient error conflated with a
 	// genuine deletion) without false-blocking a legitimate completion.
 	if f.GitErr != nil {
+		escBeadID := termsafe.Escape(f.BeadID)
 		return Decision{Action: Warn, Message: fmt.Sprintf(
-			"panel for %s: could not verify branch bead/%s (transient git error: %v) — staleness check skipped; "+
+			"panel for %s: could not verify branch bead/%s (transient git error: %s) — staleness check skipped; "+
 				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
-			f.BeadID, f.BeadID, f.GitErr)}
+			escBeadID, escBeadID, termsafe.Escape(f.GitErr.Error()))}
 	}
 
 	// (6) Stale SHA — verdicts reviewed a different commit. BLOCK, never
 	// Warn (a Warn here is the same prose-under-pressure failure the gate
 	// exists to close — the lola-f4a8 bypass class, Req 11).
 	if p.ReviewedHeadSHA != "" && f.HeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, f.HeadSHA) {
+		// Escape AFTER short() truncates (not before): truncating an
+		// already-escaped quoted literal could split an escape sequence.
 		return Decision{Action: Block, Message: fmt.Sprintf(
 			"panel round %d reviewed %s, branch now at %s — commits landed after review; "+
 				"bump round and re-panel (/ms-panel-run step 0)%s",
-			round, short(p.ReviewedHeadSHA), short(f.HeadSHA), RawMergeFence(f.BeadID))}
+			round, termsafe.Escape(short(p.ReviewedHeadSHA)), termsafe.Escape(short(f.HeadSHA)), RawMergeFence(f.BeadID))}
 	}
 
 	// (7) Dirty tree — uncommitted USER edits would be auto-committed past
@@ -232,9 +252,11 @@ func PanelGateDecision(f GateFacts) Decision {
 	if !f.WorktreeAbsent && len(f.UserDirt) > 0 {
 		var b strings.Builder
 		fmt.Fprintf(&b, "uncommitted changes in %s — `mindspec complete` would auto-commit them past review (CommitAll); commit and re-panel, or revert:",
-			f.WorktreePath)
+			termsafe.Escape(f.WorktreePath))
+		// The "\n  " separator is the template's OWN real newline — only
+		// the interpolated path itself is escaped, never the layout.
 		for _, d := range f.UserDirt {
-			fmt.Fprintf(&b, "\n  %s", d)
+			fmt.Fprintf(&b, "\n  %s", termsafe.Escape(d))
 		}
 		b.WriteString(RawMergeFence(f.BeadID))
 		return Decision{Action: Block, Message: b.String()}
@@ -257,7 +279,12 @@ func PanelGateDecision(f GateFacts) Decision {
 	if f.Res.Rejects > 0 || len(f.Res.HardBlocks) > 0 {
 		detail := fmt.Sprintf("%d/%d APPROVE", f.Res.Approves, n)
 		if len(f.Res.HardBlocks) > 0 {
-			detail += fmt.Sprintf(", hard_block from %s", strings.Join(f.Res.HardBlocks, ", "))
+			// Escape each slot PER ELEMENT before joining (Spec 116 R2).
+			hardBlocks := make([]string, len(f.Res.HardBlocks))
+			for i, h := range f.Res.HardBlocks {
+				hardBlocks[i] = termsafe.Escape(h)
+			}
+			detail += fmt.Sprintf(", hard_block from %s", strings.Join(hardBlocks, ", "))
 		}
 		return Decision{Action: Block, Message: fmt.Sprintf(
 			"panel %s round %d: %s — HARD block / REJECT recorded — halt path, see /ms-panel-tally%s",
@@ -279,9 +306,10 @@ func PanelGateDecision(f GateFacts) Decision {
 	// "refut" (no refutation escape is advertised here — Bead 1 has none
 	// yet; AC10) and never MINDSPEC_SKIP_PANEL (HC-7).
 	if unresolved := f.Res.UnresolvedVerdicts(); len(unresolved) > 0 {
+		// Escape each slot PER ELEMENT before joining (Spec 116 R2).
 		slots := make([]string, len(unresolved))
 		for i, v := range unresolved {
-			slots[i] = v.Slot
+			slots[i] = termsafe.Escape(v.Slot)
 		}
 		threshold := p.ApproveThreshold()
 		return Decision{Action: Block, Message: fmt.Sprintf(
@@ -308,9 +336,11 @@ func PanelGateDecision(f GateFacts) Decision {
 // so the contract is to enumerate what IS present (T3-2). Malformed files
 // (counted as missing) are named separately so the agent can fix them.
 func presentVerdictFiles(res *Result) string {
+	// Escape each filename PER ELEMENT before joining — escaping the
+	// joined whole would also quote the ", " separators (Spec 116 R2).
 	var files []string
 	for _, v := range res.Verdicts {
-		files = append(files, v.File)
+		files = append(files, termsafe.Escape(v.File))
 	}
 	sort.Strings(files)
 	out := "present: "
@@ -320,7 +350,11 @@ func presentVerdictFiles(res *Result) string {
 		out += strings.Join(files, ", ")
 	}
 	if len(res.Malformed) > 0 {
-		out += "; malformed (count as missing): " + strings.Join(res.Malformed, ", ")
+		malformed := make([]string, len(res.Malformed))
+		for i, m := range res.Malformed {
+			malformed[i] = termsafe.Escape(m)
+		}
+		out += "; malformed (count as missing): " + strings.Join(malformed, ", ")
 	}
 	return out
 }
