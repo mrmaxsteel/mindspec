@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-11T06:18:26Z"
+approved_by: user
+status: Approved
 ---
 # Spec 115-impl-approve-panel-gate: impl-approve panel gate — FinalizeEpic re-gates raw-bd-close'd beads before auto-merge
 
@@ -110,7 +110,7 @@ Round-2 proof discipline (G3): `go test -run '<Pat>'` exits 0 with `[no tests to
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-11
+- **Notes**: Approved via mindspec approve spec
