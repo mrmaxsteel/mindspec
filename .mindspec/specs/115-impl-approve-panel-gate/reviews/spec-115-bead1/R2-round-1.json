@@ -1,0 +1,15 @@
+{
+  "reviewer_id": "R2 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Fail-open/fail-closed directions are all correct. ScanOrphanedClosedBeads PROPAGATES every cleanly-signalled infra leg: epic-lookup + bd-list surface through ClosedEpicBeadIDs (return nil,err), and the ancestry leg records firstErr and returns (orphans, firstErr) — non-nil, never swallowed. FindOrphanedClosedBeads is a thin fail-open wrapper (`orphans, _ := Scan...`) returning the identical result shape, so complete/next/doctor are byte-identical (existing lifecycle tests unchanged and green; mixed-list parity subtest confirms a later provable orphan survives an earlier ancestry error via the discarded error). The branch trigger stays the UNCHANGED bool branchExistsFn=gitutil.BranchExists (false = no trigger); no BranchExistsE, no show-ref, empty internal/gitutil diff (all fences 0-hit). CheckPendingObligations is fail-CLOSED: getMeta read error, present-but-corrupt refutation_pending_entries, corrupt panel_refuted_entries, and shape-invalid entry (empty slot / round<1) each return a non-nil error; any uncovered (slot,round) errors naming slot@round; nil ONLY on no-pending or exact coverage. Absent-key → (nil,nil) is the legitimate pristine no-op, NOT decode-as-empty (which is the corrupt case that errors). AC7(a) regate test pins RC Blocks before the already-closed tolerance and converges after a durable refutation. Build clean; targeted tests pass; tree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    "§2 core-propagates-3-legs: ADDRESSED — epic-lookup/bd-list via ClosedEpicBeadIDs return (nil,err); ancestry sets firstErr and returns it; no swallow.",
+    "§2 wrapper-swallows: ADDRESSED — FindOrphanedClosedBeads discards the error, same shape as before; consumers byte-identical.",
+    "§2 branch-existence-trigger: ADDRESSED — unchanged bool branchExistsFn=gitutil.BranchExists (orphans.go:41,143); no BranchExistsE (0 hits), no show-ref in internal/ (0 hits), gitutil diff empty.",
+    "§2 CheckPendingObligations fail-closed: ADDRESSED — read/corrupt-pending/corrupt-refuted/shape-invalid all error; exact (slot,round) coverage; nil only on no-pending or full coverage; absent-key no-op is not decode-as-empty.",
+    "AC7(a) regate: ADDRESSED — TestCompleteRun_RegatesAlreadyClosedOrphan pins RC Blocks pre-tolerance (no merge, no reconciliation) then converges + merges + records panel_refuted after durable refutation.",
+    "Empirical: go build ./... clean; TestScanOrphanedClosedBeads_ErrorPreserving, TestPendingObligationPredicate, TestCompleteRun_RegatesAlreadyClosedOrphan all PASS -count=1; git status clean (only the untracked panel reviews dir)."
+  ]
+}

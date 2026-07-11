@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Author-of-record / scope lens on delta 19bc8114..e71a7991. CONFINED: touches only internal/complete/panel_advisory.go + panel_advisory_test.go (git diff --name-only confirms); git diff main -- internal/gitutil/ internal/approve/ empty; no Bead-2/3 creep. FAITHFUL to the consolidated round-2 STRUCTURAL fix: uncoveredPendingObligations now validates BOTH metadata keys up front, order-independent, before ANY early return — the panel_refuted_entries present-null + decode checks were moved ahead of the len(pending)==0 return (was the round-2 sibling hole). The reorder closes the corrupt-shape class structurally, not by another conditional patch. 4 additive subtests: 2 RED-on-revert (empty-pending+present-null-refuted→error; absent-pending+corrupt-refuted→error) + 2 no-false-refuse ({}→nil; valid-empty+valid-empty→nil). No existing test expectation edited; coverage walk on valid inputs byte-identical (shared core intact). Verified green: go build ./..., go test ./internal/complete (TestPendingObligationPredicate + TestPanelRefuted_*), gofmt -l clean, go vet clean. My rounds-1/2 APPROVE (7 plan Bead-1 steps, scope fence, seam signatures) is undisturbed by a validation-ordering-only change to the obligation core. git status clean (only untracked reviews/).",
+  "concrete_changes_required": [],
+  "findings": []
+}

@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "The round-1 refutation_pending_entries null hole is closed: comma-ok distinguishes present null from absence, the absent path remains a no-op, and the new assertions are RED-on-revert. Both requested test commands pass, including all 12 predicate subtests. However, the symmetric panel_refuted_entries fix is incomplete: uncoveredPendingObligations returns immediately when decoded pending length is zero, before reading or validating panel_refuted_entries. Thus realizable metadata such as {\"refutation_pending_entries\":[],\"panel_refuted_entries\":null} or {\"panel_refuted_entries\":\"corrupt\"} returns nil. This violates the explicit present-but-corrupt panel_refuted_entries REFUSES contract; the new null-refuted test hides the hole by supplying a non-empty pending entry. Valid non-empty obligation coverage and reconcile's shared-core structure are unchanged, but this sibling corrupt-shape fail-open requires another fix.",
+  "concrete_changes_required": [
+    "Validate a present panel_refuted_entries value, including present null, before the len(pending)==0 no-op return (while preserving genuinely absent keys), and add tests with absent/empty pending plus null and wrong-typed panel_refuted_entries proving non-nil errors."
+  ],
+  "findings": {
+    "section_1": "ADDRESSED: present-null refutation_pending_entries errors; present-null panel_refuted_entries errors when pending is non-empty; absent pending remains nil. The three new tests assert these branches and would fail if their guards were reverted.",
+    "section_2": "NEW_ISSUE: empty or absent pending short-circuits before panel_refuted_entries validation. Exact passing corrupt inputs include refutation_pending_entries=[] with panel_refuted_entries=null, and absent pending with panel_refuted_entries=\"corrupt\".",
+    "section_3": "ADDRESSED: delta only adds guards/comments/tests; valid absent-key and valid-array behavior remains unchanged, the core stays shared, reconcile calls uncoveredPendingObligations directly rather than CheckPendingObligations, and both requested test commands pass."
+  }
+}

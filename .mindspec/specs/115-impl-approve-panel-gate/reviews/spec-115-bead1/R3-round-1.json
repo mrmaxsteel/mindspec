@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "RED-on-revert discipline holds for all four new tests. (1) TestScanOrphanedClosedBeads_ErrorPreserving: references the new ScanOrphanedClosedBeads symbol (compile-fail on revert); the MIXED-list subtest genuinely discriminates — it asserts BOTH core err!=nil (fails if core swallowed) AND wrapper returns bead-b (fails if wrapper stopped swallowing), not just an all-error list. (2) TestPendingObligationPredicate: 9 subtests incl. corrupt-pending, corrupt-refuted, empty-slot, round<1, read-error — each asserts err!=nil, so any decode-as-empty fails. (3) TestCompleteRun_RegatesAlreadyClosedOrphan: pins existing behavior via real complete.Run; two-state (round-1 Block with completeCalled=false, round-2 converge after durable refutation) — not a tautology; round-1 would succeed (not block) if the gate ran after the already-closed tolerance. (4) TestFinalizeEpic_MergesOnlyWorktreeRealBranches: verified FinalizeEpic does an UNCONDITIONAL no-remote direct spec->main merge then deletes the spec branch — so orphan-on-spec propagates to main. The deviation on (a) (assert vs main + orphan.txt absence, since the spec branch is deleted) therefore still pins Fact 2 and is in fact a stronger end-to-end check; a buggy ref-scan merge yields IsAncestor(orphan,main)=true AND orphan.txt present, failing both. (b) pins the e.Branch prefix filter; (c) is a git-behavior pin. AC8 pair holds (removed=1, remaining=0); executor change is comment-only. gitutil diff empty, fences 0-hit, all four tests green with -count=1.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"area": "AC1 mixed-list parity subtest", "status": "ADDRESSED", "note": "Distinguishes core-returns-error (err!=nil assertion) from wrapper-still-returns-B (got[0].BeadID==bead-b); would fail if core swallowed OR wrapper stopped swallowing."},
+    {"area": "AC6 predicate fail-closed", "status": "ADDRESSED", "note": "corrupt-entries / corrupt-refuted / empty-slot / round<1 / read-error subtests each assert err!=nil — decode-as-empty would fail them."},
+    {"area": "AC7(a) regate", "status": "ADDRESSED", "note": "Real complete.Run two-state pin: Block-before-tolerance then converge-after-refutation; not tautological."},
+    {"area": "AC12 deviation assessment", "status": "ADDRESSED", "note": "Verified unconditional spec->main direct merge in the no-remote fixture; check vs main + orphan.txt absence still pins Fact 2 (stronger, end-to-end). Spec-branch deletion justifies the change. No false-pass window."},
+    {"area": "AC12 subtests (b)/(c)", "status": "ADDRESSED", "note": "(b) pins HasPrefix(e.Branch,'bead/') filter via empty-Branch detached entry + shadowing tag; (c) documents git refusing worktree-add on a dangling symref — a reinforcing structural pin, acceptable as framed."},
+    {"area": "AC8 pair", "status": "ADDRESSED", "note": "git diff main | grep -c '^-.*rule as CompleteBead' = 1; remaining occurrences = 0; executable executor lines unchanged (comment-only)."},
+    {"area": "negative fences + gitutil", "status": "ADDRESSED", "note": "git diff main -- internal/gitutil/ empty; BranchExistsE 0 hits; show-ref 0 hits; worktree clean (only untracked review dir)."}
+  ]
+}

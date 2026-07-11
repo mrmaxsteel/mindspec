@@ -393,9 +393,17 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 			if _, statErr := os.Stat(specWtPath); statErr == nil {
 				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 				if ancErr == nil && !isAnc {
-					// Spec 106 Bead 4 (Req 9): directional guard in front of the
-					// FinalizeEpic bead→spec auto-merge — same regression-only
-					// rule as CompleteBead; mutates nothing on a block.
+					// Spec 106 Bead 4 (Req 9): directional guard in front of
+					// the FinalizeEpic bead→spec auto-merge. guardMergeLayout
+					// checks ONLY the directional layout-regression invariant
+					// (a flat spec branch must not receive a canonical/legacy-
+					// layout bead merge) — it is NOT panel-gate enforcement,
+					// NOT the Spec 114/115 obligation-reconciliation backstop,
+					// and NOT the bd_close orphan check (Spec 115 mindspec-o4fd
+					// OQ1/OQ4): none of those three fire on this
+					// executor-owned merge path (ADR-0030: enforcement lives in
+					// internal/approve and internal/complete, not here).
+					// Mutates nothing on a block.
 					if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
 						return result, guardErr
 					}

@@ -1,0 +1,34 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Lens = RED-on-revert of the 4 new subtests. Both pinning subtests are genuinely discriminating. Reverting = moving the panel_refuted_entries validation back after `if len(pending)==0 { return nil,nil }`. (1) empty-pending+present-null: `refutation_pending_entries:[]` decodes to empty so len==0; reverted order returns nil BEFORE the present-null check, so the `expected error` Fatal fails; fix returns non-nil error containing `present-but-null`. (2) absent-pending+corrupt-refuted: absent key → decodePendingEntries(nil) empty → len==0; reverted order returns nil before decodeRefutations(\"corrupt...\") errors; fix asserts `could not be decoded` (decodeRefutations marshals the string then Unmarshal into []panel.Refutation fails, wrapped correctly). Both assert NON-NIL errors with the right messages. Present-null modeling `map[...]{...: nil}` faithfully matches GetMetadata (json.Unmarshal into map, JSON null → nil-interface, key present, copied by `merged[k]=v` → comma-ok present=true, raw==nil). No-false-refuse subtests correctly assert nil: both-absent and valid-empty/empty both hit the early return with no decode error. `go test -count=1 -run TestPendingObligationPredicate -v` = 16/16 PASS. No non-discriminating subtest. Git clean, read-only preserved.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-r3-1",
+      "severity": "info",
+      "summary": "Subtest 'empty pending + present-but-null panel_refuted_entries → error' is RED-on-revert: with pending decoding to empty (len==0), the reverted order's early return would return (nil,nil) before the present-null validation, failing the non-nil-error assertion. Fix validates up front → error contains 'present-but-null'. Discriminating."
+    },
+    {
+      "id": "R3-r3-2",
+      "severity": "info",
+      "summary": "Subtest 'absent pending + corrupt panel_refuted_entries → error' is RED-on-revert: absent refutation_pending_entries → decode empty → len==0; reverted order returns nil before decodeRefutations errors on the string value. Fix reaches decode → error contains 'could not be decoded'. Discriminating."
+    },
+    {
+      "id": "R3-r3-3",
+      "severity": "info",
+      "summary": "present-null modeling map[string]interface{}{\"panel_refuted_entries\": nil} faithfully reproduces bead.GetMetadata's surfacing of a JSON null (Unmarshal into map[string]interface{}, key present with nil interface value, preserved by merged[k]=v), so comma-ok presentRefuted=true && rawRefuted==nil fires as intended."
+    },
+    {
+      "id": "R3-r3-4",
+      "severity": "info",
+      "summary": "No-false-refuse subtests correctly assert nil: both-keys-absent and valid-empty-pending+valid-empty-refuted both decode cleanly to len(pending)==0 and hit the (nil,nil) early return. Not over-corrected."
+    },
+    {
+      "id": "R3-r3-5",
+      "severity": "info",
+      "summary": "go test -count=1 ./internal/complete -run TestPendingObligationPredicate -v = 16/16 subtests PASS at e71a7991. Structural reorder validates BOTH metadata keys before any early return; no shape-validation-skipping path remains."
+    }
+  ]
+}

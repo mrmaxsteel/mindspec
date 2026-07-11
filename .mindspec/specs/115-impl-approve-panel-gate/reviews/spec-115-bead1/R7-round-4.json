@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R7 Fable",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Scope: delta e71a7991..a8da895a touches ONLY internal/complete/panel_advisory.go (+27) and its test (+71), purely additive — no approve/gitutil/docs/ADR/skill; `git diff main -- internal/gitutil/` is empty; BranchExistsE/show-ref have ZERO hits in the Go diff vs main (all textual hits are review-artifact JSONs). Grounding: every claim in the new comment verified against code — decodeRefutations' bare json.Unmarshal does pass a null element as a zero-valued panel.Refutation; pendingEntryKey is NUL-separated (slot+\"\\x00\"+round), so a zero covering entry keys as \"\\x00\"+\"0\" and can never match a VALID pending entry, confirming the inertness note. New error message matches the established fail-closed family (\"shape-invalid ... cannot prove which obligations are already satisfied\"), no backtick doc-comment gotcha, gofmt -l empty. Contradiction: none — validation is now exhaustive and symmetric (refuted elements checked at L596 BEFORE the len(pending)==0 early return; pending elements in the coverage loop), and {} / valid-empty arrays / valid-covered still return nil, preserving the pristine-absent no-op. F3-1 intact: reconcilePendingRefutations calls the shared unexported core directly (L721). Build, vet, and all three suites green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "note": "BRIEF wording 'every field of every element is validated' is slightly stronger than the code: only Slot and Round are shape-checked (Reason/Evidence are not) — but this is exactly the rule pending entries use and (slot, round) is the only coverage-load-bearing pair, so symmetry holds and this is not a contradiction. Non-blocking."
+    }
+  ]
+}

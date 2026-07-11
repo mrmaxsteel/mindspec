@@ -1,0 +1,26 @@
+# spec-115-bead1 — Round 2 Bead Panel (8 reviewers, four families)
+
+**Bead worktree**: `/Users/Max/replit/mindspec/.worktrees/worktree-spec-115-impl-approve-panel-gate/.worktrees/worktree-mindspec-fgmg.1`
+**Branch**: `bead/mindspec-fgmg.1` @ **19bc8114** (round-1 impl `75e82b52` + fix commit `19bc8114`). **Pass = 8/8 UNANIMOUS APPROVE.** Findings never out-voted.
+
+**READ-ONLY**: write your verdict JSON only; ALL scratch ABSOLUTE `/tmp`; NEVER edit the worktree; leave `git status --porcelain` clean.
+
+## Round 1 result → what changed
+Round 1 was **7 APPROVE / 1 REQUEST_CHANGES**. The sole RC (R8 codex, adversarial, 0.98) found a real fail-closed hole: `uncoveredPendingObligations` (`internal/complete/panel_advisory.go`) read `meta["refutation_pending_entries"]` (and `panel_refuted_entries`) via plain map indexing, which returns `nil` for BOTH an absent key AND a present key whose JSON value is `null`; `decodePendingEntries(nil)`/`decodeRefutations(nil)` treat nil as "no obligation," so a present-but-null value passed the gate like an absent key — violating the R3 fail-closed contract ("present-but-corrupt value REFUSES, never decodes-as-empty"). Full detail: `consolidated-round-1.md`.
+
+**The fix (commit `19bc8114`, delta = `git diff 75e82b52..19bc8114`, only `internal/complete/panel_advisory.go` + `panel_advisory_test.go`):**
+- `uncoveredPendingObligations` now uses the comma-ok idiom: `rawPending, presentPending := meta["refutation_pending_entries"]`; `if presentPending && rawPending == nil` → returns an error ("present-but-null … cannot prove the bead is obligation-free"). Same comma-ok present-null → error added symmetrically for `panel_refuted_entries`. The ABSENT-key no-op path is untouched (comma-ok `present==false` falls through exactly as before). Doc comment updated to name the present-null case.
+- `TestPendingObligationPredicate` gained 3 subtests (now 12): present-null `refutation_pending_entries` → error; absent key → nil no-op preserved; present-null `panel_refuted_entries` → error.
+- The fixer empirically verified RED-on-revert (stripped the guard → the present-null subtest failed → restored).
+
+## What to verify at `19bc8114` (focus on the delta; re-confirm your round-1 lens still holds)
+1. **R8's finding is genuinely ADDRESSED.** A present key with a nil/JSON-null value for `refutation_pending_entries` now returns a non-nil error (fail-closed); same for `panel_refuted_entries`; and the ABSENT-key case still returns nil (no-op preserved — NOT broken by the fix). The new subtests actually assert these and are RED-on-revert (would fail if the comma-ok guard were removed).
+2. **No new corrupt-shape hole of the same class (R8's lens especially).** Re-scan `uncoveredPendingObligations` for any OTHER realizable metadata shape that still decodes-as-empty / passes fail-open: e.g. a present-null nested value, a wrong-typed value that `decodePendingEntries` silently tolerates, an empty-array vs absent distinction, or a `panel_refuted_entries` shape that over-covers. Confirm the fix is complete for the present-null class and didn't just patch one key while leaving a sibling.
+3. **The fix introduces NO regression.** The shared-core structure holds (`uncoveredPendingObligations` still the single core; both `CheckPendingObligations` and `reconcilePendingRefutations` call it; reconcile does NOT call the erroring predicate). `reconcilePendingRefutations`'s existing behavior on VALID inputs is unchanged — a bead with legitimately absent keys, or valid present arrays, behaves exactly as before the fix (the fix only adds an error branch for present-null). Existing `internal/complete` tests pass with no semantic edit.
+4. **Scope + fences intact.** The fix touched ONLY `internal/complete/panel_advisory.go` + its test. No `internal/approve`/`internal/gitutil`/docs change; `git diff main -- internal/gitutil/` empty; `BranchExistsE`/`show-ref` 0-hit; gofmt/vet/golangci-lint clean; `go build ./...` + `go test -count=1 ./internal/lifecycle ./internal/complete ./internal/executor` green.
+5. **Everything else from round 1 still holds** — your round-1 APPROVE lens (author-of-record faithfulness, seam signatures, byte-identity for consumers, RED-on-revert of the four named tests, AC12(a) deviation, scope/grounding) is unchanged by a fix confined to the obligation core; confirm nothing in the delta disturbed it.
+
+## Per-slot lens (unchanged from round 1; center on the delta)
+- **R1 Opus** author-of-record · **R2 Opus** fail-open/fail-closed (does the present-null fix make the predicate fully fail-closed now?) · **R3 Opus** RED-on-revert (the 3 new subtests genuinely pin) · **R4 Sonnet** empirical (run build/tests/named/fences/gofmt/vet/lint on `19bc8114`) · **R5 Sonnet** seam/type (signatures unchanged; shared core intact) · **R6 Sonnet** no-regression (reconcile + consumers unchanged on valid inputs) · **R7 Fable** scope/grounding (fix confined; no fence/scope breach) · **R8 codex** adversarial — YOUR round-1 finding: verify it's closed AND hunt for any sibling corrupt-shape hole the fix left open.
+
+Verdict: APPROVE / REQUEST_CHANGES / REJECT. Output JSON to `<this-dir>/<slot>-round-2.json`: `reviewer_id` ("<slot> <family>"), `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings`.
