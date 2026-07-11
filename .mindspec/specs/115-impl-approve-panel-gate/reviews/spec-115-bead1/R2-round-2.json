@@ -1,0 +1,14 @@
+{
+  "reviewer_id": "R2 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "The predicate is now fully fail-closed on present-null. The comma-ok idiom `rawPending, presentPending := meta[...]` fires the error ONLY when `presentPending && rawPending == nil` — for BOTH refutation_pending_entries and panel_refuted_entries, symmetrically. Traced every realizable shape: (1) absent key → presentPending==false → guard skipped → decodePendingEntries(nil) → (nil,nil) → len==0 no-op, so pristine beads still pass (no over-correction); (2) present-null → error BEFORE decode, not masked by it; (3) valid present array → rawPending!=nil → guard skipped → decodes normally (not falsely errored); (4) present empty array `[]` → JSON unmarshals to a non-nil empty slice → guard skipped → len==0 no-op (correctly NOT errored); (5) corrupt non-null → decErr branch still errors; (6) shape-invalid entry (empty slot / round<1) → still errors. Metadata read error remains first. No prior branch regressed; composition is correct and ordered. reconcile/consumers on valid inputs unchanged (fix only adds an error branch for present-null). TestPendingObligationPredicate green (12 subtests). No remaining fail-open path in the present-null class; no over-correction found.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Present-null refutation_pending_entries → non-nil error (fail-closed), caught before decode via comma-ok — verified.",
+    "Present-null panel_refuted_entries → non-nil error, symmetric guard — verified.",
+    "Absent key → presentPending==false skips guard → nil no-op preserved; empty array [] → non-nil empty slice skips guard → nil no-op. Neither is over-corrected into an error.",
+    "Valid present array, decode-error (non-null corrupt), shape-invalid (empty slot/round<1), and metadata-read-error branches all intact and correctly ordered; no regression.",
+    "Note (non-blocking, unrealizable from real bd JSON): a typed-nil slice test double would bypass the guard (typed nil != interface nil) and decode-as-empty, but encoding/json never emits a typed nil — real JSON-null yields an untyped nil interface which the guard catches. No action needed."
+  ]
+}

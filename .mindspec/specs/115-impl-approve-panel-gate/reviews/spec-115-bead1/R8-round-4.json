@@ -1,0 +1,12 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "The round-3 element-shape finding is closed. Every decoded panel_refuted_entries element is now rejected when Slot is empty or Round < 1, and that loop runs after unconditional decode but before the sole len(pending)==0 return. The exact prior input {\"panel_refuted_entries\":[null]} now errors, as do empty-slot and round<1 covering entries. Tracing all paths found both top-level keys distinguish absent from present-null, both values decode before any early return, wrong-typed known values fail decoding, and every coverage-relevant field of every element in both arrays is shape-validated. No realizable corrupt input remains that decodes empty or covers a valid obligation fail-open; duplicates, ordering, and extra valid covering entries cannot alter exact slot/round coverage. No false-refuse was introduced: absent keys, valid empty arrays, and valid exact coverage return nil. The complete package, all 20 TestPendingObligationPredicate subtests, and unchanged TestPanelRefuted reconciliation tests pass.",
+  "concrete_changes_required": [],
+  "findings": {
+    "section_1": "ADDRESSED: exhaustive refuted-element validation precedes the pending-empty return; null, empty-slot, and round<1 elements error.",
+    "section_2": "ADDRESSED: both keys and both arrays are validated fail-closed before any early return; no concrete corrupt-shape bypass remains.",
+    "section_3": "ADDRESSED: valid absent/empty metadata and valid exact coverage remain accepted; all requested tests pass."
+  }
+}

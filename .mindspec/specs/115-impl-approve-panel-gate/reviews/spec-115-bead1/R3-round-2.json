@@ -1,0 +1,11 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "RED-on-revert lens holds for all 3 new subtests. (1) present-null refutation_pending_entries: the injected getMeta returns map{key: nil} — the present-null case; reverting the comma-ok guard makes decodePendingEntries(nil) return (nil,nil), CheckPendingObligations then returns nil, so err==nil trips the subtest's t.Fatal → FAIL. Asserts a NON-NIL error plus message contains 'present-but-null'. (2) absent key: getMeta returns only some_other_key; comma-ok present==false falls through → decode(nil)→empty→nil; asserts nil correctly, preserving the §6 no-op. (3) present-null panel_refuted_entries: pending carries a real [X,1] entry (decodes fine) then refuted is nil; on revert decodeRefutations(nil)→empty→[X,1] uncovered→error, but with the WRONG message, so strings.Contains(err,'present-but-null') fails → RED via message. Modeling is faithful: production GetMetadata (bdcli.go:313) json.Unmarshals into map[string]interface{}; encoding/json surfaces a JSON null as a present key with nil value, copied verbatim by the merge loop — byte-identical to the map literal. All 12 subtests PASS (go test -count=1 -v). git clean (only my untracked reviews dir).",
+  "concrete_changes_required": [],
+  "findings": [
+    {"severity": "info", "note": "Subtest 1 & 3 are genuinely RED-on-revert (Fatal on err==nil; message-Contains discriminates on the covered/uncovered path). Subtest 2 correctly asserts nil, pinning the absent-key no-op the fix must not break."},
+    {"severity": "info", "note": "Present-null modeling verified faithful vs production GetMetadata json.Unmarshal → map key present with nil value; comma-ok idiom sees the same shape the test injects."}
+  ]
+}

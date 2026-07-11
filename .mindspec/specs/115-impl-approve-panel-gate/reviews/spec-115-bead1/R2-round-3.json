@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R2 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Traced uncoveredPendingObligations at e71a7991 end-to-end. Both metadata keys are now validated up front, BEFORE the len(pending)==0 early return: (1) refutation_pending_entries present-null + decode; (2) panel_refuted_entries present-null + decode, moved before the early return by the delta (19bc8114..e71a7991). Fail-open closed: {pending:[],refuted:null} → present-null refuted error; {refuted:\"corrupt\"} → decode error — both now hit while pending is empty/absent. No fail-open early-return or skip path bypasses a shape-validation remains; the reorder closes the corrupt-shape class structurally, not sibling-by-sibling. NO over-correction: {} → nil; {pending:[],refuted:[]} → nil; valid non-empty pending with covering refuted → unchanged coverage result. Only refuted validation moved before the early return, and every VALID refuted (absent or valid array) still passes — no valid input newly errors. All other fail-closed branches (read error, non-null decode errors, shape-invalid slot/round<1, uncovered coverage) intact and correctly ordered. All 16 subtests incl. the four new RED-on-revert/no-false-refuse cases pass; git clean; HEAD e71a7991.",
+  "concrete_changes_required": [],
+  "findings": [
+    "VERIFIED: panel_refuted_entries present-null + decode validation now sits BEFORE the len(pending)==0 early return, so a corrupt audit store errors regardless of pending emptiness (round-2 sibling closed).",
+    "VERIFIED: no false-refuse — {} → nil, {pending:[],refuted:[]} → nil, valid covering refuted → unchanged; no valid input newly errors.",
+    "VERIFIED: fail-closed branch ordering intact (read err → pending present-null → pending decode → refuted present-null → refuted decode → early return → coverage/shape-invalid).",
+    "VERIFIED: 16/16 subtests pass incl. empty-pending+present-null-refuted, absent-pending+corrupt-refuted, both-absent, valid-empty+valid-empty; delta confined to panel_advisory.go reorder + additive tests; worktree clean at e71a7991."
+  ]
+}

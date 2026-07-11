@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.95,
+  "rationale": "Author-of-record: every plan Bead-1 step is present and nothing is out of scope. (1) orphans.go — ScanOrphanedClosedBeads is the error-preserving core propagating the three infra legs (epic-lookup + bd-list via ClosedEpicBeadIDs, per-bead ancestry), ClosedEpicBeadIDs exported over the SAME enumeration, FindOrphanedClosedBeads reduced to a thin fail-open wrapper (`orphans, _ := Scan...`) that discards the error; branchExistsFn trigger untouched; mixed-list parity (firstErr recorded, scan continues). (2) TestScanOrphanedClosedBeads_ErrorPreserving present. (3) panel_advisory.go — CheckPendingObligations (DI getMeta, fail-closed on read/decode/shape, exact coverage, nil no-op) + unexported uncoveredPendingObligations core + PanelGateRoots wrapper; reconcilePendingRefutations re-expressed over the SAME core (not the erroring predicate — F3-1 honored) with byte-identical refusal strings (refuse(err.Error()) over identical fmt). (4) TestPendingObligationPredicate + TestCompleteRun_RegatesAlreadyClosedOrphan present. (5) executor is genuinely comment-only — the guardMergeLayout call line is unchanged, all +/- lines are comments. (6) TestFinalizeEpic_MergesOnlyWorktreeRealBranches present. Scope fence holds: only the 6 planned files; git diff main -- internal/gitutil/ empty; no internal/approve, no docs/ADR/skill; negative fences (BranchExistsE, show-ref) 0-hit; test files pure insertions (498/0). Build clean, four targeted tests PASS, worktree clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"area": "step1-lifecycle-core", "status": "ADDRESSED", "note": "ScanOrphanedClosedBeads error-preserving core + ClosedEpicBeadIDs export + thin fail-open FindOrphanedClosedBeads wrapper; branch-existence bool trigger unchanged; mixed-list parity (firstErr + continue)."},
+    {"area": "step2-scan-test", "status": "ADDRESSED", "note": "TestScanOrphanedClosedBeads_ErrorPreserving present (orphans_test.go:150), passes -count=1."},
+    {"area": "step3-complete-predicate", "status": "ADDRESSED", "note": "CheckPendingObligations DI predicate + uncoveredPendingObligations shared core + PanelGateRoots wrapper; reconcile re-expressed over the shared core, NOT the erroring predicate; refusal strings byte-identical."},
+    {"area": "step4-complete-tests", "status": "ADDRESSED", "note": "TestPendingObligationPredicate + TestCompleteRun_RegatesAlreadyClosedOrphan present, pass -count=1."},
+    {"area": "step5-executor-comment-only", "status": "ADDRESSED", "note": "Confirmed comment-only: guardMergeLayout call line unchanged; all +/- hunks are comment lines naming guardMergeLayout scope + ADR-0030 disclaimer."},
+    {"area": "step6-finalize-test", "status": "ADDRESSED", "note": "TestFinalizeEpic_MergesOnlyWorktreeRealBranches present, passes -count=1."},
+    {"area": "scope-fence", "status": "ADDRESSED", "note": "Only 6 planned files; internal/approve, internal/gitutil, docs/ADR/skill all untouched (git diff main -- internal/gitutil/ empty); negative fences 0-hit; no stray files (only expected panel dir untracked); existing tests unedited (pure insertions)."}
+  ]
+}
