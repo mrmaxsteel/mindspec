@@ -282,4 +282,4 @@ make test       # Run the short test suite
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
