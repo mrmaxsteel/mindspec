@@ -1,0 +1,13 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": 0.97,
+  "rationale": "AC10 RED-on-revert lens; R8 finding-2 fix verified at 997e2a9e. (1) claimsLifecyclePackage now delegates to validate.GlobMatch(pattern, \"internal/lifecycle/orphans.go\") — production's **-aware matcher, no hand-rolled prefix. GlobMatch(\"internal/**\", probe) matches (segs internal + trailing ** → true), so a broader second-domain glob IS now counted as a claimant. (2) I proved the broader-glob subtest is TRULY RED by mutating claimsLifecyclePackage back to the round-1 strings.HasPrefix heuristic in a throwaway worktree: broader_internal_star_star FAILED (only [workflow] detected — exactly R8's gap), and narrower_sibling ALSO failed (prefix wrongly claims internal/lifecycleX). Production GlobMatch fixes both; all 4 subtests + real-manifest test PASS at HEAD. (3) TestLifecycleOwnershipExactlyOneWorkflowClaimant passes against real manifests (workflow sole claimant). (4) No import cycle: go list -deps ./internal/validate shows 0 lifecycle deps; go build ./... green, go vet clean. Diff confined to 5 files. No still-missed overlapping glob, no non-discriminating subtest, no cycle.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"id": "AC10-overlap-matcher", "severity": "info", "status": "resolved", "note": "claimsLifecyclePackage uses production validate.GlobMatch against real probe path internal/lifecycle/orphans.go; broader internal/** overlap now detected (round-1 R8 gap closed)."},
+    {"id": "RED-on-revert-proof", "severity": "info", "status": "verified", "note": "Mutation to prior prefix heuristic makes broader_internal_star_star and narrower_sibling subtests FAIL; new matcher makes all pass. Subtests genuinely discriminate; not rubber-stamps."},
+    {"id": "real-manifest-invariant", "severity": "info", "status": "verified", "note": "TestLifecycleOwnershipExactlyOneWorkflowClaimant passes at HEAD; workflow is the sole real claimant."},
+    {"id": "no-import-cycle", "severity": "info", "status": "verified", "note": "internal/validate has 0 lifecycle deps; go build ./... + go vet ./internal/lifecycle green."}
+  ]
+}

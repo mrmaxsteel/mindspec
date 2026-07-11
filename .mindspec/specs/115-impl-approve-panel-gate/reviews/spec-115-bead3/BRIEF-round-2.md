@@ -1,0 +1,26 @@
+# spec-115-bead3 — Round 2 Bead Panel (8 reviewers)
+
+**Bead worktree**: `/Users/Max/replit/mindspec/.worktrees/worktree-spec-115-impl-approve-panel-gate/.worktrees/worktree-mindspec-fgmg.3`
+**Branch**: `bead/mindspec-fgmg.3` @ **997e2a9e** (round-1 docs+test `1733886e` + a fix commit). **Pass = 8/8 UNANIMOUS.** Findings never out-voted. **R7 = Opus-sub** (Fable quota-walled).
+
+**READ-ONLY**: verdict JSON only; ABSOLUTE `/tmp` scratch; NEVER edit; leave `git status --porcelain` clean.
+
+## Round 1 → the round-2 fix
+Round 1 was **7 APPROVE / 1 REQUEST_CHANGES** (R8 codex). The ADR/skill/ownership work was otherwise clean (scope, chain position, skill consistency, AC9, grounding all APPROVED). R8 raised two confirmed findings:
+1. **Doc overclaim:** the ADR/skill opening promised refusal for "any closed bead … closed without `mindspec complete`" — which literally includes the raw-`git merge`d-then-`bd close`d residual the gate CANNOT detect, contradicting the amendment's own later residual disclosure. Also "after which `impl approve` finalizes" overclaimed (other gates may still refuse).
+2. **AC10 gameable:** `claimsLifecyclePackage`'s string-prefix heuristic missed a BROADER second-domain glob (`internal/**`) that also claims `internal/lifecycle` — so "exactly one claimant" wasn't truly pinned.
+
+**The fix (commit `997e2a9e`, delta = `git diff 1733886e..997e2a9e` — 5 files: ADR + 3 skills + `ownership_test.go`):**
+1. Scoped the ADR + all 3 skill "REFUSES" claims to the DETECTABLE guarantee: refuses a closed bead whose `bead/<id>` branch is still an unmerged non-ancestor (closed without `mindspec complete`), OR that carries a durable uncovered `refutation_pending` obligation. Softened "after which `impl approve` finalizes" → "the orphan/obligation gate no longer blocks `impl approve` (which then finalizes subject to its remaining gates)". Each skill surface gained an explicit "Disclosed residual" note (raw-merged-no-obligation). AC9 substrings (`closed without`, `impl approve`) preserved.
+2. Replaced `claimsLifecyclePackage`'s prefix heuristic with the PRODUCTION ownership matcher `validate.GlobMatch(pattern, "internal/lifecycle/orphans.go")` (spec 086/091's `**`-aware dialect; no import cycle). Added `TestClaimsLifecyclePackageDiscrimination` with RED subtests: broader `internal/**` → 2 claimants; exact-duplicate `internal/lifecycle/**` → 2 claimants; workflow removed → 0; narrower sibling `internal/lifecycleX/**` → still not a false claim. `TestLifecycleOwnershipExactlyOneWorkflowClaimant` still passes against real manifests (workflow sole claimant).
+
+## What to verify at `997e2a9e`
+1. **Finding 1 ADDRESSED (R2/R7/R8 lenses):** the ADR + all 3 skill opening claims are now scoped to what `runOrphanObligationGate` (`internal/approve/impl.go`) actually detects — no longer including the raw-merged-no-obligation residual; the residual is still disclosed and now CONSISTENT with the opening (no contradiction). "impl approve finalizes" is softened to acknowledge its other gates. No NEW overclaim introduced. The 3 skill surfaces remain content-consistent.
+2. **Finding 2 ADDRESSED (R3/R8 lenses):** `claimsLifecyclePackage` now uses `validate.GlobMatch` (production semantics) against a real probe path — a broader `internal/**` claim IS now detected. The new RED subtests genuinely discriminate (broader-glob → count 2 → FAIL; duplicate → FAIL; removed-workflow → 0 → FAIL; sibling → not a false claim). `TestLifecycleOwnershipExactlyOneWorkflowClaimant` still passes at HEAD (only workflow overlaps). Confirm no import cycle (`internal/validate` doesn't import `internal/lifecycle`; build passes).
+3. **AC9 still holds:** `grep -c 'impl approve' ADR-0037…` ≥1; `grep -c 'closed without'` ≥1 in each of the 3 skill surfaces.
+4. **No regression + scope:** fix confined to the 5 files; NO OWNERSHIP.yaml/gitutil/approve/Bead-1-2 edit; `go build ./...` + `go test -count=1 ./internal/lifecycle ./internal/setup ./cmd/mindspec` green; gofmt/vet/golangci-lint clean; `mindspec validate spec` passes; `BranchExistsE`/`show-ref` 0-hit.
+
+## Per-slot lens (round-1 lenses; center on the two fixes)
+- **R1 Opus** author/scope (fix confined to 5 files, faithful) · **R2 Opus** ADR accuracy (the scoped claim is now accurate + non-contradictory; residual consistent) · **R3 Opus** AC10 RED-on-revert (the new overlap-matcher + subtests genuinely discriminate incl. the broader-glob case; re-verify in a throwaway) · **R4 Sonnet** empirical (build/tests/AC9/gofmt/vet/lint/validate) · **R5 Sonnet** skill-surface consistency (the qualified "REFUSES" + residual note identical across 3 surfaces; claude.go literal compiles/gofmt-clean) · **R6 Sonnet** no-regression (the new `internal/validate` test-import causes no cycle; setup/cmd green) · **R7 Opus-sub** grounding (the scoped claims resolve against the shipped gate; recovery still truthful; no new contradiction) · **R8 codex** — YOUR two findings: verify BOTH closed (the opening no longer overclaims + is consistent with the residual; the AC10 matcher now catches broader globs), and no new overclaim/gameability introduced.
+
+Verdict: APPROVE / REQUEST_CHANGES / REJECT. Output JSON to `<this-dir>/<slot>-round-2.json`: `reviewer_id`, `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings`.

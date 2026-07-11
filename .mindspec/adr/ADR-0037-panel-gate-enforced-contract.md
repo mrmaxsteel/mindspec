@@ -148,6 +148,54 @@ retirement deferred to a follow-up bead. See the amendment below.
 > records. There is no CLI verb to write one; /ms-panel-tally's
 > documented procedure is a hand edit of `panel.json`.
 
+> **Amendment (2026-07-11, spec 115 — contract reach: every lifecycle verb
+> that can merge a bead branch):** The 2026-06-17 amendment above made the
+> in-binary `mindspec complete` gate the single authoritative enforcement
+> point. One lifecycle verb could still merge a bead branch without ever
+> passing that point: `mindspec impl approve`, whose finalize path
+> auto-merges unmerged `bead/<id>` branches into the spec branch — including
+> a bead that was closed via a raw `bd close`, skipping `mindspec complete`
+> and its gate entirely. This amendment extends the contract's REACH — not
+> its enforcement home — to close that path: **the contract now covers every
+> lifecycle verb that can merge a bead branch.** `mindspec impl approve`
+> REFUSES to finalize (exit non-zero: no epic close, no phase write, no
+> merge, no push) while any closed bead under the spec's epic is
+> DETECTABLY unsettled — scoped to what this gate can actually see: its
+> `bead/<id>` branch is still an unmerged non-ancestor of the spec branch
+> (closed without `mindspec complete`), or it carries a durable
+> refutation obligation (§7 amendment's `refutation_pending` marker) not
+> covered by a durable `panel_refuted` record. The refusal names the
+> offending bead, and its recovery is `mindspec complete <bead>`:
+> `complete` tolerates an already-closed bead, re-runs the full layered
+> gate (including the 2026-07-10 §3 rule that any unresolved
+> REQUEST_CHANGES blocks) plus the §7 obligation reconciliation, and
+> merges — after which the orphan/obligation gate no longer blocks
+> `impl approve` (which then finalizes subject to its remaining gates).
+>
+> The **single settlement surface remains `mindspec complete`** — there is
+> no second gate home. `impl approve` never computes an Allow/Block
+> decision, never writes panel audit metadata, never applies a refutation;
+> its refusal is a lifecycle-bypass guard (the same class as `complete`'s
+> own sibling bd-close guard), not a gate decision. This preserves the
+> single-enforcement-point property the 2026-06-14/2026-06-17 amendments
+> established, and respects ADR-0030's layering: the executor is the
+> git-I/O boundary and houses no enforcement, so the refusal lives in the
+> approval flow, upstream of any terminal mutation.
+>
+> The §7 hatches keep their exact semantics and do NOT bypass this refusal:
+> `MINDSPEC_SKIP_PANEL`, abandonment, and the config toggle except the GATE
+> DECISION inside the recovery `complete` run — never the durable
+> obligation (hatches except the gate, not the obligation), and never this
+> refusal, because the refusal is not the gate decision. §6 is unchanged
+> for pristine beads: a spec whose beads all went through
+> `mindspec complete` finalizes exactly as before, and solo/harness flows
+> still pay nothing. §§2–5 and §8 are unchanged. Two residuals stay
+> honestly out of reach per §8's trust boundary: a bead branch already
+> raw-`git merge`d (the fenced anti-pattern) whose RC never had a
+> refutation applied leaves no durable obligation to see, and raw
+> `bd close` itself stays possible — it simply cannot ride an
+> `impl approve` merge without settlement.
+
 ### 2. Round derivation: filenames over panel.json
 
 The latest round is **max(N) over `*-round-<N>.json` filenames** —

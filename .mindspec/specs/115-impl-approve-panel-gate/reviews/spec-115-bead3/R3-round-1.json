@@ -1,0 +1,16 @@
+{
+  "reviewer_id": "R3 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "AC10 test genuinely pins exactly-one-workflow-claimant and is RED-on-revert, proven empirically in a throwaway worktree (git worktree add /tmp/rev-fgmg3 1733886e, mutated there, removed; bead worktree left pristine). PASS at HEAD. (A) Adding internal/lifecycle/** to core -> FAIL line 103 'got 2 claimant(s) [core workflow]'. (B) Removing the workflow claim -> FAIL line 103 'got 0 claimant(s)'. (C) Moving the claim from workflow to core -> FAIL line 106 'must be claimed by the workflow domain, got \"core\"'. The path match is NOT a loose substring: claimsLifecyclePackage uses exact match on the glob/bare-dir plus HasPrefix(\"internal/lifecycle/\") WITH trailing slash, so the sibling internal/lifecycleX/** correctly does NOT match (D -> FAIL 0 claimants), while the bare internal/lifecycle dir DOES match (E -> PASS). Vacuous truth is guarded (len(manifests)==0 fatals); repo root located robustly via go.mod walk from the package dir. No path where the test passes while the invariant is false. Full package green. Every assertion discriminates.",
+  "concrete_changes_required": [],
+  "findings": [
+    {"severity": "info", "detail": "PASS at HEAD 1733886e: go test -count=1 ./internal/lifecycle -run TestLifecycleOwnershipExactlyOneWorkflowClaimant -v -> ok."},
+    {"severity": "info", "detail": "RED-on-revert scenario A (second claimant, core adds internal/lifecycle/**): FAIL at ownership_test.go:103, got 2 claimant(s) [core workflow]. Discriminates."},
+    {"severity": "info", "detail": "RED-on-revert scenario B (workflow claim removed): FAIL at ownership_test.go:103, got 0 claimant(s). Discriminates."},
+    {"severity": "info", "detail": "RED-on-revert scenario C (claim moved workflow->core): FAIL at ownership_test.go:106, wrong domain 'core'. The domain-identity assertion (not just count) discriminates."},
+    {"severity": "info", "detail": "Substring soundness scenario D: sibling pattern internal/lifecycleX/** correctly does NOT false-match (test reports 0 claimants -> FAIL). claimsLifecyclePackage guards with HasPrefix(\"internal/lifecycle/\") including the trailing slash. Scenario E: bare-dir claim internal/lifecycle DOES match (PASS). Match logic is precise."},
+    {"severity": "info", "detail": "Vacuous-truth guard present (len(manifests)==0 -> t.Fatalf). Repo root located via go.mod walk (8-level cap) from the package dir; test ran green invoked from within ./internal/lifecycle."},
+    {"severity": "info", "detail": "Throwaway worktree removed; bead worktree git status --porcelain shows only the untracked reviews/spec-115-bead3/ dir. No bead-worktree mutation."}
+  ]
+}

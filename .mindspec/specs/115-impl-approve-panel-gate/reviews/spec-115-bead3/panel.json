@@ -1,0 +1,8 @@
+{
+  "bead_id": "mindspec-fgmg.3",
+  "spec": "115-impl-approve-panel-gate",
+  "target": "bead/mindspec-fgmg.3",
+  "round": 2,
+  "expected_reviewers": 8,
+  "reviewed_head_sha": "997e2a9ed1df513484d2b979386e69ba14ed1a63"
+}
