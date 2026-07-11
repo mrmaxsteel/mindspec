@@ -3,12 +3,16 @@ package complete
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -356,5 +360,228 @@ func TestWritePanelAuditMetadata_NoPanel_NoWrite(t *testing.T) {
 	writePanelAuditMetadata("mindspec-bd01", nil, nil) // ...nil reg → no write
 	if called {
 		t.Error("no panel → no metadata write")
+	}
+}
+
+// --- Spec 115 Bead 1: CheckPendingObligations, the exported check-only ------
+// obligation predicate (AC6's predicate half).
+
+// TestPendingObligationPredicate pins CheckPendingObligations' fail-closed
+// decode discipline and its exact (slot, round) coverage, independent of
+// reconcilePendingRefutations (which now shares the same unexported core but
+// SETTLES rather than merely checks).
+func TestPendingObligationPredicate(t *testing.T) {
+	t.Run("no recorded pending → nil", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil for a bead with no recorded pending, got: %v", err)
+		}
+	})
+
+	t.Run("uncovered entry → error naming slot@round", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{
+					{Slot: "X", Round: 2, Reason: "dismissed", Evidence: "commit abc"},
+				},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected an error naming the uncovered obligation")
+		}
+		if !strings.Contains(err.Error(), "X") || !strings.Contains(err.Error(), "round 2") {
+			t.Errorf("expected the error to name slot X @ round 2, got: %v", err)
+		}
+	})
+
+	t.Run("(slot, round)-exact covered → nil", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{
+					{Slot: "X", Round: 1, Reason: "dismissed", Evidence: "commit abc"},
+				},
+				"panel_refuted_entries": []panel.Refutation{
+					{Slot: "X", Round: 1, Reason: "dismissed", Evidence: "commit abc"},
+				},
+			}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil once the (slot, round) is exactly covered, got: %v", err)
+		}
+	})
+
+	t.Run("(slot, round) mismatch is NOT covered by a different round", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{
+					{Slot: "X", Round: 2, Reason: "dismissed"},
+				},
+				// Covers round 1, not round 2 — a round-1 refutation never
+				// clears a later round-2 re-RC on the same slot.
+				"panel_refuted_entries": []panel.Refutation{
+					{Slot: "X", Round: 1},
+				},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected an error: round 1's coverage must not clear round 2's pending obligation")
+		}
+		if !strings.Contains(err.Error(), "round 2") {
+			t.Errorf("expected the error to name round 2, got: %v", err)
+		}
+	})
+
+	t.Run("metadata read error → error, never decode-as-empty", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return nil, errors.New("simulated bd show read failure")
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a metadata-read error to propagate")
+		}
+		if !strings.Contains(err.Error(), "could not be read") {
+			t.Errorf("expected a read-error message, got: %v", err)
+		}
+	})
+
+	t.Run("corrupt refutation_pending_entries → error, never decode-as-empty", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": "corrupt-not-an-array",
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a corrupt-entries error to propagate")
+		}
+		if !strings.Contains(err.Error(), "could not be decoded") {
+			t.Errorf("expected a decode-error message, got: %v", err)
+		}
+	})
+
+	t.Run("corrupt panel_refuted_entries → error, never read as nothing-covered", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 1}},
+				"panel_refuted_entries":      "corrupt-not-an-array",
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a corrupt-audit error to propagate")
+		}
+		if !strings.Contains(err.Error(), "could not be decoded") {
+			t.Errorf("expected a decode-error message, got: %v", err)
+		}
+	})
+
+	t.Run("shape-invalid entry (empty slot) → error", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{{Slot: "", Round: 1}},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a shape-invalid-entry error (empty slot)")
+		}
+		if !strings.Contains(err.Error(), "malformed refutation_pending entry") {
+			t.Errorf("expected the malformed-entry message, got: %v", err)
+		}
+	})
+
+	t.Run("shape-invalid entry (round < 1) → error", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{{Slot: "X", Round: 0}},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a shape-invalid-entry error (round < 1)")
+		}
+		if !strings.Contains(err.Error(), "malformed refutation_pending entry") {
+			t.Errorf("expected the malformed-entry message, got: %v", err)
+		}
+	})
+}
+
+// --- Spec 115 Bead 1: AC7(a) — complete.Run re-gates an already-closed -----
+// orphan and converges after a durable refutation.
+
+// TestCompleteRun_RegatesAlreadyClosedOrphan pins EXISTING behavior (no
+// production change accompanies this test): a bead that is ALREADY CLOSED
+// (e.g. via a bare `bd close`, the mindspec-4gsz lifecycle-bypass — recovered
+// by re-running `mindspec complete <bead>`) still passes through the
+// AUTHORITATIVE panel gate at step 2.25 (complete.go:387) BEFORE step-4's
+// already-closed tolerance (complete.go:576-579) ever runs: an unresolved
+// round-1 REQUEST_CHANGES Blocks with no merge, even though the bead is
+// already closed. Once that RC is durably refuted (Spec 114 R2: the
+// refutation_pending marker + the panel_refuted reconciliation), the SAME
+// already-closed bead converges — complete.Run succeeds with the
+// already-closed warning and performs the bead→spec merge.
+func TestCompleteRun_RegatesAlreadyClosedOrphan(t *testing.T) {
+	const specID, beadID = "115-ac7a", "mindspec-115ac7a.1"
+	root, beadSHA := setupPanelGateRepo(t, specID, beadID)
+	store := newFakeMetadataStore()
+	store.wire(t)
+
+	// The bead is ALREADY CLOSED: closeBeadFn errors (a second `bd close`
+	// on an already-closed bead is not idempotent at the bd layer) and the
+	// tolerance re-read reports "closed" — the exact shape complete.go's
+	// step-4 already-closed tolerance exists to accept.
+	closeBeadFn = func(...string) error { return fmt.Errorf("bead already closed") }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		return next.BeadInfo{ID: id, Status: "closed"}, nil
+	}
+
+	slug := specID + "-bd01"
+	verdicts := map[string]string{
+		"a-round-1.json": "APPROVE", "b-round-1.json": "APPROVE", "c-round-1.json": "APPROVE",
+		"d-round-1.json": "APPROVE", "e-round-1.json": "APPROVE", "X-round-1.json": "REQUEST_CHANGES",
+	}
+	writePanel(t, root, slug, panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+		ReviewedHeadSHA: beadSHA,
+	}, verdicts)
+
+	// Round 1: the unresolved REQUEST_CHANGES Blocks at the gate — BEFORE
+	// step-4's already-closed tolerance ever runs. Nothing mutates.
+	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+		t.Fatal("expected the panel gate to Block on the unresolved round-1 REQUEST_CHANGES")
+	}
+	if ex1.completeCalled {
+		t.Fatal("a Block must perform no merge, even for an already-closed bead")
+	}
+	if store.data[beadID]["panel_refuted"] != nil {
+		t.Fatal("no reconciliation may occur before the gate Block")
+	}
+
+	// Durably refute the round-1 RC (Spec 114 R2 escape): panel.json now
+	// records an audited Refutation for slot X / round 1.
+	writePanel(t, root, slug, panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+		ReviewedHeadSHA: beadSHA,
+		Refutations:     []panel.Refutation{{Slot: "X", Round: 1, Reason: "max: dismissed", Evidence: "commit abc123"}},
+	}, verdicts)
+
+	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	res, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	if err != nil {
+		t.Fatalf("expected success once the RC is durably refuted, got: %v", err)
+	}
+	if res == nil || !res.BeadClosed {
+		t.Fatalf("expected BeadClosed=true (already-closed tolerance), got %+v", res)
+	}
+	if !ex2.completeCalled {
+		t.Fatal("expected the terminal bead->spec merge to run after the settled re-gate")
+	}
+	if store.data[beadID]["panel_refuted"] != true {
+		t.Errorf("expected the reconciliation to durably record panel_refuted, got %v", store.data[beadID])
 	}
 }
