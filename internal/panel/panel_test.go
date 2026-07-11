@@ -388,7 +388,13 @@ func TestPanel_GateFieldDecisionInert(t *testing.T) {
 // The five gate strings are hardcoded (with the empty string appended)
 // rather than looped from config.PanelGateKeys so this test — like the whole
 // internal/panel package — imports no internal/config, preserving the
-// config-free-leaf invariant with zero ambiguity. config.PanelGateKeys
+// config-free-leaf invariant with zero ambiguity. Spec 116 amended that leaf
+// invariant's LETTER (internal/panel now imports exactly one internal
+// package, the stdlib-only pure-string internal/termsafe, for
+// construction-boundary message escaping — ADR-0037 amendment, gate.go:19-33)
+// while preserving its recorded purpose: still no internal/config, no
+// git/status I/O, decision purity, now machine-checked by
+// TestPanelLeafImports_StdlibPlusTermsafeOnly (AC7). config.PanelGateKeys
 // (internal/config/config.go, "the one place the enum is declared") is the
 // source of truth these literals must mirror; a drift there is caught by
 // cmd/mindspec's enum-membership tests that DO reference config.PanelGateKeys.
