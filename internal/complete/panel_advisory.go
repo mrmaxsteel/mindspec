@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -245,12 +246,12 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		if err := persistRefutationPending(beadID, applied); err != nil {
 			slots := make([]string, 0, len(applied))
 			for _, a := range applied {
-				slots = append(slots, a.Slot)
+				slots = append(slots, termsafe.Escape(a.Slot))
 			}
 			sort.Strings(slots)
 			return matched, guard.NewFailure(fmt.Sprintf(
-				"the refutation could not be durably recorded, so the REQUEST_CHANGES from %s remains unresolved (%v) — retry, or resolve the finding",
-				strings.Join(slots, ", "), err),
+				"the refutation could not be durably recorded, so the REQUEST_CHANGES from %s remains unresolved (%s) — retry, or resolve the finding",
+				strings.Join(slots, ", "), termsafe.Escape(err.Error())),
 				fmt.Sprintf("mindspec complete %s", beadID))
 		}
 	}
@@ -661,7 +662,7 @@ func CheckPendingObligations(beadID string, getMeta func(string) (map[string]int
 	e := uncovered[0]
 	return fmt.Errorf(
 		"bead %s carries an unresolved refutation_pending obligation (%s@round %d) not yet covered by a durable panel_refuted record",
-		beadID, e.Slot, e.Round)
+		beadID, termsafe.Escape(e.Slot), e.Round)
 }
 
 // PanelGateRoots is the exported thin wrapper over panelGateRoots (Spec 115
