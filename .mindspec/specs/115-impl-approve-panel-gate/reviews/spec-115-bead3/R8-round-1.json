@@ -1,0 +1,32 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "All empirical checks pass (validate exits 0 with only the lifecycle-binding warning), scope is exactly five files, and fences are clean. However, the ADR and all three skill surfaces overclaim the shipped gate: they universally promise refusal for any closed bead lacking proof/closed without complete, although runOrphanObligationGate cannot detect an already raw-git-merged bead with no durable obligation. The ADR later admits this residual, making its earlier universal claim contradictory; the skills do not disclose it. AC10 is also gameable: claimsLifecyclePackage recognizes only lifecycle-prefixed patterns. A second domain may claim internal/**, which the repository's real GlobMatch treats as owning lifecycle files, yet the test still reports workflow as the sole claimant.",
+  "concrete_changes_required": [
+    "Qualify ADR lines 160-166 and the sentence in all three skill surfaces beginning '`mindspec impl approve` REFUSES' so they claim only detectable unmerged merge candidates or durable uncovered obligations; preserve the disclosed raw-git-merged/no-obligation residual. Avoid promising unconditional success after recovery because other approval gates may still refuse.",
+    "Replace claimsLifecyclePackage's string-prefix heuristic with ownership matching that detects every manifest glob overlapping actual internal/lifecycle files (including broader globs such as internal/**), and add RED tests for a broader second-domain claim as well as exact duplicate and removed-workflow cases."
+  ],
+  "findings": [
+    {
+      "section": "§1",
+      "grade": "ADDRESSED",
+      "summary": "go build, package tests, focused ownership test, gofmt, vet, golangci-lint, and validate all exited 0. AC9 counts: ADR 5; each skill surface 2. Validate emitted one lifecycle-binding WARN only."
+    },
+    {
+      "section": "§2",
+      "grade": "NEW_ISSUE",
+      "summary": "Exact overclaim: ADR says 'REFUSES ... while any closed bead ... lacks proof of panel settlement'; skills say 'when any closed bead ... was closed without mindspec complete'. The shipped gate misses an already raw-git-merged bead with no durable obligation, as the ADR's own residual later acknowledges."
+    },
+    {
+      "section": "§3",
+      "grade": "NEW_ISSUE",
+      "summary": "The test parses all four manifests and asserts cardinality plus workflow identity, but its matcher ignores broader owning globs such as internal/**. Thus it can pass while a second domain owns every internal/lifecycle file under the production GlobMatch semantics."
+    },
+    {
+      "section": "§4",
+      "grade": "ADDRESSED",
+      "summary": "Diff is limited to the ADR, three skill surfaces, and ownership test; no OWNERSHIP.yaml or Bead-1/2 code changed. BranchExistsE/show-ref search returned zero hits."
+    }
+  ]
+}

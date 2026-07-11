@@ -1,0 +1,24 @@
+{
+  "reviewer_id": "R8 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "Both round-1 findings are closed. ADR-0037 and all three skill surfaces now scope refusal to the shipped gate's detectable cases: an unmerged non-ancestor bead branch or an uncovered durable refutation_pending obligation. Their raw-merged/no-obligation residual disclosure is consistent, and finalization is expressly subject to remaining gates. AC10 now calls production validate.GlobMatch against a real lifecycle file; broader internal/** and duplicate claims yield two claimants, removed workflow yields zero, and the live manifests yield workflow alone. Build, requested package and named tests, gofmt, vet, lint, validation, AC9 greps, and fence checks pass; validation reports only the expected no-epic warning. No new issue or import cycle was introduced.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "section": "§1",
+      "grade": "ADDRESSED",
+      "summary": "The overclaim is removed across ADR-0037 and all three generated/source skill surfaces; residual and recovery wording are accurate and content-consistent."
+    },
+    {
+      "section": "§2",
+      "grade": "ADDRESSED",
+      "summary": "Production GlobMatch detects internal/** as a second claimant; discrimination cases are non-tautological and the real ownership invariant still passes with workflow as sole claimant."
+    },
+    {
+      "section": "§3",
+      "grade": "ADDRESSED",
+      "summary": "All requested empirical gates pass, AC9 counts are satisfied, fence searches return zero hits, and no compile/import-cycle regression exists."
+    }
+  ]
+}

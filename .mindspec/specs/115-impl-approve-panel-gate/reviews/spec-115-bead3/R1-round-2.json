@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R1 Opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Fix delta 1733886e..997e2a9e is confined to exactly the 5 authorized files (ADR-0037 + 2 SKILL.md skill surfaces + the claude.go embedded literal + ownership_test.go). No OWNERSHIP.yaml, gitutil, approve, or Bead-1/2 code touched (internal/approve diff empty). Both R8 findings faithfully addressed. Finding 1: the ADR + all 3 skill openings are re-scoped to the DETECTABLY-unsettled guarantee (unmerged non-ancestor bead branch OR refutation_pending uncovered by panel_refuted) — which exactly mirrors the shipped gate in internal/approve/impl.go (implIsAncestorFn/IsAncestor + refutation reconciliation). The raw-merged-no-obligation residual is now an explicit, consistent disclosure rather than a contradicted overclaim; 'impl approve finalizes' softened to 'orphan/obligation gate no longer blocks... subject to its remaining gates.' No new overclaim. Finding 2: claimsLifecyclePackage now uses production validate.GlobMatch against a real probe path; the new discrimination subtests genuinely go RED for the broader internal/** glob (the exact miss R8 flagged), exact-duplicate, and removed-workflow cases, while the narrower sibling correctly does not claim. go build ./... + go test ./internal/lifecycle green; no import cycle (validate does not import lifecycle); gofmt/vet clean; AC9 substrings preserved ('closed without' x2 in each skill surface, 'impl approve' x5 in ADR). git clean of edits. No scope creep.",
+  "concrete_changes_required": [],
+  "findings": []
+}

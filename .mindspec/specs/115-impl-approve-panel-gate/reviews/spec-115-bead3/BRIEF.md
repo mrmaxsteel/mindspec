@@ -1,0 +1,36 @@
+# spec-115-bead3 — Round 1 Bead Panel (8 reviewers)
+
+**Bead worktree**: `/Users/Max/replit/mindspec/.worktrees/worktree-spec-115-impl-approve-panel-gate/.worktrees/worktree-mindspec-fgmg.3`
+**Branch**: `bead/mindspec-fgmg.3` @ **1733886e** (single commit). Base = the Bead-2 merge `2f45d8d9`. Diff = `git diff 2f45d8d9..1733886e`.
+**Panel**: 8 slots — R1–R3 Opus, R4–R6 Sonnet, **R7 Fable-sub (Opus — Fable is quota-walled until 12:10 London)**, R8 codex. **Pass = 8/8 UNANIMOUS.** Findings never out-voted.
+
+**READ-ONLY**: verdict JSON only; ALL scratch ABSOLUTE `/tmp`; NEVER edit; leave `git status --porcelain` clean.
+
+## What Bead 3 is — docs + ownership (the final bead, contract-level only)
+Bead 3 documents the impl-approve refusal gate (shipped in Bead 2) at the CONTRACT level and pins the `internal/lifecycle` ownership. Five files, +90 lines: ADR-0037 (+45), the 3 ms-impl-approve skill surfaces (+15 each), and a new `internal/lifecycle/ownership_test.go`.
+
+1. **ADR-0037 dated amendment (AC9).** `.mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` §1 gains a `> **Amendment (2026-07-11, spec 115 — ...):**` block appended after the 2026-07-10 spec-114 block. Content: the contract's reach is **every lifecycle verb that can merge a bead branch** — `mindspec impl approve` REFUSES to finalize (exit non-zero: no epic close/phase write/merge/push) while any closed bead under the epic lacks proof of panel settlement (closed without `mindspec complete`, or a durable `refutation_pending` not covered by a durable `panel_refuted`); the **single settlement surface remains `mindspec complete`** (impl approve never computes Allow/Block, never writes panel metadata, never applies a refutation); the §7 hatches keep their exact semantics and do NOT bypass this refusal.
+2. **ms-impl-approve skill — 3 surfaces (AC9).** A refusal-recovery section ("closed without `mindspec complete`") appended to (a) the embedded `lifecycleSkillFiles()` literal in `internal/setup/claude.go`, (b) `.claude/skills/ms-impl-approve/SKILL.md`, (c) `.agents/skills/ms-impl-approve/SKILL.md`. Documents the refusal, the `mindspec complete <bead>` recovery, the branch-less restoration-prerequisite recourse, and that skip/abandon hatches don't bypass.
+3. **AC10 ownership test.** New `internal/lifecycle/ownership_test.go` → `TestLifecycleOwnershipExactlyOneWorkflowClaimant`: parses every `.mindspec/domains/*/OWNERSHIP.yaml`, asserts `internal/lifecycle/**` is claimed by EXACTLY ONE domain AND that domain is `workflow`. No OWNERSHIP.yaml was edited (workflow already claims it, sole claimant).
+
+**Known/accepted context (not defects):**
+- The `mindspec-sxjc` skill-copy DRIFT is PRE-EXISTING and OUT OF SCOPE: the embedded literal says `mindspec impl approve` + a session-close protocol + a `managed-by` marker; the materialized copies say `mindspec approve impl`, differ on step 5, lack the marker. Bead 3's REQUIRED edit is only the minimal AC9-compliant append to each file as-is — reconciling the drift is `mindspec-sxjc`'s job. Do NOT flag the pre-existing drift as a Bead-3 defect; DO confirm the appended section is content-consistent across the three.
+- No `.mindspec/docs/domains/` update: that directory doesn't exist in this repo; contract docs live in ADR-0037 + the skill. Whole-spec doc-sync uses `--allow-doc-skew` at impl-approve (established pattern). Not a Bead-3 defect.
+
+## What to verify at `1733886e`
+1. **AC9 — the docs are present, accurate, and RED-on-revert.** `grep -c 'impl approve' .mindspec/adr/ADR-0037-...md` ≥1 (was 0 at base — verified); `grep -c 'closed without' internal/setup/claude.go .claude/skills/ms-impl-approve/SKILL.md .agents/skills/ms-impl-approve/SKILL.md` ≥1 each (all 0 at base — verified). The ADR amendment is CONTRACT-LEVEL and ACCURATE to the shipped gate (`internal/approve/impl.go` `runOrphanObligationGate`): reach = every merging verb; single settlement surface = `mindspec complete`; impl approve computes no Allow/Block, writes no panel metadata; hatches don't bypass. The skill recovery text matches the gate's actual recovery (`mindspec complete <bead>` + the branch-less restoration recourse). No overclaim, no BranchExists/worktree/ancestry internals leaking into the contract docs.
+2. **AC10 — the ownership test genuinely pins exactly-one-workflow-claimant, RED-on-revert.** Read `ownership_test.go`: it must parse ALL `.mindspec/domains/*/OWNERSHIP.yaml`, assert `internal/lifecycle/**` claimed by exactly one domain = workflow, and be RED if a second claimant appears or the workflow claim reverts (reason it through / mutate in a throwaway). Run `go test -count=1 ./internal/lifecycle -run 'TestLifecycleOwnershipExactlyOneWorkflowClaimant' -v` (PASS) and `go test -count=1 ./internal/lifecycle` (package green). Confirm the test locates the repo root robustly (works from the package dir).
+3. **Skill append consistency.** The appended refusal section is content-consistent across the 3 surfaces (allowing for the pre-existing verb-order/marker drift OUTSIDE the appended block). The `claude.go` literal edit COMPILES (`go build ./...`) and has NO gofmt doc-comment/backtick-escape gotcha (`gofmt -l ./cmd ./internal` empty).
+4. **Scope + fences + green.** Only the 5 files changed (ADR + 3 skills + the new test); NO `internal/gitutil`/`internal/approve`/Bead-1-2 re-touch; NO OWNERSHIP.yaml edit; `BranchExistsE`/`show-ref` 0-hit; `go build ./...` + `go test -count=1 ./internal/lifecycle ./internal/setup` green; `go vet` + `golangci-lint run ./internal/setup/... ./internal/lifecycle/...` clean; `mindspec validate spec 115-impl-approve-panel-gate` passes.
+
+## Per-slot lens
+- **R1 Opus** author/scope — diff ↔ plan Bead-3 steps 1–3; only the 5 files; sxjc drift not reconciled (correct).
+- **R2 Opus** ADR accuracy — the amendment is contract-accurate to the shipped gate; no overclaim; single-settlement-surface + hatch semantics correct; chain position right (after 114).
+- **R3 Opus** AC10 RED-on-revert — the ownership test genuinely discriminates (mutate a domain claim in a throwaway worktree and confirm RED).
+- **R4 Sonnet** empirical — build / test / AC9 greps / AC10 test / gofmt / vet / golangci-lint / validate — actual output.
+- **R5 Sonnet** skill-surface consistency — the appended section is content-consistent across the 3 copies; the claude.go literal compiles and is gofmt-clean.
+- **R6 Sonnet** no-regression — the doc/literal changes break no existing setup/skill test (`go test ./internal/setup ./cmd/mindspec`); the skill-materialization path still works.
+- **R7 Fable-sub (Opus)** grounding/contradiction — every claim in the ADR + skill resolves against the shipped gate; no contradiction with the spec design (C+B, Option B, single settlement home, ADR-0030); the recovery text is truthful (branch-less case names the restoration prerequisite).
+- **R8 codex** adversarial + empirical — does the ADR/skill OVERCLAIM anything the gate doesn't do (e.g. claim it catches a case Leg 3 doesn't)? Is the AC10 test gameable (passes without genuinely asserting exactly-one-workflow)? Run the full empirical sweep + golangci-lint.
+
+Verdict: APPROVE / REQUEST_CHANGES / REJECT. Output JSON to `<this-dir>/<slot>-round-1.json`: `reviewer_id`, `verdict`, `confidence`, `rationale` (≤200 words), `concrete_changes_required` (empty if APPROVE), `findings`.
