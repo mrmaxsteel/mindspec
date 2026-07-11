@@ -1,0 +1,47 @@
+{
+  "reviewer_id": "F3 Fable",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Edge 2->1 is a real data edge: all four consumed exports (ScanOrphanedClosedBeads, ClosedEpicBeadIDs, CheckPendingObligations, PanelGateRoots) have ZERO production-code hits at 57d043fb (only unexported panelGateRoots + its test name exist), and internal/approve today imports none of lifecycle/complete/gitutil, so the plan's 'three NEW import edges' claim is empirically accurate; reverse edges absent (complete's only approve mentions are comments at complete.go:486 / complete_test.go:43). AC4's anchor grep is file-scoped to impl_test.go, so it stays RED after Bead 1 alone -- the edge is honest, not cosmetic. Bead 3's depends_on:[] is honest: every input pre-exists at HEAD (workflow/OWNERSHIP.yaml:9 sole internal/lifecycle/** claimant across all domain files; 'impl approve' 0 hits in ADR-0037; 'closed without' 0 hits in all three skill surfaces; the docs pre-draft file exists), and the plan explicitly labels land order 'orchestration preference, not a data edge' in both Decomposition and Bead 3's Depends-on. Chain = 2 <= 3. The 2a/2b non-split is sound (one contiguous gate block in impl.go, shared implXxxFn seam family, and a standalone 2a would ship a gate missing R3's unique coverage; fallback documented). No cross-bead file collision; no spec contradiction (C+B, Option-B added-not-replacing, single settlement home, ADR-0030 no-seam all honored; anchors :249/:226-227/:310/:452 resolve; gitutil diff vs main empty; negative fences 0-hit).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F3-1",
+      "severity": "LOW",
+      "status": "NEW_ISSUE",
+      "note": "Bead 1 step 3 says 'reconcilePendingRefutations is re-expressed over the same core' as the exported check-only predicate. Read literally that is impossible: the predicate ERRORS on an uncovered slot@round, while reconcile's normal path SETTLES uncovered entries (builds toSatisfy and writes panel_refuted, panel_advisory.go:558-582). The shared core must be an unexported compute-uncovered-set helper beneath BOTH wrappers, not the exported predicate itself. The pinned exported signature is correct and the 'no semantic test change in internal/complete' constraint disambiguates intent, so this is a bead-brief wording clarification, not a plan defect. Non-blocking."
+    },
+    {
+      "id": "F3-2",
+      "severity": "INFO",
+      "status": "ADDRESSED",
+      "note": "AC1/AC6/AC7 span two beads, but the Provenance table annotates each split explicitly ('lifecycle half lands in Bead 1', '(a) lands in Bead 1'), matching the spec's own multi-package proofs -- no double-ownership ambiguity in practice."
+    },
+    {
+      "id": "F3-3",
+      "severity": "INFO",
+      "status": "ADDRESSED",
+      "note": "Bead 3 references an out-of-repo pre-draft (/Users/Max/.claude/jobs/06840a22/tmp/spec-115-docs-predraft.md, verified present at review time). Not a bead-to-bead data edge; the plan's 'transcribes and re-grounds' wording keeps the bead executable even if the file evaporates."
+    },
+    {
+      "id": "brief-item-2-edges",
+      "status": "ADDRESSED",
+      "note": "Edge 2->1 real (four exports absent pre-Bead-1; approve imports none of the three packages today; acyclicity verified -- complete/lifecycle/gitutil contain no approve import). Bead 3 independence verified against the tree. No missing edge: Bead 2 is the only consumer of produced state; Bead 3 consumes only committed/pre-existing artifacts. No invented edge. Chain 2 <= 3. Frontmatter matches prose exactly ([], [1], [])."
+    },
+    {
+      "id": "brief-item-2-nonsplit",
+      "status": "ADDRESSED",
+      "note": "2a/2b rejection sound: both halves edit internal/approve/impl.go at one insertion point with the same seam family (>50% overlap merge heuristic), and intermediate 2a would ship an active gate lacking R3's unique coverage (closed bead + recorded obligation + deleted branch passes). Sanctioned fallback documented if the Bead-2 panel signals scope strain."
+    },
+    {
+      "id": "brief-item-2-collisions",
+      "status": "ADDRESSED",
+      "note": "No two beads touch the same file. Bead 1: orphans{,_test}.go, panel_advisory{,_test}.go, mindspec_executor.go, new finalize_worktree_only_test.go. Bead 2: impl{,_test}.go, new orphan_gate_test.go. Bead 3: ADR-0037, claude.go, two SKILL.md copies, new ownership_test.go. Neither new test file (finalize_worktree_only_test.go, orphan_gate_test.go, ownership_test.go) exists at HEAD; orphans_test.go vs ownership_test.go disjoint as the BRIEF requires."
+    },
+    {
+      "id": "brief-item-2-contradictions",
+      "status": "ADDRESSED",
+      "note": "No plan-vs-spec or plan-internal contradiction found. C+B: branchExistsFn stays the unchanged bool in core+wrapper, negative fences 0-hit at HEAD, git diff main -- internal/gitutil/ empty. Option B: worktree-enum leg ADDED (step 3) with the probe/shared-predicate leg retained (step 2). Single settlement home: no Allow/Block computed, no metadata written, no refutation applied; hatches restated not changed. ADR-0030: executor change is comment-only; no FinalizeEpic seam. Spec In-Scope's OWNERSHIP.yaml edit vs plan's 'NO edit needed' is consistent -- the claim is already committed on the branch, exactly as spec AC10's '(already-present) claim' states. Plan's AC5 'no refut substring' is strictly stronger than the spec's 'no panel refute / refutations' and implementable. All Verification bullets consistent with their Steps."
+    }
+  ]
+}

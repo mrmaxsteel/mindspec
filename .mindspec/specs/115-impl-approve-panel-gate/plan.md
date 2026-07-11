@@ -184,8 +184,17 @@ candidate domains from the spec, not from bead briefs).
    by a durable `panel_refuted_entries` record; returns an error naming the
    uncovered slot@round, and an error (never decode-as-empty) on a metadata
    read error, a present-but-corrupt entries value, or a shape-invalid entry
-   (empty slot / round < 1). `reconcilePendingRefutations` is re-expressed
-   over the same core so complete's own behavior is provably unchanged (no
+   (empty slot / round < 1). **The shared core is a new UNEXPORTED helper
+   that computes the set of uncovered (slot, round) entries — NOT the
+   exported `CheckPendingObligations` predicate itself.** The two wrappers
+   diverge on what they do with that set: the exported check-only predicate
+   returns the uncovered set as an ERROR (and errors on any read / corrupt /
+   shape-invalid input — it never settles), whereas
+   `reconcilePendingRefutations` CONSUMES the set to SETTLE uncovered entries
+   by writing `panel_refuted` metadata (`panel_advisory.go:558-582`).
+   Re-express BOTH as thin wrappers over that unexported
+   compute-uncovered-set helper — do NOT make reconcile call the erroring
+   predicate — so complete's own behavior is provably unchanged (no
    semantic test change in `internal/complete`).
 4. **`internal/complete/panel_advisory.go` — export the layout-aware panel
    root scan (R2's single-home reuse).** `panelGateRoots` (doc `:605`, def
@@ -195,6 +204,13 @@ candidate domains from the spec, not from bead briefs).
    reimplementing the root order in `internal/approve` — single-home, and it
    rides the same `approve → complete` import edge R3's predicate already
    adds. No behavior change; existing callers untouched.
+   **Discriminator caution:** the pre-existing test
+   `TestPanelGateRoots_LayoutAware` already contains the substring
+   `PanelGateRoots`, so any bead-brief existence discriminator for this
+   export MUST use a func-def-scoped grep (e.g.
+   `grep -q 'func PanelGateRoots' internal/complete/panel_advisory.go`) or a
+   file-scoped grep — never a bare `grep -q 'PanelGateRoots'`, which is
+   GREEN today and would not be RED-on-revert.
 5. **`internal/complete` tests.** New `TestPendingObligationPredicate`
    (AC6's predicate pin: uncovered → error naming slot@round;
    (slot, round)-exact covered → nil; read error / corrupt entries /
@@ -377,8 +393,11 @@ Bead 1 or already exists (`bead.WorktreeList`, `bead.GetMetadata`,
    their exact 114 semantics inside the recovery `complete` run.
 6. **Call-order anchor (AC4).** Extend `TestApproveImplCallOrder`
    (`impl_test.go:714`, AST-based) with a new anchor referencing the gate's
-   call site by the core's name (`ScanOrphanedClosedBeads` — ZERO hits
-   repo-wide at `eb6a2ed1`), asserting it sits after the last read-only gate
+   call site by the core's name (`ScanOrphanedClosedBeads` — ZERO code hits
+   at `eb6a2ed1`: the operative grep is file-scoped to
+   `internal/approve/impl_test.go`, no `func`/symbol match in the graded
+   scope; the only repo-wide match is the spec's own prose), asserting it
+   sits after the last read-only gate
    and BEFORE the deferred phase-reconcile write, MUTATION (1/3), and
    `FinalizeEpic`. `TestApproveImpl_HappyPath` (`:75`) and
    `TestApproveImpl_FinalizeEpicCalled` (`:299`) get NO semantic change
@@ -505,7 +524,10 @@ all domain files).
    AC9-compliant append to each file as-is; reconciling the verb-order /
    step-5 / marker drift is `mindspec-sxjc`'s scope — if the bead reconciles
    it opportunistically, it must first check the missing `managed-by` marker's
-   effect on `refreshManagedSkill`'s shipped-vs-user-modified detection and
+   effect on the shipped-vs-user-modified detection in
+   `internal/setup/skills.go` (`installSkills`/`matchesShipped`) — note
+   `refreshManagedSkill` exists only inside a doc comment
+   (`internal/setup/claude.go:679-680`), not as a function — and
    say so in completion notes; do NOT silently normalize.
 3. **AC10 structural ownership test (round-7: the proof made
    RED-on-revert).** The former `grep -l` one-liner is GREEN at the review
@@ -666,6 +688,12 @@ No ADR divergence is proposed anywhere in this plan; no ADR is superseded.
   executor fixtures of `finalize_orphan_test.go`/`merge_conflict_test.go`.
 
 ## Provenance
+
+Legend: compound ACs whose proof spans the Bead 1 → Bead 2 substrate/consumer
+dependency edge (AC1, AC6, AC7) name their COMPLETION-OWNER bead in the Bead
+column (the later bead, which fully satisfies the AC), with the prerequisite
+substrate half annotated inline in that same cell — no proof test is authored
+in two beads; only the AC→test mapping spans the edge.
 
 | Spec AC | Bead | Verification step (named, runnable) |
 |---|---|---|
