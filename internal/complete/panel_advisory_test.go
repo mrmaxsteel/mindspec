@@ -623,6 +623,77 @@ func TestPendingObligationPredicate(t *testing.T) {
 			t.Errorf("expected nil for valid present-but-empty arrays on both keys, got: %v", err)
 		}
 	})
+
+	// --- Spec 115 Bead 1 R8 round-3 fix (exhaustive, symmetric): -----------
+	// panel_refuted_entries ARRAY ELEMENTS were not shape-validated —
+	// encoding/json decodes a null element as a zero-valued
+	// panel.Refutation{Slot:"", Round:0}, and a covering entry with empty
+	// slot / round < 1 was never rejected, unlike pending entries (shape-
+	// checked above). These pin the new per-element validation of
+	// coveredRefuted running BEFORE the len(pending)==0 early return —
+	// RED-on-revert: removing the new loop makes each of these three PASS
+	// (return nil) instead of erroring.
+
+	t.Run("refuted:[null] with pending absent → error (RED-on-revert)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"panel_refuted_entries": []interface{}{nil},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a null panel_refuted_entries element to error (RED-on-revert: passes as nil without the per-element shape check)")
+		}
+		if !strings.Contains(err.Error(), "malformed panel_refuted_entries entry") {
+			t.Errorf("expected the malformed-refuted-entry message, got: %v", err)
+		}
+	})
+
+	t.Run("refuted entry with empty slot → error", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"panel_refuted_entries": []panel.Refutation{{Slot: "", Round: 1}},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a shape-invalid refuted entry (empty slot) to error")
+		}
+		if !strings.Contains(err.Error(), "malformed panel_refuted_entries entry") {
+			t.Errorf("expected the malformed-refuted-entry message, got: %v", err)
+		}
+	})
+
+	t.Run("refuted entry with round < 1 → error", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"panel_refuted_entries": []panel.Refutation{{Slot: "x", Round: 0}},
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a shape-invalid refuted entry (round < 1) to error")
+		}
+		if !strings.Contains(err.Error(), "malformed panel_refuted_entries entry") {
+			t.Errorf("expected the malformed-refuted-entry message, got: %v", err)
+		}
+	})
+
+	t.Run("valid non-empty pending fully covered by a valid covering entry → nil (unchanged)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{
+					{Slot: "X", Round: 3, Reason: "dismissed", Evidence: "commit abc"},
+				},
+				"panel_refuted_entries": []panel.Refutation{
+					{Slot: "X", Round: 3, Reason: "dismissed", Evidence: "commit abc"},
+				},
+			}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil: a valid covering entry must still clear a valid pending obligation, got: %v", err)
+		}
+	})
 }
 
 // --- Spec 115 Bead 1: AC7(a) — complete.Run re-gates an already-closed -----

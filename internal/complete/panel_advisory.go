@@ -574,6 +574,33 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			beadID, decErr)
 	}
 
+	// Validate EVERY decoded panel_refuted_entries element's shape (Spec 115
+	// Bead 1 R8 round-3 finding): encoding/json decodes a null array element
+	// as a zero-valued panel.Refutation{Slot:"", Round:0}, which the bare
+	// json.Unmarshal in decodeRefutations lets through silently. Pending
+	// entries are already shape-checked below (empty slot / round < 1 ->
+	// error); refuted (covering) entries were NOT — an asymmetry. A
+	// malformed covering entry cannot over-cover a valid pending obligation
+	// (its coverage key pendingEntryKey("", 0) can never equal a VALID
+	// pending entry's key, since a pending entry with empty slot/round<1 is
+	// itself rejected below before the coverage check), so this is
+	// defense-in-depth, not a live fail-open. But the R3 contract states a
+	// present-but-corrupt value REFUSES unconditionally, and a shape-invalid
+	// covering element is a corrupt value — so exhaustive, symmetric
+	// per-element validation of BOTH arrays is the convergent structural
+	// close: every field of every element of both arrays is now validated
+	// before any early return, definitively closing the corrupt-shape
+	// class. Validated up front, before the len(pending)==0 early return
+	// below, so an absent/empty pending array can never mask a
+	// shape-invalid refuted entry.
+	for _, c := range coveredRefuted {
+		if c.Slot == "" || c.Round < 1 {
+			return nil, fmt.Errorf(
+				"bead %s carries a malformed panel_refuted_entries entry (slot %q, round %d) — a shape-invalid audit store cannot prove which obligations are already satisfied",
+				beadID, c.Slot, c.Round)
+		}
+	}
+
 	if len(pending) == 0 {
 		return nil, nil
 	}
