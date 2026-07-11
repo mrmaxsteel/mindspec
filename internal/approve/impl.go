@@ -14,7 +14,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
-	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -56,8 +55,9 @@ var (
 	// implScanOrphansFn is R1's error-preserving orphan scan (fail-
 	// closed on the three cleanly-signaled infra legs: epic-lookup,
 	// bd-list, ancestry). The branch-existence trigger inside it stays
-	// the unchanged bool gitutil.BranchExists (round-6 C+B) — absent-or-
-	// probe-failure reads as "no trigger", never a false refusal.
+	// the unchanged bool gitutil.BranchExists (round-6 C+B, via
+	// lifecycle's own internal seam) — absent-or-probe-failure reads as
+	// "no trigger", never a false refusal.
 	implScanOrphansFn = lifecycle.ScanOrphanedClosedBeads
 	// implClosedEpicBeadIDsFn and implWorktreeListFn back the round-7
 	// Option B worktree-enumeration merge-prevention leg (AC13): the
@@ -68,13 +68,18 @@ var (
 	implClosedEpicBeadIDsFn = lifecycle.ClosedEpicBeadIDs
 	implWorktreeListFn      = bead.WorktreeList
 	// implIsAncestorFn drives the worktree-enum leg's ancestry check —
-	// taken directly via gitutil (the spec names gitutil.IsAncestor for
-	// this leg; internal/lifecycle already consumes it the same way).
-	implIsAncestorFn = gitutil.IsAncestor
+	// routed through lifecycle.IsAncestor, a thin wrapper over
+	// gitutil.IsAncestor, so this ADR-0030 enforcement package never
+	// imports the git-plumbing package directly (internal/lint
+	// boundary; internal/lifecycle already consumes it the same way).
+	implIsAncestorFn = lifecycle.IsAncestor
 	// implBranchExistsFn feeds ONLY the R3 obligation backstop's
 	// branch-state-truthful recovery line (round-2 G3) — never the
 	// orphan-detection trigger, which stays inside implScanOrphansFn.
-	implBranchExistsFn = gitutil.BranchExists
+	// Routed through lifecycle.BranchExists (thin wrapper over
+	// gitutil.BranchExists) for the same ADR-0030 boundary reason as
+	// implIsAncestorFn above.
+	implBranchExistsFn = lifecycle.BranchExists
 	// implGetMetadataFn and implCheckObligationsFn back R3's durable-
 	// obligation backstop: the SAME check-only coverage predicate
 	// (Spec 114 R2 discipline) `mindspec complete` itself settles,
@@ -562,9 +567,10 @@ func isAlreadyClosedErr(err error) bool {
 //     closed epic bead whose bead/<id> branch exists and is NOT an
 //     ancestor of the spec branch was closed without `mindspec
 //     complete`. The branch-existence trigger inside it stays the
-//     unchanged bool gitutil.BranchExists (round-6 C+B): absent, or a
-//     probe-infra failure, both read as "no trigger" — a genuinely
-//     deleted (merged-and-cleaned) branch never false-refuses.
+//     unchanged bool gitutil.BranchExists (round-6 C+B, via lifecycle's
+//     own internal seam): absent, or a probe-infra failure, both read
+//     as "no trigger" — a genuinely deleted (merged-and-cleaned) branch
+//     never false-refuses.
 //  2. The round-7 Option B worktree-enumeration merge-prevention leg
 //     (AC13): keyed off the SAME `bd worktree list` enumeration
 //     FinalizeEpic itself merges from, so a transient branch-existence-
