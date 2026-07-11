@@ -559,6 +559,70 @@ func TestPendingObligationPredicate(t *testing.T) {
 			t.Errorf("expected a present-but-null message, got: %v", err)
 		}
 	})
+
+	// --- Spec 115 Bead 1 R8 round-3 fix (structural): the round-2 fix ------
+	// validated panel_refuted_entries AFTER the len(pending)==0 early
+	// return, so a present-but-corrupt panel_refuted_entries value passed
+	// silently whenever refutation_pending_entries was absent/empty. These
+	// pin the validation now running UNCONDITIONALLY before that early
+	// return — RED-on-revert: moving the panel_refuted_entries validation
+	// back after the early return makes these two fail.
+
+	t.Run("empty pending + present-but-null panel_refuted_entries → error (RED-on-revert)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{},
+				"panel_refuted_entries":      nil,
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a present-but-null panel_refuted_entries to error even when pending is empty (RED-on-revert: passes only if the validation is moved back after the len(pending)==0 early return)")
+		}
+		if !strings.Contains(err.Error(), "present-but-null") {
+			t.Errorf("expected a present-but-null message, got: %v", err)
+		}
+	})
+
+	t.Run("absent pending + corrupt panel_refuted_entries → error (RED-on-revert)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"panel_refuted_entries": "corrupt-not-an-array",
+			}, nil
+		}
+		err := CheckPendingObligations("mindspec-x", getMeta)
+		if err == nil {
+			t.Fatal("expected a corrupt panel_refuted_entries to error even when refutation_pending_entries is absent (RED-on-revert: passes only if the validation is moved back after the len(pending)==0 early return)")
+		}
+		if !strings.Contains(err.Error(), "could not be decoded") {
+			t.Errorf("expected a decode-error message, got: %v", err)
+		}
+	})
+
+	// --- No-false-refuse pins: valid present-empty arrays on both keys ----
+	// must still no-op, so the structural move above does not turn a
+	// pristine or valid-but-empty bead into a false refuse.
+
+	t.Run("both keys absent → nil (pristine bead, no false-refuse)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil for a bead with both keys absent, got: %v", err)
+		}
+	})
+
+	t.Run("valid empty pending + valid empty refuted → nil (no false-refuse)", func(t *testing.T) {
+		getMeta := func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"refutation_pending_entries": []refutationPendingEntry{},
+				"panel_refuted_entries":      []panel.Refutation{},
+			}, nil
+		}
+		if err := CheckPendingObligations("mindspec-x", getMeta); err != nil {
+			t.Errorf("expected nil for valid present-but-empty arrays on both keys, got: %v", err)
+		}
+	})
 }
 
 // --- Spec 115 Bead 1: AC7(a) — complete.Run re-gates an already-closed -----

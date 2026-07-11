@@ -548,15 +548,19 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			"bead %s carries a refutation_pending_entries record that could not be decoded — a corrupt obligation store cannot prove the bead is obligation-free (%v)",
 			beadID, decErr)
 	}
-	if len(pending) == 0 {
-		return nil, nil
-	}
 
-	// Settle only the pending entries NOT already covered by a durable
-	// panel_refuted audit — those obligations are met of-record. The
-	// covering read is fail-closed too: a present-but-corrupt audit array
-	// errors rather than reading as "nothing covered". Same present-null vs
-	// absent distinction as above, for contract symmetry.
+	// Read + validate panel_refuted_entries UNCONDITIONALLY, BEFORE the
+	// len(pending)==0 early return below (Spec 115 Bead 1 R8 round-2
+	// finding): the round-2 fix placed this validation AFTER that early
+	// return, so a present-but-corrupt panel_refuted_entries value (e.g.
+	// present-null, or a wrong-typed value) silently passed whenever
+	// refutation_pending_entries was absent or empty — a fail-OPEN hole in
+	// exactly the case a corrupt-metadata attacker would prefer (no pending
+	// obligations to notice the audit store is broken). Validating BOTH
+	// metadata keys up front, order-independent, before ANY early return
+	// closes the whole corrupt-shape class in one structural move (the
+	// spec-114 "structural, not sibling-by-sibling patch" lesson) rather
+	// than adding another conditional check for this one sibling.
 	rawRefuted, presentRefuted := meta["panel_refuted_entries"]
 	if presentRefuted && rawRefuted == nil {
 		return nil, fmt.Errorf(
@@ -569,6 +573,15 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
 			beadID, decErr)
 	}
+
+	if len(pending) == 0 {
+		return nil, nil
+	}
+
+	// Settle only the pending entries NOT already covered by a durable
+	// panel_refuted audit — those obligations are met of-record. Both
+	// metadata keys are already validated above, so this coverage walk
+	// never needs its own early return.
 	covered := make(map[string]bool, len(coveredRefuted))
 	for _, c := range coveredRefuted {
 		covered[pendingEntryKey(c.Slot, c.Round)] = true
