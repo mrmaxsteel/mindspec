@@ -20,13 +20,19 @@ description: Approve implementation and close out the spec lifecycle
 
 `mindspec impl approve` REFUSES to finalize (non-zero exit; nothing is
 closed, written, merged, or pushed) when any closed bead under the spec's
-epic was closed without `mindspec complete` — such a bead lacks proof of
-panel settlement, and only `mindspec complete` settles it. The refusal
+epic is DETECTABLY unsettled: its `bead/<id>` branch is still an unmerged
+non-ancestor of the spec branch — it was closed without `mindspec
+complete` and never merged — or it carries a durable refutation
+obligation not covered by a durable `panel_refuted` record. The refusal
 names the bead. Recovery: run `mindspec complete <bead>` — it tolerates
 the already-closed bead, re-runs the full panel gate (blocking until any
 unresolved REQUEST_CHANGES is resolved or durably refuted), merges the
-bead branch, and then `mindspec impl approve` succeeds. If the bead's
-`bead/<id>` branch no longer exists, the refusal names the restoration
-prerequisite instead: restore the branch ref (or settle the obligation
-out-of-band) so `mindspec complete <bead>` can reach its reconciliation
-step. Skip/abandon hatches do not bypass this refusal.
+bead branch, and the orphan/obligation gate no longer blocks `mindspec
+impl approve` (which then finalizes subject to its other gates). If the
+bead's `bead/<id>` branch no longer exists, the refusal names the
+restoration prerequisite instead: restore the branch ref (or settle the
+obligation out-of-band) so `mindspec complete <bead>` can reach its
+reconciliation step. Skip/abandon hatches do not bypass this refusal.
+Disclosed residual: a bead branch already raw-`git merge`d and then
+`bd close`d, carrying no durable refutation obligation, leaves nothing
+for this gate to detect — see ADR-0037.

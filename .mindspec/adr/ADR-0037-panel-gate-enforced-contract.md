@@ -159,15 +159,18 @@ retirement deferred to a follow-up bead. See the amendment below.
 > its enforcement home — to close that path: **the contract now covers every
 > lifecycle verb that can merge a bead branch.** `mindspec impl approve`
 > REFUSES to finalize (exit non-zero: no epic close, no phase write, no
-> merge, no push) while any closed bead under the spec's epic lacks proof of
-> panel settlement — it was closed without `mindspec complete`, or it
-> carries a durable refutation obligation (§7 amendment's
-> `refutation_pending` marker) not covered by a durable `panel_refuted`
-> record. The refusal names the offending bead, and its recovery is
-> `mindspec complete <bead>`: `complete` tolerates an already-closed bead,
-> re-runs the full layered gate (including the 2026-07-10 §3 rule that any
-> unresolved REQUEST_CHANGES blocks) plus the §7 obligation reconciliation,
-> and merges — after which `impl approve` finalizes.
+> merge, no push) while any closed bead under the spec's epic is
+> DETECTABLY unsettled — scoped to what this gate can actually see: its
+> `bead/<id>` branch is still an unmerged non-ancestor of the spec branch
+> (closed without `mindspec complete`), or it carries a durable
+> refutation obligation (§7 amendment's `refutation_pending` marker) not
+> covered by a durable `panel_refuted` record. The refusal names the
+> offending bead, and its recovery is `mindspec complete <bead>`:
+> `complete` tolerates an already-closed bead, re-runs the full layered
+> gate (including the 2026-07-10 §3 rule that any unresolved
+> REQUEST_CHANGES blocks) plus the §7 obligation reconciliation, and
+> merges — after which the orphan/obligation gate no longer blocks
+> `impl approve` (which then finalizes subject to its remaining gates).
 >
 > The **single settlement surface remains `mindspec complete`** — there is
 > no second gate home. `impl approve` never computes an Allow/Block
