@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -112,12 +112,7 @@ func init() {
 // contain a raw control byte or a literal newline, so a hostile value can
 // never span or forge additional output lines.
 func escapeConfigValue(s string) string {
-	for _, r := range s {
-		if r < 0x20 || r > 0x7e {
-			return strconv.Quote(s)
-		}
-	}
-	return s
+	return termsafe.Escape(s)
 }
 
 // renderConfig renders the effective config, cfg, as human-readable
