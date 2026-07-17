@@ -412,6 +412,27 @@ func TestCheckMigrationMetadata_CurrentContractMutations(t *testing.T) {
 				}
 			},
 		},
+		{
+			// G1 (spec 118 final-review): the mover never writes an empty
+			// stage (every internal/layout/runstate.go stage constant is
+			// non-empty), so a parseable state.json with stage "" is a
+			// malformed/incomplete artifact, not a benign in-progress run.
+			// It must be Error (HasFailures true, nonzero exit), consistent
+			// with the empty-run_id/empty-entries manifest/lineage guards
+			// above — not the Warn treatment reserved for a genuine
+			// non-empty in-progress stage (see non_applied_finalize_warns).
+			name: "empty_stage_is_error",
+			mutate: func(t *testing.T, root string) {
+				path := filepath.Join(root, ".mindspec", "migrations", runID, "state.json")
+				if err := os.WriteFile(path, []byte(`{"run_id": "`+runID+`", "stage": ""}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: expectCheckStatus(
+				filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "state.stage")),
+				Error,
+			),
+		},
 	}
 
 	for _, tc := range cases {

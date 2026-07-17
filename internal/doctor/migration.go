@@ -363,7 +363,7 @@ func validateRun(r *Report, migrationsRoot, runID string, manifestValid bool, ma
 	case "applied":
 		r.Checks = append(r.Checks, Check{Name: stageName, Status: OK, Message: state.Stage})
 	case "":
-		r.Checks = append(r.Checks, Check{Name: stageName, Status: Warn, Message: "stage missing"})
+		r.Checks = append(r.Checks, Check{Name: stageName, Status: Error, Message: "state.json stage is empty (malformed run-state)"})
 	default:
 		r.Checks = append(r.Checks, Check{
 			Name:    stageName,
