@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-07-17
+
+A P1 fix for a layout-resolution regression that could wedge a repository
+flattened after upgrading to v0.11.0.
+
+### Fixed
+- **Flattened repos with an ordinary `docs/` no longer wedge into `mixed`**
+  (`mindspec-5x8r`) — layout markers were set by bare directory existence, so a
+  correctly-flattened repo that also kept a normal repo-root `docs/` (or a
+  leftover/empty `.mindspec/docs/`) was classified `layout: mixed` permanently.
+  That silently routed `mindspec spec create` down the legacy write path
+  (orphaning newly created specs from the active lifecycle) and made
+  `mindspec doctor` exit 1. Canonical and legacy markers are now
+  **lifecycle-shaped**: a `docs`/`.mindspec/docs` wrapper marks canonical/legacy
+  only when it directly contains a lifecycle directory (`specs`, `adr`,
+  `domains`, or `core`) or that tier's `context-map.md` file — symmetric with
+  the existing flat-marker rule and consistent with ADR-0039's three-tier
+  resolver. The git-ref merge guard applies the identical rule (via a
+  type-aware `git ls-tree` blob probe, so a `context-map.md` committed as a
+  directory does not mark a tier), keeping filesystem and ref classification
+  from drifting.
+- **`mindspec doctor` no longer exits 1 after a completed `migrate layout`** —
+  `checkMigrationMetadata` was a fossil of the spec-036 classify pipeline
+  removed in spec 045: it demanded seven long-deleted artifacts and suggested a
+  `migrate apply` command that no longer exists. It is rekeyed to the current
+  `migrate layout` metadata contract (the lineage manifest plus the per-run
+  `state.json`/`lineage.json`), so a healthy completed migration reports clean
+  while malformed or incomplete run-state — empty or mismatched `run_id`, empty
+  `entries`, or an empty/malformed `state.json` stage — still errors.
+
+### Documentation
+- ADR-0039 Decision §2 reconciled to document the existing legacy
+  `docs/context-map.md` resolver fallback (a documentation-consistency
+  amendment; no resolver behavior change).
+
 ## [0.11.0] - 2026-07-16
 
 The review panel becomes a first-class, in-binary lifecycle: `mindspec panel
