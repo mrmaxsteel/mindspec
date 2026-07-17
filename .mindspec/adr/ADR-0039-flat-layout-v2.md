@@ -55,7 +55,9 @@ roots) resolves with **flat → canonical → legacy** precedence, first-exists-
 1. **flat** — `.mindspec/{specs,adr,domains,core}` / `.mindspec/context-map.md`.
 2. **canonical** — `.mindspec/docs/{specs,adr,domains,core}` /
    `.mindspec/docs/context-map.md`.
-3. **legacy** — root `docs/{specs,adr,domains,core}`.
+3. **legacy** — root `docs/{specs,adr,domains,core}` / `docs/context-map.md`.
+
+This documentation-consistency reconciliation records the existing ContextMapPath/resolveArtifact fallback; it makes no resolver behavior change and does not supersede ADR-0039.
 
 With NO flat tree present the resolver returns the canonical/legacy path
 BYTE-FOR-BYTE as before spec 106 — the refactor is behavior-preserving for
