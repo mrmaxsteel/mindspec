@@ -20,42 +20,87 @@ import (
 // covers the LOCAL-merge seams only, and this is stated rather than overclaimed.
 
 // layoutAtRef fingerprints the docs layout of ref's tree, read THROUGH the
-// executor's own git seam (TreeDirsAtRef) and classified by the shared Bead-1
-// workspace signature helper (ClassifyLayout / LayoutMarkersFromMindspecChildren)
-// — one source of truth, so the merge guard and the on-disk DetectLayout can
-// never drift. Flat vs canonical is read from the immediate .mindspec children;
-// legacy (a repo-root docs/ tree, NOT observable from .mindspec children) is
-// probed only when neither flat nor canonical markers are present, so the common
-// path costs a single ls-tree.
+// executor's own git seam (TreeDirsAtRef / BlobExistsAtRef) and classified by
+// the shared Bead-1 workspace signature helper (ClassifyLayout) — one source
+// of truth, so the merge guard and the on-disk DetectLayout can never drift.
+//
+// Bead 2 (spec 118): flat, canonical, and legacy are each derived
+// INDEPENDENTLY by descending the tier's own wrapper — NO `!Flat &&
+// !Canonical` gating — so every marker is observed regardless of the others
+// (AC-9, AC-11). This supersedes the pre-Bead-2 shortcut that treated the
+// bare .mindspec child name "docs" as a canonical marker
+// (workspace.LayoutMarkersFromMindspecChildren, now flat-only — see its
+// doc comment) and treated bare `docs` wrapper existence as a legacy marker;
+// neither a bare wrapper nor a bare `docs` child name marks a tier anymore.
 func (g *MindspecExecutor) layoutAtRef(ref string) (workspace.Layout, error) {
-	children, err := g.TreeDirsAtRef(ref, ".mindspec")
+	flat, err := g.tierMarkerAtRef(ref, ".mindspec", ".mindspec/context-map.md")
 	if err != nil {
 		return "", err
 	}
-	m := workspace.LayoutMarkersFromMindspecChildren(children)
-	if !m.Flat && !m.Canonical {
-		if present, perr := g.pathExistsAtRef(ref, "docs"); perr == nil && present {
-			m.Legacy = true
+	canonical, err := g.tierMarkerAtRef(ref, ".mindspec/docs", ".mindspec/docs/context-map.md")
+	if err != nil {
+		return "", err
+	}
+	legacy, err := g.tierMarkerAtRef(ref, "docs", "docs/context-map.md")
+	if err != nil {
+		return "", err
+	}
+	return workspace.ClassifyLayout(workspace.LayoutMarkers{
+		Flat:      flat,
+		Canonical: canonical,
+		Legacy:    legacy,
+	}), nil
+}
+
+// tierMarkerAtRef reports whether a single docs tier is marked as populated
+// at ref: an immediate child of wrapperPath matching the shared
+// workspace.IsLifecycleChildName predicate (specs/adr/domains/core) — which
+// TreeDirsAtRef already restricts to TREE entries, so a same-named regular
+// file never counts — OR contextMapPath existing as a BLOB at ref (checked
+// with the type-aware BlobExistsAtRef, never FileAtRef/`git show`, which also
+// succeeds for a tree). It mirrors the filesystem tier probes
+// (workspace.flatTreePresent / canonicalTreePresent / legacyTreePresent) but
+// reads through git instead of the filesystem, so an absent or bare wrapper
+// (empty TreeDirsAtRef result, no context-map blob) reports false with no
+// error (Bead 2 / AC-9, AC-11, AC-16, AC-17, AC-18, AC-23).
+func (g *MindspecExecutor) tierMarkerAtRef(ref, wrapperPath, contextMapPath string) (bool, error) {
+	children, err := g.TreeDirsAtRef(ref, wrapperPath)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range children {
+		if workspace.IsLifecycleChildName(name) {
+			return true, nil
 		}
 	}
-	return workspace.ClassifyLayout(m), nil
+	return g.BlobExistsAtRef(ref, contextMapPath)
 }
 
 // mergeLayoutRegression reports whether merging a sourceLayout tree onto a
 // targetLayout tree is the REGRESSION direction the directional guard blocks
-// (Req 9): a canonical/legacy source onto a FLAT target — the merge that would
-// resurrect the pre-flatten .mindspec/docs/... paths on top of an
-// already-flattened tree. EVERY other combination is allowed: same-layout
+// (Req 9; extended by Bead 2 / spec 118 AC-10, AC-12, AC-22): a
+// canonical/legacy/MIXED source onto a FLAT target — the merge that would
+// resurrect the pre-flatten .mindspec/docs/... (or root docs/...) paths on
+// top of an already-flattened tree. A mixed source already coexists with a
+// flat lifecycle tree of its own (ClassifyLayout only reports Mixed when a
+// flat marker is present alongside a canonical/legacy one), so it carries
+// the exact same regression risk as a pure canonical/legacy source and is
+// blocked identically. EVERY other combination is allowed: same-layout
 // (flat→flat, canonical→canonical), the flat→canonical/legacy MIGRATION
 // direction (the flatten landing itself — so Bead 5's own move-merge and the
-// eventual flat-spec→canonical-main merge are NOT blocked), and any
-// greenfield/mixed signature. The rule is precise: block ⟺ source is
-// canonical/legacy AND target is flat.
+// eventual flat-spec→canonical-main merge are NOT blocked), and a greenfield
+// source. The rule is precise: block ⟺ source is canonical/legacy/mixed AND
+// target is flat.
 func mergeLayoutRegression(sourceLayout, targetLayout workspace.Layout) bool {
 	if targetLayout != workspace.LayoutFlat {
 		return false
 	}
-	return sourceLayout == workspace.LayoutCanonical || sourceLayout == workspace.LayoutLegacy
+	switch sourceLayout {
+	case workspace.LayoutCanonical, workspace.LayoutLegacy, workspace.LayoutMixed:
+		return true
+	default:
+		return false
+	}
 }
 
 // guardMergeLayout HARD-FAILS the REGRESSION merge direction (canonical/legacy
