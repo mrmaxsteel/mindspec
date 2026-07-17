@@ -197,6 +197,13 @@ func dualLayoutDuplicateSpecIDs(root string) []dualLayoutDup {
 	return dups
 }
 
+// lineageManifest matches BOTH the global lineage manifest
+// (.mindspec/lineage/manifest.json) and the per-run copy
+// (.mindspec/migrations/<run-id>/lineage.json) written by the CURRENT
+// `mindspec migrate layout` mover (internal/layout.LineageManifest /
+// Mover.writeLineage). The retired classify/plan/apply pipeline (inventory,
+// classification, extraction, plan, validation, apply, docs_archive/) is
+// gone; this is the only lineage schema doctor validates.
 type lineageManifest struct {
 	RunID   string                 `json:"run_id"`
 	Entries []lineageManifestEntry `json:"entries"`
@@ -208,111 +215,172 @@ type lineageManifestEntry struct {
 	Archive   string `json:"archive"`
 }
 
+// runState matches the per-run state.json record (internal/layout.State).
+// Only Stage is read; extra fields (pre_run_ref, published, group, ...) are
+// ignored unknown keys.
 type runState struct {
 	Stage string `json:"stage"`
 }
 
+// checkMigrationMetadata validates the CURRENT `mindspec migrate layout`
+// contract: a completed run leaves exactly three durable artifacts — the
+// global .mindspec/lineage/manifest.json, and per-run
+// .mindspec/migrations/<run-id>/{lineage.json,state.json}. It no longer
+// checks for docs_archive/ or the retired classify/plan/apply pipeline
+// (inventory.json, classification.json, extraction.json, plan.json,
+// plan.md, validation.json, apply.json) and emits no `migrate apply` hint.
+//
+// The check is ARMED by the global manifest OR any per-run
+// lineage.json/state.json under .mindspec/migrations/<run-id>/, so deleting
+// the global manifest out from under an otherwise-present run does not
+// silence validation — it instead surfaces as a Missing finding for the
+// manifest itself.
 func checkMigrationMetadata(r *Report, root string) {
-	archiveDir := filepath.Join(root, "docs_archive")
 	lineagePath := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
+	hasGlobalManifest := fileExists(lineagePath)
 
-	hasArchive := dirExists(archiveDir)
-	hasLineage := fileExists(lineagePath)
-	if !hasArchive && !hasLineage {
+	migrationsRoot := filepath.Join(root, ".mindspec", "migrations")
+	evidenceRuns := runsWithEvidence(migrationsRoot)
+
+	if !hasGlobalManifest && len(evidenceRuns) == 0 {
 		return
-	}
-
-	if hasArchive {
-		r.Checks = append(r.Checks, Check{Name: "docs_archive/", Status: OK})
-	} else {
-		r.Checks = append(r.Checks, Check{
-			Name:    "docs_archive/",
-			Status:  Missing,
-			Message: "create docs_archive/<run-id>/... from migrate apply",
-		})
 	}
 
 	manifestName := filepath.ToSlash(filepath.Join(".mindspec", "lineage", "manifest.json"))
-	if !hasLineage {
-		r.Checks = append(r.Checks, Check{
-			Name:    manifestName,
-			Status:  Missing,
-			Message: "run migrate apply to emit lineage manifest",
-		})
-		return
-	}
 
 	var manifest lineageManifest
-	if err := readJSONFile(lineagePath, &manifest); err != nil {
+	manifestValid := false
+	switch {
+	case !hasGlobalManifest:
 		r.Checks = append(r.Checks, Check{
 			Name:    manifestName,
-			Status:  Error,
-			Message: err.Error(),
-		})
-		return
-	}
-	if manifest.RunID == "" {
-		r.Checks = append(r.Checks, Check{
-			Name:    manifestName,
-			Status:  Error,
-			Message: "missing run_id",
-		})
-		return
-	}
-	if len(manifest.Entries) == 0 {
-		r.Checks = append(r.Checks, Check{
-			Name:    manifestName,
-			Status:  Error,
-			Message: "entries must not be empty",
-		})
-		return
-	}
-	r.Checks = append(r.Checks, Check{
-		Name:    manifestName,
-		Status:  OK,
-		Message: fmt.Sprintf("(run-id=%s, entries=%d)", manifest.RunID, len(manifest.Entries)),
-	})
-
-	runDir := filepath.Join(root, ".mindspec", "migrations", manifest.RunID)
-	required := []string{"inventory.json", "classification.json", "extraction.json", "plan.json", "plan.md", "validation.json", "state.json", "lineage.json", "apply.json"}
-	for _, name := range required {
-		path := filepath.Join(runDir, name)
-		checkName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", manifest.RunID, name))
-		if fileExists(path) {
-			r.Checks = append(r.Checks, Check{Name: checkName, Status: OK})
-			continue
-		}
-		r.Checks = append(r.Checks, Check{
-			Name:    checkName,
 			Status:  Missing,
-			Message: "missing migration checkpoint artifact",
+			Message: "run `mindspec migrate layout` to emit the lineage manifest",
 		})
+	default:
+		if err := readJSONFile(lineagePath, &manifest); err != nil {
+			r.Checks = append(r.Checks, Check{Name: manifestName, Status: Error, Message: err.Error()})
+		} else if manifest.RunID == "" {
+			r.Checks = append(r.Checks, Check{Name: manifestName, Status: Error, Message: "missing run_id"})
+		} else if len(manifest.Entries) == 0 {
+			r.Checks = append(r.Checks, Check{Name: manifestName, Status: Error, Message: "entries must not be empty"})
+		} else {
+			r.Checks = append(r.Checks, Check{
+				Name:    manifestName,
+				Status:  OK,
+				Message: fmt.Sprintf("(run-id=%s, entries=%d)", manifest.RunID, len(manifest.Entries)),
+			})
+			manifestValid = true
+		}
 	}
 
-	statePath := filepath.Join(runDir, "state.json")
-	if !fileExists(statePath) {
+	// Determine which run's per-run artifacts to validate: the manifest's
+	// run_id when the global manifest is itself valid, otherwise the sole
+	// run directory that armed this check (so a deleted/malformed global
+	// manifest does not silence per-run validation of an otherwise-present
+	// run).
+	runID := ""
+	switch {
+	case manifestValid:
+		runID = manifest.RunID
+	case len(evidenceRuns) == 1:
+		runID = evidenceRuns[0]
+	}
+	if runID == "" {
+		return
+	}
+
+	runDir := filepath.Join(migrationsRoot, runID)
+
+	// Per-run lineage.json: current schema, non-empty, and — when the
+	// global manifest is itself valid — the SAME run_id as the manifest.
+	lineageRunName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "lineage.json"))
+	lineagePathRun := filepath.Join(runDir, "lineage.json")
+	if !fileExists(lineagePathRun) {
+		r.Checks = append(r.Checks, Check{
+			Name:    lineageRunName,
+			Status:  Missing,
+			Message: "missing per-run lineage manifest",
+		})
+	} else {
+		var runLineage lineageManifest
+		if err := readJSONFile(lineagePathRun, &runLineage); err != nil {
+			r.Checks = append(r.Checks, Check{Name: lineageRunName, Status: Error, Message: err.Error()})
+		} else if runLineage.RunID == "" {
+			r.Checks = append(r.Checks, Check{Name: lineageRunName, Status: Error, Message: "missing run_id"})
+		} else if len(runLineage.Entries) == 0 {
+			r.Checks = append(r.Checks, Check{Name: lineageRunName, Status: Error, Message: "entries must not be empty"})
+		} else if manifestValid && runLineage.RunID != manifest.RunID {
+			r.Checks = append(r.Checks, Check{
+				Name:   lineageRunName,
+				Status: Error,
+				Message: fmt.Sprintf("run_id %q does not match manifest run_id %q",
+					runLineage.RunID, manifest.RunID),
+			})
+		} else {
+			r.Checks = append(r.Checks, Check{
+				Name:    lineageRunName,
+				Status:  OK,
+				Message: fmt.Sprintf("(run-id=%s, entries=%d)", runLineage.RunID, len(runLineage.Entries)),
+			})
+		}
+	}
+
+	// Per-run state.json: current schema, parseable, and the terminal stage.
+	statePathRun := filepath.Join(runDir, "state.json")
+	stateName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "state.json"))
+	stageName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "state.stage"))
+	if !fileExists(statePathRun) {
+		r.Checks = append(r.Checks, Check{
+			Name:    stateName,
+			Status:  Missing,
+			Message: "missing run-state record",
+		})
 		return
 	}
 
 	var state runState
-	if err := readJSONFile(statePath, &state); err != nil {
-		r.Checks = append(r.Checks, Check{
-			Name:    filepath.ToSlash(filepath.Join(".mindspec", "migrations", manifest.RunID, "state.stage")),
-			Status:  Error,
-			Message: err.Error(),
-		})
+	if err := readJSONFile(statePathRun, &state); err != nil {
+		r.Checks = append(r.Checks, Check{Name: stateName, Status: Error, Message: err.Error()})
 		return
 	}
+	r.Checks = append(r.Checks, Check{Name: stateName, Status: OK})
 
-	stageName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", manifest.RunID, "state.stage"))
 	switch state.Stage {
 	case "applied":
 		r.Checks = append(r.Checks, Check{Name: stageName, Status: OK, Message: state.Stage})
 	case "":
 		r.Checks = append(r.Checks, Check{Name: stageName, Status: Warn, Message: "stage missing"})
 	default:
-		r.Checks = append(r.Checks, Check{Name: stageName, Status: Warn, Message: state.Stage})
+		r.Checks = append(r.Checks, Check{
+			Name:    stageName,
+			Status:  Warn,
+			Message: fmt.Sprintf("run in progress (stage=%s)", state.Stage),
+		})
 	}
+}
+
+// runsWithEvidence returns the run-id directory names directly under
+// migrationsRoot that contain a lineage.json or state.json — i.e. current-run
+// evidence that a deleted/malformed global manifest must not be allowed to
+// silence. Sorted for determinism.
+func runsWithEvidence(migrationsRoot string) []string {
+	entries, err := os.ReadDir(migrationsRoot)
+	if err != nil {
+		return nil
+	}
+	var runs []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(migrationsRoot, e.Name())
+		if fileExists(filepath.Join(dir, "lineage.json")) || fileExists(filepath.Join(dir, "state.json")) {
+			runs = append(runs, e.Name())
+		}
+	}
+	sort.Strings(runs)
+	return runs
 }
 
 func readJSONFile(path string, out any) error {
