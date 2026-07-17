@@ -188,33 +188,74 @@ func ClassifyLayout(m LayoutMarkers) Layout {
 	}
 }
 
-// flatLifecycleChildren are the directory names that, when present directly
-// under .mindspec/, mark a FLAT lifecycle tree (as distinct from the same
-// names nested under .mindspec/docs/).
-var flatLifecycleChildren = []string{"specs", "adr", "domains", "core"}
+// LifecycleChildNames lists the four immediate-child directory names —
+// specs, adr, domains, and core — that mark a docs tier (flat, canonical, or
+// legacy) as populated (ADR-0039 Decision §2). It is the single shared name
+// set: filesystem classification below matches it against an IsDir probe on
+// each tier's wrapper, and the git-ref classifier in internal/executor
+// (Bead 2 — layoutAtRef) matches it against TreeDirsAtRef output from
+// .mindspec/docs and root docs, instead of either treating wrapper
+// existence (or the .mindspec child name "docs") as a marker.
+var LifecycleChildNames = []string{"specs", "adr", "domains", "core"}
 
-// LayoutMarkersFromMindspecChildren derives the flat/canonical markers from
-// the immediate child names of a .mindspec/ directory — e.g. the output of
-// executor.TreeDirsAtRef(ref, ".mindspec"). It is pure (no I/O) so the Bead-4
-// merge guard can fingerprint a tree at a git ref without touching the working
-// copy. Legacy (a repo-root docs/ tree) is not observable from .mindspec
-// children, so callers that need it set LayoutMarkers.Legacy themselves.
+// IsLifecycleChildName reports whether name — an immediate child's base name,
+// whether read from a filesystem directory listing or a git-ref tree listing
+// (e.g. executor.TreeDirsAtRef) — is one of the shared LifecycleChildNames.
+// It is the single source of truth for "does this immediate child mark a
+// docs tier as populated," reused by filesystem classification (this file,
+// via lifecycleChildDirPresent) and by internal/executor's git-ref
+// classifier (Bead 2).
+func IsLifecycleChildName(name string) bool {
+	for _, n := range LifecycleChildNames {
+		if name == n {
+			return true
+		}
+	}
+	return false
+}
+
+// lifecycleChildDirPresent reports whether dir (a docs-tier wrapper such as
+// .mindspec, .mindspec/docs, or root docs) has an immediate child, matching
+// one of the shared LifecycleChildNames, that is ITSELF a directory
+// (IsDir) — not a regular file, and not a name nested more than one level
+// below dir. A same-named regular file, a deeper-nested lifecycle name, or
+// an unrelated child does not count (ADR-0039 Decision §2 / AC-17, AC-18,
+// AC-20). dir itself may be absent or a regular file: isDir on its children
+// then simply reports false for each, with no panic.
+func lifecycleChildDirPresent(dir string) bool {
+	for _, name := range LifecycleChildNames {
+		if isDir(filepath.Join(dir, name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// LayoutMarkersFromMindspecChildren derives the FLAT marker from the
+// immediate child names of a .mindspec/ directory — e.g. the output of
+// executor.TreeDirsAtRef(ref, ".mindspec"). It is pure (no I/O).
+//
+// Bead 2 (spec 118) SUPERSEDES this helper's former canonical-derivation
+// behavior: it used to treat the bare child name "docs" as a canonical
+// marker, which false-marked canonical for an ordinary `.mindspec/docs/`
+// documentation wrapper containing no lifecycle directory and no
+// `context-map.md` file (AC-9). A flat list of immediate .mindspec children
+// cannot by itself tell a populated `.mindspec/docs/` tree from a bare one —
+// that requires descending into `.mindspec/docs/` — so canonical (and
+// legacy) derivation now lives in internal/executor's git-ref resolver
+// (layoutAtRef / tierMarkerAtRef), which independently descends
+// `.mindspec/docs` and root `docs` with TreeDirsAtRef and this package's
+// IsLifecycleChildName predicate, plus a type-aware blob probe for each
+// tier's context-map.md. This helper is retained ONLY for the flat tier,
+// which IS fully determined by .mindspec's own immediate children: an
+// immediate child matching IsLifecycleChildName (TreeDirsAtRef already
+// restricts these to TREE entries) or a same-named "context-map.md" entry.
 func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers {
 	var m LayoutMarkers
 	for _, c := range children {
 		name := path.Base(strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(c)), "/"))
-		switch {
-		case name == "docs":
-			m.Canonical = true
-		case name == "context-map.md":
+		if name == "context-map.md" || IsLifecycleChildName(name) {
 			m.Flat = true
-		default:
-			for _, f := range flatLifecycleChildren {
-				if name == f {
-					m.Flat = true
-					break
-				}
-			}
 		}
 	}
 	return m
@@ -248,22 +289,42 @@ func DetectLayout(root string) (Layout, error) {
 func detectLayoutKind(root string) Layout {
 	return ClassifyLayout(LayoutMarkers{
 		Flat:      flatTreePresent(root),
-		Canonical: exists(CanonicalDocsDir(root)),
-		Legacy:    exists(LegacyDocsDir(root)),
+		Canonical: canonicalTreePresent(root),
+		Legacy:    legacyTreePresent(root),
 	})
 }
 
-// flatTreePresent reports whether any flat lifecycle artifact exists directly
-// under .mindspec/ (.mindspec/{specs,adr,domains,core} or
-// .mindspec/context-map.md).
+// flatTreePresent reports whether the flat tier is marked directly under
+// .mindspec/: an immediate lifecycle child that IS a directory
+// (.mindspec/{specs,adr,domains,core}), or .mindspec/context-map.md when
+// that path IS a regular file. A same-named regular file, a context-map
+// directory, or an otherwise-empty/absent .mindspec sets no marker (ADR-0039
+// Decision §2 / AC-19, AC-20).
 func flatTreePresent(root string) bool {
 	mindspec := MindspecDir(root)
-	for _, child := range flatLifecycleChildren {
-		if exists(filepath.Join(mindspec, child)) {
-			return true
-		}
-	}
-	return exists(filepath.Join(mindspec, "context-map.md"))
+	return lifecycleChildDirPresent(mindspec) || isRegularFile(filepath.Join(mindspec, "context-map.md"))
+}
+
+// canonicalTreePresent reports whether the canonical tier is marked under
+// .mindspec/docs/: an immediate lifecycle child that IS a directory, or
+// .mindspec/docs/context-map.md when that path IS a regular file. A bare or
+// empty .mindspec/docs wrapper, an unrelated child, a nested lifecycle name,
+// a wrapper-as-file, or a context-map directory sets no marker (ADR-0039
+// Decision §2 / AC-2, AC-13, AC-17, AC-18, AC-19, AC-20).
+func canonicalTreePresent(root string) bool {
+	canonical := CanonicalDocsDir(root)
+	return lifecycleChildDirPresent(canonical) || isRegularFile(filepath.Join(canonical, "context-map.md"))
+}
+
+// legacyTreePresent reports whether the legacy tier is marked under root
+// docs/: an immediate lifecycle child that IS a directory, or
+// docs/context-map.md when that path IS a regular file. A bare or empty
+// docs/ wrapper, an unrelated child, a nested lifecycle name, a
+// wrapper-as-file, or a context-map directory sets no marker (ADR-0039
+// Decision §2 / AC-1, AC-14, AC-17, AC-18, AC-19, AC-20).
+func legacyTreePresent(root string) bool {
+	legacy := LegacyDocsDir(root)
+	return lifecycleChildDirPresent(legacy) || isRegularFile(filepath.Join(legacy, "context-map.md"))
 }
 
 // migrationRunState is the minimal projection of the layout mover's per-run
@@ -636,4 +697,21 @@ func ContextLine(dir, checkedPath string) string {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// isDir reports whether path exists and is a directory. A path that does not
+// exist, cannot be stat'd (e.g. because a path component is itself a regular
+// file), or exists as something other than a directory reports false rather
+// than panicking or returning an error.
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+// isRegularFile reports whether path exists and is a regular file (not a
+// directory or other non-regular mode). A path that does not exist or cannot
+// be stat'd reports false rather than panicking or returning an error.
+func isRegularFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

@@ -184,9 +184,28 @@ func TestCheckDocs_CanonicalMigratedLayoutPasses(t *testing.T) {
 	}
 }
 
+// TestCheckMigrationMetadata_MissingLineageManifest is the rekeyed fossil for
+// the retired classify/plan/apply pipeline (Bead 3, spec 118): docs_archive/
+// no longer arms or satisfies anything under the current `migrate layout`
+// contract. Instead, an otherwise-present per-run lineage.json/state.json
+// (current-run evidence) with the GLOBAL manifest removed must still surface
+// a Missing finding for the manifest — proving the check stays armed rather
+// than silently no-op'ing when the global manifest disappears out from under
+// a real run (Bead 3 Step 1).
 func TestCheckMigrationMetadata_MissingLineageManifest(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "docs_archive", "run-1"), 0o755); err != nil {
+	runDir := filepath.Join(root, ".mindspec", "migrations", "run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "lineage.json"), []byte(`{
+  "run_id": "run-1",
+  "entries": [{"source": "docs/core/ARCHITECTURE.md", "canonical": ".mindspec/core/ARCHITECTURE.md", "archive": ""}]
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "state.json"), []byte(`{"run_id":"run-1","stage":"applied"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +219,7 @@ func TestCheckMigrationMetadata_MissingLineageManifest(t *testing.T) {
 		}
 	}
 	if !foundMissing {
-		t.Fatal("expected missing lineage manifest check")
+		t.Fatalf("expected missing lineage manifest check; checks=%+v", r.Checks)
 	}
 }
 
@@ -216,7 +235,6 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
 		".mindspec/docs/specs",
 		".mindspec/lineage",
 		".mindspec/migrations/run-1",
-		"docs_archive/run-1/docs/core",
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
@@ -259,103 +277,35 @@ func setupCanonicalMigratedFixture(t *testing.T) string {
 		write(f, "# placeholder")
 	}
 
-	write("docs_archive/run-1/docs/core/ARCHITECTURE.md", "# archived")
+	// Current `mindspec migrate layout` contract only (internal/layout):
+	// global .mindspec/lineage/manifest.json plus per-run
+	// .mindspec/migrations/<run-id>/{lineage.json,state.json}. No
+	// docs_archive/ and none of the retired classify/plan/apply artifacts.
 	write(".mindspec/lineage/manifest.json", `{
   "run_id": "run-1",
   "entries": [
     {
       "source": "docs/core/ARCHITECTURE.md",
       "canonical": ".mindspec/docs/core/ARCHITECTURE.md",
-      "archive": "docs_archive/run-1/docs/core/ARCHITECTURE.md"
+      "archive": ""
     }
   ]
 }
 `)
-	write(".mindspec/migrations/run-1/inventory.json", `[
-  {"path":"docs/core/ARCHITECTURE.md","sha256":"abc"}
-]
-`)
-	write(".mindspec/migrations/run-1/classification.json", `[
-  {
-    "path":"docs/core/ARCHITECTURE.md",
-    "sha256":"abc",
-    "category":"core",
-    "confidence":0.92,
-    "rule":"path-contains-core",
-    "requires_llm":false
-  }
-]
-`)
-	write(".mindspec/migrations/run-1/extraction.json", `[
-  {
-    "path":"docs/core/ARCHITECTURE.md",
-    "sha256":"abc",
-    "category":"core",
-    "rule":"path-contains-core",
-    "confidence":0.92,
-    "requires_llm":false,
-    "candidate_targets":[".mindspec/docs/core/ARCHITECTURE.md"]
-  }
-]
-`)
-	write(".mindspec/migrations/run-1/plan.json", `{
-  "run_id":"run-1",
-  "generated_at":"2026-02-17T00:00:00Z",
-  "llm":{"provider":"off","model":"default","available":false},
-  "operations":[
+	write(".mindspec/migrations/run-1/lineage.json", `{
+  "run_id": "run-1",
+  "entries": [
     {
-      "action":"create",
-      "target":".mindspec/docs/core/ARCHITECTURE.md",
-      "sources":[
-        {
-          "path":"docs/core/ARCHITECTURE.md",
-          "sha256":"abc",
-          "category":"core",
-          "rule":"path-contains-core",
-          "confidence":0.92,
-          "requires_llm":false
-        }
-      ],
-      "archive_targets":["docs_archive/run-1/docs/core/ARCHITECTURE.md"],
-      "rationale":"docs/core/ARCHITECTURE.md maps to .mindspec/docs/core/ARCHITECTURE.md via rule path-contains-core.",
-      "confidence":0.92,
-      "llm_used":false
+      "source": "docs/core/ARCHITECTURE.md",
+      "canonical": ".mindspec/docs/core/ARCHITECTURE.md",
+      "archive": ""
     }
   ]
 }
-`)
-	write(".mindspec/migrations/run-1/validation.json", `{
-  "run_id":"run-1",
-  "valid":true,
-  "checks":[{"name":"integrity","status":"ok","message":"plan validation passed"}]
-}
-`)
-	write(".mindspec/migrations/run-1/plan.md", "# Migration Plan\n")
-	write(".mindspec/migrations/run-1/lineage.json", `[
-  {
-    "source":"docs/core/ARCHITECTURE.md",
-    "source_sha256":"abc",
-    "category":"core",
-    "canonical":".mindspec/docs/core/ARCHITECTURE.md",
-    "archive":"docs_archive/run-1/docs/core/ARCHITECTURE.md"
-  }
-]
 `)
 	write(".mindspec/migrations/run-1/state.json", `{
   "run_id":"run-1",
   "stage":"applied"
-}
-`)
-	write(".mindspec/migrations/run-1/apply.json", `{
-  "run_id":"run-1",
-  "applied_at":"2026-02-17T00:00:00Z",
-  "archive_mode":"copy",
-  "operations_applied":1,
-  "canonical_operations_applied":1,
-  "archived_sources":1,
-  "lineage_entries":1,
-  "source_drift_checked":1,
-  "plan_sha256":"deadbeef"
 }
 `)
 

@@ -993,20 +993,25 @@ func TestClassifyLayout(t *testing.T) {
 	}
 }
 
-// TestLayoutMarkersFromMindspecChildren pins the pure git-ref-friendly marker
-// derivation the Bead-4 merge guard feeds from executor.TreeDirsAtRef output.
+// TestLayoutMarkersFromMindspecChildren pins the pure FLAT-only marker
+// derivation from .mindspec's immediate children (executor.TreeDirsAtRef
+// output). Bead 2 (spec 118 / AC-9) supersedes this helper's former
+// "docs"-name→Canonical shortcut: a bare `.mindspec/docs` child name no
+// longer sets Canonical here (or anywhere) — canonical/legacy derivation at
+// a git ref now lives in internal/executor's layoutAtRef/tierMarkerAtRef,
+// which descends the wrapper instead of pattern-matching its name.
 func TestLayoutMarkersFromMindspecChildren(t *testing.T) {
 	cases := []struct {
 		name     string
 		children []string
 		want     LayoutMarkers
 	}{
-		{"canonical docs child", []string{"docs"}, LayoutMarkers{Canonical: true}},
+		{"bare docs child name sets no marker (Bead 2 supersedes the canonical shortcut)", []string{"docs"}, LayoutMarkers{}},
 		{"flat lifecycle children", []string{"specs", "adr", "domains", "core"}, LayoutMarkers{Flat: true}},
 		{"flat context-map file", []string{"context-map.md"}, LayoutMarkers{Flat: true}},
-		{"real-repo canonical shape ignores mover state dirs", []string{"docs", "migrations", "lineage", "config.yaml"}, LayoutMarkers{Canonical: true}},
-		{"flat+canonical (mixed when classified)", []string{"specs", "docs"}, LayoutMarkers{Flat: true, Canonical: true}},
-		{"tolerates trailing slashes and full paths", []string{".mindspec/specs/", "docs/"}, LayoutMarkers{Flat: true, Canonical: true}},
+		{"bare docs child among unrelated mover state dirs sets no marker", []string{"docs", "migrations", "lineage", "config.yaml"}, LayoutMarkers{}},
+		{"flat lifecycle child alongside bare docs child sets only Flat", []string{"specs", "docs"}, LayoutMarkers{Flat: true}},
+		{"tolerates trailing slashes and full paths (bare docs child still sets no marker)", []string{".mindspec/specs/", "docs/"}, LayoutMarkers{Flat: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1137,5 +1142,312 @@ func TestTreeRootForSpecDir_Ew79FlatWorktree(t *testing.T) {
 	// the visibility the ew79 fix preserves.
 	if got, want := ADRDir(gotRoot), filepath.Join(wtRoot, ".mindspec", "adr"); got != want {
 		t.Errorf("ADRDir(treeRoot) = %q, want %q", got, want)
+	}
+}
+
+// --- Spec 118 Bead 1: scope filesystem layout markers to resolver-shaped
+// artifacts (ADR-0039 Decision §2) ---
+//
+// TestLayoutMarkerResolveMatrix is the complete table-driven filesystem
+// resolve matrix (plan Bead 1, Testing Strategy). Each row is RED on revert:
+// reverting canonical/legacy detection to bare wrapper existence, or
+// dropping the IsDir/regular-file type checks, makes the applicable row(s)
+// fail. All four shared lifecycle names (specs, adr, domains, core) are
+// exercised across the table, including empty lifecycle directories (every
+// lifecycle dir fixture below is created via MkdirAll with no further
+// content).
+func TestLayoutMarkerResolveMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, root string)
+		wantLayout Layout
+		wantErr    bool
+	}{
+		{
+			// AC-1: flat marker + an ordinary root docs/ with no direct
+			// lifecycle child and no context-map.md file → flat (the legacy
+			// wedge fix; a bare/unrelated docs/ is no longer a marker).
+			name: "flat plus ordinary unrelated docs wrapper resolves flat",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "specs"))
+				mustMkdirAll(t, filepath.Join(root, "docs"))
+				mustWriteFile(t, filepath.Join(root, "docs", "README.md"), "unrelated\n")
+			},
+			wantLayout: LayoutFlat,
+		},
+		{
+			// AC-2: flat marker + empty/leftover .mindspec/docs/ with no
+			// direct lifecycle child and no context-map.md file → flat (the
+			// canonical wedge fix).
+			name: "flat plus empty leftover canonical wrapper resolves flat",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "adr"))
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs"))
+			},
+			wantLayout: LayoutFlat,
+		},
+		{
+			// AC-3: no flat marker; root docs/ directly contains an EMPTY
+			// lifecycle directory → legacy.
+			name: "no flat marker plus empty direct legacy lifecycle directory resolves legacy",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, "docs", "domains"))
+			},
+			wantLayout: LayoutLegacy,
+		},
+		{
+			// AC-4: no flat marker; .mindspec/docs/ directly contains an
+			// EMPTY lifecycle directory → canonical.
+			name: "no flat marker plus empty direct canonical lifecycle directory resolves canonical",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs", "core"))
+			},
+			wantLayout: LayoutCanonical,
+		},
+		{
+			// AC-5: flat lifecycle directory + .mindspec/docs/<lifecycle>/
+			// both exist → mixed, DetectLayout errors.
+			name: "flat plus canonical lifecycle directory resolves mixed and errors",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "adr"))
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs", "domains"))
+			},
+			wantLayout: LayoutMixed,
+			wantErr:    true,
+		},
+		{
+			// AC-6: flat lifecycle directory + root docs/<lifecycle>/ both
+			// exist → mixed, DetectLayout errors.
+			name: "flat plus legacy lifecycle directory resolves mixed and errors",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "domains"))
+				mustMkdirAll(t, filepath.Join(root, "docs", "core"))
+			},
+			wantLayout: LayoutMixed,
+			wantErr:    true,
+		},
+		{
+			// AC-13: no other marker; only .mindspec/docs/context-map.md is
+			// a REGULAR FILE → canonical.
+			name: "canonical context map file",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs"))
+				mustWriteFile(t, filepath.Join(root, ".mindspec", "docs", "context-map.md"), "# map\n")
+			},
+			wantLayout: LayoutCanonical,
+		},
+		{
+			// AC-14: no other marker; only root docs/context-map.md is a
+			// REGULAR FILE → legacy.
+			name: "legacy context map file",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, "docs"))
+				mustWriteFile(t, filepath.Join(root, "docs", "context-map.md"), "# map\n")
+			},
+			wantLayout: LayoutLegacy,
+		},
+		{
+			// AC-15: flat marker coexists with .mindspec/docs/context-map.md
+			// → mixed, DetectLayout errors (an incomplete flatten is not
+			// mistaken for the AC-1/AC-2 wedge).
+			name: "flat plus canonical context map file resolves mixed and errors",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "specs"))
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs"))
+				mustWriteFile(t, filepath.Join(root, ".mindspec", "docs", "context-map.md"), "# map\n")
+			},
+			wantLayout: LayoutMixed,
+			wantErr:    true,
+		},
+		{
+			// AC-21: flat marker coexists with root docs/context-map.md as a
+			// REGULAR FILE → mixed, DetectLayout errors (mirrors AC-15 for
+			// the legacy tier).
+			name: "flat plus legacy context map file resolves mixed and errors",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "core"))
+				mustMkdirAll(t, filepath.Join(root, "docs"))
+				mustWriteFile(t, filepath.Join(root, "docs", "context-map.md"), "# map\n")
+			},
+			wantLayout: LayoutMixed,
+			wantErr:    true,
+		},
+		{
+			// AC-17 (canonical tier): a lifecycle name nested BELOW a
+			// non-lifecycle immediate child (.mindspec/docs/sub/specs, not
+			// .mindspec/docs/specs) is not an immediate child, so it sets no
+			// canonical marker — the tree stays greenfield.
+			name: "canonical nested lifecycle name sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs", "sub", "specs"))
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-17 (legacy tier): same nested-below-non-lifecycle-child
+			// guard for root docs/sub/specs.
+			name: "legacy nested lifecycle name sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, "docs", "sub", "specs"))
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-18: root docs exists as a REGULAR FILE (not a directory) →
+			// no legacy marker, no panic.
+			name: "legacy wrapper as regular file sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustWriteFile(t, filepath.Join(root, "docs"), "not a directory\n")
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-18: .mindspec/docs exists as a REGULAR FILE (not a
+			// directory) → no canonical marker, no panic.
+			name: "canonical wrapper as regular file sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec"))
+				mustWriteFile(t, filepath.Join(root, ".mindspec", "docs"), "not a directory\n")
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-19 (flat tier): .mindspec/context-map.md exists as a
+			// DIRECTORY rather than a regular file → no flat marker, no
+			// panic.
+			name: "flat context map directory sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "context-map.md"))
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-19 (canonical tier): .mindspec/docs/context-map.md exists
+			// as a DIRECTORY → no canonical marker, no panic.
+			name: "canonical context map directory sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs", "context-map.md"))
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-19 (legacy tier): docs/context-map.md exists as a
+			// DIRECTORY → no legacy marker, no panic.
+			name: "legacy context map directory sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, "docs", "context-map.md"))
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-20 (flat tier): the lifecycle name "core" exists directly
+			// under .mindspec as a REGULAR FILE (not IsDir) → no flat
+			// marker, no panic.
+			name: "flat lifecycle name regular file sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec"))
+				mustWriteFile(t, filepath.Join(root, ".mindspec", "core"), "not a directory\n")
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-20 (canonical tier): the lifecycle name "adr" exists
+			// directly under .mindspec/docs as a REGULAR FILE → no
+			// canonical marker, no panic.
+			name: "canonical lifecycle name regular file sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, ".mindspec", "docs"))
+				mustWriteFile(t, filepath.Join(root, ".mindspec", "docs", "adr"), "not a directory\n")
+			},
+			wantLayout: LayoutGreenfield,
+		},
+		{
+			// AC-20 (legacy tier): the lifecycle name "domains" exists
+			// directly under docs as a REGULAR FILE → no legacy marker, no
+			// panic.
+			name: "legacy lifecycle name regular file sets no marker",
+			setup: func(t *testing.T, root string) {
+				mustMkdirAll(t, filepath.Join(root, "docs"))
+				mustWriteFile(t, filepath.Join(root, "docs", "domains"), "not a directory\n")
+			},
+			wantLayout: LayoutGreenfield,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			tc.setup(t, root)
+			assertLayout(t, root, tc.wantLayout, tc.wantErr)
+		})
+	}
+}
+
+// mustMkdirAll is a t.Helper MkdirAll for the layout-marker fixtures above.
+func mustMkdirAll(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mustWriteFile is a t.Helper WriteFile for the layout-marker fixtures above.
+// It creates the parent directory first so a fixture can write directly into
+// a not-yet-created wrapper.
+func mustWriteFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSpecDir_UnwedgedFlatNewSpec proves AC-8: in the AC-1 un-wedged flat
+// repository (a flat lifecycle tree coexisting with an ordinary,
+// non-lifecycle root docs/ wrapper), a brand-new spec slug resolves under
+// .mindspec/specs/, not the legacy docs/specs/ the pre-fix bare-wrapper
+// marker would have wedged it into (split-brain prevention through
+// classification recovery). RED on revert: reverting legacy detection to
+// bare `docs/` existence reclassifies this tree mixed/legacy and breaks this
+// assertion.
+func TestSpecDir_UnwedgedFlatNewSpec(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, ".mindspec", "specs"))
+	mustMkdirAll(t, filepath.Join(root, "docs"))
+	mustWriteFile(t, filepath.Join(root, "docs", "README.md"), "unrelated\n")
+
+	// Sanity: the whole-tree classification itself is unwedged (flat, not
+	// mixed/legacy).
+	assertLayout(t, root, LayoutFlat, false)
+
+	const newSlug = "119-brand-new-spec"
+	got, err := SpecDir(root, newSlug)
+	if err != nil {
+		t.Fatalf("SpecDir: %v", err)
+	}
+	want := filepath.Join(root, ".mindspec", "specs", newSlug)
+	if got != want {
+		t.Errorf("SpecDir(unwedged flat, new slug) = %q, want %q", got, want)
+	}
+}
+
+// TestContextMapPath_ThreeTierFallback proves AC-14: with no flat or
+// canonical marker present and only root docs/context-map.md existing as a
+// regular file, the whole tree classifies legacy and ContextMapPath falls
+// through the three-tier resolver to that legacy file. RED on revert:
+// reverting legacy detection to bare `docs/` existence still passes today,
+// but reverting the regular-file type check (accepting a context-map
+// directory) or dropping the context-map fallback entirely breaks this.
+func TestContextMapPath_ThreeTierFallback(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, "docs"))
+	mustWriteFile(t, filepath.Join(root, "docs", "context-map.md"), "# legacy map\n")
+
+	assertLayout(t, root, LayoutLegacy, false)
+
+	want := filepath.Join(root, "docs", "context-map.md")
+	if got := ContextMapPath(root); got != want {
+		t.Errorf("ContextMapPath legacy three-tier fallback = %q, want %q", got, want)
 	}
 }

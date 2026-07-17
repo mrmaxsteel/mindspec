@@ -813,6 +813,44 @@ func (g *MindspecExecutor) pathExistsAtRef(ref, path string) (bool, error) {
 	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
+// BlobExistsAtRef reports whether path is a REGULAR FILE (a git "blob") in
+// ref's tree — NOT a directory ("tree"). `git ls-tree <ref> -- <path>` alone
+// is NOT a type test: it exits 0 with a matching entry line for a directory
+// committed at that exact path just as readily as for a file (verified: a
+// tree entry renders `<mode> tree <sha>\t<path>`, a file `<mode> blob
+// <sha>\t<path>`), which is exactly why `FileAtRef`/`git show <ref>:<path>`
+// (which also succeeds against a tree) cannot be used as a file-type probe
+// either. This parses the emitted entry's type field and requires it to be
+// exactly "blob". An absent path yields empty output (exit 0) → (false,
+// nil); only an invalid ref / git failure returns a non-nil error. Bead 2
+// (spec 118 / AC-16, AC-23): the layout git-ref resolver uses this for every
+// context-map.md tier so a same-named directory committed at that path is
+// never mistaken for the marker file.
+func (g *MindspecExecutor) BlobExistsAtRef(ref, path string) (bool, error) {
+	// SEC-5: guard the ref operand before it reaches git argv.
+	if err := gitutil.RejectOptionLike(ref); err != nil {
+		return false, err
+	}
+	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, "--", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git ls-tree %s -- %s: %w", ref, path, err)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return false, nil
+	}
+	tab := strings.IndexByte(line, '\t')
+	if tab < 0 {
+		return false, nil
+	}
+	meta := strings.Fields(line[:tab])
+	if len(meta) < 2 {
+		return false, nil
+	}
+	return meta[1] == "blob", nil
+}
+
 // TreeDirsAtRef returns the basenames of sub-directory (tree) entries
 // directly under dirPath in ref's tree, via `git ls-tree <ref>
 // <dirPath>/`. An absent dirPath at a valid ref yields an empty slice
