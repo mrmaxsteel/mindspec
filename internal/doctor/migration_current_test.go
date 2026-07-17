@@ -194,6 +194,158 @@ func TestCheckMigrationMetadata_CurrentContractMutations(t *testing.T) {
 			wantFn: expectFailure,
 		},
 		{
+			// O2: pins that a valid-parse global manifest with an empty
+			// run_id is still rejected — removing the code guard at
+			// migration.go (manifest.RunID == "") must turn this row RED.
+			// Asserts the SPECIFIC manifest check is Error (not just that
+			// SOME failure exists downstream), so a coincidental cascade
+			// failure elsewhere can't mask the guard's removal.
+			name: "manifest_empty_run_id",
+			mutate: func(t *testing.T, root string) {
+				path := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
+				content := `{
+  "run_id": "",
+  "entries": [{"source": ".mindspec/docs/specs", "canonical": ".mindspec/specs", "archive": ""}]
+}
+`
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: expectCheckStatus(
+				filepath.ToSlash(filepath.Join(".mindspec", "lineage", "manifest.json")),
+				Error,
+			),
+		},
+		{
+			// O2: pins that a valid-parse global manifest with empty
+			// entries is still rejected — removing the code guard at
+			// migration.go (len(manifest.Entries) == 0) must turn this
+			// row RED.
+			name: "manifest_empty_entries",
+			mutate: func(t *testing.T, root string) {
+				path := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
+				content := `{
+  "run_id": "` + runID + `",
+  "entries": []
+}
+`
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: expectCheckStatus(
+				filepath.ToSlash(filepath.Join(".mindspec", "lineage", "manifest.json")),
+				Error,
+			),
+		},
+		{
+			// O2: pins that a valid-parse per-run lineage.json with an
+			// empty run_id is still rejected — removing the code guard
+			// (runLineage.RunID == "") must turn this row RED. Asserts the
+			// SPECIFIC per-run lineage check is Error, not just that some
+			// failure exists.
+			//
+			// The global manifest is ALSO removed here (leaving the sole
+			// evidence run to arm validation with manifestValid=false):
+			// with a valid global manifest present, the downstream
+			// run_id-mismatch guard ("" != manifest's non-empty run_id)
+			// would independently catch this mutation and mask whether
+			// the empty-run_id guard itself was doing any work. Dropping
+			// the manifest isolates the guard under test.
+			name: "per_run_lineage_empty_run_id",
+			mutate: func(t *testing.T, root string) {
+				manifestPath := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
+				if err := os.Remove(manifestPath); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, ".mindspec", "migrations", runID, "lineage.json")
+				content := `{
+  "run_id": "",
+  "entries": [{"source": ".mindspec/docs/specs", "canonical": ".mindspec/specs", "archive": ""}]
+}
+`
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: expectCheckStatus(
+				filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "lineage.json")),
+				Error,
+			),
+		},
+		{
+			// O2: pins that a valid-parse per-run lineage.json with empty
+			// entries is still rejected — removing the code guard
+			// (len(runLineage.Entries) == 0) must turn this row RED.
+			name: "per_run_lineage_empty_entries",
+			mutate: func(t *testing.T, root string) {
+				path := filepath.Join(root, ".mindspec", "migrations", runID, "lineage.json")
+				content := `{
+  "run_id": "` + runID + `",
+  "entries": []
+}
+`
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: expectCheckStatus(
+				filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "lineage.json")),
+				Error,
+			),
+		},
+		{
+			// S3: an ambiguous multi-run state (no valid global manifest
+			// to disambiguate, ≥2 evidence-bearing run directories) must
+			// not silently skip validation of ALL of them. This seeds a
+			// second run directory with its own evidence and corrupts the
+			// ORIGINAL run's state.json; the hardened checkMigrationMetadata
+			// must still validate every candidate run and surface an Error
+			// for the corrupted one specifically. If the multi-run
+			// hardening is reverted (runID stays "" and the function
+			// returns without validating any run when the manifest is
+			// invalid/absent and more than one evidence run exists), no
+			// Error check for this run's state.json is emitted and the row
+			// goes RED.
+			name: "multi_run_ambiguous_one_corrupt",
+			mutate: func(t *testing.T, root string) {
+				manifestPath := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
+				if err := os.Remove(manifestPath); err != nil {
+					t.Fatal(err)
+				}
+
+				secondRunDir := filepath.Join(root, ".mindspec", "migrations", "run-second")
+				if err := os.MkdirAll(secondRunDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				secondState := `{"run_id": "run-second", "stage": "applied"}`
+				if err := os.WriteFile(filepath.Join(secondRunDir, "state.json"), []byte(secondState), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				corruptStatePath := filepath.Join(root, ".mindspec", "migrations", runID, "state.json")
+				if err := os.WriteFile(corruptStatePath, []byte("{not valid json"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantFn: func(t *testing.T, r *Report) {
+				if !r.HasFailures() {
+					t.Fatalf("expected an Error/Missing finding, got: %+v", r.Checks)
+				}
+				stateName := filepath.ToSlash(filepath.Join(".mindspec", "migrations", runID, "state.json"))
+				var found bool
+				for _, c := range r.Checks {
+					if c.Name == stateName && c.Status == Error {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("expected an Error finding for the corrupted run's state.json (ambiguous multi-run must validate every evidence run, not skip all); checks=%+v", r.Checks)
+				}
+			},
+		},
+		{
 			name: "missing_global_manifest",
 			mutate: func(t *testing.T, root string) {
 				path := filepath.Join(root, ".mindspec", "lineage", "manifest.json")
@@ -282,5 +434,30 @@ func expectFailure(t *testing.T, r *Report) {
 	t.Helper()
 	if !r.HasFailures() {
 		t.Fatalf("expected an Error/Missing finding, got: %+v", r.Checks)
+	}
+}
+
+// expectCheckStatus returns a wantFn that asserts the Check with the given
+// name has the given status. Unlike expectFailure's generic HasFailures
+// check, this pins the failure to a SPECIFIC finding — necessary for the
+// empty-run_id/empty-entries guard rows (O2 fix-up), where a removed guard
+// can still leave HasFailures true via an unrelated downstream cascade
+// (e.g. an empty run_id resolving to a nonexistent per-run directory,
+// which independently reports Missing artifacts). Asserting the exact
+// Check/status ensures the row goes RED specifically when the guard under
+// test is reverted, not merely when some other, coincidental failure path
+// fires.
+func expectCheckStatus(name string, status Status) func(t *testing.T, r *Report) {
+	return func(t *testing.T, r *Report) {
+		t.Helper()
+		for _, c := range r.Checks {
+			if c.Name == name {
+				if c.Status != status {
+					t.Fatalf("check %q status = %v, want %v (message=%q)", name, c.Status, status, c.Message)
+				}
+				return
+			}
+		}
+		t.Fatalf("expected a check named %q, got: %+v", name, r.Checks)
 	}
 }

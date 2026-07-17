@@ -275,21 +275,34 @@ func checkMigrationMetadata(r *Report, root string) {
 	}
 
 	// Determine which run's per-run artifacts to validate: the manifest's
-	// run_id when the global manifest is itself valid, otherwise the sole
-	// run directory that armed this check (so a deleted/malformed global
-	// manifest does not silence per-run validation of an otherwise-present
-	// run).
-	runID := ""
+	// run_id when the global manifest is itself valid, the sole run
+	// directory that armed this check when there is exactly one (so a
+	// deleted/malformed global manifest does not silence per-run
+	// validation of an otherwise-present run), or — when the manifest
+	// cannot resolve which run is current AND MORE THAN ONE run directory
+	// carries evidence — every evidence run, so an ambiguous multi-run
+	// state can never silently escape validation entirely (S3 hardening:
+	// ambiguity must not be mistaken for "nothing to validate").
 	switch {
 	case manifestValid:
-		runID = manifest.RunID
+		validateRun(r, migrationsRoot, manifest.RunID, true, manifest)
 	case len(evidenceRuns) == 1:
-		runID = evidenceRuns[0]
+		validateRun(r, migrationsRoot, evidenceRuns[0], false, lineageManifest{})
+	case len(evidenceRuns) >= 2:
+		for _, rid := range evidenceRuns {
+			validateRun(r, migrationsRoot, rid, false, lineageManifest{})
+		}
 	}
-	if runID == "" {
-		return
-	}
+}
 
+// validateRun validates the per-run lineage.json and state.json artifacts
+// for a single run directory under migrationsRoot. When manifestValid is
+// true, the per-run lineage.json's run_id is additionally checked against
+// the global manifest's run_id (manifest.RunID). Called once for the
+// resolved current run in the healthy/single-run-evidence cases, and once
+// per candidate run when the global manifest cannot disambiguate which of
+// several evidence-bearing run directories is current (S3 hardening).
+func validateRun(r *Report, migrationsRoot, runID string, manifestValid bool, manifest lineageManifest) {
 	runDir := filepath.Join(migrationsRoot, runID)
 
 	// Per-run lineage.json: current schema, non-empty, and — when the
