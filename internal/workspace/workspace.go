@@ -231,31 +231,31 @@ func lifecycleChildDirPresent(dir string) bool {
 	return false
 }
 
-// LayoutMarkersFromMindspecChildren derives the flat/canonical markers from
-// the immediate child names of a .mindspec/ directory — e.g. the output of
-// executor.TreeDirsAtRef(ref, ".mindspec"). It is pure (no I/O) so the Bead-4
-// merge guard can fingerprint a tree at a git ref without touching the working
-// copy. Legacy (a repo-root docs/ tree) is not observable from .mindspec
-// children, so callers that need it set LayoutMarkers.Legacy themselves.
+// LayoutMarkersFromMindspecChildren derives the FLAT marker from the
+// immediate child names of a .mindspec/ directory — e.g. the output of
+// executor.TreeDirsAtRef(ref, ".mindspec"). It is pure (no I/O).
 //
-// NOTE: this helper predates the Bead-2 (git-ref) marker-scoping fix and is
-// superseded there — it still treats the bare .mindspec child name "docs" as
-// a canonical marker. It is left unchanged here (Bead 1 is filesystem-only;
-// Bead 2 owns its full supersession) so its existing behavior and test stay
-// green.
+// Bead 2 (spec 118) SUPERSEDES this helper's former canonical-derivation
+// behavior: it used to treat the bare child name "docs" as a canonical
+// marker, which false-marked canonical for an ordinary `.mindspec/docs/`
+// documentation wrapper containing no lifecycle directory and no
+// `context-map.md` file (AC-9). A flat list of immediate .mindspec children
+// cannot by itself tell a populated `.mindspec/docs/` tree from a bare one —
+// that requires descending into `.mindspec/docs/` — so canonical (and
+// legacy) derivation now lives in internal/executor's git-ref resolver
+// (layoutAtRef / tierMarkerAtRef), which independently descends
+// `.mindspec/docs` and root `docs` with TreeDirsAtRef and this package's
+// IsLifecycleChildName predicate, plus a type-aware blob probe for each
+// tier's context-map.md. This helper is retained ONLY for the flat tier,
+// which IS fully determined by .mindspec's own immediate children: an
+// immediate child matching IsLifecycleChildName (TreeDirsAtRef already
+// restricts these to TREE entries) or a same-named "context-map.md" entry.
 func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers {
 	var m LayoutMarkers
 	for _, c := range children {
 		name := path.Base(strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(c)), "/"))
-		switch {
-		case name == "docs":
-			m.Canonical = true
-		case name == "context-map.md":
+		if name == "context-map.md" || IsLifecycleChildName(name) {
 			m.Flat = true
-		default:
-			if IsLifecycleChildName(name) {
-				m.Flat = true
-			}
 		}
 	}
 	return m

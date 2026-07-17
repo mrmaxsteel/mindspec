@@ -905,8 +905,8 @@ func TestMergeBase_TrimsWhitespace(t *testing.T) {
 // internal/complete overwrites beadHead with the branch reported by
 // `bd worktree list` (a name it trusts) and that ref flows into the
 // executor's OWN direct git exec — MergeBase / FileAtRef / pathExistsAtRef /
-// TreeDirsAtRef / ChangedFiles — which bypass internal/gitutil's boundary
-// guard. A ref literally named `-x` / `--upload-pack=…` would be reparsed by
+// TreeDirsAtRef / ChangedFiles / BlobExistsAtRef — which bypass
+// internal/gitutil's boundary guard. A ref literally named `-x` / `--upload-pack=…` would be reparsed by
 // git as an option (verified: `git update-ref refs/heads/-x HEAD` succeeds,
 // `git merge-base main -x` reparses `-x`). These tests pin that each site
 // REJECTS a `-`-prefixed operand with the SEC-5 guard error BEFORE git is
@@ -968,6 +968,10 @@ func TestExecutorRefSites_RejectOptionLikeRef(t *testing.T) {
 		_, err := g.ChangedFiles("main", hostile)
 		assertSEC5(t, err, "ChangedFiles(head)")
 	})
+	t.Run("BlobExistsAtRef", func(t *testing.T) {
+		_, err := g.BlobExistsAtRef(hostile, "README.md")
+		assertSEC5(t, err, "BlobExistsAtRef")
+	})
 	t.Run("UploadPackVector", func(t *testing.T) {
 		// The canonical RCE-shaped operand from the finding.
 		_, err := g.MergeBase("--upload-pack=touch /tmp/pwned", "main")
@@ -976,7 +980,7 @@ func TestExecutorRefSites_RejectOptionLikeRef(t *testing.T) {
 }
 
 // TestExecutorRefSites_ControlledRefsStillWork confirms the guard does not
-// regress legitimate refs (main, spec/<id>, bead/<id>, HEAD) at the four
+// regress legitimate refs (main, spec/<id>, bead/<id>, HEAD) at the five
 // ls-tree/show/merge-base sites.
 func TestExecutorRefSites_ControlledRefsStillWork(t *testing.T) {
 	g, _, dir := newRepoExecutor(t)
@@ -1020,6 +1024,9 @@ func TestExecutorRefSites_ControlledRefsStillWork(t *testing.T) {
 		}
 		if _, err := g.MergeBase(ref, "main"); err != nil {
 			t.Errorf("MergeBase(%q, main): %v", ref, err)
+		}
+		if blobOK, err := g.BlobExistsAtRef(ref, "top.txt"); err != nil || !blobOK {
+			t.Errorf("BlobExistsAtRef(%q, top.txt) = (%v, %v), want (true, nil)", ref, blobOK, err)
 		}
 	}
 	// ChangedFiles between two controlled refs.

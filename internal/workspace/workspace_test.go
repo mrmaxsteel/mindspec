@@ -993,20 +993,25 @@ func TestClassifyLayout(t *testing.T) {
 	}
 }
 
-// TestLayoutMarkersFromMindspecChildren pins the pure git-ref-friendly marker
-// derivation the Bead-4 merge guard feeds from executor.TreeDirsAtRef output.
+// TestLayoutMarkersFromMindspecChildren pins the pure FLAT-only marker
+// derivation from .mindspec's immediate children (executor.TreeDirsAtRef
+// output). Bead 2 (spec 118 / AC-9) supersedes this helper's former
+// "docs"-name→Canonical shortcut: a bare `.mindspec/docs` child name no
+// longer sets Canonical here (or anywhere) — canonical/legacy derivation at
+// a git ref now lives in internal/executor's layoutAtRef/tierMarkerAtRef,
+// which descends the wrapper instead of pattern-matching its name.
 func TestLayoutMarkersFromMindspecChildren(t *testing.T) {
 	cases := []struct {
 		name     string
 		children []string
 		want     LayoutMarkers
 	}{
-		{"canonical docs child", []string{"docs"}, LayoutMarkers{Canonical: true}},
+		{"bare docs child name sets no marker (Bead 2 supersedes the canonical shortcut)", []string{"docs"}, LayoutMarkers{}},
 		{"flat lifecycle children", []string{"specs", "adr", "domains", "core"}, LayoutMarkers{Flat: true}},
 		{"flat context-map file", []string{"context-map.md"}, LayoutMarkers{Flat: true}},
-		{"real-repo canonical shape ignores mover state dirs", []string{"docs", "migrations", "lineage", "config.yaml"}, LayoutMarkers{Canonical: true}},
-		{"flat+canonical (mixed when classified)", []string{"specs", "docs"}, LayoutMarkers{Flat: true, Canonical: true}},
-		{"tolerates trailing slashes and full paths", []string{".mindspec/specs/", "docs/"}, LayoutMarkers{Flat: true, Canonical: true}},
+		{"bare docs child among unrelated mover state dirs sets no marker", []string{"docs", "migrations", "lineage", "config.yaml"}, LayoutMarkers{}},
+		{"flat lifecycle child alongside bare docs child sets only Flat", []string{"specs", "docs"}, LayoutMarkers{Flat: true}},
+		{"tolerates trailing slashes and full paths (bare docs child still sets no marker)", []string{".mindspec/specs/", "docs/"}, LayoutMarkers{Flat: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
