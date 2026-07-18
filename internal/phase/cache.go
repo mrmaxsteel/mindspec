@@ -35,6 +35,8 @@ type Cache struct {
 	// Whole-list memoization.
 	epicsAll       []EpicInfo
 	epicsAllLoaded bool
+	openAll        []ChildInfo
+	openAllLoaded  bool
 
 	// Per-key memoization. Presence of the map key means "looked up successfully".
 	// Errors are never stored.
@@ -88,6 +90,32 @@ func (c *Cache) ActiveEpics() ([]EpicInfo, error) {
 		}
 	}
 	return out, nil
+}
+
+// OpenBeads returns EVERY open/in_progress issue in the tracker — all
+// parents, all types — from a single global
+// `bd list --status=open,in_progress -n 0` call, memoized for the cache's
+// lifetime. Each item carries its Parent so callers can attribute it to an
+// owning epic in-process (the lifecycle aggregate scan's stale-OPEN leg,
+// spec 119 final-review r2 F1/G3: candidates must be found REGARDLESS of
+// the parent epic's status, without a per-epic children query). On error,
+// nothing is memoized so the next call retries.
+func (c *Cache) OpenBeads() ([]ChildInfo, error) {
+	if c == nil {
+		return fetchOpenBeads()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.openAllLoaded {
+		return c.openAll, nil
+	}
+	open, err := fetchOpenBeads()
+	if err != nil {
+		return nil, err
+	}
+	c.openAll = open
+	c.openAllLoaded = true
+	return open, nil
 }
 
 // FindEpic returns the EpicInfo for an exact epic ID, fetching via `bd show`
@@ -239,6 +267,22 @@ func fetchChildren(epicID string) ([]ChildInfo, error) {
 		return nil, fmt.Errorf("parse children: %w", err)
 	}
 	return children, nil
+}
+
+// fetchOpenBeads issues the single global
+// `bd list --status=open,in_progress -n 0 --json` behind Cache.OpenBeads.
+// The status pair is exactly the stale-OPEN candidate set (open +
+// in_progress built-ins); `-n 0` avoids the default --limit=50 truncation.
+func fetchOpenBeads() ([]ChildInfo, error) {
+	out, err := listJSONFn("--status=open,in_progress", "-n", "0")
+	if err != nil {
+		return nil, fmt.Errorf("bd list --status=open,in_progress failed: %w", err)
+	}
+	var items []ChildInfo
+	if err := json.Unmarshal(out, &items); err != nil {
+		return nil, fmt.Errorf("parse open issues: %w", err)
+	}
+	return items, nil
 }
 
 // fetchEpic issues a `bd show <id> --json`. Returns (nil, nil) for "not found".

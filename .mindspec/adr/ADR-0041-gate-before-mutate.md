@@ -73,7 +73,12 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
    - **Artifact materialization** (`complete` only): the optional user
      `CommitAll` (`--commit-msg`) and the pathspec-scoped beads-artifact
      sync commit. These are *local, bead-branch-only, never-`main`*
-     commits that materialize the very tip the two content gates measure.
+     commits that materialize the very tip the two content gates measure —
+     a property that is ENFORCED, not assumed: BOTH legs refuse (a
+     `guard.NewFailure` with the worktree-recreating `mindspec next`
+     recovery) when no bead worktree resolves, and a worktree-enumeration
+     failure propagates as a preflight error; neither leg ever falls back
+     to committing on the root/`main` checkout.
      The **doc-sync** and **ADR-divergence** gates deliberately validate
      the resulting committed bead tip *after* this subphase — their
      `base..beadHead` range must include the just-committed user work —
@@ -134,11 +139,13 @@ operator's Ctrl-C — between two of its mutations, the recovery contract is:
   no-op; `isAlreadyRemovedErr`/`isAlreadyClosedErr` absorb re-removals and
   re-closes. Each of these is a DELIBERATE idempotency property of the
   underlying operation, not a hope.
-- **Tracker-only commits never target protected `main`.** The tracker
-  auto-commit / artifact-sync-commit legs of `complete` are pathspec-scoped
-  and refuse rather than commit onto a main checkout (Spec 119 R3/AC-3/AC-4)
-  — a forward-reconcile contract that can commit onto the wrong branch is
-  not actually safe to retry blindly.
+- **`complete`'s commits never target protected `main`.** The artifact-
+  sync leg is pathspec-scoped and refuses rather than commit onto a main
+  checkout (Spec 119 R3/AC-3/AC-4), and the user `--commit-msg` `CommitAll`
+  leg refuses identically when no bead worktree matches (it targets the
+  matched bead worktree ONLY — no root fallback) — a forward-reconcile
+  contract that can commit onto the wrong branch is not actually safe to
+  retry blindly.
 - **A failure that cannot forward-reconcile is a refusal, not a silent
   partial state.** Every mutation whose failure cannot be absorbed by a
   bounded re-invocation (a durable-obligation marker write, a post-close

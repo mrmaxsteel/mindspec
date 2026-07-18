@@ -7,17 +7,19 @@
 // per-spec, uncached `bd` subprocesses — measured at minutes-to-never for
 // a full `doctor --ci` run, on EVERY SessionStart once wired into idle
 // instruct. This scan replaces that shape with a semantic, tracker-driven
-// enumeration whose bd cost is 1 + (number of ACTIVE epics) subprocesses:
+// enumeration whose bd cost is exactly TWO subprocesses — O(1),
+// independent of both the on-disk spec count and the epic count:
 //
 //   - `cache.AllEpics()` is called exactly ONCE; the specID for each epic
 //     comes from its own metadata (phase.ExtractSpecMetadata /
 //     phase.SpecIDFromMetadata) — never a per-spec-dir FindEpicBySpecID.
-//   - stale-OPEN candidates come from ACTIVE (open/in_progress) epics
-//     only: one `cache.GetChildren` per active epic, filtered in-process;
-//     the git-side MergedUnclosed confirmation runs only for their open
-//     children. A healthy completed historical epic cannot acquire a
-//     newly-stale OPEN child without first becoming live-divergent, so
-//     historical epics need no children query at all.
+//   - stale-OPEN candidates come from ONE global open/in_progress
+//     enumeration (`cache.OpenBeads()`), attributed to their owning spec
+//     via the bead's own Parent against the epic list — REGARDLESS of the
+//     parent epic's status (final-review r2 G3: a prematurely-closed epic
+//     can still hold an OPEN child whose work fully landed, and the
+//     original per-active-epic children query silently dropped it). The
+//     git-side MergedUnclosed confirmation runs only for those candidates.
 //   - stale-tracker divergence reads main's committed .beads/issues.jsonl
 //     ONCE into an id→status map and compares every live-closed epic
 //     against it in memory.
@@ -83,40 +85,59 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 		committed = issueStatusesInJSONL(data)
 	}
 
+	// epicID → specID for EVERY lifecycle epic, whatever its status — the
+	// in-process attribution table for the global stale-OPEN enumeration
+	// below (final-review r2 G3: parent-epic activity is a perf shape, not
+	// a semantic filter; a stale-OPEN child must surface even under a
+	// closed epic).
+	epicSpec := make(map[string]string, len(epics))
+
 	for _, epic := range epics {
 		num, title := phase.ExtractSpecMetadata(epic)
 		if num <= 0 || title == "" {
 			continue // no spec lineage — not a lifecycle epic
 		}
 		specID := phase.SpecIDFromMetadata(num, title)
+		epicSpec[epic.ID] = specID
 
-		switch strings.ToLower(strings.TrimSpace(epic.Status)) {
-		case "open", "in_progress":
-			// ACTIVE epic: one children query, filtered in-process to the
-			// open/in_progress candidates the stale-OPEN classifier needs.
-			children, cErr := cache.GetChildren(epic.ID)
-			if cErr != nil {
-				continue // best-effort: fewer findings, never a hard error
-			}
-			var openIDs []string
-			for _, ch := range children {
-				id := strings.TrimSpace(ch.ID)
-				if id == "" || id == epic.ID {
-					continue
-				}
-				switch strings.ToLower(strings.TrimSpace(ch.Status)) {
-				case "open", "in_progress":
-					openIDs = append(openIDs, id)
-				}
-			}
-			out.StaleOpen = append(out.StaleOpen, staleOpenLanded(root, specID, openIDs)...)
-		case "closed":
+		if strings.ToLower(strings.TrimSpace(epic.Status)) == "closed" {
 			if committed == nil {
 				continue // main's export unreadable — cannot check, never guess
 			}
 			if o := staleTrackerFinding(specID, epic.ID, committed); o != nil {
 				out.StaleTrackers = append(out.StaleTrackers, *o)
 			}
+		}
+	}
+
+	// stale-OPEN leg: the whole scan's SECOND (and last) bd subprocess —
+	// one global open/in_progress enumeration, grouped per owning spec
+	// in-process via each bead's Parent, then confirmed git-side by the
+	// single-home classifier (staleOpenLanded → MergedUnclosed). Grouping
+	// preserves the enumeration's own order, so output stays deterministic
+	// for a given bd result. Best-effort: an enumeration failure yields
+	// fewer findings for this leg, never a hard error (the other legs'
+	// findings above survive).
+	if open, oErr := cache.OpenBeads(); oErr == nil {
+		bySpec := make(map[string][]string)
+		var specOrder []string
+		for _, b := range open {
+			parent := strings.TrimSpace(b.Parent)
+			specID, isLifecycle := epicSpec[parent]
+			if !isLifecycle {
+				continue // top-level issue or non-lifecycle parentage
+			}
+			id := strings.TrimSpace(b.ID)
+			if id == "" || id == parent {
+				continue
+			}
+			if _, seen := bySpec[specID]; !seen {
+				specOrder = append(specOrder, specID)
+			}
+			bySpec[specID] = append(bySpec[specID], id)
+		}
+		for _, specID := range specOrder {
+			out.StaleOpen = append(out.StaleOpen, staleOpenLanded(root, specID, bySpec[specID])...)
 		}
 	}
 	return out

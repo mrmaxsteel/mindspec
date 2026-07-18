@@ -2023,7 +2023,11 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
-	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
@@ -2032,14 +2036,101 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify CommitAll was called via executor
+	// Verify CommitAll was called via executor, targeting the MATCHED bead
+	// worktree — never the root/main checkout (final-review r2 F2).
 	commitCalls := mock.CallsTo("CommitAll")
 	if len(commitCalls) != 1 {
 		t.Fatalf("expected 1 CommitAll call, got %d", len(commitCalls))
 	}
+	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
+		t.Errorf("CommitAll path: got %q, want the matched bead worktree", path)
+	}
 	msg := commitCalls[0].Args[1].(string)
 	if !strings.Contains(msg, "impl(bead-1)") || !strings.Contains(msg, "add feature X") {
 		t.Errorf("CommitAll msg: got %q", msg)
+	}
+}
+
+// TestRun_CommitMsgNoWorktreeRefusesMainCommit (final-review r2, F2): a
+// `complete --commit-msg` invocation whose bead worktree is missing (no
+// worktree-list match) while the bead/<id> ref still exists (so the R4
+// reconcile path does NOT engage) must REFUSE — the pre-fix behavior fell
+// back to CommitAll at root, i.e. a user-work commit on the main checkout
+// with no branch guard. The refusal must land BEFORE any mutation: zero
+// CommitAll calls, no bd close, no terminal CompleteBead.
+func TestRun_CommitMsgNoWorktreeRefusesMainCommit(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	// No matching worktree — the F2 gap's trigger (a pruned worktree, with
+	// the bead branch itself still present so reconcile detection stays
+	// inert; MockExecutor's RevParseRef defaults to "found").
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closed := false
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a refusal — --commit-msg with no bead worktree must never commit on the main checkout")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "main checkout") || !strings.Contains(msg, "refusing") {
+		t.Errorf("refusal must name the main-checkout hazard; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec next") {
+		t.Errorf("refusal must carry the worktree-recreating `mindspec next` recovery; got:\n%s", msg)
+	}
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("refusal must end with a `recovery:` line; got:\n%s", msg)
+	}
+	// NO commit was created anywhere — least of all on main.
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("CommitAll must never run on the refusal path, got %d calls", len(calls))
+	}
+	if closed {
+		t.Error("bd close must not run after the --commit-msg refusal")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("no terminal mutation allowed after the refusal, got %d CompleteBead calls", len(calls))
+	}
+}
+
+// TestRun_WorktreeListErrorPropagates (final-review r2, F2): a failure
+// enumerating worktrees is an infra error, not "no worktree" — it must
+// surface as a preflight error (pre-fix it was swallowed, leaving
+// wtPath == "" and routing the --commit-msg CommitAll to the main
+// checkout). Nothing may mutate.
+func TestRun_WorktreeListErrorPropagates(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return nil, fmt.Errorf("simulated bd worktree list failure")
+	}
+	closed := false
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the worktree-list failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "listing bead worktrees") {
+		t.Errorf("error must name the worktree enumeration, got: %v", err)
+	}
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("CommitAll must never run after a worktree-list failure, got %d calls", len(calls))
+	}
+	if closed {
+		t.Error("bd close must not run after a worktree-list failure")
 	}
 }
 

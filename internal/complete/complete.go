@@ -286,7 +286,11 @@ func defaultFindLocalRoot() (string, error) {
 // Steps 2.5–3 (the optional user CommitAll and the pathspec-scoped
 // artifact-sync commit) are the ARTIFACT-MATERIALIZATION subphase: local,
 // bead-branch-only, never-main commits that materialize the tip the two
-// content gates validate. The doc-sync and ADR-divergence gates (step 3.5)
+// content gates validate. The never-main property is ENFORCED, not
+// assumed: BOTH legs refuse (guard.NewFailure, `mindspec next` recovery)
+// when no bead worktree matched — neither ever falls back to committing
+// on the root/main checkout (final-review r2 F2).
+// The doc-sync and ADR-divergence gates (step 3.5)
 // deliberately run AFTER that subphase — their base..beadHead range must
 // include the just-committed user work — so a doc/ADR refusal MAY follow
 // those local commits. That is a documented, forward-reconcilable
@@ -434,17 +438,23 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	var wtPath string
 	beadHead := workspace.BeadBranch(beadID)
 	entries, err := worktreeListFn()
-	if err == nil {
-		expectedName := workspace.BeadWorktreeName(beadID)
-		expectedBranch := workspace.BeadBranch(beadID)
-		for _, e := range entries {
-			if e.Name == expectedName || e.Branch == expectedBranch {
-				wtPath = e.Path
-				if e.Branch != "" {
-					beadHead = e.Branch
-				}
-				break
+	if err != nil {
+		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
+		// infra error, not "no worktree" — swallowing it used to leave
+		// wtPath == "" and let the --commit-msg CommitAll below fall back
+		// to the root/main checkout. Propagate as a preflight refusal
+		// (nothing has mutated yet) instead of guessing.
+		return nil, fmt.Errorf("listing bead worktrees for %s: %w", beadID, err)
+	}
+	expectedName := workspace.BeadWorktreeName(beadID)
+	expectedBranch := workspace.BeadBranch(beadID)
+	for _, e := range entries {
+		if e.Name == expectedName || e.Branch == expectedBranch {
+			wtPath = e.Path
+			if e.Branch != "" {
+				beadHead = e.Branch
 			}
+			break
 		}
 	}
 
@@ -560,13 +570,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// to commit into — the work already landed — so a --commit-msg
 	// carried into a reconcile re-invocation is a no-op rather than a
 	// commit on whatever happens to be checked out at root.
-	commitPath := wtPath
-	if commitPath == "" {
-		commitPath = root
-	}
+	//
+	// Final-review r2 (F2): the user CommitAll targets the MATCHED bead
+	// worktree ONLY — there is no root fallback. wtPath == "" here means
+	// the bead's worktree is missing (pruned/removed) while its bead/<id>
+	// ref still exists (reconcile detection above did not fire), and root
+	// is the main checkout (Run's own contract), so an unguarded CommitAll
+	// would commit user work onto `main`. Refuse instead, mirroring the
+	// step-3 artifact-sync guard (R3/AC-3) — same convergent recovery:
+	// `mindspec next` recreates the missing worktree.
 	if commitMsg != "" && reconcile == nil {
+		if wtPath == "" {
+			return nil, guard.NewFailure(
+				fmt.Sprintf("bead %s's --commit-msg auto-commit would commit user work on the main checkout (%s) — no bead worktree matched; refusing.", beadID, root),
+				fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s \"...\"`)", specID, beadID, beadID),
+			)
+		}
 		msg := fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
-		if err := exec.CommitAll(commitPath, msg); err != nil {
+		if err := exec.CommitAll(wtPath, msg); err != nil {
 			return nil, fmt.Errorf("auto-commit failed: %w", err)
 		}
 	}

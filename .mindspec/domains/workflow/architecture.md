@@ -378,10 +378,12 @@ instead of performing a git merge. This is the recovery path a killed
 for real but the invocation died before completing (see
 `internal/complete/fault_injection_realgit_test.go`'s `c5` case).
 
-Tracker-only commits (the `--commit-msg` auto-commit and the artifact-sync
-follow-up commit) are now pathspec-scoped — never an `add -A` equivalent —
-and refuse rather than commit onto a main checkout when no bead worktree
-is resolved (AC-3/AC-4). A bead's own advisory scope check
+Both materialization legs refuse rather than commit onto a main checkout
+when no bead worktree is resolved (AC-3/AC-4; the user `--commit-msg`
+`CommitAll` targets the matched bead worktree ONLY — no root fallback —
+and a worktree-enumeration failure propagates instead of being swallowed),
+and the artifact-sync follow-up commit is pathspec-scoped — never an
+`add -A` equivalent. A bead's own advisory scope check
 (`internal/complete/bead_scope.go`) warns, non-fatally, when a bead's diff
 touches files outside its plan-declared `file_paths` baseline — pure
 advisory, never a gate.

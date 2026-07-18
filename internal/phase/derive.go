@@ -75,6 +75,12 @@ type ChildInfo struct {
 	Title     string `json:"title"`
 	Status    string `json:"status"`
 	IssueType string `json:"issue_type"`
+	// Parent is the bd parent issue ID (the owning epic for lifecycle
+	// beads). bd emits it in every list/show JSON shape; it is empty for
+	// top-level issues. Consumed by Cache.OpenBeads callers (the lifecycle
+	// aggregate scan) to attribute a globally-enumerated bead to its epic
+	// without a per-epic children query.
+	Parent string `json:"parent"`
 }
 
 // ActiveSpec holds discovered spec information derived from beads.
