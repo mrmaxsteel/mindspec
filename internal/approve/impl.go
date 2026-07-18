@@ -179,6 +179,20 @@ type ImplResult struct {
 //  9. exec.FinalizeEpic (TERMINAL MUTATION)
 //  10. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
 //     AllowDocSkew set AND FinalizeEpic returned nil
+//
+// ADR-0041 (gate-before-mutate): steps 1-4 above are this verb's PREFLIGHT
+// phase — the phase gate, the plan-bead gate, the doc-sync gate, the
+// ADR-divergence backstop, and the Spec 115 orphan/obligation gate all
+// resolve their facts and evaluate every derivable refusal before the first
+// mutation (step 5's deferred phase reconcile is itself idempotent and
+// still precedes step 6, the first hard mutation). The idempotent ADR-0034
+// migration (phase.EnsureMigrated, immediately below) is the ADR's named
+// exemption. Steps 6-9 are the COMMIT phase; step 9's exec.FinalizeEpic is
+// the terminal mutation chain, whose own internal stages are individually
+// classified KILL-TESTED / DOCUMENTED-FORWARD-SAFE in
+// internal/executor/finalize_fault_test.go (Spec 119 Bead 6, AC-26 i4).
+// This verb's own RECONCILE contract is bounded re-invocation converging to
+// completion or a clean named refusal — see internal/approve/impl_fault_test.go.
 func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) (*ImplResult, error) {
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err

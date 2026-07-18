@@ -82,3 +82,36 @@ Bead `mindspec-oexu.1` removed confirmed-dead execution-domain symbols
 - `internal/harness`: `filterEnv` (`agent.go`; the live `filterEnvPrefix` is
   retained) and the unused assertion helpers `assertCommandUsedFlag` +
   `assertCleanWorktree` (`asserts.go`).
+
+## Epic-scoped `FinalizeEpic` + the fault-injection stage hook (spec 119)
+
+`MindspecExecutor.FinalizeEpic`'s two bead-branch enumerations — the
+bead→spec auto-merge leg and the worktree/branch cleanup leg — are now
+scoped to a caller-supplied `lifecycleAllowSet` (the finalizing spec's
+plan-declared, lifecycle-classified bead IDs, computed by
+`internal/approve.ApproveImpl` and passed in). A candidate `bead/<id>` is
+admitted iff its ID is a member; `lifecycleAllowSet == nil` is the
+"not computed" sentinel — encountering ANY `bead/<id>` candidate while it
+is nil aborts the finalize fail-closed (a foreign-epic bead or a
+same-epic non-lifecycle follow-up must survive both legs untouched,
+R6/AC-14). This closes a class of bug where a `WorktreeOps.List()`
+enumeration failure silently skipped the whole leg instead of aborting.
+
+`FinalizeEpic` is a single COMMIT-phase mutation chain (ADR-0041 §1) with
+no seam separating its internal steps, so spec 119 Bead 6 added
+**`finalizeStepHookFn`** (`mindspec_executor.go`) — a test-only package-var
+hook invoked at five labeled stages: `auto_merge` (after the bead-branch
+auto-merge leg), `push` (after the unconditional spec-branch push),
+`orphan_finalize` (after bug wu7t's `finalizeOrphanedSpecBranch` returns),
+`pre_cleanup` (between the merge/push legs and the cleanup leg), and
+`post_cleanup` (after the cleanup leg's mutations — worktree/branch
+removals, the no-remote direct spec→main merge, spec-branch deletion —
+complete). Nil in production (a pure no-op); `internal/executor/
+finalize_fault_test.go` sets it per test to fault-inject each stage
+individually against a real temp git repo, confirming the REAL mutation
+up to that stage landed before the injected terminal error, then clears
+the hook and re-invokes `FinalizeEpic` to confirm convergence. The LAST
+stage (`post_cleanup`) is the one point where "convergence" means a
+clean, named refusal (`FinalizeEpic`'s own "spec branch does not exist"
+check) rather than completion — there is nothing left to finalize by the
+time that stage's mutations have all landed.

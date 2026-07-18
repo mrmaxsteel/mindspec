@@ -325,3 +325,119 @@ embedded from) needs no separate claim: it already resolves to workflow
 through the existing `plugins/mindspec/**` glob. With the claim in place,
 `validate.attributeDomain` resolves `.claude/workflows/ms-panel.js` to
 `"workflow"`.
+
+## Lifecycle control-plane integrity: gate-before-mutate + forward-reconcile (spec 119)
+
+Spec 119 (beads `mindspec-lc12.1` through `.6`) closes a recurring defect
+shape across all three mutating lifecycle verbs — `mindspec complete`,
+`mindspec plan approve`, `mindspec impl approve` — where a refusal
+derivable from already-available facts was discovered *mid-sequence*,
+after one or more mutations had already landed. **ADR-0041
+(gate-before-mutate)** is the codifying record: every verb now follows a
+three-phase contract — **preflight** (resolve every immutable gate fact
+and evaluate every derivable refusal before the first mutation) →
+**commit** (the mutation sequence proper) → **reconcile** (a bounded,
+idempotent forward path back to completion or a clean named refusal on
+any interruption — never a rollback). The idempotent ADR-0034 migration
+is the one exempt pre-preflight mutation in all three verbs, since it is
+itself read-only-or-idempotent.
+
+### `mindspec complete`: lineage-authoritative preflight + forward reconcile
+
+`internal/complete.Run` resolves the bead's owning spec from its **parent
+epic** (lineage), not from cwd — cwd-derived resolution is now a fallback
+used only when lineage genuinely cannot answer. A `--spec` hint is checked
+AGAINST the lineage spec and refused pre-mutation on a mismatch, naming
+both spec IDs (AC-1/AC-2). The bd_close lifecycle-bypass guard
+(`findOrphanedClosedBeadsFn`, bead `mindspec-4gsz`) and the panel gate
+(ADR-0037) both still run inside this same preflight window, before the
+tracker auto-commit.
+
+The **merged-unclosed / branch-less forward-reconcile** path
+(`internal/lifecycle.MergedUnclosed`/`FindLandedMerge`) is the reconcile
+half: when a bead has no matching worktree AND its canonical `bead/<id>`
+ref genuinely no longer exists, `Run` no longer calls `exec.MergeBase`
+against the absent ref (the exit-128 bug this replaces) — it positively
+identifies the bead's already-landed bead→spec merge commit via
+second-parent identity and anchors every per-bead gate (doc-sync,
+ADR-divergence, the bead-scope advisory) at that commit's own `M^1..M`
+diff, recording durable `mindspec_reconcile_landed_merge_sha` evidence
+instead of performing a git merge. This is the recovery path a killed
+`complete` invocation converges through after its bead→spec merge landed
+for real but the invocation died before completing (see
+`internal/complete/fault_injection_realgit_test.go`'s `c5` case).
+
+Tracker-only commits (the `--commit-msg` auto-commit and the artifact-sync
+follow-up commit) are now pathspec-scoped — never an `add -A` equivalent —
+and refuse rather than commit onto a main checkout when no bead worktree
+is resolved (AC-3/AC-4). A bead's own advisory scope check
+(`internal/complete/bead_scope.go`) warns, non-fatally, when a bead's diff
+touches files outside its plan-declared `file_paths` baseline — pure
+advisory, never a gate.
+
+### `mindspec plan approve`: preflight-resolved facts, no interleaved mutation
+
+`internal/approve.resolvePlanApprovePreflight` (called before ANY mutation
+in `ApprovePlan`) reads plan.md, parses bead sections and structured
+`work_chunks`, validates their alignment, resolves the target epic
+FAIL-CLOSED (`resolveTargetEpic` distinguishes a bd query failure from a
+genuinely absent epic — two distinct refusals, two distinct recovery
+lines), and resolves + safety-checks the epic's existing child set
+(`queryExistingChildren`/`checkExistingBeadsSafety`, the spec-074
+re-approval safeguard) — every refusal these facts can produce fires here,
+before the first mutation (the supersede-close of an all-open child set).
+`createBeadsFromParsed` then consumes the SAME preflight-resolved facts
+for bead creation + dependency wiring, so no re-read/re-validation/re-query
+can discover a fresh refusal after mutation has begun. A best-effort `bd
+dep add` failure is now named in `result.Warnings` (both bead IDs) instead
+of a silent `continue` (AC-20); a missing `work_chunks` block warns loudly
+instead of silently wiring zero edges (AC-19).
+
+### `mindspec impl approve`: epic-scoped finalize + the pre-terminal orphan/obligation gate
+
+The FinalizeEpic lifecycle allow-set (`phase.LifecycleChildIDsForEpic` ∩
+the plan-declared bead IDs) is resolved as a preflight FACT, immediately
+after the last read-only gate (ADR-divergence) and BEFORE the
+supersede-ADR placeholder's disk write — a classification failure refuses
+pre-mutation rather than falling through to the executor's own fail-closed
+abort. `runOrphanObligationGate` (spec 115, extended here) is the
+pre-terminal refusal gate: it fails closed on every cleanly-signaled infra
+error across its three legs (the orphan scan, the worktree-enumeration
+merge-prevention leg, and the durable-obligation backstop) and performs NO
+epic close, NO phase write, NO merge, NO push on a refusal.
+
+### `mindspec doctor` + `mindspec next`: shared lifecycle-divergence predicates
+
+`internal/lifecycle.FindOrphanedClosedBeads`/`ScanOrphanedClosedBeads`/
+`StaleOpenBeads`/`FindLandedMerge`/`MergedUnclosed` are the single-sourced
+predicates `mindspec complete`, `mindspec impl approve`, `mindspec next`,
+and `mindspec doctor` all consume identically — the anti-drift guarantee
+(AC-12): a bare `bd close` that bypassed `mindspec complete`, or a bead
+whose Dolt status disagrees with its landed-merge git evidence, reads the
+same way from every surface. `internal/doctor`'s `stale_open.go` and
+`finalize_orphans.go` wire these predicates into `mindspec doctor`'s CI
+mode (`--ci`, `SkipLocalEnv`) — now gated in `.github/workflows/ci.yml` —
+so a lifecycle divergence fails CI the same way a stale-schema drift
+already did.
+
+### Fault-injection regression suite (spec 119 Bead 6, AC-26)
+
+`internal/complete/fault_injection_test.go` +
+`fault_injection_realgit_test.go`, `internal/approve/impl_fault_test.go` +
+`plan_fault_test.go`, and `internal/executor/finalize_fault_test.go`
+classify every significant post-preflight mutation point in all three
+verbs as KILL-TESTED (a real mutation lands via a real-git decorator
+executor, a terminating tracker seam, or `FinalizeEpic`'s new
+`finalizeStepHookFn` stage hook, then a terminal error is forced) or
+DOCUMENTED-FORWARD-SAFE (the error is swallowed by design; a kill test
+would be fictitious). Every kill test re-invokes the same verb and asserts
+convergence to completion or a clean, named, recoverable refusal — never a
+fabricated "kill" that doesn't actually terminate anything. See ADR-0041
+§3 for the standing classification rule this suite implements.
+
+Every test in this suite is hermetic: real temp git repos (never this
+repo's own working tree), in-memory tracker fakes for `bd`, and — where a
+production seam has no test double (e.g. `internal/validate`'s
+`bead.BeadExists` → real `bd show`, which has no mock seam) — a
+scoped-PATH technique (a scratch `bin/` containing only a `git` symlink)
+rather than a dependency on this dev machine's real Dolt store.

@@ -274,6 +274,21 @@ func defaultFindLocalRoot() (string, error) {
 // exec is the Executor used for all git/workspace operations.
 // specIDHint is optional and typically comes from --spec for disambiguation.
 // opts carries lifecycle options including the doc-sync skew override.
+//
+// ADR-0041 (gate-before-mutate): the block below through the panel gate at
+// step 2.25 is this verb's PREFLIGHT phase — every immutable gate fact
+// (lineage, the impl-only guard, the bd_close orphan check, the reconcile
+// detection) is resolved and every refusal derivable from those facts is
+// evaluated before the first mutation. The idempotent ADR-0034 migration
+// (phase.EnsureMigratedWithCache, step 1.25) is the ADR's named exemption —
+// it runs ahead of preflight but is read-only-or-idempotent, so it can never
+// produce a mutation a preflight refusal would need to have prevented. Every
+// mutation from step 2.5 onward (the COMMIT phase) is followed by this
+// verb's RECONCILE contract: a killed run converges via bounded re-invocation
+// to completion or a clean named refusal (never a rollback) — see the
+// merged-unclosed / branch-less reconcile detection immediately below and
+// the fault-injection matrix in internal/complete's *_fault_test.go (Spec
+// 119 Bead 6, AC-26).
 func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (*Result, error) {
 	// Determine local root for per-worktree context resolution.
 	localRoot := root
