@@ -66,9 +66,25 @@ func (r *Report) Fix() {
 // nothing. See ADR-0034 and spec 089 Requirement 11 (the dry-run path
 // is reporting-only and exits 0 regardless of how many legacy specs
 // are surfaced).
+//
+// SkipLocalEnv, when true, skips the developer-local-environment checks
+// (Beads merge driver, bd version floor, bd schema drift, multiple-bd-
+// on-PATH, and stale hooks) that a fresh CI checkout structurally cannot
+// satisfy: `actions/checkout` never populates a checkout-local
+// `merge.beads.driver` git config value (that's a per-clone/per-worktree
+// setting `mindspec setup` writes, not tracked state), and a CI runner
+// has no local `bd` install or git hooks to probe. Running those checks
+// unconditionally in CI produced a false-positive "Beads merge driver"
+// Error on every fresh checkout (Spec 119 lc12.2 panel finding). The
+// repo-integrity / lifecycle-divergence checks (stale-OPEN, finalize-
+// orphan, orphaned-closed, tracker/git divergence, docs/layout/ownership,
+// beads durable-state) are NOT skipped — those are exactly what CI
+// SHOULD gate on. See `mindspec doctor --ci` and the CI wiring in
+// `.github/workflows/ci.yml`.
 type Options struct {
 	Force           bool
 	DryRunMigration bool
+	SkipLocalEnv    bool
 }
 
 // RunWithOptions executes all doctor checks against the given project root.
@@ -102,11 +118,18 @@ func RunWithOptions(root string, opts Options) *Report {
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)
-	checkBdVersionFloor(r, root)
-	checkBdSchemaDrift(r, root)
-	checkMultipleBdOnPath(r, root)
-	checkBeadsMergeDriver(r, root)
 	checkGit(r, root)
-	checkHooks(r, root)
+	// Developer-local-environment checks: a fresh CI checkout has no local
+	// `bd` install, no git hooks, and no checkout-local merge.beads.driver
+	// config (see Options.SkipLocalEnv doc comment), so `mindspec doctor
+	// --ci` skips these rather than false-failing the build on every clean
+	// checkout.
+	if !opts.SkipLocalEnv {
+		checkBdVersionFloor(r, root)
+		checkBdSchemaDrift(r, root)
+		checkMultipleBdOnPath(r, root)
+		checkBeadsMergeDriver(r, root)
+		checkHooks(r, root)
+	}
 	return r
 }

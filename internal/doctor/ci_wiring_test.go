@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // repoRootForCIWiring walks up from the test's working directory until it
@@ -35,10 +37,54 @@ func repoRootForCIWiring(t *testing.T) string {
 	}
 }
 
+// ciWorkflowStep is the subset of a GitHub Actions step's fields relevant to
+// the AC-11 pin. Parsed via yaml.v3 rather than naive line scanning — GitHub
+// Actions puts `continue-on-error: true` on ITS OWN line within a step's
+// block, not necessarily on the same line as `run:`, so a per-line substring
+// scan for "mindspec doctor" + "continue-on-error" can miss a bypass that
+// lives a few lines below the run command inside the SAME step.
+type ciWorkflowStep struct {
+	Name            string `yaml:"name"`
+	Run             string `yaml:"run"`
+	ContinueOnError bool   `yaml:"continue-on-error"`
+}
+
+type ciWorkflowJob struct {
+	Steps []ciWorkflowStep `yaml:"steps"`
+}
+
+type ciWorkflowFile struct {
+	Jobs map[string]ciWorkflowJob `yaml:"jobs"`
+}
+
+// findDoctorStep parses the workflow YAML and returns the step (from any
+// job) whose `run:` invokes `mindspec doctor`, and whether one was found.
+func findDoctorStep(t *testing.T, content string) (ciWorkflowStep, bool) {
+	t.Helper()
+	var wf ciWorkflowFile
+	if err := yaml.Unmarshal([]byte(content), &wf); err != nil {
+		t.Fatalf("parsing ci.yml as YAML: %v", err)
+	}
+	for _, job := range wf.Jobs {
+		for _, step := range job.Steps {
+			if strings.Contains(step.Run, "mindspec doctor") {
+				return step, true
+			}
+		}
+	}
+	return ciWorkflowStep{}, false
+}
+
 // TestCIWorkflow_RunsMindspecDoctor is the AC-11 pin: the workflow file
 // must invoke `mindspec doctor` as a permitted step (the compiled binary,
 // not `go run`), so a doctor Error/Missing finding fails the CI build via
 // its non-zero exit — mirroring `rg -n 'mindspec doctor' .github/workflows/ci.yml`.
+//
+// The bypass check parses the step's OWN YAML block (via yaml.v3) rather
+// than scanning for `continue-on-error` on the same text line as the `run:`
+// command — GitHub Actions allows (and commonly formats) `continue-on-
+// error: true` on a separate line of the step, which a per-line substring
+// scan would silently miss.
 func TestCIWorkflow_RunsMindspecDoctor(t *testing.T) {
 	root := repoRootForCIWiring(t)
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
@@ -49,15 +95,16 @@ func TestCIWorkflow_RunsMindspecDoctor(t *testing.T) {
 	if !strings.Contains(content, "mindspec doctor") {
 		t.Fatalf("expected ci.yml to invoke `mindspec doctor`; got:\n%s", content)
 	}
-	// Must not be neutered with a continue-on-error / `|| true` escape
-	// hatch that would defeat AC-11's non-zero-exit-fails-build contract.
-	for _, line := range strings.Split(content, "\n") {
-		if !strings.Contains(line, "mindspec doctor") {
-			continue
-		}
-		if strings.Contains(line, "|| true") || strings.Contains(line, "continue-on-error") {
-			t.Fatalf("mindspec doctor step must not swallow its exit code; got line: %q", line)
-		}
+
+	step, found := findDoctorStep(t, content)
+	if !found {
+		t.Fatalf("expected a workflow step whose `run:` invokes `mindspec doctor`; got:\n%s", content)
+	}
+	if step.ContinueOnError {
+		t.Fatalf("mindspec doctor step must not set continue-on-error: true (defeats AC-11's non-zero-exit-fails-build contract); step: %+v", step)
+	}
+	if strings.Contains(step.Run, "|| true") {
+		t.Fatalf("mindspec doctor step must not swallow its exit code via `|| true`; run: %q", step.Run)
 	}
 }
 

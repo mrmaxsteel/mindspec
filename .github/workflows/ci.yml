@@ -88,11 +88,17 @@ jobs:
         run: ./bin/mindspec --help
 
       # Spec 119 (AC-11): mindspec doctor over its own repo, in-binary,
-      # non-zero exit fails the build. Checks are best-effort/read-only
-      # where they depend on `bd` (not installed on this runner), so this
-      # is safe to run unconditionally.
+      # non-zero exit fails the build. `--ci` skips the developer-local-
+      # environment checks (Beads merge driver, bd version/schema, bd-on-
+      # PATH, stale hooks) that a fresh `actions/checkout` structurally
+      # cannot satisfy — e.g. `merge.beads.driver` is a per-clone git
+      # config value never populated by checkout, so without --ci this
+      # step false-failed on every clean checkout (lc12.2 panel finding).
+      # The repo-integrity / lifecycle-divergence checks (stale-OPEN,
+      # finalize-orphan, orphaned-closed, tracker/git divergence, docs/
+      # layout/ownership) still gate the build unconditionally.
       - name: mindspec doctor
-        run: ./bin/mindspec doctor
+        run: ./bin/mindspec doctor --ci
 
       - name: Upload binary
         uses: actions/upload-artifact@v4

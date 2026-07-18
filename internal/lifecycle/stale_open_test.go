@@ -83,13 +83,14 @@ func TestFindStaleOpenBeads_Flagged_BranchDeleted(t *testing.T) {
 // false-flag scenario this predicate must never reproduce).
 func TestFindStaleOpenBeads_FreshClaimNegative(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	// Another, unrelated bead lands first so the spec branch's history
-	// contains a --no-ff merge commit before the fresh claim.
-	mergeBead(t, run, dir, "other", "spec/119-test")
-	// Now freshly claim "fresh" off the spec branch's current tip: zero
-	// own commits.
+	// Fresh bead branch claimed FIRST, off the spec branch's CURRENT tip:
+	// zero own commits from the moment it's created.
 	run("checkout", "-b", "bead/fresh")
 	run("checkout", "spec/119-test")
+	// THEN the spec branch advances PAST that fork point via an unrelated
+	// bead's --no-ff merge — the genuine fork-before-spec-advance topology
+	// this negative claims to guard (the round-1 false-flag scenario).
+	mergeBead(t, run, dir, "other", "spec/119-test")
 
 	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{
 		{ID: "other", Status: "closed"}, // not queried (closed, wouldn't be in open/in_progress list anyway)
