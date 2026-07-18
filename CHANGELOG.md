@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-18
+
+Repairs the mutating lifecycle verbs — `mindspec complete`, `mindspec impl
+approve`, and `mindspec plan approve` — under one invariant: **gate-before-mutate**.
+Every immutable gate fact (the bead's owning spec from its epic lineage, branch
+ancestry, epic membership, plan and obligation state) is resolved and every
+derivable refusal evaluated *before* the first state mutation, so a verb either
+refuses cleanly up front — with a convergent recovery command — or completes
+without corrupting the state machine. Recovery is always forward-reconcilable,
+never rollback. Backward-compatible: absent the new checks, every verb behaves
+as v0.11.1 on the happy path.
+
+### Fixed
+- **`mindspec complete` no longer acts on the wrong spec** (`mindspec-zty3`) —
+  the owning spec is now resolved authoritatively from the bead's parent epic
+  (never from the session cwd or active worktree), and an explicit `--spec` hint
+  that mismatches the lineage is refused in preflight. A transient bd/Dolt
+  lookup error now fails closed with a retry command instead of silently falling
+  back to cwd resolution.
+- **`mindspec impl approve` no longer merges a different spec's in-progress
+  bead** (`mindspec-blp6`) — epic finalization scopes its bead-branch merge and
+  cleanup to the finalizing spec's own plan-declared lifecycle beads, and
+  fails closed on an enumeration error rather than silently skipping the leg.
+- **`mindspec plan approve` now wires bd dependency edges deterministically**
+  (`mindspec-ffm4`, `mindspec-cpqc`) — the emitted plan scaffold carries a
+  `work_chunks` frontmatter block with `depends_on` (so a filled scaffold
+  produces the edges that make `bd ready` / `mindspec next` correct for
+  parallel multi-agent work) plus the per-bead `**Acceptance Criteria**` section
+  the validator requires. Plan approve resolves the epic and child set fail-closed
+  before any mutation, and warns loudly on a missing `work_chunks` block or a
+  failed edge wiring.
+- **Tracker auto-commits never target protected `main`** — the artifact
+  self-heal stages an explicit lifecycle pathspec (never `add -A`) and refuses
+  on a main checkout with a named recovery; the `--commit-msg` commit is
+  likewise guarded.
+- **`internal/instruct` tests are hermetic** (`mindspec-z4ps`) — the test
+  sandbox no longer escapes to an enclosing real worktree, so the suite passes
+  when run from inside an active-spec worktree.
+
+### Added
+- **`mindspec doctor` divergence checks** — a stale-OPEN cross-check (a bead
+  still open in the tracker whose work has landed on the spec branch) and
+  finalize-orphan surfacing (an unmerged `chore/finalize-*` carrier or stale
+  committed tracker state), each reporting a recovery command; the same
+  predicates surface in `mindspec instruct` idle guidance.
+- **`mindspec doctor --ci`** — a CI-appropriate mode that runs the
+  repo-integrity / lifecycle-divergence checks while skipping developer-local
+  environment checks (merge driver, hooks, bd version), wired into the build
+  workflow so a real divergence fails CI without false-positiving on a fresh
+  checkout.
+- **Advisory per-bead scope surfacing** (`mindspec-jli8`) — a non-fatal warning
+  at `complete` when a bead's changed files fall outside its declared domain,
+  and a plan-lint flagging a single file assigned to two beads.
+- **ADR-0041** records the gate-before-mutate (preflight → commit → reconcile)
+  contract, cited from every mutating verb's preflight, with a fault-injection
+  regression suite pinning forward-reconciliation at each mutation point.
+
+### Performance
+- **`mindspec doctor` and SessionStart are fast again** — the new lifecycle
+  divergence scans previously iterated every spec directory with uncached `bd`
+  subprocesses (doctor did not complete; idle `instruct` ran on every
+  SessionStart). They now share one epic cache and a single global open-bead
+  query — a fixed two `bd` queries per scan regardless of repository history
+  (`doctor` back to its baseline, idle `instruct` in single-digit seconds).
+
+### Security
+- New agent-writable render sinks (the advisory-scope warning, the plan-lint
+  finding, and the doctor/instruct divergence findings) are escaped through
+  `internal/termsafe`, keeping hostile spec-directory or branch names from
+  forging terminal or transcript lines — consistent with the v0.11.0 hardening.
+
 ## [0.11.1] - 2026-07-17
 
 A P1 fix for a layout-resolution regression that could wedge a repository
