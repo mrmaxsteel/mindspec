@@ -17,17 +17,23 @@ func stubFinalizeOrphanSeams(t *testing.T,
 	origBranches := localBranchRefsFn
 	origCommitCount := finalizeOrphanCommitCountFn
 	origDiffStat := finalizeOrphanDiffStatFn
+	origIsAncestor := finalizeOrphanIsAncestorFn
 	origFileAtRef := fileAtRefFn
 	t.Cleanup(func() {
 		localBranchRefsFn = origBranches
 		finalizeOrphanCommitCountFn = origCommitCount
 		finalizeOrphanDiffStatFn = origDiffStat
+		finalizeOrphanIsAncestorFn = origIsAncestor
 		fileAtRefFn = origFileAtRef
 	})
 
 	localBranchRefsFn = func(workdir string) ([]string, error) { return branches, branchesErr }
 	finalizeOrphanCommitCountFn = func(workdir, base, head string) (int, error) { return commitCount, commitCountErr }
 	finalizeOrphanDiffStatFn = func(workdir, base, head string) (string, error) { return diffStat, diffStatErr }
+	// Default the G1 ancestry confirmation to "NOT merged" so the
+	// unmerged-carrier tests keep flagging; the merged/ancestry-error tests
+	// override this seam directly.
+	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return false, nil }
 	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) { return fileAtRef, fileAtRefErr }
 }
 
@@ -100,6 +106,67 @@ func TestFindOutstandingFinalizeBranches_Healthy(t *testing.T) {
 	}
 	if len(orphans) != 0 {
 		t.Fatalf("expected no orphans, got %+v", orphans)
+	}
+}
+
+// (b2) G1 (spec 119 final-review): a carrier branch that IS an ancestor of
+// origin/main is the benign merged-but-undeleted residue
+// finalizeOrphanedSpecBranch deliberately leaves behind on success — it
+// must NOT be flagged, and the ancestry check must be asked about
+// origin/main (never local main).
+func TestFindOutstandingFinalizeBranches_MergedCarrierNotFlagged(t *testing.T) {
+	stubFinalizeOrphanSeams(t,
+		[]string{"main", "chore/finalize-010-test"}, nil,
+		0, nil, "", nil, nil, nil,
+	)
+	var gotAncestor, gotDescendant string
+	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+		gotAncestor, gotDescendant = ancestor, descendant
+		return true, nil // merged
+	}
+
+	orphans, err := FindOutstandingFinalizeBranches(".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("a merged carrier must NOT be flagged, got %+v", orphans)
+	}
+	if gotAncestor != "chore/finalize-010-test" {
+		t.Errorf("IsAncestor ancestor = %q, want the carrier branch", gotAncestor)
+	}
+	if gotDescendant != "origin/main" {
+		t.Errorf("IsAncestor descendant = %q, want origin/main (never local main)", gotDescendant)
+	}
+}
+
+// (b3) G1: when the ancestry of a carrier CANNOT be checked, the branch is
+// never asserted "unmerged" from absence of proof — it is skipped and the
+// error is returned. A later provable orphan in the same list still
+// survives (the ScanOrphanedClosedBeads mixed-list contract).
+func TestFindOutstandingFinalizeBranches_AncestryErrorNotAssertedUnmerged(t *testing.T) {
+	stubFinalizeOrphanSeams(t,
+		[]string{"chore/finalize-010-err", "chore/finalize-011-real"}, nil,
+		2, nil, "1 file changed", nil, nil, nil,
+	)
+	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+		if ancestor == "chore/finalize-010-err" {
+			return false, errors.New("simulated missing origin/main")
+		}
+		return false, nil // 011-real is provably unmerged
+	}
+
+	orphans, err := FindOutstandingFinalizeBranches(".")
+	if err == nil {
+		t.Fatal("expected the ancestry-check error to be returned, got nil")
+	}
+	for _, o := range orphans {
+		if o.Branch == "chore/finalize-010-err" {
+			t.Errorf("the ancestry-error branch must NOT be asserted unmerged, got %+v", o)
+		}
+	}
+	if len(orphans) != 1 || orphans[0].Branch != "chore/finalize-011-real" {
+		t.Errorf("the later provable orphan must survive the earlier ancestry error, got %+v", orphans)
 	}
 }
 

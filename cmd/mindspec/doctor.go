@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -48,19 +50,31 @@ every repo-integrity / lifecycle-divergence check.`,
 			report.Fix()
 		}
 
-		for _, c := range report.Checks {
-			fmt.Printf("%s: %s", c.Name, statusTag(c.Status))
-			if c.Message != "" {
-				fmt.Printf(" %s", c.Message)
-			}
-			fmt.Println()
-		}
+		printDoctorChecks(os.Stdout, report.Checks)
 
 		if report.HasFailures() {
 			os.Exit(1)
 		}
 		return nil
 	},
+}
+
+// printDoctorChecks renders the report's check lines. Check names and
+// messages can carry agent-writable content (spec-dir names, branch names,
+// bead IDs, recovery text), so BOTH are routed through internal/termsafe at
+// this render sink (spec 116 / spec 119 final-review O2) — the predicate
+// strings themselves stay canonical so `mindspec instruct`'s renderer (the
+// AC-15 wording-parity counterpart, which escapes at its own template sink)
+// can never disagree with doctor on the finding text. Status tags are fixed
+// literals and need no escaping.
+func printDoctorChecks(w io.Writer, checks []doctor.Check) {
+	for _, c := range checks {
+		fmt.Fprintf(w, "%s: %s", termsafe.Escape(c.Name), statusTag(c.Status))
+		if c.Message != "" {
+			fmt.Fprintf(w, " %s", termsafe.Escape(c.Message))
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 func statusTag(s doctor.Status) string {

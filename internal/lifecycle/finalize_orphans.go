@@ -33,6 +33,7 @@ var (
 	localBranchRefsFn           = gitutil.LocalBranchRefs
 	finalizeOrphanCommitCountFn = gitutil.CommitCount
 	finalizeOrphanDiffStatFn    = gitutil.DiffStat
+	finalizeOrphanIsAncestorFn  = gitutil.IsAncestor
 	fileAtRefFn                 = gitutil.FileAtRef
 )
 
@@ -88,14 +89,43 @@ func (o FinalizeOrphan) FullMessage() string {
 // it carries was never opened, merged, and cleaned up. Stats are computed
 // against origin/main (Requirement 7), never local main — this predicate
 // never even reads local main.
+//
+// Merged-carrier suppression (spec 119 final-review G1): because the
+// recovery flow deliberately leaves the carrier branch behind LOCALLY even
+// after its PR merges, "the branch exists" alone is NOT proof of stranded
+// work. A carrier that IS an ancestor of origin/main is the benign
+// merged-but-undeleted state and is skipped — the same IsAncestor
+// confirmation ScanOrphanedClosedBeads (orphans.go) applies to bead
+// branches. When the ancestry of one branch CANNOT be checked, that branch
+// is never asserted "unmerged" from absence of proof: it is skipped and the
+// first such error is returned alongside the provable findings (the
+// mixed-list contract ScanOrphanedClosedBeads pioneered — later provable
+// findings survive an earlier branch's ancestry error). The check reads
+// only the locally available origin/main remote-tracking ref; no network
+// fetch is performed.
 func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 	branches, err := localBranchRefsFn(workdir)
 	if err != nil {
 		return nil, fmt.Errorf("listing local branches: %w", err)
 	}
 	var out []FinalizeOrphan
+	var firstErr error
 	for _, b := range branches {
 		if !strings.HasPrefix(b, workspace.FinalizeBranchPrefix) {
+			continue
+		}
+		// Confirmation before assertion: a carrier already merged into
+		// origin/main is benign residue, not an orphan. An ancestry-check
+		// failure is recorded and the branch skipped — never reported as
+		// "unmerged" without proof.
+		isAnc, ancErr := finalizeOrphanIsAncestorFn(workdir, b, "origin/main")
+		if ancErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("checking ancestry of %s against origin/main: %w", b, ancErr)
+			}
+			continue
+		}
+		if isAnc {
 			continue
 		}
 		specID := strings.TrimPrefix(b, workspace.FinalizeBranchPrefix)
@@ -112,7 +142,7 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 		)
 		out = append(out, o)
 	}
-	return out, nil
+	return out, firstErr
 }
 
 // StaleTrackerOnMain reports whether epicID's committed status inside

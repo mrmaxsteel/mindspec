@@ -55,21 +55,46 @@ kill-testable.
 Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
 `mindspec impl approve`) follows the same three-phase shape:
 
-1. **Preflight** — resolve every immutable gate fact (lineage, epic
-   resolution, child-set state, plan-content facts, doc-sync/ADR-divergence
-   diffs) and evaluate every refusal *derivable from those facts* — all
-   before the first mutation. A preflight refusal leaves the repository,
-   the tracker, and the plan artifact **byte-identical** to their pre-call
-   state (verified by the byte-identical refusal tests each verb's own bead
-   pinned: `complete`'s AC-2 `--spec`-mismatch refusal, `plan approve`'s
-   misaligned-work-chunks and absent-epic refusals, `impl approve`'s
-   zero-mutation-on-refusal call-order test).
-2. **Commit** — the mutation sequence proper: the ordered set of
-   tracker/git/Dolt operations the verb exists to perform (a tracker
-   auto-commit, `bd close`, a bead→spec merge, an epic close, `FinalizeEpic`'s
-   multi-leg git chain). Every mutation in this phase is preceded by every
-   preflight refusal — none can fire mid-sequence and find work already
-   undone, because there is no "undo": recovery is always forward (§3).
+1. **Preflight** — resolve every immutable gate fact available before any
+   commit is made (lineage and `--spec` hint agreement, epic/phase
+   membership, branch existence/ancestry and reconcile evidence,
+   orphan-sibling state, the panel decision, plan-content facts,
+   pre-existing durable obligations) and evaluate every refusal *derivable
+   from those facts* — all before the first mutation. A preflight refusal
+   leaves the repository, the tracker, and the plan artifact
+   **byte-identical** to their pre-call state (verified by the
+   byte-identical refusal tests each verb's own bead pinned: `complete`'s
+   AC-2 `--spec`-mismatch refusal, `plan approve`'s misaligned-work-chunks
+   and absent-epic refusals, `impl approve`'s zero-mutation-on-refusal
+   call-order test). The byte-identical claim is made **only** for these
+   enumerated preflight refusals — see the artifact-materialization
+   exception below.
+2. **Commit** — the mutation sequence proper, in two parts:
+   - **Artifact materialization** (`complete` only): the optional user
+     `CommitAll` (`--commit-msg`) and the pathspec-scoped beads-artifact
+     sync commit. These are *local, bead-branch-only, never-`main`*
+     commits that materialize the very tip the two content gates measure.
+     The **doc-sync** and **ADR-divergence** gates deliberately validate
+     the resulting committed bead tip *after* this subphase — their
+     `base..beadHead` range must include the just-committed user work —
+     so a doc/ADR refusal MAY land after those local commits. This is a
+     documented, forward-reconcilable exception to the byte-identical
+     preflight claim (like the migration exemption below): no tracker
+     close, bead→spec merge, branch/worktree deletion, epic close, or
+     `main` mutation has occurred; the worktree and its bead-branch
+     commits are retained; and re-running after repair converges. The
+     ordering is load-bearing in both directions: the panel gate must run
+     *before* `CommitAll` (committing advances the bead tip past
+     `reviewed_head_sha` and clears the dirt the panel decision measures),
+     and doc-sync/ADR-divergence must run *after* it (or they would
+     vacuously miss the work being completed).
+   - **Lifecycle-affecting mutation**: the ordered set of tracker/git/Dolt
+     operations the verb exists to perform (`bd close`, a bead→spec merge,
+     branch/worktree deletion, an epic close, `FinalizeEpic`'s multi-leg
+     git chain). Every mutation in this part is preceded by every refusal
+     above — preflight refusals AND the two post-materialization content
+     gates — none can fire mid-sequence and find work already undone,
+     because there is no "undo": recovery is always forward (§3).
 3. **Reconcile** — the recovery contract for an interruption anywhere in
    phase 2 (§3): a bounded, idempotent forward path back to either
    completion or a clean, named refusal. Never a rollback.

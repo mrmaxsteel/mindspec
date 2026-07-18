@@ -16,9 +16,21 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+// templateFuncs are the helpers available to every instruct template.
+// `termsafe` is the spec 116 safe-set/quote rule (internal/termsafe.Escape),
+// applied at the RENDER SINK for agent-writable display strings (spec 119
+// final-review O2) — e.g. templates/idle.md's lifecycle findings, which
+// carry spec-dir/branch/bead names. The underlying finding strings stay
+// canonical (the doctor/instruct AC-15 wording parity is asserted on the
+// shared predicate text; both consumers escape at their own sinks).
+var templateFuncs = template.FuncMap{
+	"termsafe": termsafe.Escape,
+}
 
 //go:embed templates/*.md
 var templateFS embed.FS
@@ -160,7 +172,7 @@ func Render(ctx *Context) (string, error) {
 		return "", fmt.Errorf("loading template %s: %w", tmplName, err)
 	}
 
-	tmpl, err := template.New(tmplName).Parse(string(data))
+	tmpl, err := template.New(tmplName).Funcs(templateFuncs).Parse(string(data))
 	if err != nil {
 		return "", fmt.Errorf("parsing template %s: %w", tmplName, err)
 	}

@@ -334,13 +334,24 @@ shape across all three mutating lifecycle verbs — `mindspec complete`,
 derivable from already-available facts was discovered *mid-sequence*,
 after one or more mutations had already landed. **ADR-0041
 (gate-before-mutate)** is the codifying record: every verb now follows a
-three-phase contract — **preflight** (resolve every immutable gate fact
-and evaluate every derivable refusal before the first mutation) →
-**commit** (the mutation sequence proper) → **reconcile** (a bounded,
-idempotent forward path back to completion or a clean named refusal on
-any interruption — never a rollback). The idempotent ADR-0034 migration
-is the one exempt pre-preflight mutation in all three verbs, since it is
-itself read-only-or-idempotent.
+three-phase contract — **preflight** (resolve every immutable gate fact —
+lineage/hint agreement, epic membership, ancestry/reconcile evidence,
+orphan-sibling state, the panel decision, plan and obligation facts — and
+evaluate every derivable refusal before any lifecycle-affecting mutation:
+tracker close, bead→spec merge, branch deletion, epic close, or a `main`
+commit) → **commit** (the mutation sequence proper) → **reconcile** (a
+bounded, idempotent forward path back to completion or a clean named
+refusal on any interruption — never a rollback). The idempotent ADR-0034
+migration is the one exempt pre-preflight mutation in all three verbs,
+since it is itself read-only-or-idempotent. `complete` additionally has an
+**artifact-materialization subphase** (ADR-0041 §1): the optional user
+`CommitAll` and the pathspec-scoped artifact-sync commit — local,
+bead-branch-only, never-`main` — after which the doc-sync and
+ADR-divergence gates validate the resulting committed bead tip and may
+refuse; that refusal is forward-reconcilable (the bead-branch commits are
+retained; a re-run after repair converges), not byte-identical. The
+byte-identical-refusal claim holds only for the enumerated preflight
+refusals.
 
 ### `mindspec complete`: lineage-authoritative preflight + forward reconcile
 

@@ -37,7 +37,7 @@ All new features and non-trivial changes MUST go through `mindspec spec create`.
 The same checks `mindspec doctor` runs found the following. Run the named
 recovery command for each before starting new work:
 {{- range .LifecycleFindings}}
-- {{.}}
+- {{termsafe .}}
 {{- end}}
 {{- end}}
 

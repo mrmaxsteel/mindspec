@@ -276,14 +276,34 @@ func defaultFindLocalRoot() (string, error) {
 // opts carries lifecycle options including the doc-sync skew override.
 //
 // ADR-0041 (gate-before-mutate): the block below through the panel gate at
-// step 2.25 is this verb's PREFLIGHT phase — every immutable gate fact
-// (lineage, the impl-only guard, the bd_close orphan check, the reconcile
-// detection) is resolved and every refusal derivable from those facts is
-// evaluated before the first mutation. The idempotent ADR-0034 migration
-// (phase.EnsureMigratedWithCache, step 1.25) is the ADR's named exemption —
-// it runs ahead of preflight but is read-only-or-idempotent, so it can never
-// produce a mutation a preflight refusal would need to have prevented. Every
-// mutation from step 2.5 onward (the COMMIT phase) is followed by this
+// step 2.25 is this verb's PREFLIGHT phase — the immutable facts (lineage,
+// the --spec hint agreement, the impl-only guard, the bd_close orphan
+// check, the reconcile detection/evidence, the panel decision) are resolved
+// and every refusal derivable from them fires here. A refusal raised in
+// this phase leaves tracker and git state byte-identical to the pre-call
+// state (modulo the exempt migration below).
+//
+// Steps 2.5–3 (the optional user CommitAll and the pathspec-scoped
+// artifact-sync commit) are the ARTIFACT-MATERIALIZATION subphase: local,
+// bead-branch-only, never-main commits that materialize the tip the two
+// content gates validate. The doc-sync and ADR-divergence gates (step 3.5)
+// deliberately run AFTER that subphase — their base..beadHead range must
+// include the just-committed user work — so a doc/ADR refusal MAY follow
+// those local commits. That is a documented, forward-reconcilable
+// exception, NOT a byte-identical refusal: the worktree and its bead-branch
+// commits are retained, nothing lifecycle-affecting has happened, and a
+// re-run after repair converges (see ADR-0041 §1). The step-3.75 durable-
+// obligation reconciliation is the last such pre-terminal refusal point.
+// Together, every refusal above fires BEFORE any LIFECYCLE-AFFECTING
+// mutation (bd close, the bead→spec merge, branch/worktree deletion, or
+// any main-branch commit) — the byte-identical claim, however, is made
+// ONLY for the enumerated preflight refusals of steps 1–2.25.
+//
+// The idempotent ADR-0034 migration (phase.EnsureMigratedWithCache, step
+// 1.25) is the ADR's named exemption — it runs ahead of preflight but is
+// read-only-or-idempotent, so it can never produce a mutation a preflight
+// refusal would need to have prevented. Every mutation from step 4 onward
+// (the COMMIT phase proper: close/merge/cleanup) is followed by this
 // verb's RECONCILE contract: a killed run converges via bounded re-invocation
 // to completion or a clean named refusal (never a rollback) — see the
 // merged-unclosed / branch-less reconcile detection immediately below and
@@ -310,10 +330,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// used to override it: a matching hint proceeds; a mismatching hint
 	// refuses HERE, in preflight, before any mutation, naming BOTH spec
 	// IDs (AC-2).
+	//
+	// FAIL-CLOSED on lookup errors (spec 119 final-review finding A): the
+	// cwd fallback is entered ONLY on a genuine no-lineage result — the
+	// lookup SUCCEEDED and answered "this bead has no discoverable epic
+	// lineage" (phase.ErrNoEpicLineage, or a nil-error empty spec). A REAL
+	// bd/Dolt/JSON/epic-lookup error refuses here, before the migration
+	// and before any mutation: silently demoting a transient lookup
+	// failure to cwd-derived resolution would reintroduce the zty3/R2
+	// wrong-spec bug this preflight exists to close. Classification is by
+	// errors.Is on the typed sentinel — never by error text.
 	var specID string
 	var err error
 	_, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
-	if lineageErr == nil && lineageSpec != "" {
+	switch {
+	case lineageErr == nil && lineageSpec != "":
 		specID = lineageSpec
 		if specIDHint != "" {
 			hintSpec, hintErr := resolveSpecPrefixFn(specIDHint)
@@ -327,8 +358,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				)
 			}
 		}
-	} else {
-		// Fallback: pre-119 cwd/hint-based resolution. Try localRoot
+	case lineageErr == nil || errors.Is(lineageErr, phase.ErrNoEpicLineage):
+		// Genuinely epic-less (or, defensively, a nil-error empty spec):
+		// fallback to pre-119 cwd/hint-based resolution. Try localRoot
 		// first (per-worktree context) then fall back to root.
 		specID, err = resolveTargetFn(localRoot, specIDHint)
 		if err != nil && localRoot != root {
@@ -337,6 +369,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if err != nil {
 			return nil, fmt.Errorf("resolving active spec: %w", err)
 		}
+	default:
+		// A real lineage-lookup failure: refuse before the migration and
+		// before any mutation, naming the retry re-invocation.
+		return nil, guard.NewFailure(
+			fmt.Sprintf("resolving bead %s's epic lineage failed: %v — refusing before any mutation rather than falling back to cwd-derived spec resolution.", beadID, lineageErr),
+			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", beadID),
+		)
 	}
 
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for

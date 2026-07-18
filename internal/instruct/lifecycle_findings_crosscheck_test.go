@@ -67,6 +67,12 @@ func buildFinalizeOrphanFixture(t *testing.T) string {
 	run("add", ".")
 	run("commit", "-m", "stranded finalize work")
 	run("checkout", "main")
+	// G1 (spec 119 final-review): FindOutstandingFinalizeBranches now
+	// confirms un-mergedness via IsAncestor(branch, origin/main) before
+	// flagging. Materialize the remote-tracking ref at main's tip so the
+	// carrier (one commit ahead) is PROVABLY unmerged rather than
+	// unverifiable (no network involved — locally available truth only).
+	run("update-ref", "refs/remotes/origin/main", "main")
 
 	if err := os.MkdirAll(filepath.Join(dir, ".mindspec", "specs", "119-test"), 0o755); err != nil {
 		t.Fatal(err)

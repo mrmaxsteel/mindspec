@@ -199,12 +199,15 @@ func saveAndRestore(t *testing.T) {
 	// out to bd/git or false-block. The guard's own tests override this.
 	findOrphanedClosedBeadsFn = func(specID, workdir, excludeBeadID string) []lifecycle.Orphan { return nil }
 	// Spec 119 R1 (Bead 1): default the lineage-authoritative spec
-	// resolution seam to a genuine "no lineage" error so every
+	// resolution seam to a genuine "no lineage" result — the typed
+	// phase.ErrNoEpicLineage sentinel (final-review finding A: a NON-
+	// sentinel error now fails CLOSED instead of falling back) — so every
 	// pre-existing test falls through to the (already-stubbed)
 	// resolveTargetFn-based fallback path unchanged. The AC-1/AC-2
-	// lineage tests override this to drive the new authoritative path.
+	// lineage tests override this to drive the new authoritative path;
+	// the fail-closed tests override it with a real (non-sentinel) error.
 	findEpicForBeadFn = func(beadID string) (string, string, error) {
-		return "", "", fmt.Errorf("test: no lineage")
+		return "", "", fmt.Errorf("test: %w", phase.ErrNoEpicLineage)
 	}
 	// resolveSpecPrefixFn defaults to the real resolver: production hints
 	// are almost always already-full spec IDs, which it passes through
@@ -562,10 +565,12 @@ func TestRun_LineageSpecHintMatchProceeds(t *testing.T) {
 	}
 }
 
-// TestRun_LineageUnavailable_FallsBackToCwdResolution: when the bead's
-// lineage cannot be determined (e.g. the bead genuinely does not exist yet),
-// the pre-119 cwd/hint-based resolution is still consulted — every
-// pre-119 resolution path is preserved for this degenerate case.
+// TestRun_LineageUnavailable_FallsBackToCwdResolution: when the lineage
+// lookup SUCCEEDS but answers "no epic lineage" (e.g. the bead genuinely
+// does not exist yet — the typed phase.ErrNoEpicLineage sentinel), the
+// pre-119 cwd/hint-based resolution is still consulted — every pre-119
+// resolution path is preserved for this degenerate case. (A real lookup
+// ERROR, by contrast, fails closed — see the FailsClosed tests below.)
 func TestRun_LineageUnavailable_FallsBackToCwdResolution(t *testing.T) {
 	saveAndRestore(t)
 
@@ -574,7 +579,7 @@ func TestRun_LineageUnavailable_FallsBackToCwdResolution(t *testing.T) {
 	mock := newMockExec()
 
 	findEpicForBeadFn = func(beadID string) (string, string, error) {
-		return "", "", fmt.Errorf("bead not found")
+		return "", "", fmt.Errorf("bead not found: %w", phase.ErrNoEpicLineage)
 	}
 	var resolveCalled bool
 	resolveTargetFn = func(r, flag string) (string, error) {
@@ -598,6 +603,135 @@ func TestRun_LineageUnavailable_FallsBackToCwdResolution(t *testing.T) {
 	}
 	if !resolveCalled {
 		t.Error("expected the cwd-based fallback resolveTargetFn to be consulted when lineage is unavailable")
+	}
+}
+
+// TestRun_LineageLookupErrorFailsClosed (spec 119 final-review finding A):
+// a REAL lineage-lookup error — a transient bd/Dolt failure, NOT the typed
+// phase.ErrNoEpicLineage "genuinely epic-less" sentinel — must refuse
+// fail-closed BEFORE the migration and any mutation, with a named retry
+// recovery line. It must NEVER silently fall back to cwd-derived
+// resolution (which would reintroduce the zty3/R2 wrong-spec bug on a
+// transient failure).
+func TestRun_LineageLookupErrorFailsClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "", "", fmt.Errorf("bd show %s failed: dolt lock contention", beadID)
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "119-wrong", nil
+	}
+	var migrationCalled bool
+	restorePhaseMerge := phase.SetMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		migrationCalled = true
+		return nil
+	})
+	t.Cleanup(restorePhaseMerge)
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a fail-closed refusal on a transient lineage-lookup error")
+	}
+	if !strings.Contains(err.Error(), "epic lineage") {
+		t.Errorf("refusal should name the lineage failure, got: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("fail-closed lineage refusal must end with a recovery line, got: %v", err)
+	}
+	if resolveCalled {
+		t.Error("cwd-based resolveTargetFn must NEVER be consulted on a lineage-lookup ERROR (fail-closed, not fail-open)")
+	}
+	if migrationCalled {
+		t.Error("the refusal must fire BEFORE the ADR-0034 migration (no metadata write)")
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected ZERO executor calls (zero mutations) on the fail-closed refusal, got %d: %+v", len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestRun_LineageDependentEpicLookupErrorFailsClosed (finding A, inner
+// swallow): a failure while resolving the bead's DEPENDENT parent epic
+// (phase.FindEpicForBead's cache.FindEpic leg — previously swallowed into
+// "no epic found") now propagates as a real error, and complete fails
+// closed on it identically: zero mutations, resolveTargetFn never called.
+func TestRun_LineageDependentEpicLookupErrorFailsClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		// The exact wrapped shape phase.FindEpicForBeadWithCache returns
+		// when the parent-epic `bd show` fails (NOT the no-lineage sentinel).
+		return "", "", fmt.Errorf("resolving parent epic epic-x for bead %s: bd show epic-x failed: connection refused", beadID)
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "119-wrong", nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a fail-closed refusal on a dependent-epic lookup error")
+	}
+	if resolveCalled {
+		t.Error("cwd-based resolveTargetFn must NEVER be consulted on a dependent-epic lookup ERROR")
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected ZERO executor calls on the fail-closed refusal, got %d: %+v", len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations (spec 119
+// final-review finding B): the call-order contract of the artifact-
+// materialization subphase (ADR-0041 §1). A doc-sync refusal fires AFTER
+// the optional user CommitAll (the local bead-branch commit whose tip the
+// gate must measure) but BEFORE every lifecycle-affecting mutation: no
+// `bd close`, no CompleteBead (merge/branch/worktree cleanup).
+func TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	var closeCalled bool
+	closeBeadFn = func(ids ...string) error { closeCalled = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// Source-only diff with no doc updates → doc-sync SevError.
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "did the work", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the doc-sync gate to refuse")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should mention doc-sync: %v", err)
+	}
+	// AFTER CommitAll: the user commit was materialized (forward-
+	// reconcilable local bead-branch commit, retained on refusal).
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 1 {
+		t.Errorf("expected exactly 1 CommitAll (artifact materialization) BEFORE the doc-sync refusal, got %d", len(calls))
+	}
+	// BEFORE every lifecycle-affecting mutation.
+	if closeCalled {
+		t.Error("bd close must NOT run after a doc-sync refusal")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected ZERO CompleteBead (merge/cleanup) calls after a doc-sync refusal, got %d", len(calls))
 	}
 }
 
