@@ -109,6 +109,21 @@ var (
 	// shared predicate is reused by `mindspec next` and `mindspec doctor`.
 	// Tests swap this to drive the chicken-and-egg guard without a real repo.
 	findOrphanedClosedBeadsFn = lifecycle.FindOrphanedClosedBeads
+	// resolveSpecPrefixFn resolves an explicit --spec hint (numeric prefix
+	// or full ID) for the Spec 119 R1/AC-2 lineage-mismatch check. Tests
+	// swap this to avoid a real `bd list --type=epic` call; production
+	// hints are almost always already-full spec IDs, which
+	// resolve.ResolveSpecPrefix passes through with no bd call at all.
+	resolveSpecPrefixFn = resolve.ResolveSpecPrefix
+	// mergedUnclosedFn is the Spec 119 R4 (Bead 1) landed-merge-commit-
+	// identity predicate: positively identifies a bead's already-landed
+	// bead->spec merge so the merged-unclosed / branch-less forward
+	// reconcile (Run's reconcile-mode branch below) can skip the
+	// now-pointless (and, for an absent bead/<id> ref, ERRORING)
+	// merge-base / merge / branch-cleanup git plumbing while still
+	// applying every gate against the landed content. Tests swap this to
+	// drive the reconcile matrix without a real repo.
+	mergedUnclosedFn = lifecycle.MergedUnclosed
 )
 
 // defaultVerifyCommitted is the production committed-state verifier for the
@@ -227,6 +242,17 @@ type CompleteOpts struct {
 	SupersedeADR string
 }
 
+// reconcileState carries the Spec 119 R4 merged-unclosed / branch-less
+// forward-reconcile evidence for the remainder of a Run call, once
+// positively identified. A non-nil reconcile means: skip the exec.MergeBase
+// call and exec.CompleteBead's merge/branch-cleanup legs (both would
+// operate on the now-absent bead/<id> ref), anchor every per-bead gate at
+// the landed merge commit's own M^1..M diff, and record durable evidence
+// naming the identified commit instead of performing a git merge.
+type reconcileState struct {
+	landed *lifecycle.LandedMerge
+}
+
 // Result summarizes what mindspec complete did.
 type Result struct {
 	BeadID          string
@@ -255,21 +281,47 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		localRoot = lr
 	}
 
-	// 1. Derive activeSpec from resolver.
-	// Try localRoot first (per-worktree context) then fall back to root.
-	specID, err := resolveTargetFn(localRoot, specIDHint)
-	if err != nil && localRoot != root {
-		specID, err = resolveTargetFn(root, specIDHint)
-	}
-	// If still ambiguous but we have a bead ID, resolve spec from the bead's parent epic.
-	if err != nil && beadID != "" {
-		if _, derivedSpec, beadErr := findEpicForBeadFn(beadID); beadErr == nil && derivedSpec != "" {
-			specID = derivedSpec
-			err = nil
+	// 1. Lineage-authoritative spec resolution (Spec 119 R1, AC-1/AC-2).
+	// The bead's parent epic is the AUTHORITATIVE source of its owning
+	// spec: it is invariant under cwd — a main checkout, this bead's own
+	// worktree, or a DIFFERENT spec's worktree all resolve identically.
+	// cwd-derived resolution (resolveTargetFn) is DEMOTED to a fallback,
+	// used only when the lineage lookup itself cannot answer (e.g. the
+	// bead genuinely does not exist, or has no discoverable parent epic)
+	// — every pre-119 resolution path is preserved for that degenerate
+	// case.
+	//
+	// An explicit --spec hint is checked AGAINST the lineage spec, never
+	// used to override it: a matching hint proceeds; a mismatching hint
+	// refuses HERE, in preflight, before any mutation, naming BOTH spec
+	// IDs (AC-2).
+	var specID string
+	var err error
+	_, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
+	if lineageErr == nil && lineageSpec != "" {
+		specID = lineageSpec
+		if specIDHint != "" {
+			hintSpec, hintErr := resolveSpecPrefixFn(specIDHint)
+			if hintErr != nil {
+				hintSpec = specIDHint
+			}
+			if hintSpec != lineageSpec {
+				return nil, guard.NewFailure(
+					fmt.Sprintf("bead %s belongs to spec %s, but --spec named %s — these do not match; refusing before any mutation.", beadID, lineageSpec, hintSpec),
+					fmt.Sprintf("mindspec complete %s --spec %s", beadID, lineageSpec),
+				)
+			}
 		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("resolving active spec: %w", err)
+	} else {
+		// Fallback: pre-119 cwd/hint-based resolution. Try localRoot
+		// first (per-worktree context) then fall back to root.
+		specID, err = resolveTargetFn(localRoot, specIDHint)
+		if err != nil && localRoot != root {
+			specID, err = resolveTargetFn(root, specIDHint)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolving active spec: %w", err)
+		}
 	}
 
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
@@ -342,6 +394,51 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// 2.1. Merged-unclosed / branch-less forward reconcile detection
+	// (Spec 119 R4, Bead 1 Steps 4-6). A normal in-progress bead ALWAYS
+	// has a matching worktree (created by DispatchBead) — wtPath == ""
+	// signals its absence. That alone is common in tests that never set
+	// up worktreeListFn, so it is NOT itself the trigger: the trigger is
+	// wtPath == "" AND the canonical bead/<id> ref genuinely does not
+	// exist (exec.RevParseRef + exec.IsRefNotFound — defaulting to "found"
+	// on MockExecutor, so this never fires for a test that leaves both
+	// unconfigured). That combination means the bead's work already
+	// landed via SOME bead->spec merge whose worktree/branch cleanup ran
+	// independently of this invocation (a prior `mindspec complete` run
+	// that closed-but-did-not-finish, or an operator's out-of-band
+	// recovery merge — ADR-0041's named recovery target), or a
+	// previously-closed bead being re-invoked with unsettled obligations.
+	//
+	// mergedUnclosedFn (internal/lifecycle.MergedUnclosed) positively
+	// identifies the landed merge commit so this reconcile can proceed
+	// WITHOUT ever calling exec.MergeBase against the now-absent
+	// bead/<id> ref (the exit-128 bug this fixes, AC-5).
+	var reconcile *reconcileState
+	if wtPath == "" {
+		if _, rpErr := exec.RevParseRef(root, beadHead); rpErr != nil && exec.IsRefNotFound(rpErr) {
+			landed, ok, mergedErr := mergedUnclosedFn(root, specBranch, beadID)
+			if mergedErr != nil {
+				return nil, fmt.Errorf("checking landed-merge state for %s: %w", beadID, mergedErr)
+			}
+			if !ok {
+				// No worktree, no bead/<id> ref, and no positively
+				// identified landed merge — the bead's state cannot be
+				// safely determined (AC-8). Refuse naming the missing
+				// evidence instead of falling through to a MergeBase
+				// call against the absent ref.
+				return nil, guard.NewFailure(
+					fmt.Sprintf("bead %s has no active worktree, no bead/%s branch, and no landed merge commit for it was positively identified on %s — cannot safely reconcile its state.", beadID, beadID, specBranch),
+					fmt.Sprintf("mindspec complete %s   (re-run once the bead's worktree, its branch, or its landed-merge evidence is available)", beadID),
+				)
+			}
+			reconcile = &reconcileState{landed: landed}
+			// Anchor every downstream per-bead gate (OWNERSHIP
+			// attribution, doc-sync, ADR-divergence) at the landed
+			// merge commit itself, not the absent branch name (AC-5/6).
+			beadHead = landed.SHA
+		}
+	}
+
 	// 2.25. AUTHORITATIVE panel gate (Spec 099 Bead 2, R1+R2+R5; ADR-0037).
 	// This is the in-binary enforcement point — it runs over the DECLARED
 	// beadID (no shell parsing; ADR-0036) and BEFORE step-2.5 exec.CommitAll,
@@ -404,12 +501,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 2.5. Auto-commit if commit message provided (via Executor)
+	// 2.5. Auto-commit if commit message provided (via Executor). Skipped
+	// entirely in reconcile mode (Spec 119 R4): there is no bead worktree
+	// to commit into — the work already landed — so a --commit-msg
+	// carried into a reconcile re-invocation is a no-op rather than a
+	// commit on whatever happens to be checked out at root.
 	commitPath := wtPath
 	if commitPath == "" {
 		commitPath = root
 	}
-	if commitMsg != "" {
+	if commitMsg != "" && reconcile == nil {
 		msg := fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
 		if err := exec.CommitAll(commitPath, msg); err != nil {
 			return nil, fmt.Errorf("auto-commit failed: %w", err)
@@ -424,54 +525,103 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// repoRoot and cwd so the normalization targets the same checkout
 	// whose status is being classified (bead.Export writes
 	// <workdir>/.beads/issues.jsonl).
-	checkPath := wtPath
-	if checkPath == "" {
-		checkPath = root // No worktree — check main tree
-	}
-	artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(checkPath, checkPath)
-	if dirtErr != nil {
-		return nil, fmt.Errorf("checking working tree: %w", dirtErr)
-	}
-	if len(userDirt) > 0 {
-		// User dirt blocks even when artifact dirt coexists — the
-		// artifact handling below must never mask user-authored changes.
-		msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
-			strings.Join(userDirt, "\n  "))
-		if wtPath == "" {
-			msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
+	// Skipped entirely in reconcile mode (Spec 119 R4): there is no bead
+	// worktree whose dirt this could classify — the work already landed
+	// through some other bead->spec merge.
+	if reconcile == nil {
+		checkPath := wtPath
+		if checkPath == "" {
+			checkPath = root // No worktree — check main tree
 		}
-		// Spec 092 Req 8 (mindspec-tjat): worktree-context line naming
-		// where the command ran vs. the checkout this guard evaluated.
-		// Last body line — it precedes the final recovery line (Req 12
-		// ordering). Getwd failure falls back to checkPath: a degraded
-		// but truthful context line beats no line.
-		cwd, cwdErr := completeGetwdFn()
-		if cwdErr != nil || cwd == "" {
-			cwd = checkPath
+		artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(checkPath, checkPath)
+		if dirtErr != nil {
+			return nil, fmt.Errorf("checking working tree: %w", dirtErr)
 		}
-		msg += "\n" + workspace.ContextLine(cwd, checkPath)
-		if wtPath == "" {
-			return nil, guard.NewFailure(msg, "mindspec next")
+		if len(userDirt) > 0 {
+			// User dirt blocks even when artifact dirt coexists — the
+			// artifact handling below must never mask user-authored changes.
+			msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
+				strings.Join(userDirt, "\n  "))
+			if wtPath == "" {
+				msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
+			}
+			// Spec 092 Req 8 (mindspec-tjat): worktree-context line naming
+			// where the command ran vs. the checkout this guard evaluated.
+			// Last body line — it precedes the final recovery line (Req 12
+			// ordering). Getwd failure falls back to checkPath: a degraded
+			// but truthful context line beats no line.
+			cwd, cwdErr := completeGetwdFn()
+			if cwdErr != nil || cwd == "" {
+				cwd = checkPath
+			}
+			msg += "\n" + workspace.ContextLine(cwd, checkPath)
+			if wtPath == "" {
+				return nil, guard.NewFailure(msg, "mindspec next")
+			}
+			// Existing auto-commit hint, now a Req 12 recovery line.
+			return nil, guard.NewFailure(msg,
+				fmt.Sprintf("mindspec complete %s \"describe what you did\"", beadID))
 		}
-		// Existing auto-commit hint, now a Req 12 recovery line.
-		return nil, guard.NewFailure(msg,
-			fmt.Sprintf("mindspec complete %s \"describe what you did\"", beadID))
-	}
-	if len(artifactDirt) > 0 {
-		// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
-		// a pre-commit hook re-exported the JSONL during the auto-commit
-		// above) is COMMITTED, not ignored — as a follow-up commit, never
-		// an amend — so the bead→spec merge below operates on a genuinely
-		// clean tree and field workarounds (--no-verify, core.hooksPath)
-		// are never necessary. The commit stays behind the executor
-		// (ADR-0030); CommitAll re-exports the JSONL from Dolt before
-		// staging (ADR-0025 §3), so the committed bytes match Dolt.
-		if err := exec.CommitAll(checkPath, "chore: sync beads artifact"); err != nil {
-			return nil, fmt.Errorf("committing beads artifact sync: %w", err)
+		if len(artifactDirt) > 0 {
+			// Spec 119 R3 (Bead 1 Step 3): the tracker commit must land
+			// on the spec branch — never on `main`. wtPath == "" means no
+			// bead worktree matched, so checkPath fell back to root — the
+			// MAIN repo root (Run's own contract: "root is the main repo
+			// root"), i.e. the main checkout. Refuse with a named
+			// re-invocation command rather than committing there (AC-3).
+			//
+			// The recovery command is NOT "cd + re-run `mindspec complete`"
+			// (bead-panel finding, mindspec-lc12.1 fix-up): every input to
+			// this resolution — root, wtPath, checkPath — comes from
+			// cwd-INDEPENDENT sources (workspace.FindRoot walks to the same
+			// repo root regardless of cwd; wtPath comes from `bd worktree
+			// list`, never from the shell's directory). Re-running
+			// `mindspec complete` from anywhere, including "inside the spec
+			// worktree", reaches this exact same branch and refuses again —
+			// an infinite loop. The genuinely convergent recovery is
+			// `mindspec next`: when a bead is in-progress with a missing
+			// worktree, `next` positively detects that (ResolveActiveBead)
+			// and recreates it (EnsureWorktree; see internal/next/guard.go's
+			// WorktreeSetupFailure/ClaimFailure recipes — "re-run detects
+			// the in-progress bead and auto-recovers the worktree"), after
+			// which `mindspec complete` finds a real wtPath and this
+			// refusal no longer fires.
+			if wtPath == "" {
+				return nil, guard.NewFailure(
+					fmt.Sprintf("bead %s's beads-artifact tracker sync would commit on the main checkout (%s) — refusing.", beadID, checkPath),
+					fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", specID, beadID, beadID),
+				)
+			}
+			// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
+			// a pre-commit hook re-exported the JSONL during the auto-commit
+			// above) is COMMITTED, not ignored — as a follow-up commit, never
+			// an amend — so the bead→spec merge below operates on a genuinely
+			// clean tree and field workarounds (--no-verify, core.hooksPath)
+			// are never necessary. The commit stays behind the executor
+			// (ADR-0030).
+			//
+			// Spec 119 R3: staged with an EXPLICIT lifecycle-artifact
+			// pathspec (artifactDirt, e.g. .beads/issues.jsonl) — never an
+			// `add -A` equivalent — so a file that becomes dirty between
+			// this scan and the commit (a hook, a race) is never silently
+			// swept into the tracker-only commit (AC-4).
+			if err := exec.CommitPaths(checkPath, "chore: sync beads artifact", artifactDirt); err != nil {
+				return nil, fmt.Errorf("committing beads artifact sync: %w", err)
+			}
+			// HC-3: self-heal is silent-on-success save one structured line.
+			fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
+				strings.Join(artifactDirt, ","))
+			// Residual-dirt warning (AC-4): CommitPaths staged EXACTLY
+			// artifactDirt, never `add -A`, so any OTHER path still
+			// dirty in the tree is surfaced by name instead of being
+			// silently swept in.
+			if residual, statusErr := exec.Status(checkPath); statusErr == nil {
+				if extra := residualDirtyPaths(residual, artifactDirt); len(extra) > 0 {
+					fmt.Fprintf(os.Stderr, "WARN complete.unexpected_dirty_paths: %s (not included in the artifact sync commit)\n",
+						strings.Join(extra, ", "))
+				}
+			}
 		}
-		// HC-3: self-heal is silent-on-success save one structured line.
-		fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
-			strings.Join(artifactDirt, ","))
 	}
 
 	// 3.5. Spec 086 (F2) doc-sync enforcement gate. The measured range
@@ -489,9 +639,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// without doc updates; the reason is recorded on bead metadata
 	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
 	// (see step 5.5 below).
-	base, mbErr := exec.MergeBase(specBranch, beadHead)
-	if mbErr != nil {
-		return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
+	// Spec 119 R4 (Bead 1 Step 5): the reconcile path evaluates every
+	// per-bead gate against the LANDED merge commit's own M^1..M diff
+	// instead of computing a merge-base against the now-absent bead/<id>
+	// ref — the exit-128 bug this fixes. No exec.MergeBase call is made
+	// on this path (AC-5); beadHead was already reanchored to the landed
+	// commit's SHA at reconcile detection above.
+	var base string
+	if reconcile != nil {
+		base = reconcile.landed.FirstParent
+	} else {
+		var mbErr error
+		base, mbErr = exec.MergeBase(specBranch, beadHead)
+		if mbErr != nil {
+			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
+		}
 	}
 	// OWNERSHIP attribution (manifests + domain enumeration) is read
 	// from beadHead — the SAME ref the gate diffs — so an OWNERSHIP
@@ -694,9 +856,32 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
 	// Pass empty msg since we already handled commit+clean-tree above.
-	completeErr := exec.CompleteBead(beadID, specBranch, "")
-	if completeErr == nil {
-		result.WorktreeRemoved = true
+	//
+	// Spec 119 R4 (Bead 1 Step 5): the reconcile path's work already
+	// landed via a bead->spec merge that happened OUTSIDE this
+	// invocation. exec.CompleteBead's merge would run gitutil.MergeInto
+	// against the now-absent bead/<id> ref and fail — skip the merge/
+	// branch-cleanup legs entirely and instead record DURABLE evidence
+	// naming the identified landed merge commit SHA. A write failure
+	// here refuses (recoverable, re-run once reachable) rather than
+	// silently completing without the evidence AC-5 requires.
+	var completeErr error
+	if reconcile != nil {
+		if metaErr := completeMergeMetadataFn(beadID, map[string]interface{}{
+			"mindspec_reconcile_landed_merge_sha": reconcile.landed.SHA,
+			"mindspec_reconcile_at":               time.Now().UTC().Format(time.RFC3339),
+		}); metaErr != nil {
+			msg := fmt.Sprintf(
+				"bead %s's landed merge commit %s was positively identified, but the durable reconcile evidence could not be recorded (%v) — reconciliation is NOT yet complete.\n"+
+					"this state is recoverable: re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
+				beadID, reconcile.landed.SHA, metaErr, beadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+		}
+	} else {
+		completeErr = exec.CompleteBead(beadID, specBranch, "")
+		if completeErr == nil {
+			result.WorktreeRemoved = true
+		}
 	}
 
 	// Spec 092 Req 3c (mindspec-qxsy): CompleteBead may have removed the
@@ -982,4 +1167,35 @@ func joinResultErrorMessages(r *validate.Result) string {
 		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// residualDirtyPaths parses `git status --porcelain` output (as returned by
+// exec.Status) and returns any path NOT in known — the Spec 119 R3 (Bead 1
+// Step 3) warning signal for a file that became dirty AFTER the
+// artifact-dirt scan (a hook, a race) and was therefore excluded from the
+// pathspec-scoped tracker commit (the `never an add -A equivalent`
+// guarantee). known is the exact artifactDirt pathspec just committed.
+func residualDirtyPaths(porcelain string, known []string) []string {
+	knownSet := make(map[string]bool, len(known))
+	for _, k := range known {
+		knownSet[k] = true
+	}
+	var extra []string
+	for _, line := range strings.Split(porcelain, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 4 {
+			continue
+		}
+		p := strings.TrimSpace(line[3:])
+		if idx := strings.Index(p, " -> "); idx >= 0 {
+			// Rename entry ("XY orig -> new"); the new path is what
+			// matters for classification.
+			p = p[idx+4:]
+		}
+		if p == "" || knownSet[p] {
+			continue
+		}
+		extra = append(extra, p)
+	}
+	return extra
 }
