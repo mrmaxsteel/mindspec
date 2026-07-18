@@ -169,6 +169,111 @@ func TestCommitCount(t *testing.T) {
 	}
 }
 
+// TestFirstParentMerges pins the git-I/O primitive behind the
+// landed-merge-commit-identity predicate (Spec 119 R4): two sequential
+// `git merge --no-ff -m "Merge bead/<id>"` merges onto a spec branch, each
+// with its own bead branch carrying one commit, must be listed newest-first
+// with their full parent list and exact subject.
+func TestFirstParentMerges(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	run("checkout", "-b", "spec/119-test")
+	run("checkout", "-b", "bead/one")
+	os.WriteFile(filepath.Join(dir, "one.txt"), []byte("one\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work one")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/one", "bead/one")
+
+	run("checkout", "-b", "bead/two")
+	os.WriteFile(filepath.Join(dir, "two.txt"), []byte("two\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work two")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/two", "bead/two")
+
+	merges, err := FirstParentMerges(dir, "spec/119-test")
+	if err != nil {
+		t.Fatalf("FirstParentMerges: %v", err)
+	}
+	if len(merges) != 2 {
+		t.Fatalf("expected 2 first-parent merges, got %d: %+v", len(merges), merges)
+	}
+	if merges[0].Subject != "Merge bead/two" {
+		t.Errorf("newest-first: merges[0].Subject = %q, want %q", merges[0].Subject, "Merge bead/two")
+	}
+	if merges[1].Subject != "Merge bead/one" {
+		t.Errorf("merges[1].Subject = %q, want %q", merges[1].Subject, "Merge bead/one")
+	}
+	for i, m := range merges {
+		if len(m.Parents) != 2 {
+			t.Errorf("merges[%d]: expected 2 parents, got %d: %+v", i, len(m.Parents), m.Parents)
+		}
+		if len(m.SHA) < 7 {
+			t.Errorf("merges[%d]: expected a SHA, got %q", i, m.SHA)
+		}
+	}
+
+	// The bead/two merge's SECOND parent must be bead/two's tip.
+	beadTwoTip, err := RevParseRef(dir, "bead/two")
+	if err != nil {
+		t.Fatalf("RevParseRef bead/two: %v", err)
+	}
+	if merges[0].Parents[1] != beadTwoTip {
+		t.Errorf("merges[0] second parent = %q, want bead/two tip %q", merges[0].Parents[1], beadTwoTip)
+	}
+}
+
+// TestFirstParentMerges_FreshBranchYieldsNoMerge pins the load-bearing
+// AC-10 property: `git merge --no-ff` of an already-ancestor branch (a
+// freshly-branched bead with zero own commits) performs no merge
+// ("Already up to date") and creates no commit. FirstParentMerges must then
+// report zero merges for that bead's subject.
+func TestFirstParentMerges_FreshBranchYieldsNoMerge(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	run("checkout", "-b", "spec/119-test")
+	run("checkout", "-b", "bead/fresh")
+	run("checkout", "spec/119-test")
+	// bead/fresh has zero own commits — merging it is a no-op.
+	out, err := exec.Command("git", "-C", dir, "merge", "--no-ff", "-m", "Merge bead/fresh", "bead/fresh").CombinedOutput()
+	if err != nil {
+		t.Fatalf("merge bead/fresh: %s", out)
+	}
+
+	merges, err := FirstParentMerges(dir, "spec/119-test")
+	if err != nil {
+		t.Fatalf("FirstParentMerges: %v", err)
+	}
+	if len(merges) != 0 {
+		t.Fatalf("a fresh zero-commit branch must produce NO merge commit, got %+v", merges)
+	}
+}
+
 func TestCommitAll_CleanTree(t *testing.T) {
 	dir := initGitRepo(t)
 
