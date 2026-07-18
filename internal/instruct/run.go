@@ -75,11 +75,14 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 	cache := phase.NewCache()
 
 	// Protected branch check FIRST: main/master → always idle.
-	// This must run before guard/worktree checks which query beads (slow dolt cold start).
-	if specFlag == "" {
-		if _, ok := RenderIdleIfProtected(mainRoot); ok {
-			return handleNoState(cache, mainRoot, format, out)
-		}
+	// This must run before guard/worktree checks which query beads (slow
+	// dolt cold start). Decision only (IsProtectedCheckout, git/config,
+	// no beads) — handleNoState below does the single idle render, with
+	// the shared invocation cache (final-review F1: the old
+	// RenderIdleIfProtected call here rendered idle a FIRST time just to
+	// decide, discarding the output and its lifecycle scan).
+	if specFlag == "" && IsProtectedCheckout(mainRoot) {
+		return handleNoState(cache, mainRoot, format, out)
 	}
 
 	if err := ctx.Err(); err != nil {

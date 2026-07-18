@@ -39,7 +39,21 @@ type Executor interface {
 
 	// FinalizeEpic merges the spec branch to main (or pushes for PR),
 	// cleans up all workspaces and branches for the spec lifecycle.
-	FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error)
+	//
+	// lifecycleAllowSet (Spec 119 Bead 3, R6/P6) scopes BOTH bead-branch
+	// enumerations below — the auto-merge leg and the worktree/branch
+	// cleanup leg — to the finalizing spec's plan-declared,
+	// lifecycle-classified bead IDs. It is computed by the ENFORCEMENT
+	// layer (internal/approve, via the new internal/phase classifier)
+	// and passed in as a fact, because this package may not import
+	// internal/phase (the executor/enforcement boundary declared in this
+	// package's doc comment above). A candidate bead/<id> branch is
+	// admitted iff its id is a member of the set; a nil set is the
+	// "not computed" sentinel and implementations MUST abort fail-closed
+	// rather than silently skip or admit any bead/<id> candidate (AC-14)
+	// — a caller with a genuinely empty scope must pass a non-nil,
+	// zero-length slice.
+	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error)
 
 	// Cleanup removes stale workspaces and branches for a spec.
 	// If force is true, skips lifecycle state checks.

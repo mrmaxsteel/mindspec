@@ -3,6 +3,7 @@ package phase
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+// ErrNoEpicLineage is the typed sentinel FindEpicForBead(WithCache) wraps
+// when every lookup SUCCEEDED but the bead genuinely has no discoverable
+// epic/spec lineage (the bead does not exist, has no epic-typed parent
+// dependency carrying spec metadata, and no title-number epic match).
+// Callers that fail closed on lineage lookup ERRORS (spec 119 final-review
+// finding A: a transient bd/Dolt failure must never silently demote
+// resolution to cwd guessing) use errors.Is(err, ErrNoEpicLineage) to
+// distinguish this genuinely-epic-less result — where a legacy fallback is
+// legitimate — from a real infra failure, which propagates as-is. Never
+// classify by error text.
+var ErrNoEpicLineage = errors.New("no epic lineage")
 
 // Package-level function variables for testability.
 var (
@@ -62,6 +75,12 @@ type ChildInfo struct {
 	Title     string `json:"title"`
 	Status    string `json:"status"`
 	IssueType string `json:"issue_type"`
+	// Parent is the bd parent issue ID (the owning epic for lifecycle
+	// beads). bd emits it in every list/show JSON shape; it is empty for
+	// top-level issues. Consumed by Cache.OpenBeads callers (the lifecycle
+	// aggregate scan) to attribute a globally-enumerated bead to its epic
+	// without a per-epic children query.
+	Parent string `json:"parent"`
 }
 
 // ActiveSpec holds discovered spec information derived from beads.
@@ -369,6 +388,34 @@ func OpenNonLifecycleChildrenForEpic(epicID string) []ChildInfo {
 	return OpenNonLifecycleChildren(children)
 }
 
+// LifecycleChildIDsForEpic resolves the LIFECYCLE (task / empty-type)
+// children of an epic via the shared cache (one `bd list --parent` call,
+// same query as OpenNonLifecycleChildrenForEpic above) and returns their
+// bead IDs.
+//
+// Spec 119 Bead 3 (P3): a FAIL-CLOSED sibling of the advisory
+// OpenNonLifecycleChildren(ForEpic) — those swallow a query failure to nil
+// because they feed a never-blocking hint. This function feeds
+// FinalizeEpic's destructive bead-branch enumerations (the scoping
+// allow-set, R6), so a bd query failure must be returned as an error
+// rather than silently read as "no lifecycle children" (which would
+// under-scope the allow-set and either strand real lifecycle beads or, if
+// misread as "everything is out of scope", merge nothing). bd-only, no
+// git I/O — TestEnforcementHasNoGitLeaks (ADR-0030) is unaffected.
+func LifecycleChildIDsForEpic(epicID string) ([]string, error) {
+	children, err := NewCache().GetChildren(epicID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, c := range children {
+		if classifyChild(c.IssueType) == childLifecycle {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids, nil
+}
+
 // DiscoverActiveSpecs queries beads for open/in_progress epics and derives phase for each.
 // Constructs a fresh cache; hot-path callers should use DiscoverActiveSpecsWithCache
 // to share the underlying `bd list --type=epic` call with other parts of the same invocation.
@@ -659,6 +706,16 @@ func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 // tracked); the resolved parent epic, however, is fetched via cache.FindEpic
 // so a subsequent bd show on the same epic ID is a no-op. The fallback
 // epic-list path uses cache.AllEpics so it shares with the wider invocation.
+//
+// Error contract (spec 119 final-review finding A): a genuinely-no-lineage
+// result — every lookup succeeded but no epic/spec lineage exists for this
+// bead — is returned as an error wrapping ErrNoEpicLineage. Any REAL lookup
+// failure (the `bd show` itself, its JSON decode, a parent-epic `bd show`
+// via cache.FindEpic, or the title-fallback cache.AllEpics list) PROPAGATES
+// as-is, never silently degraded into "no lineage": pre-final-review the
+// dependency/title fallbacks swallowed those inner errors and fell through
+// to the terminal not-found return, which let a transient bd/Dolt failure
+// masquerade as an epic-less bead.
 func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, err error) {
 	out, err := runBDFn("show", beadID, "--json")
 	if err != nil {
@@ -676,14 +733,22 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 		return "", "", err
 	}
 	if len(items) == 0 {
-		return "", "", fmt.Errorf("bead %s not found", beadID)
+		// The show succeeded and definitively answered "no such bead" —
+		// a genuine no-lineage result, not an infra failure.
+		return "", "", fmt.Errorf("bead %s not found: %w", beadID, ErrNoEpicLineage)
 	}
 
 	// Try to find the parent epic via dependencies
 	for _, dep := range items[0].Dependencies {
 		if strings.EqualFold(dep.IssueType, "epic") {
 			epic, epicErr := c.FindEpic(dep.ID)
-			if epicErr == nil && epic != nil {
+			if epicErr != nil {
+				// A real epic-lookup failure must propagate — skipping it
+				// (the pre-final-review behavior) silently reclassified a
+				// transient bd/Dolt error as "no lineage".
+				return "", "", fmt.Errorf("resolving parent epic %s for bead %s: %w", dep.ID, beadID, epicErr)
+			}
+			if epic != nil {
 				num, title := ExtractSpecMetadata(*epic)
 				if num > 0 && title != "" {
 					return dep.ID, SpecIDFromMetadata(num, title), nil
@@ -701,19 +766,22 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 			var num int
 			if _, scanErr := fmt.Sscanf(numStr, "%d", &num); scanErr == nil {
 				epics, listErr := c.AllEpics()
-				if listErr == nil {
-					for _, epic := range epics {
-						epicNum, epicTitle := ExtractSpecMetadata(epic)
-						if epicNum == num {
-							return epic.ID, SpecIDFromMetadata(epicNum, epicTitle), nil
-						}
+				if listErr != nil {
+					// Same rule as the dependency path: a failed epic list
+					// is an infra error, not evidence of an epic-less bead.
+					return "", "", fmt.Errorf("listing epics for bead %s title fallback: %w", beadID, listErr)
+				}
+				for _, epic := range epics {
+					epicNum, epicTitle := ExtractSpecMetadata(epic)
+					if epicNum == num {
+						return epic.ID, SpecIDFromMetadata(epicNum, epicTitle), nil
 					}
 				}
 			}
 		}
 	}
 
-	return "", "", fmt.Errorf("no epic found for bead %s", beadID)
+	return "", "", fmt.Errorf("no epic found for bead %s: %w", beadID, ErrNoEpicLineage)
 }
 
 // FindActiveBeadForEpicWithCache returns the ID of an in_progress bead under the

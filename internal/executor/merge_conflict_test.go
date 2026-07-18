@@ -185,7 +185,7 @@ func TestFinalizeEpic_BeadMergeConflictAbortsFinalize(t *testing.T) {
 	mainHashBefore := refHash(t, dir, "main")
 	specHashBefore := refHash(t, dir, "spec/077-test")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-x.1"})
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -267,7 +267,7 @@ func TestFinalizeEpic_DirectMergeConflictPreservesSpecBranch(t *testing.T) {
 	fake.listEntries = nil // no bead worktrees
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -357,7 +357,7 @@ func TestFinalizeEpic_PartialBeadMergeMatrix(t *testing.T) {
 
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"})
 	if err == nil {
 		t.Fatal("expected a merge-conflict error (bead B), got nil")
 	}
@@ -401,7 +401,7 @@ func TestFinalizeEpic_PartialBeadMergeMatrix(t *testing.T) {
 
 	// The re-run converges: both bead branches are ancestors now, so the
 	// loop skips them and finalize completes (direct merge to main).
-	result, rerunErr := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	result, rerunErr := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"})
 	if rerunErr != nil {
 		t.Fatalf("re-run after conflict resolution must converge, got: %v", rerunErr)
 	}

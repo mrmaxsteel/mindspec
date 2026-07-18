@@ -18,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
@@ -98,6 +99,11 @@ func saveAndRestore(t *testing.T) {
 	origDoltCommit := doltCommitFn
 	origVerifyCommitted := verifyCommittedFn
 	origFindOrphans := findOrphanedClosedBeadsFn
+	origFindEpicForBead := findEpicForBeadFn
+	origResolveSpecPrefix := resolveSpecPrefixFn
+	origMergedUnclosed := mergedUnclosedFn
+	origBeadScopeGetMeta := beadScopeGetMetadataFn
+	origBeadScopeChangedFiles := beadScopeChangedFilesFn
 
 	t.Cleanup(func() {
 		findOrphanedClosedBeadsFn = origFindOrphans
@@ -117,6 +123,11 @@ func saveAndRestore(t *testing.T) {
 		postCloseReadBackoff = origPostCloseBackoff
 		doltCommitFn = origDoltCommit
 		verifyCommittedFn = origVerifyCommitted
+		findEpicForBeadFn = origFindEpicForBead
+		resolveSpecPrefixFn = origResolveSpecPrefix
+		mergedUnclosedFn = origMergedUnclosed
+		beadScopeGetMetadataFn = origBeadScopeGetMeta
+		beadScopeChangedFilesFn = origBeadScopeChangedFiles
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -187,6 +198,39 @@ func saveAndRestore(t *testing.T) {
 	// default (no orphaned siblings) so existing happy-path tests don't shell
 	// out to bd/git or false-block. The guard's own tests override this.
 	findOrphanedClosedBeadsFn = func(specID, workdir, excludeBeadID string) []lifecycle.Orphan { return nil }
+	// Spec 119 R1 (Bead 1): default the lineage-authoritative spec
+	// resolution seam to a genuine "no lineage" result — the typed
+	// phase.ErrNoEpicLineage sentinel (final-review finding A: a NON-
+	// sentinel error now fails CLOSED instead of falling back) — so every
+	// pre-existing test falls through to the (already-stubbed)
+	// resolveTargetFn-based fallback path unchanged. The AC-1/AC-2
+	// lineage tests override this to drive the new authoritative path;
+	// the fail-closed tests override it with a real (non-sentinel) error.
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "", "", fmt.Errorf("test: %w", phase.ErrNoEpicLineage)
+	}
+	// resolveSpecPrefixFn defaults to the real resolver: production hints
+	// are almost always already-full spec IDs, which it passes through
+	// with no bd call at all (only a bare numeric prefix would shell
+	// out) — safe to leave live for every existing test.
+	resolveSpecPrefixFn = resolve.ResolveSpecPrefix
+	// Spec 119 R4 (Bead 1): default the landed-merge-commit-identity
+	// predicate to "not merged-unclosed" so every pre-existing test's
+	// worktree-matching behavior is unchanged. The reconcile-matrix tests
+	// override this to drive the merged-unclosed / branch-less paths.
+	mergedUnclosedFn = func(root, specBranch, beadID string) (*lifecycle.LandedMerge, bool, error) {
+		return nil, false, nil
+	}
+	// Spec 119 R11 (Bead 5): default the advisory bead-scope seams to a
+	// clean empty-metadata read (no declared file_paths baseline — the
+	// advisory check silently no-ops) so every pre-existing test stays
+	// hermetic (no real `bd show` shell-out) and prints no unexpected
+	// WARN. The AC-22 tests override beadScopeGetMetadataFn to drive the
+	// cross-domain WARN.
+	beadScopeGetMetadataFn = func(id string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
+	beadScopeChangedFilesFn = func(exec executor.Executor, base, head string) ([]string, error) {
+		return exec.ChangedFiles(base, head)
+	}
 }
 
 // newMockExec creates a MockExecutor with defaults suitable for complete tests.
@@ -417,6 +461,277 @@ func TestRun_HappyPath(t *testing.T) {
 	focusPath := filepath.Join(root, ".mindspec", "focus")
 	if _, statErr := os.Stat(focusPath); statErr == nil {
 		t.Error("expected no focus file to be written")
+	}
+}
+
+// --- Spec 119 R1 (Bead 1): lineage-authoritative spec resolution (AC-1/AC-2) ---
+
+// TestRun_LineageAuthoritative_IgnoresMisleadingCwdResolution (AC-1): the
+// bead's parent-epic lineage resolves the spec authoritatively even when
+// cwd-derived resolution (resolveTargetFn — standing in for "invoked from a
+// DIFFERENT spec's worktree, or from a main checkout with ambiguous active
+// specs") would answer differently. resolveTargetFn must never even be
+// consulted. RED-on-revert: the pre-119 code tries resolveTargetFn FIRST and
+// only falls back to bead lineage when it ERRORS — since this fixture makes
+// it SUCCEED (with the wrong answer), reverting this bead's change makes
+// resolveCalled become true and the downstream phase stubs (set up for
+// "119-correct") no longer match, either flipping the assertion or erroring.
+func TestRun_LineageAuthoritative_IgnoresMisleadingCwdResolution(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "119-correct", "epic-x")
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "epic-x", "119-correct", nil
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "119-wrong", nil // simulates a different spec's worktree / main
+	}
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("lineage-authoritative resolution should succeed, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+	if resolveCalled {
+		t.Error("cwd-based resolveTargetFn must NOT be consulted when the bead's lineage resolves authoritatively (AC-1)")
+	}
+}
+
+// TestRun_LineageSpecHintMismatchRefuses (AC-2): an explicit --spec naming a
+// DIFFERENT spec than the bead's lineage refuses in preflight, naming BOTH
+// spec IDs, with ZERO executor calls (byte-identical state).
+func TestRun_LineageSpecHintMismatchRefuses(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "epic-x", "119-correct", nil
+	}
+
+	_, err := Run(root, "bead-1", "119-wrong", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a refusal on --spec/lineage mismatch")
+	}
+	if !strings.Contains(err.Error(), "119-correct") || !strings.Contains(err.Error(), "119-wrong") {
+		t.Errorf("error must name BOTH spec IDs, got: %v", err)
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected ZERO executor calls before the preflight refusal, got %d: %+v", len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestRun_LineageSpecHintMatchProceeds (AC-2): a --spec hint that MATCHES
+// the bead's lineage proceeds normally.
+func TestRun_LineageSpecHintMatchProceeds(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "119-correct", "epic-x")
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "epic-x", "119-correct", nil
+	}
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	result, err := Run(root, "bead-1", "119-correct", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("a matching --spec hint must proceed, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+}
+
+// TestRun_LineageUnavailable_FallsBackToCwdResolution: when the lineage
+// lookup SUCCEEDS but answers "no epic lineage" (e.g. the bead genuinely
+// does not exist yet — the typed phase.ErrNoEpicLineage sentinel), the
+// pre-119 cwd/hint-based resolution is still consulted — every pre-119
+// resolution path is preserved for this degenerate case. (A real lookup
+// ERROR, by contrast, fails closed — see the FailsClosed tests below.)
+func TestRun_LineageUnavailable_FallsBackToCwdResolution(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "", "", fmt.Errorf("bead not found: %w", phase.ErrNoEpicLineage)
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "008-test", nil
+	}
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("fallback resolution must succeed, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+	if !resolveCalled {
+		t.Error("expected the cwd-based fallback resolveTargetFn to be consulted when lineage is unavailable")
+	}
+}
+
+// TestRun_LineageLookupErrorFailsClosed (spec 119 final-review finding A):
+// a REAL lineage-lookup error — a transient bd/Dolt failure, NOT the typed
+// phase.ErrNoEpicLineage "genuinely epic-less" sentinel — must refuse
+// fail-closed BEFORE the migration and any mutation, with a named retry
+// recovery line. It must NEVER silently fall back to cwd-derived
+// resolution (which would reintroduce the zty3/R2 wrong-spec bug on a
+// transient failure).
+func TestRun_LineageLookupErrorFailsClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		return "", "", fmt.Errorf("bd show %s failed: dolt lock contention", beadID)
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "119-wrong", nil
+	}
+	var migrationCalled bool
+	restorePhaseMerge := phase.SetMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
+		migrationCalled = true
+		return nil
+	})
+	t.Cleanup(restorePhaseMerge)
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a fail-closed refusal on a transient lineage-lookup error")
+	}
+	if !strings.Contains(err.Error(), "epic lineage") {
+		t.Errorf("refusal should name the lineage failure, got: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("fail-closed lineage refusal must end with a recovery line, got: %v", err)
+	}
+	if resolveCalled {
+		t.Error("cwd-based resolveTargetFn must NEVER be consulted on a lineage-lookup ERROR (fail-closed, not fail-open)")
+	}
+	if migrationCalled {
+		t.Error("the refusal must fire BEFORE the ADR-0034 migration (no metadata write)")
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected ZERO executor calls (zero mutations) on the fail-closed refusal, got %d: %+v", len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestRun_LineageDependentEpicLookupErrorFailsClosed (finding A, inner
+// swallow): a failure while resolving the bead's DEPENDENT parent epic
+// (phase.FindEpicForBead's cache.FindEpic leg — previously swallowed into
+// "no epic found") now propagates as a real error, and complete fails
+// closed on it identically: zero mutations, resolveTargetFn never called.
+func TestRun_LineageDependentEpicLookupErrorFailsClosed(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	mock := newMockExec()
+
+	findEpicForBeadFn = func(beadID string) (string, string, error) {
+		// The exact wrapped shape phase.FindEpicForBeadWithCache returns
+		// when the parent-epic `bd show` fails (NOT the no-lineage sentinel).
+		return "", "", fmt.Errorf("resolving parent epic epic-x for bead %s: bd show epic-x failed: connection refused", beadID)
+	}
+	var resolveCalled bool
+	resolveTargetFn = func(r, flag string) (string, error) {
+		resolveCalled = true
+		return "119-wrong", nil
+	}
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a fail-closed refusal on a dependent-epic lookup error")
+	}
+	if resolveCalled {
+		t.Error("cwd-based resolveTargetFn must NEVER be consulted on a dependent-epic lookup ERROR")
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected ZERO executor calls on the fail-closed refusal, got %d: %+v", len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations (spec 119
+// final-review finding B): the call-order contract of the artifact-
+// materialization subphase (ADR-0041 §1). A doc-sync refusal fires AFTER
+// the optional user CommitAll (the local bead-branch commit whose tip the
+// gate must measure) but BEFORE every lifecycle-affecting mutation: no
+// `bd close`, no CompleteBead (merge/branch/worktree cleanup).
+func TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "086-doc-sync", "epic-086")
+	resolveTargetFn = func(r, flag string) (string, error) { return "086-doc-sync", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	var closeCalled bool
+	closeBeadFn = func(ids ...string) error { closeCalled = true; return nil }
+
+	mock := newMockExec()
+	mock.MergeBaseResult = "merge-base-sha"
+	// Source-only diff with no doc updates → doc-sync SevError.
+	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
+
+	_, err := Run(root, "bead-1", "", "did the work", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the doc-sync gate to refuse")
+	}
+	if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("error should mention doc-sync: %v", err)
+	}
+	// AFTER CommitAll: the user commit was materialized (forward-
+	// reconcilable local bead-branch commit, retained on refusal).
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 1 {
+		t.Errorf("expected exactly 1 CommitAll (artifact materialization) BEFORE the doc-sync refusal, got %d", len(calls))
+	}
+	// BEFORE every lifecycle-affecting mutation.
+	if closeCalled {
+		t.Error("bd close must NOT run after a doc-sync refusal")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected ZERO CompleteBead (merge/cleanup) calls after a doc-sync refusal, got %d", len(calls))
 	}
 }
 
@@ -1708,7 +2023,11 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 	mock := newMockExec()
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
-	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
@@ -1717,14 +2036,101 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify CommitAll was called via executor
+	// Verify CommitAll was called via executor, targeting the MATCHED bead
+	// worktree — never the root/main checkout (final-review r2 F2).
 	commitCalls := mock.CallsTo("CommitAll")
 	if len(commitCalls) != 1 {
 		t.Fatalf("expected 1 CommitAll call, got %d", len(commitCalls))
 	}
+	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
+		t.Errorf("CommitAll path: got %q, want the matched bead worktree", path)
+	}
 	msg := commitCalls[0].Args[1].(string)
 	if !strings.Contains(msg, "impl(bead-1)") || !strings.Contains(msg, "add feature X") {
 		t.Errorf("CommitAll msg: got %q", msg)
+	}
+}
+
+// TestRun_CommitMsgNoWorktreeRefusesMainCommit (final-review r2, F2): a
+// `complete --commit-msg` invocation whose bead worktree is missing (no
+// worktree-list match) while the bead/<id> ref still exists (so the R4
+// reconcile path does NOT engage) must REFUSE — the pre-fix behavior fell
+// back to CommitAll at root, i.e. a user-work commit on the main checkout
+// with no branch guard. The refusal must land BEFORE any mutation: zero
+// CommitAll calls, no bd close, no terminal CompleteBead.
+func TestRun_CommitMsgNoWorktreeRefusesMainCommit(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	// No matching worktree — the F2 gap's trigger (a pruned worktree, with
+	// the bead branch itself still present so reconcile detection stays
+	// inert; MockExecutor's RevParseRef defaults to "found").
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	closed := false
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a refusal — --commit-msg with no bead worktree must never commit on the main checkout")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "main checkout") || !strings.Contains(msg, "refusing") {
+		t.Errorf("refusal must name the main-checkout hazard; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec next") {
+		t.Errorf("refusal must carry the worktree-recreating `mindspec next` recovery; got:\n%s", msg)
+	}
+	if !guard.HasFinalRecoveryLine(msg) {
+		t.Errorf("refusal must end with a `recovery:` line; got:\n%s", msg)
+	}
+	// NO commit was created anywhere — least of all on main.
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("CommitAll must never run on the refusal path, got %d calls", len(calls))
+	}
+	if closed {
+		t.Error("bd close must not run after the --commit-msg refusal")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("no terminal mutation allowed after the refusal, got %d CompleteBead calls", len(calls))
+	}
+}
+
+// TestRun_WorktreeListErrorPropagates (final-review r2, F2): a failure
+// enumerating worktrees is an infra error, not "no worktree" — it must
+// surface as a preflight error (pre-fix it was swallowed, leaving
+// wtPath == "" and routing the --commit-msg CommitAll to the main
+// checkout). Nothing may mutate.
+func TestRun_WorktreeListErrorPropagates(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return nil, fmt.Errorf("simulated bd worktree list failure")
+	}
+	closed := false
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the worktree-list failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "listing bead worktrees") {
+		t.Errorf("error must name the worktree enumeration, got: %v", err)
+	}
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("CommitAll must never run after a worktree-list failure, got %d calls", len(calls))
+	}
+	if closed {
+		t.Error("bd close must not run after a worktree-list failure")
 	}
 }
 
@@ -1851,17 +2257,25 @@ func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 		t.Errorf("classification paths: got repoRoot=%q cwd=%q, want both the bead worktree", gotRepoRoot, gotCwd)
 	}
 
-	// Req 7: exactly one follow-up commit, through the executor, at the
-	// bead worktree, with the DQ-4 message.
-	commitCalls := mock.CallsTo("CommitAll")
+	// Req 7 + Spec 119 R3: exactly one follow-up commit, through the
+	// executor, at the bead worktree, with the DQ-4 message — staged via
+	// the EXPLICIT lifecycle-artifact pathspec (CommitPaths), never an
+	// `add -A` equivalent (AC-4).
+	commitCalls := mock.CallsTo("CommitPaths")
 	if len(commitCalls) != 1 {
-		t.Fatalf("expected 1 CommitAll (artifact sync), got %d", len(commitCalls))
+		t.Fatalf("expected 1 CommitPaths (artifact sync), got %d", len(commitCalls))
 	}
 	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
 		t.Errorf("artifact-sync commit path: got %q, want bead worktree", path)
 	}
 	if msg := commitCalls[0].Args[1].(string); msg != "chore: sync beads artifact" {
 		t.Errorf("artifact-sync commit msg: got %q, want %q", msg, "chore: sync beads artifact")
+	}
+	if paths := commitCalls[0].Args[2].([]string); len(paths) != 1 || paths[0] != ".beads/issues.jsonl" {
+		t.Errorf("artifact-sync pathspec: got %v, want [.beads/issues.jsonl]", paths)
+	}
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("artifact-only sync must never use CommitAll (add -A equivalent), got %d calls", len(calls))
 	}
 
 	// The terminal mutation still ran.
@@ -1902,17 +2316,25 @@ func TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit(t *testing.T) {
 		t.Fatalf("post-auto-commit artifact re-export must never block, got: %v", err)
 	}
 
-	commitCalls := mock.CallsTo("CommitAll")
-	if len(commitCalls) != 2 {
-		t.Fatalf("expected 2 CommitAll calls (auto-commit + follow-up sync), got %d", len(commitCalls))
+	// Spec 119 R3: the auto-commit (step 2.5) still uses CommitAll (the
+	// user's own work); the follow-up artifact-only sync now goes
+	// through the pathspec-scoped CommitPaths (AC-4).
+	autoCommitCalls := mock.CallsTo("CommitAll")
+	if len(autoCommitCalls) != 1 {
+		t.Fatalf("expected 1 CommitAll (the user's auto-commit), got %d", len(autoCommitCalls))
 	}
-	first := commitCalls[0].Args[1].(string)
-	second := commitCalls[1].Args[1].(string)
+	first := autoCommitCalls[0].Args[1].(string)
 	if !strings.Contains(first, "impl(bead-1)") || !strings.Contains(first, "implement the thing") {
-		t.Errorf("first commit should be the auto-commit, got %q", first)
+		t.Errorf("auto-commit message wrong, got %q", first)
 	}
+
+	syncCalls := mock.CallsTo("CommitPaths")
+	if len(syncCalls) != 1 {
+		t.Fatalf("expected 1 CommitPaths (follow-up artifact sync), got %d", len(syncCalls))
+	}
+	second := syncCalls[0].Args[1].(string)
 	if second != "chore: sync beads artifact" {
-		t.Errorf("second commit should be the follow-up artifact sync, got %q", second)
+		t.Errorf("follow-up commit message wrong, got %q", second)
 	}
 }
 
@@ -1970,7 +2392,7 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.CommitAllErr = fmt.Errorf("commit hook exploded")
+	mock.CommitPathsErr = fmt.Errorf("commit hook exploded")
 
 	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
 		return []string{".beads/issues.jsonl"}, nil, nil
@@ -1997,6 +2419,107 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	}
 	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
 		t.Errorf("expected no CompleteBead call, got %d", len(calls))
+	}
+}
+
+// TestRun_ArtifactDirt_NoWorktreeRefusesMainCommit (Spec 119 R3, AC-3): when
+// no bead worktree matched (wtPath == "", falling back to root — the main
+// repo root per Run's own contract), artifact dirt must NOT be committed
+// there. Refuses with a named re-invocation command; zero commits.
+//
+// mindspec-lc12.1 fix-up (panel finding #1): the recovery command must be
+// one that actually converges. Resolution (root/wtPath/checkPath) is
+// cwd-INDEPENDENT, so "cd into the spec worktree and re-run `mindspec
+// complete`" reaches this exact same refusal again — an infinite loop.
+// The recovery must instead be `mindspec next`, which detects the
+// in-progress bead with a missing worktree and recreates it (see
+// internal/next/guard.go), after which a subsequent `mindspec complete`
+// finds a real wtPath. Pinned here so a regression back to the "cd ... and
+// re-run `mindspec complete`" text fails this test.
+func TestRun_ArtifactDirt_NoWorktreeRefusesMainCommit(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil } // no match → checkPath == root
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a refusal rather than committing artifact dirt on the main checkout")
+	}
+	if !strings.Contains(err.Error(), "main checkout") {
+		t.Errorf("error should name the main-checkout refusal, got: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must carry a recovery line, got: %v", err)
+	}
+	recovery := finalRecoveryCommand(t, err.Error())
+	if !strings.HasPrefix(recovery, "mindspec next") {
+		t.Errorf("recovery command must be a convergent `mindspec next` re-run, got: %q", recovery)
+	}
+	if strings.Contains(recovery, "cd into") {
+		t.Errorf("recovery command must not tell the caller to cd-and-rerun `mindspec complete` — that loops forever (cwd-independent resolution), got: %q", recovery)
+	}
+	if len(mock.CallsTo("CommitPaths")) != 0 || len(mock.CallsTo("CommitAll")) != 0 {
+		t.Error("expected ZERO commits when refusing the main-checkout artifact sync")
+	}
+}
+
+// TestRun_ArtifactDirt_ResidualDirtNamedInWarning (Spec 119 R3, AC-4): a
+// path that becomes dirty AFTER the artifact-dirt scan (simulated via
+// exec.Status returning an extra, unrelated dirty entry post-commit) is
+// EXCLUDED from the pathspec-scoped tracker commit and named in a warning —
+// never silently swept in.
+func TestRun_ArtifactDirt_ResidualDirtNamedInWarning(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+	mock.StatusFn = func(workdir string) (string, error) {
+		return " M unrelated-race-file.go\n", nil
+	}
+
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	closeBeadFn = func(ids ...string) error { return nil }
+	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	w.Close()
+	os.Stderr = origStderr
+	var captured bytes.Buffer
+	io.Copy(&captured, r)
+
+	if err != nil {
+		t.Fatalf("residual dirt must never block completion, got: %v", err)
+	}
+	if !result.BeadClosed {
+		t.Error("expected BeadClosed=true")
+	}
+	if calls := mock.CallsTo("CommitPaths"); len(calls) != 1 {
+		t.Fatalf("expected 1 CommitPaths call, got %d", len(calls))
+	} else if paths := calls[0].Args[2].([]string); len(paths) != 1 || paths[0] != ".beads/issues.jsonl" {
+		t.Errorf("expected the pathspec to be EXACTLY [.beads/issues.jsonl], got %v (the residual file must be excluded)", paths)
+	}
+	if !strings.Contains(captured.String(), "unrelated-race-file.go") {
+		t.Errorf("expected the residual dirty path to be named in a warning, got stderr: %q", captured.String())
 	}
 }
 
