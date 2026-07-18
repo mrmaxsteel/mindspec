@@ -132,3 +132,61 @@ func TestCheckADRDivergenceHeadRefResolution(t *testing.T) {
 		assertDiffRange(t, mock, "BASE", "bead/explicit-tip")
 	})
 }
+
+// TestCheckADRDivergence_ADR0041PresentVsAbsent is Spec 119 Bead 6's
+// AC-25/Verification unit fixture: it drives CheckADRDivergence over a
+// synthetic fixture citing (or not citing) "ADR-0041" — the exact
+// mechanism the real ADR-divergence gate applies to the repo's own
+// ADR-0041-gate-before-mutate.md — to pin that an Accepted, domain-covering
+// citation clears the gate and its ABSENCE reproduces the uncovered
+// failure. This is the mechanism-level proof backing the plan's "ADR cited
+// from all three verbs' preflight code; the ADR-divergence gate passes"
+// Verification bullet: the gate's coverage rule is generic over the ADR ID,
+// so exercising it with the literal ID "ADR-0041" demonstrates the exact
+// present/absent behavior the real gate applies when ADR-0041 (and its
+// workflow/execution/core domains) is or is not an effective citation.
+func TestCheckADRDivergence_ADR0041PresentVsAbsent(t *testing.T) {
+	const specID = "119-gate-before-mutate"
+
+	newFixture := func(t *testing.T, cited bool) (string, string) {
+		t.Helper()
+		root := t.TempDir()
+		specDir := filepath.Join(root, ".mindspec", "docs", "specs", specID)
+		var citations []string
+		if cited {
+			citations = []string{"ADR-0041"}
+		}
+		writeSpecAndPlan(t, root, specDir, specID, []string{"workflow"}, citations)
+		writeManifest(t, root, "workflow", "paths:\n  - internal/approve/**\n")
+		writeADR(t, root, "ADR-0041", "Accepted", []string{"workflow", "execution", "core"})
+		return root, specDir
+	}
+
+	t.Run("present: an Accepted ADR-0041 citation clears the gate", func(t *testing.T) {
+		root, specDir := newFixture(t, true)
+		mock := &executor.MockExecutor{
+			ChangedFilesResult: []string{"internal/approve/plan.go"},
+		}
+		r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-lc12.6", "", "")
+		if r.HasFailures() {
+			t.Errorf("expected no failures with ADR-0041 cited and Accepted, got %+v", r.Issues)
+		}
+		if len(findings) != 0 {
+			t.Errorf("expected no uncovered findings, got %+v", findings)
+		}
+	})
+
+	t.Run("absent: no ADR-0041 citation reproduces the uncovered failure", func(t *testing.T) {
+		root, specDir := newFixture(t, false)
+		mock := &executor.MockExecutor{
+			ChangedFilesResult: []string{"internal/approve/plan.go"},
+		}
+		r, findings := CheckADRDivergence(root, "BASE", mock, specDir, "mindspec-lc12.6", "", "")
+		if !r.HasFailures() {
+			t.Fatal("expected an uncovered failure with no ADR-0041 citation")
+		}
+		if len(findings) != 1 || findings[0].Kind != "uncovered" || findings[0].Domain != "workflow" {
+			t.Errorf("expected 1 uncovered finding on workflow, got %+v", findings)
+		}
+	})
+}

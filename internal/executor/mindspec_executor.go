@@ -343,6 +343,41 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	return nil
 }
 
+// finalizeStepHookFn is a Spec 119 Bead 6 (AC-26 i4) TEST-ONLY package-var
+// hook: FinalizeEpic invokes it at FIVE significant post-mutation stages
+// (labeled below, at each call site) so fault-injection tests can inject a
+// terminal error IMMEDIATELY AFTER each stage's real mutations have
+// already landed — there is no existing seam that separates these internal
+// steps of the mutation chain. nil in production (a pure no-op, verified by
+// TestFinalizeStepHookFn_DefaultsToNil); tests set it to a stage-labeled
+// closure and MUST restore it to nil (t.Cleanup) so it never leaks into
+// another test.
+//
+// Stages (see finalize_fault_test.go for the kill-test at each):
+//
+//	"auto_merge"     — after the bead-branch auto-merge leg (unmerged
+//	                    closed-bead branches merged into the spec branch)
+//	"push"           — after the unconditional spec-branch push (a real
+//	                    push failure already terminates finalize; this
+//	                    hook's error faithfully models the same kill)
+//	"orphan_finalize" — after finalizeOrphanedSpecBranch returns (the wu7t
+//	                    path; its error already terminates)
+//	"pre_cleanup"    — between the merge/push legs and the cleanup leg
+//	"post_cleanup"   — after the cleanup leg's mutations complete (worktree/
+//	                    branch removals, the direct spec→main merge, spec-
+//	                    branch deletion)
+var finalizeStepHookFn func(stage string) error
+
+// finalizeStepHook invokes finalizeStepHookFn for stage when set,
+// translating a non-nil return into the terminal error FinalizeEpic's
+// caller sees — a no-op when no hook is installed (production default).
+func finalizeStepHook(stage string) error {
+	if finalizeStepHookFn == nil {
+		return nil
+	}
+	return finalizeStepHookFn(stage)
+}
+
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
 // branches. Handles bead branch auto-merge into the spec branch before
 // cleanup, ensuring all bead work is integrated.
@@ -357,6 +392,11 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 // the finalize fail-closed (AC-14) rather than silently skipping the leg
 // (a stale re-implementation of today's swallowed-List-error bug) or
 // silently admitting the candidate (a scope bypass).
+//
+// Spec 119 Bead 6 (AC-26 i4): this is a single COMMIT-phase mutation chain
+// (ADR-0041 §1) with no existing seam separating its internal steps;
+// finalizeStepHook is invoked at five stages so each can be individually
+// fault-injected (finalize_fault_test.go).
 func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error) {
 	result := FinalizeResult{}
 
@@ -467,6 +507,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		}
 	}
 
+	// Spec 119 Bead 6 (AC-26 i4, stage "auto_merge"): every bead-branch
+	// auto-merge above has already landed for real by this point.
+	if err := finalizeStepHook("auto_merge"); err != nil {
+		return result, err
+	}
+
 	// Gather stats (after bead merges so counts are accurate).
 	if count, err := gitutil.CommitCount(g.Root, "main", specBranch); err == nil {
 		result.CommitCount = count
@@ -487,6 +533,13 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// baseline spec-branch push.
 		if err := gitutil.PushBranch(specBranch); err != nil {
 			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
+		}
+		// Spec 119 Bead 6 (AC-26 i4, stage "push"): the spec branch is now
+		// genuinely pushed. A real push failure above already terminates
+		// finalize; this hook's error faithfully models the same kill
+		// immediately after the push landed.
+		if err := finalizeStepHook("push"); err != nil {
+			return result, err
 		}
 
 		// Bug wu7t: on a protected main, the epic-close JSONL export
@@ -540,6 +593,14 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				return result, finErr
 			}
 			result.FinalizeBranch = branchName
+			// Spec 119 Bead 6 (AC-26 i4, stage "orphan_finalize"): the wu7t
+			// chore/finalize-<specID> branch has already landed on the
+			// remote by this point. A real finalizeOrphanedSpecBranch error
+			// above already terminates; this hook's error faithfully
+			// models the same kill immediately after that branch landed.
+			if err := finalizeStepHook("orphan_finalize"); err != nil {
+				return result, err
+			}
 		}
 	} else {
 		result.MergeStrategy = "direct"
@@ -557,6 +618,14 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		if guardErr := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
 			return result, guardErr
 		}
+	}
+
+	// Spec 119 Bead 6 (AC-26 i4, stage "pre_cleanup"): every merge/push leg
+	// above (auto-merge, push, the orphan-finalize branch) has already run;
+	// the cleanup leg (worktree/branch removals, the no-remote direct
+	// merge, spec-branch deletion) has not started yet.
+	if err := finalizeStepHook("pre_cleanup"); err != nil {
+		return result, err
 	}
 
 	// Run from repo root for cleanup operations.
@@ -622,7 +691,11 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			}
 		}
 
-		return nil
+		// Spec 119 Bead 6 (AC-26 i4, stage "post_cleanup"): every cleanup
+		// mutation above (bead worktree/branch removals, spec worktree
+		// removal, the no-remote direct spec→main merge, spec-branch
+		// deletion) has already landed for real by this point.
+		return finalizeStepHook("post_cleanup")
 	}); err != nil {
 		return result, err
 	}

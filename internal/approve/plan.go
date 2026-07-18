@@ -120,6 +120,18 @@ type planPreflightFacts struct {
 // child set — ALL before ApprovePlan performs its first mutation (spec 119
 // R1). Every returned error is a guard.NewFailure or wraps one, carrying a
 // machine-greppable recovery line (spec 092 Req 12).
+//
+// ADR-0041 (gate-before-mutate): this function IS this verb's PREFLIGHT
+// phase — every fact ApprovePlan's mutation sequence (supersede-close, the
+// Approved-frontmatter write, bead creation + dep wiring, the approval
+// auto-commit) depends on is resolved and every refusal derivable from it
+// is decided here, before that sequence's first mutation. The idempotent
+// ADR-0034 migration (phase.EnsureMigrated, called by ApprovePlan just
+// before this function) is the ADR's named exemption. ApprovePlan's own
+// mutation sequence is the COMMIT phase; its RECONCILE contract — bounded
+// re-invocation converging to a fully-wired bead set or a clean named
+// refusal — is pinned by internal/approve/plan_fault_test.go (Spec 119
+// Bead 6, AC-26 p0a/p0b/p1-p4).
 func resolvePlanApprovePreflight(planPath, specID string) (*planPreflightFacts, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {

@@ -93,3 +93,20 @@ Bead `mindspec-oexu.1` removed a confirmed-dead core-domain symbol:
 
 - `internal/recording/codex_bootstrap.go`: `DefaultCodexConfigPath`
   (no live callers).
+
+## `LifecycleChildIDsForEpic` — the FinalizeEpic scoping allow-set source (spec 119)
+
+`internal/phase.LifecycleChildIDsForEpic(epicID)` resolves an epic's
+LIFECYCLE (task / empty-type) children via the shared cache — the same
+`bd list --parent` query `OpenNonLifecycleChildrenForEpic` already issues
+— and returns their bead IDs. Unlike its advisory sibling
+(`OpenNonLifecycleChildren(ForEpic)`, which swallows a query failure to an
+empty hint because nothing downstream of it ever blocks), this function is
+FAIL-CLOSED: a bd query failure returns an error rather than silently
+reading as "no lifecycle children". It feeds
+`internal/approve.ApproveImpl`'s `FinalizeEpic` lifecycle-allow-set
+resolution (execution domain, spec 119 R6) — under-scoping that allow-set
+by misreading a query failure as "everything is out of scope" would
+either strand real lifecycle beads unmerged or (worse) merge nothing
+silently, so this call fails the whole `impl approve` invocation
+pre-mutation instead. bd-only, no git I/O (ADR-0030 boundary unaffected).
