@@ -226,6 +226,20 @@ func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string
 
 // scaffoldPlan generates a plan.md skeleton with the exact structure that
 // validation expects, so the agent only needs to fill in content.
+//
+// Spec 119 R9/R10 (Bead 4): the `work_chunks` frontmatter block below is the
+// scaffold's load-bearing addition. A filled-as-given scaffold's
+// `work_chunks[].depends_on` is the ONLY thing `createImplementationBeads`
+// wires bd dependency edges from (spec 097 R3 — no prose dependency parser
+// exists or will be added; parsing prose here would reverse that decision).
+// The per-bead prose `**Depends on**` section is retained for human
+// readability and because the validator's `bead-depends` check expects it
+// (internal/validate/plan.go, `checkBeadSection`'s `bead-depends` warning),
+// but it is explicitly labeled non-authoritative so an author does not
+// mistake editing the prose for wiring an edge. The per-bead
+// `**Acceptance Criteria**` section is likewise structurally REQUIRED — the
+// validator hard-errors (`bead-acceptance-criteria`) when a bead section
+// lacks one.
 func scaffoldPlan(specID string) string {
 	return fmt.Sprintf(`---
 status: Draft
@@ -236,6 +250,20 @@ version: "1"
 # the ## ADR Fitness section explains why no ADR applies.
 # adr_citations:
 #   - ADR-XXXX
+# work_chunks: the AUTHORITATIVE dependency-wiring source (spec 097 R3) — the
+# ONLY thing bd dependency edges are wired from. Each chunk's "id" is 1-based
+# and maps positionally to the Nth "## Bead N" section below (chunk id 1 -> the
+# first "## Bead" section, id 2 -> the second, and so on); "depends_on" lists
+# the chunk ids this chunk depends on (e.g. depends_on: [1] wires this bead to
+# depend on Bead 1); "key_file_paths" declares the files that bead's context
+# surface should carry. Add one chunk per "## Bead N" section, keeping ids
+# contiguous (1..N) — the plan-approve preflight refuses a misaligned set
+# before any mutation.
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - path/to/file.go
 ---
 # Plan: %s
 
@@ -257,8 +285,13 @@ Unit tests will verify the implementation.
 **Verification**
 - [ ] `+"`make test`"+` passes
 
+**Acceptance Criteria**
+- <Specific, measurable criterion for this bead>
+
 **Depends on**
-None
+None (human-readable documentation only — NOT parsed; bd dependency edges
+are wired exclusively from this bead's `+"`work_chunks[].depends_on`"+` entry
+in the frontmatter above)
 
 ## Provenance
 

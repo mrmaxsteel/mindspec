@@ -123,7 +123,7 @@ None
 		return nil, nil // dep add etc.
 	}
 
-	ids, err := createImplementationBeads(planPath, "097-test", "epic-097")
+	ids, _, err := createImplementationBeads(planPath, "097-test", "epic-097")
 	if err != nil {
 		t.Fatalf("createImplementationBeads: %v", err)
 	}

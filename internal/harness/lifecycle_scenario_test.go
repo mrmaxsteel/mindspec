@@ -1,11 +1,13 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
@@ -39,6 +41,128 @@ func stubApproveBeads(t *testing.T) {
 	t.Cleanup(approve.SetSpecRunBDForTest(noopBD))
 	t.Cleanup(approve.SetPlanRunBDForTest(noopBD))
 	t.Cleanup(approve.SetPlanRunBDCombinedForTest(noopBD))
+}
+
+// stubApproveBeadsWithEpicRegistry is stubApproveBeads' sibling for scenario
+// tests that call ApproveSpec THEN ApprovePlan for the SAME specID (spec 119
+// bead 4 fix-up, F1 finding 4). Before spec 119's gate-before-mutate
+// preflight, ApprovePlan tolerated `phase.FindEpicBySpecID` failing (it just
+// skipped bead auto-creation with a warning), so stubNoEpics's static "[]"
+// epic list was harmless even though ApproveSpec's epic-create call is
+// itself a canned stub response, never actually recorded anywhere. Now
+// resolveTargetEpic (internal/approve/plan.go) refuses FAIL-CLOSED when it
+// can't find a matching epic, so ApprovePlan run against stubNoEpics's
+// static "[]" genuinely fails with "no lifecycle epic found" — a regression
+// this stub fixes by making the epic list STATEFUL: ApproveSpec's
+// `bd create --type=epic --title "[SPEC <id>] <title>"` call is intercepted
+// and recorded in an in-memory registry, and phase's `AllEpics` query
+// (fetchAllEpics's `--type=epic` list) is served from that SAME registry —
+// so a spec this test approved earlier is genuinely findable by a later
+// ApprovePlan call, exactly like a real bd epic would be.
+//
+// It also stubs approve.SetPlanListJSONForTest — spec 119's
+// queryExistingChildren (the Spec-074 existing-children preflight query) is
+// likewise now fail-closed on a query error, and these scenario tests run
+// against a `testRepo` with no real `.beads/` directory, so the query must
+// be stubbed rather than left to shell out to a nonexistent bd. Every
+// scenario using this stub is a first approval (no pre-existing children),
+// so "[]" (no children) is the correct response, not just an expedient one.
+func stubApproveBeadsWithEpicRegistry(t *testing.T) {
+	t.Helper()
+
+	var mu sync.Mutex
+	var epics []map[string]interface{}
+	epicByID := map[string]map[string]interface{}{}
+
+	bdFn := func(args ...string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(args) > 0 && args[0] == "create" {
+			isEpic := false
+			var title, metadataRaw string
+			for i, a := range args {
+				if a == "--title" && i+1 < len(args) {
+					title = args[i+1]
+				}
+				if a == "--metadata" && i+1 < len(args) {
+					metadataRaw = args[i+1]
+				}
+				if a == "--type=epic" {
+					isEpic = true
+				}
+			}
+			if isEpic {
+				id := fmt.Sprintf("fake-epic-%d", len(epics)+1)
+				// Record the SAME metadata ApproveSpec's real epic-create
+				// call sends (including mindspec_phase) so EnsureMigrated
+				// (phase.EnsureMigrated, ApprovePlan's exempt pre-preflight
+				// step) sees an already-migrated, post-080-native epic — a
+				// real freshly-created epic never needs migration, so
+				// faithfully recording its metadata here means the ADR-0034
+				// migration path correctly no-ops instead of falling
+				// through to the real (unstubbed) mergeMetadataFn.
+				var metadata map[string]interface{}
+				_ = json.Unmarshal([]byte(metadataRaw), &metadata)
+				epic := map[string]interface{}{
+					"id":         id,
+					"title":      title,
+					"status":     "open",
+					"issue_type": "epic",
+					"metadata":   metadata,
+				}
+				epics = append(epics, epic)
+				epicByID[id] = epic
+				out, _ := json.Marshal(map[string]string{"id": id})
+				return out, nil
+			}
+		}
+		return []byte(`{"id":"fake-test-bead"}`), nil
+	}
+	t.Cleanup(approve.SetSpecRunBDForTest(bdFn))
+	t.Cleanup(approve.SetPlanRunBDForTest(bdFn))
+	t.Cleanup(approve.SetPlanRunBDCombinedForTest(bdFn))
+	t.Cleanup(approve.SetPlanListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[]`), nil
+	}))
+
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		// fetchAllEpics is the only phase.listJSONFn caller passing
+		// `--type=epic`; any other query (e.g. fetchChildren's `--parent`)
+		// still gets "[]" — no scenario test using this stub exercises
+		// epic-children phase queries.
+		for _, a := range args {
+			if a == "--type=epic" {
+				out, err := json.Marshal(epics)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			}
+		}
+		return []byte(`[]`), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		// fetchEpic (`bd show <id> --json`, used by EnsureMigrated's
+		// stored-phase check) is the only phase.runBDFn caller that needs a
+		// specific epic back; `dolt pull` (CheckSpecNumberCollision) ignores
+		// its return value entirely, so "[]" is harmless there.
+		if len(args) >= 2 && args[0] == "show" {
+			if epic, ok := epicByID[args[1]]; ok {
+				out, err := json.Marshal([]map[string]interface{}{epic})
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			}
+		}
+		return []byte(`[]`), nil
+	})
+	t.Cleanup(restoreRunBD)
 }
 
 // ---------------------------------------------------------------------------
@@ -317,8 +441,7 @@ func simulateApproveImpl(t *testing.T, root, specID string) {
 // ---------------------------------------------------------------------------
 
 func TestScenario_HappyPath(t *testing.T) {
-	stubNoEpics(t)
-	stubApproveBeads(t)
+	stubApproveBeadsWithEpicRegistry(t)
 	root := testRepo(t)
 	specID := "001-test-feature"
 
@@ -374,8 +497,7 @@ func TestScenario_IdleStartsClean(t *testing.T) {
 }
 
 func TestScenario_InterruptForBug(t *testing.T) {
-	stubNoEpics(t)
-	stubApproveBeads(t)
+	stubApproveBeadsWithEpicRegistry(t)
 	root := testRepo(t)
 	specID := "002-main-feature"
 	bugSpecID := "003-hotfix-bug"
@@ -527,8 +649,7 @@ func TestValidateFromWorktree(t *testing.T) {
 }
 
 func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
-	stubNoEpics(t)
-	stubApproveBeads(t)
+	stubApproveBeadsWithEpicRegistry(t)
 	root := testRepo(t)
 	specID := "006-plan-artifact"
 
@@ -565,8 +686,7 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 // where a failed auto-commit during plan approval left the spec worktree
 // dirty, causing downstream `mindspec complete` merges to fail.
 func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
-	stubNoEpics(t)
-	stubApproveBeads(t)
+	stubApproveBeadsWithEpicRegistry(t)
 	root := testRepo(t)
 	specID := "007-plan-commit-fail"
 
@@ -599,8 +719,7 @@ func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
 // hook touched tracked files without staging them). The approval must
 // refuse to advance rather than leave the next merge broken.
 func TestScenario_PlanApprovalDirtyTreeIsHardError(t *testing.T) {
-	stubNoEpics(t)
-	stubApproveBeads(t)
+	stubApproveBeadsWithEpicRegistry(t)
 	root := testRepo(t)
 	specID := "008-plan-dirty-tree"
 
