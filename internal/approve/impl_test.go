@@ -529,6 +529,75 @@ func TestApproveImpl_NoCommitsNoBeads(t *testing.T) {
 	}
 }
 
+// TestApproveImpl_MissingPlanRefusesBeforeAnyMutation is a qb03
+// regression test. mindspec-qb03 removed the CommitCount preflight's
+// refusal DISJUNCTION (`count == 0 && (planErr != nil || len(beadIDs)
+// == 0)`) from impl.go as unreachable dead code: Leg 3 of
+// runOrphanObligationGate already refuses whenever the plan is
+// unreadable (planErr != nil), and it runs BEFORE every mutation this
+// function performs (see the ordering contract atop this file — steps
+// 6/7/9). TestApproveImpl_NoCommitsNoBeads above already pins that
+// FinalizeEpic (MUTATION 3/3, terminal) never runs in this state; this
+// test goes one step further and proves the OTHER two mutations in the
+// contract — MUTATION (1/3) epic close via bd, and MUTATION (2/3) the
+// phase-metadata write (both the done write AND the deferred Req-1
+// reconcile) — also never fire, i.e. the refusal is genuinely
+// PRE-MUTATION, not merely pre-FinalizeEpic. If Leg 3's `planErr != nil`
+// check were bypassed, ApproveImpl would fall through to the reconcile
+// write, the epic-close call, and (with a zero-commit cleanup path)
+// FinalizeEpic — so bdCloseCalls/phaseWrites go nonzero and this test
+// fails, which is the exact regression qb03's removal must never
+// reintroduce.
+func TestApproveImpl_MissingPlanRefusesBeforeAnyMutation(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	// Deliberately no plan.md.
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	var bdCloseCalls []string
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "close" {
+			bdCloseCalls = append(bdCloseCalls, args[1])
+		}
+		return []byte("ok"), nil
+	}
+	var phaseWrites []map[string]interface{}
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		phaseWrites = append(phaseWrites, updates)
+		return nil
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult: 0,
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected a refusal for a spec with no readable plan.md")
+	}
+	if !strings.Contains(err.Error(), "plan bead list could not be read") {
+		t.Errorf("refusal must name the unreadable plan-bead enumeration (Leg 3): %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must end with a recovery line: %v", err)
+	}
+	if len(bdCloseCalls) != 0 {
+		t.Errorf("MUTATION (1/3) epic close must not run before Leg 3's refusal; bd close calls: %v", bdCloseCalls)
+	}
+	if len(phaseWrites) != 0 {
+		t.Errorf("MUTATION (2/3) phase-metadata write (done write or Req-1 reconcile) must not run before Leg 3's refusal; writes: %v", phaseWrites)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("MUTATION (3/3, terminal) FinalizeEpic must not run before Leg 3's refusal: %d calls", len(calls))
+	}
+}
+
 func TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")

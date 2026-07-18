@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -138,6 +139,25 @@ func TestFinalizeEpic_ScopesBothLegsToLifecycleAllowSet(t *testing.T) {
 		if _, statErr := os.Stat(wt); statErr != nil {
 			t.Errorf("worktree for %s must survive (out of lifecycle scope): %v", branch, statErr)
 		}
+	}
+
+	// The above file/branch/worktree-on-disk assertions do NOT actually
+	// pin the cleanup leg's own allow-set filter: this test's fake
+	// WorktreeOps.Remove's onRemove hook only reifies a real `git
+	// worktree remove` for the lifecycle worktree and the spec worktree
+	// (see the onRemove map above) — calling Remove on a survivor name is
+	// a silent no-op on disk, and a subsequent `git branch -D` on a
+	// still-worktree-checked-out survivor branch fails and is swallowed
+	// by FinalizeEpic's `_ = gitutil.DeleteBranch(...)`. So reverting the
+	// cleanup leg's `if !allow[beadID] { continue }` filter would call
+	// Remove on every survivor's worktree name too, yet every assertion
+	// above would still pass. Pin it directly: the cleanup leg must call
+	// WorktreeOps.Remove EXACTLY for the lifecycle bead worktree and the
+	// spec worktree, in that order, and NEVER for a foreign-epic,
+	// other-spec, or same-epic non-lifecycle survivor.
+	wantRemoveCalls := []string{"worktree-mindspec-scope.1", "worktree-spec-119-scope"}
+	if !reflect.DeepEqual(fake.removeCalls, wantRemoveCalls) {
+		t.Errorf("removeCalls = %v, want %v (cleanup leg must be scoped to the lifecycle allow-set)", fake.removeCalls, wantRemoveCalls)
 	}
 }
 
