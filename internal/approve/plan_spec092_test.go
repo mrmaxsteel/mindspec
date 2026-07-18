@@ -211,7 +211,7 @@ func TestCreateImplementationBeads_MidBatchFailureContainment(t *testing.T) {
 		return nil, nil
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err == nil {
 		t.Fatal("expected a mid-batch containment error, got nil")
 	}
@@ -266,7 +266,7 @@ func TestCreateImplementationBeads_FirstBeadFailureNoPartialSet(t *testing.T) {
 		return nil, fmt.Errorf("bd daemon not reachable")
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -456,7 +456,7 @@ func TestCreateImplementationBeads_DeleteRecoveryConverges(t *testing.T) {
 	}
 
 	// (a) First run: mid-batch failure → partial set + delete recovery.
-	partial, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	partial, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err == nil {
 		t.Fatal("expected a mid-batch containment error, got nil")
 	}
@@ -473,7 +473,7 @@ func TestCreateImplementationBeads_DeleteRecoveryConverges(t *testing.T) {
 	// The re-run is still rejected (Spec 074 supersede safety keeps its
 	// teeth), but the rejection now carries its own recovery line.
 	listState = []byte(`[{"id":"test-bead-1","status":"closed"},{"id":"test-bead-2","status":"closed"}]`)
-	if _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err == nil {
+	if _, _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err == nil {
 		t.Fatal("re-run with closed leftovers must still be rejected")
 	} else if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("the closed-leftovers dead end must end with a `recovery:` line; got:\n%s", err)
@@ -485,7 +485,7 @@ func TestCreateImplementationBeads_DeleteRecoveryConverges(t *testing.T) {
 	listState = []byte(`[]`)
 	failThird = false
 	calls = 0
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("re-run after the emitted recovery must succeed, got: %v", err)
 	}

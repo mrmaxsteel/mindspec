@@ -217,7 +217,7 @@ Bead 1, Bead 2
 	defer func() { planListJSONFn = origList }()
 	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -311,7 +311,7 @@ Bead 1
 	defer func() { planListJSONFn = origList }()
 	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -385,7 +385,7 @@ Bead 1
 	defer func() { planListJSONFn = origList }()
 	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
-	_, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
+	_, _, err := createImplementationBeads(planPath, "042-test", "parent-mol-123")
 	if err == nil {
 		t.Fatal("expected an alignment error for 3 work_chunks against 2 bead sections, got nil")
 	}
@@ -407,7 +407,7 @@ version: "1.0"
 	planPath := filepath.Join(tmp, "plan.md")
 	os.WriteFile(planPath, []byte(planContent), 0644)
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -454,7 +454,7 @@ None
 		return []byte(`{"id":"test-1"}`), nil
 	}
 
-	_, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	_, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,7 +494,7 @@ None
 		return nil, fmt.Errorf("bd not available")
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err == nil {
 		t.Fatal("expected error when bd create fails")
 	}
@@ -584,7 +584,7 @@ None
 		return []byte(`{"id":"test-bead-1"}`), nil
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -722,7 +722,7 @@ None
 	defer func() { planListJSONFn = origList }()
 	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 
-	if _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err != nil {
+	if _, _, err := createImplementationBeads(planPath, "042-test", "parent-123"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if capturedMetadata == "" {
@@ -833,7 +833,7 @@ Bead 1
 		return nil, nil // dep calls
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -921,7 +921,7 @@ None
 		return []byte(`{"id":"test-bead-1"}`), nil
 	}
 
-	beadIDs, err := createImplementationBeads(planPath, "042-test", "parent-123")
+	beadIDs, _, err := createImplementationBeads(planPath, "042-test", "parent-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
