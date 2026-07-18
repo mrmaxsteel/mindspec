@@ -105,3 +105,26 @@ Check current mode with `/spec-status`. If unclear:
   gates Allow-screen, consolidation, and the merge terminal. Judgment sections
   in both skills — Slot lens defaults, Consolidate, Artifact gates, After a
   halt — recovery, and Escape hatch — are retained unchanged on both paths.
+- **2026-07-18 (spec 119 Bead 5):** `mindspec complete` now emits an
+  ADVISORY, non-fatal `WARN bead-scope: ...` (exit code unchanged) when a
+  bead's changed files touch a domain OTHER than the domain(s) attributed
+  to the bead's own declared `file_paths` scope (Bead 4's
+  `work_chunks[].key_file_paths` metadata), while that file's domain is
+  still one of the spec's Impacted Domains
+  (`internal/complete/bead_scope.go`). It is a pure signal for a
+  human/panel to judge — legitimate seams routinely cross a domain
+  boundary atomically — never a gate. A bead with no declared `file_paths`
+  baseline (a plan without structured `work_chunks`, or a bead created
+  outside `plan approve`) is silently skipped — there is nothing to
+  compare against. `mindspec plan approve` separately runs a
+  double-assignment plan-lint (`internal/approve/plan_lint.go`,
+  advisory-only): a single file referenced in TWO OR MORE beads'
+  `**Steps**` lists is named in a warning alongside both bead headings —
+  the unambiguous case a spec-118 plan panel had to catch by hand. Both
+  checks route any path/ID-bearing text through `internal/termsafe`
+  (spec 116). Separately, `internal/instruct`'s `setupRunTestProject` test
+  fixture is now HERMETIC (a real `git init` + `os.Chdir` into the sandbox
+  + `GIT_CEILING_DIRECTORIES`, restored via `t.Cleanup`) so
+  `TestRun_IdleNoBeads` no longer reads live lifecycle state when `go
+  test` happens to run from inside an active bead worktree
+  (mindspec-z4ps).

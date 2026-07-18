@@ -102,6 +102,8 @@ func saveAndRestore(t *testing.T) {
 	origFindEpicForBead := findEpicForBeadFn
 	origResolveSpecPrefix := resolveSpecPrefixFn
 	origMergedUnclosed := mergedUnclosedFn
+	origBeadScopeGetMeta := beadScopeGetMetadataFn
+	origBeadScopeChangedFiles := beadScopeChangedFilesFn
 
 	t.Cleanup(func() {
 		findOrphanedClosedBeadsFn = origFindOrphans
@@ -124,6 +126,8 @@ func saveAndRestore(t *testing.T) {
 		findEpicForBeadFn = origFindEpicForBead
 		resolveSpecPrefixFn = origResolveSpecPrefix
 		mergedUnclosedFn = origMergedUnclosed
+		beadScopeGetMetadataFn = origBeadScopeGetMeta
+		beadScopeChangedFilesFn = origBeadScopeChangedFiles
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -213,6 +217,16 @@ func saveAndRestore(t *testing.T) {
 	// override this to drive the merged-unclosed / branch-less paths.
 	mergedUnclosedFn = func(root, specBranch, beadID string) (*lifecycle.LandedMerge, bool, error) {
 		return nil, false, nil
+	}
+	// Spec 119 R11 (Bead 5): default the advisory bead-scope seams to a
+	// clean empty-metadata read (no declared file_paths baseline — the
+	// advisory check silently no-ops) so every pre-existing test stays
+	// hermetic (no real `bd show` shell-out) and prints no unexpected
+	// WARN. The AC-22 tests override beadScopeGetMetadataFn to drive the
+	// cross-domain WARN.
+	beadScopeGetMetadataFn = func(id string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
+	beadScopeChangedFilesFn = func(exec executor.Executor, base, head string) ([]string, error) {
+		return exec.ChangedFiles(base, head)
 	}
 }
 

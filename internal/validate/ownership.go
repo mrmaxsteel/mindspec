@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
@@ -457,4 +458,88 @@ func globMatchSegments(pat, path []string) bool {
 		path = path[1:]
 	}
 	return len(path) == 0
+}
+
+// ResolveCandidateDomains resolves the domain-NAME set OWNERSHIP
+// attribution should consult for specDir: the spec's declared `##
+// Impacted Domains` entries, normalized to owning-domain names (spec 100
+// R1, normalizeImpactedDomains) or — when the spec declares none (missing
+// spec.md, or a spec.md with no Impacted-Domains section) — every domain
+// directory discovered at ownerRef (or the on-disk working tree when
+// ownerRef is "").
+//
+// This is the EXACT candidate-domain fallback ValidateDivergence performs
+// internally for its own per-file attribution loop (declared-domains ||
+// full-enumeration); exported here — additively, ValidateDivergence's own
+// inline logic is left untouched so its pinned error-message tests keep
+// passing byte-for-byte — so a second advisory gate consulting the SAME
+// OWNERSHIP data (Spec 119 R11's bead-scope WARN,
+// internal/complete/bead_scope.go) reuses it instead of re-deriving the
+// same fallback with its own drift risk.
+//
+// A missing spec.md is not an error: it degrades to the domain-directory
+// enumeration fallback, same as an empty declared-domains list would.
+func ResolveCandidateDomains(exec executor.Executor, root, specDir, ownerRef string) ([]string, error) {
+	var declared []string
+	if meta, err := contextpack.ParseSpec(specDir); err == nil {
+		declared = meta.Domains
+	} else if !os.IsNotExist(err) && !strings.Contains(err.Error(), "no such file") {
+		return nil, fmt.Errorf("loading spec metadata: %w", err)
+	}
+
+	normalized, normErrs := normalizeImpactedDomains(exec, root, ownerRef, declared)
+	if len(normErrs) > 0 {
+		return nil, fmt.Errorf("resolving impacted domains: %s", strings.Join(normErrs, "; "))
+	}
+	if len(normalized) > 0 {
+		sort.Strings(normalized)
+		return normalized, nil
+	}
+
+	disc, derr := resolveDomains(exec, root, ownerRef)
+	if derr != nil {
+		return nil, derr
+	}
+	sort.Strings(disc)
+	return disc, nil
+}
+
+// AttributeChangedFileDomains attributes each of paths to its owning
+// domain among candidateDomains (a domain-NAME set, typically
+// ResolveCandidateDomains' return value), reusing the SAME per-run
+// ownershipCache + attributeDomainCached machinery ValidateDivergence
+// uses — so a caller attributing many files loads each candidate domain's
+// OWNERSHIP.yaml at most once (spec 108 R7 discipline), never
+// re-implementing OWNERSHIP.yaml glob matching.
+//
+// Returns a path -> domain map. A path attributed to NO candidate domain
+// (unowned, or excluded via the viz/agentmind/bench first-segment rule)
+// is OMITTED from the map entirely — callers distinguish "unowned" from
+// "owned by domain X" via ok, not by an empty-string value.
+func AttributeChangedFileDomains(exec executor.Executor, root, ownerRef string, paths, candidateDomains []string) (map[string]string, error) {
+	sortedDomains := append([]string(nil), candidateDomains...)
+	sort.Strings(sortedDomains)
+
+	cache := newOwnershipCache(exec, root, ownerRef)
+	out := make(map[string]string, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		seg := p
+		if idx := strings.Index(p, "/"); idx >= 0 {
+			seg = p[:idx]
+		}
+		if _, bad := excludedFirstSegments[seg]; bad {
+			continue
+		}
+		domain, _, err := attributeDomainCached(cache, p, sortedDomains)
+		if err != nil {
+			return nil, fmt.Errorf("attributing %s: %w", p, err)
+		}
+		if domain != "" {
+			out[p] = domain
+		}
+	}
+	return out, nil
 }
