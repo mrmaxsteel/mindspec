@@ -30,6 +30,19 @@ var planRunBDFn = bead.RunBD
 // planListJSONFn wraps bead.ListJSON for testability.
 var planListJSONFn = bead.ListJSON
 
+// SetPlanListJSONForTest swaps planListJSONFn for testing and returns a
+// restore function. Needed by any caller (ApprovePlan itself, or an external
+// package driving it end-to-end, e.g. internal/harness) that must control the
+// queryExistingChildren result without shelling out to a real bd — spec 119
+// R1 made that query's failure mode fail-closed (a terminal preflight
+// refusal), so it can no longer be left unstubbed the way the historical
+// fail-open "can't query, proceed" tolerated.
+func SetPlanListJSONForTest(fn func(args ...string) ([]byte, error)) func() {
+	orig := planListJSONFn
+	planListJSONFn = fn
+	return func() { planListJSONFn = orig }
+}
+
 // planMergeMetadataFn wraps bead.MergeMetadata for testability.
 var planMergeMetadataFn = bead.MergeMetadata
 
@@ -77,6 +90,18 @@ type planPreflightFacts struct {
 	planContent string
 	sections    []validate.BeadSection
 	workChunks  []validate.WorkChunk
+	// workChunksParseErr is the ParsePlanFrontmatter error (if any) hit while
+	// resolving workChunks. In today's ApprovePlan flow this is expected to
+	// stay nil in practice — ApprovePlan's Step 1 (validate.ValidatePlan)
+	// already hard-rejects any plan whose frontmatter fails to YAML-parse at
+	// all, before resolvePlanApprovePreflight ever runs — but
+	// resolvePlanApprovePreflight makes no such assumption about its own
+	// caller (defense in depth: it re-parses the same content itself rather
+	// than trusting an earlier gate), so the AC-19 warning below
+	// distinguishes "no work_chunks block" from "a work_chunks block is
+	// present but failed to parse" using this field (F1 finding 5) instead of
+	// collapsing both into one misleading "no ... block" message.
+	workChunksParseErr error
 	// parentID is the target epic ID. Always non-empty when facts is
 	// returned without error — resolveTargetEpic refuses fail-closed on
 	// both failure modes it can encounter (P10), so no epic-less path
@@ -98,15 +123,21 @@ type planPreflightFacts struct {
 func resolvePlanApprovePreflight(planPath, specID string) (*planPreflightFacts, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading plan: %w", err)
+		return nil, guard.NewFailure(
+			fmt.Sprintf("reading plan %s failed: %v", planPath, err),
+			fmt.Sprintf("mindspec plan approve %s", specID),
+		)
 	}
 	planContent := string(data)
 
 	sections := validate.ParseBeadSections(planContent)
 
 	var workChunks []validate.WorkChunk
+	var workChunksParseErr error
 	if fm, err := validate.ParsePlanFrontmatter(planContent); err == nil {
 		workChunks = fm.WorkChunks
+	} else {
+		workChunksParseErr = err
 	}
 
 	// Alignment guard (spec 097 R3): the positional `bead_ids[N-1]` wiring
@@ -114,7 +145,10 @@ func resolvePlanApprovePreflight(planPath, specID string) (*planPreflightFacts, 
 	// section. Validate BEFORE any mutation, so a misaligned plan is
 	// rejected up front rather than mis-wired or panicking mid-create.
 	if err := validate.ValidateWorkChunkAlignment(workChunks, len(sections)); err != nil {
-		return nil, fmt.Errorf("plan work_chunks misaligned with bead sections: %w", err)
+		return nil, guard.NewFailure(
+			fmt.Sprintf("plan work_chunks misaligned with bead sections: %v", err),
+			fmt.Sprintf("mindspec plan approve %s", specID),
+		)
 	}
 
 	parentID, err := resolveTargetEpic(specID)
@@ -122,7 +156,7 @@ func resolvePlanApprovePreflight(planPath, specID string) (*planPreflightFacts, 
 		return nil, err
 	}
 
-	children, err := queryExistingChildren(parentID)
+	children, err := queryExistingChildren(parentID, specID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,11 +165,12 @@ func resolvePlanApprovePreflight(planPath, specID string) (*planPreflightFacts, 
 	}
 
 	return &planPreflightFacts{
-		planContent: planContent,
-		sections:    sections,
-		workChunks:  workChunks,
-		parentID:    parentID,
-		children:    children,
+		planContent:        planContent,
+		sections:           sections,
+		workChunks:         workChunks,
+		workChunksParseErr: workChunksParseErr,
+		parentID:           parentID,
+		children:           children,
 	}, nil
 }
 
@@ -252,7 +287,20 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		// AC-19: a legacy prose-only plan still approves (wiring nothing —
 		// no prose dependency parser exists, spec 097 R3), but silently
 		// wiring zero edges is invisible. Name the absence loudly instead.
-		result.Warnings = append(result.Warnings, "plan has no `work_chunks` frontmatter block — no bd dependency edges were wired; add `work_chunks` with `id`/`depends_on` entries to wire edges (see the plan scaffold)")
+		//
+		// F1 finding 5: "no work_chunks block" is only accurate when the
+		// plan never declared one. When facts.workChunksParseErr is set AND
+		// the raw plan text actually contains a `work_chunks` key, the block
+		// IS present but failed to parse — a materially different, more
+		// actionable diagnosis (a YAML mistake to fix, not a missing
+		// section to add), so it gets its own message naming the parse
+		// error instead of misdirecting the author to add something that
+		// was never missing.
+		warning := "plan has no `work_chunks` frontmatter block — no bd dependency edges were wired; add `work_chunks` with `id`/`depends_on` entries to wire edges (see the plan scaffold)"
+		if facts.workChunksParseErr != nil && strings.Contains(facts.planContent, "work_chunks") {
+			warning = fmt.Sprintf("plan's `work_chunks` frontmatter block is present but could not be parsed (%v) — no bd dependency edges were wired; fix the YAML and re-run `mindspec plan approve %s`", facts.workChunksParseErr, specID)
+		}
+		result.Warnings = append(result.Warnings, warning)
 	}
 
 	// First sanctioned mutation (spec 119 R1): supersede-close an all-open
@@ -397,7 +445,7 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 	}
 
 	// --- Re-approval safeguard: close-and-recreate existing beads (Spec 074) ---
-	if err := handleExistingBeads(parentID, planContent); err != nil {
+	if err := handleExistingBeads(parentID, specID, planContent); err != nil {
 		return nil, nil, err
 	}
 
@@ -652,19 +700,44 @@ type existingChildBead struct {
 // queryExistingChildren issues the parent-scoped `bd list --parent` query for
 // an epic's existing children (Spec 074 re-approval safeguard).
 //
-// FAIL-CLOSED (spec 119 R1/P9): a query or parse failure now returns an
-// error instead of the historical `return nil, nil` — "can't query, proceed
-// with creation" (plan.go:460-462 pre-119). That silent degrade let a bd
-// outage past a refusal a healthy query would have raised; the caller must
-// now treat it as a preflight-blocking fact.
-func queryExistingChildren(parentID string) ([]existingChildBead, error) {
-	out, err := planListJSONFn("--parent", parentID)
+// FAIL-CLOSED (spec 119 R1/P9): a query or parse failure now returns a
+// guard.NewFailure instead of the historical `return nil, nil` — "can't
+// query, proceed with creation" (plan.go:460-462 pre-119). That silent
+// degrade let a bd outage past a refusal a healthy query would have raised;
+// the caller must now treat it as a preflight-blocking fact, and — per this
+// function's contract as a resolvePlanApprovePreflight preflight step (spec
+// 092 Req 15) — every returned error carries a machine-greppable recovery
+// line, not a plain error.
+//
+// `--all -n 0` (rather than bd's default open-only, 50-result view) is
+// REQUIRED, not cosmetic: checkExistingBeadsSafety's whole purpose is to
+// detect an `in_progress` OR `closed` child (the Spec 074 supersede-safety
+// check), so a closed child is exactly what this query must not miss.
+// Without `--all`, `bd list` hides closed issues by default — a closed
+// leftover child would silently vanish from the result, defeating the
+// safety check it exists to feed. Without `-n 0`, results cap at 50 — an
+// epic with more than 50 children could miss a blocking closed/in_progress
+// bead past the cutoff. (internal/phase/cache.go's fetchAllEpics uses the
+// equivalent explicit `--status=open,in_progress,closed -n 0`; `--all` is
+// used here instead because it is a superset — it also covers `blocked`,
+// `deferred`, and any project custom status without needing to enumerate
+// them, and none of those need special-casing here: checkExistingBeadsSafety
+// treats every non-in_progress/non-closed status as safe-to-supersede,
+// same as it always has.)
+func queryExistingChildren(parentID, specID string) ([]existingChildBead, error) {
+	out, err := planListJSONFn("--parent", parentID, "--all", "-n", "0")
 	if err != nil {
-		return nil, fmt.Errorf("querying existing beads under epic %s: %w", parentID, err)
+		return nil, guard.NewFailure(
+			fmt.Sprintf("querying existing beads under epic %s failed: %v", parentID, err),
+			fmt.Sprintf("mindspec plan approve %s", specID),
+		)
 	}
 	var children []existingChildBead
 	if err := json.Unmarshal(out, &children); err != nil {
-		return nil, fmt.Errorf("parsing existing beads under epic %s: %w", parentID, err)
+		return nil, guard.NewFailure(
+			fmt.Sprintf("parsing existing beads under epic %s failed: %v", parentID, err),
+			fmt.Sprintf("mindspec plan approve %s", specID),
+		)
 	}
 	return children, nil
 }
@@ -684,7 +757,7 @@ func checkExistingBeadsSafety(children []existingChildBead) error {
 			)
 		case "closed":
 			return guard.NewFailure(
-				fmt.Sprintf("cannot re-approve plan: bead %s is closed — a closed child is either completed work under this epic (stop: re-approving would supersede a done record; reconsider the re-approve) or a leftover from a failed partial bead create. ONLY in the partial-create case, delete the leftover and re-run plan approve", c.ID),
+				fmt.Sprintf("cannot re-approve plan: bead %s is closed — a closed child is either completed work under this epic (stop: re-approving would supersede a done record; reconsider the re-approve), a leftover from a failed partial bead create, OR a leftover from a supersede-close whose plan-approve run was interrupted before the new bead set was created. ONLY in the latter two (partial/interrupted) cases, delete the leftover and re-run plan approve", c.ID),
 				fmt.Sprintf("bd delete %s --force", c.ID),
 			)
 		}
@@ -699,6 +772,19 @@ func checkExistingBeadsSafety(children []existingChildBead) error {
 // assumes safety already holds; it only enacts the decision, never
 // re-discovers a refusal. A nil/empty children slice is a no-op success (the
 // common first-approval case).
+//
+// Forward-safety of a crash between this call and the Approved-frontmatter
+// write it precedes in ApprovePlan (F1 finding 6): if the process dies right
+// after this closes the old children but before the new bead set is
+// created, the plan.md frontmatter is still NOT marked Approved and no new
+// beads exist yet — but the just-closed children are NOT silently lost on
+// retry. queryExistingChildren's `--all -n 0` (added alongside this comment)
+// means the re-run's preflight sees those same closed beads and
+// checkExistingBeadsSafety's "closed" branch refuses with a `bd delete <id>
+// --force` recovery line that actually converges: delete the leftovers,
+// re-run `mindspec plan approve`, and the full new set is created exactly
+// once. So this interruption window has a named, convergent recovery by
+// construction — it does not need its own bespoke handling.
 func supersedeCloseExistingBeads(children []existingChildBead, planContent string) error {
 	if len(children) == 0 {
 		return nil
@@ -725,8 +811,8 @@ func supersedeCloseExistingBeads(children []existingChildBead, planContent strin
 // NOT call this — it resolves and checks the child set once in
 // resolvePlanApprovePreflight (before any mutation) and calls
 // supersedeCloseExistingBeads directly (spec 119 R1).
-func handleExistingBeads(parentID, planContent string) error {
-	children, err := queryExistingChildren(parentID)
+func handleExistingBeads(parentID, specID, planContent string) error {
+	children, err := queryExistingChildren(parentID, specID)
 	if err != nil {
 		return err
 	}

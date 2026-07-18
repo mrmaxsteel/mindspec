@@ -1055,7 +1055,7 @@ func TestHandleExistingBeads_NoChildren(t *testing.T) {
 	}
 	defer func() { planListJSONFn = origList }()
 
-	err := handleExistingBeads("epic-123", "version: 2\n")
+	err := handleExistingBeads("epic-123", "042-test", "version: 2\n")
 	if err != nil {
 		t.Fatalf("expected nil error for no children, got: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestHandleExistingBeads_AllOpen_ClosesAndProceeds(t *testing.T) {
 	}
 	defer func() { planRunBDCombinedFn = origCombined }()
 
-	err := handleExistingBeads("epic-123", "---\nversion: 2\n---\n# Plan\n")
+	err := handleExistingBeads("epic-123", "042-test", "---\nversion: 2\n---\n# Plan\n")
 	if err != nil {
 		t.Fatalf("expected nil error for all-open children, got: %v", err)
 	}
@@ -1119,7 +1119,7 @@ func TestHandleExistingBeads_InProgress_ReturnsError(t *testing.T) {
 	}
 	defer func() { planListJSONFn = origList }()
 
-	err := handleExistingBeads("epic-123", "version: 1\n")
+	err := handleExistingBeads("epic-123", "042-test", "version: 1\n")
 	if err == nil {
 		t.Fatal("expected error for in-progress bead")
 	}
@@ -1146,7 +1146,7 @@ func TestHandleExistingBeads_Closed_ReturnsError(t *testing.T) {
 	}
 	defer func() { planListJSONFn = origList }()
 
-	err := handleExistingBeads("epic-123", "version: 1\n")
+	err := handleExistingBeads("epic-123", "042-test", "version: 1\n")
 	if err == nil {
 		t.Fatal("expected error for closed bead")
 	}

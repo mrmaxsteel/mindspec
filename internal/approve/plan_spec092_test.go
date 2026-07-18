@@ -506,7 +506,7 @@ func TestHandleExistingBeads_DeadEndsEndWithRecovery(t *testing.T) {
 		planListJSONFn = func(args ...string) ([]byte, error) {
 			return []byte(`[{"id":"bead-done","status":"closed"}]`), nil
 		}
-		err := handleExistingBeads("epic-123", "version: 1\n")
+		err := handleExistingBeads("epic-123", "042-test", "version: 1\n")
 		if err == nil {
 			t.Fatal("closed child must still be rejected")
 		}
@@ -532,7 +532,7 @@ func TestHandleExistingBeads_DeadEndsEndWithRecovery(t *testing.T) {
 		planListJSONFn = func(args ...string) ([]byte, error) {
 			return []byte(`[{"id":"bead-active","status":"in_progress"}]`), nil
 		}
-		err := handleExistingBeads("epic-123", "version: 1\n")
+		err := handleExistingBeads("epic-123", "042-test", "version: 1\n")
 		if err == nil {
 			t.Fatal("in_progress child must still be rejected")
 		}

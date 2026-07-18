@@ -1,8 +1,10 @@
 package approve
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -231,5 +233,184 @@ Bead 1 (human-readable documentation only — NOT parsed)
 	want := fmt.Sprintf("dep add %s %s", beadIDs[1], beadIDs[0])
 	if depCalls[0] != want {
 		t.Errorf("expected %q, got %q", want, depCalls[0])
+	}
+}
+
+// bdRunAt runs `bd <args...>` against a real bd repo rooted at dir and
+// returns stdout, failing the test on error (with stderr, when available,
+// included in the failure message).
+func bdRunAt(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("bd %v: %v\n%s", args, err, stderr)
+	}
+	return out
+}
+
+// bdJSONID extracts the "id" field from a `bd ... --json` single-object response.
+func bdJSONID(t *testing.T, out []byte) string {
+	t.Helper()
+	var v struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing bd --json output %q: %v", out, err)
+	}
+	if v.ID == "" {
+		t.Fatalf("bd --json output carried no id: %s", out)
+	}
+	return v.ID
+}
+
+// bdReadyIDs runs `bd ready --json` against a real bd repo and returns the
+// ready set's bead IDs.
+func bdReadyIDs(t *testing.T, dir string) []string {
+	t.Helper()
+	out := bdRunAt(t, dir, "ready", "--json")
+	var items []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &items); err != nil {
+		t.Fatalf("parsing bd ready --json output %q: %v", out, err)
+	}
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	return ids
+}
+
+func containsStr(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestScaffoldPlan_FilledWorkChunks_DrivesReadySet is the AC-18 ready-set
+// half TestScaffoldPlan_FilledWorkChunks_WireBDEdge's own doc comment
+// promised ("the edge that makes Bead 1 bd-ready and Bead 2 blocked ... bd's
+// own dependency engine, exercised elsewhere") but that no test in this
+// package actually pinned (panel finding, 5 reviewers on spec 119 bead 4's
+// review). WireBDEdge only asserts the exact `bd dep add` call fires; it
+// never asserts the call's CONSEQUENCE.
+//
+// This test drives a REAL bd repo (not a stubbed planRunBDFn/planListJSONFn)
+// because the readiness consequence lives entirely inside bd's own
+// dependency engine — no mindspec code computes "ready" — so a mocked bd
+// call can only ever re-assert that the call was MADE (WireBDEdge's job),
+// never that it actually WORKED. It is skipped when `bd` is not on PATH,
+// matching the existing convention (e.g. internal/bootstrap/mergedriver_test.go,
+// internal/executor/executor_test.go).
+func TestScaffoldPlan_FilledWorkChunks_DrivesReadySet(t *testing.T) {
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not available — this test drives a real bd repo to pin dependency-driven readiness")
+	}
+
+	bdRoot := t.TempDir()
+	bdRunAt(t, bdRoot, "init", "--non-interactive", "--skip-agents", "--skip-hooks", "-q", "--prefix", "ac18")
+	epicID := bdJSONID(t, bdRunAt(t, bdRoot, "create", "Epic", "--type", "epic", "--json"))
+
+	// Same scaffold-extension shape as TestScaffoldPlan_FilledWorkChunks_WireBDEdge:
+	// a second work_chunk with depends_on: [1], wired through the shipped
+	// work_chunks[].depends_on path (not a prose scrape).
+	scaffold := scaffoldPlan("042-scaffold-roundtrip")
+	filled := strings.NewReplacer(
+		"<Title>", "Do the thing",
+		"<Specific, measurable criterion for this bead>", "the thing is done",
+	).Replace(scaffold)
+	filled = strings.Replace(filled, "work_chunks:\n  - id: 1\n    depends_on: []\n    key_file_paths:\n      - path/to/file.go\n",
+		"work_chunks:\n  - id: 1\n    depends_on: []\n    key_file_paths:\n      - path/to/file.go\n  - id: 2\n    depends_on: [1]\n    key_file_paths:\n      - path/to/other.go\n", 1)
+	filled += `
+## Bead 2: Do the next thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`make test`" + ` passes
+
+**Acceptance Criteria**
+- the next thing is done
+
+**Depends on**
+Bead 1 (human-readable documentation only — NOT parsed)
+`
+
+	tmp := t.TempDir()
+	planPath := filepath.Join(tmp, "plan.md")
+	if err := os.WriteFile(planPath, []byte(filled), 0644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+
+	realBD := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("bd", args...)
+		cmd.Dir = bdRoot
+		return cmd.Output()
+	}
+	origRunBD := planRunBDFn
+	defer func() { planRunBDFn = origRunBD }()
+	planRunBDFn = realBD
+
+	// planListJSONFn mirrors bead.ListJSON's own contract (internal/bead/bdcli.go):
+	// callers pass args WITHOUT the "list" verb or "--json" flag — ListJSON
+	// prepends/appends both itself. queryExistingChildren relies on exactly
+	// that shape, so the real-bd stub must reproduce it, not just shell the
+	// args straight through (a bare `bd --parent <id> --all -n 0` is not a
+	// valid bd invocation — it's missing the "list" subcommand).
+	origList := planListJSONFn
+	defer func() { planListJSONFn = origList }()
+	planListJSONFn = func(args ...string) ([]byte, error) {
+		full := append([]string{"list"}, args...)
+		full = append(full, "--json")
+		return realBD(full...)
+	}
+
+	origCombined := planRunBDCombinedFn
+	defer func() { planRunBDCombinedFn = origCombined }()
+	planRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		cmd := exec.Command("bd", args...)
+		cmd.Dir = bdRoot
+		return cmd.CombinedOutput()
+	}
+
+	beadIDs, warnings, err := createImplementationBeads(planPath, "042-scaffold-roundtrip", epicID)
+	if err != nil {
+		t.Fatalf("createImplementationBeads: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected zero warnings for a fully-wired scaffold, got: %v", warnings)
+	}
+	if len(beadIDs) != 2 {
+		t.Fatalf("expected 2 beads, got %d: %v", len(beadIDs), beadIDs)
+	}
+
+	// The actual AC-18 consequence: bd's OWN readiness engine, not a mocked
+	// call assertion.
+	ready := bdReadyIDs(t, bdRoot)
+	if !containsStr(ready, beadIDs[0]) {
+		t.Errorf("bead 1 (%s, no deps) should be bd-ready; ready set: %v", beadIDs[0], ready)
+	}
+	if containsStr(ready, beadIDs[1]) {
+		t.Errorf("bead 2 (%s, depends_on: [1]) should be BLOCKED, not ready; ready set: %v", beadIDs[1], ready)
+	}
+
+	// Close bead 1; bead 2 must become ready — the other half of the
+	// consequence (a blocked bead's unblocking, not just the initial block).
+	bdRunAt(t, bdRoot, "close", beadIDs[0], "--reason", "test")
+	ready = bdReadyIDs(t, bdRoot)
+	if !containsStr(ready, beadIDs[1]) {
+		t.Errorf("bead 2 (%s) should become ready once bead 1 closes; ready set: %v", beadIDs[1], ready)
 	}
 }
