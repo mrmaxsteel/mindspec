@@ -49,6 +49,13 @@ type Context struct {
 	// Populated by the explicit `--panel-state` flag or the implement
 	// mode SessionStart auto-include.
 	PanelState string `json:"panel_state,omitempty"`
+	// LifecycleFindings carries stale-OPEN and finalize-orphan guidance
+	// (Spec 119 R7): each string is a fully rendered "<message> Run
+	// `<recovery command>`." line built from the SAME exported
+	// internal/lifecycle predicates `mindspec doctor` consumes
+	// (P8/AC-12/AC-15) — never a re-derived copy. Populated in idle mode
+	// only; templates/idle.md renders it verbatim.
+	LifecycleFindings []string `json:"lifecycle_findings,omitempty"`
 }
 
 // JSONOutput is the structured output for --format=json.
@@ -62,6 +69,9 @@ type JSONOutput struct {
 	// PanelState carries the rendered open-panel-rounds block (Spec 093
 	// Req 14) when requested via --panel-state; omitted otherwise.
 	PanelState string `json:"panel_state,omitempty"`
+	// LifecycleFindings carries stale-OPEN and finalize-orphan guidance
+	// (Spec 119 R7); populated in idle mode only.
+	LifecycleFindings []string `json:"lifecycle_findings,omitempty"`
 }
 
 // BuildContext creates a rendering context from focus state and project root.
@@ -126,6 +136,15 @@ func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Contex
 	}
 	if mc.Mode == state.ModeImplement && mc.ActiveBead != "" && mc.ActiveWorktree == "" {
 		ctx.Warnings = append(ctx.Warnings, "[worktree] no active implement worktree is set. Run `mindspec next` before coding or committing.")
+	}
+
+	// Spec 119 Bead 2 (R7): surface stale-OPEN and finalize-orphan
+	// findings in idle guidance — the same good moment `mindspec doctor`
+	// is naturally reached for, between lifecycle tasks. Scoped to idle
+	// mode so active spec/plan/implement/review renders don't pay the
+	// per-spec bd/git scan cost on every instruct call.
+	if mc.Mode == state.ModeIdle {
+		ctx.LifecycleFindings = collectLifecycleFindings(root)
 	}
 
 	return ctx
@@ -207,13 +226,14 @@ func RenderJSON(ctx *Context) (string, error) {
 	}
 
 	out := JSONOutput{
-		Mode:       ctx.Mode,
-		ActiveSpec: ctx.ActiveSpec,
-		ActiveBead: ctx.ActiveBead,
-		Guidance:   guidance,
-		Gates:      gatesForMode(ctx.Mode),
-		Warnings:   ctx.Warnings,
-		PanelState: ctx.PanelState,
+		Mode:              ctx.Mode,
+		ActiveSpec:        ctx.ActiveSpec,
+		ActiveBead:        ctx.ActiveBead,
+		Guidance:          guidance,
+		Gates:             gatesForMode(ctx.Mode),
+		Warnings:          ctx.Warnings,
+		PanelState:        ctx.PanelState,
+		LifecycleFindings: ctx.LifecycleFindings,
 	}
 
 	if out.Warnings == nil {
