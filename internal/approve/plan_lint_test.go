@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,6 +84,41 @@ func TestPlanLintDoubleAssignedFiles_NoFalsePositive(t *testing.T) {
 	warnings := planLintDoubleAssignedFiles(sections)
 	if len(warnings) != 0 {
 		t.Errorf("expected no plan-lint findings for disjoint per-bead files, got: %v", warnings)
+	}
+}
+
+// TestPlanLintDoubleAssignedFiles_TermsafeEscaped pins the R11/spec-116
+// requirement directly at the unit level: a hostile bead HEADING carrying
+// control bytes (e.g. an ESC/CSI sequence attempting to forge a fake
+// terminal line) must reach the plan-lint warning only via
+// internal/termsafe.Escape (a single-line, double-quoted Go string
+// literal) — never as a raw, un-escaped control byte — mirroring
+// internal/complete/bead_scope.go's identical hostile-input test.
+func TestPlanLintDoubleAssignedFiles_TermsafeEscaped(t *testing.T) {
+	hostileHeading := "Bead 1: \x1b[2K\rFAKE: gate passed"
+	sections := []validate.BeadSection{
+		{
+			Heading:   hostileHeading,
+			StepLines: []string{"1. Add `internal/shared/helper.go` with the new logic."},
+		},
+		{
+			Heading:   "Bead 2: Second thing",
+			StepLines: []string{"1. Consume `internal/shared/helper.go` from the executor."},
+		},
+	}
+
+	warnings := planLintDoubleAssignedFiles(sections)
+	if len(warnings) != 1 {
+		t.Fatalf("expected exactly 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	out := warnings[0]
+
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("raw ESC control byte leaked into plan-lint warning (must be termsafe-escaped): %q", out)
+	}
+	quoted := strconv.Quote(hostileHeading)
+	if !strings.Contains(out, quoted) {
+		t.Errorf("expected the termsafe-escaped (strconv.Quote) heading %q in output, got:\n%s", quoted, out)
 	}
 }
 

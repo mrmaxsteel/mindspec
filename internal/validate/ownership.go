@@ -513,9 +513,12 @@ func ResolveCandidateDomains(exec executor.Executor, root, specDir, ownerRef str
 // re-implementing OWNERSHIP.yaml glob matching.
 //
 // Returns a path -> domain map. A path attributed to NO candidate domain
-// (unowned, or excluded via the viz/agentmind/bench first-segment rule)
-// is OMITTED from the map entirely — callers distinguish "unowned" from
-// "owned by domain X" via ok, not by an empty-string value.
+// (unowned, excluded via the viz/agentmind/bench first-segment rule, or a
+// non-source process artifact per isProcessArtifact — mirroring
+// ValidateDivergence's identical skip so the two gates agree on what
+// counts as governable source) is OMITTED from the map entirely — callers
+// distinguish "unowned" from "owned by domain X" via ok, not by an
+// empty-string value.
 func AttributeChangedFileDomains(exec executor.Executor, root, ownerRef string, paths, candidateDomains []string) (map[string]string, error) {
 	sortedDomains := append([]string(nil), candidateDomains...)
 	sort.Strings(sortedDomains)
@@ -531,6 +534,9 @@ func AttributeChangedFileDomains(exec executor.Executor, root, ownerRef string, 
 			seg = p[:idx]
 		}
 		if _, bad := excludedFirstSegments[seg]; bad {
+			continue
+		}
+		if isProcessArtifact(p) {
 			continue
 		}
 		domain, _, err := attributeDomainCached(cache, p, sortedDomains)

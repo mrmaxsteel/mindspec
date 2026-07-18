@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
@@ -27,6 +28,13 @@ import (
 // Deliberately a NEW, free-standing function (kept in its own file) so it
 // stays disjoint from Bead 4's preflight-hoist edits inside ApprovePlan /
 // createImplementationBeads in plan.go proper.
+//
+// Both the file path and every bead heading rendered into the warning
+// flow from agent-authored plan.md content this process does not fully
+// control, so both are rendered through internal/termsafe (spec 116 /
+// R11) before reaching operator-facing output — mirroring
+// internal/complete/bead_scope.go's identical treatment of its own
+// path/domain/ID output.
 func planLintDoubleAssignedFiles(sections []validate.BeadSection) []string {
 	fileToBeads := map[string][]string{}
 	for _, bs := range sections {
@@ -54,9 +62,13 @@ func planLintDoubleAssignedFiles(sections []validate.BeadSection) []string {
 		if len(beads) < 2 {
 			continue
 		}
+		escapedBeads := make([]string, len(beads))
+		for i, b := range beads {
+			escapedBeads[i] = termsafe.Escape(b)
+		}
 		warnings = append(warnings, fmt.Sprintf(
 			"plan-lint: %s is assigned to multiple beads' step lists: %s",
-			p, strings.Join(beads, ", ")))
+			termsafe.Escape(p), strings.Join(escapedBeads, ", ")))
 	}
 	return warnings
 }
