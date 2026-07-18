@@ -688,6 +688,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// without further wiring. No-op while the gate emits none.
 	printResultWarnings(warnWriter, adrResult)
 
+	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
+	// WARN — hooked into this same gate-evaluation phase, right beside
+	// the doc-sync/ADR-divergence gates it shares base/beadHead/specDir
+	// with. It never affects the pass/fail decision below (HC:
+	// bead_scope.go's own doc comment) and is a pure best-effort print.
+	beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
+
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested, so the new file exists on disk even if a downstream
 	// step fails (Bead 3 step 4 ordering rule).

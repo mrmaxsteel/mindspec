@@ -283,6 +283,14 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	if err != nil {
 		return nil, err
 	}
+
+	// Spec 119 R11 (mindspec-jli8): the double-assignment plan-lint runs
+	// over the already-parsed facts.sections — advisory only, never a
+	// refusal, so it is safe to surface here alongside the work_chunks
+	// warning below rather than inside resolvePlanApprovePreflight's
+	// fail-closed refusal decisions.
+	result.Warnings = append(result.Warnings, planLintDoubleAssignedFiles(facts.sections)...)
+
 	if len(facts.workChunks) == 0 {
 		// AC-19: a legacy prose-only plan still approves (wiring nothing —
 		// no prose dependency parser exists, spec 097 R3), but silently
