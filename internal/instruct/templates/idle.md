@@ -30,6 +30,16 @@ All new features and non-trivial changes MUST go through `mindspec spec create`.
 
 **For quick bug fixes or small changes**: Create a branch FIRST with `git checkout -b fix/<description>`, make changes there, then push and create a PR. NEVER commit directly to main.
 {{- end}}
+{{- if .LifecycleFindings}}
+
+## Lifecycle Findings
+
+The same checks `mindspec doctor` runs found the following. Run the named
+recovery command for each before starting new work:
+{{- range .LifecycleFindings}}
+- {{.}}
+{{- end}}
+{{- end}}
 
 ## Available Actions
 

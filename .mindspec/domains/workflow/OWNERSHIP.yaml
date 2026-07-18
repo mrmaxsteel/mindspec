@@ -25,4 +25,5 @@ paths:
   - .agents/skills/**
   - scripts/bd-jsonl-merge-driver.sh
   - .golangci.yml
+  - .github/workflows/ci.yml
   - .mindspec/domains/workflow/OWNERSHIP.yaml

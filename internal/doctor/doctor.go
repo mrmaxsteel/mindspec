@@ -93,6 +93,12 @@ func RunWithOptions(root string, opts Options) *Report {
 	checkSourceGlobs(r, root)
 	checkBeads(r, root)
 	checkOrphanedBeads(r, root)
+	// Spec 119 Bead 2 (R5/R7): the stale-OPEN cross-check (inverse of
+	// checkOrphanedBeads) and finalize-orphan surfacing, both sharing the
+	// exported internal/lifecycle predicates the generated `mindspec
+	// instruct` guidance also invokes (P8/AC-12).
+	checkStaleOpenBeads(r, root)
+	checkFinalizeOrphans(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)

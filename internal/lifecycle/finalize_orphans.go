@@ -70,6 +70,16 @@ func (o FinalizeOrphan) RecoveryCommand() string {
 	return fmt.Sprintf("mindspec impl approve %s", o.SpecID)
 }
 
+// FullMessage combines Message and RecoveryCommand into the single rendered
+// line `mindspec doctor` (internal/doctor) and the generated `mindspec
+// instruct` guidance (internal/instruct) both surface verbatim (Spec 119
+// Bead 2, AC-15/P8) — one template, defined once here, so the two
+// consumers cannot drift into differently-worded renderings of the same
+// finding.
+func (o FinalizeOrphan) FullMessage() string {
+	return fmt.Sprintf("%s Run `%s`.", o.Message, o.RecoveryCommand())
+}
+
 // FindOutstandingFinalizeBranches scans workdir's LOCAL branches for a
 // surviving chore/finalize-<specID> carrier (workspace.FinalizeBranchPrefix).
 // finalizeOrphanedSpecBranch leaves this branch behind LOCALLY on success —

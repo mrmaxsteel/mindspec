@@ -87,6 +87,13 @@ jobs:
       - name: Verify binary runs
         run: ./bin/mindspec --help
 
+      # Spec 119 (AC-11): mindspec doctor over its own repo, in-binary,
+      # non-zero exit fails the build. Checks are best-effort/read-only
+      # where they depend on `bd` (not installed on this runner), so this
+      # is safe to run unconditionally.
+      - name: mindspec doctor
+        run: ./bin/mindspec doctor
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
