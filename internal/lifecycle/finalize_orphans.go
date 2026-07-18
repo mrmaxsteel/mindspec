@@ -166,9 +166,18 @@ func StaleTrackerOnMain(workdir, specID, epicID string, liveClosed bool) (*Final
 	if err != nil {
 		return nil, fmt.Errorf("reading main:.beads/issues.jsonl: %w", err)
 	}
-	committedStatus, found := issueStatusInJSONL(data, epicID)
+	return staleTrackerFinding(specID, epicID, issueStatusesInJSONL(data)), nil
+}
+
+// staleTrackerFinding is the pure classification core shared by
+// StaleTrackerOnMain and ScanIntegrityFindings (spec 119 final-review F1):
+// given main's ALREADY-PARSED committed id→status map, it reports the
+// stale-tracker divergence for one live-closed epic, or nil. The single
+// home of the finding's message template — neither consumer re-derives it.
+func staleTrackerFinding(specID, epicID string, committed map[string]string) *FinalizeOrphan {
+	committedStatus, found := committed[epicID]
 	if !found || strings.EqualFold(committedStatus, "closed") {
-		return nil, nil
+		return nil
 	}
 	return &FinalizeOrphan{
 		Kind:   "stale_tracker",
@@ -177,12 +186,14 @@ func StaleTrackerOnMain(workdir, specID, epicID string, liveClosed bool) (*Final
 			"epic %s (spec %s) is closed in bd but main's committed .beads/issues.jsonl still shows status %q — the finalize export never reached main",
 			epicID, specID, committedStatus,
 		),
-	}, nil
+	}
 }
 
-// issueStatusInJSONL scans a .beads/issues.jsonl blob (one JSON object per
-// line) for id == issueID and returns its status field.
-func issueStatusInJSONL(data []byte, issueID string) (string, bool) {
+// issueStatusesInJSONL parses a .beads/issues.jsonl blob (one JSON object
+// per line) ONCE into an id→status map, so an aggregate scan over many
+// epics reads and decodes main's committed export a single time (F1).
+func issueStatusesInJSONL(data []byte) map[string]string {
+	out := make(map[string]string)
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -195,9 +206,9 @@ func issueStatusInJSONL(data []byte, issueID string) (string, bool) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		if rec.ID == issueID {
-			return rec.Status, true
+		if _, dup := out[rec.ID]; !dup {
+			out[rec.ID] = rec.Status
 		}
 	}
-	return "", false
+	return out
 }

@@ -1,39 +1,22 @@
 package doctor
 
-// Test-only seam setters for the finalize-orphan checks (Spec 119 Bead 2).
-// Mirrors the phase.SetRunBDForTest / phase.SetListJSONForTest convention:
-// an exported setter returning a restore closure, rather than importing
-// "testing" into production code. These exist so a cross-package fixture
-// (internal/instruct's AC-15 same-text proof, lifecycle_findings_crosscheck_test.go)
-// can drive checkFinalizeOrphans without a live `bd`, while leaving the
-// REAL lifecycle predicates (findOutstandingFinalizeBranchesFn,
-// staleTrackerOnMainFn) unstubbed — the property under test is that both
-// `mindspec doctor` and the generated `mindspec instruct` guidance render
-// the SAME text from those real predicates.
+// Test-only surface for the lifecycle-integrity checks (Spec 119 Bead 2,
+// final-review F1). Mirrors the phase.SetRunBDForTest convention: exported
+// helpers rather than importing "testing" into production code. This
+// exists so a cross-package fixture (internal/instruct's AC-15 same-text
+// proof, lifecycle_findings_crosscheck_test.go) can drive
+// checkLifecycleIntegrity over a REAL fixture repo — with the underlying
+// bd layer stubbed at the phase seams — and compare the rendered text
+// against `mindspec instruct`'s output. The lifecycle predicates and the
+// shared aggregate scan stay UNSTUBBED: the property under test is that
+// both consumers render the SAME text from the same real scan.
 
-// SetFindEpicForFinalizeCheckForTest overrides the epic-resolution seam
-// checkFinalizeOrphans uses to map a spec ID to its epic ID. Returns a
-// restore func.
-func SetFindEpicForFinalizeCheckForTest(fn func(specID string) (string, error)) func() {
-	orig := findEpicForFinalizeCheckFn
-	findEpicForFinalizeCheckFn = fn
-	return func() { findEpicForFinalizeCheckFn = orig }
-}
-
-// SetFindEpicStatusForTest overrides the epic-status-resolution seam
-// checkFinalizeOrphans uses to derive StaleTrackerOnMain's liveClosed
-// argument. Returns a restore func.
-func SetFindEpicStatusForTest(fn func(epicID string) (string, error)) func() {
-	orig := findEpicStatusFn
-	findEpicStatusFn = fn
-	return func() { findEpicStatusFn = orig }
-}
-
-// RunFinalizeOrphanChecksForTest runs ONLY the finalize-orphan checks
-// (checkFinalizeOrphans) against root, returning the resulting Report.
-// Test-only surface for cross-package AC-15 verification.
-func RunFinalizeOrphanChecksForTest(root string) *Report {
+// RunLifecycleIntegrityChecksForTest runs ONLY the aggregate
+// lifecycle-integrity check (checkLifecycleIntegrity) against root,
+// returning the resulting Report. Test-only surface for cross-package
+// AC-15 verification.
+func RunLifecycleIntegrityChecksForTest(root string) *Report {
 	r := &Report{}
-	checkFinalizeOrphans(r, root)
+	checkLifecycleIntegrity(r, root)
 	return r
 }

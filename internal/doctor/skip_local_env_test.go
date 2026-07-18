@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 // TestRunWithOptions_SkipLocalEnv_OmitsDevEnvChecks pins that SkipLocalEnv
@@ -81,8 +82,10 @@ func TestRunWithOptions_SkipLocalEnv_StillFailsOnRealDivergence(t *testing.T) {
 	root := t.TempDir()
 	makeSpecDir(t, root, "119-test")
 
-	stubFindStaleOpen(t, func(specID, workdir string) ([]lifecycle.StaleOpenBead, error) {
-		return []lifecycle.StaleOpenBead{{BeadID: "stale-one", SpecBranch: "spec/119-test", LandedSHA: "deadbeef"}}, nil
+	stubScanIntegrity(t, func(r string, c *phase.Cache) lifecycle.IntegrityFindings {
+		return lifecycle.IntegrityFindings{
+			StaleOpen: []lifecycle.StaleOpenBead{{BeadID: "stale-one", SpecBranch: "spec/119-test", LandedSHA: "deadbeef"}},
+		}
 	})
 
 	report := RunWithOptions(root, Options{SkipLocalEnv: true})

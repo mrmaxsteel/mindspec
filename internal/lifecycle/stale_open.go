@@ -100,18 +100,29 @@ func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 		return nil, fmt.Errorf("listing open beads for epic %s: %w", epicID, err)
 	}
 
-	specBranch := workspace.SpecBranch(specID)
-
-	var out []StaleOpenBead
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id == "" || id == epicID {
 			continue
 		}
+		ids = append(ids, id)
+	}
+	return staleOpenLanded(workdir, specID, ids), nil
+}
+
+// staleOpenLanded is the pure classification core shared by
+// FindStaleOpenBeads and ScanIntegrityFindings (spec 119 final-review F1):
+// given the ALREADY-ENUMERATED open/in_progress bead IDs of specID's epic,
+// it runs MergedUnclosed per bead — no bd calls of its own — and returns
+// the beads whose work provably landed. Best-effort: an ancestry/read
+// error on one bead must not abort the scan for the rest.
+func staleOpenLanded(workdir, specID string, beadIDs []string) []StaleOpenBead {
+	specBranch := workspace.SpecBranch(specID)
+	var out []StaleOpenBead
+	for _, id := range beadIDs {
 		landed, ok, mErr := MergedUnclosed(workdir, specBranch, id)
 		if mErr != nil || !ok {
-			// Best-effort: an ancestry/read error on one bead must not
-			// abort the scan for the rest of the epic's open beads.
 			continue
 		}
 		out = append(out, StaleOpenBead{
@@ -120,5 +131,5 @@ func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 			LandedSHA:  landed.SHA,
 		})
 	}
-	return out, nil
+	return out
 }

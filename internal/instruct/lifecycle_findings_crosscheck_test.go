@@ -3,18 +3,15 @@ package instruct
 // AC-15 cross-consumer proof: `mindspec doctor` and the generated
 // `mindspec instruct` idle guidance must surface the IDENTICAL finalize-
 // orphan finding text from ONE planted fixture. This test drives the REAL
-// internal/lifecycle predicates (lifecycle.FindOutstandingFinalizeBranches
-// / lifecycle.StaleTrackerOnMain — left UNSTUBBED in both consumers) over a
-// real throwaway git repo, stubbing only the small epic-resolution glue
-// each consumer already owns privately (doctor's
-// findEpicForFinalizeCheckFn/findEpicStatusFn, instruct's
-// instructFindEpicBySpecIDFn/instructFindEpicStatusFn) so no live `bd` is
-// required. Since neither consumer re-derives or reformats the finding
+// shared aggregate (lifecycle.ScanIntegrityFindings — left UNSTUBBED in
+// both consumers, final-review F1) and the REAL internal/lifecycle
+// predicates over a real throwaway git repo, stubbing only the bd process
+// layer (phase.SetListJSONForTest / phase.SetRunBDForTest) so no live `bd`
+// is required. Since neither consumer re-derives or reformats the finding
 // text (both call lifecycle.FinalizeOrphan.FullMessage() verbatim), byte
 // equality here is the load-bearing half of AC-15 that the AC-12 identity
 // pin (in each package's own test file) cannot show on its own — this test
-// exercises the ACTUAL predicate over ACTUAL git state, not just seam
-// pointers.
+// exercises the ACTUAL scan over ACTUAL git state, not just seam pointers.
 
 import (
 	"os"
@@ -23,14 +20,15 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 // buildFinalizeOrphanFixture creates a real git repo with a surviving
-// chore/finalize-119-test branch (FindOutstandingFinalizeBranches' trigger)
-// and a main branch whose committed .beads/issues.jsonl shows epic-1 as
-// "open" (StaleTrackerOnMain's trigger, once the caller reports
-// liveClosed=true). It also creates the flat spec-enumeration directory
-// both checkFinalizeOrphans and collectLifecycleFindings walk.
+// chore/finalize-119-test branch that is provably unmerged relative to the
+// materialized origin/main ref (FindOutstandingFinalizeBranches' trigger,
+// G1-refined) and a main branch whose committed .beads/issues.jsonl shows
+// epic-1 as "open" (the stale-tracker trigger, once bd's live state — the
+// stubbed epic list — reports it closed).
 func buildFinalizeOrphanFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -80,48 +78,44 @@ func buildFinalizeOrphanFixture(t *testing.T) string {
 	return dir
 }
 
+// stubFixtureBDLayer serves the shared bd epic enumeration BOTH consumers'
+// aggregate scans issue: one live epic, epic-1, CLOSED, with spec metadata
+// resolving to spec 119-test (SpecIDFromMetadata(119, "test")). Closed
+// epics take no children query, but the `--parent` case is served
+// defensively.
+func stubFixtureBDLayer(t *testing.T) {
+	t.Helper()
+	epicJSON := `[{"id":"epic-1","title":"[SPEC 119-test] fixture epic","status":"closed","issue_type":"epic","metadata":{"spec_num":119,"spec_title":"test","mindspec_phase":"done"}}]`
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte(epicJSON), nil
+			}
+		}
+		return []byte("[]"), nil
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte(epicJSON), nil
+	}))
+}
+
 func TestLifecycleFindings_FinalizeOrphan_SameTextInDoctorAndInstruct(t *testing.T) {
 	root := buildFinalizeOrphanFixture(t)
+	stubFixtureBDLayer(t)
 
-	// Doctor's own epic-resolution glue, stubbed (no live bd required).
-	// The core predicates (findOutstandingFinalizeBranchesFn,
-	// staleTrackerOnMainFn) are left at their REAL lifecycle defaults.
-	t.Cleanup(doctor.SetFindEpicForFinalizeCheckForTest(func(specID string) (string, error) {
-		if specID == "119-test" {
-			return "epic-1", nil
-		}
-		return "", nil
-	}))
-	t.Cleanup(doctor.SetFindEpicStatusForTest(func(epicID string) (string, error) { return "closed", nil }))
-
-	// Instruct's own epic-resolution glue, stubbed identically.
-	origFindEpic := instructFindEpicBySpecIDFn
-	origStatus := instructFindEpicStatusFn
-	t.Cleanup(func() {
-		instructFindEpicBySpecIDFn = origFindEpic
-		instructFindEpicStatusFn = origStatus
-	})
-	instructFindEpicBySpecIDFn = func(specID string) (string, error) {
-		if specID == "119-test" {
-			return "epic-1", nil
-		}
-		return "", nil
-	}
-	instructFindEpicStatusFn = func(epicID string) (string, error) { return "closed", nil }
-
-	report := doctor.RunFinalizeOrphanChecksForTest(root)
+	report := doctor.RunLifecycleIntegrityChecksForTest(root)
 	var doctorMessages []string
 	for _, c := range report.Checks {
 		doctorMessages = append(doctorMessages, c.Message)
 	}
 
-	instructMessages := collectLifecycleFindings(root)
+	instructMessages := collectLifecycleFindings(root, phase.NewCache())
 
-	if len(doctorMessages) == 0 {
-		t.Fatalf("expected doctor to surface at least one finalize-orphan finding, got none")
+	if len(doctorMessages) < 2 {
+		t.Fatalf("expected doctor to surface the finalize-branch AND stale-tracker findings, got %v", doctorMessages)
 	}
-	if len(instructMessages) == 0 {
-		t.Fatalf("expected instruct to surface at least one finalize-orphan finding, got none")
+	if len(instructMessages) < 2 {
+		t.Fatalf("expected instruct to surface the finalize-branch AND stale-tracker findings, got %v", instructMessages)
 	}
 
 	for _, want := range doctorMessages {
