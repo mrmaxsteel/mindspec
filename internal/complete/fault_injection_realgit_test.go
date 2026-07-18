@@ -138,6 +138,17 @@ func setupRealGitFaultFixture(t *testing.T, specID, beadID string) (root, specBr
 	t.Helper()
 	root = t.TempDir()
 	gitRun(t, root, "init", "-q", "-b", "main")
+	// CI runners have no user.name/user.email in any git config tier
+	// (global/system) and no usable GECOS fallback, so the REAL merge
+	// commits the production code makes here (gitutil.MergeInto inside
+	// CompleteBead) would otherwise fail with "Please tell me who you
+	// are" / "unable to auto-detect email address". Set repo-local
+	// identity once so every worktree sharing this .git config (the
+	// spec and bead worktrees added below) can commit for real —
+	// mirrors internal/executor/executor_test.go's runGitIn setup.
+	gitRun(t, root, "config", "user.email", "test@example.invalid")
+	gitRun(t, root, "config", "user.name", "test")
+	gitRun(t, root, "config", "commit.gpgsign", "false")
 	writeFile(t, root, ".mindspec/docs/specs/"+specID+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
 	writeFile(t, root, ".mindspec/docs/specs/"+specID+"/plan.md",
 		"---\nstatus: Approved\nspec_id: \""+specID+"\"\nversion: \"1\"\nadr_citations:\n  - ADR-9500\n---\n\n# Plan\n")
