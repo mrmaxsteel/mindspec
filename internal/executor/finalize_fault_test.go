@@ -184,26 +184,76 @@ func TestFinalizeFault_OrphanFinalize_KillThenConverge(t *testing.T) {
 
 // --- stage (d): between the merge/push legs and the cleanup leg -----------
 
+// TestFinalizeFault_PreCleanup_KillThenConverge mirrors the auto_merge test's
+// fixture (a real lifecycle bead branch, in the finalizing epic's allow-set,
+// with a real commit not yet merged into the spec branch) so the auto_merge
+// leg performs a REAL merge — a genuine git mutation — before the
+// pre_cleanup hook fires. Without that real pre-kill mutation this test
+// would only ever assert the trivially-true "spec branch still exists"
+// (nothing here ever removes it before cleanup runs), so the merge-landed
+// assertion below is what makes the test depend on a real mutation having
+// landed rather than passing vacuously.
 func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	clearFinalizeStepHook(t)
 	g, fake, dir := newRepoExecutor(t)
 	stubBeadExport(t)
+
 	runGitIn(t, dir, "branch", "spec/077-test", "main")
-	fake.listEntries = nil
+	specWtPath := filepath.Join(dir, ".worktrees", "worktree-spec-077-test")
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/077-test")
+
+	runGitIn(t, dir, "branch", "bead/b1", "spec/077-test")
+	scratchPath := filepath.Join(dir, ".worktrees", "worktree-bead-scratch")
+	runGitIn(t, dir, "worktree", "add", scratchPath, "bead/b1")
+	if err := os.WriteFile(filepath.Join(scratchPath, "b1.txt"), []byte("b1"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, scratchPath, "add", ".")
+	runGitIn(t, scratchPath, "commit", "-m", "b1 work")
+	runGitIn(t, dir, "worktree", "remove", scratchPath)
+
+	fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-b1", Path: "", Branch: "bead/b1"}}
+	allowSet := []string{"b1"}
+
+	// The fake WorktreeOps.Remove is a no-op by default; FinalizeEpic's
+	// cleanup leg (which the second invocation below must actually reach and
+	// complete) needs the REAL linked spec worktree gone before the direct
+	// spec→main merge and spec-branch deletion can succeed, so wire onRemove
+	// to perform the real removal — same pattern as the auto_merge test.
+	fake.onRemove = func(name string) {
+		if name == "worktree-spec-077-test" {
+			runGitIn(t, dir, "worktree", "remove", "--force", specWtPath)
+		}
+	}
 
 	finalizeStepHookFn = failAtStage("pre_cleanup")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the pre_cleanup kill, got: %v", err)
 	}
-	// Nothing from the cleanup leg has run yet: the spec branch must still
-	// exist (no direct merge, no deletion attempted).
+	// The real mutation this test depends on: the auto_merge leg above the
+	// pre_cleanup hook already landed bead/b1 into spec/077-test for real.
+	if !isAncestorIn(t, dir, "bead/b1", "spec/077-test") {
+		t.Fatal("expected the real auto-merge to have landed bead/b1 into spec/077-test despite the kill")
+	}
+	// Nothing from the cleanup leg has run yet: the spec branch, the spec
+	// worktree, and the (now-merged) bead branch must all still exist — no
+	// direct merge, no worktree/branch removal attempted.
 	if !branchExistsIn(t, dir, "spec/077-test") {
 		t.Fatal("expected the spec branch to still exist before the cleanup leg has run")
 	}
+	if !branchExistsIn(t, dir, "bead/b1") {
+		t.Fatal("expected the bead branch to still exist before the cleanup leg has run")
+	}
+	// Capture the bead tip BEFORE the cleanup leg deletes bead/b1 below, so
+	// the post-convergence ancestry check can still name the exact commit.
+	beadTip := refHash(t, dir, "bead/b1")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge to completion, got: %v", err)
 	}
@@ -212,6 +262,12 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	}
 	if branchExistsIn(t, dir, "spec/077-test") {
 		t.Error("expected the spec branch to be gone after full convergence")
+	}
+	if branchExistsIn(t, dir, "bead/b1") {
+		t.Error("expected the bead branch to be gone after full convergence (cleanup leg completed)")
+	}
+	if !isAncestorIn(t, dir, beadTip, "main") {
+		t.Error("expected the real merge to have reached main via the direct spec→main merge")
 	}
 }
 
