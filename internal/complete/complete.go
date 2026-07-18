@@ -569,10 +569,27 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// MAIN repo root (Run's own contract: "root is the main repo
 			// root"), i.e. the main checkout. Refuse with a named
 			// re-invocation command rather than committing there (AC-3).
+			//
+			// The recovery command is NOT "cd + re-run `mindspec complete`"
+			// (bead-panel finding, mindspec-lc12.1 fix-up): every input to
+			// this resolution — root, wtPath, checkPath — comes from
+			// cwd-INDEPENDENT sources (workspace.FindRoot walks to the same
+			// repo root regardless of cwd; wtPath comes from `bd worktree
+			// list`, never from the shell's directory). Re-running
+			// `mindspec complete` from anywhere, including "inside the spec
+			// worktree", reaches this exact same branch and refuses again —
+			// an infinite loop. The genuinely convergent recovery is
+			// `mindspec next`: when a bead is in-progress with a missing
+			// worktree, `next` positively detects that (ResolveActiveBead)
+			// and recreates it (EnsureWorktree; see internal/next/guard.go's
+			// WorktreeSetupFailure/ClaimFailure recipes — "re-run detects
+			// the in-progress bead and auto-recovers the worktree"), after
+			// which `mindspec complete` finds a real wtPath and this
+			// refusal no longer fires.
 			if wtPath == "" {
 				return nil, guard.NewFailure(
 					fmt.Sprintf("bead %s's beads-artifact tracker sync would commit on the main checkout (%s) — refusing.", beadID, checkPath),
-					fmt.Sprintf("cd into the %s spec worktree and re-run `mindspec complete %s`", specID, beadID),
+					fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", specID, beadID, beadID),
 				)
 			}
 			// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.

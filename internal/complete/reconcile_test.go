@@ -165,6 +165,24 @@ func TestRun_Reconcile_SecondInvocationNoOp(t *testing.T) {
 
 // TestRun_Reconcile_PanelFree_NoWarning (AC-7): a panel-free bead reconciles
 // and closes with no panel output at all (§6 fail-open parity).
+//
+// RED-on-revert (mindspec-lc12.1 fix-up, panel finding #2): the outward
+// success/BeadClosed/no-panel-output assertions alone are satisfied even
+// when the reconcile-detection branch (`if wtPath == ""` in complete.go) is
+// disabled, because on the ordinary (non-reconcile) path a MockExecutor's
+// exec.MergeBase and exec.CompleteBead both default to succeeding with no
+// error regardless of whether the bead/<id> ref genuinely exists — the
+// normal path "succeeds" against a mock exactly like the reconcile path
+// does. The assertions below pin the RECONCILE-SPECIFIC outcome the AC
+// actually requires: zero exec.MergeBase calls (base comes from the landed
+// merge's first parent, never a merge-base computation against the absent
+// ref), zero exec.CompleteBead calls (no branch-cleanup/merge legs — the
+// branch is already gone), and the durable
+// `mindspec_reconcile_landed_merge_sha` evidence write naming the landed
+// SHA. Verified by disabling the branch (`if wtPath == ""` -> `if false`)
+// in internal/complete/complete.go: this test FAILS (MergeBase/CompleteBead
+// each called once, no reconcile evidence written); restoring the branch
+// makes it PASS again.
 func TestRun_Reconcile_PanelFree_NoWarning(t *testing.T) {
 	saveAndRestore(t)
 
@@ -182,10 +200,23 @@ func TestRun_Reconcile_PanelFree_NoWarning(t *testing.T) {
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
+	landed := stubbedLanded()
 	mergedUnclosedFn = func(root, specBranch, beadID string) (*lifecycle.LandedMerge, bool, error) {
-		return stubbedLanded(), true, nil
+		return landed, true, nil
 	}
 	closeBeadFn = func(ids ...string) error { return nil }
+
+	var gotMetaKey string
+	var gotMetaVal interface{}
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if id == "bead-1" {
+			if v, ok := updates["mindspec_reconcile_landed_merge_sha"]; ok {
+				gotMetaKey = "mindspec_reconcile_landed_merge_sha"
+				gotMetaVal = v
+			}
+		}
+		return nil
+	}
 
 	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
 	if err != nil {
@@ -197,11 +228,36 @@ func TestRun_Reconcile_PanelFree_NoWarning(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("expected NO panel output for a panel-free bead, got: %q", buf.String())
 	}
+	// Reconcile-specific: the skip-legs path was actually taken, not just a
+	// mock-tolerant normal path that happens to also succeed.
+	if len(mock.CallsTo("MergeBase")) != 0 {
+		t.Errorf("expected ZERO MergeBase calls on the panel-free reconcile path, got %d", len(mock.CallsTo("MergeBase")))
+	}
+	if len(mock.CallsTo("CompleteBead")) != 0 {
+		t.Errorf("expected ZERO CompleteBead calls on the panel-free reconcile path (branch already gone), got %d", len(mock.CallsTo("CompleteBead")))
+	}
+	if gotMetaKey != "mindspec_reconcile_landed_merge_sha" || gotMetaVal != landed.SHA {
+		t.Errorf("expected durable evidence naming the landed merge SHA, got key=%q val=%v", gotMetaKey, gotMetaVal)
+	}
 }
 
 // TestRun_Reconcile_DocSyncFailure_NoEvidenceNotClosed (AC-6 leg b): a
 // planted failing gate on the reconcile path exits non-zero naming it, the
 // bead is NOT closed, and no reconcile evidence is written.
+//
+// RED-on-revert (mindspec-lc12.1 fix-up, panel finding #2): the original
+// three assertions (error names "doc-sync", not closed, no evidence
+// written) all hold even when the reconcile-detection branch is disabled,
+// because the ordinary (non-reconcile) path reaches the SAME doc-sync gate
+// over a MergeBase-derived base — a MockExecutor's exec.MergeBase defaults
+// to succeeding, so the normal path plants the identical doc-sync failure
+// for the identical reason. That does not pin the reconcile behavior at
+// all. The added assertion below does: in genuine reconcile mode NO
+// exec.MergeBase call is ever made (base comes from the landed merge's
+// first parent, per complete.go's "No exec.MergeBase call is made on this
+// path (AC-5)"). Verified by disabling the branch (`if wtPath == ""` ->
+// `if false`) in internal/complete/complete.go: this test FAILS (one
+// MergeBase call recorded); restoring the branch makes it PASS again.
 func TestRun_Reconcile_DocSyncFailure_NoEvidenceNotClosed(t *testing.T) {
 	saveAndRestore(t)
 
@@ -241,6 +297,12 @@ func TestRun_Reconcile_DocSyncFailure_NoEvidenceNotClosed(t *testing.T) {
 	}
 	if metaWritten {
 		t.Error("no reconcile evidence should be written when a gate blocks")
+	}
+	// Reconcile-specific: the doc-sync gate must be reached via the
+	// landed-merge's first parent, never a merge-base computation — the
+	// discriminator that actually distinguishes this from the ordinary path.
+	if len(mock.CallsTo("MergeBase")) != 0 {
+		t.Errorf("expected ZERO MergeBase calls on the reconcile path, got %d", len(mock.CallsTo("MergeBase")))
 	}
 }
 

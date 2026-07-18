@@ -2187,6 +2187,16 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 // no bead worktree matched (wtPath == "", falling back to root — the main
 // repo root per Run's own contract), artifact dirt must NOT be committed
 // there. Refuses with a named re-invocation command; zero commits.
+//
+// mindspec-lc12.1 fix-up (panel finding #1): the recovery command must be
+// one that actually converges. Resolution (root/wtPath/checkPath) is
+// cwd-INDEPENDENT, so "cd into the spec worktree and re-run `mindspec
+// complete`" reaches this exact same refusal again — an infinite loop.
+// The recovery must instead be `mindspec next`, which detects the
+// in-progress bead with a missing worktree and recreates it (see
+// internal/next/guard.go), after which a subsequent `mindspec complete`
+// finds a real wtPath. Pinned here so a regression back to the "cd ... and
+// re-run `mindspec complete`" text fails this test.
 func TestRun_ArtifactDirt_NoWorktreeRefusesMainCommit(t *testing.T) {
 	saveAndRestore(t)
 
@@ -2209,6 +2219,13 @@ func TestRun_ArtifactDirt_NoWorktreeRefusesMainCommit(t *testing.T) {
 	}
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("refusal must carry a recovery line, got: %v", err)
+	}
+	recovery := finalRecoveryCommand(t, err.Error())
+	if !strings.HasPrefix(recovery, "mindspec next") {
+		t.Errorf("recovery command must be a convergent `mindspec next` re-run, got: %q", recovery)
+	}
+	if strings.Contains(recovery, "cd into") {
+		t.Errorf("recovery command must not tell the caller to cd-and-rerun `mindspec complete` — that loops forever (cwd-independent resolution), got: %q", recovery)
 	}
 	if len(mock.CallsTo("CommitPaths")) != 0 || len(mock.CallsTo("CommitAll")) != 0 {
 		t.Error("expected ZERO commits when refusing the main-checkout artifact sync")
