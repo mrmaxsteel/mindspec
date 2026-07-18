@@ -338,9 +338,56 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// without further wiring. No-op while the gate emits none.
 	printResultWarnings(warnWriter, adrResult)
 
+	// Spec 119 Bead 3 (P6/P2/R1): resolve the FinalizeEpic lifecycle
+	// allow-set HERE — with the other preflight FACTS, immediately after
+	// the last read-only gate's fact computation (ADR-divergence above)
+	// and BEFORE the supersede-ADR placeholder file write below (which
+	// today runs, and mutates disk, ahead of a derivable refusal — R1).
+	// The allow-set is the intersection planDeclared(specID) ∩
+	// lifecycleChildren(epicID): planDeclared is the beadIDs already read
+	// above (readPlanBeadIDs); lifecycleChildren is the NEW
+	// phase.LifecycleChildIDsForEpic classifier (P3). A classification
+	// failure refuses PRE-mutation with a named error — strictly
+	// stronger than the executor-side fail-closed abort, since nothing
+	// has mutated yet. When the plan itself is unreadable (planErr != nil)
+	// the set is left nil here; Leg 3 of runOrphanObligationGate below
+	// (unchanged) is the single place that names that specific refusal
+	// (R8/AC-17), so this resolution step does not duplicate it.
+	lifecycleChildren, lcErr := phase.LifecycleChildIDsForEpic(epicID)
+	if lcErr != nil {
+		return nil, guard.NewFailure(
+			fmt.Sprintf("could not classify spec %s's epic %s children to scope finalize: %v", specID, epicID, lcErr),
+			fmt.Sprintf("mindspec impl approve %s", specID),
+		)
+	}
+	var lifecycleAllowSet []string
+	if planErr == nil {
+		lifecycleAllowSet = intersectIDs(beadIDs, lifecycleChildren)
+	}
+
+	// Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate.
+	// Spec 119 Bead 3 (R1): now runs immediately after the allow-set
+	// resolution above and BEFORE the supersede-ADR placeholder write
+	// and the ADR-divergence refusal decision below — a derivable
+	// refusal here must precede that disk mutation. Still AFTER every
+	// read-only gate's fact computation (the ADR-divergence gate above
+	// is the last of them) and BEFORE the Spec 092 deferred phase-
+	// reconcile write, MUTATION (1/3) epic close, the mindspec_phase=done
+	// write, the CommitCount preflight, and exec.FinalizeEpic below — so
+	// a refusal here performs NO epic close, NO phase write, NO merge,
+	// NO push, NO placeholder-ADR write. Hatches (MINDSPEC_SKIP_PANEL,
+	// enforcement.panel_gate: false) bypass NOTHING here.
+	if err := runOrphanObligationGate(root, specID, specBranch, beadIDs, planErr); err != nil {
+		return nil, err
+	}
+
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested so the new file exists on disk even if a downstream
-	// step fails.
+	// step fails. Spec 087's pre-create-before-the-gate-skip-decision
+	// rule is preserved: the placeholder still exists before the
+	// ADR-divergence refusal decision immediately below, and when
+	// --supersede-adr is set that decision is skipped, so no refusal
+	// follows the write.
 	var supersedeNewID string
 	if o.SupersedeADR != "" {
 		var seedDomains []string
@@ -360,19 +407,6 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if o.OverrideADR == "" && o.SupersedeADR == "" && adrResult.HasFailures() {
 		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
 			joinResultErrorMessages(adrResult))
-	}
-
-	// Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate.
-	// Runs AFTER every read-only gate above (the ADR-divergence gate
-	// immediately above is the last of them) and BEFORE the Spec 092
-	// deferred phase-reconcile write, MUTATION (1/3) epic close, the
-	// mindspec_phase=done write, the CommitCount preflight, and
-	// exec.FinalizeEpic below — so a refusal here performs NO epic
-	// close, NO phase write, NO merge, NO push. Hatches
-	// (MINDSPEC_SKIP_PANEL, enforcement.panel_gate: false) bypass
-	// NOTHING here.
-	if err := runOrphanObligationGate(root, specID, specBranch, beadIDs, planErr); err != nil {
-		return nil, err
 	}
 
 	// Spec 092 Req 1: deferred forward reconcile of the stale phase
@@ -425,27 +459,26 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// CONSENSUS revision 9 so a future regression that re-shuffles
 	// this line is caught by TestApproveImplCallOrder.
 	//
-	// R7 (Spec 115 Bead 2 round 1): readPlanBeadIDs errors on an empty
-	// bead_ids list, so len(beadIDs)==0 and planErr!=nil are
-	// equivalent here, and the disjunction below collapses to just
-	// planErr!=nil. Leg 3 above (runOrphanObligationGate) already
-	// refuses whenever planErr!=nil, before this preflight runs — so
-	// past that gate, planErr==nil and len(beadIDs)>0 always hold and
-	// this disjunction is always false. The refusal below is therefore
-	// unreachable in normal flow; it is retained as a defensive
-	// backstop and to preserve the CONSENSUS-revision-9 call-order pin
-	// (see TestApproveImplCallOrder), not because it fires today. A
-	// valid-plan, zero-commit spec is the legitimate cleanup path and
-	// passes this check (see TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup).
-	count, countErr := exec.CommitCount("main", specBranch)
-	if countErr == nil {
-		if count == 0 && (planErr != nil || len(beadIDs) == 0) {
-			return nil, fmt.Errorf("preflight check failed: spec branch %s has no commits beyond main — nothing to merge", specBranch)
-		}
-	}
+	// Spec 119 Bead 3 (AC-17/R7): the refusal DISJUNCTION that used to
+	// live here (`count == 0 && (planErr != nil || len(beadIDs) == 0)`)
+	// is REMOVED — it was unreachable in normal flow, since Leg 3 of
+	// runOrphanObligationGate above already refuses whenever
+	// planErr != nil (and readPlanBeadIDs errors on an empty bead_ids
+	// list, so len(beadIDs)==0 implies planErr!=nil too), before this
+	// preflight runs. The CALL itself is PRESERVED at this exact
+	// position — a documented retention, not dead code — solely so
+	// TestApproveImplCallOrder continues to pin its place between the
+	// phase-metadata write and FinalizeEpic (CONSENSUS revision 9); its
+	// result is intentionally unused. A valid-plan, zero-commit spec is
+	// the legitimate cleanup path (see
+	// TestApproveImpl_NoCommitsButClosedBeads_AllowsCleanup) and was
+	// never blocked by the removed disjunction either.
+	_, _ = exec.CommitCount("main", specBranch)
 
-	// MUTATION (3/3, terminal): delegate to executor for merge/push.
-	fr, err := exec.FinalizeEpic(epicID, specID, specBranch)
+	// MUTATION (3/3, terminal): delegate to executor for merge/push,
+	// scoped to lifecycleAllowSet (Spec 119 Bead 3, R6/P6) resolved
+	// above.
+	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet)
 	if err != nil {
 		return nil, fmt.Errorf("finalizing epic: %w", err)
 	}
@@ -553,6 +586,27 @@ func isAlreadyClosedErr(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "already closed")
+}
+
+// intersectIDs returns the elements of planBeadIDs that are also present in
+// lifecycleChildren — the FinalizeEpic lifecycle allow-set (Spec 119 Bead 3,
+// R6/P6): plan-declared ∩ lifecycle-classified. Always returns a non-nil
+// slice (possibly empty) so the executor's "nil means not computed" sentinel
+// (AC-14) is never mistaken for "no lifecycle beads" — Go's zero value for a
+// nil map read is false, so an empty planBeadIDs or lifecycleChildren input
+// correctly yields an empty (non-nil) result via append's own semantics.
+func intersectIDs(planBeadIDs, lifecycleChildren []string) []string {
+	lifecycle := make(map[string]bool, len(lifecycleChildren))
+	for _, id := range lifecycleChildren {
+		lifecycle[id] = true
+	}
+	out := make([]string, 0, len(planBeadIDs))
+	for _, id := range planBeadIDs {
+		if lifecycle[id] {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // --- Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate ---

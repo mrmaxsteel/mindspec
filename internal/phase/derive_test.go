@@ -1,6 +1,7 @@
 package phase
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -257,6 +258,64 @@ func TestOpenNonLifecycleChildren(t *testing.T) {
 	ids := map[string]bool{got[0].ID: true, got[1].ID: true}
 	if !ids["bug1"] || !ids["chore1"] {
 		t.Errorf("expected bug1 + chore1, got %+v", got)
+	}
+}
+
+// TestLifecycleChildIDsForEpic_ClassifiesAndErrorsClosed pins the Spec 119
+// Bead 3 fail-closed sibling of OpenNonLifecycleChildrenForEpic: it returns
+// ONLY the lifecycle (task/empty-type) children's IDs, excludes non-lifecycle
+// (bug/other) and epic children regardless of status, and — unlike the
+// advisory helper — PROPAGATES a bd query failure instead of swallowing it
+// to nil (it feeds FinalizeEpic's destructive scoping allow-set, not a
+// never-blocking hint).
+func TestLifecycleChildIDsForEpic_ClassifiesAndErrorsClosed(t *testing.T) {
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		if contains(args, "--parent") {
+			return []byte(`[
+				{"id":"b1","status":"closed","issue_type":"task"},
+				{"id":"b2","status":"open","issue_type":""},
+				{"id":"bug1","status":"open","issue_type":"bug"},
+				{"id":"sub-epic","status":"open","issue_type":"epic"}
+			]`), nil
+		}
+		return []byte("[]"), nil
+	})
+	defer restoreList()
+
+	ids, err := LifecycleChildIDsForEpic("epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]bool{"b1": true, "b2": true}
+	if len(ids) != len(want) {
+		t.Fatalf("LifecycleChildIDsForEpic = %v, want exactly %v", ids, want)
+	}
+	for _, id := range ids {
+		if !want[id] {
+			t.Errorf("unexpected non-lifecycle/epic id in result: %q (full: %v)", id, ids)
+		}
+	}
+}
+
+// TestLifecycleChildIDsForEpic_PropagatesQueryError pins the fail-closed
+// contract: a bd list failure must return a non-nil error, never a silent
+// empty/nil result (which a destructive-enumeration caller could misread
+// as "no lifecycle children").
+func TestLifecycleChildIDsForEpic_PropagatesQueryError(t *testing.T) {
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		if contains(args, "--parent") {
+			return nil, fmt.Errorf("simulated bd list failure")
+		}
+		return []byte("[]"), nil
+	})
+	defer restoreList()
+
+	ids, err := LifecycleChildIDsForEpic("epic-1")
+	if err == nil {
+		t.Fatal("expected a propagated error on bd query failure, got nil")
+	}
+	if ids != nil {
+		t.Errorf("expected nil ids on error, got %v", ids)
 	}
 }
 

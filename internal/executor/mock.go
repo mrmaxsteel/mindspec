@@ -129,8 +129,8 @@ func (m *MockExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	return m.CompleteBeadErr
 }
 
-func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
-	m.record("FinalizeEpic", epicID, specID, specBranch)
+func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error) {
+	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
 }
 

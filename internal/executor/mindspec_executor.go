@@ -346,11 +346,27 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
 // branches. Handles bead branch auto-merge into the spec branch before
 // cleanup, ensuring all bead work is integrated.
-func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error) {
+//
+// Spec 119 Bead 3 (R6/P6): BOTH bead-branch enumerations below — the
+// auto-merge leg and the worktree/branch cleanup leg — are scoped to
+// lifecycleAllowSet, the finalizing spec's plan-declared, lifecycle-
+// classified bead IDs (computed by the enforcement layer and passed in;
+// see the Executor interface doc). A candidate bead/<id> is admitted iff
+// its id is a member. lifecycleAllowSet == nil is the "not computed"
+// sentinel: encountering ANY bead/<id> candidate while it is nil aborts
+// the finalize fail-closed (AC-14) rather than silently skipping the leg
+// (a stale re-implementation of today's swallowed-List-error bug) or
+// silently admitting the candidate (a scope bypass).
+func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error) {
 	result := FinalizeResult{}
 
 	if !gitutil.BranchExists(specBranch) {
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
+	}
+
+	allow := make(map[string]bool, len(lifecycleAllowSet))
+	for _, id := range lifecycleAllowSet {
+		allow[id] = true
 	}
 
 	// Bug wu7t: capture the spec branch tip BEFORE any finalize-time
@@ -380,51 +396,73 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 
 	// Auto-merge unmerged bead branches into spec branch before cleanup.
 	// This handles beads that were closed via `bd close` without `mindspec complete`.
-	if entries, listErr := g.WorktreeOps.List(); listErr == nil {
-		for _, e := range entries {
-			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
-				continue
-			}
-			// Auto-commit any remaining bead artifacts.
-			if e.Path != "" {
-				_ = g.commitWithExport(e.Path, "chore: commit remaining bead artifacts")
-			}
-			// Merge bead branch into spec branch if not already an ancestor.
-			if _, statErr := os.Stat(specWtPath); statErr == nil {
-				isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
-				if ancErr == nil && !isAnc {
-					// Spec 106 Bead 4 (Req 9): directional guard in front of
-					// the FinalizeEpic bead→spec auto-merge. guardMergeLayout
-					// checks ONLY the directional layout-regression invariant
-					// (a flat spec branch must not receive a canonical/legacy-
-					// layout bead merge) — it is NOT panel-gate enforcement,
-					// NOT the Spec 114/115 obligation-reconciliation backstop,
-					// and NOT the bd_close orphan check (Spec 115 mindspec-o4fd
-					// OQ1/OQ4): none of those three fire on this
-					// executor-owned merge path (ADR-0030: enforcement lives in
-					// internal/approve and internal/complete, not here).
-					// Mutates nothing on a block.
-					if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
-						return result, guardErr
-					}
-					if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
-						// Spec 092 Req 14(a) — SEMANTIC abort, not a
-						// warning: a bead→spec conflict here used to
-						// warn-and-continue, removing the spec worktree,
-						// direct-merging spec→main WITHOUT the conflicted
-						// bead's commits, deleting the spec branch, and
-						// exiting 0. New behavior: abort the in-progress
-						// merge, perform NO worktree removal, NO direct
-						// merge to main, NO branch deletion, and return
-						// non-zero (HC-4: the bead→spec merge is part of
-						// the terminal mutation). The recovery matches the
-						// post-abort reality: the spec worktree still
-						// exists because the abort preserved it.
-						return result, beadToSpecConflictFailure(e.Branch, specBranch, specWtPath,
-							fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
-					}
-					fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
+	//
+	// Spec 119 Bead 3: a WorktreeOps.List() error is now FAIL-CLOSED —
+	// today's `if listErr == nil` silently skipped the whole leg on any
+	// enumeration failure, which could leave real merge candidates
+	// entirely unmerged with no signal. Abort with a named error instead
+	// (AC-14).
+	entries, listErr := g.WorktreeOps.List()
+	if listErr != nil {
+		return result, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %w", epicID, listErr)
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
+			continue
+		}
+		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if lifecycleAllowSet == nil {
+			// AC-14: a nil allow-set alongside a real bead/<id> candidate
+			// means the caller never computed a scope — abort rather
+			// than silently skip (today's bug) or silently admit
+			// (a scope bypass).
+			return result, fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to merge without an explicit scope", epicID, e.Branch)
+		}
+		if !allow[beadID] {
+			// R6: the exclusion boundary is lifecycle identity — a
+			// foreign-epic bead or a same-epic NON-lifecycle follow-up
+			// (open or closed) is left exactly alone.
+			continue
+		}
+		// Auto-commit any remaining bead artifacts.
+		if e.Path != "" {
+			_ = g.commitWithExport(e.Path, "chore: commit remaining bead artifacts")
+		}
+		// Merge bead branch into spec branch if not already an ancestor.
+		if _, statErr := os.Stat(specWtPath); statErr == nil {
+			isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+			if ancErr == nil && !isAnc {
+				// Spec 106 Bead 4 (Req 9): directional guard in front of
+				// the FinalizeEpic bead→spec auto-merge. guardMergeLayout
+				// checks ONLY the directional layout-regression invariant
+				// (a flat spec branch must not receive a canonical/legacy-
+				// layout bead merge) — it is NOT panel-gate enforcement,
+				// NOT the Spec 114/115 obligation-reconciliation backstop,
+				// and NOT the bd_close orphan check (Spec 115 mindspec-o4fd
+				// OQ1/OQ4): none of those three fire on this
+				// executor-owned merge path (ADR-0030: enforcement lives in
+				// internal/approve and internal/complete, not here).
+				// Mutates nothing on a block.
+				if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+					return result, guardErr
 				}
+				if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
+					// Spec 092 Req 14(a) — SEMANTIC abort, not a
+					// warning: a bead→spec conflict here used to
+					// warn-and-continue, removing the spec worktree,
+					// direct-merging spec→main WITHOUT the conflicted
+					// bead's commits, deleting the spec branch, and
+					// exiting 0. New behavior: abort the in-progress
+					// merge, perform NO worktree removal, NO direct
+					// merge to main, NO branch deletion, and return
+					// non-zero (HC-4: the bead→spec merge is part of
+					// the terminal mutation). The recovery matches the
+					// post-abort reality: the spec worktree still
+					// exists because the abort preserved it.
+					return result, beadToSpecConflictFailure(e.Branch, specBranch, specWtPath,
+						fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
+				}
+				fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
 			}
 		}
 	}
@@ -523,14 +561,29 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string) (Fina
 
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
-		// Clean up lingering bead worktrees/branches.
-		if entries, listErr := g.WorktreeOps.List(); listErr == nil {
-			for _, e := range entries {
-				if strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
-					_ = g.WorktreeOps.Remove(e.Name)
-					_ = gitutil.DeleteBranch(e.Branch)
-				}
+		// Clean up lingering bead worktrees/branches. Spec 119 Bead 3:
+		// the SAME lifecycleAllowSet scoping and fail-closed enumeration
+		// as the auto-merge leg above — a foreign-epic bead or a
+		// same-epic non-lifecycle follow-up (open or closed) must
+		// survive this leg too (R6), and a WorktreeOps.List() failure
+		// here aborts rather than silently skipping the cleanup (AC-14).
+		entries, listErr := g.WorktreeOps.List()
+		if listErr != nil {
+			return fmt.Errorf("finalize epic %s: enumerating worktrees for cleanup: %w", epicID, listErr)
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
+				continue
 			}
+			beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+			if lifecycleAllowSet == nil {
+				return fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to clean up without an explicit scope", epicID, e.Branch)
+			}
+			if !allow[beadID] {
+				continue
+			}
+			_ = g.WorktreeOps.Remove(e.Name)
+			_ = gitutil.DeleteBranch(e.Branch)
 		}
 
 		// Remove spec worktree.

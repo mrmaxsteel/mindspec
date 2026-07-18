@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -922,6 +923,228 @@ func TestApproveImplCallOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(src), "\"mindspec_impl_skew_reason\"") {
 		t.Error("impl.go must contain the literal \"mindspec_impl_skew_reason\" (the override metadata key)")
+	}
+}
+
+// TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder pins
+// Spec 119 Bead 3's Step-3 preflight restructure (R1): the Spec 115
+// orphan/obligation gate (runOrphanObligationGate) must run BEFORE the
+// --supersede-adr placeholder-ADR file write (implCreateWithIDFn) — today
+// that file write used to precede a derivable refusal, violating "facts
+// before mutation". A derivable refusal must never leave a placeholder ADR
+// file on disk.
+func TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "impl.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse impl.go: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, d := range file.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if ok && fd.Name.Name == "ApproveImpl" {
+			fn = fd
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("ApproveImpl FuncDecl not found")
+	}
+
+	var orphanGatePos, supersedePos token.Pos
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*ast.Ident); ok {
+			switch id.Name {
+			case "runOrphanObligationGate":
+				if orphanGatePos == 0 {
+					orphanGatePos = call.Pos()
+				}
+			case "implCreateWithIDFn":
+				if supersedePos == 0 {
+					supersedePos = call.Pos()
+				}
+			}
+		}
+		return true
+	})
+
+	if orphanGatePos == 0 {
+		t.Fatal("runOrphanObligationGate call not found in ApproveImpl body")
+	}
+	if supersedePos == 0 {
+		t.Fatal("implCreateWithIDFn call not found in ApproveImpl body")
+	}
+	if !(orphanGatePos < supersedePos) {
+		t.Errorf("runOrphanObligationGate (pos %d) must precede the --supersede-adr placeholder write implCreateWithIDFn (pos %d)", orphanGatePos, supersedePos)
+	}
+}
+
+// TestApproveImpl_LifecycleClassificationErrorRefusesPreMutation pins
+// AC-14: a phase.LifecycleChildIDsForEpic query failure (Step 1/2, the
+// FinalizeEpic allow-set's classification leg) must refuse in ApproveImpl's
+// preflight — BEFORE any mutation — with a named error. The third `bd list
+// --parent` call is the ONE this bead adds (DerivePhaseDetail's own
+// children query is #1, the Spec 095 advisory
+// OpenNonLifecycleChildrenForEpic guard hint is #2 and swallows errors to
+// nil); only failing call #3 isolates LifecycleChildIDsForEpic specifically.
+func TestApproveImpl_LifecycleClassificationErrorRefusesPreMutation(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	var combinedCalls []string
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 {
+			combinedCalls = append(combinedCalls, args[0])
+		}
+		return []byte("ok"), nil
+	}
+	var createCalls int
+	implCreateWithIDFn = func(root, id, title string, opts adr.CreateOpts) (string, error) {
+		createCalls++
+		return "", nil
+	}
+	var phaseMetaCalls int
+	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+		phaseMetaCalls++
+		return nil
+	}
+
+	parentCalls := 0
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+				}}
+				return json.Marshal(epics)
+			}
+		}
+		if contains(args, "--parent") {
+			parentCalls++
+			if parentCalls <= 2 {
+				children := []phase.ChildInfo{{ID: "bead-1", Status: "closed", IssueType: "task"}}
+				return json.Marshal(children)
+			}
+			return nil, fmt.Errorf("simulated bd list --parent failure")
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	mock := &executor.MockExecutor{CommitCountResult: 5}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected an error when LifecycleChildIDsForEpic fails, got nil")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must end with a recovery line: %v", err)
+	}
+
+	// Zero mutating calls anywhere: no epic close, no phase-metadata
+	// write, no supersede-placeholder ADR write, no executor mutation.
+	if len(combinedCalls) != 0 {
+		t.Errorf("implRunBDCombinedFn must not be called on a preflight refusal; got %v", combinedCalls)
+	}
+	if createCalls != 0 {
+		t.Errorf("implCreateWithIDFn must not be called on a preflight refusal; got %d calls", createCalls)
+	}
+	if phaseMetaCalls != 0 {
+		t.Errorf("implPhaseMetadataFn must not be called on a preflight refusal; got %d calls", phaseMetaCalls)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must not be called on a preflight refusal; got %d calls", len(calls))
+	}
+}
+
+// TestApproveImpl_FinalizeEpicReceivesIntersectedAllowSet pins AC-13's
+// approve-side half end-to-end: the lifecycleAllowSet handed to
+// exec.FinalizeEpic must be EXACTLY planDeclared(specID) ∩
+// lifecycleChildren(epicID) — never parent-membership alone. The epic
+// here has THREE children: bead-1 (task, plan-declared → IN), bead-2
+// (bug, plan-declared but non-lifecycle → OUT despite being plan-
+// declared), and bead-3 (task, lifecycle but NOT plan-declared → OUT
+// despite being lifecycle-classified). Only bead-1 must appear in the
+// passed set.
+func TestApproveImpl_FinalizeEpicReceivesIntersectedAllowSet(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1", "bead-2"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	implRunBDFn = func(args ...string) ([]byte, error) {
+		payload := []map[string]string{{"status": "closed"}}
+		return json.Marshal(payload)
+	}
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				epics := []phase.EpicInfo{{
+					ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+				}}
+				return json.Marshal(epics)
+			}
+		}
+		if contains(args, "--parent") {
+			children := []phase.ChildInfo{
+				{ID: "bead-1", Status: "closed", IssueType: "task"},
+				{ID: "bead-2", Status: "open", IssueType: "bug"},
+				{ID: "bead-3", Status: "closed", IssueType: "task"},
+			}
+			return json.Marshal(children)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	if _, err := ApproveImpl(tmp, "010-test", mock); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	calls := mock.CallsTo("FinalizeEpic")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 FinalizeEpic call, got %d", len(calls))
+	}
+	if len(calls[0].Args) != 4 {
+		t.Fatalf("FinalizeEpic call recorded %d args, want 4 (epicID, specID, specBranch, lifecycleAllowSet)", len(calls[0].Args))
+	}
+	allowSet, ok := calls[0].Args[3].([]string)
+	if !ok {
+		t.Fatalf("FinalizeEpic 4th arg = %T, want []string", calls[0].Args[3])
+	}
+	if len(allowSet) != 1 || allowSet[0] != "bead-1" {
+		t.Errorf("lifecycleAllowSet = %v, want exactly [bead-1] (bead-2 is non-lifecycle, bead-3 is not plan-declared)", allowSet)
 	}
 }
 

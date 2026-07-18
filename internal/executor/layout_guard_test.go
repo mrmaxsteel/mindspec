@@ -476,7 +476,7 @@ func TestFinalizeEpic_DirectMergeLayoutRegressionBlocked(t *testing.T) {
 	fake.listEntries = nil // no bead worktrees
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "106-x", "spec/106-x")
+	_, err := g.FinalizeEpic("epic-1", "106-x", "spec/106-x", nil)
 	if err == nil {
 		t.Fatal("a canonical spec → flat main direct merge must be blocked (layout regression)")
 	}

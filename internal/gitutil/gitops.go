@@ -324,6 +324,15 @@ func PushBranch(branch string) error {
 // GIT_TERMINAL_PROMPT=0 fast-fail and SEC-5 argv hygiene as the other
 // network ops; a non-zero exit (offline, auth failure) is an error, NOT an
 // absent branch.
+//
+// Spec 119 Bead 3 (AC-16): `git ls-remote --heads <remote> <pattern>`
+// matches any ref whose name is a slash-delimited SUFFIX of pattern — e.g.
+// pattern "chore/finalize-105" also matches "refs/heads/aaa/chore/finalize-105"
+// (a decoy branch nested under an unrelated prefix) — so the command can
+// return MULTIPLE lines, or a decoy-only line, for a single-branch query.
+// Every returned line is scanned and ONLY the one whose refname column is
+// EXACTLY "refs/heads/<branch>" is accepted; a decoy-only result yields ""
+// (absent), never the decoy's SHA.
 func RemoteHeadSHA(remote, branch string) (string, error) {
 	if err := rejectOptionLike(remote); err != nil {
 		return "", err
@@ -336,13 +345,23 @@ func RemoteHeadSHA(remote, branch string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ls-remote %s %s: %w", remote, branch, err)
 	}
-	// Output: "<sha>\trefs/heads/<branch>\n", or empty when absent.
-	line := strings.TrimSpace(string(out))
-	if line == "" {
-		return "", nil
+	// Output: one "<sha>\trefs/heads/<name>\n" line per matching ref, or
+	// empty when nothing matches at all.
+	wantRef := "refs/heads/" + branch
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[1] == wantRef {
+			return fields[0], nil
+		}
 	}
-	fields := strings.Fields(line)
-	return fields[0], nil
+	return "", nil
 }
 
 // PushBranchForceWithLease pushes branch to origin with
@@ -353,8 +372,18 @@ func RemoteHeadSHA(remote, branch string) (string, error) {
 // `impl approve` must be able to overwrite the remote tip left by a prior
 // run's push (a plain push is rejected non-fast-forward, hard-failing the
 // retry) — but the lease is pinned to the SHA the caller just observed via
-// RemoteHeadSHA, so a tip that moved in between (e.g. a human pushed to the
-// branch) is never silently clobbered.
+// RemoteHeadSHA.
+//
+// Spec 119 Bead 3 (AC-16): this protects only the READ-TO-PUSH window
+// between that RemoteHeadSHA observation and this push — it is NOT a
+// guarantee that the tip is "never silently clobbered". If some OTHER
+// writer moves the remote tip AFTER the caller's RemoteHeadSHA read but
+// BEFORE this push lands, the lease correctly fails loudly (non-fast-
+// forward-equivalent rejection) rather than clobbering; but if that other
+// write happens to land on the SAME expectedSHA the caller observed (e.g.
+// a concurrent retry racing this one), the lease's compare succeeds and
+// this push overwrites whatever the other writer produced — the lease
+// compares a SHA, not a serialized "nobody else touched this ref" claim.
 func PushBranchForceWithLease(branch, expectedSHA string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
@@ -398,6 +427,24 @@ func EnsureGitignoreEntry(root, entry string) error {
 	content += "# mindspec worktrees\n" + entry + "/\n"
 
 	return writeFile(gitignorePath, []byte(content), 0o644)
+}
+
+// FileAtRef returns the byte contents of path at git ref in the repo rooted
+// at workdir, via `git show <ref>:<path>`. Mirrors
+// executor.MindspecExecutor.FileAtRef, but lives in gitutil so
+// internal/lifecycle (outside the executor/enforcement boundary, ADR-0030)
+// can read a committed blob — e.g. main's committed .beads/issues.jsonl —
+// without going through the executor.
+func FileAtRef(workdir, ref, path string) ([]byte, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", "-C", workdir, "show", ref+":"+path)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s: %w", ref, path, err)
+	}
+	return out, nil
 }
 
 // DiffStat returns a short diffstat summary between two refs.
