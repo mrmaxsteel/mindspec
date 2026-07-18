@@ -492,7 +492,7 @@ func TestFinalizeEpic_DirectMerge(t *testing.T) {
 
 	fake.listEntries = nil // no bead worktrees
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestFinalizeEpic_DirectMerge(t *testing.T) {
 func TestFinalizeEpic_BranchNotFound(t *testing.T) {
 	g, _, _ := newRepoExecutor(t)
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test")
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -711,7 +711,7 @@ func TestMockExecutor_RecordsCalls(t *testing.T) {
 	}
 
 	_ = m.CompleteBead("x.1", "spec/001-test", "done")
-	fr, _ := m.FinalizeEpic("e1", "001-test", "spec/001-test")
+	fr, _ := m.FinalizeEpic("e1", "001-test", "spec/001-test", nil)
 	if fr.CommitCount != 3 {
 		t.Errorf("commits = %d", fr.CommitCount)
 	}

@@ -1142,6 +1142,40 @@ func TestRemoteHeadSHA_ParsesLsRemote(t *testing.T) {
 	}
 }
 
+// TestRemoteHeadSHA_DecoyRefNeverMatches pins Spec 119 Bead 3 AC-16:
+// `git ls-remote --heads <remote> <pattern>` matches any ref whose name is
+// a slash-delimited SUFFIX of pattern, so a query for "chore/finalize-105"
+// also matches a decoy branch nested under an unrelated prefix, e.g.
+// "refs/heads/aaa/chore/finalize-105" — real git can return that decoy's
+// line ALONGSIDE or INSTEAD OF the exact match. RemoteHeadSHA must scan
+// every returned line and resolve ONLY the refname column that is EXACTLY
+// "refs/heads/<branch>" — a decoy-only result must yield "" (absent), never
+// the decoy's SHA.
+func TestRemoteHeadSHA_DecoyRefNeverMatches(t *testing.T) {
+	// Decoy line ONLY (no exact match present) — must resolve to absent,
+	// not the decoy's SHA.
+	swapExec(t, "decoysha000\trefs/heads/aaa/chore/finalize-105\n", 0)
+	sha, err := RemoteHeadSHA("origin", "chore/finalize-105")
+	if err != nil {
+		t.Fatalf("RemoteHeadSHA: unexpected error: %v", err)
+	}
+	if sha != "" {
+		t.Errorf("decoy-only result: sha = %q, want empty (decoy must never resolve)", sha)
+	}
+
+	// Decoy line PLUS the real exact match, in either order — the exact
+	// match must always win, never the decoy.
+	multi := "decoysha000\trefs/heads/aaa/chore/finalize-105\nrealsha111\trefs/heads/chore/finalize-105\n"
+	swapExec(t, multi, 0)
+	sha, err = RemoteHeadSHA("origin", "chore/finalize-105")
+	if err != nil {
+		t.Fatalf("RemoteHeadSHA: unexpected error: %v", err)
+	}
+	if sha != "realsha111" {
+		t.Errorf("decoy+exact result: sha = %q, want %q (the exact match, never the decoy)", sha, "realsha111")
+	}
+}
+
 // TestPushBranchForceWithLease_ArgvAndLease pins the compare-and-swap push
 // bug wu7t's retried chore-branch flow uses: the lease names the exact
 // refs/heads/<branch>:<expectedSHA> pair, and a failed lease (the remote

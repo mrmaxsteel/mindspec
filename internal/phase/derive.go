@@ -369,6 +369,34 @@ func OpenNonLifecycleChildrenForEpic(epicID string) []ChildInfo {
 	return OpenNonLifecycleChildren(children)
 }
 
+// LifecycleChildIDsForEpic resolves the LIFECYCLE (task / empty-type)
+// children of an epic via the shared cache (one `bd list --parent` call,
+// same query as OpenNonLifecycleChildrenForEpic above) and returns their
+// bead IDs.
+//
+// Spec 119 Bead 3 (P3): a FAIL-CLOSED sibling of the advisory
+// OpenNonLifecycleChildren(ForEpic) — those swallow a query failure to nil
+// because they feed a never-blocking hint. This function feeds
+// FinalizeEpic's destructive bead-branch enumerations (the scoping
+// allow-set, R6), so a bd query failure must be returned as an error
+// rather than silently read as "no lifecycle children" (which would
+// under-scope the allow-set and either strand real lifecycle beads or, if
+// misread as "everything is out of scope", merge nothing). bd-only, no
+// git I/O — TestEnforcementHasNoGitLeaks (ADR-0030) is unaffected.
+func LifecycleChildIDsForEpic(epicID string) ([]string, error) {
+	children, err := NewCache().GetChildren(epicID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, c := range children {
+		if classifyChild(c.IssueType) == childLifecycle {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids, nil
+}
+
 // DiscoverActiveSpecs queries beads for open/in_progress epics and derives phase for each.
 // Constructs a fresh cache; hot-path callers should use DiscoverActiveSpecsWithCache
 // to share the underlying `bd list --type=epic` call with other parts of the same invocation.
