@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -107,7 +108,11 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 	if strings.TrimSpace(beadID) == "" {
 		return nil, fmt.Errorf("%w: empty bead id", ErrLandedMergeNotFound)
 	}
-	wantSubject := "Merge " + workspace.BeadBranch(beadID)
+	beadBranch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid bead id %s: %v", ErrLandedMergeNotFound, beadID, err)
+	}
+	wantSubject := "Merge " + beadBranch
 
 	merges, err := firstParentMergesFn(root, specBranch)
 	if err != nil {
@@ -116,7 +121,6 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 
 	reviewedHeadSHA, haveReviewed := reviewedHeadSHAForBead(root, specBranch, beadID)
 
-	beadBranch := workspace.BeadBranch(beadID)
 	branchTip, branchSurvives, tipErr := resolveBranchTip(root, beadBranch)
 	if tipErr != nil {
 		return nil, fmt.Errorf("resolving surviving branch %s: %w", beadBranch, tipErr)
@@ -160,7 +164,14 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 // ("", false) — an UNAVAILABLE corroboration, never treated as a
 // contradiction.
 func reviewedHeadSHAForBead(root, specBranch, beadID string) (string, bool) {
+	// Reverse-derivation gate (ADR-0042 §1 reverse): specID is parsed back
+	// OUT of an agent-writable branch name via TrimPrefix. A malformed
+	// result is never treated as an ID — corroboration simply proceeds
+	// root-only (the same as when specID == "" today).
 	specID := strings.TrimPrefix(specBranch, workspace.SpecBranchPrefix)
+	if idvalidate.SpecID(specID) != nil {
+		specID = ""
+	}
 	roots := []string{root}
 	if specID != "" {
 		if specDir, err := workspace.SpecDir(root, specID); err == nil && specDir != "" {
@@ -202,7 +213,10 @@ func MergedUnclosed(root, specBranch, beadID string) (*LandedMerge, bool, error)
 		return nil, false, err
 	}
 
-	beadBranch := workspace.BeadBranch(beadID)
+	beadBranch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid bead id %s: %w", beadID, err)
+	}
 	_, survives, tipErr := resolveBranchTip(root, beadBranch)
 	if tipErr != nil {
 		return nil, false, fmt.Errorf("resolving branch %s: %w", beadBranch, tipErr)

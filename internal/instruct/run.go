@@ -283,7 +283,13 @@ func panelScanRoots(mainRoot, activeWorktree string) []string {
 // rerun-after-merge Pass-through, Spec 093 Req 11) — the only git work
 // the panel-state path performs beyond the fs Scan (ADR-0030 budget).
 func liveBranchSHA(beadID string) (sha string, exists bool) {
-	branch := workspace.BeadBranch(beadID)
+	branch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		// Ambient staleness check: a malformed beadID degrades to the
+		// existing "no branch" semantics (ADR-0042 degrade-vs-error
+		// policy).
+		return "", false
+	}
 	s, err := gitutil.RevParseRef("", branch)
 	if err != nil {
 		return "", false
@@ -298,8 +304,13 @@ func resolveBeadWorktree(beadID string) string {
 	if err != nil {
 		return ""
 	}
-	wtName := workspace.BeadWorktreeName(beadID)
-	branchName := workspace.BeadBranch(beadID)
+	// Ambient lookup: a malformed beadID simply matches nothing below
+	// (ADR-0042 degrade-vs-error policy).
+	wtName, wtErr := workspace.BeadWorktreeName(beadID)
+	branchName, brErr := workspace.BeadBranch(beadID)
+	if wtErr != nil && brErr != nil {
+		return ""
+	}
 	for _, e := range entries {
 		if e.Name == wtName || e.Branch == branchName {
 			return e.Path

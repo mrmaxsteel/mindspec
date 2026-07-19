@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -82,6 +83,15 @@ next to recover) rather than an "open + stale-worktree" collision.
 		beadID := strings.TrimSpace(args[0])
 		force, _ := cmd.Flags().GetBool("force")
 
+		// R3 explicit-ingress early gate (ADR-0042, AC-6): a malformed
+		// beadID refuses HERE, before any composition.
+		if err := idvalidate.BeadID(beadID); err != nil {
+			return guard.NewFailure(
+				fmt.Sprintf("%s is not a valid bead ID: %v", termsafe.Escape(beadID), err),
+				"bd ready   (pick a listed bead ID and re-run)",
+			)
+		}
+
 		root, err := findRoot()
 		if err != nil {
 			return err
@@ -118,9 +128,16 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 	// Remove resolves the worktree by name via bd).
 	specWorktree := root
 	if _, specID, ferr := phase.FindEpicForBead(beadID); ferr == nil && specID != "" {
-		specWorktree = workspace.SpecWorktreePath(root, cfg, specID)
+		// specID is D1-checked (phase.FindEpicForBead only returns a
+		// non-empty specID that already passed idvalidate.SpecID) — this
+		// waist call cannot fail.
+		if swt, swErr := workspace.SpecWorktreePath(root, cfg, specID); swErr == nil {
+			specWorktree = swt
+		}
 	}
-	beadWtPath := workspace.BeadWorktreePath(specWorktree, cfg, beadID)
+	// beadID already passed idvalidate.BeadID at the CLI early gate above;
+	// this waist call cannot fail.
+	beadWtPath, _ := workspace.BeadWorktreePath(specWorktree, cfg, beadID)
 
 	exec := executor.NewMindspecExecutor(root)
 

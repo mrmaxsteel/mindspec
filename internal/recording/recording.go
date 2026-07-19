@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // IsEnabled checks the project config to determine if recording is active.
@@ -125,7 +127,20 @@ func UpdatePhase(root, specID, from, to string) error {
 }
 
 // AddBeadToPhase adds a bead ID to the current phase in the manifest.
+//
+// Structured-persistence write-gate (ADR-0042 §7, spec 120 round 5): both
+// specID and beadID are validated BEFORE any write, same doctrine and
+// disposition as EmitBeadMarker (markers.go) — skip + one escaped warning
+// via this best-effort channel, never blocking the caller.
 func AddBeadToPhase(root, specID, beadID string) error {
+	if err := idvalidate.SpecID(specID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping manifest bead write: invalid spec id %s: %v\n", termsafe.Escape(specID), err)
+		return nil
+	}
+	if err := idvalidate.BeadID(beadID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping manifest bead write: invalid bead id %s: %v\n", termsafe.Escape(beadID), err)
+		return nil
+	}
 	if !IsEnabled(root) {
 		return nil
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
@@ -331,15 +332,23 @@ func termsafeEscapeEach(vals []string) []string {
 // the fault-injection matrix in internal/complete's *_fault_test.go (Spec
 // 119 Bead 6, AC-26).
 func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (*Result, error) {
-	// R4 (spec 120): beadID is the raw CLI/caller-supplied bead-id operand
-	// — it is never spine-validated (idvalidate.BeadID is never called on
-	// the `mindspec complete` path) before reaching the DISPLAY strings
-	// below, so every such position routes it through idrender.Bead:
-	// byte-identical for a genuine bead ID, forced-quoted otherwise, so a
-	// hostile value can never forge extra terminal lines. Functional uses
-	// (branch names, bd/git operands, the `impl(<bead-id>):` commit-
-	// message prefix) keep the raw beadID unchanged — only the display
-	// positions are affected.
+	// R3 explicit-ingress early gate (ADR-0042, AC-6): a malformed beadID
+	// refuses EARLY with a clean CLI error and the "bd ready" lever,
+	// before any lineage lookup or mutation — rather than failing deep in
+	// composition.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return nil, guard.NewFailure(
+			fmt.Sprintf("%s is not a valid bead ID: %v", termsafe.Escape(beadID), err),
+			"bd ready   (pick a listed bead ID and re-run)",
+		)
+	}
+
+	// R4 (spec 120): every DISPLAY position below routes beadID through
+	// idrender.Bead: byte-identical for a genuine bead ID, forced-quoted
+	// otherwise, so a hostile value can never forge extra terminal lines.
+	// Functional uses (branch names, bd/git operands, the
+	// `impl(<bead-id>):` commit-message prefix) keep the raw beadID
+	// unchanged — only the display positions are affected.
 	safeBeadID := idrender.Bead(beadID)
 
 	// Determine local root for per-worktree context resolution.
@@ -374,7 +383,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// errors.Is on the typed sentinel — never by error text.
 	var specID string
 	var err error
-	_, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
+	lineageEpicID, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
 	switch {
 	case lineageErr == nil && lineageSpec != "":
 		specID = lineageSpec
@@ -392,6 +401,23 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				)
 			}
 		}
+	case errors.Is(lineageErr, phase.ErrMalformedSpecMetadata):
+		// D1 explicit-verb refusal (ADR-0042 §1, spec 120 AC-4): the
+		// lineage lookup SUCCEEDED in finding an epic, but that epic's
+		// spec_title/title metadata is malformed (fails idvalidate.SpecID)
+		// — this is errors.Is-DISTINCT from ErrNoEpicLineage, so it must
+		// NEVER fall through to cwd-derived resolution (that would let a
+		// hostile epic title silently resolve to whatever spec happens to
+		// be checked out). Refuse before any mutation, naming the single
+		// convergent lever with a validated epic ID.
+		epicRef := lineageEpicID
+		if idvalidate.BeadID(epicRef) != nil {
+			epicRef = "<epic-id>"
+		}
+		return nil, guard.NewFailure(
+			fmt.Sprintf("bead %s's epic has malformed spec metadata (%s) — refusing before any mutation.", beadID, termsafe.Escape(lineageErr.Error())),
+			fmt.Sprintf("mindspec repair spec-title %s \"<corrected-title>\"   (then re-run: mindspec complete %s)", epicRef, beadID),
+		)
 	case lineageErr == nil || errors.Is(lineageErr, phase.ErrNoEpicLineage):
 		// Genuinely epic-less (or, defensively, a nil-error empty spec):
 		// fallback to pre-119 cwd/hint-based resolution. Try localRoot
@@ -447,7 +473,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// Derive spec branch from conventions
-	specBranch := workspace.SpecBranch(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return nil, fmt.Errorf("resolved spec id %s is invalid: %w", specID, err)
+	}
 
 	// 1.6. bd_close lifecycle-bypass guard (bead mindspec-4gsz). Before ANY
 	// mutation, block if some OTHER sibling bead under this epic was closed
@@ -476,7 +505,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// branch when one exists, else the canonical bead branch name
 	// (mindspec-aqey / mindspec-perm anchoring).
 	var wtPath string
-	beadHead := workspace.BeadBranch(beadID)
+	// beadID already passed idvalidate.BeadID at the top of Run — these
+	// waist calls cannot fail.
+	beadHead, _ := workspace.BeadBranch(beadID)
 	entries, err := worktreeListFn()
 	if err != nil {
 		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
@@ -487,8 +518,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// R4: beadID is an ID-typed position — idrender.Bead.
 		return nil, fmt.Errorf("listing bead worktrees for %s: %w", safeBeadID, err)
 	}
-	expectedName := workspace.BeadWorktreeName(beadID)
-	expectedBranch := workspace.BeadBranch(beadID)
+	expectedName, _ := workspace.BeadWorktreeName(beadID)
+	expectedBranch := beadHead
 	for _, e := range entries {
 		if e.Name == expectedName || e.Branch == expectedBranch {
 			wtPath = e.Path
@@ -996,10 +1027,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
+	// specID already validated above (workspace.SpecBranch succeeded).
+	specWorktree, _ := workspace.SpecWorktreePath(root, cfg, specID)
 	result := &Result{
 		BeadID:       beadID,
 		BeadClosed:   true,
-		SpecWorktree: workspace.SpecWorktreePath(root, cfg, specID),
+		SpecWorktree: specWorktree,
 	}
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
@@ -1238,10 +1271,15 @@ func advanceState(epicID string) (mode, nextBead string) {
 	derivedPhase := phase.DerivePhaseFromChildren(children)
 
 	if derivedPhase == state.ModeImplement {
-		if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
-			var ready []bead.BeadInfo
-			if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-				return state.ModeImplement, ready[0].ID
+		// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a
+		// `bd ready --parent` argv build directly — validate BEFORE any
+		// bd spawn.
+		if idvalidate.BeadID(epicID) == nil {
+			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
+				var ready []bead.BeadInfo
+				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+					return state.ModeImplement, ready[0].ID
+				}
 			}
 		}
 		// Implement phase without a ready bead: we're between beads (next one

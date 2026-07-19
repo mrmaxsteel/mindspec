@@ -25,7 +25,11 @@ func TestRelease_RemoveBeadWorktreeAndRestore_RecoversCwd(t *testing.T) {
 	beadID := "mindspec-3cj0"
 	// Build a real on-disk directory standing in for the bead worktree, at the
 	// path BeadWorktreeName resolves under the repo's worktrees dir.
-	wtDir := filepath.Join(workspace.DefaultWorktreesDir(root), workspace.BeadWorktreeName(beadID))
+	beadWtName, err := workspace.BeadWorktreeName(beadID)
+	if err != nil {
+		t.Fatalf("BeadWorktreeName: %v", err)
+	}
+	wtDir := filepath.Join(workspace.DefaultWorktreesDir(root), beadWtName)
 	if err := os.MkdirAll(wtDir, 0o755); err != nil {
 		t.Fatalf("mkdir bead worktree: %v", err)
 	}
@@ -51,8 +55,8 @@ func TestRelease_RemoveBeadWorktreeAndRestore_RecoversCwd(t *testing.T) {
 
 	// Remove must have been routed through the WorktreeOps seam (ADR-0030),
 	// for the canonical bead worktree name.
-	if len(fake.removeCalls) != 1 || fake.removeCalls[0] != workspace.BeadWorktreeName(beadID) {
-		t.Fatalf("Remove calls = %v, want exactly [%s]", fake.removeCalls, workspace.BeadWorktreeName(beadID))
+	if len(fake.removeCalls) != 1 || fake.removeCalls[0] != beadWtName {
+		t.Fatalf("Remove calls = %v, want exactly [%s]", fake.removeCalls, beadWtName)
 	}
 
 	// cwd MUST have recovered to the repo root — never the deleted worktree.

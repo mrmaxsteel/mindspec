@@ -69,18 +69,18 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	}
 	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/077-test")
 
-	runGitIn(t, dir, "branch", "bead/b1", "spec/077-test")
+	runGitIn(t, dir, "branch", "bead/bead-1", "spec/077-test")
 	scratchPath := filepath.Join(dir, ".worktrees", "worktree-bead-scratch")
-	runGitIn(t, dir, "worktree", "add", scratchPath, "bead/b1")
-	if err := os.WriteFile(filepath.Join(scratchPath, "b1.txt"), []byte("b1"), 0o644); err != nil {
+	runGitIn(t, dir, "worktree", "add", scratchPath, "bead/bead-1")
+	if err := os.WriteFile(filepath.Join(scratchPath, "bead-1.txt"), []byte("bead-1"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	runGitIn(t, scratchPath, "add", ".")
-	runGitIn(t, scratchPath, "commit", "-m", "b1 work")
+	runGitIn(t, scratchPath, "commit", "-m", "bead-1 work")
 	runGitIn(t, dir, "worktree", "remove", scratchPath)
 
-	fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-b1", Path: "", Branch: "bead/b1"}}
-	allowSet := []string{"b1"}
+	fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-bead-1", Path: "", Branch: "bead/bead-1"}}
+	allowSet := []string{"bead-1"}
 
 	// The fake WorktreeOps.Remove is a no-op by default; FinalizeEpic's
 	// cleanup leg later needs the REAL linked spec worktree actually gone
@@ -97,8 +97,8 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the auto_merge kill, got: %v", err)
 	}
-	if !isAncestorIn(t, dir, "bead/b1", "spec/077-test") {
-		t.Fatal("expected the real auto-merge to have landed bead/b1 into spec/077-test despite the kill")
+	if !isAncestorIn(t, dir, "bead/bead-1", "spec/077-test") {
+		t.Fatal("expected the real auto-merge to have landed bead/bead-1 into spec/077-test despite the kill")
 	}
 
 	finalizeStepHookFn = nil
@@ -205,18 +205,18 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	}
 	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/077-test")
 
-	runGitIn(t, dir, "branch", "bead/b1", "spec/077-test")
+	runGitIn(t, dir, "branch", "bead/bead-1", "spec/077-test")
 	scratchPath := filepath.Join(dir, ".worktrees", "worktree-bead-scratch")
-	runGitIn(t, dir, "worktree", "add", scratchPath, "bead/b1")
-	if err := os.WriteFile(filepath.Join(scratchPath, "b1.txt"), []byte("b1"), 0o644); err != nil {
+	runGitIn(t, dir, "worktree", "add", scratchPath, "bead/bead-1")
+	if err := os.WriteFile(filepath.Join(scratchPath, "bead-1.txt"), []byte("bead-1"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	runGitIn(t, scratchPath, "add", ".")
-	runGitIn(t, scratchPath, "commit", "-m", "b1 work")
+	runGitIn(t, scratchPath, "commit", "-m", "bead-1 work")
 	runGitIn(t, dir, "worktree", "remove", scratchPath)
 
-	fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-b1", Path: "", Branch: "bead/b1"}}
-	allowSet := []string{"b1"}
+	fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-bead-1", Path: "", Branch: "bead/bead-1"}}
+	allowSet := []string{"bead-1"}
 
 	// The fake WorktreeOps.Remove is a no-op by default; FinalizeEpic's
 	// cleanup leg (which the second invocation below must actually reach and
@@ -235,9 +235,9 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 		t.Fatalf("expected the pre_cleanup kill, got: %v", err)
 	}
 	// The real mutation this test depends on: the auto_merge leg above the
-	// pre_cleanup hook already landed bead/b1 into spec/077-test for real.
-	if !isAncestorIn(t, dir, "bead/b1", "spec/077-test") {
-		t.Fatal("expected the real auto-merge to have landed bead/b1 into spec/077-test despite the kill")
+	// pre_cleanup hook already landed bead/bead-1 into spec/077-test for real.
+	if !isAncestorIn(t, dir, "bead/bead-1", "spec/077-test") {
+		t.Fatal("expected the real auto-merge to have landed bead/bead-1 into spec/077-test despite the kill")
 	}
 	// Nothing from the cleanup leg has run yet: the spec branch, the spec
 	// worktree, and the (now-merged) bead branch must all still exist — no
@@ -245,12 +245,12 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	if !branchExistsIn(t, dir, "spec/077-test") {
 		t.Fatal("expected the spec branch to still exist before the cleanup leg has run")
 	}
-	if !branchExistsIn(t, dir, "bead/b1") {
+	if !branchExistsIn(t, dir, "bead/bead-1") {
 		t.Fatal("expected the bead branch to still exist before the cleanup leg has run")
 	}
-	// Capture the bead tip BEFORE the cleanup leg deletes bead/b1 below, so
+	// Capture the bead tip BEFORE the cleanup leg deletes bead/bead-1 below, so
 	// the post-convergence ancestry check can still name the exact commit.
-	beadTip := refHash(t, dir, "bead/b1")
+	beadTip := refHash(t, dir, "bead/bead-1")
 
 	finalizeStepHookFn = nil
 	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
@@ -263,7 +263,7 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	if branchExistsIn(t, dir, "spec/077-test") {
 		t.Error("expected the spec branch to be gone after full convergence")
 	}
-	if branchExistsIn(t, dir, "bead/b1") {
+	if branchExistsIn(t, dir, "bead/bead-1") {
 		t.Error("expected the bead branch to be gone after full convergence (cleanup leg completed)")
 	}
 	if !isAncestorIn(t, dir, beadTip, "main") {

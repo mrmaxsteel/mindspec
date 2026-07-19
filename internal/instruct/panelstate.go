@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -405,7 +406,15 @@ type beadLastCommitFn func(beadID string) string
 // gitBeadLastCommit is the production beadLastCommitFn: the one-line tip
 // summary of bead/<id>, or "" when the branch is unresolved.
 func gitBeadLastCommit(beadID string) string {
-	line, err := gitutil.LogOneline("", workspace.BeadBranch(beadID))
+	beadBranch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		// Gate-all-ids (ADR-0042 §1): beadID is bd-sourced and
+		// agent-writable — a malformed id degrades to the existing
+		// unresolved-branch semantics (no git detail) rather than
+		// composing a hostile branch name.
+		return ""
+	}
+	line, err := gitutil.LogOneline("", beadBranch)
 	if err != nil {
 		return ""
 	}
@@ -552,8 +561,17 @@ func gatherStaleWorktrees(list worktreeLister, inProgressIDs map[string]bool, ro
 					strings.HasPrefix(base, workspace.SpecWorktreePrefix) {
 					continue
 				}
+				// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23):
+				// beadID is parsed back OUT of an agent-creatable on-disk
+				// worktree directory name. A malformed result is
+				// discarded — never matched as a bead ID against
+				// inProgressIDs — while the entry's PATH still renders
+				// (escaped per R4) as a stale-worktree candidate below.
 				beadID := strings.TrimPrefix(base, workspace.BeadWorktreePrefix)
-				if inProgressIDs[beadID] {
+				if idvalidate.BeadID(beadID) != nil {
+					beadID = ""
+				}
+				if beadID != "" && inProgressIDs[beadID] {
 					continue // has a live in-progress bead → not stale
 				}
 				if !seen[wt.Path] {

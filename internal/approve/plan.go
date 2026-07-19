@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -223,7 +224,23 @@ func resolveTargetEpic(specID string) (string, error) {
 	}
 	for _, epic := range epics {
 		num, title := phase.ExtractSpecMetadata(epic)
-		if num > 0 && title != "" && phase.SpecIDFromMetadata(num, title) == specID {
+		if num == 0 || title == "" {
+			continue
+		}
+		// D1 (ADR-0042): a malformed derivation can never match a
+		// well-formed specID — treat as no-match, same as any other
+		// non-matching epic.
+		derived, derivedErr := phase.SpecIDFromMetadata(num, title)
+		if derivedErr == nil && derived == specID {
+			// gate-all-ids (ADR-0042): epic.ID is a bd-sourced value that
+			// flows into `bd list --parent`/`bd create --parent` argv on the
+			// ApprovePlan path (queryExistingChildren / createBeadsFromParsed).
+			// Validate before returning it as an authority-bearing id, mirroring
+			// phase.Cache.FindEpicBySpecID's RETURN gate (cache.go). A malformed
+			// bd-minted id is treated as no-match (no bd-minted exemption).
+			if idvalidate.BeadID(epic.ID) != nil {
+				continue
+			}
 			return epic.ID, nil
 		}
 	}
@@ -375,7 +392,9 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
+	// specID already validated at the top of ApprovePlan (validate.SpecID
+	// == idvalidate.SpecID), so this waist call cannot fail.
+	specWtPath, _ := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		// R4: specWtPath is a DISPLAY position here (not the `cd` operand,
@@ -459,6 +478,13 @@ func updatePlanApprovalAt(planPath, approvedBy string, now time.Time) error {
 // (spec 119 AC-20: a best-effort `bd dep add` failure surfaces here instead
 // of a silent `continue`).
 func createImplementationBeads(planPath, specID, parentID string) ([]string, []string, error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): parentID feeds the bead-create
+	// `--parent` argv build (below) and the `bd dep add`/existing-children
+	// queries this function drives — validate BEFORE any bd spawn. A
+	// well-formed epic id (the common case) passes for free.
+	if err := idvalidate.BeadID(parentID); err != nil {
+		return nil, nil, fmt.Errorf("invalid parent epic id %s: %w", parentID, err)
+	}
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading plan: %w", err)
@@ -600,6 +626,14 @@ func createBeadsFromParsed(specDir, specID, parentID, planContent string, sectio
 		if err := json.Unmarshal(out, &created); err != nil {
 			return beadIDs, warnings, beadCreateFailure(specID, sec.Heading, beadIDs, args,
 				fmt.Errorf("parsing create output: %w", err))
+		}
+		// Gate-all-ids (ADR-0042 §1, round 9): bd is agent-writable at
+		// every consumer — even a just-created bead's own id — so the
+		// freshly-minted id is validated before it feeds the `bd dep add`
+		// argv below or is composed into a branch/worktree name downstream.
+		if err := idvalidate.BeadID(created.ID); err != nil {
+			return beadIDs, warnings, beadCreateFailure(specID, sec.Heading, beadIDs, args,
+				fmt.Errorf("bd create returned an invalid bead id %s: %w", created.ID, err))
 		}
 
 		beadIDs = append(beadIDs, created.ID)
@@ -821,6 +855,14 @@ func supersedeCloseExistingBeads(children []existingChildBead, planContent strin
 	reason := fmt.Sprintf("superseded by plan v%s", version)
 	var ids []string
 	for _, c := range children {
+		// Gate-all-ids (ADR-0042 §1, round 9): c.ID is bd-sourced
+		// (bd list --parent) and therefore agent-writable — validate
+		// BEFORE it enters the `bd close` argv. This is a mutation, so a
+		// malformed id refuses the whole supersede rather than silently
+		// dropping it (which would close an incomplete/wrong set).
+		if err := idvalidate.BeadID(c.ID); err != nil {
+			return fmt.Errorf("existing child bead has an invalid id %s: %w", c.ID, err)
+		}
 		ids = append(ids, c.ID)
 	}
 	args := append([]string{"close"}, ids...)

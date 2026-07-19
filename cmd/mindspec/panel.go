@@ -464,8 +464,14 @@ func panelBeadWorktreePath(beadID string) func() string {
 		if err != nil {
 			return ""
 		}
-		expectedName := workspace.BeadWorktreeName(beadID)
-		expectedBranch := workspace.BeadBranch(beadID)
+		// Best-effort lookup: a malformed beadID (panel.json is
+		// agent-writable) simply matches nothing below rather than
+		// composing a hostile name (ADR-0042 degrade-vs-error policy).
+		expectedName, nameErr := workspace.BeadWorktreeName(beadID)
+		expectedBranch, branchErr := workspace.BeadBranch(beadID)
+		if nameErr != nil && branchErr != nil {
+			return ""
+		}
 		for _, e := range entries {
 			if e.Name == expectedName || e.Branch == expectedBranch {
 				return e.Path

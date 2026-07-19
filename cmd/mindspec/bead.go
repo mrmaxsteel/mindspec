@@ -6,6 +6,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -52,6 +54,15 @@ var beadWorktreeCmd = &cobra.Command{
 		beadID := args[0]
 		create, _ := cmd.Flags().GetBool("create")
 
+		// R3 explicit-ingress early gate (ADR-0042, AC-6): a malformed
+		// beadID refuses HERE, before any composition.
+		if err := idvalidate.BeadID(beadID); err != nil {
+			return guard.NewFailure(
+				fmt.Sprintf("%s is not a valid bead ID: %v", termsafe.Escape(beadID), err),
+				"bd ready   (pick a listed bead ID and re-run)",
+			)
+		}
+
 		root, err := findRoot()
 		if err != nil {
 			return err
@@ -63,8 +74,8 @@ var beadWorktreeCmd = &cobra.Command{
 		}
 
 		if create {
-			wtName := workspace.BeadWorktreeName(beadID)
-			branchName := workspace.BeadBranch(beadID)
+			wtName, _ := workspace.BeadWorktreeName(beadID)
+			branchName, _ := workspace.BeadBranch(beadID)
 			if err := bead.WorktreeCreate(wtName, branchName); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
@@ -79,8 +90,8 @@ var beadWorktreeCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(2)
 			}
-			expectedName := workspace.BeadWorktreeName(beadID)
-			expectedBranch := workspace.BeadBranch(beadID)
+			expectedName, _ := workspace.BeadWorktreeName(beadID)
+			expectedBranch, _ := workspace.BeadBranch(beadID)
 			found := false
 			for _, e := range entries {
 				if e.Name == expectedName || e.Branch == expectedBranch {

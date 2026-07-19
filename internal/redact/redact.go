@@ -177,6 +177,7 @@ var SubcommandTokens = map[string]struct{}{
 	"show":             {},
 	"source":           {},
 	"spec":             {}, // approve spec / bead spec / validate spec
+	"spec-title":       {}, // repair spec-title (spec 120 R3 lever)
 	"start":            {},
 	"status":           {},
 	"summary":          {},

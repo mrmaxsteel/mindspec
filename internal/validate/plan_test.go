@@ -2010,3 +2010,55 @@ func writeCanonicalADRWithDomains(t *testing.T, root, id, status, domains string
 		t.Fatalf("write canonical adr: %v", err)
 	}
 }
+
+// TestValidatePlanMalformedBeadIDsZeroBD is spec 120 AC-26 (R2 class-2
+// CONSUMER boundary + validate leg, round 7 G2): a plan.md whose
+// frontmatter carries bead_ids: ["--help", "x;evil"] performs ZERO bd
+// invocation via mindspec validate plan — asserted here by starving PATH
+// of any `bd` binary so a hidden spawn attempt would surface as a loud
+// "executable file not found" error/warning rather than silently
+// succeeding; each malformed entry reports the existing bead-id-missing
+// validation error (idvalidate.BeadID gates bead.BeadExists into
+// not-found-by-construction, internal/bead's own consumer boundary) with
+// the value never rendered raw. A well-formed dotted-child bead_ids list
+// validates byte-identically to today through the same seam (still
+// bead-id-missing here since the fixture bead doesn't exist in bd, but
+// crucially NOT a "cannot verify" bd-unavailable warning — proving the
+// gate, not a PATH failure, produced the result for the CLEAN id too;
+// the malformed ids must show the SAME missing-by-construction shape,
+// not a distinguishable exec-failure shape).
+func TestValidatePlanMalformedBeadIDsZeroBD(t *testing.T) {
+	// Starve PATH: any real `bd` exec attempt fails loudly with "exec:
+	// \"bd\": executable file not found in $PATH" rather than silently
+	// working — the discriminator that proves no spawn occurred.
+	t.Setenv("PATH", t.TempDir())
+
+	r := &Result{}
+	checkBeadIDs(r, []string{"--help", "x;evil"})
+
+	for _, issue := range r.Issues {
+		if issue.Severity == SevWarning && strings.Contains(issue.Message, "executable file not found") {
+			t.Fatalf("a bd spawn was attempted (PATH-starved exec failure surfaced): %s", issue.Message)
+		}
+	}
+	if len(r.Issues) != 2 {
+		t.Fatalf("expected exactly 2 issues (one per malformed id), got %d: %+v", len(r.Issues), r.Issues)
+	}
+	for _, issue := range r.Issues {
+		if issue.Name != "bead-id-missing" {
+			t.Errorf("expected bead-id-missing (not-found-by-construction), got [%s] %s: %s", issue.Severity, issue.Name, issue.Message)
+		}
+	}
+
+	// Clean dotted-child bead_ids reaches the SAME bead.BeadExists seam
+	// unblocked — under PATH-starvation it genuinely attempts the bd
+	// spawn (and fails, reported as a "cannot verify ... Beads
+	// unavailable" warning, never a validation error): the discriminator
+	// showing the gate does NOT short-circuit a well-formed id the way it
+	// short-circuits a malformed one above.
+	r2 := &Result{}
+	checkBeadIDs(r2, []string{"mindspec-9cyu.1"})
+	if len(r2.Issues) != 1 || r2.Issues[0].Severity != SevWarning || r2.Issues[0].Name != "bead-id-check" {
+		t.Fatalf("expected the clean dotted-child id to reach a real (PATH-starved) bd spawn attempt, reported as a bead-id-check warning; got: %+v", r2.Issues)
+	}
+}

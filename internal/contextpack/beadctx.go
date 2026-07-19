@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -39,6 +40,13 @@ type beadShowEntry struct {
 // SHA-256 Provenance block. RenderBeadContext is preserved for byte-identical
 // output when `mindspec context bead <id>` is invoked without `--max-tokens`.
 func RenderBeadContext(beadID string) (string, error) {
+	// R3-gated CLI ingress + gate-all-ids (ADR-0042 §1, round 7): beadID
+	// feeds a `bd show` argv build directly — validate BEFORE any bd
+	// spawn.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		// R4: the id just FAILED validation — render it forced-quoted.
+		return "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
+	}
 	out, err := beadShowFn("show", beadID, "--json")
 	if err != nil {
 		return "", fmt.Errorf("fetching bead %s: %w", beadID, err)

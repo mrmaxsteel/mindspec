@@ -116,3 +116,36 @@ func TestIsMainCWD(t *testing.T) {
 		t.Error("expected IsMainCWD to return true")
 	}
 }
+
+// TestGuardStateIgnoresMalformedWorktreeDirs is spec 120 AC-5's companion:
+// guard's ActiveWorktree/spec-worktree composition never panics or matches
+// on a malformed ActiveSpec value (the defense-in-depth degrade this
+// package applies on top of D2's workspace.DetectWorktreeContext gate,
+// which already prevents ActiveSpec from ever legitimately holding a
+// hostile worktree-dir-derived value). A malformed ActiveSpec simply fails
+// the "also allow spec worktree" CWD check rather than composing a hostile
+// path.
+func TestGuardStateIgnoresMalformedWorktreeDirs(t *testing.T) {
+	stubGuard(t)
+	readGuardStateFn = func(root string) (*guardState, error) {
+		return &guardState{
+			ActiveSpec:     "x;evil",
+			ActiveWorktree: "/repo/.worktrees/worktree-bead-abc",
+		}, nil
+	}
+	getwdFn = func() (string, error) { return "/repo", nil }
+
+	err := CheckCWD("/repo")
+	if err == nil {
+		t.Fatal("expected error when CWD is main and worktree is active")
+	}
+	// The malformed ActiveSpec must not have been silently accepted as a
+	// second valid CWD location — the failure still names the real
+	// ActiveWorktree, never a path composed from "x;evil".
+	if strings.Contains(err.Error(), "x;evil") {
+		t.Errorf("guard failure embedded the malformed ActiveSpec raw: %v", err)
+	}
+	if !strings.Contains(err.Error(), "worktree-bead-abc") {
+		t.Errorf("expected failure to still name the real active worktree, got: %v", err)
+	}
+}

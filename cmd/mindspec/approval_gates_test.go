@@ -207,10 +207,13 @@ func TestApproveAliasSubcommandsStillRoute(t *testing.T) {
 	// DQ-3: the hidden deprecated alias keeps working. Run outside any
 	// workspace: reaching the workspace-not-found error proves the
 	// alias resolved to the real RunE instead of the unknown-target
-	// path.
-	out, err := runBinary(t, bin, t.TempDir(), "approve", "impl", "some-spec")
+	// path. The spec-id-shaped "999-some-spec" (spec 120 R3: a
+	// non-spec-ID-shaped value would now refuse at the CLI surface
+	// BEFORE findRoot ever runs) passes the early ingress gate and
+	// reaches the workspace-lookup failure this test actually probes.
+	out, err := runBinary(t, bin, t.TempDir(), "approve", "impl", "999-some-spec")
 	if err == nil {
-		t.Fatalf("mindspec approve impl some-spec outside a workspace: expected non-zero exit\n%s", out)
+		t.Fatalf("mindspec approve impl 999-some-spec outside a workspace: expected non-zero exit\n%s", out)
 	}
 	if !strings.Contains(out, "workspace not found") {
 		t.Errorf("expected `approve impl` to route to the implementation gate (workspace-not-found error), got\n--- output ---\n%s\n--- end ---", out)

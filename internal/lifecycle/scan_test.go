@@ -208,13 +208,13 @@ func stubScanBDLayer(t *testing.T, epicJSON, openJSON string) {
 // instruct suite green. This test goes RED if the leg is removed.
 func TestScanIntegrityFindings_StaleOpenActiveEpic(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
 	stubScanBDLayer(t,
 		`[{"id":"epic-1","title":"[SPEC 119-test] fixture","status":"in_progress","issue_type":"epic","metadata":{"spec_num":119,"spec_title":"test"}}]`,
 		`[
 			{"id":"epic-1","title":"[SPEC 119-test] fixture","status":"in_progress","issue_type":"epic"},
-			{"id":"one","title":"landed but still open","status":"open","issue_type":"task","parent":"epic-1"}
+			{"id":"bead-one","title":"landed but still open","status":"open","issue_type":"task","parent":"epic-1"}
 		]`,
 	)
 	// Healthy git side otherwise: no carriers, and main's export is not
@@ -227,13 +227,13 @@ func TestScanIntegrityFindings_StaleOpenActiveEpic(t *testing.T) {
 		t.Fatalf("the aggregate MUST report the landed-but-open bead, got %+v", findings.StaleOpen)
 	}
 	got := findings.StaleOpen[0]
-	if got.BeadID != "one" || got.SpecBranch != "spec/119-test" || got.LandedSHA == "" {
+	if got.BeadID != "bead-one" || got.SpecBranch != "spec/119-test" || got.LandedSHA == "" {
 		t.Errorf("finding fields wrong: %+v", got)
 	}
 	// Message parity with the single-home predicate (AC-15/P8): the
 	// aggregate result must be byte-identical to FindStaleOpenBeads' for
 	// the same repo state.
-	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "one", Status: "open"}}, nil)
+	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "bead-one", Status: "open"}}, nil)
 	want, err := FindStaleOpenBeads("119-test", dir)
 	if err != nil || len(want) != 1 {
 		t.Fatalf("predicate cross-check failed: %v %v", want, err)

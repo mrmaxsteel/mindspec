@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
 // Naming conventions for branches and worktree directories.
@@ -35,29 +36,66 @@ const (
 )
 
 // SpecBranch returns the canonical branch name for a spec.
-// Pure naming convention — no config dependency.
-func SpecBranch(specID string) string { return SpecBranchPrefix + specID }
+// Pure naming convention — no config dependency. Validates specID via
+// idvalidate.SpecID and fails closed (the SpecDir SEC-1 precedent, ADR-0042):
+// no caller can obtain a composed branch name from an invalid ID.
+func SpecBranch(specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", err
+	}
+	return SpecBranchPrefix + specID, nil
+}
 
 // BeadBranch returns the canonical branch name for a bead.
-// Pure naming convention — no config dependency.
-func BeadBranch(beadID string) string { return BeadBranchPrefix + beadID }
+// Pure naming convention — no config dependency. Validates beadID via
+// idvalidate.BeadID and fails closed (ADR-0042 composition waist).
+func BeadBranch(beadID string) (string, error) {
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return "", err
+	}
+	return BeadBranchPrefix + beadID, nil
+}
 
 // SpecWorktreeName returns the directory basename for a spec worktree
-// (e.g. "worktree-spec-053-foo"). Pure naming convention.
-func SpecWorktreeName(specID string) string { return SpecWorktreePrefix + specID }
+// (e.g. "worktree-spec-053-foo"). Pure naming convention. Validates
+// specID via idvalidate.SpecID and fails closed (ADR-0042).
+func SpecWorktreeName(specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", err
+	}
+	return SpecWorktreePrefix + specID, nil
+}
 
 // BeadWorktreeName returns the directory basename for a bead worktree
-// (e.g. "worktree-mindspec-c8q0"). Pure naming convention.
-func BeadWorktreeName(beadID string) string { return BeadWorktreePrefix + beadID }
+// (e.g. "worktree-mindspec-c8q0"). Pure naming convention. Validates
+// beadID via idvalidate.BeadID and fails closed (ADR-0042).
+func BeadWorktreeName(beadID string) (string, error) {
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return "", err
+	}
+	return BeadWorktreePrefix + beadID, nil
+}
 
 // FinalizeBranch returns bug wu7t's from-main finalize-carrier branch name
 // for a spec (e.g. "chore/finalize-053-foo"). Pure naming convention.
-func FinalizeBranch(specID string) string { return FinalizeBranchPrefix + specID }
+// Validates specID via idvalidate.SpecID and fails closed (ADR-0042).
+func FinalizeBranch(specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", err
+	}
+	return FinalizeBranchPrefix + specID, nil
+}
 
 // FinalizeWorktreeName returns the directory basename for bug wu7t's
 // TEMPORARY finalize worktree (e.g. "worktree-finalize-053-foo"). Pure
-// naming convention.
-func FinalizeWorktreeName(specID string) string { return FinalizeWorktreePrefix + specID }
+// naming convention. Validates specID via idvalidate.SpecID and fails
+// closed (ADR-0042).
+func FinalizeWorktreeName(specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", err
+	}
+	return FinalizeWorktreePrefix + specID, nil
+}
 
 // WorktreesDir returns the absolute worktrees-root directory path under
 // root, honoring cfg.WorktreeRoot. If cfg is nil the default config is
@@ -79,21 +117,37 @@ func DefaultWorktreesDir(root string) string {
 
 // SpecWorktreePath returns the absolute spec worktree path under root,
 // honoring cfg.WorktreeRoot. If cfg is nil the default config is used.
-func SpecWorktreePath(root string, cfg *config.Config, specID string) string {
-	return filepath.Join(WorktreesDir(root, cfg), SpecWorktreeName(specID))
+// Validates specID via idvalidate.SpecID (through SpecWorktreeName) and
+// fails closed (ADR-0042).
+func SpecWorktreePath(root string, cfg *config.Config, specID string) (string, error) {
+	name, err := SpecWorktreeName(specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(WorktreesDir(root, cfg), name), nil
 }
 
 // BeadWorktreePath returns the absolute bead worktree path nested
 // under its spec worktree. cfg.WorktreeRoot controls the nested
 // worktrees-root directory name. If cfg is nil the default config is
-// used.
-func BeadWorktreePath(specWorktree string, cfg *config.Config, beadID string) string {
-	return filepath.Join(WorktreesDir(specWorktree, cfg), BeadWorktreeName(beadID))
+// used. Validates beadID via idvalidate.BeadID (through BeadWorktreeName)
+// and fails closed (ADR-0042).
+func BeadWorktreePath(specWorktree string, cfg *config.Config, beadID string) (string, error) {
+	name, err := BeadWorktreeName(beadID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(WorktreesDir(specWorktree, cfg), name), nil
 }
 
 // FinalizeWorktreePath returns the absolute path to bug wu7t's TEMPORARY
 // finalize worktree under root, honoring cfg.WorktreeRoot. If cfg is nil
-// the default config is used.
-func FinalizeWorktreePath(root string, cfg *config.Config, specID string) string {
-	return filepath.Join(WorktreesDir(root, cfg), FinalizeWorktreeName(specID))
+// the default config is used. Validates specID via idvalidate.SpecID
+// (through FinalizeWorktreeName) and fails closed (ADR-0042).
+func FinalizeWorktreePath(root string, cfg *config.Config, specID string) (string, error) {
+	name, err := FinalizeWorktreeName(specID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(WorktreesDir(root, cfg), name), nil
 }

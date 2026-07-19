@@ -115,7 +115,9 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
+	// specID already validated at the top of ApproveSpec (validate.SpecID
+	// == idvalidate.SpecID), so this waist call cannot fail.
+	specWtPath, _ := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
 		// R4: specWtPath is a DISPLAY position here (not the `cd` operand,

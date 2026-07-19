@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -30,6 +31,12 @@ import (
 // open/in_progress children (mirroring orphans.go's listClosedBeadsFn seam
 // pattern) so FindStaleOpenBeads is unit-testable without a live `bd`.
 var listOpenBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 8/9): epicID feeds a
+	// `bd list --parent` argv build directly — validate BEFORE any bd
+	// spawn, ZERO bd argv on a malformed id.
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+	}
 	out, err := bead.RunBD("list", "--parent", epicID, "--status=open,in_progress", "--json")
 	if err != nil {
 		return nil, err
@@ -125,7 +132,12 @@ func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 // the beads whose work provably landed. Best-effort: an ancestry/read
 // error on one bead must not abort the scan for the rest.
 func staleOpenLanded(workdir, specID string, beadIDs []string) []StaleOpenBead {
-	specBranch := workspace.SpecBranch(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		// Best-effort ambient scan: an invalid specID yields no findings
+		// rather than a hard error (ADR-0042 degrade-vs-error policy).
+		return nil
+	}
 	var out []StaleOpenBead
 	for _, id := range beadIDs {
 		landed, ok, mErr := MergedUnclosed(workdir, specBranch, id)

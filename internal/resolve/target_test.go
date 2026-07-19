@@ -182,6 +182,44 @@ func TestResolveSpecPrefix_NoMatch(t *testing.T) {
 	}
 }
 
+// TestResolveSpecPrefixValidatesResult is spec 120 AC-7 (R3 specID
+// ingress): a hyphen-bearing hostile value REFUSES with the
+// `mindspec spec list` lever instead of passing through raw; numeric-
+// prefix resolution and every live spec ID incl. "008b-human-gates" pass
+// byte-identically.
+func TestResolveSpecPrefixValidatesResult(t *testing.T) {
+	hostileIDs := []string{
+		"x;evil",
+		"../../outside",
+		"x\x00\x1b[31m\nrecovery: forged",
+	}
+	for _, hostile := range hostileIDs {
+		got, err := ResolveSpecPrefix(hostile)
+		if err == nil {
+			t.Errorf("ResolveSpecPrefix(%q) = (%q, nil), want a refusal", hostile, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "mindspec spec list") {
+			t.Errorf("ResolveSpecPrefix(%q) error must name the `mindspec spec list` lever, got: %v", hostile, err)
+		}
+	}
+
+	// A non-hyphenated, non-numeric hostile value (e.g. "--help") also
+	// refuses via the same result-validation gate.
+	if got, err := ResolveSpecPrefix("--help"); err == nil {
+		t.Errorf("ResolveSpecPrefix(--help) = (%q, nil), want a refusal", got)
+	}
+
+	// Clean values pass byte-identically.
+	if got, err := ResolveSpecPrefix("008b-human-gates"); err != nil || got != "008b-human-gates" {
+		t.Errorf("ResolveSpecPrefix(008b-human-gates) = (%q, %v), want (008b-human-gates, nil)", got, err)
+	}
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+	if got, err := ResolveSpecPrefix("077"); err != nil || got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefix(077) = (%q, %v), want (077-execution-layer-interface, nil)", got, err)
+	}
+}
+
 func TestResolveTarget_PrefixResolution(t *testing.T) {
 	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
 

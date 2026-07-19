@@ -430,6 +430,29 @@ func TestCompleteBead_MergesAndCleans(t *testing.T) {
 	}
 }
 
+// TestCompleteBeadRejectsMalformedSpecBranch is spec 120 AC-23
+// (internal/executor): CompleteBead with a spec/-prefixed branch whose
+// suffix fails idvalidate.SpecID refuses before any merge/worktree
+// operation — the branch is an explicit CompleteBead argument (an
+// agent-writable string, not necessarily waist-composed), and this is an
+// EXPLICIT verb, so it must refuse rather than silently compose a hostile
+// spec-worktree path.
+func TestCompleteBeadRejectsMalformedSpecBranch(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "bead/mindspec-x.1")
+
+	err := g.CompleteBead("mindspec-x.1", "spec/x;evil", "")
+	if err == nil {
+		t.Fatal("expected a refusal for a spec branch whose suffix fails idvalidate.SpecID")
+	}
+	if len(fake.removeCalls) != 0 {
+		t.Errorf("expected NO worktree removal, got %v", fake.removeCalls)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-x.1") {
+		t.Error("bead branch must be preserved on the refusal (no cleanup attempted)")
+	}
+}
+
 func TestCompleteBead_WorktreeRemoveRunsFromRepoRoot(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 

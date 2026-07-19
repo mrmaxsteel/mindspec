@@ -221,3 +221,73 @@ func TestFinalizeEpic_WorktreeListErrorAbortsBeforeAnyMutation(t *testing.T) {
 		t.Errorf("spec branch must be unchanged when List() fails; was %s, now %s", specHashBefore, got)
 	}
 }
+
+// TestFinalizeEpic_SkipsMalformedBeadBranchEntry is spec 120 AC-23 (the
+// reverse-derivation gate at BOTH the auto-merge leg and the
+// worktree/branch cleanup leg): a hostile bead/x;evil-shaped worktree
+// entry is skipped — never auto-merged, cleaned, or embedded as an ID —
+// while a clean dotted-child entry (bead/mindspec-scope.1) processes
+// byte-identically.
+func TestFinalizeEpic_SkipsMalformedBeadBranchEntry(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "spec/119-scope2")
+
+	specWtPath := filepath.Join(dir, ".worktrees", "worktree-spec-119-scope2")
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/119-scope2")
+
+	lifecycleWt := plantBeadWorktree(t, dir, "bead/mindspec-scope.1", "lifecycle.txt")
+	// A hostile-shaped bead branch — its TrimPrefix-derived "beadID" would
+	// be "x;evil", which fails idvalidate.BeadID.
+	hostileWt := plantBeadWorktree(t, dir, "bead/x;evil", "hostile.txt")
+
+	fake.listEntries = []bead.WorktreeListEntry{
+		{Name: "worktree-mindspec-scope.1", Path: lifecycleWt, Branch: "bead/mindspec-scope.1"},
+		{Name: "worktree-x;evil", Path: hostileWt, Branch: "bead/x;evil"},
+	}
+	fake.onRemove = func(name string) {
+		p := map[string]string{
+			"worktree-mindspec-scope.1": lifecycleWt,
+			"worktree-spec-119-scope2":  specWtPath,
+		}[name]
+		if p != "" {
+			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", p).Run()
+		}
+	}
+
+	// The allow-set intentionally includes the literal "x;evil" — even a
+	// same-named allow-set entry must not admit the hostile branch,
+	// because the reverse-derivation gate discards it BEFORE the
+	// allow-set membership check ever runs.
+	result, err := g.FinalizeEpic("epic-1", "119-scope2", "spec/119-scope2", []string{"mindspec-scope.1", "x;evil"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MergeStrategy != "direct" {
+		t.Fatalf("MergeStrategy = %q, want direct", result.MergeStrategy)
+	}
+
+	// The clean lifecycle bead's work reached main and was cleaned up.
+	if _, statErr := os.Stat(filepath.Join(dir, "lifecycle.txt")); statErr != nil {
+		t.Errorf("lifecycle bead's content must reach main: %v", statErr)
+	}
+	if branchExistsIn(t, dir, "bead/mindspec-scope.1") {
+		t.Error("lifecycle bead branch must be deleted after finalize")
+	}
+
+	// The hostile branch's content must NEVER reach main (never merged)
+	// and its branch/worktree must survive untouched (never cleaned up).
+	if _, statErr := os.Stat(filepath.Join(dir, "hostile.txt")); !os.IsNotExist(statErr) {
+		t.Error("hostile bead branch's content must NEVER reach main (never auto-merged)")
+	}
+	if !branchExistsIn(t, dir, "bead/x;evil") {
+		t.Error("hostile bead branch must be preserved (never cleaned up)")
+	}
+	for _, name := range fake.removeCalls {
+		if name == "worktree-x;evil" {
+			t.Error("the hostile worktree must never be removed")
+		}
+	}
+}

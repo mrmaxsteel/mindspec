@@ -38,9 +38,14 @@ func TestRenderBeadContextHostileTitleEscaped(t *testing.T) {
 	malformedID := "120-x;evil"
 
 	t.Run("RenderBeadContext", func(t *testing.T) {
+		// Spec 120 Bead 2's gate-all-ids ingress gate refuses a malformed
+		// beadID BEFORE any bd spawn or render; Bead 5's R4 discipline
+		// still applies to the refusal itself — the failed id renders
+		// forced-quoted in the error, never raw.
+		validID := "mindspec-9cyu.1"
 		restore := SetBeadShowForTest(func(args ...string) ([]byte, error) {
 			entry := []beadShowEntry{{
-				ID:    malformedID,
+				ID:    validID,
 				Title: hostileTitle,
 				Metadata: map[string]interface{}{
 					"file_paths": []interface{}{"internal/widget" + hostileFieldSuffix + ".go"},
@@ -50,14 +55,20 @@ func TestRenderBeadContextHostileTitleEscaped(t *testing.T) {
 		})
 		defer restore()
 
-		rendered, err := RenderBeadContext(malformedID)
+		if _, err := RenderBeadContext(malformedID); err == nil {
+			t.Fatal("expected the ingress gate to refuse a malformed bead id")
+		} else {
+			assertCleanRender(t, err.Error())
+			if !strings.Contains(err.Error(), strconv.Quote(malformedID)) {
+				t.Errorf("expected the malformed bead id forced-quoted in the refusal, got: %v", err)
+			}
+		}
+
+		rendered, err := RenderBeadContext(validID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		assertCleanRender(t, rendered)
-		if !strings.Contains(rendered, strconv.Quote(malformedID)) {
-			t.Errorf("expected the malformed bead id forced-quoted, got: %s", rendered)
-		}
 	})
 
 	t.Run("RenderBeadContext clean-fixture byte-identity", func(t *testing.T) {

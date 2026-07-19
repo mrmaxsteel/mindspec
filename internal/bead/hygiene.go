@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -159,6 +160,13 @@ func FixHygiene(dryRun bool) ([]string, error) {
 			if dryRun {
 				actions = append(actions, "[dry-run] would "+action)
 			} else {
+				// Class-2 consumer boundary (ADR-0042 §1, AC-26): b.ID is
+				// bd-sourced (bd list --status=open) and therefore
+				// agent-writable — validate BEFORE the `bd update
+				// --status` argv spawn.
+				if err := idvalidate.BeadID(b.ID); err != nil {
+					return actions, fmt.Errorf("bead %s has an invalid id, refusing to update its status: %w", b.ID, err)
+				}
 				if _, err := RunBDCombined("update", b.ID, "--status=closed"); err != nil {
 					return actions, fmt.Errorf("closing %s: %w", idrender.Bead(b.ID), err)
 				}

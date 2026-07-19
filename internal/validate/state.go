@@ -9,6 +9,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -197,6 +199,15 @@ func validateReviewMode(root string, s *state.Focus) []Warning {
 // in a future Cache extension. On JSON parse failure we fall back to the same
 // "Could not verify bead" warning as before.
 func checkBeadStatus(beadID string) string {
+	// Gate-all-ids (ADR-0042 §1, round 7): beadID (fed by agent-writable
+	// state.json's ActiveBead) feeds a `bd show` argv build directly —
+	// validated BEFORE any bd spawn, no spawn on a malformed id.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		// R4/gate-all-ids: beadID just failed idvalidate — render it forced-safe
+		// (idrender.Bead), matching every other gate refusal, so a malformed
+		// agent-writable ActiveBead can't forge a terminal line in the refusal.
+		return fmt.Sprintf("Could not verify bead %s via bd: %v", idrender.Bead(beadID), err)
+	}
 	output, err := bead.RunBD("show", beadID, "--json")
 	if err != nil {
 		// bd not available or bead not found — non-fatal
