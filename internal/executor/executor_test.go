@@ -118,7 +118,33 @@ func newRepoExecutor(t *testing.T) (*MindspecExecutor, *fakeWorktreeOps, string)
 		Root:        dir,
 		WorktreeOps: fake,
 	}
+	stubMergeBindingSeams(t)
 	return g, fake, dir
+}
+
+// stubMergeBindingSeams installs an in-memory, bd-free default for the
+// merge-time landed-binding seams (spec 121 Bead 2): CompleteBead and
+// FinalizeEpic's auto-merge loop now write a landed-merge binding via
+// mergeBindingFn immediately after every real merge, before cleanup — the
+// production default (bead.MergeMetadata/bead.GetMetadata) shells out to a
+// real `bd` process, which none of these throwaway git fixtures are
+// tracked by. Every test built on newRepoExecutor gets a SUCCEEDING
+// in-memory stub by default (the "already bound" read stays absent, so
+// ensureLandedBinding always attempts — and succeeds at — the write) so
+// pre-121 merge/cleanup assertions are unaffected; a test that wants to
+// exercise the AC-22 fail-closed kill path reassigns mergeBindingFn itself
+// after this call (this function's own t.Cleanup restores the production
+// default afterward regardless of what a test later re-assigns).
+func stubMergeBindingSeams(t *testing.T) {
+	t.Helper()
+	origWrite := mergeBindingFn
+	origRead := mergeBindingReadFn
+	t.Cleanup(func() {
+		mergeBindingFn = origWrite
+		mergeBindingReadFn = origRead
+	})
+	mergeBindingFn = func(string, map[string]interface{}) error { return nil }
+	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 }
 
 // --- Interface compliance ---

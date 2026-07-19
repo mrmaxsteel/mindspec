@@ -65,13 +65,25 @@ func TestFindStaleOpenBeads_Flagged_BranchSurvives(t *testing.T) {
 }
 
 // TestFindStaleOpenBeads_Flagged_BranchDeleted: the merge landed and the
-// bead branch was subsequently deleted (mindspec complete's best-effort
-// cleanup) — still flagged from the spec branch's own history alone.
+// bead branch was subsequently deleted (mindspec complete's cleanup) —
+// still flagged from the spec branch's own history, confirmed by the
+// merge-time landed-binding (spec 121 R5(b)) that CompleteBead's fail-
+// closed binding write records BEFORE that same cleanup runs — the
+// post-121 invariant this fixture must now reproduce, since cleanup is
+// suppressed whenever that write fails (AC-11: the subject text alone is
+// no longer sufficient once the branch is gone with no other datum).
 func TestFindStaleOpenBeads_Flagged_BranchDeleted(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	beadTip := revParseIn(t, dir, "bead/bead-one")
 	run("branch", "-D", "bead/bead-one")
 	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "bead-one", Status: "in_progress"}}, nil)
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_second_parent": beadTip}, nil
+	}
 
 	found, err := FindStaleOpenBeads("119-test", dir)
 	if err != nil {
