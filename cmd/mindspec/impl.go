@@ -123,7 +123,7 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		SupersedeADR: supersedeADR,
 	})
 
-	if tailErr := implApproveTail(os.Stdout, os.Stderr, root, invocationCwd, specID, result, approveErr, emitInstruct); tailErr != nil {
+	if tailErr := implApproveTail(os.Stdout, os.Stderr, root, invocationCwd, specID, cfg, result, approveErr, emitInstruct); tailErr != nil {
 		os.Exit(1)
 	}
 	return nil
@@ -147,7 +147,7 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 //     as the LAST line of stdout.
 //
 // Returns approveErr unchanged so the caller owns the exit code (HC-4).
-func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID string, result *approve.ImplResult, approveErr error, instructFn func(string) error) error {
+func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID string, cfg *config.Config, result *approve.ImplResult, approveErr error, instructFn func(string) error) error {
 	if chdirErr := os.Chdir(root); chdirErr != nil {
 		fmt.Fprintf(stderr, "warning: could not chdir to repo root %s: %v\n", root, chdirErr)
 	}
@@ -195,6 +195,13 @@ func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID strin
 			fmt.Fprintf(stdout, "Open and merge a PR from %s into main:\n", result.FinalizeBranch)
 			fmt.Fprintf(stdout, "  gh pr create --head %s --base main --title \"chore(beads): finalize epic for spec %s\" --body \"<description>\"\n", result.FinalizeBranch, specID)
 			fmt.Fprintf(stdout, "Until that PR merges, main's committed .beads/issues.jsonl is STALE: the bd post-merge hook will keep reverting the epic-close/bead-done state in Dolt on every subsequent merge/FF.\n")
+
+			// Spec 121 R1-R3 (mindspec-uxl4, ADR-0041 §4): automate the
+			// manual dance the NOTE above just described — auto-open (and,
+			// opt-in, auto-merge) the finalize PR. Strictly AFTER the
+			// finalize mutation chain above has durably completed; every
+			// failure degrades to the NOTE already printed, with exit 0.
+			runFinalizePRAutomation(stdout, stderr, cfg, specID, result.EpicID, result.FinalizeBranch)
 		}
 	}
 	fmt.Fprintln(stdout)

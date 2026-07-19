@@ -152,6 +152,14 @@ type ImplResult struct {
 	// executor.FinalizeResult.FinalizeBranch); empty on the normal,
 	// not-yet-merged path.
 	FinalizeBranch string
+
+	// EpicID is the finalizing spec's lifecycle epic id (spec 121 R1):
+	// populated whenever FinalizeBranch is set — it is the bounded result-
+	// surface addition the cmd-side finalize-PR automation's templated
+	// title (`chore(beads): finalize epic <epicID> for spec <specID>`)
+	// needs, since that automation consumes ImplResult rather than
+	// ApproveImpl's own local epicID variable.
+	EpicID string
 }
 
 // ApproveImpl transitions from review mode to idle, completing the spec lifecycle.
@@ -560,6 +568,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	result.DiffStat = fr.DiffStat
 	result.Pushed = (fr.MergeStrategy == "pr")
 	result.FinalizeBranch = fr.FinalizeBranch
+	result.EpicID = epicID
 
 	// Stop recording (best-effort — before transitioning to idle)
 	if err := recording.StopRecording(root, specID); err != nil {

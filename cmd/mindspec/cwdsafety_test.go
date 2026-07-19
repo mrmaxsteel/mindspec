@@ -87,7 +87,7 @@ func TestImplApproveTail_SuccessFromRemovedSpecWorktree(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	instructed := false
-	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x",
+	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x", nil,
 		&approve.ImplResult{SpecID: "091-x", SpecBranch: "spec/091-x", CommitCount: 2},
 		nil,
 		func(r string) error {
@@ -124,7 +124,7 @@ func TestImplApproveTail_SuccessNoNoteWhileCwdExists(t *testing.T) {
 	_, invocationCwd := chdirIntoDoomed(t, root, "alive")
 
 	var stdout, stderr bytes.Buffer
-	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x",
+	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x", nil,
 		&approve.ImplResult{SpecID: "091-x"},
 		nil,
 		func(string) error { fmt.Fprintln(&stdout, "instruct guidance line"); return nil })
@@ -152,7 +152,7 @@ func TestImplApproveTail_ErrorPathEmitsNoteOnStderr(t *testing.T) {
 	approveErr := errors.New("finalize: direct merge conflict")
 
 	var stdout, stderr bytes.Buffer
-	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x",
+	tailErr := implApproveTail(&stdout, &stderr, root, invocationCwd, "091-x", nil,
 		nil, // result is nil on error
 		approveErr,
 		func(string) error {

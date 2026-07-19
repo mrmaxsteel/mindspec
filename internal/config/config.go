@@ -15,13 +15,25 @@ import (
 
 // Config represents .mindspec/config.yaml settings.
 type Config struct {
-	ProtectedBranches []string      `yaml:"protected_branches"`
-	MergeStrategy     string        `yaml:"merge_strategy"`
-	WorktreeRoot      string        `yaml:"worktree_root"`
-	AutoFinalize      bool          `yaml:"auto_finalize"`
-	Enforcement       Enforcement   `yaml:"enforcement"`
-	Recording         Recording     `yaml:"recording"`
-	Decomposition     Decomposition `yaml:"decomposition"`
+	ProtectedBranches []string `yaml:"protected_branches"`
+	MergeStrategy     string   `yaml:"merge_strategy"`
+	WorktreeRoot      string   `yaml:"worktree_root"`
+	AutoFinalize      bool     `yaml:"auto_finalize"`
+	// AutoOpenFinalizePR and AutoMergeFinalizePR govern the spec 121
+	// finalize-PR automation (R1/R2, ADR-0041 §4): when `impl approve`'s
+	// finalize lands the epic-close export on a `chore/finalize-<specID>`
+	// carrier, AutoOpenFinalizePR (default true) auto-opens/adopts a PR
+	// from it into main; AutoMergeFinalizePR (default false — merging to
+	// main without a human is opt-in policy, never default) additionally
+	// auto-merges it on affirmative green checks with a true merge
+	// commit. Both absent-key defaults are backfilled by loadUncached's
+	// unmarshal-over-defaults pattern, mirroring Enforcement.PanelGate
+	// and AutoFinalize above. See cmd/mindspec/finalize_pr.go.
+	AutoOpenFinalizePR  bool          `yaml:"auto_open_finalize_pr"`
+	AutoMergeFinalizePR bool          `yaml:"auto_merge_finalize_pr"`
+	Enforcement         Enforcement   `yaml:"enforcement"`
+	Recording           Recording     `yaml:"recording"`
+	Decomposition       Decomposition `yaml:"decomposition"`
 
 	// SourceGlobs declares which path globs count as "source" for the
 	// doc-sync gate (spec 091 Req 11). OVERRIDE semantics: a non-empty
@@ -294,9 +306,11 @@ type Enforcement struct {
 // DefaultConfig returns a Config with all defaults applied.
 func DefaultConfig() *Config {
 	return &Config{
-		ProtectedBranches: []string{"main", "master"},
-		MergeStrategy:     "auto",
-		WorktreeRoot:      ".worktrees",
+		ProtectedBranches:   []string{"main", "master"},
+		MergeStrategy:       "auto",
+		WorktreeRoot:        ".worktrees",
+		AutoOpenFinalizePR:  true,
+		AutoMergeFinalizePR: false,
 		Enforcement: Enforcement{
 			PreCommitHook: true,
 			CLIGuards:     true,
