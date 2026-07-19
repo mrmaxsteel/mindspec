@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"gopkg.in/yaml.v3"
 )
 
@@ -126,7 +127,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	}
 
 	if err := exec.IsTreeClean(specWtPath); err != nil {
-		return nil, fmt.Errorf("spec worktree has uncommitted changes after spec approval: %w\n\ncd %s && git status", err, specWtPath)
+		return nil, fmt.Errorf("spec worktree has uncommitted changes after spec approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
 	}
 
 	// Step 4: Emit recording phase marker (best-effort)

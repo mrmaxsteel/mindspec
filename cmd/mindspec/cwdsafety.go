@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // captureInvocationCwd records the directory the shell invoked mindspec
@@ -41,6 +43,13 @@ func captureInvocationCwd() string {
 // (internal/harness/scenario_contract_hardening.go,
 // assertDoomedCompleteEmitsCdNote), which asserts the substring
 // "working directory was removed".
+//
+// root here is the trusted, operator-chosen repo root (a ROOT-ONLY sink,
+// R5/ADR-0042 §4): it is never subjected to containment.CheckContainment
+// and this function never refuses. It still routes through
+// containment.EmitCd for the same conditional shell-safe quoting every
+// other executable-`cd` render gets — defense-in-depth against a
+// metacharacter-bearing root, not a validation claim.
 func emitCdBackNote(w io.Writer, invocationCwd, root string) {
 	if invocationCwd == "" {
 		return
@@ -48,5 +57,5 @@ func emitCdBackNote(w io.Writer, invocationCwd, root string) {
 	if _, err := os.Stat(invocationCwd); err == nil {
 		return
 	}
-	fmt.Fprintf(w, "NOTE: your shell's working directory was removed — run: cd %s\n", root)
+	fmt.Fprintf(w, "NOTE: your shell's working directory was removed — run: %s\n", containment.EmitCd(root))
 }

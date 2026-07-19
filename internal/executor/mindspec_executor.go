@@ -14,7 +14,26 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
+
+// checkWorktreeContainment is the shared check-at-use gate (ADR-0042 §4,
+// AC-11) every composed-worktree-path create/chdir/mkdir site in this
+// package calls immediately before the actual filesystem/git operation.
+// root is the trusted repo root (g.Root, or the resolved spec-worktree
+// anchor once ITS OWN containment was already checked); composed is the
+// path about to be used. On failure it returns a guard-formatted refusal
+// naming the R5 convergent lever — never the raw composed path, which may
+// carry a hostile worktree_root byte-for-byte.
+func checkWorktreeContainment(root, composed string) error {
+	if err := containment.CheckContainment(root, composed); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing to use worktree path: %v", err),
+			containment.RejectionLever,
+		)
+	}
+	return nil
+}
 
 // WorktreeOps abstracts the bead worktree CLI surface so tests can run
 // orchestration logic without requiring `bd` on PATH. The default
@@ -107,9 +126,15 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 	specBranch := workspace.SpecBranch(specID)
 	wtName := workspace.SpecWorktreeName(specID)
 	wtPath := cfg.WorktreePath(g.Root, wtName)
+	wtRootPath := filepath.Join(g.Root, cfg.WorktreeRoot)
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed worktree-root directory immediately before creating it.
+	if err := checkWorktreeContainment(g.Root, wtRootPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Ensure .worktrees/ directory exists and is gitignored.
-	if err := os.MkdirAll(filepath.Join(g.Root, cfg.WorktreeRoot), 0o755); err != nil {
+	if err := os.MkdirAll(wtRootPath, 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
 	if err := gitutil.EnsureGitignoreEntry(g.Root, cfg.WorktreeRoot); err != nil {
@@ -127,6 +152,12 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 		}
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed spec-worktree path (G3's site — the PRIMARY spec-worktree
+	// create) immediately before WorktreeOps.Create.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Create worktree via beads CLI.
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
 	if err := g.WorktreeOps.Create(relWtPath, specBranch); err != nil {
@@ -205,6 +236,16 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	// Resolve anchor root: prefer spec worktree if it exists.
 	anchorRoot := g.resolveAnchorRoot(specID)
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): anchorRoot may be a composed
+	// spec-worktree path (resolveAnchorRoot returns one when it exists on
+	// disk) — re-validate its containment before chdir'ing into it below.
+	// A bare g.Root anchor is the trusted root and skips this (root-only).
+	if anchorRoot != g.Root {
+		if err := checkWorktreeContainment(g.Root, anchorRoot); err != nil {
+			return WorkspaceInfo{}, err
+		}
+	}
+
 	// Create bead branch from spec branch (or HEAD).
 	if !gitutil.BranchExists(branchName) {
 		if err := gitutil.CreateBranch(branchName, baseBranch); err != nil {
@@ -212,8 +253,14 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 		}
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed worktree-root directory immediately before creating it.
+	anchorWtRootPath := filepath.Join(anchorRoot, cfg.WorktreeRoot)
+	if err := checkWorktreeContainment(g.Root, anchorWtRootPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Ensure .worktrees/ directory and gitignore at the anchor root.
-	if err := os.MkdirAll(filepath.Join(anchorRoot, cfg.WorktreeRoot), 0o755); err != nil {
+	if err := os.MkdirAll(anchorWtRootPath, 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
 	if err := gitutil.EnsureGitignoreEntry(anchorRoot, cfg.WorktreeRoot); err != nil {
@@ -223,6 +270,11 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	// Create worktree under the anchor root.
 	wtName := workspace.BeadWorktreeName(beadID)
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed bead-worktree path immediately before WorktreeOps.Create.
+	if err := checkWorktreeContainment(g.Root, filepath.Join(anchorRoot, relWtPath)); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	if err := withWorkingDir(anchorRoot, func() error {
 		return g.WorktreeOps.Create(relWtPath, branchName)
 	}); err != nil {
@@ -753,6 +805,12 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", fmt.Errorf("creating %s from origin/main: %w", choreBranch, err)
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed finalize-worktree path immediately before creating its
+	// parent directory and before the git worktree add below.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
 		return "", fmt.Errorf("creating worktrees directory for %s: %w", choreBranch, err)
 	}
@@ -1192,7 +1250,7 @@ func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string,
 	fmt.Fprintf(&b, "\nnothing was removed: the %s branch, its worktree, and the spec worktree are preserved.", beadBranch)
 	fmt.Fprintf(&b, "\nresolve in the spec worktree (%s): re-run the merge there, fix the conflicts, commit the merge, then re-run the lifecycle command", specWtPath)
 	return guard.NewFailure(b.String(),
-		"cd "+specWtPath,
+		containment.EmitCd(specWtPath),
 		"git merge --no-ff "+beadBranch,
 		rerun,
 	)
@@ -1218,7 +1276,7 @@ func directMergeConflictFailure(root, specBranch string, mergeErr error) error {
 	fmt.Fprintf(&b, "\nmain is clean and the %s branch is preserved (branch deletion was skipped).", specBranch)
 	fmt.Fprintf(&b, "\nresolve at the repo root: re-run the merge there, fix the conflicts, commit the merge, then delete the branch with `git branch -d %s`", specBranch)
 	return guard.NewFailure(b.String(),
-		"cd "+root,
+		containment.EmitCd(root),
 		"git merge --no-ff "+specBranch,
 	)
 }

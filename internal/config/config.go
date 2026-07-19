@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"gopkg.in/yaml.v3"
 )
 
@@ -423,6 +424,26 @@ func loadUncached(root string) (*Config, error) {
 	}
 	if cfg.WorktreeRoot == "" {
 		cfg.WorktreeRoot = ".worktrees"
+	}
+	// R5 ingress predicate (ADR-0042 §4, AC-10/AC-13): worktree_root is
+	// agent-writable and participates in every composed worktree path, so
+	// it is validated HERE, at the same site its default is backfilled.
+	// This is a PURELY LEXICAL charset/relative/no-".." check — see
+	// containment.ValidateWorktreeRoot's doc comment for why symlink-aware
+	// containment is deliberately NOT done here (it lives at check-at-use,
+	// closer to each composed path's actual use). A failing value fails
+	// Load closed with a "recovery: " line (the ZFC/ADR-0035 convergent
+	// lever: rewrite worktree_root to the default). internal/config cannot
+	// import internal/guard (guard already imports config — a cycle), so
+	// the recovery line is assembled locally here rather than via
+	// guard.NewFailure; its wire format ("...\nrecovery: <command>") is
+	// what guard.HasFinalRecoveryLine parses, and every caller further up
+	// the stack that CAN import guard should prefer
+	// guard.NewFailure(msg, containment.RejectionLever) instead of
+	// duplicating this pattern (this is the one place that must, because
+	// of the import-graph constraint).
+	if err := containment.ValidateWorktreeRoot(cfg.WorktreeRoot); err != nil {
+		return nil, fmt.Errorf("invalid worktree_root: %s\nrecovery: %s", err.Error(), containment.RejectionLever)
 	}
 
 	// Decomposition thresholds: per-field zero-value backfill. Explicit `0`

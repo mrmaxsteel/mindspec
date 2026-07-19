@@ -22,6 +22,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // Package-level function variables for testability.
@@ -1117,18 +1118,18 @@ func FormatResult(r *Result) string {
 		// the same cd hint as plan/review — the removed bead worktree
 		// may have been the shell's cwd.
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
 		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 	case state.ModeReview:
 		fmt.Fprintf(&sb, "All beads complete. Mode: review (spec: %s)\n", r.NextSpec)
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 		sb.WriteString("Run `mindspec instruct` for review guidance and next steps.\n")
 	default:

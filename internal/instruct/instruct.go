@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // templateFuncs are the helpers available to every instruct template.
@@ -28,8 +29,14 @@ import (
 // carry spec-dir/branch/bead names. The underlying finding strings stay
 // canonical (the doctor/instruct AC-15 wording parity is asserted on the
 // shared predicate text; both consumers escape at their own sinks).
+// `shellsafe` is the R5 single shell-safe cd emitter's quoting primitive
+// (containment.ShellSafe, ADR-0042 §4) — templates/implement.md's
+// "Run `cd {{.ActiveWorktree | shellsafe}}`" line routes through it so a
+// space-bearing worktree_root still renders a shell-safe, round-trippable
+// cd line (AC-12).
 var templateFuncs = template.FuncMap{
-	"termsafe": termsafe.Escape,
+	"termsafe":  termsafe.Escape,
+	"shellsafe": containment.ShellSafe,
 }
 
 //go:embed templates/*.md

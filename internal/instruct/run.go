@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // Options tunes a Run invocation. The zero value reproduces the bare
@@ -92,7 +93,7 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 	// CWD redirect: if running from main with an active worktree,
 	// emit ONLY the redirect message — no normal guidance.
 	if wtPath := guard.ActiveWorktreePathWithCache(cache, mainRoot); wtPath != "" && guard.IsMainCWDWithCache(cache, mainRoot) {
-		msg := fmt.Sprintf("# MindSpec — CWD Redirect\n\nYou are in the main worktree. Run:\n\n  cd %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", wtPath)
+		msg := fmt.Sprintf("# MindSpec — CWD Redirect\n\nYou are in the main worktree. Run:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
 		if format == "json" {
 			fmt.Fprintf(out, `{"redirect":true,"worktree_path":%q,"message":"Switch to worktree"}`, wtPath)
 			fmt.Fprintln(out)

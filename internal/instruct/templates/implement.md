@@ -38,7 +38,7 @@ Execute the active bead in an isolated worktree. Stay within scope.
 You are in the bead worktree. All code changes go here, not the main repo.
 {{- else}}
 
-Run `cd {{.ActiveWorktree}}` to enter the bead worktree. All code changes go there, not the main repo.
+Run `cd {{.ActiveWorktree | shellsafe}}` to enter the bead worktree. All code changes go there, not the main repo.
 {{- end}}
 {{- else}}
 

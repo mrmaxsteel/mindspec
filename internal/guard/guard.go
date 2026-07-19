@@ -8,7 +8,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // guardState holds the subset of state that guards need.
@@ -23,6 +25,24 @@ var (
 	loadConfigFn     = config.Load
 	getwdFn          = os.Getwd
 )
+
+// degradeConfigOnError is the R5 never-block degrade helper (ADR-0042 §4,
+// AC-13 companion subtest), extracted from defaultReadGuardStateWithCache
+// so it is directly unit-testable without driving the full phase-
+// resolution pipeline: a config load failure — e.g. an invalid
+// worktree_root that failed containment.ValidateWorktreeRoot at ingress
+// — must never block this best-effort, ambient guard-state read. It
+// returns the safe default config and ONE escaped warning line (R4:
+// cfgErr.Error() may embed the agent-writable raw worktree_root value, so
+// it is routed through termsafe.Escape before it ever reaches a
+// terminal) rather than silently swallowing the error with no signal at
+// all. cfgErr must be non-nil; callers write the returned warning to
+// stderr.
+func degradeConfigOnError(cfgErr error) (cfg *config.Config, warning string) {
+	cfg = config.DefaultConfig()
+	warning = fmt.Sprintf("warning: could not load config (falling back to worktree_root=%s): %s\n", cfg.WorktreeRoot, termsafe.Escape(cfgErr.Error()))
+	return cfg, warning
+}
 
 func defaultReadGuardState(root string) (*guardState, error) {
 	return defaultReadGuardStateWithCache(nil, root)
@@ -44,7 +64,9 @@ func defaultReadGuardStateWithCache(c *phase.Cache, root string) (*guardState, e
 	}
 	cfg, cfgErr := loadConfigFn(root)
 	if cfgErr != nil {
-		cfg = config.DefaultConfig()
+		degradedCfg, warning := degradeConfigOnError(cfgErr)
+		cfg = degradedCfg
+		fmt.Fprint(os.Stderr, warning)
 	}
 	// Derive worktree path from context.
 	// Validate existence at each level: prefer bead worktree > spec worktree.
@@ -127,7 +149,7 @@ func checkCWDWithCache(c *phase.Cache, root string) error {
 		// Req 12 (spec 092): guard failures end with a `recovery:` line.
 		return NewFailure(
 			fmt.Sprintf("mindspec: CWD is the main worktree; the active worktree is %s", gs.ActiveWorktree),
-			"cd "+gs.ActiveWorktree,
+			containment.EmitCd(gs.ActiveWorktree),
 		)
 	}
 

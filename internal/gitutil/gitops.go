@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // ErrRefNotFound is returned by RevParseRef when the named ref genuinely does
@@ -860,9 +861,21 @@ func RmCached(workdir, file string) error {
 // --- worktree helpers ------------------------------------------------------
 
 // WorktreeAddDetach runs `git worktree add --detach <wtPath> <commit>` in workdir.
+//
+// R5 check-at-use (ADR-0042 §4, AC-11): wtPath is re-validated for
+// symlink-aware containment under workdir immediately before the git
+// invocation — the wrapper-level check, which covers every present AND
+// future caller by construction (WorktreeAddDetach has zero non-test
+// callers today, per the spec's grep-complete inventory).
 func WorktreeAddDetach(workdir, wtPath, commit string) error {
 	if err := rejectOptionLike(commit); err != nil {
 		return err
+	}
+	if err := containment.CheckContainment(workdir, wtPath); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing worktree add --detach: %v", err),
+			containment.RejectionLever,
+		)
 	}
 	cmd := execCommand("git", gitArgs(workdir, "worktree", "add", "--detach", wtPath, commit)...)
 	out, err := cmd.CombinedOutput()
@@ -873,9 +886,21 @@ func WorktreeAddDetach(workdir, wtPath, commit string) error {
 }
 
 // WorktreeAdd runs `git worktree add <wtPath> <branch>` in workdir.
+//
+// R5 check-at-use (ADR-0042 §4, AC-11): wtPath is re-validated for
+// symlink-aware containment under workdir immediately before the git
+// invocation — the wrapper-level check covers every caller by
+// construction, in addition to the named executor-level checks that
+// already precede most calls (defense-in-depth, not a replacement).
 func WorktreeAdd(workdir, wtPath, branch string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
+	}
+	if err := containment.CheckContainment(workdir, wtPath); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing worktree add: %v", err),
+			containment.RejectionLever,
+		)
 	}
 	cmd := execCommand("git", gitArgs(workdir, "worktree", "add", wtPath, branch)...)
 	out, err := cmd.CombinedOutput()
