@@ -137,6 +137,8 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintf(&b, "merge_strategy: %s\n", escapeConfigValue(cfg.MergeStrategy))
 	fmt.Fprintf(&b, "worktree_root: %s\n", escapeConfigValue(cfg.WorktreeRoot))
 	fmt.Fprintf(&b, "auto_finalize: %t\n", cfg.AutoFinalize)
+	fmt.Fprintf(&b, "auto_open_finalize_pr: %t\n", cfg.AutoOpenFinalizePR)
+	fmt.Fprintf(&b, "auto_merge_finalize_pr: %t\n", cfg.AutoMergeFinalizePR)
 	fmt.Fprintln(&b)
 
 	fmt.Fprintln(&b, "enforcement:")

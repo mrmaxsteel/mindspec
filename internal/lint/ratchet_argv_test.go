@@ -1,23 +1,29 @@
 // ratchet_argv_test.go — spec 120 R6 scan (g): the whole-tree,
-// wrapper-agnostic bd/git exec-operand audit (TestArgvIDOperandGated).
+// wrapper-agnostic bd/git/gh exec-operand audit (TestArgvIDOperandGated).
 //
 // THE exhaustive, by-construction enforcer of the round-9
-// gate-all-ids rule. Every bd/git invocation across cmd/ + internal/
+// gate-all-ids rule. Every bd/git/gh invocation across cmd/ + internal/
 // is resolved SEMANTICALLY at the exec seam / wrapper-call graph —
-// never by a fixed wrapper-name list:
+// never by a fixed wrapper-name list. "gh" joined the watched-literal
+// set in spec 121 Bead 3 (panel round 1, S3-1): the finalize-PR
+// automation's remote seam (cmd/mindspec/finalize_pr.go) is the first
+// production gh exec site, and without this it would carry zero
+// automated drift protection — the exact Bead-1 failure mode this
+// scanner exists to prevent:
 //
 //   - direct exec.Command / exec.CommandContext spawns whose command
-//     operand resolves to "bd"/"git" (string literal, one-level const
-//     fold, package execCommand-style seam var — Command AND
+//     operand resolves to "bd"/"git"/"gh" (string literal, one-level
+//     const fold, package execCommand-style seam var — Command AND
 //     CommandContext — a single-assignment LOCAL exec-constructor
 //     alias like `spawn := exec.Command`, a single-assignment
 //     string-literal local, or a variable traced to
-//     exec.LookPath("bd"|"git") — the harness Sandbox.runBD shape
+//     exec.LookPath("bd"|"git"|"gh") — the harness Sandbox.runBD shape
 //     that is invisible to name matchers). Command resolution FAILS
 //     CLOSED (round 11): an operand that cannot be PROVEN
-//     non-bd/non-git surfaces as an "exec-unresolved" site that must
-//     be classified like any other — a resolved non-bd/non-git
-//     literal is the ONLY basis for skipping a spawn;
+//     non-bd/non-git/non-gh surfaces as an "exec-unresolved" site that
+//     must be classified like any other — a resolved
+//     non-bd/non-git/non-gh literal is the ONLY basis for skipping a
+//     spawn;
 //   - generic runners whose command operand is a function PARAMETER:
 //     their call sites resolve the literal at the caller (and a
 //     caller forwarding its own parameter joins the runner set,
@@ -637,8 +643,13 @@ func (s *argvScanner) discover(table map[string]argvEntry) []argvSite {
 		switch {
 		case kind == "lit":
 			// A resolved literal is the ONLY basis for skipping: a
-			// non-bd/non-git literal is PROVEN out of scope.
-			if val == "bd" || val == "git" {
+			// non-bd/non-git/non-gh literal is PROVEN out of scope.
+			// "gh" (spec 121 R1-R3, ADR-0041 §4): the finalize-PR
+			// automation's remote seam is a process-spawning site with
+			// its own id operands (specID/epicID feed the templated PR
+			// title) — watching it here makes gate-all-ids ratchet-
+			// enforced by construction, not merely a reviewed claim.
+			if val == "bd" || val == "git" || val == "gh" {
 				addSite(f, call, true, val, call.Args[cmdArgIdx+1:])
 			}
 		case kind == "param" && fn != nil:
@@ -728,7 +739,7 @@ func (s *argvScanner) discover(table map[string]argvEntry) []argvSite {
 					val, kind := s.resolveCmdOperand(call.Args[pr.cmdIdx], f, fl, params)
 					switch {
 					case kind == "lit":
-						if val == "bd" || val == "git" {
+						if val == "bd" || val == "git" || val == "gh" {
 							rest := append([]ast.Expr{}, call.Args[:pr.cmdIdx]...)
 							rest = append(rest, call.Args[pr.cmdIdx+1:]...)
 							addSite(f, call, true, val, rest)
@@ -993,7 +1004,7 @@ func auditArgvSites(u *rUniverse, sites []argvSite, table map[string]argvEntry) 
 	for _, k := range keys {
 		e, ok := table[k]
 		if !ok {
-			problems = append(problems, "UNCLASSIFIED bd/git exec site (classify gated / non-id / caller-audited): "+k+" [~line "+itoa(firstLine[k])+", count "+itoa(counts[k])+"]")
+			problems = append(problems, "UNCLASSIFIED bd/git/gh exec site (classify gated / non-id / caller-audited): "+k+" [~line "+itoa(firstLine[k])+", count "+itoa(counts[k])+"]")
 			continue
 		}
 		if e.Count != counts[k] {
@@ -1032,15 +1043,15 @@ func auditArgvSites(u *rUniverse, sites []argvSite, table map[string]argvEntry) 
 }
 
 // TestArgvIDOperandGated is spec 120 R6 scan (g) (AC-14/AC-27): the
-// exhaustive whole-tree bd/git exec-operand audit.
+// exhaustive whole-tree bd/git/gh exec-operand audit.
 func TestArgvIDOperandGated(t *testing.T) {
 	u := loadRatchetUniverse(t)
 	s := newArgvScanner(u)
 	sites := s.discover(argvAuditTable)
 	if len(sites) == 0 {
-		t.Fatal("scan (g) discovered zero bd/git exec sites — the scanner has regressed")
+		t.Fatal("scan (g) discovered zero bd/git/gh exec sites — the scanner has regressed")
 	}
-	failOnProblems(t, "scan (g) bd/git exec-operand audit",
+	failOnProblems(t, "scan (g) bd/git/gh exec-operand audit",
 		auditArgvSites(u, sites, argvAuditTable))
 
 	t.Run("fixture_ungated_id_argv_flagged", func(t *testing.T) {
