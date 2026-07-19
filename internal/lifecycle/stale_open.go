@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -57,17 +58,23 @@ type StaleOpenBead struct {
 // state (ADR-0035 recovery-line convention): re-running `mindspec complete`
 // converges Dolt to the already-landed state.
 func (s StaleOpenBead) RecoveryCommand() string {
-	return "mindspec complete " + s.BeadID
+	// R4: BeadID is an ID-typed position — idrender.Bead.
+	return "mindspec complete " + idrender.Bead(s.BeadID)
 }
 
 // Message is the rendered human-readable finding text, recovery command
 // included — the SAME string `mindspec doctor` and the generated `mindspec
 // instruct` guidance must both surface verbatim (Spec 119 AC-15/P8): this
 // is the single template, never re-derived by either consumer.
+//
+// R4: BeadID is idrender'd (ID-typed position); SpecBranch is the
+// spine-validated `spec/<id>` branch operand (workspace.SpecBranch) and
+// stays RAW; LandedSHA is a git-produced hex commit SHA, not agent-writable
+// free text.
 func (s StaleOpenBead) Message() string {
 	return fmt.Sprintf(
 		"bead %s is OPEN/in_progress in the tracker but its work already landed as merge %s on %s — the tracker never converged. Run `%s` to recover.",
-		s.BeadID, s.LandedSHA, s.SpecBranch, s.RecoveryCommand(),
+		idrender.Bead(s.BeadID), s.LandedSHA, s.SpecBranch, s.RecoveryCommand(),
 	)
 }
 

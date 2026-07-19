@@ -22,9 +22,15 @@ func stubScanIntegrity(t *testing.T, fn func(root string, cache *phase.Cache) li
 func TestCheckLifecycleIntegrity_StaleOpenReported(t *testing.T) {
 	root := t.TempDir()
 
+	// R4: StaleOpenBead.Message()/RecoveryCommand() now idrender.Bead the
+	// BeadID field (spec 120 Bead 5 fix-up) — a valid,
+	// idvalidate.BeadID-conformant id is required here so the
+	// byte-identical render path is exercised rather than the
+	// forced-quote path a bare placeholder like "one" would trigger.
+	const beadID = "mindspec-9if1"
 	stubScanIntegrity(t, func(r string, c *phase.Cache) lifecycle.IntegrityFindings {
 		return lifecycle.IntegrityFindings{
-			StaleOpen: []lifecycle.StaleOpenBead{{BeadID: "one", SpecBranch: "spec/119-test", LandedSHA: "deadbeef"}},
+			StaleOpen: []lifecycle.StaleOpenBead{{BeadID: beadID, SpecBranch: "spec/119-test", LandedSHA: "deadbeef"}},
 		}
 	})
 
@@ -44,7 +50,7 @@ func TestCheckLifecycleIntegrity_StaleOpenReported(t *testing.T) {
 	if found.Status != Error {
 		t.Errorf("status = %v, want Error", found.Status)
 	}
-	if !strings.Contains(found.Message, "mindspec complete one") {
+	if !strings.Contains(found.Message, "mindspec complete "+beadID) {
 		t.Errorf("message must carry the recovery command; got %q", found.Message)
 	}
 	if found.FixFunc == nil {

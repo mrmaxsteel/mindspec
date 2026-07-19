@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 )
 
 // CheckBeadExists verifies a bead ID exists in Beads by routing through
@@ -29,13 +30,18 @@ func checkBeadIDs(r *Result, ids []string) {
 	}
 
 	for _, id := range ids {
+		// id is a bead_ids entry from the agent-authored plan.md
+		// frontmatter — render it through idrender.Bead (spec 120 R4):
+		// byte-identical for a genuine bead ID, forced-safe otherwise,
+		// since this exact check exists BECAUSE the ID may not be valid.
+		safeID := idrender.Bead(id)
 		exists, err := CheckBeadExists(id)
 		if err != nil {
-			r.AddWarning("bead-id-check", fmt.Sprintf("cannot verify bead %s (Beads unavailable): %v", id, err))
+			r.AddWarning("bead-id-check", fmt.Sprintf("cannot verify bead %s (Beads unavailable): %v", safeID, err))
 			return // don't keep checking if bd is unavailable
 		}
 		if !exists {
-			r.AddError("bead-id-missing", fmt.Sprintf("bead ID %s not found in Beads", id))
+			r.AddError("bead-id-missing", fmt.Sprintf("bead ID %s not found in Beads", safeID))
 		}
 	}
 }

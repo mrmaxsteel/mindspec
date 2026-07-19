@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 const (
@@ -100,11 +103,13 @@ func FormatReport(r *HygieneReport) string {
 	fmt.Fprintf(&sb, "=====================\n\n")
 	fmt.Fprintf(&sb, "Open beads: %d / %d recommended max\n\n", r.TotalOpen, r.RecommendedMax)
 
+	// R4: b.ID is an ID-typed position (idrender.Bead); b.Title is
+	// agent-writable single-line free text (termsafe.Escape).
 	if len(r.Stale) > 0 {
 		fmt.Fprintf(&sb, "Stale beads (%d):\n", len(r.Stale))
 		for _, b := range r.Stale {
-			fmt.Fprintf(&sb, "  - %s: %s (updated: %s)\n", b.ID, b.Title, b.UpdatedAt)
-			fmt.Fprintf(&sb, "    Fix: bd update %s --notes=\"still active\" OR bd close %s\n", b.ID, b.ID)
+			fmt.Fprintf(&sb, "  - %s: %s (updated: %s)\n", idrender.Bead(b.ID), termsafe.Escape(b.Title), b.UpdatedAt)
+			fmt.Fprintf(&sb, "    Fix: bd update %s --notes=\"still active\" OR bd close %s\n", idrender.Bead(b.ID), idrender.Bead(b.ID))
 		}
 		sb.WriteString("\n")
 	}
@@ -112,7 +117,7 @@ func FormatReport(r *HygieneReport) string {
 	if len(r.Orphaned) > 0 {
 		fmt.Fprintf(&sb, "Orphaned beads (%d) — no mindspec metadata (spec_id / mindspec_phase):\n", len(r.Orphaned))
 		for _, b := range r.Orphaned {
-			fmt.Fprintf(&sb, "  - %s: %s\n", b.ID, b.Title)
+			fmt.Fprintf(&sb, "  - %s: %s\n", idrender.Bead(b.ID), termsafe.Escape(b.Title))
 		}
 		sb.WriteString("\n")
 	}
@@ -120,7 +125,7 @@ func FormatReport(r *HygieneReport) string {
 	if len(r.Oversized) > 0 {
 		fmt.Fprintf(&sb, "Oversized descriptions (%d):\n", len(r.Oversized))
 		for _, b := range r.Oversized {
-			fmt.Fprintf(&sb, "  - %s: %s (%d chars)\n", b.ID, b.Title, len(b.Description))
+			fmt.Fprintf(&sb, "  - %s: %s (%d chars)\n", idrender.Bead(b.ID), termsafe.Escape(b.Title), len(b.Description))
 		}
 		sb.WriteString("\n")
 	}
@@ -148,12 +153,14 @@ func FixHygiene(dryRun bool) ([]string, error) {
 	var actions []string
 	for _, b := range beads {
 		if strings.EqualFold(b.Status, "done") {
-			action := fmt.Sprintf("close %s (%s)", b.ID, b.Title)
+			// R4: b.ID is an ID-typed position (idrender.Bead); b.Title is
+			// agent-writable free text (termsafe.Escape).
+			action := fmt.Sprintf("close %s (%s)", idrender.Bead(b.ID), termsafe.Escape(b.Title))
 			if dryRun {
 				actions = append(actions, "[dry-run] would "+action)
 			} else {
 				if _, err := RunBDCombined("update", b.ID, "--status=closed"); err != nil {
-					return actions, fmt.Errorf("closing %s: %w", b.ID, err)
+					return actions, fmt.Errorf("closing %s: %w", idrender.Bead(b.ID), err)
 				}
 				actions = append(actions, action)
 			}

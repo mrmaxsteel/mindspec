@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // normalizeImpactedDomains resolves each raw `## Impacted Domains`
@@ -156,7 +157,18 @@ func normalizeImpactedDomains(exec executor.Executor, root, ownerRef string, ent
 			appendName(owners[0])
 		default:
 			sort.Strings(owners)
-			errs = append(errs, fmt.Sprintf("Impacted-Domains entry %q is ambiguous: claimed by more than one domain's OWNERSHIP.yaml (%s); make the manifests disjoint or name a single owning domain dir", entry, strings.Join(owners, ", ")))
+			// R4 (spec 120): owners are on-disk domain-dir basenames
+			// (listDomainDirs -> os.ReadDir e.Name(), agent-creatable, never
+			// idvalidate'd). Escape PER ELEMENT before Join — never the
+			// already-joined whole — so a hostile basename can neither forge
+			// a terminal line nor swallow the ", " separator into its own
+			// unescaped content. termsafe.Escape is byte-identical for a
+			// genuine domain name.
+			safeOwners := make([]string, len(owners))
+			for i, o := range owners {
+				safeOwners[i] = termsafe.Escape(o)
+			}
+			errs = append(errs, fmt.Sprintf("Impacted-Domains entry %q is ambiguous: claimed by more than one domain's OWNERSHIP.yaml (%s); make the manifests disjoint or name a single owning domain dir", entry, strings.Join(safeOwners, ", ")))
 		}
 	}
 

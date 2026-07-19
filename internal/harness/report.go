@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // Report summarizes the analysis of an agent session.
@@ -80,7 +82,13 @@ func (r *Report) FormatText() string {
 		fmt.Fprintln(&b)
 		fmt.Fprintf(&b, "Wrong actions (%d):\n", len(r.WrongActions))
 		for i, wa := range r.WrongActions {
-			fmt.Fprintf(&b, "  %d. [%s] %s\n", i+1, wa.Rule, wa.Reason)
+			// wa.Reason embeds transcript content from the recorded agent
+			// session (e.g. describeEvent(e), raw command args) — agent-
+			// writable free text — so it is escaped before reaching this
+			// terminal render (spec 120 R4). wa.Rule is always one of a
+			// fixed set of harness-defined literal rule names; escaping
+			// is a no-op for it but kept for uniformity.
+			fmt.Fprintf(&b, "  %d. [%s] %s\n", i+1, termsafe.Escape(wa.Rule), termsafe.Escape(wa.Reason))
 		}
 	}
 

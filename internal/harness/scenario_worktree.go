@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -384,7 +385,15 @@ The plan for 001-greeting is finished. Advance to the next phase.`,
 }
 
 // gitBranchExists checks if a git branch exists in the sandbox.
+//
+// R7 (spec 120): branch is a dynamic operand reaching a git spawn —
+// guard with gitutil.RejectOptionLike, fail-fast t.Fatalf before the
+// spawn (SEC-5).
 func gitBranchExists(sandbox *Sandbox, branch string) bool {
+	sandbox.t.Helper()
+	if err := gitutil.RejectOptionLike(branch); err != nil {
+		sandbox.t.Fatalf("gitBranchExists: %v", err)
+	}
 	cmd := exec.Command("git", "rev-parse", "--verify", branch)
 	cmd.Dir = sandbox.Root
 	return cmd.Run() == nil

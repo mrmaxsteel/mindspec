@@ -122,12 +122,18 @@ func ScenarioStalePhaseImplApprove() Scenario {
 			epicID = sandbox.CreateSpecEpic(specID)
 			beadID = sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
+			// R7 (spec 120, round 10): beadID/epicID are id-position
+			// operands reaching `bd close`/`bd update` spawns — gated
+			// with requireValidBeadID, fail-fast t.Fatalf BEFORE the
+			// spawn.
+			requireValidBeadID(sandbox.t, beadID)
 			sandbox.runBDMust("close", beadID)
 
 			// Stale phase cache: stored phase says "implement" while every
 			// child is closed (child-derived phase = review). bd update
 			// --metadata REPLACES the whole map, so spec_num/spec_title are
 			// repeated to preserve ADR-0023 epic binding.
+			requireValidBeadID(sandbox.t, epicID)
 			sandbox.runBDMust("update", epicID, "--metadata",
 				`{"spec_num":1,"spec_title":"stale","mindspec_phase":"implement"}`)
 
@@ -262,11 +268,16 @@ func assertStaleApproveSelfHeals(t *testing.T, sandbox *Sandbox) {
 	epicID := sandbox.CreateSpecEpic(specID)
 	beadID := sandbox.CreateBead("["+specID+"] Probe feature", "task", epicID)
 	sandbox.ClaimBead(beadID)
+	// R7 (spec 120, round 10): beadID/epicID are id-position operands
+	// reaching `bd close`/`bd update` spawns — gated with
+	// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+	requireValidBeadID(t, beadID)
 	sandbox.runBDMust("close", beadID)
 	// Stale stored phase while every child is closed (derived = review).
 	// Test-side setup write — only the agent event stream is scanned by
 	// the no-surgery assertion. spec_num/spec_title repeated to preserve
 	// the ADR-0023 epic binding (bd update --metadata replaces the map).
+	requireValidBeadID(t, epicID)
 	sandbox.runBDMust("update", epicID, "--metadata",
 		`{"spec_num":2,"spec_title":"staleprobe","mindspec_phase":"implement"}`)
 
@@ -346,6 +357,10 @@ func ScenarioCompleteFromDoomedWorktree() Scenario {
 			// Deferred keepalive sibling keeps the epic from auto-closing
 			// when the task bead closes (see ScenarioBeadsArtifactPassthrough).
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
+			// R7 (spec 120, round 10): keepaliveID is an id-position
+			// operand reaching a `bd defer` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, keepaliveID)
 			sandbox.runBDMust("defer", keepaliveID)
 			sandbox.ClaimBead(beadID)
 
@@ -719,6 +734,10 @@ func ScenarioPrecommitReexportComplete() Scenario {
 			epicID = sandbox.CreateSpecEpic(specID)
 			beadID = sandbox.CreateBead("["+specID+"] Create reexport.go", "task", epicID)
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
+			// R7 (spec 120, round 10): keepaliveID is an id-position
+			// operand reaching a `bd defer` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, keepaliveID)
 			sandbox.runBDMust("defer", keepaliveID)
 
 			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
@@ -856,6 +875,10 @@ func ScenarioWrongDirectoryGuardRecovery() Scenario {
 			epicID = sandbox.CreateSpecEpic(specID)
 			beadID = sandbox.CreateBead("["+specID+"] Create wrongdir.go", "task", epicID)
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
+			// R7 (spec 120, round 10): keepaliveID is an id-position
+			// operand reaching a `bd defer` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, keepaliveID)
 			sandbox.runBDMust("defer", keepaliveID)
 
 			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
@@ -968,6 +991,10 @@ func ScenarioApprovalGateDiscovery() Scenario {
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
+			// R7 (spec 120, round 10): beadID is an id-position operand
+			// reaching a `bd close` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, beadID)
 			sandbox.runBDMust("close", beadID)
 
 			// ADR-divergence coverage triple (run-1 adjudication): gate.go

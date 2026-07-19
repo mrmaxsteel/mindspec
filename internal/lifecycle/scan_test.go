@@ -252,12 +252,17 @@ func TestScanIntegrityFindings_StaleOpenActiveEpic(t *testing.T) {
 // committed export AGREES the epic is closed, so no stale-tracker finding
 // muddies the assertion.
 func TestScanIntegrityFindings_StaleOpenUnderClosedEpic(t *testing.T) {
+	// R4: RecoveryCommand() now idrender.Bead's the BeadID field (spec 120
+	// Bead 5 fix-up) — a valid, idvalidate.BeadID-conformant id is required
+	// here so the byte-identical render path is exercised rather than the
+	// forced-quote path a bare placeholder like "one" would trigger.
+	const beadID = "mindspec-9if1"
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, beadID, "spec/119-test")
 
 	stubScanBDLayer(t,
 		`[{"id":"epic-1","title":"[SPEC 119-test] fixture","status":"closed","issue_type":"epic","metadata":{"spec_num":119,"spec_title":"test"}}]`,
-		`[{"id":"one","title":"landed but still open","status":"open","issue_type":"task","parent":"epic-1"}]`,
+		`[{"id":"`+beadID+`","title":"landed but still open","status":"open","issue_type":"task","parent":"epic-1"}]`,
 	)
 	stubScanGitSeams(t, []string{"main", "spec/119-test"}, `{"id":"epic-1","status":"closed"}`+"\n")
 
@@ -270,10 +275,10 @@ func TestScanIntegrityFindings_StaleOpenUnderClosedEpic(t *testing.T) {
 		t.Fatalf("a stale-OPEN child under a CLOSED epic MUST be reported, got %+v", findings.StaleOpen)
 	}
 	got := findings.StaleOpen[0]
-	if got.BeadID != "one" || got.SpecBranch != "spec/119-test" || got.LandedSHA == "" {
+	if got.BeadID != beadID || got.SpecBranch != "spec/119-test" || got.LandedSHA == "" {
 		t.Errorf("finding fields wrong: %+v", got)
 	}
-	if got.RecoveryCommand() != "mindspec complete one" {
-		t.Errorf("RecoveryCommand = %q", got.RecoveryCommand())
+	if want := "mindspec complete " + beadID; got.RecoveryCommand() != want {
+		t.Errorf("RecoveryCommand = %q, want %q", got.RecoveryCommand(), want)
 	}
 }

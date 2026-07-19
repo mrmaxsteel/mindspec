@@ -52,6 +52,18 @@ var passFixtures = map[string]struct {
 	"secret-gitlab-pat":  {"x glpat-AbCdEfGhIjKlMnOp y", "glpat-AbCdEfGhIjKlMnOp"},
 	"secret-slack":       {"x xoxb-1234-abcdefgh y", "xoxb-1234-abcdefgh"},
 	"secret-aws":         {"x AKIAIOSFODNN7EXAM y", "AKIAIOSFODNN7EXAM"},
+	// secret-aws-session (spec 120 R9/AC-21): ASIA temp/session credential
+	// ids are the same realistic 20-char length as AKIA long-term keys —
+	// under entropy-b64's 23-char threshold and not hex-only, so (like
+	// secret-aws) this is independently load-bearing, not redundant.
+	"secret-aws-session": {"x ASIAIOSFODNN7EXAM y", "ASIAIOSFODNN7EXAM"},
+	// secret-gcp-key-id (spec 120 R9/AC-21): a short private_key_id value
+	// well under any entropy threshold — independently load-bearing.
+	"secret-gcp-key-id": {`creds {"private_key_id": "abc123def"} end`, "abc123def"},
+	// secret-gcp-api-key (spec 120 R9/AC-21): a realistic, fixed ~39-char
+	// AIza-prefixed Google API key — ALWAYS long enough that entropy-b64
+	// backstops it (see redundantPasses below), same as secret-github-pat.
+	"secret-gcp-api-key": {"key AIzaSyD4abcdEFGHijklMNOPqrstUVWXyz1234 end", "AIzaSyD4abcdEFGHijklMNOPqrstUVWXyz1234"},
 	"secret-openai":      {"x sk-abcdefghijklmnop y", "sk-abcdefghijklmnop"},
 	"secret-bearer":      {"got Bearer shorttok99 here", "Bearer shorttok99"},
 	"secret-jwt":         {"x eyJabcdef.eyJghijkl.SflKxwRk y", "eyJabcdef.eyJghijkl.SflKxwRk"},
@@ -100,6 +112,10 @@ var passFixtures = map[string]struct {
 //     is always ≥31 chars and entropy-b64 (≥23) always catches it.
 var redundantPasses = map[string]string{
 	"secret-github-pat": "entropy-b64",
+	// AIza-prefixed Google API keys are a FIXED ~39-char format (always
+	// ≥23 chars), so entropy-b64 always backstops the leak class; the
+	// dedicated pass only refines the placeholder (spec 120 R9/AC-21).
+	"secret-gcp-api-key": "entropy-b64",
 	// A URL and a bead/spec branch both contain a `/`, so the generic
 	// slashpath pass already redacts them to <path>; the url / branch
 	// passes only refine the placeholder (<url>/<branch>). slashpath is the

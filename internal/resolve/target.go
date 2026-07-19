@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -18,7 +19,7 @@ func (e *ErrAmbiguousTarget) Error() string {
 	var sb strings.Builder
 	sb.WriteString("multiple active specs found; use --spec to target one:\n")
 	for _, s := range e.Active {
-		sb.WriteString(fmt.Sprintf("  %s  (mode: %s)\n", s.SpecID, s.Mode))
+		sb.WriteString(fmt.Sprintf("  %s  (mode: %s)\n", idrender.Spec(s.SpecID), s.Mode))
 	}
 	return sb.String()
 }

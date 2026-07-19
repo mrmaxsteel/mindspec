@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
@@ -578,15 +579,35 @@ func CommitAll(workdir, message string) error {
 
 	addCmd := execCommand("git", "-C", workdir, "add", "-A")
 	if out, err := addCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("staging changes: %s", strings.TrimSpace(string(out)))
+		// R4: git's CombinedOutput can echo back agent-writable repo content
+		// (e.g. a hostile pathspec/filename) — escape per-line before it
+		// reaches the error/terminal path.
+		return fmt.Errorf("staging changes: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
 	commitCmd := execCommand("git", "-C", workdir, "commit", "-m", message)
 	if out, err := commitCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("committing: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("committing: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
 	return nil
+}
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — git porcelain/error output —
+// while preserving the real newlines that separate genuine lines (R4:
+// per-line escaping for line-oriented bodies, never per-message, so a
+// hostile line cannot forge additional lines while legitimate multi-line
+// structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // File I/O wrappers for testability.

@@ -3,6 +3,9 @@ package next
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // SelectWork picks a work item from the list.
@@ -90,10 +93,15 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 }
 
 // FormatWorkList returns a formatted numbered list of work items for display.
+//
+// R4: IssueType is a bd `--type` value — not schema-enforced against a
+// fixed enum on this side of the bd boundary (a caller invoking `bd
+// create --type` directly, outside mindspec's own always-"task" wrapper,
+// could set it to anything) — escape it alongside Title.
 func FormatWorkList(items []BeadInfo) string {
 	var result string
 	for i, item := range items {
-		result += fmt.Sprintf("  %d. [%s] %s (P%d, %s)\n", i+1, item.ID, item.Title, item.Priority, item.IssueType)
+		result += fmt.Sprintf("  %d. [%s] %s (P%d, %s)\n", i+1, idrender.Bead(item.ID), termsafe.Escape(item.Title), item.Priority, termsafe.Escape(item.IssueType))
 	}
 	return result
 }

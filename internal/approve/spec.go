@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -117,13 +118,16 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve spec %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
-		return nil, fmt.Errorf("auto-commit spec approval failed: %w\n\nFix the issue in %s and re-run 'mindspec spec approve %s'", err, specWtPath, specID)
+		// R4: specWtPath is a DISPLAY position here (not the `cd` operand,
+		// which containment.EmitCd below already renders spine-safe) —
+		// termsafe.Escape it.
+		return nil, fmt.Errorf("auto-commit spec approval failed: %w\n\nFix the issue in %s and re-run 'mindspec spec approve %s'", err, termsafe.Escape(specWtPath), specID)
 	}
 
 	// Pre-commit hooks (beads, etc.) can modify tracked files as a side
 	// effect. A second pass captures any residual changes.
 	if err := exec.CommitAll(specWtPath, fmt.Sprintf("chore: sync beads state after spec approval for %s", specID)); err != nil {
-		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec spec approve %s'", err, specWtPath, specID)
+		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec spec approve %s'", err, termsafe.Escape(specWtPath), specID)
 	}
 
 	if err := exec.IsTreeClean(specWtPath); err != nil {

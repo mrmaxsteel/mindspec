@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -39,7 +40,7 @@ func checkLifecycleIntegrity(r *Report, root string) {
 	for _, s := range findings.StaleOpen {
 		beadID := s.BeadID
 		r.Checks = append(r.Checks, Check{
-			Name:    fmt.Sprintf("stale-open bead: %s", beadID),
+			Name:    fmt.Sprintf("stale-open bead: %s", idrender.Bead(beadID)),
 			Status:  Error,
 			Message: s.Message(),
 			FixFunc: func() error { return runMindspecCompleteFn(root, beadID) },
@@ -52,7 +53,7 @@ func checkLifecycleIntegrity(r *Report, root string) {
 
 func addFinalizeOrphanCheck(r *Report, o lifecycle.FinalizeOrphan) {
 	r.Checks = append(r.Checks, Check{
-		Name:    fmt.Sprintf("finalize orphan (%s): %s", o.Kind, o.SpecID),
+		Name:    fmt.Sprintf("finalize orphan (%s): %s", o.Kind, idrender.Spec(o.SpecID)),
 		Status:  Error,
 		Message: o.FullMessage(),
 	})

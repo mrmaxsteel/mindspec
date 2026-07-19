@@ -32,7 +32,7 @@ Execute the active bead in an isolated worktree. Stay within scope.
 ## Worktree Bootstrap — MANDATORY
 {{- if .ActiveWorktree}}
 
-**Active Worktree**: `{{.ActiveWorktree}}`
+**Active Worktree**: `{{.ActiveWorktreeDisplay}}`
 {{- if .InWorktree}}
 
 You are in the bead worktree. All code changes go here, not the main repo.

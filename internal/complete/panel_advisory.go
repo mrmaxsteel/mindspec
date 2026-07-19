@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -64,7 +65,8 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 	}
 	res, err := panelTallyFn(reg.Dir)
 	if err != nil {
-		fmt.Fprintf(w, "panel advisory: %s registered but its directory is unreadable: %v\n", reg.Slug(), err)
+		// R4: Slug() is a directory basename — escape before rendering.
+		fmt.Fprintf(w, "panel advisory: %s registered but its directory is unreadable: %v\n", termsafe.Escape(reg.Slug()), err)
 		return &reg
 	}
 	verdict, summary := res.VoteDecision()
@@ -77,7 +79,7 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 	default:
 		label = "would BLOCK"
 	}
-	fmt.Fprintf(w, "panel advisory: %s %s — gate %s\n", reg.Slug(), summary, label)
+	fmt.Fprintf(w, "panel advisory: %s %s — gate %s\n", termsafe.Escape(reg.Slug()), summary, label)
 	return &reg
 }
 
@@ -225,7 +227,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 			// zero-command guard.NewFailure would PANIC — always pass one.
 			return matched, guard.NewFailure(d.Message, fmt.Sprintf(
 				"re-run the panel (/ms-panel-run step 0 for %s), then `mindspec complete %s`",
-				beadID, beadID))
+				idrender.Bead(beadID), idrender.Bead(beadID)))
 		case panel.Warn:
 			if firstWarn == "" {
 				firstWarn = d.Message
@@ -252,7 +254,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 			return matched, guard.NewFailure(fmt.Sprintf(
 				"the refutation could not be durably recorded, so the REQUEST_CHANGES from %s remains unresolved (%s) — retry, or resolve the finding",
 				strings.Join(slots, ", "), termsafe.Escape(err.Error())),
-				fmt.Sprintf("mindspec complete %s", beadID))
+				fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
 		}
 	}
 
@@ -521,11 +523,17 @@ type uncoveredPendingEntry struct {
 // returns (nil, nil) — a genuine no-op, §6 fail-open preserved for pristine
 // beads.
 func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string]interface{}, error)) ([]uncoveredPendingEntry, error) {
+	// beadID flows in from the impl-approve gate's planBeadIDs
+	// (approve.readPlanBeadIDs, R4 cluster 2) via CheckPendingObligations
+	// below — NEVER idvalidate'd. getMeta(beadID) is the FUNCTIONAL
+	// metadata-store read, so it takes the raw beadID; every DISPLAY
+	// position in this function's error messages renders safeBeadID.
+	safeBeadID := idrender.Bead(beadID)
 	meta, err := getMeta(beadID)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"bead %s metadata could not be read to verify its refutation obligations are satisfied — an unreadable metadata store cannot prove the bead is obligation-free (%v)",
-			beadID, err)
+			safeBeadID, err)
 	}
 	// Distinguish an ABSENT refutation_pending_entries key (the genuine
 	// no-obligation no-op below) from a PRESENT key whose JSON value is
@@ -538,7 +546,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 	if presentPending && rawPending == nil {
 		return nil, fmt.Errorf(
 			"bead %s carries a present-but-null refutation_pending_entries value — a present-but-corrupt obligation store cannot prove the bead is obligation-free",
-			beadID)
+			safeBeadID)
 	}
 	pending, decErr := decodePendingEntries(rawPending)
 	if decErr != nil {
@@ -547,7 +555,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 		// an ABSENT key (raw nil) is the genuine no-obligation no-op below.
 		return nil, fmt.Errorf(
 			"bead %s carries a refutation_pending_entries record that could not be decoded — a corrupt obligation store cannot prove the bead is obligation-free (%v)",
-			beadID, decErr)
+			safeBeadID, decErr)
 	}
 
 	// Read + validate panel_refuted_entries UNCONDITIONALLY, BEFORE the
@@ -566,13 +574,13 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 	if presentRefuted && rawRefuted == nil {
 		return nil, fmt.Errorf(
 			"bead %s carries a present-but-null panel_refuted_entries value — a present-but-corrupt audit store cannot prove which obligations are already satisfied",
-			beadID)
+			safeBeadID)
 	}
 	coveredRefuted, decErr := decodeRefutations(rawRefuted)
 	if decErr != nil {
 		return nil, fmt.Errorf(
 			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
-			beadID, decErr)
+			safeBeadID, decErr)
 	}
 
 	// Validate EVERY decoded panel_refuted_entries element's shape (Spec 115
@@ -598,7 +606,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 		if c.Slot == "" || c.Round < 1 {
 			return nil, fmt.Errorf(
 				"bead %s carries a malformed panel_refuted_entries entry (slot %q, round %d) — a shape-invalid audit store cannot prove which obligations are already satisfied",
-				beadID, c.Slot, c.Round)
+				safeBeadID, c.Slot, c.Round)
 		}
 	}
 
@@ -623,7 +631,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			// decode error above.
 			return nil, fmt.Errorf(
 				"bead %s carries a malformed refutation_pending entry (slot %q, round %d) — a shape-invalid obligation store cannot prove the bead is obligation-free",
-				beadID, p.Slot, p.Round)
+				safeBeadID, p.Slot, p.Round)
 		}
 		if covered[pendingEntryKey(p.Slot, p.Round)] {
 			// Already covered by a durable audit — a no-op, not re-flagged.
@@ -660,9 +668,12 @@ func CheckPendingObligations(beadID string, getMeta func(string) (map[string]int
 		return nil
 	}
 	e := uncovered[0]
+	// beadID here is the same untrusted plan-frontmatter bead ID
+	// documented on uncoveredPendingObligations above (R4 cluster 2) —
+	// render it via idrender.Bead rather than raw.
 	return fmt.Errorf(
 		"bead %s carries an unresolved refutation_pending obligation (%s@round %d) not yet covered by a durable panel_refuted record",
-		beadID, termsafe.Escape(e.Slot), e.Round)
+		idrender.Bead(beadID), termsafe.Escape(e.Slot), e.Round)
 }
 
 // PanelGateRoots is the exported thin wrapper over panelGateRoots (Spec 115
@@ -712,7 +723,7 @@ func PanelGateRoots(root, wtPath, specID string) []string {
 // genuinely pristine beads.
 func reconcilePendingRefutations(beadID string) error {
 	refuse := func(msg string) error {
-		return guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+		return guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
 	}
 
 	// Spec 115 Bead 1: the decode + (slot, round)-coverage walk (Plan
@@ -740,7 +751,7 @@ func reconcilePendingRefutations(beadID string) error {
 	if err := writePanelRefutedMetadata(beadID, toSatisfy); err != nil {
 		// Non-swallowing: an obligation may NEVER merge un-audited. The
 		// completion fails pre-close and the bead stays in_progress.
-		return fmt.Errorf("recording panel_refuted for %s: %w", beadID, err)
+		return fmt.Errorf("recording panel_refuted for %s: %w", idrender.Bead(beadID), err)
 	}
 	return nil
 }
@@ -856,7 +867,7 @@ func writePanelAuditMetadata(beadID string, reg *panel.Registration, w io.Writer
 			"panel_gate_skipped_at": now,
 		}
 		if err := completeMergeMetadataFn(beadID, meta); err != nil && w != nil {
-			fmt.Fprintf(w, "Warning: could not record panel_gate_skipped metadata on %s: %v\n", beadID, err)
+			fmt.Fprintf(w, "Warning: could not record panel_gate_skipped metadata on %s: %v\n", idrender.Bead(beadID), err)
 		}
 	}
 
@@ -867,7 +878,7 @@ func writePanelAuditMetadata(beadID string, reg *panel.Registration, w io.Writer
 			"panel_abandoned_reason": reg.Panel.AbandonReason,
 		}
 		if err := completeMergeMetadataFn(beadID, meta); err != nil && w != nil {
-			fmt.Fprintf(w, "Warning: could not record panel_abandoned metadata on %s: %v\n", beadID, err)
+			fmt.Fprintf(w, "Warning: could not record panel_abandoned metadata on %s: %v\n", idrender.Bead(beadID), err)
 		}
 	}
 }

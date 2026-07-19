@@ -17,6 +17,35 @@
 // fallback path anywhere. RedactEvent returns false to drop a whole
 // entry the same way. Beads 2/3 build their HC-7 behavior on these
 // signals.
+//
+// # Accepted residual (spec 120-trust-boundary-render-audit R9(b), OQ3 —
+// RESOLVED)
+//
+// Two shapes are a DOCUMENTED, accepted residual — not newly scrubbed by
+// this bead: a bare `user:pass`-WITHOUT-an-`@` (the dsn-credentials pass
+// only fires on the `user:pass@host` authority shape; a lone
+// `user:pass` with no host has no distinguishing signal from ordinary
+// "label:value" prose, so a new pass here risks over-scrubbing
+// legitimate text) and internal hostnames appearing bare (with no
+// credential authority or scheme to key off). The HC-7 fail-closed DROP
+// already bounds the exposure for anything that also fails
+// classification; this residual class is accepted as the resolved
+// baseline per OQ3, with plan-refinement latitude retained (a scrub
+// pass MAY be added later if golden-corpus measurement shows an
+// acceptable false-positive rate).
+//
+// # IPv6 over-scrub tradeoff (spec 120 R9, AC-21)
+//
+// The ipv6 pass is deliberately permissive (HC-7: prefer over-scrub to a
+// missed leak) and therefore also matches two non-address shapes:
+// a bare timestamp like "12:34:56" (three hex-looking colon-separated
+// groups — indistinguishable from a compressed/full-form IPv6 address
+// by pattern alone) becomes "<ip>", and a C++ scope-resolution token
+// like "std::vector" has its trailing letter-plus-"::" fragment
+// (e.g. "d::") consumed, yielding a garbled but non-leaking
+// "st<ip>vector". Both are pinned, not fixed, by
+// TestScrub_IPv6OverScrubTradeoffsPinned — todays behavior is the
+// accepted baseline this bead records, not a defect to chase.
 package redact
 
 import (
@@ -257,6 +286,18 @@ var scrubPasses = []pass{
 	{"secret-gitlab-pat", regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{16,}\b`), "<secret>"},
 	{"secret-slack", regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{8,}\b`), "<secret>"},
 	{"secret-aws", regexp.MustCompile(`\bAKIA[0-9A-Z]{12,}\b`), "<secret>"},
+	// AWS temporary/session credential ids (STS AssumeRole, instance-profile
+	// creds) — same shape as AKIA long-term keys but the ASIA prefix (spec
+	// 120 R9/AC-21).
+	{"secret-aws-session", regexp.MustCompile(`\bASIA[0-9A-Z]{12,}\b`), "<secret>"},
+	// GCP service-account JSON key files: the "private_key_id" field is not
+	// itself secret, but its presence signals a service-account key blob
+	// whose sibling "private_key" field IS (caught by the PEM pass above
+	// when present); scrub the field+value together defensively (spec 120
+	// R9/AC-21).
+	{"secret-gcp-key-id", regexp.MustCompile(`(?i)"private_key_id"\s*:\s*"[^"]*"`), `"private_key_id": "<secret>"`},
+	// Google API keys (AIza-prefixed, spec 120 R9/AC-21).
+	{"secret-gcp-api-key", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}\b`), "<secret>"},
 	{"secret-openai", regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}\b`), "<secret>"},
 	// Bearer outside an Authorization header (e.g. bare "Bearer <tok>").
 	{"secret-bearer", regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*`), "Bearer <secret>"},
@@ -266,6 +307,10 @@ var scrubPasses = []pass{
 	// (handled by secret-auth-header above); any long bare base64
 	// credential is caught by the entropy backstop.
 	{"secret-jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b`), "<secret>"},
+	// secret-assign is case-INSENSITIVE, so it already covers Azure
+	// Storage's mixed-case `AccountKey=` connection-string credential
+	// (spec 120 R9/AC-21 — verified by TestScrub_AzureAccountKey rather
+	// than a new dedicated pass, since this one is fully redundant).
 	{"secret-assign", regexp.MustCompile(`(?i)\b([A-Z0-9_]*(?:TOKEN|KEY|PASSWORD|SECRET))=\S+`), "${1}=<secret>"},
 	// DSN / connection-string credential authority BEFORE email (the email
 	// pass would otherwise eat only the `pass@host` half and leak the
@@ -369,6 +414,10 @@ var residualLeakPasses = []*regexp.Regexp{
 	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]`),                                         // gitlab pat
 	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]`),                                     // slack token
 	regexp.MustCompile(`\bAKIA[0-9A-Z]`),                                                // aws key
+	regexp.MustCompile(`\bASIA[0-9A-Z]`),                                                // aws session key (spec 120 R9)
+	regexp.MustCompile(`(?i)"private_key_id"\s*:\s*"[^<]`),                              // residual gcp private_key_id value (spec 120 R9)
+	regexp.MustCompile(`\bAIza[0-9A-Za-z_-]`),                                           // gcp api key (spec 120 R9)
+	regexp.MustCompile(`\bAccountKey=[^<]`),                                             // azure storage account key — defense-in-depth alongside secret-assign (spec 120 R9)
 	regexp.MustCompile(`\bsk-[A-Za-z0-9]`),                                              // openai key
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.`),                                      // jwt
 	regexp.MustCompile(`(?i)BEGIN[ A-Z0-9]*PRIVATE KEY`),                                // residual PEM envelope — flags a surviving BEGIN…PRIVATE KEY marker even when the trailing dashes are absent (repanel-codex: malformed/partial envelope)

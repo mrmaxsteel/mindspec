@@ -14,9 +14,11 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -376,14 +378,17 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
 	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
-		return nil, fmt.Errorf("auto-commit plan approval failed: %w\n\nFix the issue in %s and re-run 'mindspec plan approve %s'", err, specWtPath, specID)
+		// R4: specWtPath is a DISPLAY position here (not the `cd` operand,
+		// which containment.EmitCd below already renders spine-safe) —
+		// termsafe.Escape it.
+		return nil, fmt.Errorf("auto-commit plan approval failed: %w\n\nFix the issue in %s and re-run 'mindspec plan approve %s'", err, termsafe.Escape(specWtPath), specID)
 	}
 
 	// Pre-commit hooks (beads, etc.) can modify tracked files as a side
 	// effect of the commit above. A second CommitAll picks up those
 	// residual changes so the spec worktree lands clean.
 	if err := exec.CommitAll(specWtPath, fmt.Sprintf("chore: sync beads state after plan approval for %s", specID)); err != nil {
-		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec plan approve %s'", err, specWtPath, specID)
+		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec plan approve %s'", err, termsafe.Escape(specWtPath), specID)
 	}
 
 	// Final guard: the spec worktree must be clean before beads can be
@@ -770,16 +775,18 @@ func queryExistingChildren(parentID, specID string) ([]existingChildBead, error)
 // mutation, over the SAME children queryExistingChildren resolved.
 func checkExistingBeadsSafety(children []existingChildBead) error {
 	for _, c := range children {
+		// R4: c.ID is an ID-typed position — idrender.Bead (match
+		// complete.go:1118), not termsafe.Escape.
 		switch strings.ToLower(c.Status) {
 		case "in_progress":
 			return guard.NewFailure(
-				fmt.Sprintf("cannot re-approve plan: bead %s is in_progress — complete the active work first, then re-run plan approve", c.ID),
-				fmt.Sprintf("mindspec complete %s", c.ID),
+				fmt.Sprintf("cannot re-approve plan: bead %s is in_progress — complete the active work first, then re-run plan approve", idrender.Bead(c.ID)),
+				fmt.Sprintf("mindspec complete %s", idrender.Bead(c.ID)),
 			)
 		case "closed":
 			return guard.NewFailure(
-				fmt.Sprintf("cannot re-approve plan: bead %s is closed — a closed child is either completed work under this epic (stop: re-approving would supersede a done record; reconsider the re-approve), a leftover from a failed partial bead create, OR a leftover from a supersede-close whose plan-approve run was interrupted before the new bead set was created. ONLY in the latter two (partial/interrupted) cases, delete the leftover and re-run plan approve", c.ID),
-				fmt.Sprintf("bd delete %s --force", c.ID),
+				fmt.Sprintf("cannot re-approve plan: bead %s is closed — a closed child is either completed work under this epic (stop: re-approving would supersede a done record; reconsider the re-approve), a leftover from a failed partial bead create, OR a leftover from a supersede-close whose plan-approve run was interrupted before the new bead set was created. ONLY in the latter two (partial/interrupted) cases, delete the leftover and re-run plan approve", idrender.Bead(c.ID)),
+				fmt.Sprintf("bd delete %s --force", idrender.Bead(c.ID)),
 			)
 		}
 	}
@@ -902,7 +909,7 @@ func buildDesignField(specDir, requirements string, adrCitationIDs []string) str
 			if err != nil {
 				continue
 			}
-			citations = append(citations, fmt.Sprintf("- see %s — %s", id, a.Title))
+			citations = append(citations, fmt.Sprintf("- see %s — %s", termsafe.Escape(id), termsafe.Escape(a.Title)))
 		}
 		if len(citations) > 0 {
 			parts = append(parts, "## ADR Decisions\n\nCited by ID — full text under `.mindspec/adr/`:\n\n"+strings.Join(citations, "\n"))

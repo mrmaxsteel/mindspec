@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/setup"
 )
 
@@ -25,7 +27,13 @@ type Sandbox struct {
 	// mindspecBinDir is the project's bin/ directory (contains mindspec binary).
 	mindspecBinDir string
 
-	t *testing.T
+	// t is testing.TB, not the concrete *testing.T, so the R7/AC-19
+	// hostile-id/hostile-ref fail-fast tests can probe it with a
+	// Goexit-halting fake TB (spec 120): a real *testing.T subtest that
+	// intentionally fails would mark the enclosing `go test` run failed
+	// even when that failure IS the assertion under test, so the id/ref
+	// gates need an interface seam here instead.
+	t testing.TB
 }
 
 // NewSandbox creates a fresh git repo in t.TempDir() with .mindspec/,
@@ -191,7 +199,7 @@ func (s *Sandbox) Commit(msg string) {
 	}
 }
 
-func mustRun(t *testing.T, dir string, name string, args ...string) string { //nolint:unparam // name kept for call-site clarity
+func mustRun(t testing.TB, dir string, name string, args ...string) string { //nolint:unparam // name kept for call-site clarity
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -204,7 +212,7 @@ func mustRun(t *testing.T, dir string, name string, args ...string) string { //n
 
 // mustRunWithBin is like mustRun but prepends binDir to PATH so that
 // git hooks (e.g. pre-commit shim) can resolve the mindspec binary.
-func mustRunWithBin(t *testing.T, dir, binDir string, name string, args ...string) { //nolint:unparam // name kept for call-site clarity
+func mustRunWithBin(t testing.TB, dir, binDir string, name string, args ...string) { //nolint:unparam // name kept for call-site clarity
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -248,7 +256,16 @@ func (s *Sandbox) GitBranch() string {
 }
 
 // BranchExists checks whether a git branch exists.
+//
+// R7 (spec 120): branch is a dynamic operand reaching a git spawn — guard
+// with gitutil.RejectOptionLike, fail-fast t.Fatalf before the spawn, so a
+// hostile `-`-prefixed operand can never be reinterpreted as a git option
+// (SEC-5).
 func (s *Sandbox) BranchExists(branch string) bool {
+	s.t.Helper()
+	if err := gitutil.RejectOptionLike(branch); err != nil {
+		s.t.Fatalf("BranchExists: %v", err)
+	}
 	cmd := exec.Command("git", "rev-parse", "--verify", branch)
 	cmd.Dir = s.Root
 	return cmd.Run() == nil
@@ -260,7 +277,15 @@ func (s *Sandbox) WorktreeExists(name string) bool {
 }
 
 // ListBranches returns branch names matching the given prefix (e.g. "spec/", "bead/").
+//
+// R7 (spec 120): prefix is a dynamic operand (the git branch --list glob
+// pattern) — guard with gitutil.RejectOptionLike, fail-fast t.Fatalf
+// before the spawn.
 func (s *Sandbox) ListBranches(prefix string) []string {
+	s.t.Helper()
+	if err := gitutil.RejectOptionLike(prefix); err != nil {
+		s.t.Fatalf("ListBranches: %v", err)
+	}
 	cmd := exec.Command("git", "branch", "--list", prefix+"*")
 	cmd.Dir = s.Root
 	out, err := cmd.Output()
@@ -407,8 +432,21 @@ func (s *Sandbox) CreateSpecEpic(specID string) string {
 
 // CreateBead creates a beads issue in the sandbox and returns its ID.
 // issueType is "epic" or "task". parentID is optional.
+//
+// R7 (spec 120, round 9/10): parentID is an id-position operand reaching
+// a `bd create --parent` spawn — gated with idvalidate.BeadID,
+// fail-fast t.Fatalf BEFORE the spawn (AC-19/AC-27's harness leg), even
+// though this is scenario-authored test scaffolding rather than an
+// agent-writable runtime vector (gated anyway for uniformity, per the
+// no-provenance-exemption rule). title/issueType are non-id free text
+// and are NOT gated.
 func (s *Sandbox) CreateBead(title, issueType, parentID string) string {
 	s.t.Helper()
+	if parentID != "" {
+		if err := idvalidate.BeadID(parentID); err != nil {
+			s.t.Fatalf("CreateBead: invalid parentID: %v", err)
+		}
+	}
 	args := []string{"create", "--title", title, "--type", issueType, "--priority", "2", "--json"}
 	if parentID != "" {
 		args = append(args, "--parent", parentID)
@@ -425,8 +463,15 @@ func (s *Sandbox) CreateBead(title, issueType, parentID string) string {
 }
 
 // ClaimBead sets a beads issue to in_progress status.
+//
+// R7 (spec 120, round 9/10): beadID is an id-position operand reaching a
+// `bd update` spawn — gated with idvalidate.BeadID, fail-fast t.Fatalf
+// BEFORE the spawn (AC-19/AC-27's harness leg).
 func (s *Sandbox) ClaimBead(beadID string) {
 	s.t.Helper()
+	if err := idvalidate.BeadID(beadID); err != nil {
+		s.t.Fatalf("ClaimBead: invalid beadID: %v", err)
+	}
 	out, err := s.runBD("update", beadID, "--status=in_progress")
 	if err != nil {
 		s.t.Fatalf("bd update %s: %v\n%s", beadID, err, out)

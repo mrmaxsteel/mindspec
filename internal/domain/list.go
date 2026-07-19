@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -149,19 +150,43 @@ func List(root string) ([]DomainEntry, error) {
 }
 
 // FormatTable formats domain entries as an aligned table.
+//
+// R4: Name is an agent-writable domain-directory basename, Owns and each
+// Relationships entry are agent-writable free text sourced from
+// context-map.md — all are escaped via termsafe.Escape BEFORE the column
+// widths are measured, so a hostile value cannot both widen the table AND
+// smuggle raw control bytes into the render (spec 120 R4).
 func FormatTable(entries []DomainEntry) string {
 	if len(entries) == 0 {
 		return "No domains found.\n"
 	}
 
-	// Calculate column widths
-	nameW, ownsW := len("Domain"), len("Owns")
-	for _, e := range entries {
-		if len(e.Name) > nameW {
-			nameW = len(e.Name)
+	type row struct {
+		name string
+		owns string
+		rels string
+	}
+	rows := make([]row, len(entries))
+	for i, e := range entries {
+		relStrs := make([]string, len(e.Relationships))
+		for j, r := range e.Relationships {
+			relStrs[j] = termsafe.Escape(r)
 		}
-		if len(e.Owns) > ownsW {
-			ownsW = len(e.Owns)
+		rows[i] = row{
+			name: termsafe.Escape(e.Name),
+			owns: termsafe.Escape(e.Owns),
+			rels: strings.Join(relStrs, ", "),
+		}
+	}
+
+	// Calculate column widths off the ESCAPED values.
+	nameW, ownsW := len("Domain"), len("Owns")
+	for _, r := range rows {
+		if len(r.name) > nameW {
+			nameW = len(r.name)
+		}
+		if len(r.owns) > ownsW {
+			ownsW = len(r.owns)
 		}
 	}
 
@@ -175,9 +200,8 @@ func FormatTable(entries []DomainEntry) string {
 	b.WriteString(strings.Repeat("-", 13))
 	b.WriteString("\n")
 
-	for _, e := range entries {
-		rels := strings.Join(e.Relationships, ", ")
-		b.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, e.Name, ownsW, e.Owns, rels))
+	for _, r := range rows {
+		b.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, r.name, ownsW, r.owns, r.rels))
 	}
 
 	return b.String()

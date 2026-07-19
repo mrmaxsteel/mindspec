@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -261,4 +263,52 @@ func TestScanOrphanedClosedBeads_ErrorPreserving(t *testing.T) {
 			t.Fatalf("fail-open wrapper must return bead-b byte-identically (ignoring bead-a's error), got %+v", got)
 		}
 	})
+}
+
+// --- Spec 120 R4 (converging pass): RecoveryCommand hostile-BeadID pin ---
+//
+// Orphan.BeadID is populated straight from `bd list --status=closed --json`
+// (ClosedEpicBeadIDs / listClosedBeadsFn) and is NEVER passed through
+// idvalidate.BeadID before landing in the struct — a sibling bd-writing
+// agent (or a compromised one) can shape it into anything printable. Every
+// consumer that renders o.BeadID or o.RecoveryCommand() (checkUnmergedBeads
+// in cmd/mindspec/next.go, implOrphanRefusal in internal/approve/impl.go,
+// mindspec doctor) must never let a malformed-but-printable value pass
+// through looking like a real ID. RecoveryCommand routes through
+// idrender.Bead, which pins that here directly rather than relying on the
+// generic idrender package test alone to catch a regression at THIS call
+// site.
+func TestOrphan_RecoveryCommand_HostileBeadIDForcedQuoted(t *testing.T) {
+	hostileIDs := []string{
+		"mindspec-1\n--help", // newline-injected extra "line"
+		"mindspec-1;evil",    // printable metacharacter injection
+		"mindspec-1 --force; rm -rf /",
+	}
+	for _, id := range hostileIDs {
+		o := Orphan{BeadID: id, BeadBranch: "bead/" + id, SpecBranch: "spec/008-test"}
+		got := o.RecoveryCommand()
+		wantQuoted := "mindspec complete " + strconv.Quote(id)
+		if got != wantQuoted {
+			t.Errorf("RecoveryCommand() for hostile id %q = %q, want forced-quoted %q", id, got, wantQuoted)
+		}
+		// The forced-quote must fold any embedded newline into the
+		// escaped `\n` two-character sequence — no raw newline can
+		// reach the rendered command and forge an extra terminal line.
+		if strings.ContainsRune(got, '\n') {
+			t.Errorf("RecoveryCommand() for hostile id %q still contains a raw newline: %q", id, got)
+		}
+	}
+}
+
+// TestOrphan_RecoveryCommand_CleanBeadIDByteIdentical is the clean-fixture
+// counterpart (F3 discipline): a genuine, waist-valid bead ID must still
+// render byte-identically — the hostile-input fix must not degrade the
+// happy path.
+func TestOrphan_RecoveryCommand_CleanBeadIDByteIdentical(t *testing.T) {
+	const clean = "mindspec-9cyu.1"
+	o := Orphan{BeadID: clean, BeadBranch: "bead/" + clean, SpecBranch: "spec/008-test"}
+	want := "mindspec complete " + clean
+	if got := o.RecoveryCommand(); got != want {
+		t.Errorf("RecoveryCommand() for clean id %q = %q, want byte-identical %q", clean, got, want)
+	}
 }

@@ -10,8 +10,10 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -155,9 +157,29 @@ func defaultSetOpen(beadID string) error {
 func defaultSetOpenVia(run func(args ...string) ([]byte, error), beadID string) error {
 	out, err := run("update", beadID, "--status=open", "--assignee=")
 	if err != nil {
-		return fmt.Errorf("setting bead %s back to open: %s", beadID, strings.TrimSpace(string(out)))
+		// R4: beadID is an ID-typed position (idrender.Bead); the bd
+		// subprocess output is agent-influenced porcelain text — escape it
+		// per-line.
+		return fmt.Errorf("setting bead %s back to open: %s", idrender.Bead(beadID), escapeLines(strings.TrimSpace(string(out))))
 	}
 	return nil
+}
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — bd subprocess output —
+// while preserving the real newlines that separate genuine lines (R4:
+// per-line escaping for line-oriented bodies, never per-message, so a
+// hostile line cannot forge additional lines while legitimate multi-line
+// structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // defaultActiveBead resolves the active bead (bd's single in_progress child,
@@ -203,13 +225,19 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 			return fmt.Errorf("checking bead worktree for uncommitted changes: %w", err)
 		}
 		if len(userDirt) > 0 {
+			// R4: each porcelain entry is an agent-writable filename —
+			// escape per-line; beadID is an ID-typed position (idrender).
+			escapedUserDirt := make([]string, len(userDirt))
+			for i, line := range userDirt {
+				escapedUserDirt[i] = termsafe.Escape(line)
+			}
 			msg := fmt.Sprintf(
 				"cannot release bead %s: its worktree has uncommitted user changes:\n  %s\n"+
 					"these may be your work in progress — release did NOT remove the worktree.\n"+
 					"(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
-				beadID, strings.Join(userDirt, "\n  "))
+				idrender.Bead(beadID), strings.Join(escapedUserDirt, "\n  "))
 			return guard.NewFailure(msg,
-				fmt.Sprintf("commit them (git add -A && git commit) then re-run `mindspec release %s`, or discard them by re-running with `mindspec release %s --force`", beadID, beadID))
+				fmt.Sprintf("commit them (git add -A && git commit) then re-run `mindspec release %s`, or discard them by re-running with `mindspec release %s --force`", idrender.Bead(beadID), idrender.Bead(beadID)))
 		}
 	}
 
@@ -220,9 +248,11 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 		// Remove-first / set-open-last: a removal failure leaves the bead
 		// STILL CLAIMED (not yet open) — a recoverable state. Re-running
 		// release converges once the worktree is gone.
+		// R4: beadID is an ID-typed position — idrender.Bead, matching the
+		// dirty-check branch above.
 		return guard.NewFailure(
-			fmt.Sprintf("removing the worktree for bead %s failed; the bead is left CLAIMED (recoverable).\ncause: %v", beadID, err),
-			fmt.Sprintf("mindspec release %s", beadID))
+			fmt.Sprintf("removing the worktree for bead %s failed; the bead is left CLAIMED (recoverable).\ncause: %v", idrender.Bead(beadID), err),
+			fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)))
 	}
 
 	// Step 6 read: capture whether the released bead is the active one BEFORE
@@ -237,8 +267,8 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 		// of release (worktree already gone → Remove is idempotent) or
 		// `mindspec next` recovers.
 		return guard.NewFailure(
-			fmt.Sprintf("the bead %s worktree was removed but returning the bead to open failed (still-claimed, worktree-gone — recoverable).\ncause: %v", beadID, err),
-			fmt.Sprintf("mindspec release %s", beadID))
+			fmt.Sprintf("the bead %s worktree was removed but returning the bead to open failed (still-claimed, worktree-gone — recoverable).\ncause: %v", idrender.Bead(beadID), err),
+			fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)))
 	}
 
 	// Step 6 + 6.5: the cursor is DERIVED from bd's single in_progress child
@@ -252,7 +282,7 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 		}
 	}
 
-	fmt.Fprintf(deps.stdout, "Released bead %s.\nWorktree removed; bead returned to open (assignee cleared).\n", beadID)
+	fmt.Fprintf(deps.stdout, "Released bead %s.\nWorktree removed; bead returned to open (assignee cleared).\n", idrender.Bead(beadID))
 	return nil
 }
 

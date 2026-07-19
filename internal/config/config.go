@@ -528,7 +528,11 @@ func validateOrchestration(cfg *Config) error {
 	}
 	for k, v := range cfg.Loop.GateAuthority {
 		if v != "panel" && v != "human" {
-			return fmt.Errorf("loop.gate_authority.%s must be \"panel\" or \"human\" (got %q)\nrecovery: set loop.gate_authority.%s to panel or human in .mindspec/config.yaml", k, v, k)
+			// R8/AC-20 (spec 120): k is an agent-writable YAML map key —
+			// quote at BOTH interpolation points (the :592-area
+			// panel.gates precedent), so control bytes can never reach
+			// the message or recovery clause raw.
+			return fmt.Errorf("loop.gate_authority.%s must be \"panel\" or \"human\" (got %q)\nrecovery: set loop.gate_authority.%s to panel or human in .mindspec/config.yaml", strconv.Quote(k), v, strconv.Quote(k))
 		}
 	}
 	if ch := cfg.Loop.Context.ControllerHandoff; ch != "per-spec" && ch != "at-usage-threshold" {

@@ -2,6 +2,8 @@ package resolve
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -153,6 +155,36 @@ func TestFormatActiveList_Multiple(t *testing.T) {
 	got := FormatActiveList(specs)
 	if got == "No active specs found.\n" {
 		t.Error("expected non-empty list")
+	}
+}
+
+// TestFormatActiveList_HostileSpecIDForcedQuoted is Spec 120 R4's
+// (converging pass) Class B pin: SpecStatus.SpecID is bd-epic-metadata-
+// derived and never spine-validated (see resolve.ActiveSpecsWithCache),
+// so FormatActiveList must force a malformed-but-printable SpecID through
+// idrender.Spec rather than render it raw.
+func TestFormatActiveList_HostileSpecIDForcedQuoted(t *testing.T) {
+	hostileID := "001-alpha\nrecovery: forged"
+	got := FormatActiveList([]SpecStatus{{SpecID: hostileID, Mode: "spec"}})
+	wantQuoted := strconv.Quote(hostileID)
+	if !strings.Contains(got, wantQuoted) {
+		t.Errorf("FormatActiveList missing forced-quoted hostile SpecID %q:\n%s", wantQuoted, got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if line == "recovery: forged" {
+			t.Errorf("a forged standalone line reached the output via the hostile SpecID's raw newline: %q", got)
+		}
+	}
+}
+
+// TestFormatActiveList_CleanSpecIDByteIdentical is the clean-fixture
+// counterpart (F3 discipline).
+func TestFormatActiveList_CleanSpecIDByteIdentical(t *testing.T) {
+	const clean = "001-alpha"
+	got := FormatActiveList([]SpecStatus{{SpecID: clean, Mode: "spec"}})
+	want := "Active specs (1):\n  " + clean + "  phase=spec\n"
+	if got != want {
+		t.Errorf("FormatActiveList(clean) = %q, want byte-identical %q", got, want)
 	}
 }
 

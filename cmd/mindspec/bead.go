@@ -6,6 +6,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +69,10 @@ var beadWorktreeCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Worktree created: %s\n", wtName)
+			// R4 (spec 120): wtName is composed from the agent-writable
+			// beadID; termsafe.Escape is byte-identical for a genuine name
+			// and neutralizes control bytes in a hostile one.
+			fmt.Printf("Worktree created: %s\n", termsafe.Escape(wtName))
 		} else {
 			entries, err := bead.WorktreeList()
 			if err != nil {
@@ -79,13 +84,19 @@ var beadWorktreeCmd = &cobra.Command{
 			found := false
 			for _, e := range entries {
 				if e.Name == expectedName || e.Branch == expectedBranch {
-					fmt.Println(e.Path)
+					// R4 (spec 120): e.Path is a free-text field from
+					// `bd worktree list --json` (agent-writable, never
+					// idvalidate'd). termsafe.Escape is byte-identical for a
+					// genuine path (so `cd $(mindspec bead worktree <id>)`
+					// still works) and neutralizes control bytes in a hostile
+					// one.
+					fmt.Println(termsafe.Escape(e.Path))
 					found = true
 					break
 				}
 			}
 			if !found {
-				fmt.Println("No worktree found for bead", beadID)
+				fmt.Println("No worktree found for bead", idrender.Bead(beadID))
 			}
 		}
 		return nil
@@ -171,7 +182,7 @@ Use this to recover when plan-approve failed to create beads.`,
 
 		fmt.Printf("Created %d implementation beads:\n", len(result.BeadIDs))
 		for _, id := range result.BeadIDs {
-			fmt.Printf("  - %s\n", id)
+			fmt.Printf("  - %s\n", idrender.Bead(id))
 		}
 		for _, w := range result.Warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
