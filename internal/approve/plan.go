@@ -483,7 +483,7 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 	// queries this function drives — validate BEFORE any bd spawn. A
 	// well-formed epic id (the common case) passes for free.
 	if err := idvalidate.BeadID(parentID); err != nil {
-		return nil, nil, fmt.Errorf("invalid parent epic id %s: %w", parentID, err)
+		return nil, nil, fmt.Errorf("invalid parent epic id %s: %w", idrender.Bead(parentID), err)
 	}
 	data, err := os.ReadFile(planPath)
 	if err != nil {
@@ -633,7 +633,7 @@ func createBeadsFromParsed(specDir, specID, parentID, planContent string, sectio
 		// argv below or is composed into a branch/worktree name downstream.
 		if err := idvalidate.BeadID(created.ID); err != nil {
 			return beadIDs, warnings, beadCreateFailure(specID, sec.Heading, beadIDs, args,
-				fmt.Errorf("bd create returned an invalid bead id %s: %w", created.ID, err))
+				fmt.Errorf("bd create returned an invalid bead id %s: %w", idrender.Bead(created.ID), err))
 		}
 
 		beadIDs = append(beadIDs, created.ID)
@@ -861,7 +861,7 @@ func supersedeCloseExistingBeads(children []existingChildBead, planContent strin
 		// malformed id refuses the whole supersede rather than silently
 		// dropping it (which would close an incomplete/wrong set).
 		if err := idvalidate.BeadID(c.ID); err != nil {
-			return fmt.Errorf("existing child bead has an invalid id %s: %w", c.ID, err)
+			return fmt.Errorf("existing child bead has an invalid id %s: %w", idrender.Bead(c.ID), err)
 		}
 		ids = append(ids, c.ID)
 	}

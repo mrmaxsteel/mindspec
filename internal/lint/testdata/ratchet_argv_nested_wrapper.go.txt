@@ -1,0 +1,30 @@
+// Negative fixture for spec 120 R6 scan (g), round-11 caller
+// resolution: the bd wrapper is reached through a NESTED selector
+// (o.in.driveBD — the receiver is itself a selector, not a bare
+// ident) and through a METHOD VALUE (run := d.driveBD). Once the
+// wrapper spawn is classified caller-audited, NEITHER caller may
+// escape the caller-audited fixed point.
+package fixture
+
+import (
+	"os/exec"
+)
+
+type innerDriver struct{}
+
+func (d *innerDriver) driveBD(args ...string) ([]byte, error) {
+	return exec.Command("bd", args...).Output()
+}
+
+type outerHolder struct {
+	in *innerDriver
+}
+
+func nestedSelectorCaller(o *outerHolder, specID string) ([]byte, error) {
+	return o.in.driveBD("show", specID)
+}
+
+func methodValueCaller(d *innerDriver, beadID string) ([]byte, error) {
+	run := d.driveBD
+	return run("update", beadID, "--claim")
+}

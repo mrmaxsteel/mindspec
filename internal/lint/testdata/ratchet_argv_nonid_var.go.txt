@@ -1,0 +1,15 @@
+// Negative fixture for spec 120 R6 scan (g), round-8 call-site-keyed
+// discriminator: the id operand hides in a NON-id-named variable.
+// The site must still be flagged — classification is keyed by call
+// site, never by operand names.
+package fixture
+
+import (
+	"os"
+	"os/exec"
+)
+
+func hiddenOperand() ([]byte, error) {
+	x := os.Getenv("MINDSPEC_FIXTURE_TARGET") // an id, in a non-id-named var
+	return exec.Command("bd", "show", x, "--json").Output()
+}

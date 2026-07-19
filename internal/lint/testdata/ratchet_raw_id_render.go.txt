@@ -1,0 +1,22 @@
+// Negative fixture for spec 120 R6 scan (h): an ungated fmt.Printf of
+// a beadID-named value must be flagged; the idrender-routed and
+// %q-rendered shapes must pass.
+package fixture
+
+import (
+	"fmt"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+)
+
+func renderRawly(beadID string) {
+	// Ungated raw ID render — RED.
+	fmt.Printf("claimed %s\n", beadID)
+}
+
+func renderSafely(beadID string) {
+	// idrender-routed — forced-safe, GREEN.
+	fmt.Printf("claimed %s\n", idrender.Bead(beadID))
+	// %q verb — strconv.Quote semantics, GREEN.
+	fmt.Printf("claimed %q\n", beadID)
+}

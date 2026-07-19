@@ -1,0 +1,48 @@
+// Negative fixture for spec 120 R6 scan (g), round-11 DELTA
+// (fail-closed exec-constructor aliasing): two shapes that previously
+// escaped spawn discovery SILENTLY must now surface for classification.
+//
+//   1. LOCAL function-value alias of the exec seam:
+//        spawn := exec.Command; spawn(program, id)
+//      The direct-spawn Ident arm formerly consulted only package-level
+//      exec seam vars, so a local `spawn` never entered discovery.
+//   2. PACKAGE seam var bound to exec.CommandContext (cmdArgIdx 1):
+//        var execCommandContext = exec.CommandContext
+//      The seam-var matcher formerly matched only Sel.Name=="Command".
+//   3. LOCAL `var spawn = exec.Command` (DeclStmt/ValueSpec):
+//        var spawn = exec.Command; spawn("bd", "show", id)
+//      analyzeFuncLocals/resolveLocalAlias formerly inspected only
+//      AssignStmt, so the var-decl binding form escaped.
+package fixture
+
+import (
+	"context"
+	"os/exec"
+)
+
+// Package seam var over CommandContext — command operand is arg index 1.
+var execCommandContext = exec.CommandContext
+
+func aliasEscape(id string) error {
+	program := "bd"      // single-assignment string literal -> "bd"
+	spawn := exec.Command // single-assignment local exec alias
+	return spawn(program, "show", id).Run()
+}
+
+func ctxSeamEscape(ctx context.Context, id string) error {
+	return execCommandContext(ctx, "bd", "show", id).Run()
+}
+
+// The remaining local binding form: `var spawn = exec.Command` (a
+// DeclStmt/ValueSpec, not an AssignStmt). Must also surface.
+func localVarDeclAliasEscape(id string) error {
+	var spawn = exec.Command // single-initialization local exec alias
+	return spawn("bd", "show", id).Run()
+}
+
+// Tuple var-decl binding form: `var spawn, _ = exec.Command, 0` — the
+// DeclStmt paths must handle tuple ValueSpecs pairwise, not single-only.
+func tupleVarDeclAliasEscape(id string) error {
+	var spawn, _ = exec.Command, 0
+	return spawn("bd", "show", id).Run()
+}

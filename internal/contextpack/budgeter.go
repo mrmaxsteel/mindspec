@@ -154,7 +154,7 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 	// Gate-all-ids (ADR-0042 §1, round 9): beadID feeds a `bd show` argv
 	// build via beadShowFn — validate BEFORE any bd spawn.
 	if err := idvalidate.BeadID(beadID); err != nil {
-		return nil, fmt.Errorf("invalid bead id %s: %w", beadID, err)
+		return nil, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
 	}
 
 	// 1. Fetch bead JSON via the existing beadShowFn seam.
@@ -182,7 +182,7 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 	// import internal/workspace's composition helpers here beyond
 	// SpecsDir, the enumeration-root accessor).
 	if err := idvalidate.SpecID(specID); err != nil {
-		return nil, fmt.Errorf("bead %s carries an invalid spec_id %s: %w", beadID, specID, err)
+		return nil, fmt.Errorf("bead %s carries an invalid spec_id %s: %w", beadID, idrender.Spec(specID), err)
 	}
 
 	// 3. Resolve spec dir + read spec.md, plan.md. The spec dir is resolved

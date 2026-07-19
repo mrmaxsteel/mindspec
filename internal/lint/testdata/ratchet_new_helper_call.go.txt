@@ -1,0 +1,13 @@
+// Negative fixture for spec 120 R6 scan (a): a NEW call of a
+// workspace composition helper that is absent from the audited
+// allowlist. The scan must flag it as UNAUDITED.
+package fixture
+
+import (
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+)
+
+func newHelperCall(beadID string) (string, error) {
+	// This brand-new call site is not in compositionCallAllowlist.
+	return workspace.BeadBranch(beadID)
+}

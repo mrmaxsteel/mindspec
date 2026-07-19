@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/spf13/cobra"
@@ -160,7 +161,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
-		msg := fmt.Sprintf("repair phase: no lifecycle epic found for spec %s", specID)
+		msg := fmt.Sprintf("repair phase: no lifecycle epic found for spec %s", idrender.Spec(specID))
 		if err != nil {
 			msg += fmt.Sprintf(": %v", err)
 		}

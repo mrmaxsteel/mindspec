@@ -1,0 +1,23 @@
+// Negative fixture for spec 120 R6 scan (g), round-10 wrapper-agnostic
+// discriminator: a NEW wrapper that spawns bd via
+// exec.LookPath("bd")+exec.Command(bdPath, ...), matching neither
+// bead.RunBD nor Sandbox.runBD by name. The exec seam inside it must
+// be discovered and flagged; once classified caller-audited, its
+// id-passing caller must be flagged in turn.
+package fixture
+
+import (
+	"os/exec"
+)
+
+func myFutureBDDriver(args ...string) ([]byte, error) {
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command(bdPath, args...).Output()
+}
+
+func callsFutureDriver(specID string) ([]byte, error) {
+	return myFutureBDDriver("show", specID, "--json")
+}

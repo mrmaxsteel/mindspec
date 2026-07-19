@@ -642,7 +642,7 @@ func FindEpicBySpecID(specID string) (string, error) {
 // no-match.
 func FindEpicBySpecIDWithCache(c *Cache, specID string) (string, error) {
 	if err := idvalidate.SpecID(specID); err != nil {
-		return "", fmt.Errorf("no epic found for spec %s", specID)
+		return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
 	}
 	return c.FindEpicBySpecID(specID)
 }
@@ -781,7 +781,7 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 	// explicit-ingress gate at complete.Run's beadID argument (no id
 	// operand is trusted by provenance, even one already gated upstream).
 	if err := idvalidate.BeadID(beadID); err != nil {
-		return "", "", fmt.Errorf("invalid bead id %s: %w", beadID, err)
+		return "", "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
 	}
 	out, err := runBDFn("show", beadID, "--json")
 	if err != nil {

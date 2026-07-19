@@ -35,7 +35,7 @@ var listOpenBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
 	// `bd list --parent` argv build directly — validate BEFORE any bd
 	// spawn, ZERO bd argv on a malformed id.
 	if err := idvalidate.BeadID(epicID); err != nil {
-		return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
 	out, err := bead.RunBD("list", "--parent", epicID, "--status=open,in_progress", "--json")
 	if err != nil {
@@ -103,7 +103,7 @@ func (s StaleOpenBead) Message() string {
 func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 	epicID, err := findEpicBySpecIDFn(specID)
 	if err != nil {
-		return nil, fmt.Errorf("finding epic for spec %s: %w", specID, err)
+		return nil, fmt.Errorf("finding epic for spec %s: %w", idrender.Spec(specID), err)
 	}
 	if epicID == "" {
 		return nil, nil

@@ -20,6 +20,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -110,7 +111,7 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 	}
 	beadBranch, err := workspace.BeadBranch(beadID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid bead id %s: %v", ErrLandedMergeNotFound, beadID, err)
+		return nil, fmt.Errorf("%w: invalid bead id %s: %v", ErrLandedMergeNotFound, idrender.Bead(beadID), err)
 	}
 	wantSubject := "Merge " + beadBranch
 
@@ -215,7 +216,7 @@ func MergedUnclosed(root, specBranch, beadID string) (*LandedMerge, bool, error)
 
 	beadBranch, err := workspace.BeadBranch(beadID)
 	if err != nil {
-		return nil, false, fmt.Errorf("invalid bead id %s: %w", beadID, err)
+		return nil, false, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
 	}
 	_, survives, tipErr := resolveBranchTip(root, beadBranch)
 	if tipErr != nil {
