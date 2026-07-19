@@ -468,7 +468,9 @@ func SpecDir(root, specID string) (string, error) {
 	if err := idvalidate.SpecID(specID); err != nil {
 		return "", err
 	}
-	wtBase := filepath.Join(DefaultWorktreesDir(root), SpecWorktreeName(specID))
+	// specID is already validated above; SpecWorktreeName cannot fail here.
+	specWtName, _ := SpecWorktreeName(specID)
+	wtBase := filepath.Join(DefaultWorktreesDir(root), specWtName)
 	// 1. Worktree, flat shape.
 	if p := filepath.Join(wtBase, ".mindspec", "specs", specID); exists(p) {
 		return p, nil
@@ -667,12 +669,23 @@ func DetectWorktreeContext(dir string) (kind, specID, beadID string) {
 		if part == ".worktrees" && i+1 < len(parts) {
 			wtDir := parts[i+1]
 			if strings.HasPrefix(wtDir, SpecWorktreePrefix) {
-				lastKind = WorktreeSpec
-				lastSpecID = strings.TrimPrefix(wtDir, SpecWorktreePrefix)
-				lastBeadID = ""
+				// D2 (ADR-0042): the trimmed suffix is a string parsed
+				// back OUT of an agent-writable on-disk directory name —
+				// it must pass idvalidate before it exercises any ID
+				// authority. A failing segment leaves this match
+				// unrecognized (existing WorktreeMain/empty-ID semantics)
+				// rather than composing an ActiveWorktree from a hostile
+				// dir name.
+				if candidate := strings.TrimPrefix(wtDir, SpecWorktreePrefix); idvalidate.SpecID(candidate) == nil {
+					lastKind = WorktreeSpec
+					lastSpecID = candidate
+					lastBeadID = ""
+				}
 			} else if strings.HasPrefix(wtDir, BeadWorktreePrefix) {
-				lastKind = WorktreeBead
-				lastBeadID = strings.TrimPrefix(wtDir, BeadWorktreePrefix)
+				if candidate := strings.TrimPrefix(wtDir, BeadWorktreePrefix); idvalidate.BeadID(candidate) == nil {
+					lastKind = WorktreeBead
+					lastBeadID = candidate
+				}
 			}
 		}
 	}

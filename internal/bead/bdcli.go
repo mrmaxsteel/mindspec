@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 )
 
@@ -76,6 +77,16 @@ func RunBD(args ...string) ([]byte, error) {
 // performed inside this package so enforcement-package callers
 // (e.g. internal/validate) never import os/exec.
 func BeadExists(id string) (bool, error) {
+	// Class-2 executable-operand CONSUMER boundary (ADR-0042 §1, spec 120
+	// AC-26, round 6/7 G2): id feeds a `bd show` argv build directly — bd
+	// ids are agent-writable (bd create --force --id=<arbitrary> is
+	// empirically unsafe), so it is validated BEFORE any bd spawn HERE,
+	// in-package, covering every present and future caller (validate
+	// plan's checkBeadIDs->CheckBeadExists included). A malformed id
+	// cannot name a real bead: not-found-by-construction, ZERO bd argv.
+	if err := idvalidate.BeadID(id); err != nil {
+		return false, nil
+	}
 	_, err := RunBD("show", id, "--json")
 	if err == nil {
 		return true, nil
@@ -139,6 +150,13 @@ func Export(workdir string) error {
 func Close(ids ...string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("Close requires at least one bead ID")
+	}
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): every id operand is
+	// validated BEFORE any bd spawn — ZERO bd argv on a malformed id.
+	for _, id := range ids {
+		if err := idvalidate.BeadID(id); err != nil {
+			return fmt.Errorf("invalid bead id %s: %w", id, err)
+		}
 	}
 	args := append([]string{"close"}, ids...)
 	out, err := tracedCombined("close", args)
@@ -273,6 +291,14 @@ func ListJSON(args ...string) ([]byte, error) {
 // unchanged — only a genuine READ/PARSE failure now aborts. See GetMetadata,
 // the read half this shares.
 func MergeMetadata(issueID string, updates map[string]interface{}) error {
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): issueID feeds the
+	// `bd update --metadata` argv build below — validated BEFORE any bd
+	// spawn (GetMetadata's own `bd show` gate would catch it too, but the
+	// write half gates independently so the property holds even if
+	// GetMetadata's contract ever changes).
+	if err := idvalidate.BeadID(issueID); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", issueID, err)
+	}
 	existing, err := GetMetadata(issueID)
 	if err != nil {
 		return fmt.Errorf("bd metadata merge-read failed for %s: %w", issueID, err)
@@ -311,6 +337,11 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 // reconciliation (internal/complete), both rely on: a read error is never a
 // license to proceed as if the store were empty.
 func GetMetadata(issueID string) (map[string]interface{}, error) {
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): issueID feeds a
+	// `bd show` argv build directly — validated BEFORE any bd spawn.
+	if err := idvalidate.BeadID(issueID); err != nil {
+		return nil, fmt.Errorf("invalid bead id %s: %w", issueID, err)
+	}
 	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
 	if err != nil {
 		return nil, fmt.Errorf("bd show %s failed: %w", issueID, err)

@@ -1,16 +1,16 @@
 package approve
 
-// Spec 120 R4 cluster 2 (round-5 fix-up): readPlanBeadIDs reads bead_ids
-// from the AGENT-AUTHORED plan.md YAML frontmatter (internal/approve/impl.go)
-// and is NEVER idvalidate'd — the same untrusted-provenance class
-// internal/validate/beads.go's checkBeadIDs already treats via
-// idrender.Bead. These tests pin that every DISPLAY position fed by that
-// same plan-frontmatter bead ID — the plan-bead status gate (1/3) and the
-// durable-obligation backstop's (Leg 3) recourse — forces a malformed
-// bead ID through strconv.Quote (idrender.Bead), while the FUNCTIONAL bd
-// lookups (readBeadStatus's `bd show`, implObligationRefusal's
-// workspace.BeadBranch/implBranchExistsFn) keep consuming the raw ID
-// unchanged.
+// Spec 120 R4 cluster 2 (round-5 fix-up) merged with Bead 2's AC-25
+// read-gate: readPlanBeadIDs reads bead_ids from the AGENT-AUTHORED
+// plan.md YAML frontmatter (internal/approve/impl.go) and now
+// idvalidate's every entry at the read boundary — a malformed entry is
+// REFUSED before any functional bd lookup can consume it, and the
+// refusal's DISPLAY position forces the malformed ID through
+// strconv.Quote (idrender.Bead), never rendering it raw. Genuine plan
+// bead IDs still flow through unchanged to the FUNCTIONAL bd lookups
+// (readBeadStatus's `bd show`), and the downstream display positions
+// (status gate 1/3, Leg 3 recourse) keep their idrender discipline —
+// byte-identical for valid IDs.
 
 import (
 	"encoding/json"
@@ -38,11 +38,11 @@ func TestApproveImpl_HostilePlanBeadID_OpenStatusForcedQuoted(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 	saveAndRestore(t)
 
-	var sawFunctionalRawID bool
+	var sawFunctionalHostileID bool
 	implRunBDFn = func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "show" {
 			if args[1] == hostilePlanBeadID {
-				sawFunctionalRawID = true
+				sawFunctionalHostileID = true
 			}
 			payload := []map[string]string{{"status": "in_progress"}}
 			return json.Marshal(payload)
@@ -54,39 +54,44 @@ func TestApproveImpl_HostilePlanBeadID_OpenStatusForcedQuoted(t *testing.T) {
 	mock := approveOKMock()
 	_, err := ApproveImpl(tmp, "010-test", mock)
 	if err == nil {
-		t.Fatal("expected an error when the plan bead is still open")
+		t.Fatal("expected the AC-25 read-gate to refuse a malformed plan-frontmatter bead ID")
 	}
 	msg := err.Error()
 
-	// The functional bd invocation (readBeadStatus's `bd show`) must still
-	// receive the RAW id — escaping it would break the actual lookup.
-	if !sawFunctionalRawID {
-		t.Fatal("readBeadStatus's functional bd show must receive the raw plan-frontmatter bead ID unchanged")
+	// Bead 2's AC-25 read-gate refuses BEFORE any functional bd lookup —
+	// the hostile ID must never reach a `bd show` argv.
+	if sawFunctionalHostileID {
+		t.Fatal("a malformed plan-frontmatter bead ID must be refused before reaching readBeadStatus's bd show")
 	}
 
+	// Bead 5's R4 display discipline on the refusal itself: the malformed
+	// ID renders forced-quoted (idrender.Bead), never raw.
 	wantQuoted := strconv.Quote(hostilePlanBeadID)
-	if !strings.Contains(msg, fmt.Sprintf("bead %s is still \"in_progress\"", wantQuoted)) {
-		t.Errorf("gate-failure body must render the forced-quoted bead ID, got:\n%s", msg)
+	if !strings.Contains(msg, fmt.Sprintf("plan frontmatter bead_ids entry %s is not a valid bead ID", wantQuoted)) {
+		t.Errorf("read-gate refusal must render the forced-quoted bead ID, got:\n%s", msg)
+	}
+	if strings.Contains(msg, "entry "+hostilePlanBeadID+" is not") {
+		t.Errorf("read-gate refusal rendered the malformed bead ID raw:\n%s", msg)
 	}
 	if !guard.HasFinalRecoveryLine(msg) {
 		t.Errorf("expected a final recovery line: %v", msg)
-	}
-	wantRecovery := "recovery: mindspec complete " + wantQuoted
-	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
-	if got := lines[len(lines)-1]; got != wantRecovery {
-		t.Errorf("final recovery line = %q, want %q", got, wantRecovery)
 	}
 }
 
 func TestApproveImpl_HostilePlanBeadID_StatusReadErrorForcedQuoted(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
-	writePlanWithBeads(t, tmp, "010-test", []string{hostilePlanBeadID})
+	// Bead 2's AC-25 read-gate means a malformed entry can no longer reach
+	// readBeadStatus at all — the status-read-error DISPLAY position is
+	// exercised with a genuine ID (byte-identical through idrender.Bead),
+	// while the hostile-ID case is pinned as a read-gate refusal above.
+	const cleanID = "mindspec-9cyu.2"
+	writePlanWithBeads(t, tmp, "010-test", []string{cleanID})
 	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "show" && args[1] == hostilePlanBeadID {
+		if len(args) >= 2 && args[0] == "show" && args[1] == cleanID {
 			return nil, fmt.Errorf("bd unavailable")
 		}
 		return nil, fmt.Errorf("unexpected args: %v", args)
@@ -98,10 +103,9 @@ func TestApproveImpl_HostilePlanBeadID_StatusReadErrorForcedQuoted(t *testing.T)
 		t.Fatal("expected an error when readBeadStatus itself fails")
 	}
 	msg := err.Error()
-	wantQuoted := strconv.Quote(hostilePlanBeadID)
-	want := fmt.Sprintf("checking bead %s status: bd unavailable", wantQuoted)
+	want := fmt.Sprintf("checking bead %s status: bd unavailable", cleanID)
 	if !strings.Contains(msg, want) {
-		t.Errorf("status-read-error wrap must render the forced-quoted bead ID, got:\n%s\nwant substring: %s", msg, want)
+		t.Errorf("status-read-error wrap must render the clean bead ID byte-identically, got:\n%s\nwant substring: %s", msg, want)
 	}
 }
 

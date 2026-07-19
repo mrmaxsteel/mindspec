@@ -73,16 +73,21 @@ func defaultReadGuardStateWithCache(c *phase.Cache, root string) (*guardState, e
 	// If neither exists on disk (both deleted during crash/cleanup),
 	// leave ActiveWorktree empty so no redirect fires.
 	if ctx.SpecID != "" {
-		specWt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
-		if ctx.BeadID != "" {
-			beadWt := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID)
-			if dirExists(beadWt) {
-				gs.ActiveWorktree = beadWt
+		// Ambient, best-effort guard state: a malformed ctx.SpecID/BeadID
+		// (which should not occur post-D1/D2, but guard degrades safely
+		// regardless) simply leaves ActiveWorktree unset — no redirect
+		// fires (ADR-0042 degrade-vs-error policy for never-block
+		// consumers).
+		if specWt, err := workspace.SpecWorktreePath(root, cfg, ctx.SpecID); err == nil {
+			if ctx.BeadID != "" {
+				if beadWt, err := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID); err == nil && dirExists(beadWt) {
+					gs.ActiveWorktree = beadWt
+				} else if dirExists(specWt) {
+					gs.ActiveWorktree = specWt
+				}
 			} else if dirExists(specWt) {
 				gs.ActiveWorktree = specWt
 			}
-		} else if dirExists(specWt) {
-			gs.ActiveWorktree = specWt
 		}
 	}
 	return gs, nil
@@ -136,10 +141,11 @@ func checkCWDWithCache(c *phase.Cache, root string) error {
 	// Also allow the spec worktree — lifecycle commands (complete, impl-approve)
 	// need to run there after all beads are done.
 	if gs.ActiveSpec != "" {
-		specWtName := workspace.SpecWorktreeName(gs.ActiveSpec)
-		specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
-		if strings.HasPrefix(cwdAbs, specWtAbs) {
-			return nil
+		if specWtName, err := workspace.SpecWorktreeName(gs.ActiveSpec); err == nil {
+			specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
+			if strings.HasPrefix(cwdAbs, specWtAbs) {
+				return nil
+			}
 		}
 	}
 

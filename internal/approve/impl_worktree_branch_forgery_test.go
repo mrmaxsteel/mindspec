@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -12,13 +11,14 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
-// R4 (spec 120): the worktree-enumeration leg's ancestry-error refusal
-// (runWorktreeEnumerationLeg) renders WorktreeListEntry.Branch, which is
-// agent-writable free text from `bd worktree list --json` (never
-// idvalidate'd — filtered only by the "bead/" prefix and membership in the
-// raw bd-JSON closed-epic-bead set). The ancestry error itself (gitutil
-// IsAncestor) echoes the same branch back. A hostile branch that survives
-// to this refusal must be forced through strconv.Quote, never rendered raw.
+// R4 (spec 120 Bead 5) merged with Bead 2's reverse-derivation gate
+// (AC-23): the worktree-enumeration leg (runWorktreeEnumerationLeg)
+// parses a beadID back OUT of an agent-creatable worktree branch and now
+// SKIPS any malformed candidate — a hostile branch can no longer reach
+// the ancestry refusal at all. The ancestry-error refusal itself still
+// re-embeds free-text git stderr (gitutil IsAncestor), so Bead 5's R4
+// escaping must keep neutralizing control bytes and forged lines there
+// even for a clean (gate-passing) branch.
 func TestRunWorktreeEnumerationLeg_HostileBranchForcedQuoted(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
@@ -27,40 +27,54 @@ func TestRunWorktreeEnumerationLeg_HostileBranchForcedQuoted(t *testing.T) {
 	saveAndRestore(t)
 
 	// The closed-epic-bead set is raw bd-JSON; a hostile id there matches a
-	// hostile worktree branch of the same shape and reaches the refusal.
+	// hostile worktree branch of the same shape.
 	hostileBeadID := "bead-1\nFORGED: this bead is totally merged"
 	hostileBranch := "bead/" + hostileBeadID
+	cleanBranch := "bead/bead-1"
 
 	implScanOrphansFn = func(string, string, string) ([]lifecycle.Orphan, error) { return nil, nil }
-	implClosedEpicBeadIDsFn = func(string) ([]string, error) { return []string{hostileBeadID}, nil }
-	implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
-		return []bead.WorktreeListEntry{{Branch: hostileBranch, Path: "/tmp/wt"}}, nil
+	implClosedEpicBeadIDsFn = func(string) ([]string, error) {
+		return []string{hostileBeadID, "bead-1"}, nil
 	}
-	implIsAncestorFn = func(string, string, string) (bool, error) {
+	implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Branch: hostileBranch, Path: "/tmp/wt-hostile"},
+			{Branch: cleanBranch, Path: "/tmp/wt"},
+		}, nil
+	}
+	var sawBranches []string
+	implIsAncestorFn = func(_, branch, _ string) (bool, error) {
+		sawBranches = append(sawBranches, branch)
 		// Mirror gitutil IsAncestor's real error, which re-embeds the branch
-		// plus raw git stderr (here carrying an ESC control byte).
-		return false, fmt.Errorf("checking ancestry %s..spec/010-test: \x1b]0;pwn\x07 unknown revision", hostileBranch)
+		// plus raw git stderr (here carrying an ESC control byte and a
+		// forged-line payload).
+		return false, fmt.Errorf("checking ancestry %s..spec/010-test: \x1b]0;pwn\x07 unknown revision\nFORGED: this bead is totally merged", branch)
 	}
 
-	mock := approveOKMock()
-	if _, err := ApproveImpl(tmp, "010-test", mock); err != nil {
-		msg := err.Error()
-		// No forged line: the hostile newline must not carry the FORGED text
-		// onto its own terminal line.
-		if strings.Contains(msg, "\nFORGED:") {
-			t.Errorf("hostile branch newline rendered raw (forged line):\n%s", msg)
+	err := runWorktreeEnumerationLeg(tmp, "010-test", "spec/010-test")
+	if err == nil {
+		t.Fatal("expected an ancestry-error refusal for the clean branch")
+	}
+	msg := err.Error()
+
+	// Bead 2's reverse-derivation gate: the malformed derived beadID is
+	// skipped — the hostile branch must never reach the ancestry check.
+	for _, b := range sawBranches {
+		if b == hostileBranch {
+			t.Errorf("hostile branch reached the ancestry check (reverse-derivation gate bypassed)")
 		}
-		// No raw ESC byte leaking from the echoed git stderr.
-		if strings.ContainsRune(msg, 0x1b) {
-			t.Errorf("raw ESC control byte rendered into refusal:\n%s", msg)
-		}
-		// The branch is present, but forced-quoted (termsafe.Escape ->
-		// strconv.Quote for control-bearing input).
-		if !strings.Contains(msg, strconv.Quote(hostileBranch)) {
-			t.Errorf("expected forced-quoted branch %q in refusal:\n%s", strconv.Quote(hostileBranch), msg)
-		}
-	} else {
-		t.Fatalf("expected an ancestry-error refusal, got nil")
+	}
+	// Bead 5's R4 escaping on the refusal: no forged standalone line, no
+	// raw ESC byte leaking from the echoed git stderr.
+	if strings.Contains(msg, "\nFORGED:") {
+		t.Errorf("hostile git-stderr newline rendered raw (forged line):\n%s", msg)
+	}
+	if strings.ContainsRune(msg, 0x1b) {
+		t.Errorf("raw ESC control byte rendered into refusal:\n%s", msg)
+	}
+	// The clean branch still renders byte-identically in the refusal body.
+	if !strings.Contains(msg, "could not verify worktree branch "+cleanBranch) {
+		t.Errorf("expected the clean branch byte-identical in refusal:\n%s", msg)
 	}
 }
 

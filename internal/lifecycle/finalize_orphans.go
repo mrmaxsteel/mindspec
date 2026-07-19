@@ -21,10 +21,13 @@ package lifecycle
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -134,7 +137,17 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 		if isAnc {
 			continue
 		}
+		// Reverse-derivation gate (ADR-0042 §1 reverse, spec 120 AC-23,
+		// round-4 G2): specID is parsed back OUT of an agent-creatable
+		// local git branch name (git refnames admit shell/Markdown
+		// metacharacters). A malformed result is skipped with one
+		// escaped warning — never minted as a FinalizeOrphan, never
+		// composed, rendered, or embedded as an ID.
 		specID := strings.TrimPrefix(b, workspace.FinalizeBranchPrefix)
+		if err := idvalidate.SpecID(specID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping malformed finalize branch %s: %v\n", termsafe.Escape(b), err)
+			continue
+		}
 		o := FinalizeOrphan{Kind: "finalize_branch", SpecID: specID, Branch: b}
 		if count, cErr := finalizeOrphanCommitCountFn(workdir, "origin/main", b); cErr == nil {
 			o.CommitCount = count

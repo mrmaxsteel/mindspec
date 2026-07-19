@@ -2,9 +2,12 @@ package recording
 
 import (
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/ndjson"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // MarkerEvent is the on-disk NDJSON shape of a lifecycle marker.
@@ -84,7 +87,23 @@ func EmitPhaseMarker(root, specID, from, to string) error {
 }
 
 // EmitBeadMarker emits a lifecycle.bead.start or lifecycle.bead.complete marker.
+//
+// Structured-persistence write-gate (ADR-0042 §7, spec 120 round 5): both
+// specID and beadID are validated BEFORE any write — persisted stores are
+// agent-writable, so validation-at-write is trace-record integrity hygiene,
+// never trust (any future read of a persisted ID field into an ID role
+// re-validates at ingest, per the ADR doctrine). A malformed id skips the
+// write entirely (best-effort channel — never blocks the caller) with one
+// escaped warning naming the value.
 func EmitBeadMarker(root, specID, action, beadID string) error {
+	if err := idvalidate.SpecID(specID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping bead marker write: invalid spec id %s: %v\n", termsafe.Escape(specID), err)
+		return nil
+	}
+	if err := idvalidate.BeadID(beadID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping bead marker write: invalid bead id %s: %v\n", termsafe.Escape(beadID), err)
+		return nil
+	}
 	event := "lifecycle.bead." + action
 	return EmitMarker(root, specID, event, map[string]any{
 		"bead_id": beadID,

@@ -437,6 +437,52 @@ func TestResolveMode_Feature_EpicMetadataPrimary(t *testing.T) {
 	}
 }
 
+// TestResolveModeHostileTitle is spec 120 AC-23's round-5 consumer-
+// boundary test: a bd Title of the form "[IMPL 120-x;evil.1] …" — and the
+// 116 hostile control-byte triple — yields ResolvedWork.SpecID == ""; the
+// epic-lookup seam (findEpicForModeFn) is stubbed and asserts NO lookup is
+// attempted with the malformed value; a clean "[IMPL 009-feature.1]"
+// title parses byte-identically to today. The NO-recording-write leg
+// (round-6 F2) is doubly covered by the explicit cross-reference to
+// internal/recording's TestRecordingWriteGates — the class-5 write-gate —
+// together with the existing cmd/mindspec/next.go:287-293 `SpecID != ""`
+// guard this test's ResolvedWork.SpecID == "" assertion feeds.
+func TestResolveModeHostileTitle(t *testing.T) {
+	origFn := findEpicForModeFn
+	defer func() { findEpicForModeFn = origFn }()
+
+	hostileTitles := []string{
+		"[IMPL 120-x;evil.1] pwn",
+		"[IMPL x\x00\x1b[31m\nrecovery: forged.1] pwn",
+	}
+	for _, title := range hostileTitles {
+		var lookupCalled bool
+		findEpicForModeFn = func(specID string) (string, error) {
+			lookupCalled = true
+			return "", fmt.Errorf("epic-lookup should never be called for a malformed derived specID")
+		}
+		bead := BeadInfo{ID: "x", Title: title, IssueType: "feature"}
+		result := ResolveMode(t.TempDir(), bead)
+		if result.SpecID != "" {
+			t.Errorf("title %q: SpecID = %q, want \"\" (malformed derivation)", title, result.SpecID)
+		}
+		if lookupCalled {
+			t.Errorf("title %q: epic-lookup seam must NEVER be called with a malformed derived specID", title)
+		}
+		if strings.ContainsAny(result.SpecID, ";\x00\x1b") {
+			t.Errorf("title %q: SpecID carries raw hostile bytes: %q", title, result.SpecID)
+		}
+	}
+
+	// Clean title parses byte-identically to today.
+	findEpicForModeFn = origFn
+	cleanBead := BeadInfo{ID: "x", Title: "[IMPL 009-feature.1] Chunk title", IssueType: "task"}
+	cleanResult := ResolveMode(t.TempDir(), cleanBead)
+	if cleanResult.SpecID != "009-feature" {
+		t.Errorf("clean title SpecID = %q, want 009-feature", cleanResult.SpecID)
+	}
+}
+
 func TestResolveMode_NoColonInTitle(t *testing.T) {
 	bead := BeadInfo{ID: "x", Title: "No colon here", IssueType: "task"}
 	result := ResolveMode("/nonexistent", bead)
@@ -459,14 +505,24 @@ func TestParseSpecID(t *testing.T) {
 		{"[IMPL 009-workflow-gaps.2] Approval enhancements", "009-workflow-gaps"},
 		{"[SPEC 008b-gates] Human Gates Feature", "008b-gates"},
 		{"[PLAN 009-feature] Plan decomposition", "009-feature"},
-		{"[IMPL 001.3] Simple numeric", "001"},
+		// Spec 120 (ADR-0042 reverse-derivation consumer gate, AC-24
+		// empty-sentinel discipline): a bare numeric slug with no
+		// "-slug" tail is not a well-formed spec ID under the corrected
+		// idvalidate.SpecID grammar (which requires <NNN>-<slug>) — the
+		// derivation gate discards it and returns "" (the existing
+		// no-spec sentinel), same as any other malformed derived value.
+		{"[IMPL 001.3] Simple numeric", ""},
 		// No-tag bracket format: [specID] Bead N: title
 		{"[049-hook-command] Bead 1: Core hook infrastructure", "049-hook-command"},
 		{"[010-spec-init] Bead 3: Worktree creation", "010-spec-init"},
 		{"005-next: Implement work selection", "005-next"},
 		{"003-context: Fix rendering bug", "003-context"},
 		{"No colon here", ""},
-		{"simple:", "simple"},
+		// Spec 120: "simple" has no leading digits, so it fails
+		// idvalidate.SpecID and the gate returns "" (was never a
+		// real spec-dir shape; every actual colon-convention title is
+		// "NNN-slug: …").
+		{"simple:", ""},
 		{": leading colon", ""},
 	}
 	for _, tt := range tests {
@@ -525,6 +581,43 @@ func TestClaimBead_CallsRunBDCombined(t *testing.T) {
 	}
 	if len(capturedArgs) != 3 || capturedArgs[0] != "update" || capturedArgs[1] != "bead-abc" || capturedArgs[2] != "--claim" {
 		t.Errorf("unexpected args: %v", capturedArgs)
+	}
+}
+
+// TestNextClaimRejectsMalformedBeadID is spec 120 AC-6 (internal/next):
+// ClaimBead's gate-all-ids validation refuses a malformed id before any
+// bd spawn (never reaching runBDCombFn); and the ready-set claim seam
+// (SelectWorkByName, the explicit-claim path `mindspec next <bead-id>`
+// drives) is inert-by-construction — a malformed positional bead name can
+// never resolve to a real ready-set entry, so the explicit claim of a
+// malformed ID always refuses before ClaimBead is ever reached.
+func TestNextClaimRejectsMalformedBeadID(t *testing.T) {
+	origRunBDComb := runBDCombFn
+	defer func() { runBDCombFn = origRunBDComb }()
+
+	hostileIDs := []string{"--help", "x;evil", "x\x00\x1b[31m\nrecovery: forged"}
+	for _, hostile := range hostileIDs {
+		var spawned bool
+		runBDCombFn = func(args ...string) ([]byte, error) {
+			spawned = true
+			return nil, nil
+		}
+		if err := ClaimBead(hostile); err == nil {
+			t.Errorf("ClaimBead(%q) accepted a hostile id", hostile)
+		}
+		if spawned {
+			t.Errorf("ClaimBead(%q) spawned bd before the gate refused", hostile)
+		}
+	}
+
+	// The ready-set claim seam: an explicit claim of a malformed ID names
+	// no real ready-set entry, so it refuses at SelectWorkByName — never
+	// reaching ClaimBead.
+	items := []BeadInfo{{ID: "mindspec-real", Title: "Real work", Status: "open"}}
+	for _, hostile := range hostileIDs {
+		if _, err := SelectWorkByName(items, hostile); err == nil {
+			t.Errorf("SelectWorkByName(%q) resolved a hostile positional name against the ready set", hostile)
+		}
 	}
 }
 

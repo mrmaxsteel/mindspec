@@ -58,15 +58,20 @@ func CheckADRDivergence(
 
 	implApprove := beadID == ""
 	if headRef == "" {
+		var branchErr error
 		if implApprove {
 			// Impl backstop path: scan the full spec branch tip vs the
 			// caller-supplied base (typically merge-base with main).
-			headRef = workspace.SpecBranch(filepath.Base(specDir))
+			headRef, branchErr = workspace.SpecBranch(filepath.Base(specDir))
 		} else {
 			// Per-bead path: default to the canonical bead branch so
 			// the lane is self-anchoring even when the caller does not
 			// resolve a head ref explicitly.
-			headRef = workspace.BeadBranch(beadID)
+			headRef, branchErr = workspace.BeadBranch(beadID)
+		}
+		if branchErr != nil {
+			r.AddError("adr-divergence-load", "invalid id composing diff head ref: "+branchErr.Error())
+			return r, nil
 		}
 	}
 

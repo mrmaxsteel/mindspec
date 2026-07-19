@@ -11,16 +11,19 @@ import (
 	"testing"
 )
 
-// TestPanelLeafImports_StdlibPlusTermsafeOnly (Spec 116 AC7) machine-checks
-// the amended internal/panel leaf invariant (ADR-0037 amendment, gate.go's
-// package doc comment): the package's non-test *.go files import exactly
-// ONE github.com/mrmaxsteel/mindspec-prefixed package, internal/termsafe —
-// the stdlib-only, pure-string escaper — and no other internal package.
-// Before Spec 116 the invariant was "imports NO internal package at all";
-// this test pins the amended letter in code, the same way ADR-0030's
-// executor boundary is enforced by internal/lint/boundary_test.go rather
-// than by convention, so any future second internal import fails a test
-// immediately rather than drifting past review.
+// TestPanelLeafImports_StdlibPlusTermsafeOnly (Spec 116 AC7, extended by
+// spec 120 R2) machine-checks the amended internal/panel leaf invariant
+// (ADR-0037 amendment + ADR-0042, gate.go's package doc comment): the
+// package's non-test *.go files import exactly TWO
+// github.com/mrmaxsteel/mindspec-prefixed packages -- internal/termsafe
+// (the stdlib-only, pure-string escaper) and internal/idvalidate (the
+// stdlib-only id-grammar validator, spec 120's ResolveGateFacts beadID
+// gate) -- and no other internal package. Before Spec 116 the invariant
+// was "imports NO internal package at all"; this test pins the amended
+// letter in code, the same way ADR-0030's executor boundary is enforced by
+// internal/lint/boundary_test.go rather than by convention, so any future
+// THIRD internal import fails a test immediately rather than drifting past
+// review.
 func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -34,7 +37,10 @@ func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 	}
 
 	const modulePrefix = "github.com/mrmaxsteel/mindspec/"
-	const wantOnly = modulePrefix + "internal/termsafe"
+	wantOnly := map[string]bool{
+		modulePrefix + "internal/termsafe":   true,
+		modulePrefix + "internal/idvalidate": true,
+	}
 
 	seen := map[string]bool{}
 	var nonTestFiles []string
@@ -60,22 +66,24 @@ func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 				t.Fatalf("%s: unquoting import path %s: %v", e.Name(), imp.Path.Value, err)
 			}
 			if !strings.HasPrefix(path, modulePrefix) {
-				continue // stdlib or third-party — the leaf invariant only constrains internal imports
+				continue // stdlib or third-party -- the leaf invariant only constrains internal imports
 			}
 			seen[path] = true
-			if path != wantOnly {
-				t.Errorf("%s imports %s — internal/panel's leaf invariant (ADR-0037 amendment, Spec 116) permits exactly ONE internal import, %s, and no other", e.Name(), path, wantOnly)
+			if !wantOnly[path] {
+				t.Errorf("%s imports %s -- internal/panel's leaf invariant (ADR-0037 amendment + ADR-0042, spec 120) permits exactly the internal/termsafe and internal/idvalidate leaves, and no other", e.Name(), path)
 			}
 		}
 	}
 
 	if len(nonTestFiles) == 0 {
-		t.Fatal("no non-test *.go files found in internal/panel — the scan found nothing to check")
+		t.Fatal("no non-test *.go files found in internal/panel -- the scan found nothing to check")
 	}
-	if !seen[wantOnly] {
-		t.Errorf("expected internal/panel to import %s (the construction-boundary escaper, Spec 116) somewhere in its non-test files, but no file did", wantOnly)
+	for want := range wantOnly {
+		if !seen[want] {
+			t.Errorf("expected internal/panel to import %s somewhere in its non-test files, but no file did", want)
+		}
 	}
-	if len(seen) != 1 {
-		t.Errorf("internal/panel imports %d distinct internal packages, want exactly 1 (%s): %v", len(seen), wantOnly, seen)
+	if len(seen) != len(wantOnly) {
+		t.Errorf("internal/panel imports %d distinct internal packages, want exactly %d (%v): %v", len(seen), len(wantOnly), wantOnly, seen)
 	}
 }

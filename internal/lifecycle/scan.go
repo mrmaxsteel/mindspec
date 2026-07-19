@@ -97,7 +97,12 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 		if num <= 0 || title == "" {
 			continue // no spec lineage — not a lifecycle epic
 		}
-		specID := phase.SpecIDFromMetadata(num, title)
+		// D1 ambient-enumeration degrade (ADR-0042): a malformed
+		// derivation skips this one epic — never brick the whole scan.
+		specID, err := phase.SpecIDFromMetadata(num, title)
+		if err != nil {
+			continue
+		}
 		epicSpec[epic.ID] = specID
 
 		if strings.ToLower(strings.TrimSpace(epic.Status)) == "closed" {

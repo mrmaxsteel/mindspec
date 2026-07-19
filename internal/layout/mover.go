@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
 // GitOps is the subset of executor.Executor the mover drives. The production
@@ -364,6 +365,16 @@ func (m *Mover) routeReviewSlug(slug string, specIDs []string) string {
 // panelSpec reads review/<slug>/panel.json and returns its `spec` field, or ""
 // when the file is absent/unreadable/unparseable (then the slug-prefix fallback
 // applies).
+//
+// Reverse-derivation consumer gate (ADR-0042 §1 reverse, spec 120 round-5
+// O3, AC-23 TestPanelSpecRejectsTraversal): the `spec` field is a string
+// read back OUT of an agent-writable panel.json — idvalidate.SpecID is
+// applied HERE, BEFORE the caller's specExists check (routeReviewSlug,
+// below), because specExists is a bare os.Stat that a traversal value like
+// "../.." would PASS (it stats a real directory) — the enforcement-was-
+// missing proof. An invalid/hostile value returns "" exactly like an
+// absent/unparseable file, so the slug-prefix fallback applies and no
+// hostile bytes ever reach the MoveGroup.Dst concat below.
 func (m *Mover) panelSpec(slug string) string {
 	data, err := os.ReadFile(filepath.Join(m.root, "review", slug, "panel.json"))
 	if err != nil {
@@ -375,7 +386,11 @@ func (m *Mover) panelSpec(slug string) string {
 	if json.Unmarshal(data, &p) != nil {
 		return ""
 	}
-	return strings.TrimSpace(p.Spec)
+	spec := strings.TrimSpace(p.Spec)
+	if idvalidate.SpecID(spec) != nil {
+		return ""
+	}
+	return spec
 }
 
 // specExists reports whether spec id has a directory under any active layout
@@ -391,6 +406,13 @@ func (m *Mover) specExists(specID string) bool {
 
 // listSpecIDs returns the spec-id directory names under the active specs root
 // (flat → canonical → legacy, first non-empty wins) for slug-prefix routing.
+//
+// Reverse-derivation consumer gate (ADR-0042 §1 reverse, spec 120 round-4
+// G1, AC-23): entry names are enumerated from an agent-creatable directory
+// (os.ReadDir) — validate-and-drop: an invalid dir name (e.g.
+// ".mindspec/specs/120-x;evil") is never added to the candidate list, so
+// routeReviewSlug's numeric-prefix fallback can only ever return a
+// validated ID and the MoveGroup.Dst concat above stays clean.
 func (m *Mover) listSpecIDs() []string {
 	for _, root := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
 		ents, err := os.ReadDir(filepath.Join(m.root, filepath.FromSlash(root)))
@@ -399,7 +421,7 @@ func (m *Mover) listSpecIDs() []string {
 		}
 		var ids []string
 		for _, e := range ents {
-			if e.IsDir() {
+			if e.IsDir() && idvalidate.SpecID(e.Name()) == nil {
 				ids = append(ids, e.Name())
 			}
 		}

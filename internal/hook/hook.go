@@ -216,15 +216,17 @@ func ReadState() *HookState {
 		if cfgErr != nil {
 			cfg = config.DefaultConfig()
 		}
+		// Ambient, never-block hook state: a malformed SpecID/BeadID
+		// simply leaves ActiveWorktree unset (ADR-0042 degrade-vs-error
+		// policy for never-block consumers).
 		if ctx.BeadID != "" && ctx.SpecID != "" {
-			specWt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
-			wt := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID)
-			if dirExists(wt) {
-				hs.ActiveWorktree = wt
+			if specWt, err := workspace.SpecWorktreePath(root, cfg, ctx.SpecID); err == nil {
+				if wt, err := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID); err == nil && dirExists(wt) {
+					hs.ActiveWorktree = wt
+				}
 			}
 		} else if ctx.SpecID != "" {
-			wt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
-			if dirExists(wt) {
+			if wt, err := workspace.SpecWorktreePath(root, cfg, ctx.SpecID); err == nil && dirExists(wt) {
 				hs.ActiveWorktree = wt
 			}
 		}

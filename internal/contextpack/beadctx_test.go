@@ -107,7 +107,7 @@ func TestRenderBeadContext_NotFound(t *testing.T) {
 	})
 	defer restore()
 
-	_, err := RenderBeadContext("missing")
+	_, err := RenderBeadContext("mindspec-missing")
 	if err == nil {
 		t.Fatal("expected error for missing bead")
 	}

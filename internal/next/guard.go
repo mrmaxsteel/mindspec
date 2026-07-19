@@ -210,7 +210,7 @@ func ClaimFailure(root string, cfg *config.Config, beadID, specID string, claimE
 	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
 		specWorktreeOrPlaceholder(root, cfg, specID),
 		nestedBeadWorktreeRel(cfg, beadID),
-		workspace.BeadBranch(beadID),
+		beadBranchOrPlaceholder(beadID),
 		specBranchOrPlaceholder(specID))
 	if specID == "" {
 		return guard.NewFailure(b.String(),
@@ -243,7 +243,7 @@ func WorktreeSetupFailure(root string, cfg *config.Config, beadID, specID string
 	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
 		specWorktreeOrPlaceholder(root, cfg, specID),
 		nestedBeadWorktreeRel(cfg, beadID),
-		workspace.BeadBranch(beadID),
+		beadBranchOrPlaceholder(beadID),
 		specBranchOrPlaceholder(specID))
 	if specID == "" {
 		return guard.NewFailure(b.String(),
@@ -254,31 +254,53 @@ func WorktreeSetupFailure(root string, cfg *config.Config, beadID, specID string
 }
 
 // specWorktreeOrPlaceholder interpolates the spec worktree path for the
-// Req 3/4 recipes, or a readable placeholder when the spec is unknown.
+// Req 3/4 recipes, or a readable placeholder when the spec is unknown OR
+// fails idvalidate (ADR-0042 composition waist — a malformed specID must
+// never reach a composed path in a rendered recipe).
 func specWorktreeOrPlaceholder(root string, cfg *config.Config, specID string) string {
 	if specID == "" {
 		return "<spec-worktree>"
 	}
-	return workspace.SpecWorktreePath(root, cfg, specID)
+	if p, err := workspace.SpecWorktreePath(root, cfg, specID); err == nil {
+		return p
+	}
+	return "<spec-worktree>"
 }
 
 // specBranchOrPlaceholder interpolates the spec branch name, or a
-// readable placeholder when the spec is unknown.
+// readable placeholder when the spec is unknown OR fails idvalidate.
 func specBranchOrPlaceholder(specID string) string {
 	if specID == "" {
 		return "<spec-branch>"
 	}
-	return workspace.SpecBranch(specID)
+	if b, err := workspace.SpecBranch(specID); err == nil {
+		return b
+	}
+	return "<spec-branch>"
+}
+
+// beadBranchOrPlaceholder interpolates the bead branch name, or a
+// readable placeholder when beadID fails idvalidate.
+func beadBranchOrPlaceholder(beadID string) string {
+	if b, err := workspace.BeadBranch(beadID); err == nil {
+		return b
+	}
+	return "<bead-branch>"
 }
 
 // nestedBeadWorktreeRel renders the bead worktree path relative to the
 // spec worktree (the `git -C <spec-worktree>` target of the recipes),
-// honoring cfg.WorktreeRoot.
+// honoring cfg.WorktreeRoot. Falls back to a placeholder basename when
+// beadID fails idvalidate.
 func nestedBeadWorktreeRel(cfg *config.Config, beadID string) string {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	return filepath.Join(cfg.WorktreeRoot, workspace.BeadWorktreeName(beadID))
+	name, err := workspace.BeadWorktreeName(beadID)
+	if err != nil {
+		name = "<bead-worktree>"
+	}
+	return filepath.Join(cfg.WorktreeRoot, name)
 }
 
 // pathWithin reports whether dir is root or a descendant of root,

@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -269,8 +271,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		}
 	}
 
-	// Derive spec branch from convention.
-	specBranch := workspace.SpecBranch(specID)
+	// Derive spec branch from convention. specID already validated at the
+	// top of ApproveImpl (validate.SpecID == idvalidate.SpecID), so this
+	// waist call cannot fail.
+	specBranch, _ := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
@@ -280,6 +284,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 	planPath := filepath.Join(specDir, "plan.md")
 	beadIDs, planErr := readPlanBeadIDs(planPath)
+	if planErr != nil && errors.Is(planErr, ErrPlanBeadIDsMalformed) {
+		// AC-25: a malformed bead_ids entry REFUSES before ANY bd
+		// invocation — unlike the benign "no plan.md" / "no frontmatter"
+		// cases below, which silently skip this gate.
+		return nil, planErr
+	}
 	if planErr == nil {
 		for _, bid := range beadIDs {
 			// bid is a bead_ids entry from the agent-authored plan.md
@@ -451,6 +461,16 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 
 	// MUTATION (1/3): close epic and mark as explicitly done.
 	if epicID != "" {
+		// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a `bd close`
+		// argv build directly — validate BEFORE any bd spawn. epicID is
+		// already RETURN-gated at phase.FindEpicBySpecIDWithCache, so this
+		// is defense in depth (a well-formed id passes for free).
+		if err := idvalidate.BeadID(epicID); err != nil {
+			return nil, guard.NewFailure(
+				fmt.Sprintf("resolved epic id %s is invalid: %v", termsafe.Escape(epicID), err),
+				fmt.Sprintf("mindspec repair phase %s", specID),
+			)
+		}
 		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
 			if !isAlreadyClosedErr(err) {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
@@ -550,10 +570,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 }
 
 func readBeadStatus(id string) (string, error) {
-	// id is a bead_ids entry from the agent-authored plan.md frontmatter
-	// (R4 cluster 2) — NEVER idvalidate'd. The functional bd invocation
-	// below takes the raw id; only the error-message DISPLAY positions
-	// render the idrender'd copy.
+	// Gate-all-ids (ADR-0042 §1, round 6/9): id feeds a `bd show` argv
+	// build via the generic RunBD seam — validated here as defense in
+	// depth, on top of the readPlanBeadIDs read-gate its sole production
+	// caller already applies (AC-25/AC-26). The functional bd invocation
+	// below takes the raw id; the error-message DISPLAY positions render
+	// the idrender'd copy (R4 cluster 2).
+	if err := idvalidate.BeadID(id); err != nil {
+		return "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+	}
 	out, err := implRunBDFn("show", id, "--json")
 	if err != nil {
 		return "", err
@@ -575,6 +600,16 @@ func readBeadStatus(id string) (string, error) {
 // is located via the canonical internal/frontmatter.Parse (ARCH-6) rather than
 // a hand-rolled `\n---` substring scan, so only a whole-line `---` fence closes
 // the block and a space-padded fence reads as no-frontmatter.
+//
+// Class-2 executable-operand consumer gate (ADR-0042 §1, spec 120 R2 AC-25,
+// round 6 G3): plan.md's bead_ids frontmatter is agent-writable, and every
+// entry here previously reached bd argv (readBeadStatus's `bd show <id>`
+// and, via the plan-declared intersection, implCheckObligationsFn) with NO
+// idvalidate.BeadID gate — a `--help`/`-`-prefixed entry is bd option
+// injection. Every entry is validated HERE, at the read, before ANY caller
+// ever sees the list: a malformed entry REFUSES convergently (the plan-
+// frontmatter lever) rather than letting it flow to a bd spawn. Clean
+// dotted-child bead_ids (e.g. "mindspec-9cyu.1") pass byte-identically.
 func readPlanBeadIDs(planPath string) ([]string, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
@@ -595,8 +630,25 @@ func readPlanBeadIDs(planPath string) ([]string, error) {
 	if len(fm.BeadIDs) == 0 {
 		return nil, fmt.Errorf("no bead_ids in plan frontmatter")
 	}
+	for _, bid := range fm.BeadIDs {
+		if err := idvalidate.BeadID(bid); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrPlanBeadIDsMalformed, guard.FormatFailure(
+				fmt.Sprintf("plan frontmatter bead_ids entry %s is not a valid bead ID: %v", idrender.Bead(bid), err),
+				"fix plan.md's bead_ids frontmatter, then re-run: mindspec plan approve",
+			))
+		}
+	}
 	return fm.BeadIDs, nil
 }
+
+// ErrPlanBeadIDsMalformed is the sentinel readPlanBeadIDs wraps when a
+// plan.md bead_ids entry fails idvalidate.BeadID (spec 120 AC-25). Callers
+// that otherwise treat a readPlanBeadIDs error as "no plan-bead gate to
+// run" (a genuinely-absent or unparseable plan.md, the pre-existing
+// benign case) use errors.Is(err, ErrPlanBeadIDsMalformed) to instead
+// REFUSE convergently — a hostile bead_ids entry must never silently skip
+// the gate the same way a missing plan.md does.
+var ErrPlanBeadIDsMalformed = errors.New("plan frontmatter bead_ids contains a malformed bead id")
 
 func isAlreadyClosedErr(err error) bool {
 	if err == nil {
@@ -737,8 +789,12 @@ func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
 		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 			continue
 		}
+		// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): beadID is
+		// parsed back OUT of an agent-creatable worktree/branch entry. A
+		// malformed candidate is skipped — never matched against the
+		// closed-epic-bead set, never embedded in an ID role.
 		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
-		if beadID == "" || !closed[beadID] {
+		if beadID == "" || idvalidate.BeadID(beadID) != nil || !closed[beadID] {
 			continue
 		}
 		isAnc, ancErr := implIsAncestorFn(root, e.Branch, specBranch)
@@ -849,16 +905,24 @@ func formatAdvisorySlotLine(beadID string, unresolved []panel.Verdict) string {
 // restoration prerequisite first — the message must never present a
 // command known to fail.
 func implObligationRefusal(beadID string, cause error) error {
-	// beadID flows in from planBeadIDs (readPlanBeadIDs, R4 cluster 2) —
-	// NEVER idvalidate'd. workspace.BeadBranch(beadID) is a FUNCTIONAL
-	// branch-name construction (fed to implBranchExistsFn's git lookup),
-	// so it takes the raw beadID; every DISPLAY position below (the two
+	// beadID flows in from planBeadIDs (readPlanBeadIDs, R4 cluster 2).
+	// workspace.BeadBranch(beadID) is a FUNCTIONAL branch-name
+	// construction (fed to implBranchExistsFn's git lookup), so it takes
+	// the raw beadID; every DISPLAY position below (the two
 	// recovery-command lines and the branch-name mention) renders the
 	// idrender'd copy instead.
-	branch := workspace.BeadBranch(beadID)
+	branch, err := workspace.BeadBranch(beadID)
+	branchValid := err == nil
+	if !branchValid {
+		// beadID here is a plan-declared, already-gated id (readPlanBeadIDs
+		// validates every entry, AC-25) reaching this rendering helper —
+		// this should be unreachable, but degrade to a placeholder rather
+		// than composing a hostile branch name.
+		branch = "<bead-branch>"
+	}
 	safeBeadID := idrender.Bead(beadID)
 	safeBranch := workspace.BeadBranchPrefix + safeBeadID
-	if implBranchExistsFn(branch) {
+	if branchValid && implBranchExistsFn(branch) {
 		return guard.NewFailure(cause.Error(), fmt.Sprintf("mindspec complete %s", safeBeadID))
 	}
 	return guard.NewFailure(

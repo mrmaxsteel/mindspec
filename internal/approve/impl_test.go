@@ -2404,3 +2404,92 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 		}
 	})
 }
+
+// TestReadPlanBeadIDsRejectsMalformed is spec 120 AC-25 (R2 class-2
+// executable-operand consumer, round 6 G3): with a plan.md whose
+// frontmatter carries a malformed bead_ids entry, the impl-approve path
+// REFUSES before ANY bd invocation — asserted via the implRunBDFn seam
+// recording ZERO calls (so neither readBeadStatus nor
+// implCheckObligationsFn ever sees the value, closing the option-
+// injection at the readBeadStatus call and the obligation-gate leg); the
+// refusal names the plan-frontmatter lever, shows the hostile value
+// escaped-only, and satisfies guard.HasFinalRecoveryLine; a well-formed
+// dotted-child bead_ids list passes byte-identically to today.
+func TestReadPlanBeadIDsRejectsMalformed(t *testing.T) {
+	hostileBeadIDs := []string{"--help", "x;evil"}
+	for _, hostile := range hostileBeadIDs {
+		t.Run(hostile, func(t *testing.T) {
+			tmp := t.TempDir()
+			writeSpecDir(t, tmp, "010-test")
+			writePlanWithBeads(t, tmp, "010-test", []string{hostile})
+			os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+			saveAndRestore(t)
+
+			var runBDCalls int
+			implRunBDFn = func(args ...string) ([]byte, error) {
+				runBDCalls++
+				return nil, fmt.Errorf("unexpected bd invocation: %v", args)
+			}
+
+			mock := &executor.MockExecutor{
+				CommitCountResult:  5,
+				FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			}
+
+			_, err := ApproveImpl(tmp, "010-test", mock)
+			if err == nil {
+				t.Fatal("expected a refusal for a malformed plan.md bead_ids entry")
+			}
+			if runBDCalls != 0 {
+				t.Errorf("expected ZERO bd invocations before the refusal, got %d", runBDCalls)
+			}
+			if !guard.HasFinalRecoveryLine(err.Error()) {
+				t.Errorf("refusal must end with a recovery line, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "plan.md") || !strings.Contains(err.Error(), "bead_ids") {
+				t.Errorf("refusal must name the plan-frontmatter lever, got: %v", err)
+			}
+			if strings.ContainsRune(err.Error(), 0x00) || strings.ContainsRune(err.Error(), 0x1b) {
+				t.Errorf("refusal must not contain raw NUL/ESC bytes: %q", err.Error())
+			}
+			if len(mock.CallsTo("FinalizeEpic")) != 0 {
+				t.Error("expected ZERO FinalizeEpic calls on the refusal")
+			}
+		})
+	}
+
+	// Well-formed dotted-child bead_ids pass byte-identically to today.
+	t.Run("clean dotted-child bead_ids pass", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeSpecDir(t, tmp, "010-test")
+		writePlanWithBeads(t, tmp, "010-test", []string{"mindspec-9cyu.1"})
+		os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+		saveAndRestore(t)
+		implRunBDFn = func(args ...string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "show" {
+				payload := []map[string]string{{"status": "closed"}}
+				return json.Marshal(payload)
+			}
+			return nil, fmt.Errorf("unexpected args: %v", args)
+		}
+		var closed []string
+		implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "close" {
+				closed = append(closed, args[1])
+			}
+			return []byte("ok"), nil
+		}
+		mock := &executor.MockExecutor{
+			CommitCountResult:  5,
+			FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+		}
+		if _, err := ApproveImpl(tmp, "010-test", mock); err != nil {
+			t.Fatalf("clean dotted-child bead_ids must not refuse: %v", err)
+		}
+		if len(closed) != 1 || closed[0] != "epic-parent" {
+			t.Errorf("expected to close epic-parent, got: %v", closed)
+		}
+	})
+}

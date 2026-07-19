@@ -262,7 +262,7 @@ func TestPanelRefuted_MarkerWriteFailure_Blocks(t *testing.T) {
 	})
 
 	t.Run("the union read fails", func(t *testing.T) {
-		const specID, beadID = "114-pr03b", "mindspec-114pr.3b"
+		const specID, beadID = "114-pr03b", "mindspec-114pr3b"
 		root, beadSHA := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.failGet = func(string) bool { return true }
@@ -431,7 +431,7 @@ func TestPanelRefuted_NaturalResolution_NoObligation(t *testing.T) {
 // --- (vb) round-5 item 1: UNION multi-entry reconciliation ---------------
 
 func TestPanelRefuted_CrossRun_UnionReconcilesAll(t *testing.T) {
-	const specID, beadID = "114-pr05b", "mindspec-114pr.5b"
+	const specID, beadID = "114-pr05b", "mindspec-114pr5b"
 	root, beadSHA := setupPanelGateRepo(t, specID, beadID)
 	store := newFakeMetadataStore()
 	store.wire(t)
@@ -707,7 +707,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 	}
 
 	t.Run("env-skip hatch satisfies a pre-existing pending from the marker", func(t *testing.T) {
-		const specID, beadID = "114-pr12a", "mindspec-114pr.12a"
+		const specID, beadID = "114-pr12a", "mindspec-114pr12a"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		origSkip := panelSkipEnvFn
 		t.Cleanup(func() { panelSkipEnvFn = origSkip })
@@ -734,7 +734,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 	})
 
 	t.Run("env-skip hatch with an unreadable metadata store still REFUSES", func(t *testing.T) {
-		const specID, beadID = "114-pr12a2", "mindspec-114pr.12a2"
+		const specID, beadID = "114-pr12a2", "mindspec-114pr12a2"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		origSkip := panelSkipEnvFn
 		t.Cleanup(func() { panelSkipEnvFn = origSkip })
@@ -757,7 +757,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 	})
 
 	t.Run("config-disabled hatch satisfies a pre-existing pending from the marker", func(t *testing.T) {
-		const specID, beadID = "114-pr12b", "mindspec-114pr.12b"
+		const specID, beadID = "114-pr12b", "mindspec-114pr12b"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
 			t.Fatal(err)
@@ -786,7 +786,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 	})
 
 	t.Run("abandoned hatch satisfies a pre-existing pending from the marker", func(t *testing.T) {
-		const specID, beadID = "114-pr12c", "mindspec-114pr.12c"
+		const specID, beadID = "114-pr12c", "mindspec-114pr12c"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 
 		store := newFakeMetadataStore()
@@ -812,7 +812,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 	// PRISTINE bead (no pending) completes and writes ONLY panel_gate_skipped
 	// (round-2 item 10 — the hatch excepts the gate, not the obligation).
 	t.Run("no-obligation control: pristine bead under the same hatch writes only panel_gate_skipped", func(t *testing.T) {
-		const specID, beadID = "114-pr12d", "mindspec-114pr.12d"
+		const specID, beadID = "114-pr12d", "mindspec-114pr12d"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		origSkip := panelSkipEnvFn
 		t.Cleanup(func() { panelSkipEnvFn = origSkip })
@@ -852,7 +852,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 // UNIONED into the existing audit entries, never skipped.
 func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
 	t.Run("covered by a durable panel_refuted_entries record is a no-op", func(t *testing.T) {
-		const specID, beadID = "114-pr15a", "mindspec-114pr.15a"
+		const specID, beadID = "114-pr15a", "mindspec-114pr15a"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.data[beadID] = map[string]interface{}{
@@ -881,7 +881,7 @@ func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
 	})
 
 	t.Run("a NON-covered pending is satisfied from its marker, unioned (control)", func(t *testing.T) {
-		const specID, beadID = "114-pr15c", "mindspec-114pr.15c"
+		const specID, beadID = "114-pr15c", "mindspec-114pr15c"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.data[beadID] = map[string]interface{}{
@@ -932,7 +932,7 @@ func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
 // TestPanelRefuted_PristineNoPanel_FailsOpen.
 func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 	t.Run("malformed refutation_pending_entries", func(t *testing.T) {
-		const specID, beadID = "114-pr16a", "mindspec-114pr.16a"
+		const specID, beadID = "114-pr16a", "mindspec-114pr16a"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.data[beadID] = map[string]interface{}{
@@ -962,7 +962,7 @@ func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 	// corrupt array would let the run complete — pinning that the corrupt
 	// value itself is what Refuses.
 	t.Run("malformed panel_refuted_entries", func(t *testing.T) {
-		const specID, beadID = "114-pr16b", "mindspec-114pr.16b"
+		const specID, beadID = "114-pr16b", "mindspec-114pr16b"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.data[beadID] = map[string]interface{}{
@@ -991,7 +991,7 @@ func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 	// A decodable array whose ENTRY is shape-invalid (empty slot) cannot be
 	// settled as a truthful audit — Refuse, symmetric with the decode error.
 	t.Run("shape-invalid pending entry (empty slot)", func(t *testing.T) {
-		const specID, beadID = "114-pr16c", "mindspec-114pr.16c"
+		const specID, beadID = "114-pr16c", "mindspec-114pr16c"
 		root, _ := setupPanelGateRepo(t, specID, beadID)
 		store := newFakeMetadataStore()
 		store.data[beadID] = map[string]interface{}{

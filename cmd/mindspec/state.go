@@ -85,11 +85,16 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			activeBead = ctx.BeadID
 		}
 
+		// Ambient display command: a malformed specID (shouldn't occur —
+		// resolve.ResolveTarget's result is R3-gated — but this degrades
+		// safely regardless) simply omits SpecBranch (ADR-0042 degrade-
+		// vs-error policy for never-block consumers).
+		specBranch, _ := workspace.SpecBranch(specID)
 		out := &stateOutput{
 			Mode:       mode,
 			ActiveSpec: specID,
 			ActiveBead: activeBead,
-			SpecBranch: workspace.SpecBranch(specID),
+			SpecBranch: specBranch,
 		}
 
 		data, err := json.MarshalIndent(out, "", "  ")
