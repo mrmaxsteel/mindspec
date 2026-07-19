@@ -14,14 +14,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // Package-level function variables for testability.
@@ -149,9 +153,10 @@ func defaultVerifyCommitted(beadID string) error {
 	info, err := fetchBeadAsOfFn(beadID, "HEAD")
 	if err != nil {
 		if bead.IsUnsupportedFlagError(err, "as-of") {
+			// R4: beadID is an ID-typed position — idrender.Bead.
 			fmt.Fprintf(os.Stderr,
 				"event=complete.committed_read_downgraded bead=%s reason=%q\n",
-				beadID, "bd show --as-of unsupported by installed bd (bd < 1.0.4) — falling back to same-read verification (bd show)")
+				idrender.Bead(beadID), "bd show --as-of unsupported by installed bd (bd < 1.0.4) — falling back to same-read verification (bd show)")
 			return verifyCommittedSameRead(beadID)
 		}
 		return fmt.Errorf("committed-state re-read (--as-of HEAD) failed: %w", err)
@@ -268,6 +273,19 @@ func defaultFindLocalRoot() (string, error) {
 	return workspace.FindLocalRoot(".")
 }
 
+// termsafeEscapeEach applies termsafe.Escape to every element of vals (R4):
+// porcelain-derived filenames (working-tree dirt, artifact-sync paths) are
+// agent-writable, and escaping PER ELEMENT before joining — never the
+// already-joined whole — is required so a hostile element can never also
+// swallow the join separator into its own (unescaped) content.
+func termsafeEscapeEach(vals []string) []string {
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = termsafe.Escape(v)
+	}
+	return out
+}
+
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
 // beadID is required — it must always be provided by the caller.
@@ -314,6 +332,25 @@ func defaultFindLocalRoot() (string, error) {
 // the fault-injection matrix in internal/complete's *_fault_test.go (Spec
 // 119 Bead 6, AC-26).
 func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (*Result, error) {
+	// R3 explicit-ingress early gate (ADR-0042, AC-6): a malformed beadID
+	// refuses EARLY with a clean CLI error and the "bd ready" lever,
+	// before any lineage lookup or mutation — rather than failing deep in
+	// composition.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return nil, guard.NewFailure(
+			fmt.Sprintf("%s is not a valid bead ID: %v", termsafe.Escape(beadID), err),
+			"bd ready   (pick a listed bead ID and re-run)",
+		)
+	}
+
+	// R4 (spec 120): every DISPLAY position below routes beadID through
+	// idrender.Bead: byte-identical for a genuine bead ID, forced-quoted
+	// otherwise, so a hostile value can never forge extra terminal lines.
+	// Functional uses (branch names, bd/git operands, the
+	// `impl(<bead-id>):` commit-message prefix) keep the raw beadID
+	// unchanged — only the display positions are affected.
+	safeBeadID := idrender.Bead(beadID)
+
 	// Determine local root for per-worktree context resolution.
 	localRoot := root
 	if lr, err := findLocalRootFn(); err == nil {
@@ -346,7 +383,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// errors.Is on the typed sentinel — never by error text.
 	var specID string
 	var err error
-	_, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
+	lineageEpicID, lineageSpec, lineageErr := findEpicForBeadFn(beadID)
 	switch {
 	case lineageErr == nil && lineageSpec != "":
 		specID = lineageSpec
@@ -356,12 +393,31 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				hintSpec = specIDHint
 			}
 			if hintSpec != lineageSpec {
+				// R4: beadID/lineageSpec/hintSpec are ID-typed positions
+				// — idrender.Bead/idrender.Spec.
 				return nil, guard.NewFailure(
-					fmt.Sprintf("bead %s belongs to spec %s, but --spec named %s — these do not match; refusing before any mutation.", beadID, lineageSpec, hintSpec),
-					fmt.Sprintf("mindspec complete %s --spec %s", beadID, lineageSpec),
+					fmt.Sprintf("bead %s belongs to spec %s, but --spec named %s — these do not match; refusing before any mutation.", safeBeadID, idrender.Spec(lineageSpec), idrender.Spec(hintSpec)),
+					fmt.Sprintf("mindspec complete %s --spec %s", safeBeadID, idrender.Spec(lineageSpec)),
 				)
 			}
 		}
+	case errors.Is(lineageErr, phase.ErrMalformedSpecMetadata):
+		// D1 explicit-verb refusal (ADR-0042 §1, spec 120 AC-4): the
+		// lineage lookup SUCCEEDED in finding an epic, but that epic's
+		// spec_title/title metadata is malformed (fails idvalidate.SpecID)
+		// — this is errors.Is-DISTINCT from ErrNoEpicLineage, so it must
+		// NEVER fall through to cwd-derived resolution (that would let a
+		// hostile epic title silently resolve to whatever spec happens to
+		// be checked out). Refuse before any mutation, naming the single
+		// convergent lever with a validated epic ID.
+		epicRef := lineageEpicID
+		if idvalidate.BeadID(epicRef) != nil {
+			epicRef = "<epic-id>"
+		}
+		return nil, guard.NewFailure(
+			fmt.Sprintf("bead %s's epic has malformed spec metadata (%s) — refusing before any mutation.", beadID, termsafe.Escape(lineageErr.Error())),
+			fmt.Sprintf("mindspec repair spec-title %s \"<corrected-title>\"   (then re-run: mindspec complete %s)", epicRef, beadID),
+		)
 	case lineageErr == nil || errors.Is(lineageErr, phase.ErrNoEpicLineage):
 		// Genuinely epic-less (or, defensively, a nil-error empty spec):
 		// fallback to pre-119 cwd/hint-based resolution. Try localRoot
@@ -376,9 +432,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	default:
 		// A real lineage-lookup failure: refuse before the migration and
 		// before any mutation, naming the retry re-invocation.
+		// R4: beadID is an ID-typed position — idrender.Bead.
 		return nil, guard.NewFailure(
-			fmt.Sprintf("resolving bead %s's epic lineage failed: %v — refusing before any mutation rather than falling back to cwd-derived spec resolution.", beadID, lineageErr),
-			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", beadID),
+			fmt.Sprintf("resolving bead %s's epic lineage failed: %v — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, lineageErr),
+			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
 	}
 
@@ -407,12 +464,19 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if epicErr == nil && epicID != "" {
 		epicPhase, phaseErr := phase.DerivePhaseWithCache(epicCache, epicID)
 		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
-			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", beadID, specID, epicPhase)
+			// R4: beadID/specID are ID-typed positions (idrender);
+			// epicPhase is bd-metadata-sourced (mindspec_phase) and not
+			// re-validated against the enum here on the not-equal path
+			// — escape it as free text.
+			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", safeBeadID, idrender.Spec(specID), termsafe.Escape(epicPhase))
 		}
 	}
 
 	// Derive spec branch from conventions
-	specBranch := workspace.SpecBranch(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return nil, fmt.Errorf("resolved spec id %s is invalid: %w", specID, err)
+	}
 
 	// 1.6. bd_close lifecycle-bypass guard (bead mindspec-4gsz). Before ANY
 	// mutation, block if some OTHER sibling bead under this epic was closed
@@ -426,8 +490,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// converges).
 	if orphans := findOrphanedClosedBeadsFn(specID, root, beadID); len(orphans) > 0 {
 		o := orphans[0]
+		// R4: o.BeadID is an ID-typed position (idrender.Bead);
+		// o.BeadBranch/o.SpecBranch carry a "bead/"/"spec/" prefix so
+		// they don't validate against the bare idvalidate grammar —
+		// escape as free text instead (mirroring internal/doctor's
+		// orphaned_beads.go render of the same lifecycle.Orphan shape).
 		return nil, fmt.Errorf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s (closed-but-unmerged).\nRun `mindspec complete %s` to recover, then re-run `mindspec complete %s`.",
-			o.BeadID, o.BeadBranch, o.SpecBranch, o.BeadID, beadID)
+			idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch), idrender.Bead(o.BeadID), safeBeadID)
 	}
 
 	// 2. Find worktree matching bead (needed for commit/clean-tree paths).
@@ -436,7 +505,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// branch when one exists, else the canonical bead branch name
 	// (mindspec-aqey / mindspec-perm anchoring).
 	var wtPath string
-	beadHead := workspace.BeadBranch(beadID)
+	// beadID already passed idvalidate.BeadID at the top of Run — these
+	// waist calls cannot fail.
+	beadHead, _ := workspace.BeadBranch(beadID)
 	entries, err := worktreeListFn()
 	if err != nil {
 		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
@@ -444,19 +515,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// wtPath == "" and let the --commit-msg CommitAll below fall back
 		// to the root/main checkout. Propagate as a preflight refusal
 		// (nothing has mutated yet) instead of guessing.
-		return nil, fmt.Errorf("listing bead worktrees for %s: %w", beadID, err)
+		// R4: beadID is an ID-typed position — idrender.Bead.
+		return nil, fmt.Errorf("listing bead worktrees for %s: %w", safeBeadID, err)
 	}
-	expectedName := workspace.BeadWorktreeName(beadID)
-	expectedBranch := workspace.BeadBranch(beadID)
-	for _, e := range entries {
-		if e.Name == expectedName || e.Branch == expectedBranch {
-			wtPath = e.Path
-			if e.Branch != "" {
-				beadHead = e.Branch
-			}
-			break
-		}
-	}
+	expectedName, _ := workspace.BeadWorktreeName(beadID)
+	wtPath, beadHead = resolveBeadWorktree(entries, expectedName, beadHead)
 
 	// 2.1. Merged-unclosed / branch-less forward reconcile detection
 	// (Spec 119 R4, Bead 1 Steps 4-6). A normal in-progress bead ALWAYS
@@ -482,7 +545,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if _, rpErr := exec.RevParseRef(root, beadHead); rpErr != nil && exec.IsRefNotFound(rpErr) {
 			landed, ok, mergedErr := mergedUnclosedFn(root, specBranch, beadID)
 			if mergedErr != nil {
-				return nil, fmt.Errorf("checking landed-merge state for %s: %w", beadID, mergedErr)
+				// R4: beadID is an ID-typed position — idrender.Bead.
+				return nil, fmt.Errorf("checking landed-merge state for %s: %w", safeBeadID, mergedErr)
 			}
 			if !ok {
 				// No worktree, no bead/<id> ref, and no positively
@@ -490,9 +554,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				// safely determined (AC-8). Refuse naming the missing
 				// evidence instead of falling through to a MergeBase
 				// call against the absent ref.
+				// R4: beadID is an ID-typed position — idrender.Bead.
+				// specBranch is the spine-derived `spec/<id>` operand and
+				// stays consistent with the branch-operand convention.
 				return nil, guard.NewFailure(
-					fmt.Sprintf("bead %s has no active worktree, no bead/%s branch, and no landed merge commit for it was positively identified on %s — cannot safely reconcile its state.", beadID, beadID, specBranch),
-					fmt.Sprintf("mindspec complete %s   (re-run once the bead's worktree, its branch, or its landed-merge evidence is available)", beadID),
+					fmt.Sprintf("bead %s has no active worktree, no bead/%s branch, and no landed merge commit for it was positively identified on %s — cannot safely reconcile its state.", safeBeadID, safeBeadID, specBranch),
+					fmt.Sprintf("mindspec complete %s   (re-run once the bead's worktree, its branch, or its landed-merge evidence is available)", safeBeadID),
 				)
 			}
 			reconcile = &reconcileState{landed: landed}
@@ -581,9 +648,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// `mindspec next` recreates the missing worktree.
 	if commitMsg != "" && reconcile == nil {
 		if wtPath == "" {
+			// R4: beadID/specID are ID-typed positions (idrender); root
+			// is a filesystem path (operator-chosen, out of the
+			// agent-writable-content render-sink scope), not escaped.
 			return nil, guard.NewFailure(
-				fmt.Sprintf("bead %s's --commit-msg auto-commit would commit user work on the main checkout (%s) — no bead worktree matched; refusing.", beadID, root),
-				fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s \"...\"`)", specID, beadID, beadID),
+				fmt.Sprintf("bead %s's --commit-msg auto-commit would commit user work on the main checkout (%s) — no bead worktree matched; refusing.", safeBeadID, root),
+				fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s \"...\"`)", idrender.Spec(specID), safeBeadID, safeBeadID),
 			)
 		}
 		msg := fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
@@ -615,8 +685,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if len(userDirt) > 0 {
 			// User dirt blocks even when artifact dirt coexists — the
 			// artifact handling below must never mask user-authored changes.
+			// Each porcelain line is an agent-writable filename (R4): escape
+			// per-line so a hostile filename cannot forge extra lines or
+			// control bytes into the terminal-facing message.
 			msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
-				strings.Join(userDirt, "\n  "))
+				strings.Join(termsafeEscapeEach(userDirt), "\n  "))
 			if wtPath == "" {
 				msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
 			}
@@ -634,8 +707,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				return nil, guard.NewFailure(msg, "mindspec next")
 			}
 			// Existing auto-commit hint, now a Req 12 recovery line.
+			// R4: beadID is an ID-typed position — idrender.Bead.
 			return nil, guard.NewFailure(msg,
-				fmt.Sprintf("mindspec complete %s \"describe what you did\"", beadID))
+				fmt.Sprintf("mindspec complete %s \"describe what you did\"", safeBeadID))
 		}
 		if len(artifactDirt) > 0 {
 			// Spec 119 R3 (Bead 1 Step 3): the tracker commit must land
@@ -662,9 +736,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// which `mindspec complete` finds a real wtPath and this
 			// refusal no longer fires.
 			if wtPath == "" {
+				// R4: beadID/specID are ID-typed positions (idrender);
+				// checkPath is a filesystem path, out of scope.
 				return nil, guard.NewFailure(
-					fmt.Sprintf("bead %s's beads-artifact tracker sync would commit on the main checkout (%s) — refusing.", beadID, checkPath),
-					fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", specID, beadID, beadID),
+					fmt.Sprintf("bead %s's beads-artifact tracker sync would commit on the main checkout (%s) — refusing.", safeBeadID, checkPath),
+					fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", idrender.Spec(specID), safeBeadID, safeBeadID),
 				)
 			}
 			// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
@@ -684,16 +760,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				return nil, fmt.Errorf("committing beads artifact sync: %w", err)
 			}
 			// HC-3: self-heal is silent-on-success save one structured line.
+			// R4: artifactDirt entries are porcelain-derived filenames —
+			// agent-writable — escape per-element before joining (mirrors
+			// the userDirt handling above; escaping the already-joined
+			// whole would also quote the ", " separators).
 			fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
-				strings.Join(artifactDirt, ","))
+				strings.Join(termsafeEscapeEach(artifactDirt), ","))
 			// Residual-dirt warning (AC-4): CommitPaths staged EXACTLY
 			// artifactDirt, never `add -A`, so any OTHER path still
 			// dirty in the tree is surfaced by name instead of being
 			// silently swept in.
 			if residual, statusErr := exec.Status(checkPath); statusErr == nil {
 				if extra := residualDirtyPaths(residual, artifactDirt); len(extra) > 0 {
+					// R4: same porcelain-filename escaping as above.
 					fmt.Fprintf(os.Stderr, "WARN complete.unexpected_dirty_paths: %s (not included in the artifact sync commit)\n",
-						strings.Join(extra, ", "))
+						strings.Join(termsafeEscapeEach(extra), ", "))
 				}
 			}
 		}
@@ -820,7 +901,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// Check if the bead is already closed — if so, warn and continue cleanup.
 		info, fetchErr := fetchBeadByIDFn(beadID)
 		if fetchErr == nil && strings.EqualFold(strings.TrimSpace(info.Status), "closed") {
-			fmt.Printf("Warning: bead %s already closed — performing merge and cleanup.\n", beadID)
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			fmt.Printf("Warning: bead %s already closed — performing merge and cleanup.\n", safeBeadID)
 		} else {
 			return nil, fmt.Errorf("closing bead: %w", err)
 		}
@@ -871,11 +953,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// reaches here — it converges to case (a)/(b) above — so a
 			// legitimately-closed complete whose Dolt was briefly slow is
 			// NOT false-blocked.
+			// R4: beadID is an ID-typed position — idrender.Bead (safeBeadID).
 			msg := fmt.Sprintf(
 				"bead %s close returned success but the post-close status re-read could not be VERIFIED after %d attempts (last error: %v) — the close was NOT confirmed to persist.\n"+
 					"this state is recoverable: the worktree is kept and the close step is idempotent — re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
-				beadID, postCloseReadAttempts, fetchErr, beadID)
-			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+				safeBeadID, postCloseReadAttempts, fetchErr, safeBeadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		case strings.EqualFold(strings.TrimSpace(info.Status), "closed"):
 			// (a) Re-read AFFIRMS closed — but a SESSION re-read of "closed"
 			// does NOT prove the close PERSISTED to committed Dolt state
@@ -893,18 +976,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// PRE-MERGE return. complete must NEVER print `closed` + exit 0
 			// on an unverified/uncommitted close.
 			if commitErr := doltCommitFn(); commitErr != nil {
+				// R4: beadID is an ID-typed position — idrender.Bead.
 				msg := fmt.Sprintf(
 					"bead %s close returned success and re-read as closed, but the forced `bd dolt commit` to make the close DURABLE failed (%v) — the close was NOT confirmed to persist.\n"+
 						"this state is recoverable: the worktree is kept and both the close and `bd dolt commit` are idempotent — re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
-					beadID, commitErr, beadID)
-				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+					safeBeadID, commitErr, safeBeadID)
+				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 			}
 			if verifyErr := verifyCommittedFn(beadID); verifyErr != nil {
+				// R4: beadID is an ID-typed position — idrender.Bead.
 				msg := fmt.Sprintf(
 					"bead %s close returned success but the post-commit committed-state verification did NOT confirm the close persisted (%v) — the close was NOT confirmed to persist.\n"+
 						"this state is recoverable: the worktree is kept and the close step is idempotent — re-run `mindspec complete %s` and it converges once the close persists.",
-					beadID, verifyErr, beadID)
-				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+					safeBeadID, verifyErr, safeBeadID)
+				return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 			}
 			// Forced commit + committed-state verify both passed — proceed.
 		default:
@@ -913,11 +998,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// the close did NOT persist. Surface a HARD error + non-zero
 			// exit so `complete` NEVER prints `closed` + exit 0 on an
 			// unpersisted close (ADR-0035 recovery line).
+			// R4: beadID is an ID-typed position — idrender.Bead. The
+			// tracker status itself is already safely rendered via %q
+			// (Go's %q verb quotes/escapes on its own).
 			msg := fmt.Sprintf(
 				"bead %s close returned success but a re-read shows it is still %q (not closed) — the close did NOT persist (silent close-loss).\n"+
 					"this state is recoverable: re-run `mindspec complete %s` — the close step is idempotent and converges once the close persists.",
-				beadID, strings.TrimSpace(info.Status), beadID)
-			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+				safeBeadID, strings.TrimSpace(info.Status), safeBeadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	}
 
@@ -930,10 +1018,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
+	// specID already validated above (workspace.SpecBranch succeeded).
+	specWorktree, _ := workspace.SpecWorktreePath(root, cfg, specID)
 	result := &Result{
 		BeadID:       beadID,
 		BeadClosed:   true,
-		SpecWorktree: workspace.SpecWorktreePath(root, cfg, specID),
+		SpecWorktree: specWorktree,
 	}
 
 	// 5. Merge bead→spec, remove worktree, delete branch (via Executor).
@@ -953,11 +1043,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			"mindspec_reconcile_landed_merge_sha": reconcile.landed.SHA,
 			"mindspec_reconcile_at":               time.Now().UTC().Format(time.RFC3339),
 		}); metaErr != nil {
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			// reconcile.landed.SHA is a git-produced hex commit SHA, not
+			// agent-writable free text.
 			msg := fmt.Sprintf(
 				"bead %s's landed merge commit %s was positively identified, but the durable reconcile evidence could not be recorded (%v) — reconciliation is NOT yet complete.\n"+
 					"this state is recoverable: re-run `mindspec complete %s` once bd/Dolt is reachable and it converges.",
-				beadID, reconcile.landed.SHA, metaErr, beadID)
-			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+				safeBeadID, reconcile.landed.SHA, metaErr, safeBeadID)
+			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
 		completeErr = exec.CompleteBead(beadID, specBranch, "")
@@ -1002,18 +1095,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// the re-attempted merge sees the bead branch as an ancestor and
 	// cleanup proceeds.
 	if completeErr != nil {
+		// R4: beadID is an ID-typed position — idrender.Bead. specBranch
+		// is the spine-derived `spec/<id>` branch operand and stays RAW
+		// per the established convention.
 		msg := fmt.Sprintf(
 			"bead %s is CLOSED in Dolt but completion did NOT finish — its branch may not be merged into %s (closed-but-unmerged).\n"+
 				"this state is recoverable: fix the cause below, then re-run `mindspec complete %s` — the close step is idempotent and completion converges.\n"+
 				"cause: %v",
-			beadID, specBranch, beadID, completeErr)
+			safeBeadID, specBranch, safeBeadID, completeErr)
 		if guard.HasFinalRecoveryLine(msg) {
 			// The executor failure already carries Req 12 recovery
 			// lines (e.g. the conflict-abort failures) — keep them
 			// final instead of stacking a redundant generic one.
 			return nil, errors.New(msg)
 		}
-		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", beadID))
+		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 	}
 
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
@@ -1031,7 +1127,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			"mindspec_doc_skew_by",
 		)
 		if err := completeMergeMetadataFn(beadID, meta); err != nil {
-			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", beadID, err)
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			fmt.Printf("Warning: could not record doc-skew override metadata on %s: %v\n", safeBeadID, err)
 		}
 	}
 
@@ -1047,7 +1144,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			"mindspec_adr_override_by",
 		)
 		if err := completeMergeMetadataFn(beadID, meta); err != nil {
-			fmt.Printf("Warning: could not record adr-override metadata on %s: %v\n", beadID, err)
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			fmt.Printf("Warning: could not record adr-override metadata on %s: %v\n", safeBeadID, err)
 		}
 	}
 	if opts.SupersedeADR != "" && completeErr == nil {
@@ -1066,7 +1164,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			"mindspec_adr_supersede_by":     gitUserEmailFn(),
 		}
 		if err := completeMergeMetadataFn(beadID, meta); err != nil {
-			fmt.Printf("Warning: could not record adr-supersede metadata on %s: %v\n", beadID, err)
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			fmt.Printf("Warning: could not record adr-supersede metadata on %s: %v\n", safeBeadID, err)
 		}
 	}
 
@@ -1105,30 +1204,30 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Bead %s closed.\n", r.BeadID)
+	fmt.Fprintf(&sb, "Bead %s closed.\n", idrender.Bead(r.BeadID))
 	if r.WorktreeRemoved {
 		sb.WriteString("Worktree removed.\n")
 	}
 	switch r.NextMode {
 	case state.ModeImplement:
-		fmt.Fprintf(&sb, "Next bead ready: %s\n", r.NextBead)
-		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", r.NextSpec)
+		fmt.Fprintf(&sb, "Next bead ready: %s\n", idrender.Bead(r.NextBead))
+		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", idrender.Spec(r.NextSpec))
 		// Spec 092 Req 4 (mindspec-qxsy): the implement branch carries
 		// the same cd hint as plan/review — the removed bead worktree
 		// may have been the shell's cwd.
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
-		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", r.NextSpec)
+		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", idrender.Spec(r.NextSpec))
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 	case state.ModeReview:
-		fmt.Fprintf(&sb, "All beads complete. Mode: review (spec: %s)\n", r.NextSpec)
+		fmt.Fprintf(&sb, "All beads complete. Mode: review (spec: %s)\n", idrender.Spec(r.NextSpec))
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
-			fmt.Fprintf(&sb, "Run: `cd %s`\n", r.SpecWorktree)
+			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 		sb.WriteString("Run `mindspec instruct` for review guidance and next steps.\n")
 	default:
@@ -1163,10 +1262,15 @@ func advanceState(epicID string) (mode, nextBead string) {
 	derivedPhase := phase.DerivePhaseFromChildren(children)
 
 	if derivedPhase == state.ModeImplement {
-		if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
-			var ready []bead.BeadInfo
-			if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-				return state.ModeImplement, ready[0].ID
+		// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a
+		// `bd ready --parent` argv build directly — validate BEFORE any
+		// bd spawn.
+		if idvalidate.BeadID(epicID) == nil {
+			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
+				var ready []bead.BeadInfo
+				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+					return state.ModeImplement, ready[0].ID
+				}
 			}
 		}
 		// Implement phase without a ready bead: we're between beads (next one
@@ -1201,6 +1305,8 @@ func buildSkewMetadata(reason, reasonKey, atKey, byKey string) map[string]interf
 // the body and the final `recovery:` lines carry the re-run and bypass
 // commands (guard.NewFailure, ADR-0035 convention).
 func adrDivergenceFailure(beadID, findings string) error {
+	// R4: beadID is an ID-typed position — idrender.Bead.
+	safeBeadID := idrender.Bead(beadID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "adr-divergence: %s\n", findings)
 	b.WriteString("triage before bypassing (repair-first):\n")
@@ -1210,9 +1316,9 @@ func adrDivergenceFailure(beadID, findings string) error {
 	b.WriteString("  3. only after 1-2 do not apply, bypass with --override-adr \"<reason>\"\n")
 	b.WriteString("     (recorded on bead metadata) or --supersede-adr ADR-NNNN")
 	return guard.NewFailure(b.String(),
-		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", beadID),
-		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", beadID),
-		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", beadID))
+		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", safeBeadID),
+		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", safeBeadID),
+		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", safeBeadID))
 }
 
 // warnWriter is the destination for WARN lines rendered from
@@ -1280,4 +1386,44 @@ func residualDirtyPaths(porcelain string, known []string) []string {
 		extra = append(extra, p)
 	}
 	return extra
+}
+
+// resolveBeadWorktree pins the bead's worktree path and the ref the
+// per-bead gates (step 3.5) measure against (beadHead) from the bd
+// worktree list: the matched worktree's actual branch when one exists,
+// else the canonical bead branch (mindspec-aqey / mindspec-perm
+// anchoring).
+//
+// Final-review G1-1 (spec 120): a row is still matched on Name OR Branch,
+// but its Branch field is agent-writable (bd worktree list --json) — so
+// it may only REPLACE the validated canonical branch when it is itself a
+// well-formed bead branch ("bead/" + idvalidate.BeadID). A NAME-only
+// match paired with a Branch that is main, an option-like ref, or an
+// otherwise malformed value falls back to the canonical waist-composed
+// branch instead of promoting the unvalidated value into git argv
+// (rev-parse/merge-base/diff/show). The worktree PATH is still adopted:
+// only the ref used for git authority is gated.
+func resolveBeadWorktree(entries []bead.WorktreeListEntry, expectedName, canonicalBranch string) (wtPath, beadHead string) {
+	beadHead = canonicalBranch
+	for _, e := range entries {
+		if e.Name != expectedName && e.Branch != canonicalBranch {
+			continue
+		}
+		wtPath = e.Path
+		if e.Branch == "" || e.Branch == canonicalBranch {
+			return wtPath, beadHead
+		}
+		listedID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) && idvalidate.BeadID(listedID) == nil {
+			beadHead = e.Branch
+			return wtPath, beadHead
+		}
+		// ADR-0042 degrade policy: name the rejected (escaped) branch
+		// rather than silently dropping it, and anchor at the canonical
+		// waist-composed branch so no unvalidated value reaches git argv.
+		fmt.Fprintf(os.Stderr, "warning: worktree %s lists branch %s which is not a well-formed bead branch — anchoring per-bead gates at %s instead\n",
+			termsafe.Escape(e.Name), termsafe.Escape(e.Branch), canonicalBranch)
+		return wtPath, beadHead
+	}
+	return "", canonicalBranch
 }

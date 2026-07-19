@@ -8,11 +8,13 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // Options tunes a Run invocation. The zero value reproduces the bare
@@ -92,7 +94,7 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 	// CWD redirect: if running from main with an active worktree,
 	// emit ONLY the redirect message — no normal guidance.
 	if wtPath := guard.ActiveWorktreePathWithCache(cache, mainRoot); wtPath != "" && guard.IsMainCWDWithCache(cache, mainRoot) {
-		msg := fmt.Sprintf("# MindSpec — CWD Redirect\n\nYou are in the main worktree. Run:\n\n  cd %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", wtPath)
+		msg := fmt.Sprintf("# MindSpec — CWD Redirect\n\nYou are in the main worktree. Run:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
 		if format == "json" {
 			fmt.Fprintf(out, `{"redirect":true,"worktree_path":%q,"message":"Switch to worktree"}`, wtPath)
 			fmt.Fprintln(out)
@@ -229,12 +231,17 @@ func handleNoState(cache *phase.Cache, root, format string, out io.Writer) error
 }
 
 // handleAmbiguous renders the ambiguous template listing all active specs.
+//
+// R4: SpecID is idrender'd here, at the template-data-prep site, rather
+// than in the template itself — ambiguous.md renders {{.SpecID}} raw, so
+// the escaping MUST happen before it lands in the struct (byte-identical
+// for a genuine spec ID; forced through strconv.Quote for a malformed one).
 func handleAmbiguous(cache *phase.Cache, root, format string, out io.Writer, ambErr *resolve.ErrAmbiguousTarget) error {
 	mc := &state.Focus{Mode: "ambiguous"}
 	ctx := BuildContextWithCache(cache, root, mc)
 	for _, s := range ambErr.Active {
 		ctx.ActiveSpecList = append(ctx.ActiveSpecList, SpecInfo{
-			SpecID: s.SpecID,
+			SpecID: idrender.Spec(s.SpecID),
 			Mode:   s.Mode,
 		})
 	}
@@ -276,7 +283,13 @@ func panelScanRoots(mainRoot, activeWorktree string) []string {
 // rerun-after-merge Pass-through, Spec 093 Req 11) — the only git work
 // the panel-state path performs beyond the fs Scan (ADR-0030 budget).
 func liveBranchSHA(beadID string) (sha string, exists bool) {
-	branch := workspace.BeadBranch(beadID)
+	branch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		// Ambient staleness check: a malformed beadID degrades to the
+		// existing "no branch" semantics (ADR-0042 degrade-vs-error
+		// policy).
+		return "", false
+	}
 	s, err := gitutil.RevParseRef("", branch)
 	if err != nil {
 		return "", false
@@ -291,8 +304,13 @@ func resolveBeadWorktree(beadID string) string {
 	if err != nil {
 		return ""
 	}
-	wtName := workspace.BeadWorktreeName(beadID)
-	branchName := workspace.BeadBranch(beadID)
+	// Ambient lookup: a malformed beadID simply matches nothing below
+	// (ADR-0042 degrade-vs-error policy).
+	wtName, wtErr := workspace.BeadWorktreeName(beadID)
+	branchName, brErr := workspace.BeadBranch(beadID)
+	if wtErr != nil && brErr != nil {
+		return ""
+	}
 	for _, e := range entries {
 		if e.Name == wtName || e.Branch == branchName {
 			return e.Path

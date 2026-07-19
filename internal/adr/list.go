@@ -3,6 +3,8 @@ package adr
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // ListOpts configures ADR listing.
@@ -51,8 +53,10 @@ func FormatTable(adrs []ADR) string {
 	b.WriteString(fmt.Sprintf("%-10s %-12s %-20s %s\n", "──────────", "────────────", "────────────────────", "─────"))
 
 	for _, a := range adrs {
-		domains := strings.Join(a.Domains, ", ")
-		b.WriteString(fmt.Sprintf("%-10s %-12s %-20s %s\n", a.ID, a.DisplayStatus(), domains, a.Title))
+		// R4: ID/Status/Domains/Title all originate from agent-writable ADR
+		// filename/frontmatter/heading content — escape every field.
+		domains := termsafe.Escape(strings.Join(a.Domains, ", "))
+		b.WriteString(fmt.Sprintf("%-10s %-12s %-20s %s\n", termsafe.Escape(a.ID), termsafe.Escape(a.DisplayStatus()), domains, termsafe.Escape(a.Title)))
 	}
 
 	return b.String()

@@ -13,8 +13,47 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — porcelain output, git
+// error text, conflicted-file lists — while preserving the real newlines
+// that separate genuine lines (R4: per-line escaping for line-oriented
+// bodies, never per-message, so a hostile line cannot forge additional
+// lines while legitimate multi-line structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// checkWorktreeContainment is the shared check-at-use gate (ADR-0042 §4,
+// AC-11) every composed-worktree-path create/chdir/mkdir site in this
+// package calls immediately before the actual filesystem/git operation.
+// root is the trusted repo root (g.Root, or the resolved spec-worktree
+// anchor once ITS OWN containment was already checked); composed is the
+// path about to be used. On failure it returns a guard-formatted refusal
+// naming the R5 convergent lever — never the raw composed path, which may
+// carry a hostile worktree_root byte-for-byte.
+func checkWorktreeContainment(root, composed string) error {
+	if err := containment.CheckContainment(root, composed); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing to use worktree path: %v", err),
+			containment.RejectionLever,
+		)
+	}
+	return nil
+}
 
 // WorktreeOps abstracts the bead worktree CLI surface so tests can run
 // orchestration logic without requiring `bd` on PATH. The default
@@ -85,7 +124,10 @@ func NewMindspecExecutor(root string) *MindspecExecutor {
 // would otherwise silently degrade from a deleted cwd, so the warning is the
 // honest signal rather than a hard failure.
 func (g *MindspecExecutor) RemoveBeadWorktreeAndRestore(beadID string) error {
-	wtName := workspace.BeadWorktreeName(beadID)
+	wtName, err := workspace.BeadWorktreeName(beadID)
+	if err != nil {
+		return err
+	}
 	removeErr := g.WorktreeOps.Remove(wtName)
 	// Chdir to root IMMEDIATELY after removal, regardless of removeErr: the
 	// process may already be sitting in the (now partially/fully) removed
@@ -104,12 +146,24 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 		return WorkspaceInfo{}, fmt.Errorf("loading config: %w", err)
 	}
 
-	specBranch := workspace.SpecBranch(specID)
-	wtName := workspace.SpecWorktreeName(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return WorkspaceInfo{}, err
+	}
+	wtName, err := workspace.SpecWorktreeName(specID)
+	if err != nil {
+		return WorkspaceInfo{}, err
+	}
 	wtPath := cfg.WorktreePath(g.Root, wtName)
+	wtRootPath := filepath.Join(g.Root, cfg.WorktreeRoot)
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed worktree-root directory immediately before creating it.
+	if err := checkWorktreeContainment(g.Root, wtRootPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Ensure .worktrees/ directory exists and is gitignored.
-	if err := os.MkdirAll(filepath.Join(g.Root, cfg.WorktreeRoot), 0o755); err != nil {
+	if err := os.MkdirAll(wtRootPath, 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
 	if err := gitutil.EnsureGitignoreEntry(g.Root, cfg.WorktreeRoot); err != nil {
@@ -127,6 +181,12 @@ func (g *MindspecExecutor) InitSpecWorkspace(specID string) (WorkspaceInfo, erro
 		}
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed spec-worktree path (G3's site — the PRIMARY spec-worktree
+	// create) immediately before WorktreeOps.Create.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Create worktree via beads CLI.
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
 	if err := g.WorktreeOps.Create(relWtPath, specBranch); err != nil {
@@ -185,16 +245,25 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 		cfg = config.DefaultConfig()
 	}
 
-	branchName := workspace.BeadBranch(beadID)
+	branchName, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		return WorkspaceInfo{}, err
+	}
+	wtName, err := workspace.BeadWorktreeName(beadID)
+	if err != nil {
+		return WorkspaceInfo{}, err
+	}
 	baseBranch := "HEAD"
 	if specID != "" {
-		baseBranch = workspace.SpecBranch(specID)
+		baseBranch, err = workspace.SpecBranch(specID)
+		if err != nil {
+			return WorkspaceInfo{}, err
+		}
 	}
 
 	// Check for existing worktree.
-	entries, err := g.WorktreeOps.List()
-	if err == nil {
-		wtName := workspace.BeadWorktreeName(beadID)
+	entries, listErr := g.WorktreeOps.List()
+	if listErr == nil {
 		for _, e := range entries {
 			if e.Name == wtName || e.Branch == branchName {
 				return WorkspaceInfo{Path: e.Path, Branch: branchName}, nil
@@ -205,6 +274,16 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 	// Resolve anchor root: prefer spec worktree if it exists.
 	anchorRoot := g.resolveAnchorRoot(specID)
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): anchorRoot may be a composed
+	// spec-worktree path (resolveAnchorRoot returns one when it exists on
+	// disk) — re-validate its containment before chdir'ing into it below.
+	// A bare g.Root anchor is the trusted root and skips this (root-only).
+	if anchorRoot != g.Root {
+		if err := checkWorktreeContainment(g.Root, anchorRoot); err != nil {
+			return WorkspaceInfo{}, err
+		}
+	}
+
 	// Create bead branch from spec branch (or HEAD).
 	if !gitutil.BranchExists(branchName) {
 		if err := gitutil.CreateBranch(branchName, baseBranch); err != nil {
@@ -212,17 +291,27 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 		}
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed worktree-root directory immediately before creating it.
+	anchorWtRootPath := filepath.Join(anchorRoot, cfg.WorktreeRoot)
+	if err := checkWorktreeContainment(g.Root, anchorWtRootPath); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	// Ensure .worktrees/ directory and gitignore at the anchor root.
-	if err := os.MkdirAll(filepath.Join(anchorRoot, cfg.WorktreeRoot), 0o755); err != nil {
+	if err := os.MkdirAll(anchorWtRootPath, 0o755); err != nil {
 		return WorkspaceInfo{}, fmt.Errorf("creating %s directory: %w", cfg.WorktreeRoot, err)
 	}
 	if err := gitutil.EnsureGitignoreEntry(anchorRoot, cfg.WorktreeRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
 	}
 
-	// Create worktree under the anchor root.
-	wtName := workspace.BeadWorktreeName(beadID)
+	// Create worktree under the anchor root (wtName validated above).
 	relWtPath := filepath.Join(cfg.WorktreeRoot, wtName)
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed bead-worktree path immediately before WorktreeOps.Create.
+	if err := checkWorktreeContainment(g.Root, filepath.Join(anchorRoot, relWtPath)); err != nil {
+		return WorkspaceInfo{}, err
+	}
 	if err := withWorkingDir(anchorRoot, func() error {
 		return g.WorktreeOps.Create(relWtPath, branchName)
 	}); err != nil {
@@ -247,8 +336,14 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 // CompleteBead closes out a bead: commits, merges into spec, removes worktree,
 // deletes branch. Mirrors the logic in internal/complete/complete.go.
 func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
-	beadBranch := workspace.BeadBranch(beadID)
-	wtName := workspace.BeadWorktreeName(beadID)
+	beadBranch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		return err
+	}
+	wtName, err := workspace.BeadWorktreeName(beadID)
+	if err != nil {
+		return err
+	}
 
 	// Find bead worktree.
 	var wtPath string
@@ -286,12 +381,25 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 
 	// Merge bead branch into spec branch via spec worktree.
 	// Derive spec worktree path from specBranch (spec/<specID>).
+	//
+	// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): specBranch is
+	// itself an explicit CompleteBead argument — an agent-writable string,
+	// not necessarily waist-composed. CompleteBead is an EXPLICIT verb, so
+	// a trimmed suffix failing idvalidate.SpecID REFUSES before any
+	// merge/worktree operation rather than silently composing a hostile
+	// spec-worktree path.
 	specID := strings.TrimPrefix(specBranch, workspace.SpecBranchPrefix)
+	if err := idvalidate.SpecID(specID); err != nil {
+		return fmt.Errorf("refusing to complete bead %s: spec branch %s does not carry a valid spec id: %w", beadID, specBranch, err)
+	}
 	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	specWtPath, err := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(specWtPath); err == nil {
 		// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard in front
 		// of the bead→spec merge. Blocks ONLY the regression direction (a
@@ -329,7 +437,11 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	if err := withWorkingDir(g.Root, func() error {
 		if wtName != "" {
 			if err := g.WorktreeOps.Remove(wtName); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", wtName, err)
+				// Final-review G3-2 (spec 120): wtName may be the
+				// agent-writable bd-list e.Name (reassigned on the
+				// OR-match above) — escape it so a control-bearing name
+				// cannot forge extra terminal lines.
+				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", termsafe.Escape(wtName), err)
 			}
 		}
 		if err := gitutil.DeleteBranch(beadBranch); err != nil {
@@ -404,6 +516,15 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
 	}
 
+	// Composition-waist gate (ADR-0042 §1): FinalizeEpic is an explicit
+	// lifecycle verb — a malformed specID must refuse before any composed
+	// worktree path is used, not silently degrade. Every SpecWorktreePath/
+	// SpecWorktreeName/FinalizeBranch/FinalizeWorktreePath call below with
+	// this same specID is therefore guaranteed to succeed.
+	if err := idvalidate.SpecID(specID); err != nil {
+		return result, fmt.Errorf("finalize epic %s: invalid spec id %s: %w", epicID, idrender.Spec(specID), err)
+	}
+
 	allow := make(map[string]bool, len(lifecycleAllowSet))
 	for _, id := range lifecycleAllowSet {
 		allow[id] = true
@@ -429,7 +550,8 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWtPath := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	// specID already validated above; err is impossible here.
+	specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
 	}
@@ -450,7 +572,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 			continue
 		}
+		// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): beadID is
+		// parsed back OUT of an agent-creatable local git branch name. A
+		// malformed candidate is skipped entirely — never auto-merged,
+		// never embedded in an ID role — rather than trusted by its
+		// bead/-prefix shape alone.
 		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if idvalidate.BeadID(beadID) != nil {
+			// ADR-0042 degrade policy: name the skipped branch (escaped) so a
+			// malformed reverse-derivation candidate is not silently dropped.
+			fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
+			continue
+		}
 		if lifecycleAllowSet == nil {
 			// AC-14: a nil allow-set alongside a real bead/<id> candidate
 			// means the caller never computed a scope — abort rather
@@ -644,7 +777,17 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 				continue
 			}
+			// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): as in
+			// the auto-merge leg above, a malformed candidate is skipped
+			// entirely — never cleaned up or embedded in an ID role.
 			beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+			if idvalidate.BeadID(beadID) != nil {
+				// ADR-0042 degrade policy: name the skipped branch (escaped)
+				// so a malformed reverse-derivation candidate is not silently
+				// dropped from cleanup.
+				fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
+				continue
+			}
 			if lifecycleAllowSet == nil {
 				return fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to clean up without an explicit scope", epicID, e.Branch)
 			}
@@ -655,8 +798,8 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			_ = gitutil.DeleteBranch(e.Branch)
 		}
 
-		// Remove spec worktree.
-		specWtName := workspace.SpecWorktreeName(specID)
+		// Remove spec worktree (specID already validated in FinalizeEpic above).
+		specWtName, _ := workspace.SpecWorktreeName(specID)
 		if err := g.WorktreeOps.Remove(specWtName); err != nil {
 			if !isAlreadyRemovedErr(err) {
 				return fmt.Errorf("removing spec worktree: %w", err)
@@ -726,8 +869,28 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 // recreates it; note this differs from the spec branch, which FinalizeEpic's
 // cleanup DELETES locally after pushing).
 func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (string, error) {
-	choreBranch := workspace.FinalizeBranch(specID)
-	wtPath := workspace.FinalizeWorktreePath(g.Root, cfg, specID)
+	choreBranch, err := workspace.FinalizeBranch(specID)
+	if err != nil {
+		return "", err
+	}
+	wtPath, err := workspace.FinalizeWorktreePath(g.Root, cfg, specID)
+	if err != nil {
+		return "", err
+	}
+
+	// Final-review S1 (spec 120): containment gate BEFORE the destructive
+	// self-heal below. wtPath is composed from the agent-writable
+	// cfg.WorktreeRoot, which is only LEXICALLY validated at config
+	// ingress (charset/relative/no-"..", explicitly not symlink-aware) —
+	// a symlinked ancestor can resolve the composed path outside the
+	// project root. The self-heal force-removes whatever exists at that
+	// path, so the symlink-aware check-at-use gate must run first; on
+	// failure, refuse outright (never force-remove an uncontained path).
+	// The second gate further down (before MkdirAll/WorktreeAdd) still
+	// runs at ITS use sites per the ADR-0042 check-at-use discipline.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
+		return "", err
+	}
 
 	// Self-heal leftovers from a crashed prior run BEFORE touching the
 	// branch: a leftover temp worktree fails WorktreeAdd below, and one
@@ -753,6 +916,12 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", fmt.Errorf("creating %s from origin/main: %w", choreBranch, err)
 	}
 
+	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
+	// composed finalize-worktree path immediately before creating its
+	// parent directory and before the git worktree add below.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
 		return "", fmt.Errorf("creating worktrees directory for %s: %w", choreBranch, err)
 	}
@@ -796,8 +965,14 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 // Cleanup removes stale workspaces and branches for a spec.
 // Mirrors the logic in internal/cleanup/cleanup.go.
 func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
-	specBranch := workspace.SpecBranch(specID)
-	specWtName := workspace.SpecWorktreeName(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return err
+	}
+	specWtName, err := workspace.SpecWorktreeName(specID)
+	if err != nil {
+		return err
+	}
 
 	// Remove worktree (best-effort).
 	if err := g.WorktreeOps.Remove(specWtName); err != nil {
@@ -823,7 +998,10 @@ func (g *MindspecExecutor) IsTreeClean(path string) error {
 		return fmt.Errorf("checking worktree status: %w", err)
 	}
 	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("workspace has uncommitted changes:\n%s", strings.TrimSpace(out))
+		// R4: each porcelain line names an agent-writable file path —
+		// escape per-line so a hostile filename cannot forge extra lines
+		// or control bytes into the terminal-facing message.
+		return fmt.Errorf("workspace has uncommitted changes:\n%s", escapeLines(strings.TrimSpace(out)))
 	}
 	return nil
 }
@@ -1145,7 +1323,12 @@ func (g *MindspecExecutor) resolveAnchorRoot(specID string) string {
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWt := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	// Ambient helper: an invalid specID simply falls back to g.Root
+	// (ADR-0042 degrade-vs-error policy for never-block consumers).
+	specWt, err := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	if err != nil {
+		return g.Root
+	}
 	if fi, err := os.Stat(specWt); err == nil && fi.IsDir() {
 		return specWt
 	}
@@ -1181,18 +1364,26 @@ func abortMergeState(workdir string) (conflicted []string, note string) {
 func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string, mergeErr error) error {
 	conflicted, note := abortMergeState(specWtPath)
 	var b strings.Builder
-	fmt.Fprintf(&b, "merge conflict: could not merge %s into %s: %v", beadBranch, specBranch, mergeErr)
+	// R4: beadBranch/specBranch are the waist-validated branch operands —
+	// stay RAW. mergeErr is git-produced error text, conflicted entries
+	// are agent-writable filenames, and note may embed a git error —
+	// each escaped per-line.
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into %s: %s", beadBranch, specBranch, escapeLines(fmt.Sprint(mergeErr)))
 	if len(conflicted) > 0 {
-		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+		escaped := make([]string, len(conflicted))
+		for i, f := range conflicted {
+			escaped[i] = termsafe.Escape(f)
+		}
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(escaped, "\n  "))
 	}
 	if note != "" {
 		b.WriteString("\n")
-		b.WriteString(note)
+		b.WriteString(escapeLines(note))
 	}
 	fmt.Fprintf(&b, "\nnothing was removed: the %s branch, its worktree, and the spec worktree are preserved.", beadBranch)
 	fmt.Fprintf(&b, "\nresolve in the spec worktree (%s): re-run the merge there, fix the conflicts, commit the merge, then re-run the lifecycle command", specWtPath)
 	return guard.NewFailure(b.String(),
-		"cd "+specWtPath,
+		containment.EmitCd(specWtPath),
 		"git merge --no-ff "+beadBranch,
 		rerun,
 	)
@@ -1207,18 +1398,25 @@ func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string,
 func directMergeConflictFailure(root, specBranch string, mergeErr error) error {
 	conflicted, note := abortMergeState(root)
 	var b strings.Builder
-	fmt.Fprintf(&b, "merge conflict: could not merge %s into main: %v", specBranch, mergeErr)
+	// R4: specBranch is the waist-validated branch operand — stays RAW.
+	// mergeErr, conflicted entries, and note are escaped per-line (see
+	// beadToSpecConflictFailure above for the same discipline).
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into main: %s", specBranch, escapeLines(fmt.Sprint(mergeErr)))
 	if len(conflicted) > 0 {
-		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+		escaped := make([]string, len(conflicted))
+		for i, f := range conflicted {
+			escaped[i] = termsafe.Escape(f)
+		}
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(escaped, "\n  "))
 	}
 	if note != "" {
 		b.WriteString("\n")
-		b.WriteString(note)
+		b.WriteString(escapeLines(note))
 	}
 	fmt.Fprintf(&b, "\nmain is clean and the %s branch is preserved (branch deletion was skipped).", specBranch)
 	fmt.Fprintf(&b, "\nresolve at the repo root: re-run the merge there, fix the conflicts, commit the merge, then delete the branch with `git branch -d %s`", specBranch)
 	return guard.NewFailure(b.String(),
-		"cd "+root,
+		containment.EmitCd(root),
 		"git merge --no-ff "+specBranch,
 	)
 }

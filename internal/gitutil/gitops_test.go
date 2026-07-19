@@ -681,18 +681,71 @@ func TestRmCached(t *testing.T) {
 
 func TestWorktreeAddDetach(t *testing.T) {
 	calls := swapExec(t, "", 0)
-	if err := WorktreeAddDetach("/r", "/wt-a", "abc"); err != nil {
+	// R5 check-at-use (ADR-0042 §4): the wrapper now re-validates
+	// containment of wtPath under workdir before shelling out, so this
+	// argv-shape test needs a REAL, nested root/wtPath pair — a bare
+	// unrelated "/r"/"/wt-a" pair would (correctly) refuse.
+	root := t.TempDir()
+	wt := filepath.Join(root, "wt-a")
+	if err := WorktreeAddDetach(root, wt, "abc"); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/r", "worktree", "add", "--detach", "/wt-a", "abc")
+	assertArgs(t, (*calls)[0].args, "-C", root, "worktree", "add", "--detach", wt, "abc")
 }
 
 func TestWorktreeAdd(t *testing.T) {
 	calls := swapExec(t, "", 0)
-	if err := WorktreeAdd("/r", "/wt-a", "feature"); err != nil {
+	// R5 check-at-use (ADR-0042 §4): same nested-path requirement as
+	// TestWorktreeAddDetach above.
+	root := t.TempDir()
+	wt := filepath.Join(root, "wt-a")
+	if err := WorktreeAdd(root, wt, "feature"); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/r", "worktree", "add", "/wt-a", "feature")
+	assertArgs(t, (*calls)[0].args, "-C", root, "worktree", "add", wt, "feature")
+}
+
+// TestWorktreeAdd_RefusesContainmentBeforeExec and
+// TestWorktreeAddDetach_RefusesContainmentBeforeExec (S3 panel finding, R5
+// fix-up round): pin the wrapper-level containment gate itself — given a
+// root/wtPath pair that FAILS containment (wtPath is not lexically under
+// root at all, the cheapest possible rejection), WorktreeAdd/
+// WorktreeAddDetach must return the containment error and MUST NOT reach
+// execCommand — i.e. git is never spawned. TestWorktreeAdd/
+// TestWorktreeAddDetach above already require a real nested root/wtPath
+// pair to exercise the argv shape; these are their negative-path
+// companions, using the swapped exec seam to assert zero calls.
+func TestWorktreeAdd_RefusesContainmentBeforeExec(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	root := t.TempDir()
+	// Deliberately NOT under root — the cheapest containment rejection
+	// (lexical escape), modelling an agent-writable worktree_root that
+	// composed a path outside the project root.
+	outside := t.TempDir()
+	wt := filepath.Join(outside, "wt-a")
+
+	err := WorktreeAdd(root, wt, "feature")
+	if err == nil {
+		t.Fatal("expected WorktreeAdd to REFUSE a wtPath that fails containment under root")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("execCommand must NEVER be called when containment refuses; got %d call(s): %v", len(*calls), *calls)
+	}
+}
+
+func TestWorktreeAddDetach_RefusesContainmentBeforeExec(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	root := t.TempDir()
+	outside := t.TempDir()
+	wt := filepath.Join(outside, "wt-a")
+
+	err := WorktreeAddDetach(root, wt, "abc")
+	if err == nil {
+		t.Fatal("expected WorktreeAddDetach to REFUSE a wtPath that fails containment under root")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("execCommand must NEVER be called when containment refuses; got %d call(s): %v", len(*calls), *calls)
+	}
 }
 
 func TestWorktreeRemoveForce(t *testing.T) {

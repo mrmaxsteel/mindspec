@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -71,9 +72,21 @@ The bead ID is required as the first argument.`,
 			if cfgErr != nil {
 				cfg = config.DefaultConfig()
 			}
-			specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
-			if fi, err := os.Stat(specWtPath); err == nil && fi.IsDir() {
-				os.Chdir(specWtPath)
+			specWtPath, swErr := workspace.SpecWorktreePath(root, cfg, specID)
+			if swErr != nil {
+				// specID already passed resolve.ResolveSpecPrefix above
+				// (validates its RESULT) — an invalid value here should
+				// be unreachable, but degrade to root rather than
+				// composing a hostile path (ADR-0042 never-block policy
+				// for this best-effort auto-cd convenience).
+				os.Chdir(root)
+			} else if fi, err := os.Stat(specWtPath); err == nil && fi.IsDir() {
+				if ctErr := containment.CheckContainment(root, specWtPath); ctErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: refusing auto-cd into spec worktree: %v\n", ctErr)
+					os.Chdir(root)
+				} else {
+					os.Chdir(specWtPath)
+				}
 			} else {
 				os.Chdir(root)
 			}

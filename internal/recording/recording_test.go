@@ -226,7 +226,7 @@ func TestEmitBeadMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := EmitBeadMarker(root, specID, "start", "T-abc"); err != nil {
+	if err := EmitBeadMarker(root, specID, "start", "t-abc"); err != nil {
 		t.Fatalf("EmitBeadMarker: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestEmitBeadMarker(t *testing.T) {
 	if e.Event != "lifecycle.bead.start" {
 		t.Errorf("Event = %q, want lifecycle.bead.start", e.Event)
 	}
-	if e.Data["bead_id"] != "T-abc" {
+	if e.Data["bead_id"] != "t-abc" {
 		t.Errorf("bead_id = %v, want T-abc", e.Data["bead_id"])
 	}
 }
@@ -402,7 +402,7 @@ func TestAddBeadToPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := AddBeadToPhase(root, specID, "T-abc"); err != nil {
+	if err := AddBeadToPhase(root, specID, "t-abc"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -414,7 +414,7 @@ func TestAddBeadToPhase(t *testing.T) {
 	if len(got.Phases[0].Beads) != 1 {
 		t.Fatalf("expected 1 bead, got %d", len(got.Phases[0].Beads))
 	}
-	if got.Phases[0].Beads[0] != "T-abc" {
+	if got.Phases[0].Beads[0] != "t-abc" {
 		t.Errorf("bead = %q, want T-abc", got.Phases[0].Beads[0])
 	}
 }
@@ -527,7 +527,164 @@ func TestRecordingFileModesAgentMindFirst(t *testing.T) {
 	}
 }
 
+// TestRecordingWriteGates is spec 120 AC-23 (the round-5 structured-
+// persistence class, ADR-0042 §7): EmitBeadMarker/AddBeadToPhase with an
+// invalid specID OR beadID perform NO events.ndjson/manifest mutation and
+// surface one escaped warning via the existing error channel; a valid
+// dotted child (mindspec-9cyu.1) writes byte-identically to today.
+func TestRecordingWriteGates(t *testing.T) {
+	const validSpecID = "001-test-spec"
+
+	setup := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		enableRecording(t, root)
+		if err := os.MkdirAll(mustRecordingDir(t, root, validSpecID), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteManifest(root, validSpecID, &Manifest{SpecID: validSpecID, Status: "recording", Phases: []Phase{{Phase: "implement"}}}); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	hostileIDs := []string{"--help", "x;evil", "x\x00\x1b[31m\nrecovery: forged"}
+
+	t.Run("EmitBeadMarker skips on invalid specID", func(t *testing.T) {
+		root := setup(t)
+		if err := EmitBeadMarker(root, "not a spec id", "start", "mindspec-9cyu.1"); err != nil {
+			t.Fatalf("EmitBeadMarker must skip (nil error), got: %v", err)
+		}
+		if _, err := os.Stat(mustEventsPath(t, root, validSpecID)); !os.IsNotExist(err) {
+			t.Errorf("expected NO events.ndjson write for an invalid specID, stat err = %v", err)
+		}
+	})
+
+	t.Run("EmitBeadMarker skips on invalid beadID", func(t *testing.T) {
+		for _, hostile := range hostileIDs {
+			root := setup(t)
+			if err := EmitBeadMarker(root, validSpecID, "start", hostile); err != nil {
+				t.Fatalf("EmitBeadMarker(%q) must skip (nil error), got: %v", hostile, err)
+			}
+			if _, err := os.Stat(mustEventsPath(t, root, validSpecID)); !os.IsNotExist(err) {
+				t.Errorf("EmitBeadMarker(%q): expected NO events.ndjson write, stat err = %v", hostile, err)
+			}
+		}
+	})
+
+	t.Run("AddBeadToPhase skips on invalid beadID", func(t *testing.T) {
+		for _, hostile := range hostileIDs {
+			root := setup(t)
+			if err := AddBeadToPhase(root, validSpecID, hostile); err != nil {
+				t.Fatalf("AddBeadToPhase(%q) must skip (nil error), got: %v", hostile, err)
+			}
+			m, err := ReadManifest(root, validSpecID)
+			if err != nil {
+				t.Fatalf("ReadManifest: %v", err)
+			}
+			if len(m.Phases[0].Beads) != 0 {
+				t.Errorf("AddBeadToPhase(%q): expected NO manifest mutation, got Beads=%v", hostile, m.Phases[0].Beads)
+			}
+		}
+	})
+
+	t.Run("valid dotted-child bead writes byte-identically", func(t *testing.T) {
+		root := setup(t)
+		if err := EmitBeadMarker(root, validSpecID, "start", "mindspec-9cyu.1"); err != nil {
+			t.Fatalf("EmitBeadMarker: %v", err)
+		}
+		data, err := os.ReadFile(mustEventsPath(t, root, validSpecID))
+		if err != nil {
+			t.Fatalf("expected events.ndjson to exist for a valid write: %v", err)
+		}
+		var e MarkerEvent
+		if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Data["bead_id"] != "mindspec-9cyu.1" {
+			t.Errorf("bead_id = %v, want mindspec-9cyu.1", e.Data["bead_id"])
+		}
+
+		if err := AddBeadToPhase(root, validSpecID, "mindspec-9cyu.1"); err != nil {
+			t.Fatalf("AddBeadToPhase: %v", err)
+		}
+		m, err := ReadManifest(root, validSpecID)
+		if err != nil {
+			t.Fatalf("ReadManifest: %v", err)
+		}
+		if len(m.Phases[0].Beads) != 1 || m.Phases[0].Beads[0] != "mindspec-9cyu.1" {
+			t.Errorf("expected Beads=[mindspec-9cyu.1], got %v", m.Phases[0].Beads)
+		}
+	})
+}
+
 // TestHealthCheckNoRecording was deleted with internal/recording/health.go
 // in spec 084 Bead 3. mindspec no longer manages a collector subprocess,
 // so the HealthCheck / RestartIfDead / HealthStatus surface is gone.
 // Recording presence on disk is still observable via HasRecording.
+
+// TestWriteManifestRejectsHostilePayloadIDs is the spec 120 final-review
+// G2-1 regression: WriteManifest is the class-5 structured-persistence
+// consumer for the agent-writable recording manifest, and previously
+// validated only the PATH specID — not the ID-bearing payload fields. A
+// read-modify-write cycle (StopRecording/UpdatePhase/AddBeadToPhase) over
+// an agent-edited manifest.json must never serialize a hostile spec_id or
+// phase bead id back into the durable file (ADR-0042 persistence
+// doctrine: validate durable ID fields at write).
+func TestWriteManifestRejectsHostilePayloadIDs(t *testing.T) {
+	specID := "001-test-spec"
+
+	cases := []struct {
+		name string
+		m    *Manifest
+	}{
+		{"nil manifest", nil},
+		{"hostile payload spec_id (option-like)", &Manifest{
+			SpecID: "--help", Status: "recording",
+		}},
+		{"hostile payload spec_id (control bytes)", &Manifest{
+			SpecID: "120-x\n[FORGED] fake", Status: "recording",
+		}},
+		{"hostile phase bead id (metachar)", &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"x;evil"}}},
+		}},
+		{"hostile phase bead id (option-like)", &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"mindspec-9cyu.1", "--help"}}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := WriteManifest(root, specID, tc.m); err == nil {
+				t.Fatal("WriteManifest accepted a hostile/nil payload")
+			}
+			mp, err := ManifestPath(root, specID)
+			if err != nil {
+				t.Fatalf("ManifestPath: %v", err)
+			}
+			if _, statErr := os.Stat(mp); statErr == nil {
+				t.Error("hostile manifest payload was persisted to disk")
+			}
+		})
+	}
+
+	t.Run("valid payload still writes", func(t *testing.T) {
+		root := t.TempDir()
+		m := &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"mindspec-9cyu.1", "mindspec-0ke"}}},
+		}
+		if err := WriteManifest(root, specID, m); err != nil {
+			t.Fatalf("WriteManifest rejected a valid payload: %v", err)
+		}
+		got, err := ReadManifest(root, specID)
+		if err != nil {
+			t.Fatalf("ReadManifest: %v", err)
+		}
+		if got.SpecID != specID || len(got.Phases) != 1 || len(got.Phases[0].Beads) != 2 {
+			t.Errorf("valid manifest did not round-trip: %+v", got)
+		}
+	})
+}

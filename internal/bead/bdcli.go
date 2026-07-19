@@ -16,7 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // execCommand is a package-level variable for testability.
@@ -76,6 +79,16 @@ func RunBD(args ...string) ([]byte, error) {
 // performed inside this package so enforcement-package callers
 // (e.g. internal/validate) never import os/exec.
 func BeadExists(id string) (bool, error) {
+	// Class-2 executable-operand CONSUMER boundary (ADR-0042 §1, spec 120
+	// AC-26, round 6/7 G2): id feeds a `bd show` argv build directly — bd
+	// ids are agent-writable (bd create --force --id=<arbitrary> is
+	// empirically unsafe), so it is validated BEFORE any bd spawn HERE,
+	// in-package, covering every present and future caller (validate
+	// plan's checkBeadIDs->CheckBeadExists included). A malformed id
+	// cannot name a real bead: not-found-by-construction, ZERO bd argv.
+	if err := idvalidate.BeadID(id); err != nil {
+		return false, nil
+	}
 	_, err := RunBD("show", id, "--json")
 	if err == nil {
 		return true, nil
@@ -139,6 +152,13 @@ func Export(workdir string) error {
 func Close(ids ...string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("Close requires at least one bead ID")
+	}
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): every id operand is
+	// validated BEFORE any bd spawn — ZERO bd argv on a malformed id.
+	for _, id := range ids {
+		if err := idvalidate.BeadID(id); err != nil {
+			return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+		}
 	}
 	args := append([]string{"close"}, ids...)
 	out, err := tracedCombined("close", args)
@@ -220,7 +240,34 @@ func WorktreeList() ([]WorktreeListEntry, error) {
 // The --force flag skips the "unpushed commits" safety check, which is
 // appropriate because mindspec always merges bead work into the spec
 // branch before removing the worktree.
+//
+// Gate-in-func (spec 120 final-review G1-2/G3-1, class-2 consumer
+// boundary): the name operand is NOT assumed waist-composed — production
+// callers forward the agent-writable `bd worktree list` Name field
+// (executor CompleteBead reassigns wtName = e.Name on an OR-match;
+// FinalizeEpic's cleanup leg removes e.Name directly). The operand must
+// be a canonical mindspec worktree basename with its embedded id passing
+// idvalidate; anything else (option-like values such as "--help"
+// included) errors with ZERO bd spawn.
 func WorktreeRemove(name string) error {
+	// Gate the name operand IN-FUNC (scan (g) verifies an idvalidate call
+	// in this declaration). Accept exactly the canonical mindspec worktree
+	// basenames — "worktree-spec-<specID>", "worktree-finalize-<specID>",
+	// or "worktree-<beadID>" — with the embedded id validated by
+	// idvalidate. Prefixes are tried most-specific first: a bead ID that
+	// itself begins with "spec-"/"finalize-" but fails the spec-ID grammar
+	// still validates via the bead-worktree form.
+	gated := false
+	if rest, ok := strings.CutPrefix(name, workspace.SpecWorktreePrefix); ok && idvalidate.SpecID(rest) == nil {
+		gated = true
+	} else if rest, ok := strings.CutPrefix(name, workspace.FinalizeWorktreePrefix); ok && idvalidate.SpecID(rest) == nil {
+		gated = true
+	} else if rest, ok := strings.CutPrefix(name, workspace.BeadWorktreePrefix); ok && idvalidate.BeadID(rest) == nil {
+		gated = true
+	}
+	if !gated {
+		return fmt.Errorf("refusing bd worktree remove: %q is not a canonical mindspec worktree name (worktree-<beadID>, worktree-spec-<specID>, or worktree-finalize-<specID>)", name)
+	}
 	args := []string{"worktree", "remove", name, "--force"}
 	out, err := tracedCombined("worktree-remove", args)
 	if err != nil {
@@ -273,6 +320,14 @@ func ListJSON(args ...string) ([]byte, error) {
 // unchanged — only a genuine READ/PARSE failure now aborts. See GetMetadata,
 // the read half this shares.
 func MergeMetadata(issueID string, updates map[string]interface{}) error {
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): issueID feeds the
+	// `bd update --metadata` argv build below — validated BEFORE any bd
+	// spawn (GetMetadata's own `bd show` gate would catch it too, but the
+	// write half gates independently so the property holds even if
+	// GetMetadata's contract ever changes).
+	if err := idvalidate.BeadID(issueID); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(issueID), err)
+	}
 	existing, err := GetMetadata(issueID)
 	if err != nil {
 		return fmt.Errorf("bd metadata merge-read failed for %s: %w", issueID, err)
@@ -311,6 +366,11 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 // reconciliation (internal/complete), both rely on: a read error is never a
 // license to proceed as if the store were empty.
 func GetMetadata(issueID string) (map[string]interface{}, error) {
+	// Class-2 consumer boundary (ADR-0042 §1, AC-26): issueID feeds a
+	// `bd show` argv build directly — validated BEFORE any bd spawn.
+	if err := idvalidate.BeadID(issueID); err != nil {
+		return nil, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(issueID), err)
+	}
 	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
 	if err != nil {
 		return nil, fmt.Errorf("bd show %s failed: %w", issueID, err)

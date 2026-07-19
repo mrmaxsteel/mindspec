@@ -10,13 +10,16 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -131,7 +134,7 @@ team lead spawns fresh agents per bead.`,
 				if ambErr, ok := err.(*resolve.ErrAmbiguousTarget); ok {
 					fmt.Fprintf(os.Stderr, "Multiple active specs have ready beads:\n\n")
 					for i, s := range ambErr.Active {
-						fmt.Fprintf(os.Stderr, "  %d. %s  (phase: %s)\n", i+1, s.SpecID, s.Mode)
+						fmt.Fprintf(os.Stderr, "  %d. %s  (phase: %s)\n", i+1, idrender.Spec(s.SpecID), s.Mode)
 					}
 					fmt.Fprintf(os.Stderr, "\nAsk the user which spec to work on, then re-run:\n")
 					fmt.Fprintf(os.Stderr, "  mindspec next --spec=<number>\n")
@@ -186,24 +189,24 @@ team lead spawns fresh agents per bead.`,
 			if specFlag != "" {
 				activeBead, resolveErr := next.ResolveActiveBead(root, specFlag)
 				if resolveErr == nil && activeBead != "" {
-					fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", activeBead)
+					fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", idrender.Bead(activeBead))
 					wtPath, wtErr := next.EnsureWorktree(root, activeBead, specFlag, exec)
 					if wtErr != nil {
-						return fmt.Errorf("recovering worktree for in-progress bead %s: %w", activeBead, wtErr)
+						return fmt.Errorf("recovering worktree for in-progress bead %s: %w", idrender.Bead(activeBead), wtErr)
 					}
 					if wtPath != "" {
 						fmt.Printf("Worktree recovered: %s\n", wtPath)
-						fmt.Printf("  cd %s\n", wtPath)
+						fmt.Printf("  %s\n", containment.EmitCd(wtPath))
 					}
 					resolved := next.ResolveMode(root, next.BeadInfo{ID: activeBead, Title: "[" + specFlag + "] recovered"})
 					resolved.SpecID = specFlag
-					fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, activeBead)
+					fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, activeBead))
 					return nil
 				}
 			}
 			fmt.Println("No ready work found.")
 			if specFlag != "" {
-				fmt.Printf("(filtered to spec: %s)\n", specFlag)
+				fmt.Printf("(filtered to spec: %s)\n", idrender.Spec(specFlag))
 			}
 			fmt.Println()
 			fmt.Println("Next steps:")
@@ -241,7 +244,7 @@ team lead spawns fresh agents per bead.`,
 		}
 
 		// Step 5: Claim
-		fmt.Printf("Claiming [%s] %s ...\n", selected.ID, selected.Title)
+		fmt.Print(formatClaimLine(selected.ID, selected.Title))
 		if err := next.ClaimBead(selected.ID); err != nil {
 			// Spec 093 Req 3: the recovery recipe lives at this caller —
 			// it has the root/specFlag context the interpolation needs.
@@ -268,7 +271,7 @@ team lead spawns fresh agents per bead.`,
 			warnWorktreeSetupFailure(os.Stderr, root, specFlag, selected, wtErr)
 		} else if wtPath != "" {
 			fmt.Printf("Worktree: %s\n", wtPath)
-			fmt.Printf("  cd %s\n", wtPath)
+			fmt.Printf("  %s\n", containment.EmitCd(wtPath))
 		}
 
 		// Step 6: Resolve mode and spec ID
@@ -281,7 +284,7 @@ team lead spawns fresh agents per bead.`,
 		// Note: parent status propagation handled natively by beads epics
 
 		// ADR-0023: no focus write — state is derived from beads.
-		fmt.Printf("State updated: mode=%s, spec=%s, bead=%s\n", resolved.Mode, resolved.SpecID, selected.ID)
+		fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, selected.ID))
 		fmt.Println()
 
 		// Step 7.5: Emit recording bead marker (best-effort)
@@ -331,7 +334,8 @@ team lead spawns fresh agents per bead.`,
 func completionGuidance(beadID string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	fmt.Fprintf(&sb, "**When done**: do the work and commit it in the worktree. Then run `mindspec complete %s \"describe what you did\"` to close this bead — run it from the repo root (it resolves the bead worktree itself) and note it will remove the bead worktree when it succeeds.\n", beadID)
+	// R4: beadID is an ID-typed position — idrender.Bead.
+	fmt.Fprintf(&sb, "**When done**: do the work and commit it in the worktree. Then run `mindspec complete %s \"describe what you did\"` to close this bead — run it from the repo root (it resolves the bead worktree itself) and note it will remove the bead worktree when it succeeds.\n", idrender.Bead(beadID))
 	sb.WriteString("Do NOT use `bd close` or raw git — `mindspec complete` handles merge, cleanup, and state transitions.\n")
 	// Spec 092 Req 14 (mindspec-pi24): anti-merge-main warning in the
 	// bead-context channel too — the implement template's completion
@@ -399,6 +403,27 @@ func containsSpecID(title, specID string) bool {
 	return strings.Contains(title, specID)
 }
 
+// formatClaimLine renders the "Claiming [<id>] <title> ..." line printed
+// just before a bead is claimed. id is an ID-typed position (routed
+// through idrender.Bead so a malformed value is forced-quoted rather than
+// rendered raw); title is agent-writable free text from the bd Title
+// field (routed through termsafe.Escape per R4).
+func formatClaimLine(id, title string) string {
+	return fmt.Sprintf("Claiming [%s] %s ...\n", idrender.Bead(id), termsafe.Escape(title))
+}
+
+// formatStateLine renders the "State updated: mode=..., spec=..., bead=..."
+// line printed after mode resolution. specID and beadID are ID-typed
+// positions routed through idrender (AC-24): a malformed value renders
+// forced-quoted; a clean value (including the dotted-child shape) renders
+// byte-identically. The empty-sentinel discipline (round-6 F1) matters
+// here specifically: specID == "" is the legitimate spec-mode value
+// (today's "spec=" with nothing after the "=") — idrender.Spec treats the
+// empty string as identity, so this NEVER renders as `spec=""`.
+func formatStateLine(mode, specID, beadID string) string {
+	return fmt.Sprintf("State updated: mode=%s, spec=%s, bead=%s\n", mode, idrender.Spec(specID), idrender.Bead(beadID))
+}
+
 // claimFailureError builds the spec 093 Req 3 claim-failure recovery
 // error for the `mindspec next` ClaimBead caller. Extracted from the
 // RunE closure so the wiring — the FULL recipe is returned, never the
@@ -460,8 +485,18 @@ func checkUnmergedBeads(specID string) error {
 	if len(orphans) == 0 {
 		return nil
 	}
-	o := orphans[0]
-	return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", o.BeadID, o.BeadID)
+	return unmergedBeadError(orphans[0])
+}
+
+// unmergedBeadError formats the checkUnmergedBeads refusal for a single
+// orphan. Extracted so a hostile o.BeadID (unvalidated bd-list data — see
+// lifecycle.Orphan) can be pinned directly: idrender.Bead forces a
+// malformed-but-printable ID through strconv.Quote so it can never be
+// mistaken for — or forge output around — a genuine bead ID (R4 display-
+// forgery sweep, spec 120).
+func unmergedBeadError(o lifecycle.Orphan) error {
+	safeBeadID := idrender.Bead(o.BeadID)
+	return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", safeBeadID, safeBeadID)
 }
 
 func init() {

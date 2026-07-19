@@ -19,6 +19,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -28,6 +30,14 @@ import (
 var (
 	findEpicBySpecIDFn = phase.FindEpicBySpecID
 	listClosedBeadsFn  = func(epicID string) ([]bead.BeadInfo, error) {
+		// Gate-all-ids (ADR-0042 §1, round 8/9): epicID feeds a
+		// `bd list --parent` argv build directly — bd ids are
+		// agent-writable (bd create --force --id=<arbitrary> proven
+		// unsafe), so it is validated BEFORE any bd spawn, ZERO bd argv
+		// on a malformed id.
+		if err := idvalidate.BeadID(epicID); err != nil {
+			return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
+		}
 		out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
 		if err != nil {
 			return nil, err
@@ -52,7 +62,12 @@ type Orphan struct {
 }
 
 // RecoveryCommand is the converging re-run that clears the orphaned state.
-func (o Orphan) RecoveryCommand() string { return "mindspec complete " + o.BeadID }
+// The bead ID is rendered via idrender.Bead: byte-identical for a
+// genuine, waist-valid bead ID, but forced through strconv.Quote for a
+// malformed-but-printable value so this display/copy-paste surface can
+// never be mistaken for — or forge output around — a real recovery
+// command (R4 display-forgery sweep, spec 120).
+func (o Orphan) RecoveryCommand() string { return "mindspec complete " + idrender.Bead(o.BeadID) }
 
 // ClosedEpicBeadIDs returns the ids of every closed bead under specID's epic
 // — the SAME `bd list --parent <epic> --status=closed` enumeration
@@ -71,7 +86,7 @@ func (o Orphan) RecoveryCommand() string { return "mindspec complete " + o.BeadI
 func ClosedEpicBeadIDs(specID string) ([]string, error) {
 	epicID, err := findEpicBySpecIDFn(specID)
 	if err != nil {
-		return nil, fmt.Errorf("finding epic for spec %s: %w", specID, err)
+		return nil, fmt.Errorf("finding epic for spec %s: %w", idrender.Spec(specID), err)
 	}
 	if epicID == "" {
 		return nil, nil
@@ -130,7 +145,10 @@ func ScanOrphanedClosedBeads(specID, workdir, excludeBeadID string) ([]Orphan, e
 		return nil, err
 	}
 
-	specBranch := workspace.SpecBranch(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return nil, fmt.Errorf("composing spec branch for %s: %w", idrender.Spec(specID), err)
+	}
 
 	var orphans []Orphan
 	var firstErr error
@@ -138,7 +156,19 @@ func ScanOrphanedClosedBeads(specID, workdir, excludeBeadID string) ([]Orphan, e
 		if id == "" || id == excludeBeadID {
 			continue
 		}
-		beadBranch := workspace.BeadBranch(id)
+		// Gate-all-ids (ADR-0042 §1): id is bd-sourced and agent-writable
+		// (bd create --force --id=<arbitrary> is empirically unsafe) —
+		// validate before composing a branch name. A malformed id is
+		// recorded via the same firstErr discipline as an ancestry-check
+		// failure (fail-closed signal for the gate) but the scan keeps
+		// walking (MIXED-list parity for the fail-open wrapper).
+		beadBranch, err := workspace.BeadBranch(id)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("invalid closed-bead id %s: %w", idrender.Bead(id), err)
+			}
+			continue
+		}
 		// Cheap trigger: a closed bead with no branch is cleanly completed.
 		if !branchExistsFn(beadBranch) {
 			continue

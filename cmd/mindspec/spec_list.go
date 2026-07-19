@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/spec"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +43,11 @@ var specListCmd = &cobra.Command{
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "SPEC ID\tSTATUS\tPHASE")
 		for _, s := range specs {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", s.SpecID, s.Status, s.Phase)
+			// R4: s.SpecID is the unvalidated on-disk spec-dir basename
+			// (internal/spec/list.go's e.Name()) — agent-writable, never
+			// spine-validated before this render — so route it through
+			// idrender.Spec (spec 120 R4).
+			fmt.Fprintf(w, "%s\t%s\t%s\n", idrender.Spec(s.SpecID), s.Status, s.Phase)
 		}
 		return w.Flush()
 	},

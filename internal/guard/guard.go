@@ -8,7 +8,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // guardState holds the subset of state that guards need.
@@ -23,6 +25,24 @@ var (
 	loadConfigFn     = config.Load
 	getwdFn          = os.Getwd
 )
+
+// degradeConfigOnError is the R5 never-block degrade helper (ADR-0042 §4,
+// AC-13 companion subtest), extracted from defaultReadGuardStateWithCache
+// so it is directly unit-testable without driving the full phase-
+// resolution pipeline: a config load failure — e.g. an invalid
+// worktree_root that failed containment.ValidateWorktreeRoot at ingress
+// — must never block this best-effort, ambient guard-state read. It
+// returns the safe default config and ONE escaped warning line (R4:
+// cfgErr.Error() may embed the agent-writable raw worktree_root value, so
+// it is routed through termsafe.Escape before it ever reaches a
+// terminal) rather than silently swallowing the error with no signal at
+// all. cfgErr must be non-nil; callers write the returned warning to
+// stderr.
+func degradeConfigOnError(cfgErr error) (cfg *config.Config, warning string) {
+	cfg = config.DefaultConfig()
+	warning = fmt.Sprintf("warning: could not load config (falling back to worktree_root=%s): %s\n", cfg.WorktreeRoot, termsafe.Escape(cfgErr.Error()))
+	return cfg, warning
+}
 
 func defaultReadGuardState(root string) (*guardState, error) {
 	return defaultReadGuardStateWithCache(nil, root)
@@ -44,23 +64,30 @@ func defaultReadGuardStateWithCache(c *phase.Cache, root string) (*guardState, e
 	}
 	cfg, cfgErr := loadConfigFn(root)
 	if cfgErr != nil {
-		cfg = config.DefaultConfig()
+		degradedCfg, warning := degradeConfigOnError(cfgErr)
+		cfg = degradedCfg
+		fmt.Fprint(os.Stderr, warning)
 	}
 	// Derive worktree path from context.
 	// Validate existence at each level: prefer bead worktree > spec worktree.
 	// If neither exists on disk (both deleted during crash/cleanup),
 	// leave ActiveWorktree empty so no redirect fires.
 	if ctx.SpecID != "" {
-		specWt := workspace.SpecWorktreePath(root, cfg, ctx.SpecID)
-		if ctx.BeadID != "" {
-			beadWt := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID)
-			if dirExists(beadWt) {
-				gs.ActiveWorktree = beadWt
+		// Ambient, best-effort guard state: a malformed ctx.SpecID/BeadID
+		// (which should not occur post-D1/D2, but guard degrades safely
+		// regardless) simply leaves ActiveWorktree unset — no redirect
+		// fires (ADR-0042 degrade-vs-error policy for never-block
+		// consumers).
+		if specWt, err := workspace.SpecWorktreePath(root, cfg, ctx.SpecID); err == nil {
+			if ctx.BeadID != "" {
+				if beadWt, err := workspace.BeadWorktreePath(specWt, cfg, ctx.BeadID); err == nil && dirExists(beadWt) {
+					gs.ActiveWorktree = beadWt
+				} else if dirExists(specWt) {
+					gs.ActiveWorktree = specWt
+				}
 			} else if dirExists(specWt) {
 				gs.ActiveWorktree = specWt
 			}
-		} else if dirExists(specWt) {
-			gs.ActiveWorktree = specWt
 		}
 	}
 	return gs, nil
@@ -114,10 +141,11 @@ func checkCWDWithCache(c *phase.Cache, root string) error {
 	// Also allow the spec worktree — lifecycle commands (complete, impl-approve)
 	// need to run there after all beads are done.
 	if gs.ActiveSpec != "" {
-		specWtName := workspace.SpecWorktreeName(gs.ActiveSpec)
-		specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
-		if strings.HasPrefix(cwdAbs, specWtAbs) {
-			return nil
+		if specWtName, err := workspace.SpecWorktreeName(gs.ActiveSpec); err == nil {
+			specWtAbs, _ := filepath.Abs(filepath.Join(root, cfg.WorktreeRoot, specWtName))
+			if strings.HasPrefix(cwdAbs, specWtAbs) {
+				return nil
+			}
 		}
 	}
 
@@ -127,7 +155,7 @@ func checkCWDWithCache(c *phase.Cache, root string) error {
 		// Req 12 (spec 092): guard failures end with a `recovery:` line.
 		return NewFailure(
 			fmt.Sprintf("mindspec: CWD is the main worktree; the active worktree is %s", gs.ActiveWorktree),
-			"cd "+gs.ActiveWorktree,
+			containment.EmitCd(gs.ActiveWorktree),
 		)
 	}
 

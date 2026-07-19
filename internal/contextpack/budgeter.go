@@ -51,6 +51,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/tokenize"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
@@ -148,6 +151,12 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 		return nil, fmt.Errorf("BuildBead: tokenizer is nil")
 	}
 
+	// Gate-all-ids (ADR-0042 §1, round 9): beadID feeds a `bd show` argv
+	// build via beadShowFn — validate BEFORE any bd spawn.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return nil, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
+	}
+
 	// 1. Fetch bead JSON via the existing beadShowFn seam.
 	beadJSON, err := beadShowFn("show", beadID, "--json")
 	if err != nil {
@@ -166,6 +175,14 @@ func BuildBead(beadID string, maxTokens int, tok tokenize.Tokenizer) ([]byte, er
 	specID, ok := stringFromMeta(e.Metadata, "spec_id")
 	if !ok || specID == "" {
 		return nil, fmt.Errorf("bead JSON for %s lacks metadata.spec_id; cannot resolve spec", beadID)
+	}
+	// R6(c) Join-with-ID gate (ADR-0042 §1, round 6 O3): specID is
+	// agent-writable bd-metadata reaching a filepath.Join below —
+	// idvalidate-then-join, not waist-routed (this package must not
+	// import internal/workspace's composition helpers here beyond
+	// SpecsDir, the enumeration-root accessor).
+	if err := idvalidate.SpecID(specID); err != nil {
+		return nil, fmt.Errorf("bead %s carries an invalid spec_id %s: %w", beadID, idrender.Spec(specID), err)
 	}
 
 	// 3. Resolve spec dir + read spec.md, plan.md. The spec dir is resolved
@@ -661,9 +678,11 @@ func extractPlanBeadSection(planBody, beadID, title string) string {
 
 // renderHeader emits the level-1 header line.
 func renderHeader(title, id string) string {
+	// R4: title is agent-writable single-line free text (termsafe.Escape);
+	// id is an ID-typed position (idrender.Bead).
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("# Bead Context: %s\n", title))
-	b.WriteString(fmt.Sprintf("**Bead**: %s\n\n", id))
+	b.WriteString(fmt.Sprintf("# Bead Context: %s\n", termsafe.Escape(title)))
+	b.WriteString(fmt.Sprintf("**Bead**: %s\n\n", idrender.Bead(id)))
 	return b.String()
 }
 
@@ -735,7 +754,9 @@ func renderTier3ADRs(adrs []renderedADR) string {
 	var b strings.Builder
 	b.WriteString("## Cited ADRs\n\n")
 	for _, a := range adrs {
-		b.WriteString(fmt.Sprintf("### %s: %s\n\n", a.ID, a.Title))
+		// R4: ADR.ID and ADR.Title are agent-writable frontmatter fields —
+		// escape both, matching renderHeader above.
+		b.WriteString(fmt.Sprintf("### %s: %s\n\n", termsafe.Escape(a.ID), termsafe.Escape(a.Title)))
 		if a.Decision != "" {
 			b.WriteString("#### Decision\n\n")
 			b.WriteString(a.Decision)

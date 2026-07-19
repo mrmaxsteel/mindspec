@@ -1,0 +1,19 @@
+// Green fixture for spec 120 R6 scan (e) (defense-in-depth): the same
+// reverse-derivation shape WITH its idvalidate gate present — must
+// NOT be flagged.
+package fixture
+
+import (
+	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+)
+
+func gatedReverseDerivation(branch string) (string, bool) {
+	beadID := strings.TrimPrefix(branch, workspace.BeadBranchPrefix)
+	if idvalidate.BeadID(beadID) != nil {
+		return "", false
+	}
+	return beadID, true
+}

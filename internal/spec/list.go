@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -31,6 +32,12 @@ func List(root string) ([]SpecEntry, error) {
 			continue
 		}
 		specID := e.Name()
+		// R6(c) Join-with-ID gate (ADR-0042 §1): specID is enumerated
+		// from an agent-creatable directory name — validate-and-skip
+		// rather than composing/rendering an unvalidated entry.
+		if idvalidate.SpecID(specID) != nil {
+			continue
+		}
 		status := frontmatter.StatusFromPath(filepath.Join(specsDir, specID, "spec.md"))
 		// Preserve the "unknown" sentinel for CLI display: a blank Status column
 		// looks broken in tables. The parser drops the sentinel; the table keeps it.

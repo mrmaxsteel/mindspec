@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,11 +16,14 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 
@@ -263,22 +267,14 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// backlog (or leaving the child attached) is recommended instead.
 	if epicID != "" {
 		if open := phase.OpenNonLifecycleChildrenForEpic(epicID); len(open) > 0 {
-			names := make([]string, 0, len(open))
-			for _, c := range open {
-				if c.Title != "" {
-					names = append(names, fmt.Sprintf("%s (%s)", c.ID, c.Title))
-				} else {
-					names = append(names, c.ID)
-				}
-			}
-			fmt.Fprintf(os.Stderr,
-				"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent', mindspec-bk5t)\n",
-				specID, strings.Join(names, ", "))
+			fmt.Fprint(os.Stderr, formatOpenChildHint(specID, open))
 		}
 	}
 
-	// Derive spec branch from convention.
-	specBranch := workspace.SpecBranch(specID)
+	// Derive spec branch from convention. specID already validated at the
+	// top of ApproveImpl (validate.SpecID == idvalidate.SpecID), so this
+	// waist call cannot fail.
+	specBranch, _ := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
@@ -288,18 +284,31 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 	planPath := filepath.Join(specDir, "plan.md")
 	beadIDs, planErr := readPlanBeadIDs(planPath)
+	if planErr != nil && errors.Is(planErr, ErrPlanBeadIDsMalformed) {
+		// AC-25: a malformed bead_ids entry REFUSES before ANY bd
+		// invocation — unlike the benign "no plan.md" / "no frontmatter"
+		// cases below, which silently skip this gate.
+		return nil, planErr
+	}
 	if planErr == nil {
 		for _, bid := range beadIDs {
+			// bid is a bead_ids entry from the agent-authored plan.md
+			// frontmatter (readPlanBeadIDs, R4 cluster 2) — NEVER
+			// idvalidate'd. The functional bd lookup (readBeadStatus)
+			// takes the raw bid; every DISPLAY position below renders
+			// safeBid instead, matching internal/validate/beads.go's
+			// checkBeadIDs treatment of the same untrusted source.
+			safeBid := idrender.Bead(bid)
 			status, err := readBeadStatus(bid)
 			if err != nil {
-				return nil, fmt.Errorf("checking bead %s status: %w", bid, err)
+				return nil, fmt.Errorf("checking bead %s status: %w", safeBid, err)
 			}
 			if status != "closed" {
 				// Spec 092 Reqs 8/12 (mindspec-tjat): context line plus
 				// a final copy-pastable recovery line.
 				return nil, guard.NewFailure(
-					fmt.Sprintf("bead %s is still %q — close all beads before approving implementation\n%s", bid, status, implContextLine(root)),
-					fmt.Sprintf("mindspec complete %s", bid),
+					fmt.Sprintf("bead %s is still %q — close all beads before approving implementation\n%s", safeBid, status, implContextLine(root)),
+					fmt.Sprintf("mindspec complete %s", safeBid),
 				)
 			}
 		}
@@ -452,6 +461,16 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 
 	// MUTATION (1/3): close epic and mark as explicitly done.
 	if epicID != "" {
+		// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a `bd close`
+		// argv build directly — validate BEFORE any bd spawn. epicID is
+		// already RETURN-gated at phase.FindEpicBySpecIDWithCache, so this
+		// is defense in depth (a well-formed id passes for free).
+		if err := idvalidate.BeadID(epicID); err != nil {
+			return nil, guard.NewFailure(
+				fmt.Sprintf("resolved epic id %s is invalid: %v", termsafe.Escape(epicID), err),
+				fmt.Sprintf("mindspec repair phase %s", specID),
+			)
+		}
 		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
 			if !isAlreadyClosedErr(err) {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
@@ -551,6 +570,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 }
 
 func readBeadStatus(id string) (string, error) {
+	// Gate-all-ids (ADR-0042 §1, round 6/9): id feeds a `bd show` argv
+	// build via the generic RunBD seam — validated here as defense in
+	// depth, on top of the readPlanBeadIDs read-gate its sole production
+	// caller already applies (AC-25/AC-26). The functional bd invocation
+	// below takes the raw id; the error-message DISPLAY positions render
+	// the idrender'd copy (R4 cluster 2).
+	if err := idvalidate.BeadID(id); err != nil {
+		return "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+	}
 	out, err := implRunBDFn("show", id, "--json")
 	if err != nil {
 		return "", err
@@ -560,10 +588,10 @@ func readBeadStatus(id string) (string, error) {
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return "", fmt.Errorf("parsing bd show output for %s: %w", id, err)
+		return "", fmt.Errorf("parsing bd show output for %s: %w", idrender.Bead(id), err)
 	}
 	if len(payload) == 0 {
-		return "", fmt.Errorf("no bead returned for %s", id)
+		return "", fmt.Errorf("no bead returned for %s", idrender.Bead(id))
 	}
 	return strings.ToLower(strings.TrimSpace(payload[0].Status)), nil
 }
@@ -572,6 +600,16 @@ func readBeadStatus(id string) (string, error) {
 // is located via the canonical internal/frontmatter.Parse (ARCH-6) rather than
 // a hand-rolled `\n---` substring scan, so only a whole-line `---` fence closes
 // the block and a space-padded fence reads as no-frontmatter.
+//
+// Class-2 executable-operand consumer gate (ADR-0042 §1, spec 120 R2 AC-25,
+// round 6 G3): plan.md's bead_ids frontmatter is agent-writable, and every
+// entry here previously reached bd argv (readBeadStatus's `bd show <id>`
+// and, via the plan-declared intersection, implCheckObligationsFn) with NO
+// idvalidate.BeadID gate — a `--help`/`-`-prefixed entry is bd option
+// injection. Every entry is validated HERE, at the read, before ANY caller
+// ever sees the list: a malformed entry REFUSES convergently (the plan-
+// frontmatter lever) rather than letting it flow to a bd spawn. Clean
+// dotted-child bead_ids (e.g. "mindspec-9cyu.1") pass byte-identically.
 func readPlanBeadIDs(planPath string) ([]string, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
@@ -592,8 +630,25 @@ func readPlanBeadIDs(planPath string) ([]string, error) {
 	if len(fm.BeadIDs) == 0 {
 		return nil, fmt.Errorf("no bead_ids in plan frontmatter")
 	}
+	for _, bid := range fm.BeadIDs {
+		if err := idvalidate.BeadID(bid); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrPlanBeadIDsMalformed, guard.FormatFailure(
+				fmt.Sprintf("plan frontmatter bead_ids entry %s is not a valid bead ID: %v", idrender.Bead(bid), err),
+				"fix plan.md's bead_ids frontmatter, then re-run: mindspec plan approve",
+			))
+		}
+	}
 	return fm.BeadIDs, nil
 }
+
+// ErrPlanBeadIDsMalformed is the sentinel readPlanBeadIDs wraps when a
+// plan.md bead_ids entry fails idvalidate.BeadID (spec 120 AC-25). Callers
+// that otherwise treat a readPlanBeadIDs error as "no plan-bead gate to
+// run" (a genuinely-absent or unparseable plan.md, the pre-existing
+// benign case) use errors.Is(err, ErrPlanBeadIDsMalformed) to instead
+// REFUSE convergently — a hostile bead_ids entry must never silently skip
+// the gate the same way a missing plan.md does.
+var ErrPlanBeadIDsMalformed = errors.New("plan frontmatter bead_ids contains a malformed bead id")
 
 func isAlreadyClosedErr(err error) bool {
 	if err == nil {
@@ -734,15 +789,26 @@ func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
 		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 			continue
 		}
+		// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): beadID is
+		// parsed back OUT of an agent-creatable worktree/branch entry. A
+		// malformed candidate is skipped — never matched against the
+		// closed-epic-bead set, never embedded in an ID role.
 		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
-		if beadID == "" || !closed[beadID] {
+		if beadID == "" || idvalidate.BeadID(beadID) != nil || !closed[beadID] {
 			continue
 		}
 		isAnc, ancErr := implIsAncestorFn(root, e.Branch, specBranch)
 		if ancErr != nil {
+			// R4 (spec 120): e.Branch is a free-text field from
+			// `bd worktree list --json` (agent-writable, never idvalidate'd),
+			// and ancErr echoes it back (gitutil IsAncestor). Escape the
+			// branch display and the whole error string (which re-embeds the
+			// branch + raw git stderr) — byte-identical for a genuine ref,
+			// control-bytes neutralized for a hostile one. Mirrors the
+			// implOrphanRefusal sibling below.
 			return guard.NewFailure(
-				fmt.Sprintf("could not verify worktree branch %s is merged into %s: %v", e.Branch, specBranch, ancErr),
-				fmt.Sprintf("mindspec impl approve %s", specID),
+				fmt.Sprintf("could not verify worktree branch %s is merged into %s: %s", termsafe.Escape(e.Branch), termsafe.Escape(specBranch), termsafe.Escape(ancErr.Error())),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)),
 			)
 		}
 		if isAnc {
@@ -767,12 +833,31 @@ func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
 func implOrphanRefusal(root, specID string, o lifecycle.Orphan) error {
 	msg := fmt.Sprintf(
 		"bead %s (branch %s) was closed without running mindspec complete and is not merged into %s",
-		o.BeadID, o.BeadBranch, o.SpecBranch,
+		idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch),
 	)
 	if slot := implAdvisorySlotLine(root, specID, o.BeadID); slot != "" {
 		msg += "\n" + slot
 	}
 	return guard.NewFailure(msg, o.RecoveryCommand())
+}
+
+// formatOpenChildHint renders the Spec 095 (mindspec-ry73) advisory hint
+// naming open non-lifecycle follow-up children of specID's epic (see the
+// call site above for the full rationale). R4: c.ID is an ID-typed
+// position (idrender.Bead); c.Title is agent-writable free text
+// (termsafe.Escape); specID is likewise idrender'd.
+func formatOpenChildHint(specID string, open []phase.ChildInfo) string {
+	names := make([]string, 0, len(open))
+	for _, c := range open {
+		if c.Title != "" {
+			names = append(names, fmt.Sprintf("%s (%s)", idrender.Bead(c.ID), termsafe.Escape(c.Title)))
+		} else {
+			names = append(names, idrender.Bead(c.ID))
+		}
+	}
+	return fmt.Sprintf(
+		"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent', mindspec-bk5t)\n",
+		idrender.Spec(specID), strings.Join(names, ", "))
 }
 
 // implAdvisorySlotLine is Spec 115 R2: best-effort naming of the
@@ -796,11 +881,19 @@ func implAdvisorySlotLine(root, specID, beadID string) string {
 	if len(unresolved) == 0 {
 		return ""
 	}
+	return formatAdvisorySlotLine(beadID, unresolved)
+}
+
+// formatAdvisorySlotLine renders implAdvisorySlotLine's message body from
+// an already-resolved unresolved-verdict slice. R4: beadID is an
+// ID-typed position (idrender.Bead); each Slot is derived from a
+// reviewer verdict filename and is escaped per-entry before joining.
+func formatAdvisorySlotLine(beadID string, unresolved []panel.Verdict) string {
 	slots := make([]string, 0, len(unresolved))
 	for _, v := range unresolved {
-		slots = append(slots, v.Slot)
+		slots = append(slots, termsafe.Escape(v.Slot))
 	}
-	return fmt.Sprintf("panel advisory: bead %s carries unresolved reviewer slot(s) %s on its registered panel", beadID, strings.Join(slots, ", "))
+	return fmt.Sprintf("panel advisory: bead %s carries unresolved reviewer slot(s) %s on its registered panel", idrender.Bead(beadID), strings.Join(slots, ", "))
 }
 
 // implObligationRefusal wraps an uncovered-obligation error (Leg 3, R3)
@@ -812,14 +905,30 @@ func implAdvisorySlotLine(root, specID, beadID string) string {
 // restoration prerequisite first — the message must never present a
 // command known to fail.
 func implObligationRefusal(beadID string, cause error) error {
-	branch := workspace.BeadBranch(beadID)
-	if implBranchExistsFn(branch) {
-		return guard.NewFailure(cause.Error(), fmt.Sprintf("mindspec complete %s", beadID))
+	// beadID flows in from planBeadIDs (readPlanBeadIDs, R4 cluster 2).
+	// workspace.BeadBranch(beadID) is a FUNCTIONAL branch-name
+	// construction (fed to implBranchExistsFn's git lookup), so it takes
+	// the raw beadID; every DISPLAY position below (the two
+	// recovery-command lines and the branch-name mention) renders the
+	// idrender'd copy instead.
+	branch, err := workspace.BeadBranch(beadID)
+	branchValid := err == nil
+	if !branchValid {
+		// beadID here is a plan-declared, already-gated id (readPlanBeadIDs
+		// validates every entry, AC-25) reaching this rendering helper —
+		// this should be unreachable, but degrade to a placeholder rather
+		// than composing a hostile branch name.
+		branch = "<bead-branch>"
+	}
+	safeBeadID := idrender.Bead(beadID)
+	safeBranch := workspace.BeadBranchPrefix + safeBeadID
+	if branchValid && implBranchExistsFn(branch) {
+		return guard.NewFailure(cause.Error(), fmt.Sprintf("mindspec complete %s", safeBeadID))
 	}
 	return guard.NewFailure(
 		cause.Error(),
-		fmt.Sprintf("restore the %s branch ref (it no longer exists) so 'mindspec complete' can reach its reconciliation step, or settle the obligation out-of-band", branch),
-		fmt.Sprintf("mindspec complete %s", beadID),
+		fmt.Sprintf("restore the %s branch ref (it no longer exists) so 'mindspec complete' can reach its reconciliation step, or settle the obligation out-of-band", safeBranch),
+		fmt.Sprintf("mindspec complete %s", safeBeadID),
 	)
 }
 

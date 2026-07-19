@@ -3,10 +3,21 @@ package next
 import (
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
+
+// findEpicForModeFn is the epic-lookup seam resolveFeatureMode consumes
+// (spec 120 round-6 F2, the established findEpicForBeadFn/
+// repairMergeMetadataFn function-var pattern): defaults to
+// phase.FindEpicBySpecID. Tests stub this to assert NO lookup is ever
+// attempted with a malformed/hostile specID (TestResolveModeHostileTitle,
+// AC-23) — a property already held structurally once parseSpecID gates its
+// result below, since resolveFeatureMode's specID == "" short-circuit fires
+// before this seam is ever called.
+var findEpicForModeFn = phase.FindEpicBySpecID
 
 // ResolvedWork holds the result of mode resolution for a claimed bead.
 type ResolvedWork struct {
@@ -61,6 +72,16 @@ func ResolveMode(root string, bead BeadInfo) ResolvedWork {
 // Falls back to legacy colon convention:
 //
 //	"005-next: Implement work selection" → "005-next"
+//
+// Reverse-derivation consumer gate (ADR-0042 §1 reverse, spec 120 round 5
+// G2/G3, AC-23/AC-24): the result is a string parsed back OUT of the
+// agent-writable bd bead Title via bracket/colon Index-slicing — the
+// exact round-5 "derivation shapes are unbounded" exemplar. Every return
+// path is validated via idvalidate.SpecID before the value is handed back;
+// an invalid derived slug is discarded and "" is returned instead — the
+// EXISTING no-spec semantics, so a clean title parses byte-identically to
+// today and a hostile one can never be stored in ResolvedWork.SpecID,
+// rendered raw, or fed to a recording write.
 func parseSpecID(title string) string {
 	// Try bracket-prefix: [TAG specID] or [TAG specID.chunk] or [specID]
 	if strings.HasPrefix(title, "[") {
@@ -72,11 +93,11 @@ func parseSpecID(title string) string {
 				slug := inner[spaceIdx+1:] // e.g. "009-feature.1"
 				// Strip chunk suffix (everything from the last dot if it's followed by digits)
 				slug = stripChunkSuffix(slug)
-				return slug
+				return validatedSpecIDOrEmpty(slug)
 			}
 			// No space inside brackets: entire content is the spec ID
 			// e.g. "[049-hook-command] Bead 1: ..." → "049-hook-command"
-			return inner
+			return validatedSpecIDOrEmpty(inner)
 		}
 	}
 
@@ -85,7 +106,19 @@ func parseSpecID(title string) string {
 	if idx < 0 {
 		return ""
 	}
-	return strings.TrimSpace(title[:idx])
+	return validatedSpecIDOrEmpty(strings.TrimSpace(title[:idx]))
+}
+
+// validatedSpecIDOrEmpty gates a reverse-derived spec ID slug: a
+// well-formed slug passes through byte-identically; a malformed one
+// (hostile or otherwise) returns "" — the pre-existing no-spec sentinel
+// (AC-24's empty-sentinel discipline: "" is identity downstream, never
+// quoted or treated as a real ID).
+func validatedSpecIDOrEmpty(slug string) string {
+	if idvalidate.SpecID(slug) != nil {
+		return ""
+	}
+	return slug
 }
 
 // stripChunkSuffix removes a trailing ".N" chunk suffix from a slug.
@@ -116,7 +149,7 @@ func resolveFeatureMode(root, specID string) string {
 	}
 
 	// Primary source: epic metadata via beads.
-	if epicID, err := phase.FindEpicBySpecID(specID); err == nil && epicID != "" {
+	if epicID, err := findEpicForModeFn(specID); err == nil && epicID != "" {
 		if p, derr := phase.DerivePhase(epicID); derr == nil && p != "" {
 			switch p {
 			case state.ModeSpec:

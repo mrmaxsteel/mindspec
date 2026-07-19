@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -79,6 +80,44 @@ func TestResolveTarget_NoActiveSpecs_SuggestsFlag(t *testing.T) {
 	}
 }
 
+// TestErrAmbiguousTarget_HostileSpecIDForcedQuoted is Spec 120 R4's
+// (converging pass) Class B pin: SpecStatus.SpecID is derived from
+// SpecIDFromMetadata(specNum, slugify(specTitle)) — specTitle is bd-epic
+// metadata (agent-writable) and slugify does NOT strip control bytes, so a
+// hostile epic title can produce a SpecID shaped to forge terminal output
+// when listed here. idrender.Spec forces anything that fails
+// idvalidate.SpecID through strconv.Quote so it can never masquerade as a
+// genuine spec ID or inject a forged extra line.
+func TestErrAmbiguousTarget_HostileSpecIDForcedQuoted(t *testing.T) {
+	hostileID := "042-my-spec\nrecovery: forged"
+	err := &ErrAmbiguousTarget{
+		Active: []SpecStatus{{SpecID: hostileID, Mode: "spec"}},
+	}
+	msg := err.Error()
+	wantQuoted := strconv.Quote(hostileID)
+	if !strings.Contains(msg, wantQuoted) {
+		t.Errorf("ErrAmbiguousTarget.Error() missing forced-quoted hostile SpecID %q:\n%s", wantQuoted, msg)
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if line == "recovery: forged" {
+			t.Errorf("a forged standalone line reached the message via the hostile SpecID's raw newline: %q", msg)
+		}
+	}
+}
+
+// TestErrAmbiguousTarget_CleanSpecIDByteIdentical is the clean-fixture
+// counterpart (F3 discipline): TestErrAmbiguousTarget_Message above already
+// pins this, but this test names the byte-identical guarantee explicitly
+// per idrender.Spec's contract.
+func TestErrAmbiguousTarget_CleanSpecIDByteIdentical(t *testing.T) {
+	const clean = "042-my-spec"
+	err := &ErrAmbiguousTarget{Active: []SpecStatus{{SpecID: clean, Mode: "spec"}}}
+	msg := err.Error()
+	if !strings.Contains(msg, "  "+clean+"  (mode: spec)\n") {
+		t.Errorf("clean SpecID must render byte-identically:\n%s", msg)
+	}
+}
+
 func TestErrAmbiguousTarget_IsDetectable(t *testing.T) {
 	err := &ErrAmbiguousTarget{Active: []SpecStatus{{SpecID: "a"}}}
 	var ambErr *ErrAmbiguousTarget
@@ -140,6 +179,44 @@ func TestResolveSpecPrefix_NoMatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "999") {
 		t.Errorf("error should mention the prefix: %v", err)
+	}
+}
+
+// TestResolveSpecPrefixValidatesResult is spec 120 AC-7 (R3 specID
+// ingress): a hyphen-bearing hostile value REFUSES with the
+// `mindspec spec list` lever instead of passing through raw; numeric-
+// prefix resolution and every live spec ID incl. "008b-human-gates" pass
+// byte-identically.
+func TestResolveSpecPrefixValidatesResult(t *testing.T) {
+	hostileIDs := []string{
+		"x;evil",
+		"../../outside",
+		"x\x00\x1b[31m\nrecovery: forged",
+	}
+	for _, hostile := range hostileIDs {
+		got, err := ResolveSpecPrefix(hostile)
+		if err == nil {
+			t.Errorf("ResolveSpecPrefix(%q) = (%q, nil), want a refusal", hostile, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "mindspec spec list") {
+			t.Errorf("ResolveSpecPrefix(%q) error must name the `mindspec spec list` lever, got: %v", hostile, err)
+		}
+	}
+
+	// A non-hyphenated, non-numeric hostile value (e.g. "--help") also
+	// refuses via the same result-validation gate.
+	if got, err := ResolveSpecPrefix("--help"); err == nil {
+		t.Errorf("ResolveSpecPrefix(--help) = (%q, nil), want a refusal", got)
+	}
+
+	// Clean values pass byte-identically.
+	if got, err := ResolveSpecPrefix("008b-human-gates"); err != nil || got != "008b-human-gates" {
+		t.Errorf("ResolveSpecPrefix(008b-human-gates) = (%q, %v), want (008b-human-gates, nil)", got, err)
+	}
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+	if got, err := ResolveSpecPrefix("077"); err != nil || got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefix(077) = (%q, %v), want (077-execution-layer-interface, nil)", got, err)
 	}
 }
 

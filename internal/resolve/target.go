@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -18,7 +20,7 @@ func (e *ErrAmbiguousTarget) Error() string {
 	var sb strings.Builder
 	sb.WriteString("multiple active specs found; use --spec to target one:\n")
 	for _, s := range e.Active {
-		sb.WriteString(fmt.Sprintf("  %s  (mode: %s)\n", s.SpecID, s.Mode))
+		sb.WriteString(fmt.Sprintf("  %s  (mode: %s)\n", idrender.Spec(s.SpecID), s.Mode))
 	}
 	return sb.String()
 }
@@ -31,15 +33,29 @@ func ResolveSpecPrefix(prefix string) (string, error) {
 }
 
 // ResolveSpecPrefixWithCache is the cache-aware variant of ResolveSpecPrefix.
+//
+// R3 explicit-ingress early gate (ADR-0042, spec 120 AC-7): validates its
+// RESULT before returning — both the hyphen pass-through below and the
+// prefix-resolved value — so a hostile `--spec` value refuses cleanly at
+// the CLI surface, before any composition (`SpecBranch`/`SpecWorktreePath`/
+// etc.) ever sees it. Every live spec ID (including letter-suffixed forms
+// like "008b-human-gates") passes byte-identically.
 func ResolveSpecPrefixWithCache(c *phase.Cache, prefix string) (string, error) {
-	// If it contains a hyphen, treat as full spec ID — pass through.
+	// If it contains a hyphen, treat as full spec ID — pass through,
+	// gated.
 	if strings.Contains(prefix, "-") {
+		if err := idvalidate.SpecID(prefix); err != nil {
+			return "", fmt.Errorf("%q is not a valid spec ID: %w; run `mindspec spec list` and re-run with a listed ID", prefix, err)
+		}
 		return prefix, nil
 	}
 
 	// Must be numeric-only to be a prefix.
 	for _, r := range prefix {
 		if !unicode.IsDigit(r) {
+			if err := idvalidate.SpecID(prefix); err != nil {
+				return "", fmt.Errorf("%q is not a valid spec ID: %w; run `mindspec spec list` and re-run with a listed ID", prefix, err)
+			}
 			return prefix, nil
 		}
 	}
@@ -58,7 +74,14 @@ func ResolveSpecPrefixWithCache(c *phase.Cache, prefix string) (string, error) {
 		}
 		switch len(matches) {
 		case 1:
-			return matches[0], nil
+			resolved := matches[0]
+			if err := idvalidate.SpecID(resolved); err != nil {
+				// Defense in depth: a matched active-spec SpecID should
+				// already be well-formed (D1-checked), but no id operand
+				// is trusted by provenance (round 9).
+				return "", fmt.Errorf("resolved spec id %q for prefix %q is invalid: %w; run `mindspec spec list` and re-run with a listed ID", resolved, prefix, err)
+			}
+			return resolved, nil
 		case 0:
 			// Fall through to error.
 		default:

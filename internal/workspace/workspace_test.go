@@ -1089,7 +1089,11 @@ func TestSpecDir_BothWorktreeShapes(t *testing.T) {
 	const specID = "044-launch-website"
 	t.Run("flat worktree shape", func(t *testing.T) {
 		root := t.TempDir()
-		wt := filepath.Join(root, ".worktrees", SpecWorktreeName(specID), ".mindspec", "specs", specID)
+		specWtName, err := SpecWorktreeName(specID)
+		if err != nil {
+			t.Fatalf("SpecWorktreeName: %v", err)
+		}
+		wt := filepath.Join(root, ".worktrees", specWtName, ".mindspec", "specs", specID)
 		if err := os.MkdirAll(wt, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1103,7 +1107,11 @@ func TestSpecDir_BothWorktreeShapes(t *testing.T) {
 	})
 	t.Run("canonical worktree shape", func(t *testing.T) {
 		root := t.TempDir()
-		wt := filepath.Join(root, ".worktrees", SpecWorktreeName(specID), ".mindspec", "docs", "specs", specID)
+		specWtName, err := SpecWorktreeName(specID)
+		if err != nil {
+			t.Fatalf("SpecWorktreeName: %v", err)
+		}
+		wt := filepath.Join(root, ".worktrees", specWtName, ".mindspec", "docs", "specs", specID)
 		if err := os.MkdirAll(wt, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1124,7 +1132,11 @@ func TestSpecDir_BothWorktreeShapes(t *testing.T) {
 func TestTreeRootForSpecDir_Ew79FlatWorktree(t *testing.T) {
 	const specID = "091-x"
 	root := t.TempDir()
-	wtRoot := filepath.Join(root, ".worktrees", SpecWorktreeName(specID))
+	specWtName, err := SpecWorktreeName(specID)
+	if err != nil {
+		t.Fatalf("SpecWorktreeName: %v", err)
+	}
+	wtRoot := filepath.Join(root, ".worktrees", specWtName)
 	specDir := filepath.Join(wtRoot, ".mindspec", "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -1450,4 +1462,66 @@ func TestContextMapPath_ThreeTierFallback(t *testing.T) {
 	if got := ContextMapPath(root); got != want {
 		t.Errorf("ContextMapPath legacy three-tier fallback = %q, want %q", got, want)
 	}
+}
+
+// TestDetectWorktreeContextRejectsMalformedNames is spec 120 AC-5 (D2,
+// ADR-0042 §1 reverse): hostile .worktrees/worktree-spec-<hostile> and
+// .worktrees/worktree-<hostile> segments resolve unrecognized (WorktreeMain,
+// empty IDs) — the reverse-derivation TrimPrefix must never hand an
+// unvalidated segment to a caller as a real ID. Every currently-valid
+// naming fixture — incl. a dotted-child bead worktree and a finalize
+// worktree — resolves byte-identically to today (this was RED under the
+// pre-Bead-1 grammar: both parse to IDs the old pattern rejected).
+func TestDetectWorktreeContextRejectsMalformedNames(t *testing.T) {
+	t.Parallel()
+
+	hostileSuffixes := []string{
+		"x;evil",
+		"../../outside",
+		"x evil",
+		"x\x00\x1b[31m\nrecovery: forged",
+	}
+
+	t.Run("hostile spec worktree segment resolves unrecognized", func(t *testing.T) {
+		for _, h := range hostileSuffixes {
+			dir := "/Users/dev/project/.worktrees/worktree-spec-" + h + "/internal"
+			kind, specID, beadID := DetectWorktreeContext(dir)
+			if kind != WorktreeMain {
+				t.Errorf("hostile suffix %q: expected WorktreeMain, got %s (specID=%q)", h, kind, specID)
+			}
+			if specID != "" || beadID != "" {
+				t.Errorf("hostile suffix %q: expected empty IDs, got spec=%q bead=%q", h, specID, beadID)
+			}
+		}
+	})
+
+	t.Run("hostile bead worktree segment resolves unrecognized", func(t *testing.T) {
+		for _, h := range hostileSuffixes {
+			dir := "/Users/dev/project/.worktrees/worktree-" + h + "/src"
+			kind, specID, beadID := DetectWorktreeContext(dir)
+			if kind != WorktreeMain {
+				t.Errorf("hostile suffix %q: expected WorktreeMain, got %s (beadID=%q)", h, kind, beadID)
+			}
+			if specID != "" || beadID != "" {
+				t.Errorf("hostile suffix %q: expected empty IDs, got spec=%q bead=%q", h, specID, beadID)
+			}
+		}
+	})
+
+	t.Run("clean shapes resolve byte-identically", func(t *testing.T) {
+		kind, specID, beadID := DetectWorktreeContext("/Users/dev/project/.worktrees/worktree-mindspec-9cyu.1/src")
+		if kind != WorktreeBead || specID != "" || beadID != "mindspec-9cyu.1" {
+			t.Errorf("dotted-child bead worktree: got kind=%s spec=%q bead=%q", kind, specID, beadID)
+		}
+
+		kind, specID, beadID = DetectWorktreeContext("/Users/dev/project/.worktrees/worktree-finalize-053-foo/src")
+		if kind != WorktreeBead || specID != "" || beadID != "finalize-053-foo" {
+			t.Errorf("finalize worktree: got kind=%s spec=%q bead=%q", kind, specID, beadID)
+		}
+
+		kind, specID, beadID = DetectWorktreeContext("/Users/dev/project/.worktrees/worktree-spec-008b-human-gates/src")
+		if kind != WorktreeSpec || specID != "008b-human-gates" || beadID != "" {
+			t.Errorf("letter-suffixed spec worktree: got kind=%s spec=%q bead=%q", kind, specID, beadID)
+		}
+	})
 }

@@ -5,10 +5,30 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — subprocess CombinedOutput
+// — while preserving the real newlines that separate genuine lines (R4:
+// per-line escaping for line-oriented bodies, never per-message, so a
+// hostile line cannot forge additional lines while legitimate multi-line
+// structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
+}
 
 // findOrphanedClosedBeadsFn is the shared bd_close lifecycle-bypass predicate
 // (also used by `mindspec next` and `mindspec complete`). Injectable so the
@@ -28,7 +48,9 @@ func defaultRunMindspecComplete(root, beadID string) error {
 	cmd := exec.Command(bin, "complete", beadID)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mindspec complete %s failed: %v: %s", beadID, err, string(out))
+		// R4: subprocess CombinedOutput is agent-influenced porcelain text —
+		// escape per-line before it reaches the error path.
+		return fmt.Errorf("mindspec complete %s failed: %v: %s", idrender.Bead(beadID), err, escapeLines(string(out)))
 	}
 	return nil
 }
@@ -67,11 +89,15 @@ func checkOrphanedBeads(r *Report, root string) {
 		// neutral observer, not itself completing any bead.
 		for _, o := range findOrphanedClosedBeadsFn(specID, root, "") {
 			beadID := o.BeadID
+			// R4: beadID is an ID-typed position (idrender.Bead);
+			// BeadBranch/SpecBranch carry a "bead/"/"spec/" prefix so
+			// they don't validate against the bare idvalidate grammar —
+			// escape as free text instead.
 			r.Checks = append(r.Checks, Check{
-				Name:   fmt.Sprintf("orphaned closed bead: %s", beadID),
+				Name:   fmt.Sprintf("orphaned closed bead: %s", idrender.Bead(beadID)),
 				Status: Error,
 				Message: fmt.Sprintf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s. Run `%s` to recover.",
-					beadID, o.BeadBranch, o.SpecBranch, o.RecoveryCommand()),
+					idrender.Bead(beadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch), o.RecoveryCommand()),
 				FixFunc: func() error { return runMindspecCompleteFn(root, beadID) },
 			})
 		}

@@ -370,6 +370,10 @@ func ScenarioImplApprove() Scenario {
 			epicID := sandbox.CreateSpecEpic(specID)
 			beadID := sandbox.CreateBead("["+specID+"] Implement feature", "task", epicID)
 			sandbox.ClaimBead(beadID)
+			// R7 (spec 120, round 10): beadID is an id-position operand
+			// reaching a `bd close` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, beadID)
 			sandbox.runBDMust("close", beadID)
 
 			// ADR-divergence coverage triple (098 Bead 1 / R1 / myn3):
@@ -663,6 +667,10 @@ while 002-beta remains unchanged. Do not close beads directly with bd commands.`
 			assertMergeTopology(t, sandbox, "spec/001-alpha")
 
 			// 002-beta epic should have no children (agent didn't touch it)
+			// R7 (spec 120, round 10): epicBeta is an id-position operand
+			// reaching a `bd list --parent` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(t, epicBeta)
 			betaChildren, _ := sandbox.runBD("list", "--json", "--parent", epicBeta)
 			bc := strings.TrimSpace(betaChildren)
 			if bc != "" && bc != "[]" && bc != "null" {

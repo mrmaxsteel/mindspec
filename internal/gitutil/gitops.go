@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // ErrRefNotFound is returned by RevParseRef when the named ref genuinely does
@@ -577,15 +579,35 @@ func CommitAll(workdir, message string) error {
 
 	addCmd := execCommand("git", "-C", workdir, "add", "-A")
 	if out, err := addCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("staging changes: %s", strings.TrimSpace(string(out)))
+		// R4: git's CombinedOutput can echo back agent-writable repo content
+		// (e.g. a hostile pathspec/filename) — escape per-line before it
+		// reaches the error/terminal path.
+		return fmt.Errorf("staging changes: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
 	commitCmd := execCommand("git", "-C", workdir, "commit", "-m", message)
 	if out, err := commitCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("committing: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("committing: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
 	return nil
+}
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — git porcelain/error output —
+// while preserving the real newlines that separate genuine lines (R4:
+// per-line escaping for line-oriented bodies, never per-message, so a
+// hostile line cannot forge additional lines while legitimate multi-line
+// structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // File I/O wrappers for testability.
@@ -860,9 +882,21 @@ func RmCached(workdir, file string) error {
 // --- worktree helpers ------------------------------------------------------
 
 // WorktreeAddDetach runs `git worktree add --detach <wtPath> <commit>` in workdir.
+//
+// R5 check-at-use (ADR-0042 §4, AC-11): wtPath is re-validated for
+// symlink-aware containment under workdir immediately before the git
+// invocation — the wrapper-level check, which covers every present AND
+// future caller by construction (WorktreeAddDetach has zero non-test
+// callers today, per the spec's grep-complete inventory).
 func WorktreeAddDetach(workdir, wtPath, commit string) error {
 	if err := rejectOptionLike(commit); err != nil {
 		return err
+	}
+	if err := containment.CheckContainment(workdir, wtPath); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing worktree add --detach: %v", err),
+			containment.RejectionLever,
+		)
 	}
 	cmd := execCommand("git", gitArgs(workdir, "worktree", "add", "--detach", wtPath, commit)...)
 	out, err := cmd.CombinedOutput()
@@ -873,9 +907,21 @@ func WorktreeAddDetach(workdir, wtPath, commit string) error {
 }
 
 // WorktreeAdd runs `git worktree add <wtPath> <branch>` in workdir.
+//
+// R5 check-at-use (ADR-0042 §4, AC-11): wtPath is re-validated for
+// symlink-aware containment under workdir immediately before the git
+// invocation — the wrapper-level check covers every caller by
+// construction, in addition to the named executor-level checks that
+// already precede most calls (defense-in-depth, not a replacement).
 func WorktreeAdd(workdir, wtPath, branch string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
+	}
+	if err := containment.CheckContainment(workdir, wtPath); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing worktree add: %v", err),
+			containment.RejectionLever,
+		)
 	}
 	cmd := execCommand("git", gitArgs(workdir, "worktree", "add", wtPath, branch)...)
 	out, err := cmd.CombinedOutput()

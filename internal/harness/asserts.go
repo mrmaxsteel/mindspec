@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 func assertCommandRan(t *testing.T, events []ActionEvent, command string, argSubstr ...string) { //nolint:unparam // command kept for call-site clarity
@@ -386,7 +388,12 @@ type beadStatus struct {
 }
 
 // beadStatusStr returns the status of a bead by ID, or "unknown" on error.
+//
+// R7 (spec 120, round 10): beadID is an id-position operand reaching a
+// `bd show` spawn via runBD — gated with requireValidBeadID, fail-fast
+// t.Fatalf BEFORE the spawn.
 func beadStatusStr(sandbox *Sandbox, beadID string) string {
+	requireValidBeadID(sandbox.t, beadID)
 	out, err := sandbox.runBD("show", beadID, "--json")
 	if err != nil {
 		return "unknown"
@@ -402,6 +409,10 @@ func beadStatusStr(sandbox *Sandbox, beadID string) string {
 // the given epicID. Useful when bead IDs are created dynamically (e.g. by plan approve).
 func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount int) {
 	t.Helper()
+	// R7 (spec 120, round 10): epicID is an id-position operand reaching
+	// a `bd list --parent` spawn via runBD — gated with
+	// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+	requireValidBeadID(t, epicID)
 	// Query all statuses to count beads regardless of lifecycle state.
 	var allBeads []beadStatus
 	for _, status := range []string{"open", "in_progress", "closed"} {
@@ -427,6 +438,10 @@ func assertBeadsMinCount(t testing.TB, sandbox *Sandbox, epicID string, minCount
 func assertBeadsState(t testing.TB, sandbox *Sandbox, _ string, expectedStatuses map[string]string) {
 	t.Helper()
 	for id, want := range expectedStatuses {
+		// R7 (spec 120, round 10): id is an id-position operand reaching
+		// a `bd show` spawn via runBD — gated with requireValidBeadID,
+		// fail-fast t.Fatalf BEFORE the spawn.
+		requireValidBeadID(t, id)
 		out, err := sandbox.runBD("show", id, "--json")
 		if err != nil {
 			t.Errorf("bead %q: bd show failed: %v", id, err)
@@ -453,6 +468,12 @@ func assertBeadsState(t testing.TB, sandbox *Sandbox, _ string, expectedStatuses
 // deleted by impl approve) after a bead→spec merge.
 func assertMergeTopology(t testing.TB, sandbox *Sandbox, specBranch string) {
 	t.Helper()
+	// R7 (spec 120): specBranch is a dynamic operand reaching a git
+	// spawn — guard with gitutil.RejectOptionLike, fail-fast t.Fatalf
+	// before the spawn (SEC-5).
+	if err := gitutil.RejectOptionLike(specBranch); err != nil {
+		t.Fatalf("assertMergeTopology: %v", err)
+	}
 	// Try the specified branch first; fall back to --all if it no longer exists
 	// (impl approve deletes the spec branch after merging).
 	cmd := exec.Command("git", "log", "--merges", "--oneline", specBranch)

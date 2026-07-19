@@ -7,6 +7,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -41,6 +43,12 @@ func QueryReady() ([]BeadInfo, error) {
 
 // QueryReadyForEpic queries ready work scoped to a specific epic (parent issue).
 func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a
+	// `bd ready --parent` argv build directly — validate BEFORE any bd
+	// spawn.
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
+	}
 	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, err)
@@ -119,6 +127,14 @@ func ResolveActiveBead(root, specID string) (string, error) {
 	if err != nil || epicID == "" {
 		return "", nil
 	}
+	// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a
+	// `bd list --parent` argv build directly — validate BEFORE any bd
+	// spawn (defense in depth: epicID is already RETURN-gated at
+	// phase.FindEpicBySpecID, but no id operand is trusted by
+	// provenance).
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return "", nil
+	}
 
 	out, err := listJSONFn("--parent", epicID, "--status=in_progress")
 	if err != nil {
@@ -150,6 +166,13 @@ func ResolveActiveBead(root, specID string) (string, error) {
 // claimed". The "claim failed:" prefix keeps just enough context to know a
 // claim was what failed while letting the true cause through.
 func ClaimBead(id string) error {
+	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd update --claim`
+	// argv build directly — validate BEFORE any bd spawn (this is also
+	// the R3 explicit-claim ingress: a malformed claim target refuses
+	// convergently).
+	if err := idvalidate.BeadID(id); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+	}
 	out, err := runBDCombFn("update", id, "--claim")
 	if err != nil {
 		return fmt.Errorf("claim failed: %s", strings.TrimSpace(string(out)))
@@ -162,6 +185,11 @@ func ClaimBead(id string) error {
 // in-session/uncommitted state. See FetchBeadAsOf for the committed-state
 // read (bead mindspec-uopd).
 func FetchBeadByID(id string) (BeadInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd show` argv
+	// build directly — validate BEFORE any bd spawn.
+	if err := idvalidate.BeadID(id); err != nil {
+		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+	}
 	out, err := runBDFn("show", id, "--json")
 	if err != nil {
 		return BeadInfo{}, fmt.Errorf("bd show %s failed: %w", id, err)
@@ -181,6 +209,11 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 // that case and fall back to FetchBeadByID (see
 // internal/complete.defaultVerifyCommitted).
 func FetchBeadAsOf(id, ref string) (BeadInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd show` argv
+	// build directly — validate BEFORE any bd spawn.
+	if err := idvalidate.BeadID(id); err != nil {
+		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
+	}
 	out, err := runBDFn("show", id, "--as-of", ref, "--json")
 	if err != nil {
 		return BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w", id, ref, err)

@@ -33,9 +33,15 @@ func stubStaleOpenSeams(t *testing.T, epicID string, epicErr error, items []bead
 // tracker, with its bead/<id> branch surviving (benign merged-but-
 // undeleted) is flagged.
 func TestFindStaleOpenBeads_Flagged_BranchSurvives(t *testing.T) {
+	// R4: RecoveryCommand()/Message() now idrender.Bead the BeadID field
+	// (spec 120 Bead 5 fix-up) — a valid, idvalidate.BeadID-conformant id
+	// is required here so the byte-identical render path is exercised
+	// rather than the forced-quote path a bare placeholder like "one"
+	// would trigger.
+	const beadID = "mindspec-9if1"
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "one", Status: "open"}}, nil)
+	mergeBead(t, run, dir, beadID, "spec/119-test")
+	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: beadID, Status: "open"}}, nil)
 
 	found, err := FindStaleOpenBeads("119-test", dir)
 	if err != nil {
@@ -44,14 +50,14 @@ func TestFindStaleOpenBeads_Flagged_BranchSurvives(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("expected 1 stale-open finding, got %d: %+v", len(found), found)
 	}
-	if found[0].BeadID != "one" {
-		t.Errorf("BeadID = %q, want one", found[0].BeadID)
+	if found[0].BeadID != beadID {
+		t.Errorf("BeadID = %q, want %s", found[0].BeadID, beadID)
 	}
 	if found[0].LandedSHA == "" {
 		t.Error("expected a populated LandedSHA")
 	}
-	if found[0].RecoveryCommand() != "mindspec complete one" {
-		t.Errorf("RecoveryCommand = %q", found[0].RecoveryCommand())
+	if want := "mindspec complete " + beadID; found[0].RecoveryCommand() != want {
+		t.Errorf("RecoveryCommand = %q, want %q", found[0].RecoveryCommand(), want)
 	}
 	if found[0].Message() == "" {
 		t.Error("expected a non-empty Message")
@@ -63,9 +69,9 @@ func TestFindStaleOpenBeads_Flagged_BranchSurvives(t *testing.T) {
 // cleanup) — still flagged from the spec branch's own history alone.
 func TestFindStaleOpenBeads_Flagged_BranchDeleted(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	run("branch", "-D", "bead/one")
-	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "one", Status: "in_progress"}}, nil)
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("branch", "-D", "bead/bead-one")
+	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "bead-one", Status: "in_progress"}}, nil)
 
 	found, err := FindStaleOpenBeads("119-test", dir)
 	if err != nil {
@@ -113,12 +119,12 @@ func TestFindStaleOpenBeads_FreshClaimNegative(t *testing.T) {
 // earlier landed merge) must not be flagged.
 func TestFindStaleOpenBeads_HealthyAgreement(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	run("checkout", "bead/one")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("checkout", "bead/bead-one")
 	writeAndCommit(t, run, dir, "more.txt", "more work not yet merged")
 	run("checkout", "spec/119-test")
 
-	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "one", Status: "in_progress"}}, nil)
+	stubStaleOpenSeams(t, "epic-1", nil, []bead.BeadInfo{{ID: "bead-one", Status: "in_progress"}}, nil)
 
 	found, err := FindStaleOpenBeads("119-test", dir)
 	if err != nil {

@@ -21,9 +21,13 @@ package lifecycle
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -64,11 +68,16 @@ type FinalizeOrphan struct {
 
 // RecoveryCommand names the forward re-invocation that clears the orphan
 // (ADR-0035 recovery-line convention).
+//
+// R4: o.Branch is the spine-validated `chore/finalize-<specID>` branch
+// operand (workspace.FinalizeBranchPrefix) and stays RAW, matching the
+// `spec/<id>`/`bead/<id>` convention; o.SpecID is an ID-typed position —
+// idrender.Spec.
 func (o FinalizeOrphan) RecoveryCommand() string {
 	if o.Kind == "finalize_branch" {
 		return fmt.Sprintf("open a PR for %s and merge it (or delete the branch if it is superseded)", o.Branch)
 	}
-	return fmt.Sprintf("mindspec impl approve %s", o.SpecID)
+	return fmt.Sprintf("mindspec impl approve %s", idrender.Spec(o.SpecID))
 }
 
 // FullMessage combines Message and RecoveryCommand into the single rendered
@@ -128,7 +137,17 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 		if isAnc {
 			continue
 		}
+		// Reverse-derivation gate (ADR-0042 §1 reverse, spec 120 AC-23,
+		// round-4 G2): specID is parsed back OUT of an agent-creatable
+		// local git branch name (git refnames admit shell/Markdown
+		// metacharacters). A malformed result is skipped with one
+		// escaped warning — never minted as a FinalizeOrphan, never
+		// composed, rendered, or embedded as an ID.
 		specID := strings.TrimPrefix(b, workspace.FinalizeBranchPrefix)
+		if err := idvalidate.SpecID(specID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping malformed finalize branch %s: %v\n", termsafe.Escape(b), err)
+			continue
+		}
 		o := FinalizeOrphan{Kind: "finalize_branch", SpecID: specID, Branch: b}
 		if count, cErr := finalizeOrphanCommitCountFn(workdir, "origin/main", b); cErr == nil {
 			o.CommitCount = count
@@ -136,9 +155,11 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 		if stat, sErr := finalizeOrphanDiffStatFn(workdir, "origin/main", b); sErr == nil {
 			o.DiffStat = stat
 		}
+		// R4: b is the spine-validated finalize-branch operand (stays RAW);
+		// specID is an ID-typed position (idrender.Spec).
 		o.Message = fmt.Sprintf(
 			"finalize branch %s is unmerged (%d commit(s) ahead of origin/main) — spec %s's epic-close export never reached main",
-			b, o.CommitCount, specID,
+			b, o.CommitCount, idrender.Spec(specID),
 		)
 		out = append(out, o)
 	}
@@ -179,12 +200,15 @@ func staleTrackerFinding(specID, epicID string, committed map[string]string) *Fi
 	if !found || strings.EqualFold(committedStatus, "closed") {
 		return nil
 	}
+	// R4: epicID/specID are ID-typed positions (idrender.Bead/idrender.Spec);
+	// committedStatus already renders through %q (strconv.Quote-equivalent),
+	// which is inherently forced-safe.
 	return &FinalizeOrphan{
 		Kind:   "stale_tracker",
 		SpecID: specID,
 		Message: fmt.Sprintf(
 			"epic %s (spec %s) is closed in bd but main's committed .beads/issues.jsonl still shows status %q — the finalize export never reached main",
-			epicID, specID, committedStatus,
+			idrender.Bead(epicID), idrender.Spec(specID), committedStatus,
 		),
 	}
 }

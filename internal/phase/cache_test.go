@@ -305,12 +305,16 @@ func TestCache_FindEpic_NotFoundMemoized(t *testing.T) {
 
 	c := NewCache()
 	for i := 0; i < 3; i++ {
-		epic, err := c.FindEpic("missing")
+		// A well-formed-but-nonexistent id: this test exercises not-found
+		// memoization, not idvalidate.BeadID gating (which fetchEpic now
+		// applies BEFORE any bd spawn — see TestFetchChildrenEpicIDGate for
+		// that property).
+		epic, err := c.FindEpic("mindspec-missing")
 		if err != nil {
-			t.Fatalf("FindEpic(missing) call %d: %v", i, err)
+			t.Fatalf("FindEpic(mindspec-missing) call %d: %v", i, err)
 		}
 		if epic != nil {
-			t.Fatalf("FindEpic(missing) returned non-nil pointer; want nil sentinel")
+			t.Fatalf("FindEpic(mindspec-missing) returned non-nil pointer; want nil sentinel")
 		}
 	}
 	if calls != 1 {
@@ -358,5 +362,54 @@ func TestCache_FindEpicBySpecIDWithCache_ShareAcrossCalls(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("listJSON called %d times, want 1 (shared cache should memoize)", calls)
+	}
+}
+
+// TestFetchChildrenEpicIDGate is spec 120 AC-26 (round-8 epicID gate):
+// fetchChildren (via the exported FetchChildren) with a malformed epicID
+// records ZERO listJSONFn calls (the existing recording-stub seam,
+// derive.go:48) and errors through the existing channel; a well-formed
+// epicID (mindspec-s2mf) produces byte-identical argv to today (exactly
+// one call).
+func TestFetchChildrenEpicIDGate(t *testing.T) {
+	hostileEpicIDs := []string{
+		"--help",
+		"x;evil",
+		"x\x00\x1b[31m\nrecovery: forged",
+	}
+
+	for _, epicID := range hostileEpicIDs {
+		var calls int
+		restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+			calls++
+			return []byte("[]"), nil
+		})
+		_, err := FetchChildren(epicID)
+		restore()
+		if err == nil {
+			t.Errorf("FetchChildren(%q) accepted a malformed epic id", epicID)
+		}
+		if calls != 0 {
+			t.Errorf("FetchChildren(%q): expected ZERO listJSONFn calls, got %d", epicID, calls)
+		}
+	}
+
+	// Well-formed epicID: exactly one call, byte-identical argv to today.
+	var gotArgs []string
+	var calls int
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		calls++
+		gotArgs = args
+		return []byte("[]"), nil
+	})
+	defer restore()
+	if _, err := FetchChildren("mindspec-s2mf"); err != nil {
+		t.Fatalf("FetchChildren(mindspec-s2mf): %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 listJSONFn call, got %d", calls)
+	}
+	if len(gotArgs) < 2 || gotArgs[0] != "--parent" || gotArgs[1] != "mindspec-s2mf" {
+		t.Errorf("argv = %v, want [--parent mindspec-s2mf ...]", gotArgs)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -92,9 +93,32 @@ func ReadManifest(root, specID string) (*Manifest, error) {
 }
 
 // WriteManifest writes the manifest to disk.
+//
+// Persistence gate (spec 120 final-review G2-1, ADR-0042 class-5
+// structured persistence): the manifest is agent-writable on disk and is
+// round-tripped through read-modify-write cycles (StopRecording,
+// UpdatePhase, AddBeadToPhase), so validating only the PATH specID is not
+// enough — the ID-bearing PAYLOAD fields (m.SpecID and every
+// m.Phases[*].Beads entry) are validated here, at the write boundary,
+// before serialization. A hostile ID that was hand-edited into
+// manifest.json fails closed: the write is refused and the durable file
+// is never re-minted with the hostile value.
 func WriteManifest(root, specID string, m *Manifest) error {
 	if err := validate.SpecID(specID); err != nil {
 		return err
+	}
+	if m == nil {
+		return fmt.Errorf("writing manifest: nil manifest")
+	}
+	if err := validate.SpecID(m.SpecID); err != nil {
+		return fmt.Errorf("refusing to write manifest: payload spec_id: %w", err)
+	}
+	for _, ph := range m.Phases {
+		for _, b := range ph.Beads {
+			if err := idvalidate.BeadID(b); err != nil {
+				return fmt.Errorf("refusing to write manifest: phase %q bead id: %w", ph.Phase, err)
+			}
+		}
 	}
 	dir, err := RecordingDir(root, specID)
 	if err != nil {

@@ -10,7 +10,10 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -25,6 +28,17 @@ import (
 // legitimate — from a real infra failure, which propagates as-is. Never
 // classify by error text.
 var ErrNoEpicLineage = errors.New("no epic lineage")
+
+// ErrMalformedSpecMetadata is the spec 120 D1 sentinel SpecIDFromMetadata
+// returns when the composed spec ID fails idvalidate.SpecID (ADR-0042 §1):
+// agent-writable epic spec_title/title metadata is only lowercased and
+// hyphenated by slugify — it PRESERVES shell metacharacters and `..` — so
+// the derived ID must validate before any caller treats it as a real spec
+// ID. errors.Is-DISTINCT from ErrNoEpicLineage: a lineage lookup that
+// SUCCEEDS with hostile/malformed metadata is not "no lineage" — it must
+// never be silently demoted to cwd-derived fallback resolution (that would
+// let the D1 preflight refusal, spec 120 AC-4, be bypassed).
+var ErrMalformedSpecMetadata = errors.New("malformed spec metadata: derived spec id fails idvalidate.SpecID")
 
 // Package-level function variables for testability.
 var (
@@ -100,11 +114,22 @@ type Context struct {
 	EpicID       string `json:"epic_id"`
 }
 
-// SpecIDFromMetadata constructs a spec ID from num and title.
-// The title is slugified (lowercased, spaces/underscores → hyphens) to match
-// the original slug format used by spec-init (e.g. "Llm Test Coverage" → "llm-test-coverage").
-func SpecIDFromMetadata(specNum int, specTitle string) string {
-	return fmt.Sprintf("%03d-%s", specNum, slugify(specTitle))
+// SpecIDFromMetadata constructs a spec ID from num and title, checked
+// (spec 120 D1, ADR-0042 §1, OQ2 — (string, error), the SpecDir SEC-1
+// precedent). The title is slugified (lowercased, spaces/underscores →
+// hyphens) to match the original slug format used by spec-init (e.g.
+// "Llm Test Coverage" → "llm-test-coverage"), but slugify only lowercases
+// and hyphenates — it PRESERVES shell metacharacters and ".." verbatim
+// from the agent-writable spec_title/title metadata. The composed ID must
+// therefore pass idvalidate.SpecID before ANY caller treats it as a real
+// ID; a failure returns ErrMalformedSpecMetadata (errors.Is-distinct from
+// ErrNoEpicLineage — see its doc comment) wrapping the idvalidate error.
+func SpecIDFromMetadata(specNum int, specTitle string) (string, error) {
+	id := fmt.Sprintf("%03d-%s", specNum, slugify(specTitle))
+	if err := idvalidate.SpecID(id); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrMalformedSpecMetadata, err)
+	}
+	return id, nil
 }
 
 // slugify converts a title to a URL-safe slug: lowercase, spaces/underscores → hyphens,
@@ -222,7 +247,13 @@ func specIDForEpicWithCache(c *Cache, epicID string) string {
 	epic, err := c.FindEpic(epicID)
 	if err == nil && epic != nil {
 		if num, title := ExtractSpecMetadata(*epic); num > 0 && title != "" {
-			return SpecIDFromMetadata(num, title)
+			// D1 (ADR-0042): a malformed derivation falls back to the
+			// existing "<spec-id>" placeholder, same as no metadata at
+			// all — this is a recovery-line rendering helper, never a
+			// gate.
+			if specID, err := SpecIDFromMetadata(num, title); err == nil {
+				return specID
+			}
 		}
 	}
 	return "<spec-id>"
@@ -439,7 +470,20 @@ func DiscoverActiveSpecsWithCache(c *Cache) ([]ActiveSpec, error) {
 			continue // no spec metadata, skip
 		}
 
-		specID := SpecIDFromMetadata(specNum, specTitle)
+		specID, err := SpecIDFromMetadata(specNum, specTitle)
+		if err != nil {
+			// D1 ambient-enumeration degrade (ADR-0042, AC-9): a hostile
+			// spec_title/title must never brick this best-effort scan for
+			// every OTHER valid spec — skip this one epic with a single
+			// escaped warning naming the convergent repair lever.
+			epicRef := epic.ID
+			if idvalidate.BeadID(epicRef) != nil {
+				epicRef = "<epic-id>"
+			}
+			fmt.Fprintf(os.Stderr, "warning: epic %s has malformed spec metadata (%s); skipping this spec — run `mindspec repair spec-title %s \"<corrected-title>\"` to fix\n",
+				termsafe.Escape(epic.ID), termsafe.Escape(err.Error()), epicRef)
+			continue
+		}
 
 		// Spec 080: check metadata-stored phase first.
 		if storedPhase := extractPhaseFromMetadata(epic); storedPhase != "" {
@@ -570,7 +614,12 @@ func CheckSpecNumberCollision(specNum int) error {
 	for _, epic := range epics {
 		num, _ := ExtractSpecMetadata(epic)
 		if num == specNum {
-			return fmt.Errorf("spec number %03d is already in use by epic %s (%s)", specNum, epic.ID, epic.Title)
+			// epic.ID/epic.Title are bd-sourced and agent-writable (an
+			// epic's title can be edited via `bd update`); this error
+			// reaches the terminal raw via cobra's default unhandled-
+			// error printer, so escape both before interpolation
+			// (spec 120 R4).
+			return fmt.Errorf("spec number %03d is already in use by epic %s (%s)", specNum, idrender.Bead(epic.ID), termsafe.Escape(epic.Title))
 		}
 	}
 
@@ -584,7 +633,17 @@ func FindEpicBySpecID(specID string) (string, error) {
 }
 
 // FindEpicBySpecIDWithCache is the cache-aware variant of FindEpicBySpecID.
+//
+// Semantic-lookup boundary gate (ADR-0042 §6 inertness theorem, round 5):
+// this is pure in-process string equality against SpecIDFromMetadata — an
+// invalid specID can only fail to match, so this one-line validation is
+// posture (closing re-litigation of the class), not a live-bug fix. Invalid
+// → the existing not-found error, byte-identical in shape to a genuine
+// no-match.
 func FindEpicBySpecIDWithCache(c *Cache, specID string) (string, error) {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
+	}
 	return c.FindEpicBySpecID(specID)
 }
 
@@ -717,6 +776,13 @@ func FindEpicForBead(beadID string) (epicID, specID string, err error) {
 // to the terminal not-found return, which let a transient bd/Dolt failure
 // masquerade as an epic-less bead.
 func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, err error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): beadID feeds a `bd show` argv
+	// build directly — validated here, doubly covered with the R3
+	// explicit-ingress gate at complete.Run's beadID argument (no id
+	// operand is trusted by provenance, even one already gated upstream).
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return "", "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
+	}
 	out, err := runBDFn("show", beadID, "--json")
 	if err != nil {
 		return "", "", fmt.Errorf("bd show %s failed: %w", beadID, err)
@@ -735,7 +801,7 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 	if len(items) == 0 {
 		// The show succeeded and definitively answered "no such bead" —
 		// a genuine no-lineage result, not an infra failure.
-		return "", "", fmt.Errorf("bead %s not found: %w", beadID, ErrNoEpicLineage)
+		return "", "", fmt.Errorf("bead %s not found: %w", idrender.Bead(beadID), ErrNoEpicLineage)
 	}
 
 	// Try to find the parent epic via dependencies
@@ -746,12 +812,22 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 				// A real epic-lookup failure must propagate — skipping it
 				// (the pre-final-review behavior) silently reclassified a
 				// transient bd/Dolt error as "no lineage".
-				return "", "", fmt.Errorf("resolving parent epic %s for bead %s: %w", dep.ID, beadID, epicErr)
+				return "", "", fmt.Errorf("resolving parent epic %s for bead %s: %w", idrender.Bead(dep.ID), idrender.Bead(beadID), epicErr)
 			}
 			if epic != nil {
 				num, title := ExtractSpecMetadata(*epic)
 				if num > 0 && title != "" {
-					return dep.ID, SpecIDFromMetadata(num, title), nil
+					// D1 (ADR-0042, AC-4): a malformed derivation
+					// PROPAGATES as an ErrMalformedSpecMetadata-wrapping
+					// error — errors.Is-distinct from ErrNoEpicLineage —
+					// so complete.Run's preflight refuses before any
+					// mutation instead of silently falling back to
+					// cwd-derived resolution.
+					specID, specErr := SpecIDFromMetadata(num, title)
+					if specErr != nil {
+						return dep.ID, "", specErr
+					}
+					return dep.ID, specID, nil
 				}
 			}
 		}
@@ -774,7 +850,13 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 				for _, epic := range epics {
 					epicNum, epicTitle := ExtractSpecMetadata(epic)
 					if epicNum == num {
-						return epic.ID, SpecIDFromMetadata(epicNum, epicTitle), nil
+						// D1 (ADR-0042, AC-4): same propagation rule as
+						// the dependency-path leg above.
+						specID, specErr := SpecIDFromMetadata(epicNum, epicTitle)
+						if specErr != nil {
+							return epic.ID, "", specErr
+						}
+						return epic.ID, specID, nil
 					}
 				}
 			}
@@ -810,7 +892,13 @@ func FindActiveBeadForEpicWithCache(c *Cache, epicID string) string {
 	// Only return a bead when exactly one is in_progress.
 	// Multiple in_progress beads (parallel agents) → ambiguous, return "".
 	if len(beads) == 1 {
-		return beads[0].ID
+		// R3 ambient ingress gate (ADR-0042, spec 120 AC-6): the in_progress
+		// child's ID is bd-sourced and therefore agent-writable — a
+		// malformed candidate is not selected (existing empty-result
+		// semantics), never returned as ctx.BeadID.
+		if idvalidate.BeadID(beads[0].ID) == nil {
+			return beads[0].ID
+		}
 	}
 	return ""
 }

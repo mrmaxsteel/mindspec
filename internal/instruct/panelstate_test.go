@@ -720,12 +720,12 @@ func TestGatherStaleWorktrees(t *testing.T) {
 	list := func() ([]bead.WorktreeListEntry, error) {
 		return []bead.WorktreeListEntry{
 			{Name: "main", Path: root, IsMain: true},
-			{Name: "worktree-ms.live", Path: "/x/worktree-ms.live"},       // has in-progress bead → NOT stale
-			{Name: "worktree-ms.gone", Path: "/x/worktree-ms.gone"},       // no in-progress bead → STALE
+			{Name: "worktree-ms-live", Path: "/x/worktree-ms-live"},       // has in-progress bead → NOT stale
+			{Name: "worktree-ms-gone", Path: "/x/worktree-ms-gone"},       // no in-progress bead → STALE
 			{Name: "worktree-spec-093-x", Path: "/x/worktree-spec-093-x"}, // spec worktree → excluded
 		}, nil
 	}
-	inProgress := map[string]bool{"ms.live": true}
+	inProgress := map[string]bool{"ms-live": true}
 
 	entries := gatherStaleWorktrees(list, inProgress, root)
 
@@ -733,11 +733,11 @@ func TestGatherStaleWorktrees(t *testing.T) {
 	for _, e := range entries {
 		paths[e.Path] = e.Source
 	}
-	if src, ok := paths["/x/worktree-ms.gone"]; !ok || src != "worktree-list" {
-		t.Errorf("worktree-ms.gone (no live bead) must be stale via worktree-list; got %+v", entries)
+	if src, ok := paths["/x/worktree-ms-gone"]; !ok || src != "worktree-list" {
+		t.Errorf("worktree-ms-gone (no live bead) must be stale via worktree-list; got %+v", entries)
 	}
-	if _, ok := paths["/x/worktree-ms.live"]; ok {
-		t.Error("worktree-ms.live has a live in-progress bead and must NOT be stale")
+	if _, ok := paths["/x/worktree-ms-live"]; ok {
+		t.Error("worktree-ms-live has a live in-progress bead and must NOT be stale")
 	}
 	if _, ok := paths["/x/worktree-spec-093-x"]; ok {
 		t.Error("spec worktree must be excluded from stale-bead-worktree detection")
@@ -747,6 +747,39 @@ func TestGatherStaleWorktrees(t *testing.T) {
 	}
 	if src, ok := paths[agentDir]; !ok || src != "agent-scan" {
 		t.Errorf("the .claude/worktrees/agent-* dir must be scanned; got %+v", entries)
+	}
+}
+
+// TestGatherStaleWorktrees_MalformedNameNotMatchedAsBeadID is spec 120
+// AC-23's panelstate.go:555 reverse-derivation gate companion: a
+// malformed worktree-<hostile> name's TrimPrefix-derived beadID is
+// discarded — never matched against inProgressIDs (so it can never be
+// suppressed by a same-named in-progress bead it does not actually
+// belong to) — while the entry's PATH still surfaces as a stale-worktree
+// candidate.
+func TestGatherStaleWorktrees_MalformedNameNotMatchedAsBeadID(t *testing.T) {
+	root := t.TempDir()
+	hostile := "x;evil"
+	list := func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-" + hostile, Path: "/x/worktree-" + hostile},
+		}, nil
+	}
+	// Even if inProgressIDs happened to carry the exact hostile string
+	// (modelling an attacker-controlled coincidence), it must never
+	// suppress the entry — the malformed derived value is discarded
+	// before the map lookup.
+	inProgress := map[string]bool{hostile: true}
+
+	entries := gatherStaleWorktrees(list, inProgress, root)
+	found := false
+	for _, e := range entries {
+		if e.Path == "/x/worktree-"+hostile {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("malformed worktree name must still surface as a stale-worktree candidate (path renders escaped by the caller); got %+v", entries)
 	}
 }
 

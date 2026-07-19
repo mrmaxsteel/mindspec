@@ -52,9 +52,9 @@ func mergeBead(t *testing.T, run func(args ...string), dir, beadID, specBranch s
 
 func TestFindLandedMerge_Identified(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
-	landed, err := FindLandedMerge(dir, "spec/119-test", "one")
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("FindLandedMerge: %v", err)
 	}
@@ -97,10 +97,10 @@ func TestFindLandedMerge_NoBranchAtAllNotFound(t *testing.T) {
 // identify the merge from the spec branch's own history alone.
 func TestFindLandedMerge_BranchDeletedAfterMerge(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	run("branch", "-D", "bead/one")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("branch", "-D", "bead/bead-one")
 
-	landed, err := FindLandedMerge(dir, "spec/119-test", "one")
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("FindLandedMerge after branch deletion: %v", err)
 	}
@@ -114,16 +114,16 @@ func TestFindLandedMerge_BranchDeletedAfterMerge(t *testing.T) {
 // match (still identified).
 func TestFindLandedMerge_ReviewedHeadSHACorroborates(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
-	landed, err := FindLandedMerge(dir, "spec/119-test", "one")
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("baseline FindLandedMerge: %v", err)
 	}
 
 	origScan := landedPanelScanFn
 	t.Cleanup(func() { landedPanelScanFn = origScan })
-	beadID := "one"
+	beadID := "bead-one"
 	landedPanelScanFn = func(roots ...string) []panel.Registration {
 		return []panel.Registration{{
 			Dir: "/fake/review/one",
@@ -134,7 +134,7 @@ func TestFindLandedMerge_ReviewedHeadSHACorroborates(t *testing.T) {
 		}}
 	}
 
-	got, err := FindLandedMerge(dir, "spec/119-test", "one")
+	got, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("FindLandedMerge with corroborating panel: %v", err)
 	}
@@ -148,10 +148,10 @@ func TestFindLandedMerge_ReviewedHeadSHACorroborates(t *testing.T) {
 // second parent CONTRADICTS the match — not a positive identification.
 func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
 	// A second, UNRELATED branch/commit — neither ancestor nor descendant
-	// of bead/one's tip — stands in for a contradicting reviewed_head_sha.
+	// of bead/bead-one's tip — stands in for a contradicting reviewed_head_sha.
 	run("checkout", "main")
 	run("checkout", "-b", "unrelated")
 	os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("x\n"), 0644)
@@ -169,7 +169,7 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 
 	origScan := landedPanelScanFn
 	t.Cleanup(func() { landedPanelScanFn = origScan })
-	beadID := "one"
+	beadID := "bead-one"
 	landedPanelScanFn = func(roots ...string) []panel.Registration {
 		return []panel.Registration{{
 			Dir: "/fake/review/one",
@@ -180,7 +180,7 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 		}}
 	}
 
-	_, err = FindLandedMerge(dir, "spec/119-test", "one")
+	_, err = FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if !errors.Is(err, ErrLandedMergeNotFound) {
 		t.Fatalf("expected ErrLandedMergeNotFound on contradiction, got %v", err)
 	}
@@ -188,10 +188,10 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 
 func TestMergedUnclosed_BranchDeleted(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	run("branch", "-D", "bead/one")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("branch", "-D", "bead/bead-one")
 
-	landed, ok, err := MergedUnclosed(dir, "spec/119-test", "one")
+	landed, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("MergedUnclosed: %v", err)
 	}
@@ -205,11 +205,11 @@ func TestMergedUnclosed_BranchDeleted(t *testing.T) {
 
 func TestMergedUnclosed_BranchSurvivesAsAncestor(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
-	// bead/one still exists but carries no NEW commits beyond the merge —
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	// bead/bead-one still exists but carries no NEW commits beyond the merge —
 	// benign merged-but-undeleted.
 
-	_, ok, err := MergedUnclosed(dir, "spec/119-test", "one")
+	_, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("MergedUnclosed: %v", err)
 	}
@@ -223,15 +223,15 @@ func TestMergedUnclosed_BranchSurvivesAsAncestor(t *testing.T) {
 // merge (real still-unmerged work), it must NOT be reported merged-unclosed.
 func TestMergedUnclosed_BranchDivergedNotFlagged(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
-	mergeBead(t, run, dir, "one", "spec/119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
-	run("checkout", "bead/one")
+	run("checkout", "bead/bead-one")
 	os.WriteFile(filepath.Join(dir, "one-more.txt"), []byte("more\n"), 0644)
 	run("add", ".")
 	run("commit", "-m", "more work not yet merged")
 	run("checkout", "spec/119-test")
 
-	_, ok, err := MergedUnclosed(dir, "spec/119-test", "one")
+	_, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one")
 	if err != nil {
 		t.Fatalf("MergedUnclosed: %v", err)
 	}
@@ -251,5 +251,29 @@ func TestMergedUnclosed_NoLandedMerge(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected merged-unclosed to be false when no landed merge exists")
+	}
+}
+
+// TestReviewedHeadSHAForBead_MalformedSpecBranchProceedsRootOnly is spec
+// 120 AC-23's landed.go:163 companion: a malformed spec branch (its
+// TrimPrefix-derived specID fails idvalidate.SpecID) makes corroboration
+// proceed root-only — landedPanelScanFn is called with ONLY the repo
+// root, never a composed (and therefore possibly-hostile) spec-dir root.
+func TestReviewedHeadSHAForBead_MalformedSpecBranchProceedsRootOnly(t *testing.T) {
+	origScan := landedPanelScanFn
+	t.Cleanup(func() { landedPanelScanFn = origScan })
+
+	var gotRoots []string
+	landedPanelScanFn = func(roots ...string) []panel.Registration {
+		gotRoots = roots
+		return nil
+	}
+
+	_, found := reviewedHeadSHAForBead("/repo", "spec/x;evil", "mindspec-x.1")
+	if found {
+		t.Error("expected no corroboration available for a malformed spec branch")
+	}
+	if len(gotRoots) != 1 || gotRoots[0] != "/repo" {
+		t.Errorf("expected corroboration to scan root-only, got roots=%v", gotRoots)
 	}
 }

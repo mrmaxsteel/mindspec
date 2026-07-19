@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -20,17 +21,21 @@ import (
 // only enforcer now (internal/complete/panel_advisory.go:45-47), so there is
 // no second invoker left to keep in sync.
 //
-// internal/panel is a dependency-clean LEAF: this file imports exactly ONE
-// internal package, the stdlib-only, pure-string internal/termsafe (spec
-// 116's construction-boundary field escaping; ADR-0037 amendment,
-// 2026-07-11). The git/status/ref-not-found I/O is still supplied by the
-// CALLER through the GateIO seam (function closures), and the bead-branch
-// prefix is still inlined as the literal "bead/" (== workspace.BeadBranchPrefix)
-// rather than importing internal/workspace. The invariant's recorded purpose
-// — no config coupling, no git/status I/O, decision purity — is preserved;
-// only its letter ("imports NO internal package") changes, to admit this one
-// stdlib-only escaping leaf, and it is now machine-checked (not just
-// documented) by TestPanelLeafImports_StdlibPlusTermsafeOnly (AC7).
+// internal/panel is a dependency-clean LEAF: this file imports exactly TWO
+// internal packages, both stdlib-only pure-string leaves: internal/termsafe
+// (spec 116's construction-boundary field escaping; ADR-0037 amendment,
+// 2026-07-11) and internal/idvalidate (spec 120 R2/ADR-0042: beadID is
+// validated at the ResolveGateFacts seam before the inline "bead/"+beadID
+// concat below, closing ingress (iv) — internal/panel stays a leaf by
+// validating in-package rather than importing internal/workspace). The
+// git/status/ref-not-found I/O is still supplied by the CALLER through the
+// GateIO seam (function closures), and the bead-branch prefix is still
+// inlined as the literal "bead/" (== workspace.BeadBranchPrefix) rather than
+// importing internal/workspace. The invariant's recorded purpose — no
+// config coupling, no git/status I/O, decision purity — is preserved; only
+// its letter ("imports NO internal package") changes, to admit these two
+// stdlib-only leaves, and it is now machine-checked (not just documented) by
+// TestPanelLeafImports_StdlibPlusTermsafeOnly (AC7, extended by spec 120).
 
 // SkipPanelEnv is the env-only escape hatch for the panel gate (Spec 093
 // Req 13a, ADR-0037 §7). It is read via os.Getenv ONLY by callers — the
@@ -439,6 +444,24 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 	// cheaply skip git entirely on the abandoned/round-mismatch paths.
 	if res.Panel != nil && (res.Panel.Abandoned || res.RoundMismatch) {
 		return f
+	}
+
+	// Composition-waist gate (ADR-0042 §1, spec 120 R2 ingress (iv)):
+	// beadID feeds an inline "bead/"+beadID branch-ref concat below — the
+	// SAME class the workspace.BeadBranch waist gates elsewhere — so it is
+	// validated in-package (keeping internal/panel a leaf) before the
+	// concat is ever built or a git subprocess is spawned. A malformed
+	// beadID is treated as a git error (fail-closed, matching the
+	// unreadable-registration disposition above) rather than composing a
+	// hostile ref. beadID == "" is the LEGITIMATE non-bead-panel sentinel
+	// (deps.RevParse is nonBeadTargetRevParse in that case, which ignores
+	// the ref argument entirely and resolves reg.Panel.Target instead) —
+	// only a NON-EMPTY, malformed beadID is gated here.
+	if beadID != "" {
+		if err := idvalidate.BeadID(beadID); err != nil {
+			f.GitErr = fmt.Errorf("invalid bead id %q: %w", beadID, err)
+			return f
+		}
 	}
 
 	// (7) staleness — one `git rev-parse bead/<id>` in the scan root. The

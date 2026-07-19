@@ -7,7 +7,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // HookState holds the subset of workflow state that hooks need.
@@ -91,11 +93,11 @@ func runPreCommit(stateFn func() *HookState) Result {
 		if mode == "" {
 			mode = "idle"
 		}
-		msg := fmt.Sprintf("mindspec: commits on '%s' are blocked (mode: %s).", branch, mode)
+		msg := fmt.Sprintf("mindspec: commits on '%s' are blocked (mode: %s).", termsafe.Escape(branch), mode)
 		msg += "\n  For bug fixes: git checkout -b fix/<description>"
 		msg += "\n  For features: mindspec spec create <slug>"
 		if st.ActiveWorktree != "" {
-			msg += fmt.Sprintf("\n  Or switch to your worktree: cd %s", st.ActiveWorktree)
+			msg += fmt.Sprintf("\n  Or switch to your worktree: %s", containment.EmitCd(st.ActiveWorktree))
 		}
 		msg += "\n  Escape hatch: MINDSPEC_ALLOW_MAIN=1 git commit ..."
 		return Result{Action: Block, Message: msg}
@@ -120,10 +122,10 @@ func runPreCommit(stateFn func() *HookState) Result {
 	// not the guard.FormatFailure error-return convention, but still
 	// end with actionable guidance.
 	if st.Mode == "implement" && strings.HasPrefix(branch, "spec/") {
-		msg := fmt.Sprintf("mindspec: commits on spec branch '%s' are blocked during implement mode.\n  Implementation code belongs on bead branches.", branch)
+		msg := fmt.Sprintf("mindspec: commits on spec branch '%s' are blocked during implement mode.\n  Implementation code belongs on bead branches.", termsafe.Escape(branch))
 		msg += "\n  Run: mindspec next   (to claim a bead and create a bead worktree)"
 		if st.ActiveWorktree != "" {
-			msg += fmt.Sprintf("\n  Or switch to your bead worktree: cd %s", st.ActiveWorktree)
+			msg += fmt.Sprintf("\n  Or switch to your bead worktree: %s", containment.EmitCd(st.ActiveWorktree))
 		}
 		msg += "\n  Legitimate direct spec-branch commits (final-review fix-ups: PR-body precision,"
 		msg += "\n  stray-file reverts, CI-unblocking test fixes) may use the escape hatch:"

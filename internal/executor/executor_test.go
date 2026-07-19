@@ -430,6 +430,29 @@ func TestCompleteBead_MergesAndCleans(t *testing.T) {
 	}
 }
 
+// TestCompleteBeadRejectsMalformedSpecBranch is spec 120 AC-23
+// (internal/executor): CompleteBead with a spec/-prefixed branch whose
+// suffix fails idvalidate.SpecID refuses before any merge/worktree
+// operation — the branch is an explicit CompleteBead argument (an
+// agent-writable string, not necessarily waist-composed), and this is an
+// EXPLICIT verb, so it must refuse rather than silently compose a hostile
+// spec-worktree path.
+func TestCompleteBeadRejectsMalformedSpecBranch(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "bead/mindspec-x.1")
+
+	err := g.CompleteBead("mindspec-x.1", "spec/x;evil", "")
+	if err == nil {
+		t.Fatal("expected a refusal for a spec branch whose suffix fails idvalidate.SpecID")
+	}
+	if len(fake.removeCalls) != 0 {
+		t.Errorf("expected NO worktree removal, got %v", fake.removeCalls)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-x.1") {
+		t.Error("bead branch must be preserved on the refusal (no cleanup attempted)")
+	}
+}
+
 func TestCompleteBead_WorktreeRemoveRunsFromRepoRoot(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 
@@ -1242,3 +1265,42 @@ func TestWithWorkingDir_RestoresOriginalCwd(t *testing.T) {
 		t.Errorf("cwd after return: got %q, want restored %q", wd, home)
 	}
 }
+
+// TestCompleteBead_EscapesHostileWorktreeNameInRemoveWarning is the spec
+// 120 final-review G3-2 regression: CompleteBead reassigns wtName to the
+// agent-writable bd-list e.Name on an OR-match (a row can match purely on
+// Branch), and the could-not-remove warning used to render that name RAW
+// to stderr — a control-bearing name forged extra terminal lines. The
+// warning must route through termsafe.Escape.
+func TestCompleteBead_EscapesHostileWorktreeNameInRemoveWarning(t *testing.T) {
+	g, fake, _ := newRepoExecutor(t)
+
+	hostileName := "wt\x1b[31mevil\nforged: recovery line"
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   hostileName,
+		Path:   "", // no worktree path: commit/merge legs are skipped (msg == "")
+		Branch: "bead/mindspec-x.1",
+	}}
+	fake.removeErr = errTestRemoveBoom{}
+
+	stderr := captureStderrAround(t, func() {
+		// bead/mindspec-x.1 does not exist as a branch, so the
+		// merged-ancestor safety check and merge legs are skipped; the
+		// cleanup leg runs Remove(wtName) which fails, forcing the warning.
+		if err := g.CompleteBead("mindspec-x.1", "spec/077-test", ""); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if strings.Contains(stderr, "\x1b") || strings.Contains(stderr, "\nforged:") {
+		t.Fatalf("hostile worktree name rendered raw to stderr:\n%q", stderr)
+	}
+	if !strings.Contains(stderr, `"wt\x1b[31mevil\nforged: recovery line"`) {
+		t.Errorf("expected termsafe-quoted worktree name in warning, got:\n%q", stderr)
+	}
+}
+
+// errTestRemoveBoom is a sentinel error for the remove-warning test above.
+type errTestRemoveBoom struct{}
+
+func (errTestRemoveBoom) Error() string { return "remove failed (test)" }

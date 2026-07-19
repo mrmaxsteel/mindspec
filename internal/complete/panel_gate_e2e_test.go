@@ -239,8 +239,8 @@ func TestPanelGate_RequestChangesBlocksComplete(t *testing.T) {
 // sub-threshold panel registered for bead X does NOT block complete of bead Y.
 func TestPanelGate_DifferentBead_DoesNotBlock(t *testing.T) {
 	const specID = "099-pgiso"
-	const beadX = "mindspec-099pg.X"
-	const beadY = "mindspec-099pg.Y"
+	const beadX = "mindspec-099pgx"
+	const beadY = "mindspec-099pgy"
 	root, _ := setupPanelGateRepo(t, specID, beadY)
 	// Panel registers bead X (not the bead we complete).
 	writePanel(t, root, specID+"-bdX", panel.Panel{

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // ScenarioInterruptForBug tests mid-bead interrupt for a bug fix.
@@ -198,6 +199,12 @@ func cleanupBugfixBranchPRs(t *testing.T, sandbox *Sandbox) {
 		branch := strings.TrimPrefix(ref, "refs/heads/")
 		if branch == "main" {
 			continue
+		}
+		// R7 (spec 120): branch is a dynamic, remote-derived operand
+		// reaching a git spawn — guard with gitutil.RejectOptionLike,
+		// fail-fast t.Fatalf before the spawn (SEC-5).
+		if err := gitutil.RejectOptionLike(branch); err != nil {
+			t.Fatalf("cleanupBugfixBranchPRs: %v", err)
 		}
 		delCmd := exec.Command("git", "push", "origin", "--delete", branch)
 		delCmd.Dir = sandbox.Root

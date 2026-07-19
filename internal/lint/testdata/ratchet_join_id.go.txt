@@ -1,0 +1,9 @@
+// Negative fixture for spec 120 R6 scan (c): a NEW
+// filepath.Join(dir, specID) outside the waist must be flagged.
+package fixture
+
+import "path/filepath"
+
+func joinWithID(dir, specID string) string {
+	return filepath.Join(dir, specID)
+}

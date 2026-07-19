@@ -707,4 +707,31 @@ func TestApproveImpl_WorktreeEnumRefusesDespiteProbeMiss(t *testing.T) {
 			t.Errorf("expected FinalizeEpic to run once, got %d", len(calls))
 		}
 	})
+
+	// TestReverseGate: spec 120 AC-23 (round-4 reverse-derivation gate at
+	// runWorktreeEnumerationLeg): a hostile bead/x;evil-shaped worktree
+	// entry is skipped — never matched against the closed-epic-bead set,
+	// never embedded as an ID in a refusal — even when the ancestry check
+	// would report it unmerged (the worst case for a false trigger).
+	t.Run("hostile worktree entry never triggers the enumeration leg", func(t *testing.T) {
+		tmp := setup(t)
+		implClosedEpicBeadIDsFn = func(specID string) ([]string, error) { return []string{"bead-1"}, nil }
+		implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+			return []bead.WorktreeListEntry{
+				{Branch: "bead/x;evil", Path: "/tmp/wt-hostile"},
+			}, nil
+		}
+		implIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+			t.Fatalf("ancestry must never be checked for a malformed reverse-derived bead id: %s", ancestor)
+			return false, nil
+		}
+
+		mock := approveOKMock()
+		if _, err := ApproveImpl(tmp, "010-test", mock); err != nil {
+			t.Fatalf("a hostile worktree entry must never trigger the enumeration leg: %v", err)
+		}
+		if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 1 {
+			t.Errorf("expected FinalizeEpic to run once, got %d", len(calls))
+		}
+	})
 }

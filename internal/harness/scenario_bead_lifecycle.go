@@ -239,6 +239,11 @@ func ScenarioBlockedBeadTransition() Scenario {
 			bead2 = sandbox.CreateBead("["+specID+"] Extension (blocked)", "task", epicID)
 
 			// bead-2 depends on bead-1
+			// R7 (spec 120, round 10): bead2/bead1 are id-position
+			// operands reaching a `bd dep add` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, bead2)
+			requireValidBeadID(sandbox.t, bead1)
 			sandbox.runBDMust("dep", "add", bead2, bead1)
 			sandbox.ClaimBead(bead1)
 
@@ -328,10 +333,19 @@ func ScenarioUnmergedBeadGuard() Scenario {
 			bead2 = sandbox.CreateBead("["+specID+"] Second feature", "task", epicID)
 
 			// bead-2 depends on bead-1
+			// R7 (spec 120, round 10): bead2/bead1 are id-position
+			// operands reaching a `bd dep add` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, bead2)
+			requireValidBeadID(sandbox.t, bead1)
 			sandbox.runBDMust("dep", "add", bead2, bead1)
 
 			// Claim bead-1 and close it via bd close (simulating agent skipping mindspec complete)
 			sandbox.ClaimBead(bead1)
+			// R7 (spec 120, round 10): bead1 is an id-position operand
+			// reaching a `bd close` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, bead1)
 			sandbox.runBDMust("close", bead1)
 
 			// Approved spec + plan
@@ -415,6 +429,11 @@ func ScenarioStopAfterComplete() Scenario {
 			bead2 = sandbox.CreateBead("["+specID+"] Second task", "task", epicID)
 			// bead2 depends on bead1 — blocked until bead1 is closed.
 			// This prevents Haiku from getting distracted by bead2 at session start.
+			// R7 (spec 120, round 10): bead2/bead1 are id-position
+			// operands reaching a `bd dep add` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, bead2)
+			requireValidBeadID(sandbox.t, bead1)
 			sandbox.runBDMust("dep", "add", bead2, bead1)
 			sandbox.ClaimBead(bead1)
 
@@ -599,6 +618,10 @@ func ScenarioBeadsArtifactPassthrough() Scenario {
 			// perturb `mindspec next` selection. Without this, `mindspec complete`
 			// can hit "no active specs found" during its post-close state advance.
 			keepaliveID := sandbox.CreateBead("["+specID+"] future: follow-up", "task", epicID)
+			// R7 (spec 120, round 10): keepaliveID is an id-position
+			// operand reaching a `bd defer` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, keepaliveID)
 			sandbox.runBDMust("defer", keepaliveID)
 
 			sandbox.WriteFile(".mindspec/specs/"+specID+"/spec.md", `---
@@ -638,6 +661,10 @@ Create hello.go with a Hello() function that returns "hi".
 			// it entirely. The ID still lands in the JSONL diff, which is the
 			// canary for Bead 2.
 			driveByID = sandbox.CreateBead("Drive-by: refresh stale dashboard", "task", "")
+			// R7 (spec 120, round 10): driveByID is an id-position
+			// operand reaching a `bd close` spawn — gated with
+			// requireValidBeadID, fail-fast t.Fatalf BEFORE the spawn.
+			requireValidBeadID(sandbox.t, driveByID)
 			sandbox.runBDMust("close", driveByID)
 			if _, err := sandbox.runBD("export", "-o", ".beads/issues.jsonl"); err != nil {
 				return fmt.Errorf("bd export dirty: %w", err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -63,6 +64,23 @@ func Show(root, id string) (*ADR, error) {
 	return &a, nil
 }
 
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-writable text — an ADR's ## Decision body —
+// while preserving the real newlines that separate genuine lines (R4:
+// per-line escaping for line-oriented bodies, never per-message, so a
+// hostile line cannot forge additional lines while legitimate multi-line
+// structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ExtractDecision extracts the content of the ## Decision section.
 func ExtractDecision(content string) string {
 	lines := strings.Split(content, "\n")
@@ -91,22 +109,27 @@ func ExtractDecision(content string) string {
 func FormatSummary(a *ADR) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("ID:             %s\n", a.ID))
-	b.WriteString(fmt.Sprintf("Title:          %s\n", a.Title))
-	b.WriteString(fmt.Sprintf("Status:         %s\n", a.DisplayStatus()))
-	b.WriteString(fmt.Sprintf("Date:           %s\n", a.Date))
-	b.WriteString(fmt.Sprintf("Domain(s):      %s\n", strings.Join(a.Domains, ", ")))
+	// R4: every field below is agent-writable ADR frontmatter/filename
+	// content (ID is the on-disk filename stem, the rest come straight off
+	// the **Key**: lines or heading of the .md body) — termsafe.Escape each
+	// single-line value; Decision is a multi-line free-text body so it is
+	// escaped per-line via escapeLines.
+	b.WriteString(fmt.Sprintf("ID:             %s\n", termsafe.Escape(a.ID)))
+	b.WriteString(fmt.Sprintf("Title:          %s\n", termsafe.Escape(a.Title)))
+	b.WriteString(fmt.Sprintf("Status:         %s\n", termsafe.Escape(a.DisplayStatus())))
+	b.WriteString(fmt.Sprintf("Date:           %s\n", termsafe.Escape(a.Date)))
+	b.WriteString(fmt.Sprintf("Domain(s):      %s\n", termsafe.Escape(strings.Join(a.Domains, ", "))))
 
 	if a.Supersedes != "" {
-		b.WriteString(fmt.Sprintf("Supersedes:     %s\n", a.Supersedes))
+		b.WriteString(fmt.Sprintf("Supersedes:     %s\n", termsafe.Escape(a.Supersedes)))
 	}
 	if a.SupersededBy != "" {
-		b.WriteString(fmt.Sprintf("Superseded-by:  %s\n", a.SupersededBy))
+		b.WriteString(fmt.Sprintf("Superseded-by:  %s\n", termsafe.Escape(a.SupersededBy)))
 	}
 
 	decision := ExtractDecision(a.Content)
 	if decision != "" {
-		b.WriteString(fmt.Sprintf("\nDecision:\n%s\n", decision))
+		b.WriteString(fmt.Sprintf("\nDecision:\n%s\n", escapeLines(decision)))
 	}
 
 	return b.String()

@@ -274,6 +274,41 @@ func TestScrub_Categories(t *testing.T) {
 			present: []string{"<secret>"},
 		},
 		{
+			// spec 120 R9/AC-21: ASIA-prefixed AWS temporary/session
+			// credential ids (STS AssumeRole, instance-profile creds).
+			name:    "aws session key secret",
+			in:      "key ASIAIOSFODNN7EXAMPLE here",
+			absent:  []string{"ASIAIOSFODNN7EXAMPLE"},
+			present: []string{"<secret>"},
+		},
+		{
+			// spec 120 R9/AC-21: GCP service-account JSON key blob
+			// marker — the private_key_id field signals a key file
+			// whose sibling private_key (PEM) is the actual secret.
+			name:    "gcp service-account private_key_id marker",
+			in:      `creds {"type": "service_account", "private_key_id": "0123456789abcdef0123456789abcdef01234567"}`,
+			absent:  []string{"0123456789abcdef0123456789abcdef01234567"},
+			present: []string{`"private_key_id": "<secret>"`},
+		},
+		{
+			// spec 120 R9/AC-21: AIza-prefixed Google API key.
+			name:    "gcp api key secret",
+			in:      "key AIzaSyD4abcdEFGHijklMNOPqrstUVWXyz1234 here",
+			absent:  []string{"AIzaSyD4abcdEFGHijklMNOPqrstUVWXyz1234"},
+			present: []string{"<secret>"},
+		},
+		{
+			// spec 120 R9/AC-21: Azure Storage connection-string
+			// AccountKey= credential — scrubbed by the existing
+			// case-insensitive secret-assign pass (AccountKey matches
+			// its KEY suffix class case-insensitively), not a
+			// dedicated pass.
+			name:    "azure storage account key",
+			in:      "DefaultEndpointsProtocol=https;AccountName=foo;AccountKey=abcd1234efgh5678ijkl==;EndpointSuffix=core.windows.net",
+			absent:  []string{"abcd1234efgh5678ijkl"},
+			present: []string{"AccountKey=<secret>"},
+		},
+		{
 			name:    "openai key secret",
 			in:      "sk-abcdefghijklmnopqrstuvwx token",
 			absent:  []string{"sk-abcdefghijklmnop"},
@@ -798,5 +833,44 @@ func TestFingerprint_DistinctOnAnyInput(t *testing.T) {
 	if Fingerprint(Identity{Command: "complete", EscapeHatch: "override-adr"}) ==
 		Fingerprint(Identity{Command: "complete-override", EscapeHatch: "adr"}) {
 		t.Error("fingerprint aliased across a field boundary")
+	}
+}
+
+// TestScrub_IPv6OverScrubTradeoffsPinned pins AC-21's IPv6 over-scrub
+// tradeoff fixtures (spec 120 R9): the ipv6 pass, being deliberately
+// permissive (HC-7: prefer over-scrub to a missed leak), also fires on
+// a bare timestamp shape and mangles a C++ scope-resolution token. This
+// is documented, accepted behavior (see the package doc's "IPv6
+// over-scrub tradeoff" section) — the test pins TODAY's exact output so
+// a future change to the ipv6 pattern is a deliberate, reviewed
+// decision, not an accidental regression.
+func TestScrub_IPv6OverScrubTradeoffsPinned(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "bare timestamp over-scrubbed as an IPv6 address",
+			in:   "time 12:34:56 elapsed",
+			want: "time <ip> elapsed",
+		},
+		{
+			name: "C++ scope-resolution token partially consumed",
+			in:   "the std::vector<int> type",
+			want: "the st<ip>vector<int> type",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := Scrub(c.in)
+			if !ok {
+				t.Fatalf("Scrub(%q) dropped (ok=false), want a pinned scrubbed value", c.in)
+			}
+			if got != c.want {
+				t.Errorf("Scrub(%q) = %q, want %q (today's pinned accepted-residual behavior)", c.in, got, c.want)
+			}
+		})
 	}
 }

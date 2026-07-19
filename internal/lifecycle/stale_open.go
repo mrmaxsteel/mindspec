@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -29,6 +31,12 @@ import (
 // open/in_progress children (mirroring orphans.go's listClosedBeadsFn seam
 // pattern) so FindStaleOpenBeads is unit-testable without a live `bd`.
 var listOpenBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 8/9): epicID feeds a
+	// `bd list --parent` argv build directly — validate BEFORE any bd
+	// spawn, ZERO bd argv on a malformed id.
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
+	}
 	out, err := bead.RunBD("list", "--parent", epicID, "--status=open,in_progress", "--json")
 	if err != nil {
 		return nil, err
@@ -57,17 +65,23 @@ type StaleOpenBead struct {
 // state (ADR-0035 recovery-line convention): re-running `mindspec complete`
 // converges Dolt to the already-landed state.
 func (s StaleOpenBead) RecoveryCommand() string {
-	return "mindspec complete " + s.BeadID
+	// R4: BeadID is an ID-typed position — idrender.Bead.
+	return "mindspec complete " + idrender.Bead(s.BeadID)
 }
 
 // Message is the rendered human-readable finding text, recovery command
 // included — the SAME string `mindspec doctor` and the generated `mindspec
 // instruct` guidance must both surface verbatim (Spec 119 AC-15/P8): this
 // is the single template, never re-derived by either consumer.
+//
+// R4: BeadID is idrender'd (ID-typed position); SpecBranch is the
+// spine-validated `spec/<id>` branch operand (workspace.SpecBranch) and
+// stays RAW; LandedSHA is a git-produced hex commit SHA, not agent-writable
+// free text.
 func (s StaleOpenBead) Message() string {
 	return fmt.Sprintf(
 		"bead %s is OPEN/in_progress in the tracker but its work already landed as merge %s on %s — the tracker never converged. Run `%s` to recover.",
-		s.BeadID, s.LandedSHA, s.SpecBranch, s.RecoveryCommand(),
+		idrender.Bead(s.BeadID), s.LandedSHA, s.SpecBranch, s.RecoveryCommand(),
 	)
 }
 
@@ -89,7 +103,7 @@ func (s StaleOpenBead) Message() string {
 func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 	epicID, err := findEpicBySpecIDFn(specID)
 	if err != nil {
-		return nil, fmt.Errorf("finding epic for spec %s: %w", specID, err)
+		return nil, fmt.Errorf("finding epic for spec %s: %w", idrender.Spec(specID), err)
 	}
 	if epicID == "" {
 		return nil, nil
@@ -118,7 +132,12 @@ func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 // the beads whose work provably landed. Best-effort: an ancestry/read
 // error on one bead must not abort the scan for the rest.
 func staleOpenLanded(workdir, specID string, beadIDs []string) []StaleOpenBead {
-	specBranch := workspace.SpecBranch(specID)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		// Best-effort ambient scan: an invalid specID yields no findings
+		// rather than a hard error (ADR-0042 degrade-vs-error policy).
+		return nil
+	}
 	var out []StaleOpenBead
 	for _, id := range beadIDs {
 		landed, ok, mErr := MergedUnclosed(workdir, specBranch, id)

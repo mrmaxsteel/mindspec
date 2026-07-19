@@ -1,0 +1,17 @@
+// Negative fixture for spec 120 R6 scan (e) (defense-in-depth):
+// mirrors a real reverse-derivation site (an ID parsed back OUT of a
+// branch name via strings.TrimPrefix of a workspace prefix) with its
+// idvalidate gate DELETED. The scan must flag it RED.
+package fixture
+
+import (
+	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+)
+
+func ungatedReverseDerivation(branch string) string {
+	// idvalidate call deleted — this is the RED shape.
+	beadID := strings.TrimPrefix(branch, workspace.BeadBranchPrefix)
+	return beadID
+}

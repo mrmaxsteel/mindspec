@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -54,8 +55,17 @@ not by doctor.)
 // writes the manifest, so it works identically for missing, empty-stub,
 // and populated manifests (the explicit-arg re-emit behavior that the
 // Requirement 16 widen-hint relies on).
+//
+// R4 (spec 120): the no-arg caller (cmd/mindspec/ownership.go's
+// runOwnershipPopulate) sources domain from DomainsNeedingPopulate's
+// disk enumeration — an on-disk domain-directory basename, agent-
+// writable and NOT run through validate.DomainName before reaching this
+// multi-line, directly-printed-to-stdout template. Escaping here (once,
+// at the single substitution site) covers that path without disturbing
+// the explicit-<domain>-arg caller, which already validates first and
+// so passes a genuine name through Escape as a byte-identical no-op.
 func BuildPopulatePrompt(domain string) string {
-	return strings.ReplaceAll(populatePromptTemplate, "<domain>", domain)
+	return strings.ReplaceAll(populatePromptTemplate, "<domain>", termsafe.Escape(domain))
 }
 
 // DomainsNeedingPopulate returns the lexicographically-sorted domain

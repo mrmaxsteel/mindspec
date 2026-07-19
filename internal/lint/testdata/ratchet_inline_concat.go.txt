@@ -1,0 +1,14 @@
+// Negative fixture for spec 120 R6 scan (b): inline branch and
+// spec-dir/reviews composition outside the waist. Every chain here
+// must be flagged as UNAUDITED.
+package fixture
+
+func inlineBeadConcat(x string) string {
+	// A new "bead/"+x concat — the gate.go:447 shape.
+	return "bead/" + x
+}
+
+func inlineReviewsConcat(specID, slug string) string {
+	// G1's shape: ".mindspec/specs/"+specID+"/reviews/"+slug.
+	return ".mindspec/specs/" + specID + "/reviews/" + slug
+}

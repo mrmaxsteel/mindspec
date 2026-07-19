@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -276,7 +277,12 @@ func checkADRTouchpointsExist(r *Result, root, specDir string, sections map[stri
 		}
 		seen[id] = struct{}{}
 		if _, err := store.Get(id); err != nil {
-			r.AddError("adr-touchpoint-missing", fmt.Sprintf("ADR Touchpoints references %s, which does not exist; fix the typo/reference or run `mindspec adr list` to find the correct ID", id))
+			// id is a regex-captured reference out of the agent-authored
+			// spec.md "## ADR Touchpoints" prose — free text, not a
+			// validated ADR ID (that's why the lookup just failed) — so
+			// it is escaped, not idrender'd, before it reaches
+			// Result.FormatText's terminal render (spec 120 R4).
+			r.AddError("adr-touchpoint-missing", fmt.Sprintf("ADR Touchpoints references %s, which does not exist; fix the typo/reference or run `mindspec adr list` to find the correct ID", termsafe.Escape(id)))
 		}
 	}
 }
@@ -332,7 +338,10 @@ func checkOpenQuestions(r *Result, sections map[string]string) {
 	for _, line := range strings.Split(oq, "\n") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "- [ ]") {
-			r.AddError("open-question", fmt.Sprintf("unresolved open question: %s", t))
+			// t is a full line of agent-authored spec.md prose (the "##
+			// Open Questions" body) — free text — so it is escaped
+			// before reaching Result.FormatText's terminal render.
+			r.AddError("open-question", fmt.Sprintf("unresolved open question: %s", termsafe.Escape(t)))
 		}
 	}
 }

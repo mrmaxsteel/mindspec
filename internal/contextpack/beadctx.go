@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // beadShowFn is a package-level variable for testability.
@@ -37,6 +40,13 @@ type beadShowEntry struct {
 // SHA-256 Provenance block. RenderBeadContext is preserved for byte-identical
 // output when `mindspec context bead <id>` is invoked without `--max-tokens`.
 func RenderBeadContext(beadID string) (string, error) {
+	// R3-gated CLI ingress + gate-all-ids (ADR-0042 §1, round 7): beadID
+	// feeds a `bd show` argv build directly — validate BEFORE any bd
+	// spawn.
+	if err := idvalidate.BeadID(beadID); err != nil {
+		// R4: the id just FAILED validation — render it forced-quoted.
+		return "", fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
+	}
 	out, err := beadShowFn("show", beadID, "--json")
 	if err != nil {
 		return "", fmt.Errorf("fetching bead %s: %w", beadID, err)
@@ -53,8 +63,12 @@ func RenderBeadContext(beadID string) (string, error) {
 	e := entries[0]
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("# Bead Context: %s\n", e.Title))
-	b.WriteString(fmt.Sprintf("**Bead**: %s", e.ID))
+	// R4: Title is agent-writable single-line free text (termsafe.Escape);
+	// ID is an ID-typed position (idrender.Bead). Design/AcceptanceCriteria/
+	// Description stay untouched below — they are fenced multi-line
+	// payload, not single-line render positions.
+	b.WriteString(fmt.Sprintf("# Bead Context: %s\n", termsafe.Escape(e.Title)))
+	b.WriteString(fmt.Sprintf("**Bead**: %s", idrender.Bead(e.ID)))
 
 	// Estimate tokens from total content
 	totalLen := len(e.Description) + len(e.AcceptanceCriteria) + len(e.Design)
@@ -87,7 +101,9 @@ func RenderBeadContext(beadID string) (string, error) {
 				b.WriteString("## Key File Paths\n\n")
 				for _, fp := range fpList {
 					if s, ok := fp.(string); ok {
-						b.WriteString(fmt.Sprintf("- %s\n", s))
+						// R4: each file_paths entry is agent-writable
+						// metadata — escape per-line.
+						b.WriteString(fmt.Sprintf("- %s\n", termsafe.Escape(s)))
 					}
 				}
 				b.WriteString("\n")

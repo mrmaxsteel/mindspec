@@ -446,7 +446,10 @@ func TestFaultInjection_ApprovePlan_P3_ApprovalAutoCommit_KillThenConverge(t *te
 	restoreMerge := SetPlanMergeMetadataForTest(func(id string, updates map[string]interface{}) error { return nil })
 	defer restoreMerge()
 
-	specWtPath := workspace.SpecWorktreePath(root, nil, specID)
+	specWtPath, err := workspace.SpecWorktreePath(root, nil, specID)
+	if err != nil {
+		t.Fatalf("SpecWorktreePath: %v", err)
+	}
 	if err := os.MkdirAll(specWtPath, 0o755); err != nil {
 		t.Fatalf("mkdir spec worktree path: %v", err)
 	}

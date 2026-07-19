@@ -28,6 +28,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 // stubBeadExport swaps commitWithExport's bead-export step (the bug wu7t
@@ -373,5 +375,51 @@ func TestFinalizeEpic_OrphanChoreFailureStillPushesSpecBranch(t *testing.T) {
 	}
 	if got := refHash(t, origin, "spec/077-test"); got != specTipBefore {
 		t.Errorf("origin spec tip = %s, want pre-finalize tip %s", got, specTipBefore)
+	}
+}
+
+// TestFinalizeOrphanedSpecBranch_ContainmentGateBeforeSelfHeal is the
+// spec 120 final-review S1 regression: wtPath is composed from the
+// agent-writable cfg.WorktreeRoot (lexically validated at config ingress,
+// explicitly NOT symlink-aware), and the crashed-prior-run self-heal used
+// to run gitutil.WorktreeRemoveForce/os.RemoveAll on that path BEFORE the
+// function's checkWorktreeContainment gate. With a symlink-escaped
+// worktrees root, the destructive self-heal reached OUTSIDE the project
+// root. The containment gate must refuse before anything is removed.
+func TestFinalizeOrphanedSpecBranch_ContainmentGateBeforeSelfHeal(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+
+	// Symlink-escaped worktrees root: <repo>/trees -> <outside temp dir>.
+	// "trees" is lexically clean (charset/relative/no-"..") so it passes
+	// the config-ingress ValidateWorktreeRoot shape; only the symlink-aware
+	// containment check can catch it.
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "trees")); err != nil {
+		t.Skipf("cannot create symlink on this platform: %v", err)
+	}
+
+	// Plant a victim directory at the RESOLVED (escaped) location so the
+	// self-heal's os.Stat(wtPath) sees an existing leftover to remove.
+	victim := filepath.Join(outside, "worktree-finalize-077-test")
+	if err := os.MkdirAll(victim, 0o755); err != nil {
+		t.Fatalf("mkdir victim: %v", err)
+	}
+	sentinel := filepath.Join(victim, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("must survive"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.WorktreeRoot = "trees"
+
+	_, err := g.finalizeOrphanedSpecBranch(cfg, "mindspec-epic", "077-test")
+	if err == nil {
+		t.Fatal("expected a containment refusal for a symlink-escaped worktree root")
+	}
+	if !strings.Contains(err.Error(), "refusing to use worktree path") {
+		t.Errorf("expected the containment refusal, got: %v", err)
+	}
+	if _, statErr := os.Stat(sentinel); statErr != nil {
+		t.Fatalf("destructive self-heal ran BEFORE the containment gate: sentinel gone (%v)", statErr)
 	}
 }

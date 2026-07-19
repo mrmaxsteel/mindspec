@@ -1,0 +1,23 @@
+// Negative fixture for spec 120 R6 scan (g), fail-closed command
+// resolution (round 11): the bd command name hides in a LOCAL variable
+// (program := "bd"), and a second spawn's command operand is fully
+// dynamic. BOTH spawns must surface as sites requiring classification —
+// the local assignment via sound single-assignment propagation, the
+// dynamic one via the fail-closed default (an operand that cannot be
+// PROVEN non-bd/non-git is never silently skipped).
+package fixture
+
+import (
+	"os"
+	"os/exec"
+)
+
+func localVarCmd(id string) ([]byte, error) {
+	program := "bd" // local single assignment — must resolve to bd
+	return exec.Command(program, "show", id).Output()
+}
+
+func dynamicCmd(id string) ([]byte, error) {
+	tool := os.Getenv("MINDSPEC_FIXTURE_TOOL") // unresolvable — fail closed
+	return exec.Command(tool, "show", id).Output()
+}

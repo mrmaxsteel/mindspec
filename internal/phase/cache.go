@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -174,7 +176,7 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		if eid, ok := c.specToEpic[specID]; ok {
 			c.mu.Unlock()
 			if eid == "" {
-				return "", fmt.Errorf("no epic found for spec %s", specID)
+				return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
 			}
 			return eid, nil
 		}
@@ -186,21 +188,38 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 	}
 	for _, epic := range epics {
 		num, title := ExtractSpecMetadata(epic)
-		if num > 0 && title != "" && SpecIDFromMetadata(num, title) == specID {
-			if c != nil {
-				c.mu.Lock()
-				c.specToEpic[specID] = epic.ID
-				c.mu.Unlock()
-			}
-			return epic.ID, nil
+		if num == 0 || title == "" {
+			continue
 		}
+		// D1 (ADR-0042): a malformed derivation can never match a
+		// well-formed specID lookup — treat it as no-match rather than
+		// letting the comparison itself observe a hostile derived value.
+		derived, derivedErr := SpecIDFromMetadata(num, title)
+		if derivedErr != nil || derived != specID {
+			continue
+		}
+		// Round-9 RETURN gate (ADR-0042 §1, gate-all-ids): epic.ID is
+		// bd-sourced and therefore agent-writable (bd create --force
+		// --id=<arbitrary> is empirically unsafe) — validate BEFORE it is
+		// ever returned as an ID a caller (fetchChildren,
+		// ResolveActiveBead, the `bd list --parent` sites) will treat as
+		// trusted and embed in bd/git argv.
+		if idvalidate.BeadID(epic.ID) != nil {
+			continue
+		}
+		if c != nil {
+			c.mu.Lock()
+			c.specToEpic[specID] = epic.ID
+			c.mu.Unlock()
+		}
+		return epic.ID, nil
 	}
 	if c != nil {
 		c.mu.Lock()
 		c.specToEpic[specID] = "" // memoize the not-found
 		c.mu.Unlock()
 	}
-	return "", fmt.Errorf("no epic found for spec %s", specID)
+	return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
 }
 
 // FetchChildren returns all children (any status) of an epic via a single
@@ -251,6 +270,13 @@ func fetchAllEpics() ([]EpicInfo, error) {
 // GetChildren(epicID) signature; if root resolution fails it degrades to ""
 // and bead.AllStatuses("") still returns the built-ins (which include blocked).
 func fetchChildren(epicID string) ([]ChildInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 8/9): epicID feeds a
+	// `bd list --parent` argv build directly — bd ids are agent-writable
+	// (bd create --force --id=<arbitrary> proven unsafe), so it is
+	// validated BEFORE any bd spawn, ZERO bd argv on a malformed id.
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
+	}
 	root := ""
 	if cwd, err := os.Getwd(); err == nil {
 		if r, err := workspace.FindRoot(cwd); err == nil {
@@ -287,6 +313,11 @@ func fetchOpenBeads() ([]ChildInfo, error) {
 
 // fetchEpic issues a `bd show <id> --json`. Returns (nil, nil) for "not found".
 func fetchEpic(epicID string) (*EpicInfo, error) {
+	// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a `bd show` argv
+	// build directly — validate BEFORE any bd spawn.
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
+	}
 	out, err := runBDFn("show", epicID, "--json")
 	if err != nil {
 		return nil, err

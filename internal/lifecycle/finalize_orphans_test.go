@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -262,5 +263,36 @@ func TestStaleTrackerOnMain_PropagatesReadError(t *testing.T) {
 	)
 	if _, err := StaleTrackerOnMain(".", "010-test", "epic-1", true); err == nil {
 		t.Fatal("expected a propagated error on git-read failure, got nil")
+	}
+}
+
+// TestFinalizeOrphansSkipsMalformedBranch is spec 120 AC-23 (the reverse-
+// derivation gate, round-4 G2): a local chore/finalize-x;evil-shaped
+// branch yields NO FinalizeOrphan and one escaped warning/clean skip — no
+// raw hostile bytes in any output; a valid chore/finalize-053-foo branch
+// still reports byte-identically.
+func TestFinalizeOrphansSkipsMalformedBranch(t *testing.T) {
+	stubFinalizeOrphanSeams(t,
+		[]string{"main", "chore/finalize-x;evil", "chore/finalize-053-foo"}, nil,
+		2, nil,
+		"1 file changed", nil,
+		nil, nil,
+	)
+
+	orphans, err := FindOutstandingFinalizeBranches(".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected exactly 1 orphan (the malformed branch skipped), got %d: %+v", len(orphans), orphans)
+	}
+	o := orphans[0]
+	if o.SpecID != "053-foo" || o.Branch != "chore/finalize-053-foo" {
+		t.Errorf("expected the valid branch to report byte-identically, got %+v", o)
+	}
+	for _, orphan := range orphans {
+		if strings.Contains(orphan.SpecID, ";") || strings.Contains(orphan.Branch, ";") {
+			t.Errorf("hostile bytes reached a FinalizeOrphan: %+v", orphan)
+		}
 	}
 }

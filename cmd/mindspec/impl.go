@@ -8,8 +8,11 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +46,17 @@ func init() {
 func approveImplRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
 
+	// R3 explicit-ingress early gate (ADR-0042, AC-7): a hostile args[0]
+	// refuses HERE, before any SpecWorktreePath composition or os.Chdir —
+	// not deep in composition where the value might already have been
+	// used to probe the filesystem.
+	if err := idvalidate.SpecID(specID); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("%s is not a valid spec ID: %v", termsafe.Escape(specID), err),
+			"mindspec spec list   (pick a listed spec ID and re-run)",
+		)
+	}
+
 	// Spec 092 Req 4 (mindspec-qxsy): capture the shell's invocation
 	// directory BEFORE any auto-chdir. FinalizeEpic removes the spec
 	// worktree, so if the shell sat inside it the cd-back NOTE below is
@@ -61,9 +75,19 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 	if cfgErr != nil {
 		cfg = config.DefaultConfig()
 	}
-	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
+	// specID already validated above; this waist call cannot fail.
+	specWtPath, _ := workspace.SpecWorktreePath(root, cfg, specID)
 	if info, err := os.Stat(specWtPath); err == nil && info.IsDir() {
-		_ = os.Chdir(specWtPath)
+		// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of
+		// the composed spec-worktree path immediately before the auto-cd.
+		// This site already tolerates a chdir failure silently (best-
+		// effort convenience, not the primary gate), so a containment
+		// failure is likewise a skip-and-warn, not a hard command failure.
+		if ctErr := containment.CheckContainment(root, specWtPath); ctErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: refusing auto-cd into spec worktree: %v\n", ctErr)
+		} else {
+			_ = os.Chdir(specWtPath)
+		}
 	}
 
 	// Spec 086 Bead 3: --allow-doc-skew override flag (shared between
