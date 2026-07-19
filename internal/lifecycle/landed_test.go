@@ -5,10 +5,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
+
+// TestMain installs a hermetic, always-unavailable default for
+// landedBindingMetadataFn across every test in this file (spec 121 Bead 2):
+// the production default (bead.GetMetadata) shells out to a real `bd`
+// process against whatever repo happens to be the test binary's cwd —
+// none of these throwaway fixture dirs are a real bd-tracked repo, and
+// relying on `bd show <fixture-bead-id>` to happen to error is
+// environment-dependent (it would silently start SUCCEEDING if a fixture
+// ID like "bead-one" ever collided with a real tracked issue). Tests that
+// exercise the binding leg itself install their own stub and restore this
+// default via t.Cleanup.
+func TestMain(m *testing.M) {
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	}
+	os.Exit(m.Run())
+}
 
 // initLandedRepo builds a real throwaway git repo with a spec/<id> branch
 // forked from main — the fixture shape FindLandedMerge/MergedUnclosed
@@ -93,20 +111,93 @@ func TestFindLandedMerge_NoBranchAtAllNotFound(t *testing.T) {
 
 // TestFindLandedMerge_BranchDeletedAfterMerge: the common recovery
 // scenario — the bead branch was merged AND then deleted (mimicking
-// CompleteBead's best-effort branch cleanup). FindLandedMerge must still
-// identify the merge from the spec branch's own history alone.
+// CompleteBead's cleanup). Post-spec-121, the subject text alone is no
+// longer sufficient once every OTHER corroboration leg is gone (AC-11):
+// this scenario now converges because CompleteBead's merge-time binding
+// write (R5(b)) recorded the landed-binding metadata BEFORE the branch was
+// deleted — stubbed here via landedBindingMetadataFn to isolate the
+// FindLandedMerge-level behavior from a real bd process. FindLandedMerge
+// must still identify the merge from the spec branch's own history,
+// confirmed by the binding datum.
 func TestFindLandedMerge_BranchDeletedAfterMerge(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	beadTip := revParseIn(t, dir, "bead/bead-one")
 	run("branch", "-D", "bead/bead-one")
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_second_parent": beadTip}, nil
+	}
 
 	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
-		t.Fatalf("FindLandedMerge after branch deletion: %v", err)
+		t.Fatalf("FindLandedMerge after branch deletion (with a recorded landed-binding): %v", err)
 	}
 	if landed.SHA == "" {
 		t.Fatal("expected a populated merge SHA")
 	}
+}
+
+// TestFindLandedMerge_BranchDeletedNoBindingNoEvidence is the spec 121
+// AC-11 companion: with the branch ALSO deleted and no landed-binding
+// recorded (the pre-121 state — a subject-scan candidate exists but every
+// corroboration leg is unavailable), FindLandedMerge must NOT identify the
+// merge on the subject text alone. It returns a *LandedMergeNoEvidence
+// carrying the candidate's SHAs.
+func TestFindLandedMerge_BranchDeletedNoBindingNoEvidence(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("branch", "-D", "bead/bead-one")
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	var noEvidence *LandedMergeNoEvidence
+	if !errors.As(err, &noEvidence) {
+		t.Fatalf("expected *LandedMergeNoEvidence, got %v", err)
+	}
+	if noEvidence.MergeSHA == "" || noEvidence.SecondParent == "" {
+		t.Fatalf("expected populated candidate SHAs, got %+v", noEvidence)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Error("LandedMergeNoEvidence must still satisfy errors.Is(err, ErrLandedMergeNotFound)")
+	}
+}
+
+// TestFindLandedMerge_SpoofedSubjectOverWrongSecondParentRefuses is spec
+// 121 AC-11's spoof fixture: a hand-crafted "Merge bead/<id>" commit whose
+// second parent is a NON-EMPTY, unrelated commit (not the real bead's
+// work) and no admissible datum confirms it — FindLandedMerge must refuse,
+// proving the identification is by DATUM, never by the subject text or
+// second-parent non-emptiness alone.
+func TestFindLandedMerge_SpoofedSubjectOverWrongSecondParentRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+
+	// An unrelated branch with real (non-empty) content stands in for the
+	// "wrong bead's work" a spoofed merge subject points at.
+	run("checkout", "-b", "unrelated-work")
+	os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("x\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "unrelated content")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/spoofed-bead", "unrelated-work")
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "spoofed-bead")
+	var noEvidence *LandedMergeNoEvidence
+	if !errors.As(err, &noEvidence) {
+		t.Fatalf("expected the spoofed subject to refuse via the no-evidence path, got %v", err)
+	}
+}
+
+// revParseIn resolves ref's SHA in dir via a plain `git rev-parse`.
+func revParseIn(t *testing.T, dir, ref string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", ref)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", ref, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TestFindLandedMerge_ReviewedHeadSHACorroborates: a registered panel whose
@@ -189,7 +280,18 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 func TestMergedUnclosed_BranchDeleted(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	beadTip := revParseIn(t, dir, "bead/bead-one")
 	run("branch", "-D", "bead/bead-one")
+
+	// Spec 121: the branch is gone with no panel registered, so the
+	// merge-time landed-binding (recorded by CompleteBead's fail-closed
+	// write BEFORE that same cleanup ran) is the confirming datum — the
+	// post-121 invariant this fixture reproduces.
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_second_parent": beadTip}, nil
+	}
 
 	landed, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one")
 	if err != nil {
@@ -200,6 +302,28 @@ func TestMergedUnclosed_BranchDeleted(t *testing.T) {
 	}
 	if landed == nil || landed.SHA == "" {
 		t.Fatalf("expected populated landed evidence, got %+v", landed)
+	}
+}
+
+// TestMergedUnclosed_NoEvidencePropagatesAsError is spec 121's companion to
+// TestMergedUnclosed_BranchDeleted: WITHOUT the landed-binding (or any
+// other datum), a subject-scan candidate must surface as a genuine error
+// (a *LandedMergeNoEvidence, via errors.As) — not silently swallowed into
+// (nil, false, nil) — so a caller like internal/complete's reconcile can
+// render the R5(c) attested-restore refusal instead of a generic "nothing
+// found" message.
+func TestMergedUnclosed_NoEvidencePropagatesAsError(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("branch", "-D", "bead/bead-one")
+
+	_, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one")
+	if ok {
+		t.Fatal("expected merged-unclosed to be false")
+	}
+	var noEvidence *LandedMergeNoEvidence
+	if !errors.As(err, &noEvidence) {
+		t.Fatalf("expected a *LandedMergeNoEvidence error, got %v", err)
 	}
 }
 
@@ -275,5 +399,178 @@ func TestReviewedHeadSHAForBead_MalformedSpecBranchProceedsRootOnly(t *testing.T
 	}
 	if len(gotRoots) != 1 || gotRoots[0] != "/repo" {
 		t.Errorf("expected corroboration to scan root-only, got roots=%v", gotRoots)
+	}
+}
+
+// TestFindLandedMerge_RevertNotIdentified is spec 121 AC-10(i): a
+// positively-corroborated candidate merge whose OWN content was later
+// reverted on specBranch must NOT be identified — R5(d)'s net-effect
+// since-M check gates identification, not corroboration alone.
+func TestFindLandedMerge_RevertNotIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	run("revert", "--no-edit", "-m", "1", mergeSHA)
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected ErrLandedMergeNotFound after a revert of the merge's own content, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "reverted") {
+		t.Errorf("expected the refusal to name the revert evidence, got: %v", err)
+	}
+	// AC-10: this must be a DIFFERENT error shape than the no-evidence
+	// path — a *LandedMergeNoEvidence would (mis)invite an attested-restore
+	// recovery, which is wrong here (the content was deliberately reverted,
+	// not merely uncorroborated).
+	var noEvidence *LandedMergeNoEvidence
+	if errors.As(err, &noEvidence) {
+		t.Error("a reverted merge must not surface as a LandedMergeNoEvidence (that implies attested-restore, which is wrong for a genuine revert)")
+	}
+}
+
+// TestFindLandedMerge_RevertThenReapplyIdentified is AC-10(ii)'s
+// anti-overreach guard (the spec's stated tag deviation — passes both
+// before and after this bead's changes): a revert FOLLOWED BY a later
+// commit that reintroduces the SAME net content is still identified.
+// "Ever reverted ⇒ reject" would be over-rejection.
+func TestFindLandedMerge_RevertThenReapplyIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	run("revert", "--no-edit", "-m", "1", mergeSHA)
+	// Reapply: a NEW commit recreating the exact file the bead's merge
+	// introduced (same net content, different commit shape than a
+	// cherry-pick — see the sibling test below for that shape).
+	os.WriteFile(filepath.Join(dir, "bead-one.txt"), []byte("bead-one\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "reapply bead-one's change")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("expected revert-then-reapply to still identify the merge, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the original merge %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_CherryPickReapplyIdentified: the OTHER reapply
+// shape — a cherry-pick of the bead's own reverted commit (a DIFFERENT
+// commit SHA, same net diff) — is still identified: net effect is
+// content-based, never SHA-based.
+func TestFindLandedMerge_CherryPickReapplyIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	beadCommitSHA := revParseIn(t, dir, "bead/bead-one")
+	run("revert", "--no-edit", "-m", "1", mergeSHA)
+	run("cherry-pick", beadCommitSHA)
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("expected a cherry-pick reapply to still identify the merge, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the original merge %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_PerDatumSufficiency pins spec 121 AC-12: each
+// admissible datum is INDEPENDENTLY sufficient to positively identify a
+// candidate — panel-only, surviving-branch-only, and binding-only each
+// close the identification alone, with the other two legs unavailable.
+func TestFindLandedMerge_PerDatumSufficiency(t *testing.T) {
+	t.Run("panel-only", func(t *testing.T) {
+		dir, run := initLandedRepo(t, "119-test")
+		mergeBead(t, run, dir, "bead-one", "spec/119-test")
+		secondParent := revParseIn(t, dir, "bead/bead-one")
+		run("branch", "-D", "bead/bead-one") // surviving-branch leg unavailable
+
+		origScan := landedPanelScanFn
+		t.Cleanup(func() { landedPanelScanFn = origScan })
+		beadID := "bead-one"
+		landedPanelScanFn = func(roots ...string) []panel.Registration {
+			return []panel.Registration{{Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: secondParent}}}
+		}
+		// binding leg unavailable via TestMain's default stub.
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err != nil {
+			t.Fatalf("panel-only corroboration must be sufficient, got: %v", err)
+		}
+		if landed == nil {
+			t.Fatal("expected a positively identified merge")
+		}
+	})
+
+	t.Run("surviving-branch-only", func(t *testing.T) {
+		dir, run := initLandedRepo(t, "119-test")
+		mergeBead(t, run, dir, "bead-one", "spec/119-test")
+		// No panel registered (landedPanelScanFn default finds none here);
+		// binding leg unavailable via TestMain's default stub.
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err != nil {
+			t.Fatalf("surviving-branch-only corroboration must be sufficient, got: %v", err)
+		}
+		if landed == nil {
+			t.Fatal("expected a positively identified merge")
+		}
+	})
+
+	t.Run("binding-only", func(t *testing.T) {
+		dir, run := initLandedRepo(t, "119-test")
+		mergeBead(t, run, dir, "bead-one", "spec/119-test")
+		secondParent := revParseIn(t, dir, "bead/bead-one")
+		run("branch", "-D", "bead/bead-one")
+
+		origBinding := landedBindingMetadataFn
+		t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+		landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+			return map[string]interface{}{"mindspec_landed_second_parent": secondParent}, nil
+		}
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err != nil {
+			t.Fatalf("binding-only corroboration must be sufficient, got: %v", err)
+		}
+		if landed == nil {
+			t.Fatal("expected a positively identified merge")
+		}
+	})
+}
+
+// TestFindLandedMerge_BindingContradictsDifferentMerge: a recorded binding
+// naming a DIFFERENT merge SHA whose second parent neither matches nor is
+// an ancestor of this candidate's is a CONTRADICTION, not silently
+// ignored.
+func TestFindLandedMerge_BindingContradictsDifferentMerge(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+
+	run("checkout", "main")
+	run("checkout", "-b", "unrelated")
+	os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("x\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "unrelated work")
+	unrelatedSHA := revParseIn(t, dir, "unrelated")
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     "0000000000000000000000000000000000dead",
+			"mindspec_landed_second_parent": unrelatedSHA,
+		}, nil
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected a contradicted binding to refuse, got: %v", err)
+	}
+	var noEvidence *LandedMergeNoEvidence
+	if errors.As(err, &noEvidence) {
+		t.Error("a CONTRADICTED binding must not surface as LandedMergeNoEvidence (that implies no datum was even available)")
 	}
 }

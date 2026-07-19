@@ -603,6 +603,17 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if _, rpErr := exec.RevParseRef(root, beadHead); rpErr != nil && exec.IsRefNotFound(rpErr) {
 			landed, ok, mergedErr := mergedUnclosedFn(root, specBranch, beadID)
 			if mergedErr != nil {
+				// Spec 121 R5(c): a *lifecycle.LandedMergeNoEvidence names a
+				// subject-scan candidate that no admissible durable datum
+				// confirms — render the attested-restore forward exit
+				// (candidate SHAs + the exact restore command + the
+				// human-verification marker) instead of the generic infra-
+				// failure wrap below, which would otherwise bury the
+				// candidate's identity in a free-text %v.
+				var noEvidence *lifecycle.LandedMergeNoEvidence
+				if errors.As(mergedErr, &noEvidence) {
+					return nil, attestedRestoreFailure(beadID, specBranch, beadHead, noEvidence)
+				}
 				// R4: beadID is an ID-typed position — idrender.Bead.
 				return nil, fmt.Errorf("checking landed-merge state for %s: %w", safeBeadID, mergedErr)
 			}
@@ -1377,6 +1388,35 @@ func adrDivergenceFailure(beadID, findings string) error {
 		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", safeBeadID))
+}
+
+// attestedRestoreFailure renders spec 121 R5(c)'s attested-restore forward
+// exit (ADR-0041 §2(ii)): a subject-scan merge candidate exists on
+// specBranch but no admissible durable datum — a registered panel, a
+// surviving bead/<id> branch, or the merge-time landed-binding
+// (lifecycle.LandedMergeNoEvidence) — confirms it belongs to beadID.
+// Unlike every other recovery line in this file, the named restore command
+// is DELIBERATELY NON-MECHANICAL (ADR-0035): recreating bead/<id> at the
+// candidate's second parent only converges the state correctly if that
+// merge genuinely carried this bead's work, so the message carries an
+// explicit human-verification marker rather than inviting a blind re-run —
+// the one recovery line in this tree an agent must NOT paste without
+// looking first.
+func attestedRestoreFailure(beadID, specBranch, beadBranch string, ne *lifecycle.LandedMergeNoEvidence) error {
+	// R4: beadID is an ID-typed position — idrender.Bead. specBranch/
+	// beadBranch are the spine-derived branch operands (RAW, per this
+	// file's convention); ne.MergeSHA/ne.SecondParent are git-produced hex
+	// commit SHAs, not agent-writable free text.
+	safeBeadID := idrender.Bead(beadID)
+	restoreCmd := fmt.Sprintf("git branch %s %s", beadBranch, ne.SecondParent)
+	msg := fmt.Sprintf(
+		"bead %s has no active worktree and no %s branch; a candidate merge %s was found on %s but no admissible durable datum (a registered panel, a surviving branch, or a merge-time landed-binding) confirms it is this bead's landed merge — refusing to reconcile on the merge's subject text alone.\n"+
+			"if — and only if — you have verified (by inspecting its diff) that merge %s actually carried %s's work: running `%s` attests that merge %s carried THIS bead's work — verify before running; do not execute blindly.",
+		safeBeadID, beadBranch, ne.MergeSHA, specBranch, ne.MergeSHA, safeBeadID, restoreCmd, ne.MergeSHA)
+	return guard.NewFailure(msg,
+		restoreCmd,
+		fmt.Sprintf("mindspec complete %s", safeBeadID),
+	)
 }
 
 // warnWriter is the destination for WARN lines rendered from

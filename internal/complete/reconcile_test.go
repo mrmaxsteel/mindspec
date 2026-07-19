@@ -12,6 +12,143 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
+// wireRealMergedUnclosedFixture is the shared e2e scaffold for spec 121's
+// R5(c)/AC-11/AC-18 fixtures below: a real temp repo, the REAL
+// lifecycle.MergedUnclosed predicate (no panel/binding seams stubbed —
+// exactly the "nothing corroborates it" shape these fixtures pin), and the
+// same phase/worktree/bd stubs TestRun_Reconcile_RealPanel_MissingRefWarnCloses
+// uses.
+func wireRealMergedUnclosedFixture(t *testing.T, root, specID string) {
+	t.Helper()
+	saveAndRestore(t)
+	stubPhaseEpic(t, specID, "epic-"+specID)
+	resolveTargetFn = func(string, string) (string, error) { return specID, nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
+	findLocalRootFn = func() (string, error) { return root, nil }
+	mergedUnclosedFn = lifecycle.MergedUnclosed
+}
+
+// TestRun_Reconcile_NoEvidenceAttestedRestore is spec 121 AC-18: an honest
+// out-of-band merge — a REAL "Merge bead/<id>" merge commit landed on
+// specBranch, its branch subsequently deleted, no panel registered, no
+// merge-time landed-binding recorded — has NO admissible datum confirming
+// it. Run must refuse with the R5(c) attested-restore forward exit
+// (candidate SHAs + the exact restore command + the human-verification
+// marker), never closing the bead. Executing the named restore command
+// (planting bead/<id> back at the recorded second parent) and re-running
+// converges: the surviving-branch corroboration leg then confirms it and
+// the bead closes. RED on today's main (the pre-121 subject-only
+// fall-through would have closed it on the first Run call).
+func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
+	const specID, beadID = "121-noevid", "mindspec-121noevid.1"
+	specBranch := "spec/" + specID
+	beadBranch := "bead/" + beadID
+
+	root := t.TempDir()
+	gitRun(t, root, "init", "-q", "-b", "main")
+	writeFile(t, root, "README.md", "# fixture\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "base")
+	gitRun(t, root, "checkout", "-q", "-b", specBranch)
+	gitRun(t, root, "checkout", "-q", "-b", beadBranch)
+	writeFile(t, root, "internal/thing/thing.go", "package thing\n\nfunc New() {}\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "impl")
+	beadSHA := gateRevParse(t, root, beadBranch)
+	gitRun(t, root, "checkout", "-q", specBranch)
+	gitRun(t, root, "merge", "-q", "--no-ff", "-m", "Merge "+beadBranch, beadBranch)
+	mergeSHA := gateRevParse(t, root, specBranch)
+	gitRun(t, root, "branch", "-D", beadBranch)
+	gitRun(t, root, "checkout", "-q", "main")
+
+	wireRealMergedUnclosedFixture(t, root, specID)
+	var closed bool
+	closeBeadFn = func(...string) error { closed = true; return nil }
+
+	newExec := func() executor.Executor {
+		return &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	}
+
+	_, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	if err == nil {
+		t.Fatal("expected the attested-restore refusal")
+	}
+	if closed {
+		t.Error("bead must not be closed on the no-evidence refusal")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must carry a recovery line, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), mergeSHA) {
+		t.Errorf("refusal must name the candidate merge SHA %s, got: %v", mergeSHA, err)
+	}
+	wantCmd := "git branch " + beadBranch + " " + beadSHA
+	if !strings.Contains(err.Error(), wantCmd) {
+		t.Errorf("refusal must name the exact restore command %q, got: %v", wantCmd, err)
+	}
+	if !strings.Contains(err.Error(), "verify before running; do not execute blindly") {
+		t.Errorf("refusal must carry the human-verification marker, got: %v", err)
+	}
+
+	// Executing the restore command + re-running converges: the surviving
+	// branch now corroborates the candidate, and the bead closes.
+	gitRun(t, root, "branch", beadBranch, beadSHA)
+	res, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	if err != nil {
+		t.Fatalf("re-run after restoring the branch must converge, got: %v", err)
+	}
+	if res == nil || !res.BeadClosed {
+		t.Fatalf("expected the bead to close after restoring the branch, res=%+v", res)
+	}
+}
+
+// TestRun_Reconcile_SpoofedMergeRefusesViaAttestedRestore is spec 121
+// AC-11's spoof fixture exercised through complete.Run: a hand-crafted
+// "Merge bead/<id>" commit whose second parent carries REAL, NON-EMPTY,
+// UNRELATED content (never this bead's actual work) and no admissible
+// datum confirms it. Run must refuse — proving identification is by
+// DATUM, never by the subject text or the second parent's non-emptiness
+// alone. RED on today's main (the pre-121 fall-through accepted this).
+func TestRun_Reconcile_SpoofedMergeRefusesViaAttestedRestore(t *testing.T) {
+	const specID, beadID = "121-spoof", "mindspec-121spoof.1"
+	specBranch := "spec/" + specID
+	beadBranch := "bead/" + beadID
+
+	root := t.TempDir()
+	gitRun(t, root, "init", "-q", "-b", "main")
+	writeFile(t, root, "README.md", "# fixture\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "base")
+	gitRun(t, root, "checkout", "-q", "-b", specBranch)
+
+	// An UNRELATED branch with real content stands in for the "wrong
+	// bead's work" a spoofed merge subject points at — never
+	// beadID's actual (non-existent) work.
+	gitRun(t, root, "checkout", "-q", "-b", "unrelated-work")
+	writeFile(t, root, "internal/other/other.go", "package other\n\nfunc New() {}\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "unrelated work")
+	gitRun(t, root, "checkout", "-q", specBranch)
+	gitRun(t, root, "merge", "-q", "--no-ff", "-m", "Merge "+beadBranch, "unrelated-work")
+	gitRun(t, root, "checkout", "-q", "main")
+
+	wireRealMergedUnclosedFixture(t, root, specID)
+	var closed bool
+	closeBeadFn = func(...string) error { closed = true; return nil }
+
+	_, err := Run(root, beadID, specID, "", &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	if err == nil {
+		t.Fatal("expected the spoofed merge to refuse via the attested-restore no-evidence path")
+	}
+	if closed {
+		t.Error("bead must not be closed on the spoofed-merge refusal")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must carry a recovery line, got: %v", err)
+	}
+}
+
 // Spec 119 R4 (Bead 1): the merged-unclosed / branch-less forward-reconcile
 // matrix (AC-5..AC-9). These tests pin the reconcile-mode branch complete.Run
 // takes when a bead has no matching worktree AND its canonical bead/<id> ref
