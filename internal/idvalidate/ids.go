@@ -7,6 +7,14 @@
 // These validators are the project-wide chokepoint for any user-supplied
 // identifier that flows into filepath.Join, os.ReadFile, os.WriteFile, or
 // filepath.Glob. Bypassing them is a SEC-1 hazard (see bead mindspec-x1qr).
+//
+// The spec ID and bead ID grammars are corrected to match the framework's
+// real minting scheme — dotted numeric epic-children at any depth,
+// any-length alnum segments, and one optional letter suffix on the spec
+// number — as a contract WIDENING (every ID the prior, stricter patterns
+// accepted still passes); see ADR-0042 and spec 120-trust-boundary-render-audit
+// R1/AC-1 for the live-inventory proof and the rejection-preservation
+// argument.
 package idvalidate
 
 import (
@@ -15,18 +23,27 @@ import (
 	"strings"
 )
 
-// specIDPattern matches valid spec IDs: 3+ digits, hyphen, then kebab-case slug.
-var specIDPattern = regexp.MustCompile(`^[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*$`)
+// specIDPattern matches valid spec IDs: 3+ digits, one optional letter
+// suffix on the number (e.g. "008b", "008c" — MindSpec's own on-disk
+// letter-suffixed spec dirs), hyphen, then kebab-case slug.
+var specIDPattern = regexp.MustCompile(`^[0-9]{3,}[a-z]?-[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // adrIDPattern: ADR-NNNN (4+ digits), optionally with a kebab slug.
 // Accepts ADR-0001, ADR-0001-descriptive-slug.
 var adrIDPattern = regexp.MustCompile(`^ADR-[0-9]{4,}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$`)
 
-// beadIDPattern: <project-slug>-<4+ alphanum>. E.g. mindspec-x1qr.
-// Mirrors bd CLI bead ID format. Current bd uses exactly 4 alphanumeric
-// suffix characters; {4,} keeps us forward-compatible if that widens.
-// The explicit segment form forbids leading hyphens and empty segments.
-var beadIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-[a-z0-9]{4,}$`)
+// beadIDPattern: <project-slug>-<any-length-alnum-segments>, optionally
+// followed by one or more dotted NUMERIC epic-child suffixes at any
+// depth. E.g. "mindspec-x1qr", "mindspec-0ke" (3-char suffix),
+// "mindspec-mol-015" (multi-segment slug), "mindspec-9cyu.1" (epic
+// child), "mindspec-69y.2.2" (nested epic child). Mirrors bd CLI's real
+// minting scheme — bd does NOT enforce a minimum suffix length, and bd's
+// dotted child-numbering is exactly this hierarchical form (it is not
+// merely a flat slug). The explicit segment form still forbids leading
+// hyphens and empty segments; the dotted suffix, if present, must be
+// `.` followed by one or more digits, so `..` and non-numeric children
+// (e.g. "a.b") can never match.
+var beadIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?:\.[0-9]+)*$`)
 
 // domainNamePattern: kebab-case, starts with a letter. The explicit
 // segment form forbids trailing hyphens (e.g. "cli-") and consecutive
@@ -77,16 +94,21 @@ func ADRID(id string) error {
 	return nil
 }
 
-// BeadID validates a bead identifier (e.g. "mindspec-x1qr").
+// BeadID validates a bead identifier (e.g. "mindspec-x1qr", "mindspec-9cyu.1").
 //
-// Format assumption: beadIDPattern treats a bead ID as a flat
-// <project-slug>-<4+alnum> identifier — one or more hyphen-separated
-// leading segments forming the project slug, followed by a final
-// 4-or-more-character alphanumeric suffix (e.g. "mindspec-x1qr",
-// "a-b-c-d-1234"). The leading segments must be non-empty, so leading,
-// trailing, and consecutive hyphens are all rejected. This mirrors the bd
-// CLI's flat bead ID scheme; it intentionally does NOT model any nested or
-// hierarchical ID format.
+// Format: beadIDPattern models a bead ID as a hyphen-separated
+// <project-slug>-<segment> base (two or more hyphen-separated segments of
+// one or more alphanumeric characters each — there is no minimum suffix
+// length; bd mints short suffixes like "mindspec-0ke" and multi-segment
+// slugs like "mindspec-mol-015"), optionally followed by one or more
+// dotted NUMERIC epic-child suffixes at any nesting depth (e.g.
+// "mindspec-9cyu.1", "mindspec-69y.2.2"). This mirrors bd's real, nested
+// bead ID scheme — bd's own epic/child numbering IS a hierarchical
+// format, and this validator models it directly rather than disclaiming
+// it. The base segments must be non-empty, so leading, trailing, and
+// consecutive hyphens are all rejected; each dotted child must be `.`
+// followed by one or more digits, so `..` and non-numeric children (e.g.
+// "a.b") can never match — traversal stays structurally impossible.
 //
 // Note: as of SEC-1 (bead mindspec-x1qr) implementation, no production code
 // passes bead IDs into filepath.Join. This validator is preventative — it
@@ -97,7 +119,7 @@ func BeadID(id string) error {
 		return fmt.Errorf("invalid bead ID: empty")
 	}
 	if id == "." || id == ".." {
-		return fmt.Errorf("invalid bead ID %q: must match <project>-<4+alnum> format", id)
+		return fmt.Errorf("invalid bead ID %q: must match <project>-<slug>[.<child>...] format", id)
 	}
 	if strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("invalid bead ID %q: contains path separator", id)
@@ -106,7 +128,7 @@ func BeadID(id string) error {
 		return fmt.Errorf("invalid bead ID %q: contains glob metacharacter", id)
 	}
 	if !beadIDPattern.MatchString(id) {
-		return fmt.Errorf("invalid bead ID %q: must match <project>-<4+alnum> format", id)
+		return fmt.Errorf("invalid bead ID %q: must match <project>-<slug>[.<child>...] format", id)
 	}
 	return nil
 }
