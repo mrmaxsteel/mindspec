@@ -197,6 +197,68 @@ func ScanOrphanedClosedBeads(specID, workdir, excludeBeadID string) ([]Orphan, e
 	return orphans, firstErr
 }
 
+// IsBeadSelfOrphaned reports whether beadID ITSELF is a closed-but-unmerged
+// orphan: closed in the tracker (a member of ClosedEpicBeadIDs(specID)),
+// its bead/<id> branch EXISTS, and that branch is NOT an ancestor of the
+// spec branch. It reuses the SAME trigger+confirmation discipline
+// ScanOrphanedClosedBeads applies to every OTHER sibling — a single-bead
+// instance of the identical predicate, not a parallel reimplementation —
+// so the two determinations can never drift (ADR-0041 §2(i), spec 121
+// R6(a)).
+//
+// This is the determination `complete`'s step-1.6 preflight consults when
+// it has already found OTHER orphaned siblings (mindspec-tpjn): when the
+// invoked bead is itself the orphan being recovered, naming it in the
+// all-orphans refusal would be a deadlock — a refusal whose only "fix" is
+// the very invocation being refused. Demoting to a WARN there is the
+// genuine forward exit §2(i) requires.
+//
+// An infra/ancestry error is PROPAGATED, never swallowed to false: the
+// caller MUST treat a determination error as NOT self-orphaned and RETAIN
+// its refusal (a retryable preflight refusal with nothing yet mutated,
+// ADR-0041 §1) — a fail-open here would demote a refusal on unproven
+// evidence.
+func IsBeadSelfOrphaned(specID, workdir, beadID string) (bool, error) {
+	ids, err := ClosedEpicBeadIDs(specID)
+	if err != nil {
+		return false, err
+	}
+	closed := false
+	for _, id := range ids {
+		if id == beadID {
+			closed = true
+			break
+		}
+	}
+	if !closed {
+		return false, nil
+	}
+
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return false, fmt.Errorf("composing spec branch for %s: %w", idrender.Spec(specID), err)
+	}
+	// Gate-all-ids (ADR-0042 §1): beadID is bd-sourced and agent-writable —
+	// validate before composing a branch name, mirroring
+	// ScanOrphanedClosedBeads' per-id discipline.
+	beadBranch, err := workspace.BeadBranch(beadID)
+	if err != nil {
+		return false, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
+	}
+	// Cheap trigger: a closed bead with no branch is cleanly completed —
+	// not an orphan (nothing left to merge).
+	if !branchExistsFn(beadBranch) {
+		return false, nil
+	}
+	// Confirmation: a branch that IS an ancestor of the spec branch is the
+	// benign merged-but-undeleted state, not an orphan.
+	isAnc, err := isAncestorFn(workdir, beadBranch, specBranch)
+	if err != nil {
+		return false, fmt.Errorf("checking ancestry of %s: %w", beadBranch, err)
+	}
+	return !isAnc, nil
+}
+
 // FindOrphanedClosedBeads returns the closed sibling beads under specID's epic
 // that were closed without `mindspec complete`.
 //

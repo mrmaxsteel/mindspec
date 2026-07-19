@@ -100,6 +100,7 @@ func saveAndRestore(t *testing.T) {
 	origDoltCommit := doltCommitFn
 	origVerifyCommitted := verifyCommittedFn
 	origFindOrphans := findOrphanedClosedBeadsFn
+	origIsBeadSelfOrphaned := isBeadSelfOrphanedFn
 	origFindEpicForBead := findEpicForBeadFn
 	origResolveSpecPrefix := resolveSpecPrefixFn
 	origMergedUnclosed := mergedUnclosedFn
@@ -108,6 +109,7 @@ func saveAndRestore(t *testing.T) {
 
 	t.Cleanup(func() {
 		findOrphanedClosedBeadsFn = origFindOrphans
+		isBeadSelfOrphanedFn = origIsBeadSelfOrphaned
 		closeBeadFn = origClose
 		worktreeListFn = origWtList
 		runBDFn = origRunBD
@@ -199,6 +201,12 @@ func saveAndRestore(t *testing.T) {
 	// default (no orphaned siblings) so existing happy-path tests don't shell
 	// out to bd/git or false-block. The guard's own tests override this.
 	findOrphanedClosedBeadsFn = func(specID, workdir, excludeBeadID string) []lifecycle.Orphan { return nil }
+	// Spec 121 R6(a) (mindspec-tpjn): default the self-orphan determination
+	// to "not self-orphaned" so the (rare) test that plants OTHER orphans
+	// without also driving the self-orphan path gets the all-orphans
+	// refusal, not a silent WARN-demotion, and never shells out to bd/git.
+	// The WARN-demotion / infra-error-retention tests override this.
+	isBeadSelfOrphanedFn = func(specID, workdir, beadID string) (bool, error) { return false, nil }
 	// Spec 119 R1 (Bead 1): default the lineage-authoritative spec
 	// resolution seam to a genuine "no lineage" result — the typed
 	// phase.ErrNoEpicLineage sentinel (final-review finding A: a NON-

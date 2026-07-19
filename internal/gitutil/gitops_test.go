@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -750,10 +751,124 @@ func TestWorktreeAddDetach_RefusesContainmentBeforeExec(t *testing.T) {
 
 func TestWorktreeRemoveForce(t *testing.T) {
 	calls := swapExec(t, "", 0)
-	if err := WorktreeRemoveForce("/r", "/wt-a"); err != nil {
+	// R7 check-at-use (ADR-0042, spec 121, mindspec-17bd): the wrapper now
+	// re-validates containment of wtPath under workdir before shelling
+	// out, so this argv-shape test needs a REAL, nested root/wtPath pair —
+	// same requirement as TestWorktreeAdd/TestWorktreeAddDetach above. An
+	// in-tree, plainly-named removal stays behavior-identical to before.
+	root := t.TempDir()
+	wt := filepath.Join(root, "wt-a")
+	if err := WorktreeRemoveForce(root, wt); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/r", "worktree", "remove", "--force", "/wt-a")
+	assertArgs(t, (*calls)[0].args, "-C", root, "worktree", "remove", "--force", wt)
+}
+
+// TestWorktreeRemoveForce_RefusesContainmentBeforeExec (AC-15(i), the
+// lexical-escape half): a wtPath that is not lexically under root at all
+// — the cheapest possible containment rejection, mirroring
+// TestWorktreeAdd_RefusesContainmentBeforeExec — must refuse and never
+// reach execCommand.
+func TestWorktreeRemoveForce_RefusesContainmentBeforeExec(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	root := t.TempDir()
+	outside := t.TempDir()
+	wt := filepath.Join(outside, "wt-a")
+
+	err := WorktreeRemoveForce(root, wt)
+	if err == nil {
+		t.Fatal("expected WorktreeRemoveForce to REFUSE a wtPath that fails containment under root")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("execCommand must NEVER be called when containment refuses; got %d call(s): %v", len(*calls), *calls)
+	}
+}
+
+// TestWorktreeRemoveForce_SymlinkEscapeContainment is AC-15(i) in full: a
+// composed path whose ANCESTOR SYMLINK escapes the repo root (not merely a
+// lexically-outside path — the discriminator the containment package's
+// own test proves lexical-only checking would miss) must refuse with the
+// containment error, and — because the refusal fires BEFORE the git
+// invocation — the out-of-tree target directory the symlink resolves to
+// SURVIVES completely untouched.
+//
+// This is also the proof beside AC-15's test-comment requirement that the
+// finalize self-heal's os.RemoveAll fallback (mindspec_executor.go)
+// cannot defeat this wrapper gate: that fallback only runs AFTER
+// WorktreeRemoveForce has already failed, and its caller (a) already gates
+// the SAME composed path with its own containment check before either is
+// reached, and (b) fails closed here — so a symlink-escaped path never
+// reaches ANY removal, wrapper or fallback.
+func TestWorktreeRemoveForce_SymlinkEscapeContainment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires POSIX symlink semantics")
+	}
+	calls := swapExec(t, "", 0)
+
+	root := t.TempDir()
+	outside := t.TempDir() // a directory OUTSIDE root entirely
+
+	// A marker file inside outside proves survival: if WorktreeRemoveForce
+	// ever reached a real `git worktree remove --force` (or any fallback
+	// force-remove) against the resolved path, this file would be gone.
+	marker := filepath.Join(outside, "marker.txt")
+	if err := os.WriteFile(marker, []byte("still here"), 0o644); err != nil {
+		t.Fatalf("writing marker file: %v", err)
+	}
+
+	// root/.worktrees is a SYMLINK pointing outside root.
+	wtRootLink := filepath.Join(root, ".worktrees")
+	if err := os.Symlink(outside, wtRootLink); err != nil {
+		t.Fatalf("os.Symlink: %v", err)
+	}
+	composed := filepath.Join(root, ".worktrees", "worktree-spec-999-x")
+
+	err := WorktreeRemoveForce(root, composed)
+	if err == nil {
+		t.Fatal("expected WorktreeRemoveForce to REFUSE a wtPath whose ancestor symlink escapes root")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("execCommand must NEVER be called when containment refuses; got %d call(s): %v", len(*calls), *calls)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Errorf("out-of-tree target must SURVIVE untouched after the refusal; marker file gone: %v", statErr)
+	}
+}
+
+// TestWorktreeRemoveForce_RefusesOptionLikePath is AC-15(ii): an
+// option-like composed wtPath (one beginning with '-') must be refused
+// before it can ever be parsed as a git flag — pinned beside the existing
+// rejectOptionLike tests. wtPath is the SOLE operand here, so the guard
+// applies to it directly (unlike WorktreeAdd/WorktreeAddDetach, which gate
+// a separate commit/branch operand).
+//
+// O3-1 (panel MINOR): root is a REAL, existing directory — not a bare
+// nonexistent path — so this is not "vacuously" refused by containment
+// erroring on a root that doesn't exist. It cannot be made to ALSO pass
+// containment: a valid absolute wtPath under a real root can never itself
+// begin with '-' (absolute paths begin with '/'), so containment would
+// (if reached) independently reject this same relative, dash-led operand
+// for its own lexical-mismatch reason — that overlap is unavoidable for
+// ANY option-like fixture, never just this one. To isolate rejectOptionLike
+// from that unavoidable overlap, this test asserts on the SPECIFIC error
+// text RejectOptionLike returns ("looks like an option" / SEC-5 — distinct
+// from containment's wrapped "refusing worktree remove --force: ..."
+// message), proving THIS guard produced the refusal. A reordering that ran
+// containment first would flip this assertion (RED), which a bare
+// err != nil check could not detect.
+func TestWorktreeRemoveForce_RefusesOptionLikePath(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	root := t.TempDir()
+	err := WorktreeRemoveForce(root, "--upload-pack=evil")
+	if err == nil {
+		t.Fatal("expected WorktreeRemoveForce to REFUSE an option-like wtPath")
+	}
+	if !strings.Contains(err.Error(), "looks like an option") {
+		t.Errorf("expected the rejectOptionLike-specific refusal (SEC-5), not a containment failure; got: %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("execCommand must NEVER be called for an option-like wtPath; got %d call(s): %v", len(*calls), *calls)
+	}
 }
 
 func TestWorktreePrune(t *testing.T) {

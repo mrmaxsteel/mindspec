@@ -932,7 +932,32 @@ func WorktreeAdd(workdir, wtPath, branch string) error {
 }
 
 // WorktreeRemoveForce runs `git worktree remove --force <wtPath>` in workdir.
+//
+// R7 check-at-use (ADR-0042 check-at-use discipline, spec 121,
+// mindspec-17bd): wtPath is re-validated for symlink-aware containment
+// under workdir immediately before the git invocation — the same
+// wrapper-level discipline WorktreeAdd/WorktreeAddDetach already carry
+// (:895/:920), which spec 120's containment sweep scoped this one
+// destructive wrapper out of. wtPath is ALSO the sole operand here (unlike
+// the add wrappers, which gate a separate commit/branch operand and
+// containment-check wtPath independently), so the option-like guard
+// applies to it directly: an option-like wtPath is refused before it can
+// reach git's argv at all. In-tree, plainly-named removals are
+// byte-identical in behavior. The caller-level gate spec 120's final
+// review added before the finalize self-heal's os.RemoveAll fallback
+// (mindspec_executor.go, the code preceding its WorktreeRemoveForce call)
+// remains — defense-in-depth, not a replacement — so this closes every
+// OTHER present and future caller at the wrapper itself.
 func WorktreeRemoveForce(workdir, wtPath string) error {
+	if err := rejectOptionLike(wtPath); err != nil {
+		return err
+	}
+	if err := containment.CheckContainment(workdir, wtPath); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("refusing worktree remove --force: %v", err),
+			containment.RejectionLever,
+		)
+	}
 	cmd := execCommand("git", gitArgs(workdir, "worktree", "remove", "--force", wtPath)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
