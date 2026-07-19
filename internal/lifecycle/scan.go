@@ -24,13 +24,14 @@
 //     ONCE into an id→status map and compares every live-closed epic
 //     against it in memory.
 //   - `chore/finalize-*` carriers are enumerated once, git-only, with the
-//     G1 origin/main ancestry confirmation.
+//     G1/spec-121 net-effect already-landed confirmation (ancestry alone
+//     is no longer sufficient — see FindOutstandingFinalizeBranches).
 //
-// The pure classifiers (staleOpenLanded, staleTrackerFinding, the
-// FindOutstandingFinalizeBranches predicate) remain the single homes of
-// the trigger + message text (P8/AC-12/AC-15): this aggregate only owns
-// the ENUMERATION, so doctor and instruct still cannot drift on either
-// the finding condition or its wording.
+// The pure classifiers (staleOpenLanded, staleTrackerFinding,
+// pullAdvisoryFinding, the FindOutstandingFinalizeBranches predicate)
+// remain the single homes of the trigger + message text (P8/AC-12/AC-15):
+// this aggregate only owns the ENUMERATION, so doctor and instruct still
+// cannot drift on either the finding condition or its wording.
 package lifecycle
 
 import (
@@ -79,10 +80,29 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 		return out
 	}
 
-	// main's committed export, read + decoded ONCE for every epic below.
-	var committed map[string]string
-	if data, jErr := fileAtRefFn(root, "main", ".beads/issues.jsonl"); jErr == nil {
-		committed = issueStatusesInJSONL(data)
+	// The refreshed origin/main committed export (falling back to local
+	// main only when no origin/main ref exists — mainExportRef, spec 121
+	// R2(c)), read + decoded ONCE for every epic below. When origin/main
+	// WAS consulted, local main's export is also read once so a residual
+	// local-main lag can be reported as a pull_advisory rather than
+	// silently invisible (ADR-0041 §2(i): never a self-looping
+	// re-finalize recovery for an export that already landed).
+	var committed, localCommitted map[string]string
+	if mainRef, refErr := mainExportRef(root); refErr == nil {
+		if data, jErr := fileAtRefFn(root, mainRef, ".beads/issues.jsonl"); jErr == nil {
+			committed = issueStatusesInJSONL(data)
+		}
+		if mainRef == "origin/main" {
+			// Deliberate swallow (mirrors StaleTrackerOnMain): this
+			// secondary local-main read only feeds the advisory-only
+			// pull_advisory leg below — a read failure here just means
+			// no advisory fires this scan, never that a finding is
+			// fabricated or the primary committed/origin-main leg above
+			// is affected.
+			if data, jErr := fileAtRefFn(root, "main", ".beads/issues.jsonl"); jErr == nil {
+				localCommitted = issueStatusesInJSONL(data)
+			}
+		}
 	}
 
 	// epicID → specID for EVERY lifecycle epic, whatever its status — the
@@ -111,6 +131,14 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 			}
 			if o := staleTrackerFinding(specID, epic.ID, committed); o != nil {
 				out.StaleTrackers = append(out.StaleTrackers, *o)
+			} else if localCommitted != nil {
+				// R2(c): origin/main already agrees (no stale_tracker
+				// finding) but local main's own export still lags —
+				// surfaced only as a pull_advisory, never the
+				// self-looping re-finalize recovery.
+				if adv := pullAdvisoryFinding(specID, epic.ID, localCommitted[epic.ID]); adv != nil {
+					out.StaleTrackers = append(out.StaleTrackers, *adv)
+				}
 			}
 		}
 	}

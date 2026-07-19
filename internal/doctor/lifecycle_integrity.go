@@ -52,6 +52,20 @@ func checkLifecycleIntegrity(r *Report, root string) {
 }
 
 func addFinalizeOrphanCheck(r *Report, o lifecycle.FinalizeOrphan) {
+	// Spec 121 R2(c) (Bead 1 review MINOR fix): a "pull_advisory" is NOT
+	// a stranded-carrier finding — origin/main already carries the
+	// correct export, only the LOCAL checkout lags — so it renders at
+	// Warn severity under its own name, never mislabeled as a "finalize
+	// orphan" at Error severity (which would overstate a harmless,
+	// self-clearing local staleness as a stranded carrier).
+	if o.Kind == "pull_advisory" {
+		r.Checks = append(r.Checks, Check{
+			Name:    fmt.Sprintf("local main behind origin (pull advisory): %s", idrender.Spec(o.SpecID)),
+			Status:  Warn,
+			Message: o.FullMessage(),
+		})
+		return
+	}
 	r.Checks = append(r.Checks, Check{
 		Name:    fmt.Sprintf("finalize orphan (%s): %s", o.Kind, idrender.Spec(o.SpecID)),
 		Status:  Error,
