@@ -504,3 +504,50 @@ func containsSubstr(s, sub string) bool {
 	}
 	return false
 }
+
+// TestResult_FormatText_EscapesHostileTarget is the spec 120 final-review
+// O3-1 regression: FormatText's header lines render r.TargetID, which is
+// set from the ungated CLI arg BEFORE the SpecID/BeadID gates run (spec.go,
+// plan.go, adr_divergence.go) and survives intact on the gate-FAIL path. A
+// control-bearing target must therefore be termsafe-escaped at BOTH render
+// sites (the all-checks-passed header and the issue header) or it forges
+// extra terminal lines through the very function spec 120 names as the
+// terminal-render choke point.
+func TestResult_FormatText_EscapesHostileTarget(t *testing.T) {
+	hostile := "120-x\n[FORGED] fake terminal line"
+	quoted := `"120-x\n[FORGED] fake terminal line"`
+
+	t.Run("issue header", func(t *testing.T) {
+		r := &Result{SubCommand: "spec", TargetID: hostile}
+		r.AddError("specid", "not a valid spec ID")
+		out := r.FormatText()
+		if strings.Contains(out, "\n[FORGED]") {
+			t.Fatalf("hostile TargetID forged a terminal line through the issue header:\n%s", out)
+		}
+		if !strings.Contains(out, quoted) {
+			t.Errorf("expected termsafe-quoted target %s in output, got:\n%s", quoted, out)
+		}
+	})
+
+	t.Run("all-checks-passed header", func(t *testing.T) {
+		r := &Result{SubCommand: "spec", TargetID: hostile}
+		out := r.FormatText()
+		if strings.Contains(out, "\n[FORGED]") {
+			t.Fatalf("hostile TargetID forged a terminal line through the all-passed header:\n%s", out)
+		}
+		if !strings.Contains(out, quoted) {
+			t.Errorf("expected termsafe-quoted target %s in output, got:\n%s", quoted, out)
+		}
+	})
+
+	t.Run("clean target renders byte-identical", func(t *testing.T) {
+		r := &Result{SubCommand: "spec", TargetID: "005-next"}
+		if got := r.FormatText(); !strings.HasPrefix(got, "005-next: all checks passed\n") {
+			t.Errorf("clean all-passed header changed: %q", got)
+		}
+		r.AddError("test", "msg")
+		if got := r.FormatText(); !strings.HasPrefix(got, "005-next: 1 issue(s) found\n") {
+			t.Errorf("clean issue header changed: %q", got)
+		}
+	})
+}

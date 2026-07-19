@@ -622,3 +622,69 @@ func TestRecordingWriteGates(t *testing.T) {
 // in spec 084 Bead 3. mindspec no longer manages a collector subprocess,
 // so the HealthCheck / RestartIfDead / HealthStatus surface is gone.
 // Recording presence on disk is still observable via HasRecording.
+
+// TestWriteManifestRejectsHostilePayloadIDs is the spec 120 final-review
+// G2-1 regression: WriteManifest is the class-5 structured-persistence
+// consumer for the agent-writable recording manifest, and previously
+// validated only the PATH specID — not the ID-bearing payload fields. A
+// read-modify-write cycle (StopRecording/UpdatePhase/AddBeadToPhase) over
+// an agent-edited manifest.json must never serialize a hostile spec_id or
+// phase bead id back into the durable file (ADR-0042 persistence
+// doctrine: validate durable ID fields at write).
+func TestWriteManifestRejectsHostilePayloadIDs(t *testing.T) {
+	specID := "001-test-spec"
+
+	cases := []struct {
+		name string
+		m    *Manifest
+	}{
+		{"nil manifest", nil},
+		{"hostile payload spec_id (option-like)", &Manifest{
+			SpecID: "--help", Status: "recording",
+		}},
+		{"hostile payload spec_id (control bytes)", &Manifest{
+			SpecID: "120-x\n[FORGED] fake", Status: "recording",
+		}},
+		{"hostile phase bead id (metachar)", &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"x;evil"}}},
+		}},
+		{"hostile phase bead id (option-like)", &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"mindspec-9cyu.1", "--help"}}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := WriteManifest(root, specID, tc.m); err == nil {
+				t.Fatal("WriteManifest accepted a hostile/nil payload")
+			}
+			mp, err := ManifestPath(root, specID)
+			if err != nil {
+				t.Fatalf("ManifestPath: %v", err)
+			}
+			if _, statErr := os.Stat(mp); statErr == nil {
+				t.Error("hostile manifest payload was persisted to disk")
+			}
+		})
+	}
+
+	t.Run("valid payload still writes", func(t *testing.T) {
+		root := t.TempDir()
+		m := &Manifest{
+			SpecID: specID, Status: "recording",
+			Phases: []Phase{{Phase: "implement", Beads: []string{"mindspec-9cyu.1", "mindspec-0ke"}}},
+		}
+		if err := WriteManifest(root, specID, m); err != nil {
+			t.Fatalf("WriteManifest rejected a valid payload: %v", err)
+		}
+		got, err := ReadManifest(root, specID)
+		if err != nil {
+			t.Fatalf("ReadManifest: %v", err)
+		}
+		if got.SpecID != specID || len(got.Phases) != 1 || len(got.Phases[0].Beads) != 2 {
+			t.Errorf("valid manifest did not round-trip: %+v", got)
+		}
+	})
+}

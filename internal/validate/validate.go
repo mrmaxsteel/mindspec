@@ -72,12 +72,19 @@ func (r *Result) ToJSON() (string, error) {
 
 // FormatText returns the result as human-readable text.
 func (r *Result) FormatText() string {
+	// Final-review O3-1 (spec 120): the header renders r.TargetID, which is
+	// set from the UNGATED CLI arg BEFORE the SpecID/BeadID ingress gates
+	// run (ValidateSpec/ValidatePlan/ValidateDivergence) and survives
+	// intact on the gate-FAIL path — so the target must be escaped at BOTH
+	// header render sites below, the same by-construction backstop the
+	// issue.Message render already has. Escape is byte-identical for every
+	// genuine (printable, single-line) target.
 	if len(r.Issues) == 0 {
 		target := r.TargetID
 		if target == "" {
 			target = r.SubCommand
 		}
-		return fmt.Sprintf("%s: all checks passed\n", target)
+		return fmt.Sprintf("%s: all checks passed\n", termsafe.Escape(target))
 	}
 
 	var b strings.Builder
@@ -85,7 +92,7 @@ func (r *Result) FormatText() string {
 	if target == "" {
 		target = r.SubCommand
 	}
-	b.WriteString(fmt.Sprintf("%s: %d issue(s) found\n\n", target, len(r.Issues)))
+	b.WriteString(fmt.Sprintf("%s: %d issue(s) found\n\n", termsafe.Escape(target), len(r.Issues)))
 
 	for _, issue := range r.Issues {
 		// R4 (spec 120): issue.Message is the terminal-facing choke point for

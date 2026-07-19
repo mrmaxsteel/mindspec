@@ -519,16 +519,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, fmt.Errorf("listing bead worktrees for %s: %w", safeBeadID, err)
 	}
 	expectedName, _ := workspace.BeadWorktreeName(beadID)
-	expectedBranch := beadHead
-	for _, e := range entries {
-		if e.Name == expectedName || e.Branch == expectedBranch {
-			wtPath = e.Path
-			if e.Branch != "" {
-				beadHead = e.Branch
-			}
-			break
-		}
-	}
+	wtPath, beadHead = resolveBeadWorktree(entries, expectedName, beadHead)
 
 	// 2.1. Merged-unclosed / branch-less forward reconcile detection
 	// (Spec 119 R4, Bead 1 Steps 4-6). A normal in-progress bead ALWAYS
@@ -1395,4 +1386,44 @@ func residualDirtyPaths(porcelain string, known []string) []string {
 		extra = append(extra, p)
 	}
 	return extra
+}
+
+// resolveBeadWorktree pins the bead's worktree path and the ref the
+// per-bead gates (step 3.5) measure against (beadHead) from the bd
+// worktree list: the matched worktree's actual branch when one exists,
+// else the canonical bead branch (mindspec-aqey / mindspec-perm
+// anchoring).
+//
+// Final-review G1-1 (spec 120): a row is still matched on Name OR Branch,
+// but its Branch field is agent-writable (bd worktree list --json) — so
+// it may only REPLACE the validated canonical branch when it is itself a
+// well-formed bead branch ("bead/" + idvalidate.BeadID). A NAME-only
+// match paired with a Branch that is main, an option-like ref, or an
+// otherwise malformed value falls back to the canonical waist-composed
+// branch instead of promoting the unvalidated value into git argv
+// (rev-parse/merge-base/diff/show). The worktree PATH is still adopted:
+// only the ref used for git authority is gated.
+func resolveBeadWorktree(entries []bead.WorktreeListEntry, expectedName, canonicalBranch string) (wtPath, beadHead string) {
+	beadHead = canonicalBranch
+	for _, e := range entries {
+		if e.Name != expectedName && e.Branch != canonicalBranch {
+			continue
+		}
+		wtPath = e.Path
+		if e.Branch == "" || e.Branch == canonicalBranch {
+			return wtPath, beadHead
+		}
+		listedID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) && idvalidate.BeadID(listedID) == nil {
+			beadHead = e.Branch
+			return wtPath, beadHead
+		}
+		// ADR-0042 degrade policy: name the rejected (escaped) branch
+		// rather than silently dropping it, and anchor at the canonical
+		// waist-composed branch so no unvalidated value reaches git argv.
+		fmt.Fprintf(os.Stderr, "warning: worktree %s lists branch %s which is not a well-formed bead branch — anchoring per-bead gates at %s instead\n",
+			termsafe.Escape(e.Name), termsafe.Escape(e.Branch), canonicalBranch)
+		return wtPath, beadHead
+	}
+	return "", canonicalBranch
 }

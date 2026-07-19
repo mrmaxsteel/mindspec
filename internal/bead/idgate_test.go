@@ -146,3 +146,64 @@ func TestHostileBDStoreIDNeverReachesArgv(t *testing.T) {
 		t.Errorf("expected ZERO bd spawns for hostile store ids, got trace:\n%s", trace.String())
 	}
 }
+
+// TestWorktreeRemoveArgvGate is the spec 120 final-review G1-2/G3-1
+// regression: WorktreeRemove's name operand arrives from agent-writable
+// `bd worktree list` rows in production (executor CompleteBead forwards
+// e.Name after an OR-match; FinalizeEpic's cleanup leg forwards e.Name
+// directly), so the bd boundary itself must gate it. A non-canonical
+// worktree name — option-like, metacharacter-bearing, or carrying an id
+// that fails idvalidate — errors with ZERO bd spawn; every canonical
+// mindspec worktree-name shape spawns byte-identical argv to today.
+func TestWorktreeRemoveArgvGate(t *testing.T) {
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+
+	hostileNames := []string{
+		"--help",
+		"-rf",
+		"main",
+		"",
+		"worktree-",
+		"worktree-x;evil",
+		"worktree-mindspec-x1qr\nforged: line",
+		"worktree-spec-UPPER",
+		"worktree-../../etc",
+	}
+	for _, name := range hostileNames {
+		var spawned bool
+		execCommand = func(cmd string, args ...string) *exec.Cmd {
+			spawned = true
+			return exec.Command("echo")
+		}
+		if err := WorktreeRemove(name); err == nil {
+			t.Errorf("WorktreeRemove(%q) accepted a non-canonical worktree name", name)
+		}
+		if spawned {
+			t.Errorf("WorktreeRemove(%q) spawned bd", name)
+		}
+	}
+
+	cleanNames := []string{
+		"worktree-mindspec-9cyu.1",                      // bead worktree, dotted child
+		"worktree-mindspec-0ke",                         // bead worktree, short suffix
+		"worktree-bead-1",                               // bead worktree, fixture-style base
+		"worktree-spec-120-trust-boundary-render-audit", // spec worktree
+		"worktree-finalize-053-foo",                     // finalize temp worktree
+	}
+	for _, name := range cleanNames {
+		var gotArgv []string
+		execCommand = func(cmd string, args ...string) *exec.Cmd {
+			gotArgv = append([]string{cmd}, args...)
+			return exec.Command("echo")
+		}
+		if err := WorktreeRemove(name); err != nil {
+			t.Errorf("WorktreeRemove(%q) rejected a canonical worktree name: %v", name, err)
+			continue
+		}
+		want := "bd worktree remove " + name + " --force"
+		if got := strings.Join(gotArgv, " "); got != want {
+			t.Errorf("WorktreeRemove(%q) argv = %q, want %q", name, got, want)
+		}
+	}
+}

@@ -437,7 +437,11 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 	if err := withWorkingDir(g.Root, func() error {
 		if wtName != "" {
 			if err := g.WorktreeOps.Remove(wtName); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", wtName, err)
+				// Final-review G3-2 (spec 120): wtName may be the
+				// agent-writable bd-list e.Name (reassigned on the
+				// OR-match above) — escape it so a control-bearing name
+				// cannot forge extra terminal lines.
+				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", termsafe.Escape(wtName), err)
 			}
 		}
 		if err := gitutil.DeleteBranch(beadBranch); err != nil {
@@ -871,6 +875,20 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 	}
 	wtPath, err := workspace.FinalizeWorktreePath(g.Root, cfg, specID)
 	if err != nil {
+		return "", err
+	}
+
+	// Final-review S1 (spec 120): containment gate BEFORE the destructive
+	// self-heal below. wtPath is composed from the agent-writable
+	// cfg.WorktreeRoot, which is only LEXICALLY validated at config
+	// ingress (charset/relative/no-"..", explicitly not symlink-aware) —
+	// a symlinked ancestor can resolve the composed path outside the
+	// project root. The self-heal force-removes whatever exists at that
+	// path, so the symlink-aware check-at-use gate must run first; on
+	// failure, refuse outright (never force-remove an uncontained path).
+	// The second gate further down (before MkdirAll/WorktreeAdd) still
+	// runs at ITS use sites per the ADR-0042 check-at-use discipline.
+	if err := checkWorktreeContainment(g.Root, wtPath); err != nil {
 		return "", err
 	}
 

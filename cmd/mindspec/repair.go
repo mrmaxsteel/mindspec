@@ -71,11 +71,13 @@ The write is a MERGE (bead.MergeMetadata, the same HC-5 discipline as
 'mindspec repair phase'): unrelated metadata keys are preserved, and a
 raw 'bd update --metadata' replace is never emitted.
 
-Both arguments are validated before any bd invocation: <epic-id> must be
-a well-formed bead ID, and the replacement <title> must slugify (via the
-same derivation 'mindspec next'/'mindspec complete' use) to a well-formed
-spec ID — a title whose slug still fails validation is refused with no
-write attempted, so the lever is guaranteed to converge once applied.`,
+Both arguments are validated before any bd MUTATION: <epic-id> is gated
+as a well-formed bead ID before any bd invocation, and the replacement
+<title> must slugify (via the same derivation 'mindspec next'/'mindspec
+complete' use) to a well-formed spec ID — that slug convergence check
+runs after the epic's spec_num is read but before the metadata merge, so
+a title whose slug still fails validation is refused with no write
+attempted, and the lever is guaranteed to converge once applied.`,
 	Args: cobra.ExactArgs(2),
 	RunE: repairSpecTitleRunE,
 }

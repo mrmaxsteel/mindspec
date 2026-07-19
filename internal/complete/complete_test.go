@@ -3878,3 +3878,88 @@ func TestPerBeadGateBlockKeepsRecoveryContract(t *testing.T) {
 		t.Errorf("expected no CompleteBead call on gate block, got %d", len(calls))
 	}
 }
+
+// TestResolveBeadWorktree_GatesListedBranch is the spec 120 final-review
+// G1-1 regression: a bd worktree-list row accepted on a NAME-only match
+// used to promote its unvalidated Branch field straight into beadHead —
+// which then reaches git rev-parse/merge-base/diff/show argv. The listed
+// branch may only replace the validated canonical branch when it is
+// itself a well-formed bead branch ("bead/" + idvalidate.BeadID); any
+// other value falls back to the canonical waist-composed branch.
+func TestResolveBeadWorktree_GatesListedBranch(t *testing.T) {
+	const expectedName = "worktree-mindspec-x.1"
+	const canonical = "bead/mindspec-x.1"
+
+	cases := []struct {
+		name     string
+		entries  []bead.WorktreeListEntry
+		wantPath string
+		wantHead string
+	}{
+		{
+			name:     "no matching row: canonical branch, no path",
+			entries:  []bead.WorktreeListEntry{{Name: "other", Branch: "bead/mindspec-zz.9", Path: "/p0"}},
+			wantPath: "",
+			wantHead: canonical,
+		},
+		{
+			name:     "branch match with foreign name: path adopted, canonical head",
+			entries:  []bead.WorktreeListEntry{{Name: "renamed-dir", Branch: canonical, Path: "/p1"}},
+			wantPath: "/p1",
+			wantHead: canonical,
+		},
+		{
+			name:     "name match with empty branch: canonical head",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "", Path: "/p2"}},
+			wantPath: "/p2",
+			wantHead: canonical,
+		},
+		{
+			name:     "name match with VALID re-anchored bead branch: promoted",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "bead/mindspec-other", Path: "/p3"}},
+			wantPath: "/p3",
+			wantHead: "bead/mindspec-other",
+		},
+		{
+			name:     "name match with Branch=main: falls back to canonical (never reaches git argv)",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "main", Path: "/p4"}},
+			wantPath: "/p4",
+			wantHead: canonical,
+		},
+		{
+			name:     "name match with option-like branch: falls back to canonical",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "--upload-pack=/tmp/evil", Path: "/p5"}},
+			wantPath: "/p5",
+			wantHead: canonical,
+		},
+		{
+			name:     "name match with metachar bead branch: falls back to canonical",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "bead/mindspec-x;evil", Path: "/p6"}},
+			wantPath: "/p6",
+			wantHead: canonical,
+		},
+		{
+			name:     "name match with control-byte branch: falls back to canonical",
+			entries:  []bead.WorktreeListEntry{{Name: expectedName, Branch: "bead/mindspec-x\nevil", Path: "/p7"}},
+			wantPath: "/p7",
+			wantHead: canonical,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath, gotHead string
+			// The fallback legs warn on stderr (ADR-0042 degrade policy);
+			// capture so test output stays clean.
+			_ = captureStderr(t, func() {
+				gotPath, gotHead = resolveBeadWorktree(tc.entries, expectedName, canonical)
+			})
+			if gotPath != tc.wantPath {
+				t.Errorf("wtPath = %q, want %q", gotPath, tc.wantPath)
+			}
+			if gotHead != tc.wantHead {
+				t.Errorf("beadHead = %q, want %q", gotHead, tc.wantHead)
+			}
+		})
+	}
+}

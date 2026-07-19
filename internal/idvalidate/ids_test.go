@@ -98,6 +98,8 @@ func TestIDValidateWideningPreservesRejections(t *testing.T) {
 		"",
 		".",
 		"..",
+		"--help",           // option-like: already rejected structurally (leading '-'), made explicit (F1-2)
+		"-rf",              // option-like: already rejected structurally (leading '-'), made explicit (F1-2)
 		"a..1",             // double dot
 		"a.b",              // non-numeric child, no base segment
 		"mindspec-x1qr.a",  // non-numeric child, realistic base

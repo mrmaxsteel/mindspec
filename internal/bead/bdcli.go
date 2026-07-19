@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // execCommand is a package-level variable for testability.
@@ -239,7 +240,34 @@ func WorktreeList() ([]WorktreeListEntry, error) {
 // The --force flag skips the "unpushed commits" safety check, which is
 // appropriate because mindspec always merges bead work into the spec
 // branch before removing the worktree.
+//
+// Gate-in-func (spec 120 final-review G1-2/G3-1, class-2 consumer
+// boundary): the name operand is NOT assumed waist-composed — production
+// callers forward the agent-writable `bd worktree list` Name field
+// (executor CompleteBead reassigns wtName = e.Name on an OR-match;
+// FinalizeEpic's cleanup leg removes e.Name directly). The operand must
+// be a canonical mindspec worktree basename with its embedded id passing
+// idvalidate; anything else (option-like values such as "--help"
+// included) errors with ZERO bd spawn.
 func WorktreeRemove(name string) error {
+	// Gate the name operand IN-FUNC (scan (g) verifies an idvalidate call
+	// in this declaration). Accept exactly the canonical mindspec worktree
+	// basenames — "worktree-spec-<specID>", "worktree-finalize-<specID>",
+	// or "worktree-<beadID>" — with the embedded id validated by
+	// idvalidate. Prefixes are tried most-specific first: a bead ID that
+	// itself begins with "spec-"/"finalize-" but fails the spec-ID grammar
+	// still validates via the bead-worktree form.
+	gated := false
+	if rest, ok := strings.CutPrefix(name, workspace.SpecWorktreePrefix); ok && idvalidate.SpecID(rest) == nil {
+		gated = true
+	} else if rest, ok := strings.CutPrefix(name, workspace.FinalizeWorktreePrefix); ok && idvalidate.SpecID(rest) == nil {
+		gated = true
+	} else if rest, ok := strings.CutPrefix(name, workspace.BeadWorktreePrefix); ok && idvalidate.BeadID(rest) == nil {
+		gated = true
+	}
+	if !gated {
+		return fmt.Errorf("refusing bd worktree remove: %q is not a canonical mindspec worktree name (worktree-<beadID>, worktree-spec-<specID>, or worktree-finalize-<specID>)", name)
+	}
 	args := []string{"worktree", "remove", name, "--force"}
 	out, err := tracedCombined("worktree-remove", args)
 	if err != nil {
