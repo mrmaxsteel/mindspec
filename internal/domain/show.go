@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -131,40 +133,66 @@ func extractSection(content, heading string) string {
 }
 
 // FormatSummary formats a DomainInfo as plain text.
+//
+// R4: Name is an agent-writable domain-directory basename; Owns/
+// Boundaries/KeyFiles are multi-line free text extracted verbatim from
+// the agent-authored overview.md; Relationships' Domain/Direction come
+// from the agent-authored context-map.md. Single-line values are escaped
+// via termsafe.Escape, multi-line bodies per-line via escapeLines, and
+// Specs entries (spec IDs) via idrender.Spec — closing the same display-
+// forgery gap already fixed for ADR/bead titles.
 func FormatSummary(info *DomainInfo) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Domain: %s\n\n", info.Name))
+	b.WriteString(fmt.Sprintf("Domain: %s\n\n", termsafe.Escape(info.Name)))
 
 	if info.Owns != "" {
-		b.WriteString(fmt.Sprintf("Owns:\n%s\n\n", indent(info.Owns)))
+		b.WriteString(fmt.Sprintf("Owns:\n%s\n\n", indent(escapeLines(info.Owns))))
 	}
 
 	if info.Boundaries != "" {
-		b.WriteString(fmt.Sprintf("Boundaries:\n%s\n\n", indent(info.Boundaries)))
+		b.WriteString(fmt.Sprintf("Boundaries:\n%s\n\n", indent(escapeLines(info.Boundaries))))
 	}
 
 	if len(info.Relationships) > 0 {
 		b.WriteString("Relationships:\n")
 		for _, r := range info.Relationships {
-			b.WriteString(fmt.Sprintf("  %s %s\n", r.Direction, r.Domain))
+			b.WriteString(fmt.Sprintf("  %s %s\n", termsafe.Escape(r.Direction), termsafe.Escape(r.Domain)))
 		}
 		b.WriteString("\n")
 	}
 
 	if info.KeyFiles != "" {
-		b.WriteString(fmt.Sprintf("Key Files:\n%s\n\n", indent(info.KeyFiles)))
+		b.WriteString(fmt.Sprintf("Key Files:\n%s\n\n", indent(escapeLines(info.KeyFiles))))
 	}
 
 	if len(info.Specs) > 0 {
 		b.WriteString("Specs:\n")
 		for _, s := range info.Specs {
-			b.WriteString(fmt.Sprintf("  - %s\n", s))
+			b.WriteString(fmt.Sprintf("  - %s\n", idrender.Spec(s)))
 		}
 		b.WriteString("\n")
 	}
 
 	return b.String()
+}
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-writable text, preserving the real newlines
+// that separate genuine lines (R4: per-line escaping for line-oriented
+// bodies, never per-message, so a hostile line cannot forge additional
+// lines while legitimate multi-line structure survives). Mirrors
+// internal/adr's escapeLines (no shared package; the helper is tiny and
+// duplicated per-package by existing convention).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // FormatJSON formats a DomainInfo as indented JSON.

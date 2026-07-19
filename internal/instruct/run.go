@@ -8,6 +8,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -230,12 +231,17 @@ func handleNoState(cache *phase.Cache, root, format string, out io.Writer) error
 }
 
 // handleAmbiguous renders the ambiguous template listing all active specs.
+//
+// R4: SpecID is idrender'd here, at the template-data-prep site, rather
+// than in the template itself — ambiguous.md renders {{.SpecID}} raw, so
+// the escaping MUST happen before it lands in the struct (byte-identical
+// for a genuine spec ID; forced through strconv.Quote for a malformed one).
 func handleAmbiguous(cache *phase.Cache, root, format string, out io.Writer, ambErr *resolve.ErrAmbiguousTarget) error {
 	mc := &state.Focus{Mode: "ambiguous"}
 	ctx := BuildContextWithCache(cache, root, mc)
 	for _, s := range ambErr.Active {
 		ctx.ActiveSpecList = append(ctx.ActiveSpecList, SpecInfo{
-			SpecID: s.SpecID,
+			SpecID: idrender.Spec(s.SpecID),
 			Mode:   s.Mode,
 		})
 	}

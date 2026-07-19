@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -467,7 +468,10 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 	for _, cite := range citations {
 		a, err := store.Get(cite.ID)
 		if err != nil {
-			r.AddError("adr-cite-missing", fmt.Sprintf("cited ADR %s does not exist", cite.ID))
+			// cite.ID is a plan.md `adr_citations` entry — agent-authored
+			// YAML, not spine-validated before this render (spec 120 R4,
+			// same class as spec.go:285's ADR Touchpoints reference).
+			r.AddError("adr-cite-missing", fmt.Sprintf("cited ADR %s does not exist", termsafe.Escape(cite.ID)))
 			continue
 		}
 
@@ -480,20 +484,27 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 		if len(impactedDomains) > 0 {
 			overlap := intersectFold(a.Domains, impactedDomains)
 			if len(overlap) == 0 {
-				r.AddError("adr-cite-irrelevant", fmt.Sprintf("cited ADR %s declares domains %v which do not intersect spec impacted domains %v", cite.ID, a.Domains, impactedDomains))
+				// R4: cite.ID is agent-authored (see above); a.Domains /
+				// impactedDomains are domain-name lists, not ID strings,
+				// and are out of this render-audit's ID-render scope.
+				r.AddError("adr-cite-irrelevant", fmt.Sprintf("cited ADR %s declares domains %v which do not intersect spec impacted domains %v", termsafe.Escape(cite.ID), a.Domains, impactedDomains))
 				irrelevant = true
 			}
 		}
 
 		if !irrelevant && strings.EqualFold(a.Status, "Superseded") {
-			msg := fmt.Sprintf("cited ADR %s is Superseded", cite.ID)
+			// R4: cite.ID agent-authored (see above); a.SupersededBy is
+			// the target ADR's OWN frontmatter pointer — also
+			// agent-authored free text, not spine-validated here.
+			msg := fmt.Sprintf("cited ADR %s is Superseded", termsafe.Escape(cite.ID))
 			if a.SupersededBy != "" {
-				msg += fmt.Sprintf(" (see %s)", a.SupersededBy)
+				msg += fmt.Sprintf(" (see %s)", termsafe.Escape(a.SupersededBy))
 			}
 			r.AddWarning("adr-cite-superseded", msg)
 		}
 		if !irrelevant && strings.EqualFold(a.Status, "Proposed") {
-			r.AddWarning("adr-cite-proposed", fmt.Sprintf("cited ADR %s has status Proposed — consider accepting it first", cite.ID))
+			// R4: cite.ID agent-authored (see above).
+			r.AddWarning("adr-cite-proposed", fmt.Sprintf("cited ADR %s has status Proposed — consider accepting it first", termsafe.Escape(cite.ID)))
 		}
 	}
 }
@@ -539,7 +550,10 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 				r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; run: mindspec adr create --domain %s", d, d))
 			}
 		case coveredProposedOnly:
-			r.AddWarning("adr-coverage-proposed", fmt.Sprintf("impacted domain %q is covered only by Proposed ADR %s — flip it to Accepted after the implementation ships", d, proposedID))
+			// R4: proposedID is a.ID (ParseADR's filename-basename-
+			// derived ADR ID — agent-writable, not spine-validated) —
+			// escape before render.
+			r.AddWarning("adr-coverage-proposed", fmt.Sprintf("impacted domain %q is covered only by Proposed ADR %s — flip it to Accepted after the implementation ships", d, termsafe.Escape(proposedID)))
 		}
 	}
 }
@@ -722,12 +736,19 @@ func walkSupersededChain(store adr.Store, startID string) (string, error) {
 	current := startID
 	for hops := 0; hops <= maxLen; hops++ {
 		if _, seen := visited[current]; seen {
-			return "", fmt.Errorf("adr-supersede-cycle: chain re-visits %s starting from %s", current, startID)
+			// R4: current/startID walk the agent-authored SupersededBy
+			// chain (each hop's `next` comes straight from another ADR's
+			// frontmatter pointer, never spine-validated) — this error's
+			// .Error() string is later surfaced verbatim via r.AddError
+			// in coverageOf, so escape both operands here at the source
+			// rather than at every downstream render site.
+			return "", fmt.Errorf("adr-supersede-cycle: chain re-visits %s starting from %s", termsafe.Escape(current), termsafe.Escape(startID))
 		}
 		visited[current] = struct{}{}
 		a, err := store.Get(current)
 		if err != nil {
-			return "", fmt.Errorf("adr-supersede-chain-broken: cannot resolve %s: %w", current, err)
+			// R4: current is agent-authored (see above).
+			return "", fmt.Errorf("adr-supersede-chain-broken: cannot resolve %s: %w", termsafe.Escape(current), err)
 		}
 		next := strings.TrimSpace(a.SupersededBy)
 		if next == "" {
@@ -735,7 +756,8 @@ func walkSupersededChain(store adr.Store, startID string) (string, error) {
 		}
 		current = next
 	}
-	return "", fmt.Errorf("adr-supersede-chain-too-long: chain from %s exceeds %d hops", startID, maxLen)
+	// R4: startID is agent-authored (see above).
+	return "", fmt.Errorf("adr-supersede-chain-too-long: chain from %s exceeds %d hops", termsafe.Escape(startID), maxLen)
 }
 
 // loadImpactedDomains reads spec.md from specDir and returns the parsed
@@ -812,16 +834,21 @@ func checkBeadSection(r *Result, bs BeadSection) {
 	// **Steps** heading but zero numbered items is malformed. The lower bound
 	// `< 3` (previously an error) is demoted to a warning to match the existing
 	// `> 7` upper-bound warning — symmetric advisory signal, not a hard gate.
+	// bs.Heading is parsed verbatim from a `## ` line in the agent-authored
+	// plan.md — agent-writable free text that reaches the terminal via
+	// Result.FormatText — so it is escaped at every interpolation site
+	// below (spec 120 R4).
+	heading := termsafe.Escape(bs.Heading)
 	if bs.StepsCount == 0 {
-		r.AddError("bead-steps", fmt.Sprintf("%s: missing steps (no numbered items under **Steps**)", bs.Heading))
+		r.AddError("bead-steps", fmt.Sprintf("%s: missing steps (no numbered items under **Steps**)", heading))
 	} else if bs.StepsCount < 3 {
-		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", bs.Heading, bs.StepsCount))
+		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", heading, bs.StepsCount))
 	} else if bs.StepsCount > 7 {
-		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", bs.Heading, bs.StepsCount))
+		r.AddWarning("bead-steps", fmt.Sprintf("%s: has %d steps (recommended 3-7)", heading, bs.StepsCount))
 	}
 
 	if !bs.HasVerify || bs.VerifyCount == 0 {
-		r.AddError("bead-verification", fmt.Sprintf("%s: missing verification steps", bs.Heading))
+		r.AddError("bead-verification", fmt.Sprintf("%s: missing verification steps", heading))
 	}
 
 	// Verification *quality* (is it concrete? is it testable?) is delegated to
@@ -835,11 +862,11 @@ func checkBeadSection(r *Result, bs BeadSection) {
 	// Spec 080: per-bead acceptance criteria is a structural requirement (error, not warning).
 	// Applies regardless of approval status — plans must always have per-bead AC.
 	if bs.AcceptanceCriteria == "" {
-		r.AddError("bead-acceptance-criteria", fmt.Sprintf("%s: missing per-bead acceptance criteria — each bead must have an **Acceptance Criteria** section", bs.Heading))
+		r.AddError("bead-acceptance-criteria", fmt.Sprintf("%s: missing per-bead acceptance criteria — each bead must have an **Acceptance Criteria** section", heading))
 	}
 
 	if !bs.HasDependsOn {
-		r.AddWarning("bead-depends", fmt.Sprintf("%s: no 'Depends on' declaration", bs.Heading))
+		r.AddWarning("bead-depends", fmt.Sprintf("%s: no 'Depends on' declaration", heading))
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
@@ -58,6 +60,23 @@ func classifyDirty(paths []string) (artifactDirt, userDirt []string) {
 		}
 	}
 	return
+}
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — a wrapped bd/git error
+// message — while preserving the real newlines that separate genuine
+// lines (R4: per-line escaping for line-oriented bodies, never
+// per-message, so a hostile line cannot forge additional lines while
+// legitimate multi-line structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func isArtifactPath(p string) bool {
@@ -140,7 +159,10 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 	var b strings.Builder
 	b.WriteString("cannot claim work: the working tree has uncommitted user changes:\n")
 	for _, p := range userDirt {
-		fmt.Fprintf(&b, "  %s\n", p)
+		// R4: each porcelain entry is an agent-writable filename — escape
+		// per-line so a hostile filename cannot forge extra lines or
+		// control bytes into the terminal-facing message.
+		fmt.Fprintf(&b, "  %s\n", termsafe.Escape(p))
 	}
 	b.WriteString("these may be the user's work in progress — do NOT stash, discard, or commit them on the user's behalf\n")
 	b.WriteString("(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)\n")
@@ -173,11 +195,18 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 // and the bead title carried no spec slug; the recipe then falls back
 // to placeholders and a plain `mindspec next` re-run.
 func ClaimFailure(root string, cfg *config.Config, beadID, specID string, claimErr error) error {
+	// R4: beadID/specID are ID-typed positions (idrender.Bead/idrender.Spec);
+	// claimErr can carry agent-influenced bd porcelain/error text, so it is
+	// escaped per-line. workspace.BeadBranch/specBranchOrPlaceholder emit
+	// spine-validated `bead/<id>`/`spec/<id>` branch operands, which stay
+	// RAW; specWorktreeOrPlaceholder/nestedBeadWorktreeRel are the `git -C`
+	// path operands of a copy-paste recipe (same convention as the cd
+	// emitter), also RAW.
 	var b strings.Builder
-	fmt.Fprintf(&b, "claiming bead %s: %v\n", beadID, claimErr)
+	fmt.Fprintf(&b, "claiming bead %s: %s\n", idrender.Bead(beadID), escapeLines(fmt.Sprintf("%v", claimErr)))
 	b.WriteString("if this is a bd event-recording failure (e.g. Dolt Error 1105 on large\n")
 	b.WriteString("descriptions), claim manually:\n")
-	fmt.Fprintf(&b, "  bd update %s --claim --status in_progress\n", beadID)
+	fmt.Fprintf(&b, "  bd update %s --claim --status in_progress\n", idrender.Bead(beadID))
 	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
 		specWorktreeOrPlaceholder(root, cfg, specID),
 		nestedBeadWorktreeRel(cfg, beadID),
@@ -188,7 +217,7 @@ func ClaimFailure(root string, cfg *config.Config, beadID, specID string, claimE
 			"mindspec next   (re-run to auto-recover the worktree)")
 	}
 	return guard.NewFailure(b.String(),
-		fmt.Sprintf("mindspec next --spec %s   (re-run to auto-recover the worktree)", specID))
+		fmt.Sprintf("mindspec next --spec %s   (re-run to auto-recover the worktree)", idrender.Spec(specID)))
 }
 
 // WorktreeSetupFailure formats the worktree-setup-failure recipe
@@ -205,9 +234,12 @@ func ClaimFailure(root string, cfg *config.Config, beadID, specID string, claimE
 // print the formatted failure to stderr — only the message routes
 // through guard.NewFailure (HC-5).
 func WorktreeSetupFailure(root string, cfg *config.Config, beadID, specID string, wtErr error) error {
+	// R4: beadID/specID are ID-typed positions (idrender.Bead/idrender.Spec);
+	// wtErr can carry agent-influenced text, so it is escaped per-line —
+	// same convention as ClaimFailure above.
 	var b strings.Builder
-	fmt.Fprintf(&b, "worktree setup failed: %v\n", wtErr)
-	fmt.Fprintf(&b, "bead %s is claimed but has no worktree — create it manually:\n", beadID)
+	fmt.Fprintf(&b, "worktree setup failed: %s\n", escapeLines(fmt.Sprintf("%v", wtErr)))
+	fmt.Fprintf(&b, "bead %s is claimed but has no worktree — create it manually:\n", idrender.Bead(beadID))
 	fmt.Fprintf(&b, "  git -C %s worktree add %s -b %s %s",
 		specWorktreeOrPlaceholder(root, cfg, specID),
 		nestedBeadWorktreeRel(cfg, beadID),
@@ -218,7 +250,7 @@ func WorktreeSetupFailure(root string, cfg *config.Config, beadID, specID string
 			"mindspec next   (re-run detects the in-progress bead and auto-recovers the worktree)")
 	}
 	return guard.NewFailure(b.String(),
-		fmt.Sprintf("mindspec next --spec %s   (re-run detects the in-progress bead and auto-recovers the worktree)", specID))
+		fmt.Sprintf("mindspec next --spec %s   (re-run detects the in-progress bead and auto-recovers the worktree)", idrender.Spec(specID)))
 }
 
 // specWorktreeOrPlaceholder interpolates the spec worktree path for the

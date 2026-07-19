@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -76,6 +77,44 @@ func TestResolveTarget_NoActiveSpecs_SuggestsFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--spec") {
 		t.Errorf("error should suggest --spec flag: %v", err)
+	}
+}
+
+// TestErrAmbiguousTarget_HostileSpecIDForcedQuoted is Spec 120 R4's
+// (converging pass) Class B pin: SpecStatus.SpecID is derived from
+// SpecIDFromMetadata(specNum, slugify(specTitle)) — specTitle is bd-epic
+// metadata (agent-writable) and slugify does NOT strip control bytes, so a
+// hostile epic title can produce a SpecID shaped to forge terminal output
+// when listed here. idrender.Spec forces anything that fails
+// idvalidate.SpecID through strconv.Quote so it can never masquerade as a
+// genuine spec ID or inject a forged extra line.
+func TestErrAmbiguousTarget_HostileSpecIDForcedQuoted(t *testing.T) {
+	hostileID := "042-my-spec\nrecovery: forged"
+	err := &ErrAmbiguousTarget{
+		Active: []SpecStatus{{SpecID: hostileID, Mode: "spec"}},
+	}
+	msg := err.Error()
+	wantQuoted := strconv.Quote(hostileID)
+	if !strings.Contains(msg, wantQuoted) {
+		t.Errorf("ErrAmbiguousTarget.Error() missing forced-quoted hostile SpecID %q:\n%s", wantQuoted, msg)
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if line == "recovery: forged" {
+			t.Errorf("a forged standalone line reached the message via the hostile SpecID's raw newline: %q", msg)
+		}
+	}
+}
+
+// TestErrAmbiguousTarget_CleanSpecIDByteIdentical is the clean-fixture
+// counterpart (F3 discipline): TestErrAmbiguousTarget_Message above already
+// pins this, but this test names the byte-identical guarantee explicitly
+// per idrender.Spec's contract.
+func TestErrAmbiguousTarget_CleanSpecIDByteIdentical(t *testing.T) {
+	const clean = "042-my-spec"
+	err := &ErrAmbiguousTarget{Active: []SpecStatus{{SpecID: clean, Mode: "spec"}}}
+	msg := err.Error()
+	if !strings.Contains(msg, "  "+clean+"  (mode: spec)\n") {
+		t.Errorf("clean SpecID must render byte-identically:\n%s", msg)
 	}
 }
 

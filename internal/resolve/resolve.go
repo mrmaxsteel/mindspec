@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
@@ -80,7 +81,7 @@ func FormatActiveList(specs []SpecStatus) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Active specs (%d):\n", len(specs)))
 	for _, s := range specs {
-		sb.WriteString(fmt.Sprintf("  %s  phase=%s\n", s.SpecID, s.Mode))
+		sb.WriteString(fmt.Sprintf("  %s  phase=%s\n", idrender.Spec(s.SpecID), s.Mode))
 	}
 	return sb.String()
 }

@@ -13,9 +13,27 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
+
+// escapeLines applies termsafe.Escape to each line of a (possibly
+// multi-line) block of agent-influenced text — porcelain output, git
+// error text, conflicted-file lists — while preserving the real newlines
+// that separate genuine lines (R4: per-line escaping for line-oriented
+// bodies, never per-message, so a hostile line cannot forge additional
+// lines while legitimate multi-line structure survives).
+func escapeLines(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = termsafe.Escape(l)
+	}
+	return strings.Join(lines, "\n")
+}
 
 // checkWorktreeContainment is the shared check-at-use gate (ADR-0042 §4,
 // AC-11) every composed-worktree-path create/chdir/mkdir site in this
@@ -881,7 +899,10 @@ func (g *MindspecExecutor) IsTreeClean(path string) error {
 		return fmt.Errorf("checking worktree status: %w", err)
 	}
 	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("workspace has uncommitted changes:\n%s", strings.TrimSpace(out))
+		// R4: each porcelain line names an agent-writable file path —
+		// escape per-line so a hostile filename cannot forge extra lines
+		// or control bytes into the terminal-facing message.
+		return fmt.Errorf("workspace has uncommitted changes:\n%s", escapeLines(strings.TrimSpace(out)))
 	}
 	return nil
 }
@@ -1239,13 +1260,21 @@ func abortMergeState(workdir string) (conflicted []string, note string) {
 func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string, mergeErr error) error {
 	conflicted, note := abortMergeState(specWtPath)
 	var b strings.Builder
-	fmt.Fprintf(&b, "merge conflict: could not merge %s into %s: %v", beadBranch, specBranch, mergeErr)
+	// R4: beadBranch/specBranch are the waist-validated branch operands —
+	// stay RAW. mergeErr is git-produced error text, conflicted entries
+	// are agent-writable filenames, and note may embed a git error —
+	// each escaped per-line.
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into %s: %s", beadBranch, specBranch, escapeLines(fmt.Sprint(mergeErr)))
 	if len(conflicted) > 0 {
-		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+		escaped := make([]string, len(conflicted))
+		for i, f := range conflicted {
+			escaped[i] = termsafe.Escape(f)
+		}
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(escaped, "\n  "))
 	}
 	if note != "" {
 		b.WriteString("\n")
-		b.WriteString(note)
+		b.WriteString(escapeLines(note))
 	}
 	fmt.Fprintf(&b, "\nnothing was removed: the %s branch, its worktree, and the spec worktree are preserved.", beadBranch)
 	fmt.Fprintf(&b, "\nresolve in the spec worktree (%s): re-run the merge there, fix the conflicts, commit the merge, then re-run the lifecycle command", specWtPath)
@@ -1265,13 +1294,20 @@ func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string,
 func directMergeConflictFailure(root, specBranch string, mergeErr error) error {
 	conflicted, note := abortMergeState(root)
 	var b strings.Builder
-	fmt.Fprintf(&b, "merge conflict: could not merge %s into main: %v", specBranch, mergeErr)
+	// R4: specBranch is the waist-validated branch operand — stays RAW.
+	// mergeErr, conflicted entries, and note are escaped per-line (see
+	// beadToSpecConflictFailure above for the same discipline).
+	fmt.Fprintf(&b, "merge conflict: could not merge %s into main: %s", specBranch, escapeLines(fmt.Sprint(mergeErr)))
 	if len(conflicted) > 0 {
-		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(conflicted, "\n  "))
+		escaped := make([]string, len(conflicted))
+		for i, f := range conflicted {
+			escaped[i] = termsafe.Escape(f)
+		}
+		fmt.Fprintf(&b, "\nconflicted files:\n  %s", strings.Join(escaped, "\n  "))
 	}
 	if note != "" {
 		b.WriteString("\n")
-		b.WriteString(note)
+		b.WriteString(escapeLines(note))
 	}
 	fmt.Fprintf(&b, "\nmain is clean and the %s branch is preserved (branch deletion was skipped).", specBranch)
 	fmt.Fprintf(&b, "\nresolve at the repo root: re-run the merge there, fix the conflicts, commit the merge, then delete the branch with `git branch -d %s`", specBranch)

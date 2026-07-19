@@ -6,6 +6,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +62,7 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 	if len(result.BeadIDs) > 0 {
 		fmt.Printf("Created %d implementation beads:\n", len(result.BeadIDs))
 		for _, id := range result.BeadIDs {
-			fmt.Printf("  - %s\n", id)
+			fmt.Printf("  - %s\n", idrender.Bead(id))
 		}
 	} else {
 		fmt.Println("WARNING: No implementation beads were created.")

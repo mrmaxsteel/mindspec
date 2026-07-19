@@ -19,6 +19,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -52,7 +53,12 @@ type Orphan struct {
 }
 
 // RecoveryCommand is the converging re-run that clears the orphaned state.
-func (o Orphan) RecoveryCommand() string { return "mindspec complete " + o.BeadID }
+// The bead ID is rendered via idrender.Bead: byte-identical for a
+// genuine, waist-valid bead ID, but forced through strconv.Quote for a
+// malformed-but-printable value so this display/copy-paste surface can
+// never be mistaken for — or forge output around — a real recovery
+// command (R4 display-forgery sweep, spec 120).
+func (o Orphan) RecoveryCommand() string { return "mindspec complete " + idrender.Bead(o.BeadID) }
 
 // ClosedEpicBeadIDs returns the ids of every closed bead under specID's epic
 // — the SAME `bd list --parent <epic> --status=closed` enumeration

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // Severity levels for validation issues.
@@ -86,7 +88,15 @@ func (r *Result) FormatText() string {
 	b.WriteString(fmt.Sprintf("%s: %d issue(s) found\n\n", target, len(r.Issues)))
 
 	for _, issue := range r.Issues {
-		b.WriteString(fmt.Sprintf("  [%s] %s: %s\n", issue.Severity, issue.Name, issue.Message))
+		// R4 (spec 120): issue.Message is the terminal-facing choke point for
+		// every validator. Individual validators interpolate agent-writable
+		// values (on-disk domain-dir basenames, plan/ADR YAML entries, bd
+		// metadata); several escape at the source, but termsafe.Escape here
+		// is the by-construction backstop so NO validator can forge a
+		// terminal line through this render. Escape is byte-identical for the
+		// (always single-line, printable) genuine messages and only quotes a
+		// control-bearing one — it never double-escapes already-safe content.
+		b.WriteString(fmt.Sprintf("  [%s] %s: %s\n", issue.Severity, issue.Name, termsafe.Escape(issue.Message)))
 	}
 
 	return b.String()

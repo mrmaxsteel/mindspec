@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -50,18 +51,32 @@ type SpecInfo struct {
 
 // Context holds all data needed to render guidance.
 type Context struct {
-	Mode             string     `json:"mode"`
-	ActiveSpec       string     `json:"active_spec"`
-	ActiveBead       string     `json:"active_bead"`
-	ActiveWorktree   string     `json:"active_worktree"`
-	InWorktree       bool       `json:"in_worktree,omitempty"`
-	SpecGoal         string     `json:"spec_goal,omitempty"`
-	PlanApproved     bool       `json:"plan_approved,omitempty"`
-	AvailableSpecs   []string   `json:"available_specs,omitempty"`
-	ActiveSpecList   []SpecInfo `json:"active_spec_list,omitempty"`
-	BeadPrimer       string     `json:"bead_primer,omitempty"`
-	BranchProtection bool       `json:"branch_protection,omitempty"`
-	Warnings         []string   `json:"warnings,omitempty"`
+	Mode       string `json:"mode"`
+	ActiveSpec string `json:"active_spec"`
+	ActiveBead string `json:"active_bead"`
+	// ActiveWorktree stays RAW (never escaped): templates/implement.md
+	// pipes it through the `shellsafe` template func to build the
+	// executable `cd {{.ActiveWorktree | shellsafe}}` operand (R5,
+	// containment.ShellSafe / ADR-0042 §4). Escaping this field would
+	// double-transform that operand (termsafe.Escape's quoting is not
+	// what shellsafe expects) and break the emitted cd line. Use
+	// ActiveWorktreeDisplay for the display-only line instead (R4
+	// cluster 1 round-5).
+	ActiveWorktree string `json:"active_worktree"`
+	// ActiveWorktreeDisplay is the termsafe-escaped copy of
+	// ActiveWorktree for the display-only "Active Worktree" line
+	// (templates/implement.md:35) — the single field the DISPLAY
+	// position renders, kept separate from the RAW cd-operand field
+	// above (R4 cluster 1 round-5).
+	ActiveWorktreeDisplay string     `json:"active_worktree_display,omitempty"`
+	InWorktree            bool       `json:"in_worktree,omitempty"`
+	SpecGoal              string     `json:"spec_goal,omitempty"`
+	PlanApproved          bool       `json:"plan_approved,omitempty"`
+	AvailableSpecs        []string   `json:"available_specs,omitempty"`
+	ActiveSpecList        []SpecInfo `json:"active_spec_list,omitempty"`
+	BeadPrimer            string     `json:"bead_primer,omitempty"`
+	BranchProtection      bool       `json:"branch_protection,omitempty"`
+	Warnings              []string   `json:"warnings,omitempty"`
 	// PanelState is the rendered open-panel-rounds block (Spec 093
 	// Req 14). Empty when no panel is registered — Render appends
 	// nothing, preserving the zero-cost-when-no-panel contract (Req 15).
@@ -101,11 +116,24 @@ func BuildContext(root string, mc *state.Focus) *Context {
 
 // BuildContextWithCache is the cache-aware variant of BuildContext.
 func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Context {
+	// R4 cluster 1 round-5: this is the SINGLE template-data-prep seam
+	// for the single-active/normal instruct path (run.go's Run,
+	// handleNoState, handleAmbiguous's base ctx, and
+	// cmd/mindspec/instruct_tail.go all funnel through here) — the
+	// mirror of the already-fixed ambiguous-path seam (run.go's
+	// handleAmbiguous, which idrender's each SpecInfo.SpecID after this
+	// call returns). ActiveSpec/ActiveBead are ID-typed positions
+	// (idrender.Spec/idrender.Bead — byte-identical for a genuine ID,
+	// forced-quoted otherwise, matching internal/validate/beads.go's
+	// checkBeadIDs treatment of the same untrusted-provenance class).
+	// ActiveWorktree stays RAW here (see the field doc above); only its
+	// display copy is escaped.
 	ctx := &Context{
-		Mode:           mc.Mode,
-		ActiveSpec:     mc.ActiveSpec,
-		ActiveBead:     mc.ActiveBead,
-		ActiveWorktree: mc.ActiveWorktree,
+		Mode:                  mc.Mode,
+		ActiveSpec:            idrender.Spec(mc.ActiveSpec),
+		ActiveBead:            idrender.Bead(mc.ActiveBead),
+		ActiveWorktree:        mc.ActiveWorktree,
+		ActiveWorktreeDisplay: termsafe.Escape(mc.ActiveWorktree),
 	}
 
 	// Check if CWD matches the active worktree
@@ -151,7 +179,10 @@ func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Contex
 	// Run cross-validation and collect warnings
 	warnings := validate.CrossValidate(root, mc)
 	for _, w := range warnings {
-		ctx.Warnings = append(ctx.Warnings, fmt.Sprintf("[%s] %s", w.Field, w.Message))
+		// R4: w.Message may embed an agent-writable value (e.g. a
+		// malformed activeSpec ID surfaced via an error string) — escape
+		// per-line so it can never forge extra warning lines.
+		ctx.Warnings = append(ctx.Warnings, fmt.Sprintf("[%s] %s", w.Field, termsafe.Escape(w.Message)))
 	}
 	if mc.Mode == state.ModeImplement && mc.ActiveBead != "" && mc.ActiveWorktree == "" {
 		ctx.Warnings = append(ctx.Warnings, "[worktree] no active implement worktree is set. Run `mindspec next` before coding or committing.")

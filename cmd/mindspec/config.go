@@ -541,7 +541,7 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 		if note == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "panel %s: %s\n", reg.Slug(), note)
+		fmt.Fprintf(&b, "panel %s: %s\n", termsafe.Escape(reg.Slug()), note)
 	}
 	return b.String()
 }

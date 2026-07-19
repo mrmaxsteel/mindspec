@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -570,7 +572,12 @@ func CheckSpecNumberCollision(specNum int) error {
 	for _, epic := range epics {
 		num, _ := ExtractSpecMetadata(epic)
 		if num == specNum {
-			return fmt.Errorf("spec number %03d is already in use by epic %s (%s)", specNum, epic.ID, epic.Title)
+			// epic.ID/epic.Title are bd-sourced and agent-writable (an
+			// epic's title can be edited via `bd update`); this error
+			// reaches the terminal raw via cobra's default unhandled-
+			// error printer, so escape both before interpolation
+			// (spec 120 R4).
+			return fmt.Errorf("spec number %03d is already in use by epic %s (%s)", specNum, idrender.Bead(epic.ID), termsafe.Escape(epic.Title))
 		}
 	}
 
@@ -735,7 +742,7 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 	if len(items) == 0 {
 		// The show succeeded and definitively answered "no such bead" —
 		// a genuine no-lineage result, not an infra failure.
-		return "", "", fmt.Errorf("bead %s not found: %w", beadID, ErrNoEpicLineage)
+		return "", "", fmt.Errorf("bead %s not found: %w", idrender.Bead(beadID), ErrNoEpicLineage)
 	}
 
 	// Try to find the parent epic via dependencies
@@ -746,7 +753,7 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 				// A real epic-lookup failure must propagate — skipping it
 				// (the pre-final-review behavior) silently reclassified a
 				// transient bd/Dolt error as "no lineage".
-				return "", "", fmt.Errorf("resolving parent epic %s for bead %s: %w", dep.ID, beadID, epicErr)
+				return "", "", fmt.Errorf("resolving parent epic %s for bead %s: %w", idrender.Bead(dep.ID), idrender.Bead(beadID), epicErr)
 			}
 			if epic != nil {
 				num, title := ExtractSpecMetadata(*epic)

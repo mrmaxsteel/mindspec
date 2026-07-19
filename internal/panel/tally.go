@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // Canonical verdict strings as written by panel reviewers
@@ -277,7 +279,9 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 		if reason == "" {
 			reason = "(no abandon_reason recorded)"
 		}
-		return VoteAbandoned, fmt.Sprintf("round %d abandoned: %s", round, reason)
+		// R4: AbandonReason is agent-writable free text from panel.json —
+		// escape before rendering.
+		return VoteAbandoned, fmt.Sprintf("round %d abandoned: %s", round, termsafe.Escape(reason))
 	}
 	n := p.ExpectedReviewers
 	if r.RoundMismatch {
@@ -293,7 +297,9 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 	if unresolved := r.UnresolvedVerdicts(); len(unresolved) > 0 {
 		slots := make([]string, len(unresolved))
 		for i, v := range unresolved {
-			slots[i] = v.Slot
+			// R4: Slot is derived from a reviewer verdict filename —
+			// escape per-entry.
+			slots[i] = termsafe.Escape(v.Slot)
 		}
 		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE, threshold is %d/%d",
 			round, strings.Join(slots, ", "), r.Approves, n, threshold, n)
