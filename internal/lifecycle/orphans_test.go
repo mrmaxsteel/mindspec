@@ -312,3 +312,120 @@ func TestOrphan_RecoveryCommand_CleanBeadIDByteIdentical(t *testing.T) {
 		t.Errorf("RecoveryCommand() for clean id %q = %q, want byte-identical %q", clean, got, want)
 	}
 }
+
+// --- Spec 121 R6(a) (mindspec-tpjn, ADR-0041 §2(i)): IsBeadSelfOrphaned ---
+
+// TestIsBeadSelfOrphaned_Orphaned mirrors
+// TestFindOrphanedClosedBeads_Orphaned's trigger+confirmation shape
+// (closed + branch exists + NOT ancestor) but as a single-bead answer:
+// true.
+func TestIsBeadSelfOrphaned_Orphaned(t *testing.T) {
+	stubPredicate(t, "epic-1",
+		[]string{"bead-1"},
+		map[string]bool{"bead/bead-1": true},
+		map[string]bool{}, // not an ancestor
+	)
+
+	got, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got {
+		t.Error("expected bead-1 to be reported self-orphaned")
+	}
+}
+
+// TestIsBeadSelfOrphaned_NotClosed: a bead absent from the epic's
+// closed-bead list (the normal in-progress case) is never self-orphaned,
+// regardless of what its branch looks like.
+func TestIsBeadSelfOrphaned_NotClosed(t *testing.T) {
+	stubPredicate(t, "epic-1",
+		[]string{"bead-other"}, // bead-1 is NOT in the closed list
+		map[string]bool{"bead/bead-1": true},
+		map[string]bool{},
+	)
+
+	got, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("expected a bead absent from the closed list to be reported NOT self-orphaned")
+	}
+}
+
+// TestIsBeadSelfOrphaned_BenignMergedUndeleted mirrors
+// TestFindOrphanedClosedBeads_BenignMergedUndeleted: closed + branch
+// exists + IS an ancestor is the benign merged-but-undeleted state, not
+// self-orphaned.
+func TestIsBeadSelfOrphaned_BenignMergedUndeleted(t *testing.T) {
+	stubPredicate(t, "epic-1",
+		[]string{"bead-1"},
+		map[string]bool{"bead/bead-1": true},
+		map[string]bool{"bead/bead-1": true}, // IS an ancestor
+	)
+
+	got, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("expected the benign merged-but-undeleted state to be reported NOT self-orphaned")
+	}
+}
+
+// TestIsBeadSelfOrphaned_NoBranch: closed but with no surviving branch at
+// all is cleanly completed, not an orphan.
+func TestIsBeadSelfOrphaned_NoBranch(t *testing.T) {
+	stubPredicate(t, "epic-1",
+		[]string{"bead-1"},
+		map[string]bool{}, // branch does not exist
+		map[string]bool{},
+	)
+
+	got, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("expected a closed bead with no surviving branch to be reported NOT self-orphaned")
+	}
+}
+
+// TestIsBeadSelfOrphaned_AncestryErrorPropagates: an infra/ancestry-check
+// error is PROPAGATED, never swallowed to false — the caller (complete's
+// step-1.6 preflight) is the one that must treat a propagated error as
+// NOT self-orphaned and retain its refusal; this predicate itself must
+// never silently guess.
+func TestIsBeadSelfOrphaned_AncestryErrorPropagates(t *testing.T) {
+	stubPredicate(t, "epic-1",
+		[]string{"bead-1"},
+		map[string]bool{"bead/bead-1": true},
+		map[string]bool{},
+	)
+	origAnc := isAncestorFn
+	t.Cleanup(func() { isAncestorFn = origAnc })
+	isAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+		return false, errors.New("simulated ancestry-check infra failure")
+	}
+
+	_, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err == nil {
+		t.Fatal("expected the ancestry-check error to propagate, not be swallowed to false")
+	}
+}
+
+// TestIsBeadSelfOrphaned_EpicLookupErrorPropagates: an epic/bd-list
+// failure (surfaced through ClosedEpicBeadIDs) also propagates.
+func TestIsBeadSelfOrphaned_EpicLookupErrorPropagates(t *testing.T) {
+	origEpic := findEpicBySpecIDFn
+	t.Cleanup(func() { findEpicBySpecIDFn = origEpic })
+	findEpicBySpecIDFn = func(specID string) (string, error) {
+		return "", errors.New("simulated epic lookup failure")
+	}
+
+	_, err := IsBeadSelfOrphaned("008-test", ".", "bead-1")
+	if err == nil {
+		t.Fatal("expected the epic-lookup error to propagate")
+	}
+}

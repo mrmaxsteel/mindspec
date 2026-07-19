@@ -8,8 +8,11 @@ package complete
 // hid the inconsistency.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -174,5 +177,221 @@ func TestRun_CompleteBeadPlainFailureGainsRecoveryLine(t *testing.T) {
 	// B9: the final recovery command is never a banned (Req 19) command.
 	if cmd := finalRecoveryCommand(t, msg); guard.IsBannedRecoveryCommand(cmd) {
 		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
+}
+
+// --- Spec 121 R6 (mindspec-tpjn): orphan-preflight convergence (ADR-0041 §2(i)) ---
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// whatever fn wrote to it. The step-1.6 WARN-demotion prints via
+// fmt.Printf (stdout), mirroring the existing "Warning: bead ... already
+// closed" line (complete.go step 4) — captureStderr (above, this
+// package) exists for the stderr-writing seams; this is its stdout twin.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = orig
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return buf.String()
+}
+
+// runOrphanFixture runs complete.Run for beadID against a minimal happy
+// path (no worktree, no next-ready bead) with the orphan-preflight seams
+// stubbed as given, and reports whether the bead was closed (i.e. the run
+// PROCEEDED past step 1.6) plus everything Run printed to stdout.
+func runOrphanFixture(t *testing.T, specID, beadID string, otherOrphans []lifecycle.Orphan, selfOrphaned func(id string) (bool, error)) (closed bool, gotExclude string, stdout string) {
+	t.Helper()
+	saveAndRestore(t)
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, specID, "mol-parent-1")
+
+	resolveTargetFn = func(r, flag string) (string, error) { return specID, nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
+
+	findOrphanedClosedBeadsFn = func(sid, workdir, excludeBeadID string) []lifecycle.Orphan {
+		gotExclude = excludeBeadID
+		return otherOrphans
+	}
+	isBeadSelfOrphanedFn = func(sid, workdir, id string) (bool, error) {
+		return selfOrphaned(id)
+	}
+
+	var closedID string
+	closeBeadFn = func(ids ...string) error { closedID = ids[0]; return nil }
+
+	var runErr error
+	stdout = captureStdout(t, func() {
+		_, runErr = Run(root, beadID, "", "", newMockExec(), CompleteOpts{})
+	})
+	if runErr == nil {
+		if closedID != beadID {
+			t.Errorf("Run succeeded but never closed %s (closed %q instead)", beadID, closedID)
+		}
+		return true, gotExclude, stdout
+	}
+	if closedID != "" {
+		t.Errorf("Run must not mutate (close) before/without proceeding past the orphan preflight; closed=%q, err=%v", closedID, runErr)
+	}
+	return false, gotExclude, runErr.Error()
+}
+
+// TestRun_MultiOrphanConvergence is AC-13: three mutually-orphaned closed
+// siblings A, B, C. `mindspec complete bead-a` proceeds (recovers A) emitting a
+// WARN naming BOTH B and C; `mindspec complete bead-b` then proceeds (WARN
+// naming C); `mindspec complete bead-c` then proceeds — the whole sequence
+// converges via nothing but `mindspec complete` invocations (ADR-0041
+// §2(i), the WARN-demotion this bead adds). RED on today's `main`: the
+// pre-121 preflight refuses unconditionally on ANY other-orphan finding,
+// so `complete A` here would error instead of proceeding.
+func TestRun_MultiOrphanConvergence(t *testing.T) {
+	// Step 1: complete A. B and C are still orphaned; A is itself the
+	// orphan being recovered.
+	closedA, excludeA, outA := runOrphanFixture(t, "008-test", "bead-a",
+		[]lifecycle.Orphan{
+			{BeadID: "bead-b", BeadBranch: "bead/bead-b", SpecBranch: "spec/008-test"},
+			{BeadID: "bead-c", BeadBranch: "bead/bead-c", SpecBranch: "spec/008-test"},
+		},
+		func(id string) (bool, error) { return id == "bead-a", nil },
+	)
+	if !closedA {
+		t.Fatalf("expected complete A to PROCEED (WARN-demotion); got: %s", outA)
+	}
+	if excludeA != "bead-a" {
+		t.Errorf("exclude arg = %q, want %q", excludeA, "bead-a")
+	}
+	if !strings.Contains(outA, "bead-b") || !strings.Contains(outA, "bead-c") {
+		t.Errorf("expected the WARN to name BOTH B and C; got stdout:\n%s", outA)
+	}
+	if !strings.Contains(strings.ToLower(outA), "warn") {
+		t.Errorf("expected a WARN-level line (demoted from refusal); got stdout:\n%s", outA)
+	}
+
+	// Step 2: complete B. Only C remains orphaned; B is itself the orphan
+	// being recovered.
+	closedB, excludeB, outB := runOrphanFixture(t, "008-test", "bead-b",
+		[]lifecycle.Orphan{
+			{BeadID: "bead-c", BeadBranch: "bead/bead-c", SpecBranch: "spec/008-test"},
+		},
+		func(id string) (bool, error) { return id == "bead-b", nil },
+	)
+	if !closedB {
+		t.Fatalf("expected complete B to PROCEED (WARN-demotion); got: %s", outB)
+	}
+	if excludeB != "bead-b" {
+		t.Errorf("exclude arg = %q, want %q", excludeB, "bead-b")
+	}
+	if !strings.Contains(outB, "bead-c") {
+		t.Errorf("expected the WARN to name C; got stdout:\n%s", outB)
+	}
+
+	// Step 3: complete C. No orphans remain at all — the normal,
+	// unconverged path (findOrphanedClosedBeadsFn returns nil).
+	closedC, _, outC := runOrphanFixture(t, "008-test", "bead-c", nil,
+		func(id string) (bool, error) { return false, nil },
+	)
+	if !closedC {
+		t.Fatalf("expected complete C to proceed with zero orphans remaining; got: %s", outC)
+	}
+}
+
+// TestRun_AllOrphansRefusalNamesEverySibling is AC-14: a NON-orphaned bead
+// C invoked while A and B are both orphaned refuses naming BOTH A and B
+// with the full recovery sequence (not just orphans[0], the pre-121
+// shape) — then, after A and B are completed, `complete C` proceeds. RED
+// on today's `main`: the pre-121 message names only orphans[0] (A), never
+// B.
+func TestRun_AllOrphansRefusalNamesEverySibling(t *testing.T) {
+	closed, exclude, msg := runOrphanFixture(t, "008-test", "bead-c",
+		[]lifecycle.Orphan{
+			{BeadID: "bead-a", BeadBranch: "bead/bead-a", SpecBranch: "spec/008-test"},
+			{BeadID: "bead-b", BeadBranch: "bead/bead-b", SpecBranch: "spec/008-test"},
+		},
+		func(id string) (bool, error) { return false, nil }, // C is NOT itself orphaned
+	)
+	if closed {
+		t.Fatal("expected complete C to be REFUSED — nothing mutated")
+	}
+	if exclude != "bead-c" {
+		t.Errorf("exclude arg = %q, want %q", exclude, "bead-c")
+	}
+	if !strings.Contains(msg, "bead-a") {
+		t.Errorf("refusal must name sibling A; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "bead-b") {
+		t.Errorf("refusal must name sibling B; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec complete bead-a") {
+		t.Errorf("refusal must name A's recovery command; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec complete bead-b") {
+		t.Errorf("refusal must name B's recovery command; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "mindspec complete bead-c") {
+		t.Errorf("refusal must name the converging re-run of C itself; got:\n%s", msg)
+	}
+
+	// After A and B are completed, complete C proceeds (no orphans left).
+	closedC, _, outC := runOrphanFixture(t, "008-test", "bead-c", nil,
+		func(id string) (bool, error) { return false, nil },
+	)
+	if !closedC {
+		t.Fatalf("expected complete C to proceed once A and B are recovered; got: %s", outC)
+	}
+}
+
+// TestRun_SelfOrphanDeterminationErrorRetainsRefusal is the infra-error
+// retention subtest ADR-0041 §2(i) requires: when the self-orphan
+// determination itself ERRORS (an infra/ancestry failure, not a genuine
+// answer), the invoked bead is treated as NOT self-orphaned and the
+// all-orphans refusal is RETAINED — a retryable preflight refusal with
+// NOTHING mutated — never a demotion to WARN on unproven evidence.
+func TestRun_SelfOrphanDeterminationErrorRetainsRefusal(t *testing.T) {
+	determinationErr := errors.New("checking ancestry of bead/bead-a: simulated infra failure")
+
+	tests := []struct {
+		name       string
+		selfAnswer bool
+	}{
+		{"false answer with error", false},
+		// S2-1 (panel MINOR, load-bearing discriminator): the production
+		// gate is `selfErr == nil && selfOrphaned` — a regression that
+		// dropped the `selfErr == nil` half would read THIS true answer
+		// as self-orphaned and wrongly WARN-demote instead of retaining
+		// the refusal. Stubbing (true, err) proves the error check
+		// itself gates the decision, not merely the bool's zero value
+		// (the previous false-only fixture could not distinguish the
+		// two).
+		{"true answer with error", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			closed, _, msg := runOrphanFixture(t, "008-test", "bead-a",
+				[]lifecycle.Orphan{
+					{BeadID: "bead-b", BeadBranch: "bead/bead-b", SpecBranch: "spec/008-test"},
+				},
+				func(id string) (bool, error) { return tc.selfAnswer, determinationErr },
+			)
+			if closed {
+				t.Fatal("expected the refusal to be RETAINED on a determination error — nothing mutated")
+			}
+			if !strings.Contains(msg, "bead-b") {
+				t.Errorf("refusal must still name the orphaned sibling B; got:\n%s", msg)
+			}
+			if !strings.Contains(msg, "mindspec complete bead-b") {
+				t.Errorf("refusal must still carry B's recovery command; got:\n%s", msg)
+			}
+		})
 	}
 }
