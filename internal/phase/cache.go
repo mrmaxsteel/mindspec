@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -175,7 +176,7 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		if eid, ok := c.specToEpic[specID]; ok {
 			c.mu.Unlock()
 			if eid == "" {
-				return "", fmt.Errorf("no epic found for spec %s", specID)
+				return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
 			}
 			return eid, nil
 		}
@@ -218,7 +219,7 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		c.specToEpic[specID] = "" // memoize the not-found
 		c.mu.Unlock()
 	}
-	return "", fmt.Errorf("no epic found for spec %s", specID)
+	return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
 }
 
 // FetchChildren returns all children (any status) of an epic via a single
@@ -274,7 +275,7 @@ func fetchChildren(epicID string) ([]ChildInfo, error) {
 	// (bd create --force --id=<arbitrary> proven unsafe), so it is
 	// validated BEFORE any bd spawn, ZERO bd argv on a malformed id.
 	if err := idvalidate.BeadID(epicID); err != nil {
-		return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
 	root := ""
 	if cwd, err := os.Getwd(); err == nil {
@@ -315,7 +316,7 @@ func fetchEpic(epicID string) (*EpicInfo, error) {
 	// Gate-all-ids (ADR-0042 §1, round 9): epicID feeds a `bd show` argv
 	// build directly — validate BEFORE any bd spawn.
 	if err := idvalidate.BeadID(epicID); err != nil {
-		return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
 	out, err := runBDFn("show", epicID, "--json")
 	if err != nil {

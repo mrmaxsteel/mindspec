@@ -1,0 +1,37 @@
+// Negative fixture for spec 120 R6 scan (h), rejection-path matcher
+// (round 11, O3): a bare `id` identifier (and a bare `.ID` selector)
+// rendered raw INSIDE the idvalidate rejection branch must be flagged
+// even though the suffix matcher (specid/beadid/epicid) misses it; the
+// idrender-wrapped sibling stays green.
+package fixture
+
+import (
+	"fmt"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+)
+
+func rejectRawly(id string) error {
+	if err := idvalidate.BeadID(id); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", id, err) // bare id — RED
+	}
+	return nil
+}
+
+type beadRec struct{ ID string }
+
+func rejectSelectorRawly(b beadRec) error {
+	err := idvalidate.BeadID(b.ID)
+	if err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", b.ID, err) // bare .ID — RED
+	}
+	return nil
+}
+
+func rejectSafely(id string) error {
+	if err := idvalidate.BeadID(id); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err) // GREEN
+	}
+	return nil
+}

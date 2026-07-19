@@ -18,6 +18,7 @@ paths:
   - internal/layout/**
   - internal/trace/**
   - internal/termsafe/**
+  - internal/lint/**
   - cmd/**
   - plugins/mindspec/**
   - .claude/skills/**

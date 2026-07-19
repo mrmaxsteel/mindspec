@@ -1,0 +1,6 @@
+# Fixture template for spec 120 R6 scan (d)
+
+**New**: {{.BrandNewField}}
+{{- if .BrandNewField}}
+conditional (not a render)
+{{- end}}

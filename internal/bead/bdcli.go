@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 )
 
@@ -155,7 +156,7 @@ func Close(ids ...string) error {
 	// validated BEFORE any bd spawn — ZERO bd argv on a malformed id.
 	for _, id := range ids {
 		if err := idvalidate.BeadID(id); err != nil {
-			return fmt.Errorf("invalid bead id %s: %w", id, err)
+			return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
 		}
 	}
 	args := append([]string{"close"}, ids...)
@@ -297,7 +298,7 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 	// write half gates independently so the property holds even if
 	// GetMetadata's contract ever changes).
 	if err := idvalidate.BeadID(issueID); err != nil {
-		return fmt.Errorf("invalid bead id %s: %w", issueID, err)
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(issueID), err)
 	}
 	existing, err := GetMetadata(issueID)
 	if err != nil {
@@ -340,7 +341,7 @@ func GetMetadata(issueID string) (map[string]interface{}, error) {
 	// Class-2 consumer boundary (ADR-0042 §1, AC-26): issueID feeds a
 	// `bd show` argv build directly — validated BEFORE any bd spawn.
 	if err := idvalidate.BeadID(issueID); err != nil {
-		return nil, fmt.Errorf("invalid bead id %s: %w", issueID, err)
+		return nil, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(issueID), err)
 	}
 	out, err := tracedOutput("show", []string{"show", issueID, "--json"})
 	if err != nil {

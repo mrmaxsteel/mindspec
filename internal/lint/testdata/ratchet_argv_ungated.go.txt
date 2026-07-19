@@ -1,0 +1,14 @@
+// Negative fixture for spec 120 R6 scan (g): an ungated exec argv
+// carrying a specID-named identifier. Absent from the audit table,
+// the site must be flagged UNCLASSIFIED.
+package fixture
+
+import (
+	"os"
+	"os/exec"
+)
+
+func ungatedShow() ([]byte, error) {
+	specID := os.Getenv("MINDSPEC_FIXTURE_SPEC") // agent-writable, no idvalidate
+	return exec.Command("bd", "show", specID, "--json").Output()
+}

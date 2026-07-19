@@ -165,7 +165,7 @@ func FixHygiene(dryRun bool) ([]string, error) {
 				// agent-writable — validate BEFORE the `bd update
 				// --status` argv spawn.
 				if err := idvalidate.BeadID(b.ID); err != nil {
-					return actions, fmt.Errorf("bead %s has an invalid id, refusing to update its status: %w", b.ID, err)
+					return actions, fmt.Errorf("bead %s has an invalid id, refusing to update its status: %w", idrender.Bead(b.ID), err)
 				}
 				if _, err := RunBDCombined("update", b.ID, "--status=closed"); err != nil {
 					return actions, fmt.Errorf("closing %s: %w", idrender.Bead(b.ID), err)

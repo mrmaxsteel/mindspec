@@ -36,7 +36,7 @@ var (
 		// unsafe), so it is validated BEFORE any bd spawn, ZERO bd argv
 		// on a malformed id.
 		if err := idvalidate.BeadID(epicID); err != nil {
-			return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+			return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 		}
 		out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
 		if err != nil {
@@ -86,7 +86,7 @@ func (o Orphan) RecoveryCommand() string { return "mindspec complete " + idrende
 func ClosedEpicBeadIDs(specID string) ([]string, error) {
 	epicID, err := findEpicBySpecIDFn(specID)
 	if err != nil {
-		return nil, fmt.Errorf("finding epic for spec %s: %w", specID, err)
+		return nil, fmt.Errorf("finding epic for spec %s: %w", idrender.Spec(specID), err)
 	}
 	if epicID == "" {
 		return nil, nil
@@ -147,7 +147,7 @@ func ScanOrphanedClosedBeads(specID, workdir, excludeBeadID string) ([]Orphan, e
 
 	specBranch, err := workspace.SpecBranch(specID)
 	if err != nil {
-		return nil, fmt.Errorf("composing spec branch for %s: %w", specID, err)
+		return nil, fmt.Errorf("composing spec branch for %s: %w", idrender.Spec(specID), err)
 	}
 
 	var orphans []Orphan
@@ -165,7 +165,7 @@ func ScanOrphanedClosedBeads(specID, workdir, excludeBeadID string) ([]Orphan, e
 		beadBranch, err := workspace.BeadBranch(id)
 		if err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("invalid closed-bead id %s: %w", id, err)
+				firstErr = fmt.Errorf("invalid closed-bead id %s: %w", idrender.Bead(id), err)
 			}
 			continue
 		}

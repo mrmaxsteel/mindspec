@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -517,7 +518,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// SpecWorktreeName/FinalizeBranch/FinalizeWorktreePath call below with
 	// this same specID is therefore guaranteed to succeed.
 	if err := idvalidate.SpecID(specID); err != nil {
-		return result, fmt.Errorf("finalize epic %s: invalid spec id %s: %w", epicID, specID, err)
+		return result, fmt.Errorf("finalize epic %s: invalid spec id %s: %w", epicID, idrender.Spec(specID), err)
 	}
 
 	allow := make(map[string]bool, len(lifecycleAllowSet))

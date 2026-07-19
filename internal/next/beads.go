@@ -8,6 +8,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -46,7 +47,7 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	// `bd ready --parent` argv build directly — validate BEFORE any bd
 	// spawn.
 	if err := idvalidate.BeadID(epicID); err != nil {
-		return nil, fmt.Errorf("invalid epic id %s: %w", epicID, err)
+		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
 	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err != nil {
@@ -170,7 +171,7 @@ func ClaimBead(id string) error {
 	// the R3 explicit-claim ingress: a malformed claim target refuses
 	// convergently).
 	if err := idvalidate.BeadID(id); err != nil {
-		return fmt.Errorf("invalid bead id %s: %w", id, err)
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
 	}
 	out, err := runBDCombFn("update", id, "--claim")
 	if err != nil {
@@ -187,7 +188,7 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd show` argv
 	// build directly — validate BEFORE any bd spawn.
 	if err := idvalidate.BeadID(id); err != nil {
-		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", id, err)
+		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
 	}
 	out, err := runBDFn("show", id, "--json")
 	if err != nil {
@@ -211,7 +212,7 @@ func FetchBeadAsOf(id, ref string) (BeadInfo, error) {
 	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd show` argv
 	// build directly — validate BEFORE any bd spawn.
 	if err := idvalidate.BeadID(id); err != nil {
-		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", id, err)
+		return BeadInfo{}, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(id), err)
 	}
 	out, err := runBDFn("show", id, "--as-of", ref, "--json")
 	if err != nil {

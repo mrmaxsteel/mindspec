@@ -1,0 +1,24 @@
+// Negative fixture for spec 120 R6 scan (f) (defense-in-depth): a
+// specs-root os.ReadDir whose enumerated names reach a filepath.Join
+// with NO idvalidate gate in the declaration. The scan must flag it.
+package fixture
+
+import (
+	"os"
+	"path/filepath"
+)
+
+func ungatedSpecsEnumeration(root string) []string {
+	specsDir := filepath.Join(root, ".mindspec/specs")
+	entries, err := os.ReadDir(specsDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		// The enumerated (agent-creatable) name reaches a Join with
+		// no idvalidate anywhere in this declaration — RED.
+		out = append(out, filepath.Join(specsDir, e.Name(), "spec.md"))
+	}
+	return out
+}
