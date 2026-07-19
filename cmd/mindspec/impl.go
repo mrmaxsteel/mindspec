@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +64,16 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 	}
 	specWtPath := workspace.SpecWorktreePath(root, cfg, specID)
 	if info, err := os.Stat(specWtPath); err == nil && info.IsDir() {
-		_ = os.Chdir(specWtPath)
+		// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of
+		// the composed spec-worktree path immediately before the auto-cd.
+		// This site already tolerates a chdir failure silently (best-
+		// effort convenience, not the primary gate), so a containment
+		// failure is likewise a skip-and-warn, not a hard command failure.
+		if ctErr := containment.CheckContainment(root, specWtPath); ctErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: refusing auto-cd into spec worktree: %v\n", ctErr)
+		} else {
+			_ = os.Chdir(specWtPath)
+		}
 	}
 
 	// Spec 086 Bead 3: --allow-doc-skew override flag (shared between

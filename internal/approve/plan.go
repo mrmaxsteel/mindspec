@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // planRunBDCombinedFn is a package-level variable for testability.
@@ -388,7 +389,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// Final guard: the spec worktree must be clean before beads can be
 	// merged back into it during `mindspec complete`.
 	if err := exec.IsTreeClean(specWtPath); err != nil {
-		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\ncd %s && git status", err, specWtPath)
+		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
 	}
 
 	// Step 4b (Spec 080): Write mindspec_phase: implement to epic metadata.

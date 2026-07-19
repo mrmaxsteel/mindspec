@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -193,7 +194,7 @@ team lead spawns fresh agents per bead.`,
 					}
 					if wtPath != "" {
 						fmt.Printf("Worktree recovered: %s\n", wtPath)
-						fmt.Printf("  cd %s\n", wtPath)
+						fmt.Printf("  %s\n", containment.EmitCd(wtPath))
 					}
 					resolved := next.ResolveMode(root, next.BeadInfo{ID: activeBead, Title: "[" + specFlag + "] recovered"})
 					resolved.SpecID = specFlag
@@ -268,7 +269,7 @@ team lead spawns fresh agents per bead.`,
 			warnWorktreeSetupFailure(os.Stderr, root, specFlag, selected, wtErr)
 		} else if wtPath != "" {
 			fmt.Printf("Worktree: %s\n", wtPath)
-			fmt.Printf("  cd %s\n", wtPath)
+			fmt.Printf("  %s\n", containment.EmitCd(wtPath))
 		}
 
 		// Step 6: Resolve mode and spec ID

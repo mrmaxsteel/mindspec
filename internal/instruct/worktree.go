@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // getwdFn is a package-level variable for testability.
@@ -30,5 +32,5 @@ func CheckWorktree(activeWorktree string) string {
 		return ""
 	}
 
-	return fmt.Sprintf("Switch to worktree to begin work: cd %s", activeWorktree)
+	return "Switch to worktree to begin work: " + containment.EmitCd(activeWorktree)
 }

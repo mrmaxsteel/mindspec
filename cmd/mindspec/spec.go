@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/spec"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +59,7 @@ creates a branch and worktree, sets state to spec mode, and emits guidance.`,
 
 		if result.WorktreePath != "" {
 			fmt.Printf("Worktree: %s (branch: %s)\n", result.WorktreePath, result.SpecBranch)
-			fmt.Printf("\n  cd %s\n\n", result.WorktreePath)
+			fmt.Printf("\n  %s\n\n", containment.EmitCd(result.WorktreePath))
 		} else {
 			fmt.Println()
 		}

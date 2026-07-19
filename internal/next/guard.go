@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // artifactPaths is the list of paths mindspec treats as co-managed build
@@ -146,7 +147,7 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 	b.WriteString(workspace.ContextLine(cwd, cwd))
 	if activeWorktree != "" && !pathWithin(cwd, activeWorktree) {
 		return guard.NewFailure(b.String(),
-			fmt.Sprintf("cd %s && mindspec next", activeWorktree))
+			fmt.Sprintf("%s && mindspec next", containment.EmitCd(activeWorktree)))
 	}
 	return guard.NewFailure(b.String(),
 		"if these changes are yours, commit them (git add -A && git commit), then re-run: mindspec next")
