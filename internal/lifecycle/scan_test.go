@@ -16,22 +16,27 @@ import (
 func stubScanGitSeams(t *testing.T, branches []string, committedJSONL string) {
 	t.Helper()
 	origBranches := localBranchRefsFn
-	origIsAncestor := finalizeOrphanIsAncestorFn
+	origNetEffect := finalizeOrphanNetEffectFn
 	origFileAtRef := fileAtRefFn
 	origCommitCount := finalizeOrphanCommitCountFn
 	origDiffStat := finalizeOrphanDiffStatFn
+	origRevParseRef := revParseRefFn
 	t.Cleanup(func() {
 		localBranchRefsFn = origBranches
-		finalizeOrphanIsAncestorFn = origIsAncestor
+		finalizeOrphanNetEffectFn = origNetEffect
 		fileAtRefFn = origFileAtRef
 		finalizeOrphanCommitCountFn = origCommitCount
 		finalizeOrphanDiffStatFn = origDiffStat
+		revParseRefFn = origRevParseRef
 	})
 	localBranchRefsFn = func(workdir string) ([]string, error) { return branches, nil }
-	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return false, nil }
+	finalizeOrphanNetEffectFn = func(workdir, ref, target string) (bool, error) { return false, nil }
 	finalizeOrphanCommitCountFn = func(workdir, base, head string) (int, error) { return 1, nil }
 	finalizeOrphanDiffStatFn = func(workdir, base, head string) (string, error) { return "1 file changed", nil }
 	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) { return []byte(committedJSONL), nil }
+	// Default origin/main as resolvable (the common remote workflow) so
+	// mainExportRef routes to origin/main deterministically in these tests.
+	revParseRefFn = func(workdir, ref string) (string, error) { return "deadbeefcafe", nil }
 }
 
 // TestScanIntegrityFindings_SubprocessBudget is the final-review F1

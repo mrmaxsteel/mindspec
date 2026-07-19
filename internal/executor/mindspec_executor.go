@@ -697,16 +697,23 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// specBranchBase()'s fallback discipline, a fetch/detect error
 		// here is never a hard `impl approve` failure.
 		//
-		// Known blind spot (panel round 1, Group 5): the IsAncestor
-		// probe assumes the impl PR landed as a merge commit, FF, or
-		// rebase — anything that preserves the spec branch's commit
-		// SHAs in origin/main's history. A SQUASH-merged impl PR
-		// discards those SHAs, so preFinalizeTip is NOT an ancestor,
-		// detection misses, and the pre-fix behavior recurs (finalize
-		// commit stranded on the dead spec branch). This repo's
-		// workflow merges spec PRs with merge commits; a
-		// squash-tolerant detection (e.g. content-based JSONL
-		// comparison) is a deferred follow-up, not this fix.
+		// Per-consumer contract (spec 121 R4, ADR-0041 §2(iii)): SHA
+		// ancestry remains SUFFICIENT as-is for this probe — it decides
+		// carrier ROUTING, and an ancestor spec branch is a spent PR
+		// carrier regardless of later history (nothing pushed to it can
+		// reach main again; a later revert of its work on main is a
+		// main-side state the doctor/stale-tracker surface detects, not a
+		// routing input here). When ancestry is FALSE, fall back to the
+		// net-effect predicate over the spec branch's full diff — this is
+		// what closes the SQUASH blind spot (mindspec-3xqm item 1): a
+		// squash-merged impl PR discards the spec branch's SHAs, so
+		// ancestry alone would miss it and push the epic-close commit onto
+		// the now-dead spec-branch carrier (the pre-121 bug). On a
+		// content-fallback INFRA failure, this probe WARNS naming itself
+		// undetermined and proceeds on the ancestry answer alone (false) —
+		// a DELIBERATE fail-open (spec 121 R4): the stranded outcome stays
+		// fully detected by the shipped doctor finalize-orphan finding, the
+		// same absorb already covering this probe's own fetch-failure leg.
 		orphaned := false
 		if preFinalizeTip != "" {
 			if fetchErr := withWorkingDir(g.Root, func() error {
@@ -715,8 +722,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				fmt.Fprintf(os.Stderr, "warning: could not fetch origin/main to check protected-main finalize state: %v\n", fetchErr)
 			} else if isAnc, ancErr := gitutil.IsAncestor(g.Root, preFinalizeTip, "origin/main"); ancErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not determine whether %s was already merged into origin/main: %v\n", specBranch, ancErr)
+			} else if isAnc {
+				orphaned = true
+			} else if landed, neErr := netEffectLandedFn(g.Root, preFinalizeTip, "origin/main"); neErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not determine whether %s's content already landed on origin/main (net-effect probe undetermined) — proceeding on ancestry alone: %v\n", specBranch, neErr)
 			} else {
-				orphaned = isAnc
+				orphaned = landed
 			}
 		}
 
@@ -1312,6 +1323,15 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 // this seam exists: bug wu7t's finalizeOrphanedSpecBranch test needs a
 // deterministic, bd-free export stub.
 var execBeadExportFn = bead.Export
+
+// netEffectLandedFn is the ONE exported already-merged predicate
+// (gitutil.NetEffectLanded) the protected-main FinalizeEpic probe falls
+// back to when SHA ancestry is false (spec 121 R4, ADR-0041 §2(iii)) — the
+// squash-merge blind-spot fix. AC-17 anti-drift pins this seam's default to
+// be the identical symbol internal/lifecycle's doctor merged-carrier
+// suppression routes through, so neither consumer can drift into a private
+// reimplementation.
+var netEffectLandedFn = gitutil.NetEffectLanded
 
 // resolveAnchorRoot returns the spec worktree path if it exists, otherwise
 // the main repo root. Bead worktrees are anchored under the spec worktree.

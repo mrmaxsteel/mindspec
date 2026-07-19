@@ -153,6 +153,67 @@ operator's Ctrl-C — between two of its mutations, the recovery contract is:
   `guard.NewFailure` naming the exact re-run command — it never lets the
   command exit 0 having only partially mutated state.
 
+#### §2(i)–(iii): Convergence-completeness (Spec 121 amendment)
+
+Spec 119 stated the forward-reconcile contract above in general terms —
+"re-invocation is always safe," "state re-derivation, never state
+assumption." Spec 121 found two concrete ways that promise could still fail
+to hold in practice, and pins the completing doctrine here as three named
+clauses of this section (§2), because each is a refinement of the same
+forward-reconcile contract rather than a new one:
+
+- **§2(i) — Deadlock-free recovery graph, genuine forward exits.** Every
+  refusal's named recovery MUST be a step that can actually change the fact
+  being refused on. A refusal whose only named recovery is bare
+  re-invocation, when re-invocation alone cannot change that fact, is a
+  deadlock, not a convergence path — the CONVERGENCE promise of §2 is
+  false for that state until a genuine forward exit is named. Two
+  instances this spec closes: **the `mindspec-tpjn` all-orphans
+  sequence** (`complete`'s step-1.6 preflight previously refused naming
+  only the first orphaned sibling, so two closed-but-unmerged siblings each
+  refusing on the other had no non-manual exit; the fix demotes to a WARN
+  when the invoked bead is itself orphaned-closed, and otherwise names
+  EVERY orphaned sibling with the full recovery sequence, so a finite
+  chain of `mindspec complete` invocations converges); and **the
+  `mindspec-q9ea` attested-restore exit** (the landed-merge identity
+  predicate's no-durable-datum state now refuses with a NAMED, explicitly
+  non-mechanical recovery — restoring the bead branch ref at the candidate
+  merge's second-parent SHA, carrying its own human-verification marker —
+  rather than a refusal with no forward path at all).
+- **§2(ii) — Durably corroborated, revert/reapply-aware landed evidence.**
+  Landed-work evidence a forward-reconcile decision relies on to CLOSE a
+  bead MUST be corroborated by a durable identity datum the lifecycle
+  itself recorded — a registered panel's `reviewed_head_sha`, a surviving
+  bead-branch ref, or the merge-time landed-binding this amendment
+  introduces — NEVER subject text alone, and never a content heuristic
+  over what the second parent's commits contain (that a merge carries
+  non-empty work is not evidence it carries THIS bead's work). The
+  corroborating datum MUST additionally be revert/reapply-aware BY NET
+  EFFECT: the first-parent chain SINCE the candidate merge, not merely the
+  merge's historical presence, so a subsequently-reverted merge is not
+  misidentified as landed while a revert-then-reapplied one still is (a
+  permanent "ever-reverted ⇒ reject" rule would itself violate §2(i)'s
+  deadlock-free rule by manufacturing a refusal an honest landed state can
+  never clear). The merge-time binding itself MUST be recorded FAIL-CLOSED
+  BEFORE any branch/worktree cleanup for that bead: a failed write
+  suppresses cleanup and refuses recoverably rather than warning and
+  continuing, so the branch survives as the corroborating datum and
+  re-invocation converges. This closes `mindspec-q9ea`'s subject-only
+  acceptance gap.
+- **§2(iii) — Content-aware already-merged re-derivation.** Where the
+  hosting workflow can discard a branch's SHAs entirely (a squash merge),
+  "already landed on the target ref" MUST be re-derived from CURRENT-state
+  net-effect content equivalence, not from SHA ancestry alone — ancestry
+  remains a valid SUFFICIENT condition where it holds, but its ABSENCE must
+  not be read as "not landed" when a squash (or an equivalent SHA-discarding
+  merge) is a normal part of the workflow, and ancestry HOLDING must not be
+  read as "landed forever" where the target's content can itself move
+  backward (a true-merge-then-revert). This closes the `mindspec-3xqm`
+  item-1 squash blind spot at both of its consumers (the protected-main
+  already-merged probe and the doctor merged-carrier suppression), which
+  route through one shared exported predicate so neither consumer can drift
+  into its own reimplementation.
+
 ### 3. The kill/forward-safe classification (AC-26's fault-injection matrix)
 
 Not every mutation point needs — or can honestly receive — an individual
