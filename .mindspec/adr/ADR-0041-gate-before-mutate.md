@@ -265,7 +265,10 @@ forward-reconcile rather than a new grant:
   impl PR, exactly as before this amendment. Because the carrier's entire
   content is a machine-regenerated `.beads/issues.jsonl` export, opening
   its PR is **always safe**: the automation MAY auto-open (and
-  idempotently adopt an already-open) PR for it with no config gate.
+  idempotently adopt an already-open) PR for it, gated by the
+  `auto_open_finalize_pr` config key — **default true** (on by default;
+  an operator may disable it, which also renders `auto_merge_finalize_pr`
+  inert).
 - **Auto-merging it is opt-in, never default.** Merging that PR into
   `main` is admissible only behind an explicit config key
   (`auto_merge_finalize_pr`, default **false**) — merging to `main`

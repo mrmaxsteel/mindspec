@@ -541,6 +541,197 @@ func TestFindLandedMerge_PerDatumSufficiency(t *testing.T) {
 	})
 }
 
+// TestFindLandedMerge_MultiCommitBeadBranchIdentified is spec 121 AC-12's
+// multi-commit honest-merge fixture (final-review F2-1(a)): a bead branch
+// carrying SEVERAL own commits, merged --no-ff with the deterministic
+// message, must reconcile exactly like the single-commit mergeBead() shape —
+// identified by FindLandedMerge AND flagged merged-unclosed. Every other R5
+// fixture routes through mergeBead()'s exactly-one-commit merge; this pins
+// that nothing in the identification (subject scan, corroboration,
+// R5(d) net-effect subsumption) silently assumes a single-commit second
+// parent.
+func TestFindLandedMerge_MultiCommitBeadBranchIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-one")
+	for _, f := range []string{"one.txt", "two.txt", "three.txt"} {
+		os.WriteFile(filepath.Join(dir, f), []byte(f+"\n"), 0644)
+		run("add", ".")
+		run("commit", "-m", "work "+f)
+	}
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("a multi-commit bead-branch merge must reconcile, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the merge %q", landed.SHA, mergeSHA)
+	}
+	if _, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one"); err != nil || !ok {
+		t.Errorf("expected merged-unclosed (ok=true, err=nil), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestFindLandedMerge_ConflictResolutionMergeIdentified is spec 121 AC-12's
+// conflict-resolution fixture (final-review F2-1(b)), the load-bearing one:
+// a REAL conflict resolved at merge time means M's tree matches NEITHER
+// parent's version of the conflicted file — and R5(d)'s gate is
+// ContentSubsumed(M^1, M, tip), whose merge-tree leg treats a CONFLICT as
+// definitive not-landed. An honestly-conflict-resolved-then-landed merge
+// refusing here would be the §2(i) permanent-refusal class the whole spec
+// forbids (over-refusal of legitimate work). The spec branch is also
+// advanced past M with unrelated later work so the subsumption check is
+// non-degenerate (tip != M, ours != theirs).
+func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+
+	// A file both sides will edit, committed on the spec branch before the
+	// bead forks.
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("base\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "seed conflict file")
+
+	run("checkout", "-b", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("bead side\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "bead edit")
+
+	run("checkout", "spec/119-test")
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("spec side\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "spec edit")
+
+	// The merge must genuinely CONFLICT (raw exec — run() would t.Fatal).
+	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
+	}
+	// Resolve honestly (content matching NEITHER parent) and commit the
+	// merge; --no-edit preserves MERGE_MSG's deterministic
+	// "Merge bead/bead-one" subject, exactly as an operator resolving a
+	// gitutil.MergeInto conflict in the spec worktree would.
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
+	run("add", ".")
+	run("commit", "--no-edit")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// Advance the spec branch with unrelated later work: tip != M, so the
+	// R5(d) subsumption evaluates a genuine three-way, not ours==theirs.
+	os.WriteFile(filepath.Join(dir, "later.txt"), []byte("later\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "unrelated later work")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("an honestly-conflict-resolved merge must reconcile (R5(d) must not over-refuse it), got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the conflict-resolution merge %q", landed.SHA, mergeSHA)
+	}
+	if _, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one"); err != nil || !ok {
+		t.Errorf("expected merged-unclosed (ok=true, err=nil), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestLandedBindingForBead_MalformedValuesTreatedAbsent is the spec 121
+// final-review G2-1 provenance-gate unit: the landed-binding values are
+// read from AGENT-WRITABLE bd metadata, so anything that is not a
+// well-formed git object id (option-like, control bytes, a rev expression,
+// too short/long, non-hex) makes the binding datum ABSENT — (nil, false) —
+// never a struct carrying the hostile value onward.
+func TestLandedBindingForBead_MalformedValuesTreatedAbsent(t *testing.T) {
+	orig := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = orig })
+
+	for _, hostile := range []string{
+		"--upload-pack=/tmp/evil",    // git option injection
+		"deadbee\x1b[2J\x07",         // terminal control bytes
+		"HEAD~1",                     // rev expression
+		"deadbeefdeadbeef:README.md", // rev expression (path form)
+		"abc",                        // too short for an object id
+		strings.Repeat("a", 65),      // too long
+		"deadbeefzzzz",               // non-hex
+	} {
+		landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"mindspec_landed_merge_sha":     hostile,
+				"mindspec_landed_second_parent": hostile,
+			}, nil
+		}
+		if b, have := landedBindingForBead("bead-one"); have || b != nil {
+			t.Errorf("malformed binding value %q must be treated as absent, got %+v", hostile, b)
+		}
+	}
+
+	// Well-formed values (full and abbreviated hex) still bind.
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     "0123456789abcdef0123456789abcdef01234567",
+			"mindspec_landed_second_parent": "0123456",
+		}, nil
+	}
+	if b, have := landedBindingForBead("bead-one"); !have || b == nil {
+		t.Error("a well-formed hex binding must remain available")
+	}
+}
+
+// TestFindLandedMerge_HostileBindingNeverAGitOperand is G2-1's end-to-end
+// pin: a crafted mindspec_landed_second_parent/merge_sha (option-like or
+// control-byte-bearing) must (i) NEVER reach isAncestorFn — the git-operand
+// seam — raw, (ii) never confirm the candidate (the bead does not close on
+// a crafted binding: with every other leg unavailable this is the R5(c)
+// no-evidence refusal), and (iii) never appear raw in the error render.
+func TestFindLandedMerge_HostileBindingNeverAGitOperand(t *testing.T) {
+	for _, hostile := range []string{
+		"--upload-pack=/tmp/evil",
+		"deadbee\x1b[2J\x07forged",
+	} {
+		t.Run(strings.Map(func(r rune) rune {
+			if r < 0x20 || r > 0x7e {
+				return '_'
+			}
+			return r
+		}, hostile), func(t *testing.T) {
+			dir, run := initLandedRepo(t, "119-test")
+			mergeBead(t, run, dir, "bead-one", "spec/119-test")
+			run("branch", "-D", "bead/bead-one") // no surviving-branch leg
+
+			origBinding := landedBindingMetadataFn
+			t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+			landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+				return map[string]interface{}{
+					"mindspec_landed_merge_sha":     hostile,
+					"mindspec_landed_second_parent": hostile,
+				}, nil
+			}
+
+			origAnc := isAncestorFn
+			t.Cleanup(func() { isAncestorFn = origAnc })
+			var operands []string
+			isAncestorFn = func(workdir, anc, desc string) (bool, error) {
+				operands = append(operands, anc, desc)
+				return origAnc(workdir, anc, desc)
+			}
+
+			_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+			var noEvidence *LandedMergeNoEvidence
+			if !errors.As(err, &noEvidence) {
+				t.Fatalf("a crafted binding must be treated as ABSENT (no-evidence refusal, never a close), got: %v", err)
+			}
+			for _, op := range operands {
+				if op == hostile {
+					t.Fatalf("the crafted binding value reached isAncestorFn as a raw git operand: %q", op)
+				}
+			}
+			if err != nil && strings.ContainsAny(err.Error(), "\x1b\x07") {
+				t.Errorf("the error render carries raw control bytes: %q", err.Error())
+			}
+		})
+	}
+}
+
 // TestFindLandedMerge_BindingContradictsDifferentMerge: a recorded binding
 // naming a DIFFERENT merge SHA whose second parent neither matches nor is
 // an ancestor of this candidate's is a CONTRADICTION, not silently

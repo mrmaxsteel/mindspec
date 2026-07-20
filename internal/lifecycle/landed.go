@@ -23,6 +23,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -109,6 +110,29 @@ type landedBinding struct {
 	secondParent string
 }
 
+// wellFormedGitObjectID reports whether s is shaped like a git object id:
+// 7-64 hex digits (an abbreviated SHA-1 through a full SHA-256). Spec 121
+// final-review G2-1 (ADR-0042 provenance): the landed-binding values are
+// read from AGENT-WRITABLE bd metadata, and binding.secondParent flows
+// into isAncestorFn as a GIT OPERAND — before any such value may reach a
+// git argv it must be structurally incapable of parsing as a git option
+// (hex-only can never start with '-') or a revision EXPRESSION (no '.',
+// '~', '^', ':', '@'). A non-conforming value makes the binding datum
+// ABSENT, never a git operand and never a confirmation.
+func wellFormedGitObjectID(s string) bool {
+	if len(s) < 7 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // landedBindingForBead reads beadID's recorded landed-binding metadata, if
 // any. A missing/empty binding, or a metadata-read failure, yields
 // (nil, false) — an UNAVAILABLE datum, never treated as a contradiction
@@ -116,6 +140,13 @@ type landedBinding struct {
 // was only introduced in spec 121, so a pre-121 bead — or one whose binding
 // write failed and was instead corroborated through a different datum —
 // simply has none.
+//
+// G2-1 provenance gate: a present-but-malformed value (anything that is
+// not a well-formed git object id — an option-like `--foo`, terminal
+// control bytes, a rev expression) also yields (nil, false): the executor's
+// own binding write only ever records rev-parse output, so a non-conforming
+// value is a corrupted or crafted binding — it must never confirm a
+// candidate, and above all never reach git as an operand.
 func landedBindingForBead(beadID string) (*landedBinding, bool) {
 	meta, err := landedBindingMetadataFn(beadID)
 	if err != nil || meta == nil {
@@ -126,6 +157,9 @@ func landedBindingForBead(beadID string) (*landedBinding, bool) {
 	sha = strings.TrimSpace(sha)
 	sp = strings.TrimSpace(sp)
 	if sha == "" && sp == "" {
+		return nil, false
+	}
+	if (sha != "" && !wellFormedGitObjectID(sha)) || (sp != "" && !wellFormedGitObjectID(sp)) {
 		return nil, false
 	}
 	return &landedBinding{mergeSHA: sha, secondParent: sp}, true
@@ -278,8 +312,13 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 				// is a contradiction, not a silently-unconfirmed leg.
 				anc, ancErr := isAncestorFn(root, binding.secondParent, secondParent)
 				if ancErr != nil || !anc {
+					// G2-1: binding.mergeSHA/binding.secondParent come from
+					// agent-writable bd metadata — the provenance gate above
+					// (wellFormedGitObjectID in landedBindingForBead) already
+					// constrains them to hex, but render them escaped anyway
+					// so this message can never carry a raw hostile value.
 					return nil, fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)",
-						ErrLandedMergeNotFound, beadID, specBranch, binding.mergeSHA, binding.secondParent, m.SHA, secondParent)
+						ErrLandedMergeNotFound, beadID, specBranch, termsafe.Escape(binding.mergeSHA), termsafe.Escape(binding.secondParent), m.SHA, secondParent)
 				}
 				confirmed = true
 			}

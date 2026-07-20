@@ -363,6 +363,20 @@ func TestStaleTrackerOnMain_PullAdvisoryWhenLocalLags(t *testing.T) {
 	}
 }
 
+// Spec 121 final-review S1-1: localStatus is parsed from local main's
+// committed .beads/issues.jsonl (agent-writable provenance) — a
+// control-byte-bearing status must render through termsafe.Escape, never
+// reach the message raw.
+func TestPullAdvisoryFinding_HostileStatusRendersEscaped(t *testing.T) {
+	o := pullAdvisoryFinding("010-test", "epic-1", "open\x1b[2J\x07forged")
+	if o == nil {
+		t.Fatal("expected a pull_advisory finding for a non-terminal local status")
+	}
+	if strings.ContainsAny(o.Message, "\x1b\x07") {
+		t.Errorf("the pull_advisory message carries raw control bytes: %q", o.Message)
+	}
+}
+
 // (m) R2(c): origin/main agrees AND local main agrees too — no finding of
 // any kind (no phantom pull_advisory when there is nothing to pull).
 func TestStaleTrackerOnMain_NoPullAdvisoryWhenLocalAgrees(t *testing.T) {

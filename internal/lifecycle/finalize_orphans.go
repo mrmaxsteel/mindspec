@@ -303,12 +303,18 @@ func pullAdvisoryFinding(specID, epicID, localStatus string) *FinalizeOrphan {
 	if localStatus == "" || strings.EqualFold(localStatus, "closed") {
 		return nil
 	}
+	// Spec 121 final-review S1-1: localStatus is parsed from local main's
+	// committed .beads/issues.jsonl — agent-writable provenance — so it
+	// renders through termsafe.Escape, the single shared mechanism every
+	// other untrusted-provenance render in this package uses (a bare %q is
+	// equivalently forced-safe via strconv.Quote, but convention coherence
+	// wins: one mechanism, no per-site re-derivation).
 	return &FinalizeOrphan{
 		Kind:   "pull_advisory",
 		SpecID: specID,
 		Message: fmt.Sprintf(
-			"epic %s (spec %s) is closed on origin/main but the local main checkout's .beads/issues.jsonl still shows status %q",
-			idrender.Bead(epicID), idrender.Spec(specID), localStatus,
+			"epic %s (spec %s) is closed on origin/main but the local main checkout's .beads/issues.jsonl still shows status %s",
+			idrender.Bead(epicID), idrender.Spec(specID), termsafe.Escape(localStatus),
 		),
 	}
 }

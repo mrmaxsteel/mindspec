@@ -287,7 +287,11 @@ func TestFinalizeEpic_AlreadyMergedUnboundReRunBinds(t *testing.T) {
 // TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite: the mirror
 // convergence case — a candidate whose binding IS already recorded must
 // NOT be re-written (idempotent no-op), so the ordinary "already an
-// ancestor, nothing to do" path is unaffected once bound.
+// ancestor, nothing to do" path is unaffected once bound. Final-review
+// G3-1 sharpened "already recorded" to "recorded AND MATCHING the located
+// merge" — so this fixture stores the REAL merge SHA (any other stored
+// value is a stale binding the executor must now overwrite; see
+// TestFinalizeEpic_StaleBindingMismatchRewritesCorrectBinding).
 func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 	runGitIn(t, dir, "branch", "spec/121-g2b")
@@ -301,6 +305,7 @@ func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 
 	beadWt := plantBeadWorktree(t, dir, "bead/mindspec-g2b.1", "g2b.txt")
 	runGitIn(t, specWtPath, "merge", "--no-ff", "-m", "Merge bead/mindspec-g2b.1", "bead/mindspec-g2b.1")
+	mergeSHA := refHash(t, dir, "spec/121-g2b")
 
 	fake.listEntries = []bead.WorktreeListEntry{
 		{Name: "worktree-mindspec-g2b.1", Path: beadWt, Branch: "bead/mindspec-g2b.1"},
@@ -321,7 +326,7 @@ func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 		return nil
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) {
-		return map[string]interface{}{"mindspec_landed_merge_sha": "already-bound-sha"}, nil
+		return map[string]interface{}{"mindspec_landed_merge_sha": mergeSHA}, nil
 	}
 
 	if _, err := g.FinalizeEpic("epic-1", "121-g2b", "spec/121-g2b", []string{"mindspec-g2b.1"}); err != nil {
@@ -329,6 +334,232 @@ func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 	}
 	if writeCalls != 0 {
 		t.Errorf("an already-bound candidate must NOT be re-written, writeCalls=%d", writeCalls)
+	}
+}
+
+// TestFinalizeEpic_StaleBindingMismatchRewritesCorrectBinding is the spec
+// 121 final-review G3-1 fixture: a PRE-EXISTING binding whose stored
+// mindspec_landed_merge_sha does NOT match the merge located by identity
+// (a reopened bead's leftover, or a wrong/crafted value) must be
+// OVERWRITTEN with the correct binding — never skipped as "already bound".
+// The pre-fix skip returned nil on ANY non-empty stored SHA, so cleanup
+// proceeded, destroyed the surviving-branch datum, and left the WRONG
+// binding behind for FindLandedMerge to contradict later (stuck in
+// attested-restore with no admissible datum).
+func TestFinalizeEpic_StaleBindingMismatchRewritesCorrectBinding(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "spec/121-g31")
+
+	specWtPath := filepath.Join(dir, ".worktrees", "worktree-spec-121-g31")
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/121-g31")
+	t.Cleanup(func() { _ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", specWtPath).Run() })
+
+	beadWt := plantBeadWorktree(t, dir, "bead/mindspec-g31.1", "g31.txt")
+	runGitIn(t, specWtPath, "merge", "--no-ff", "-m", "Merge bead/mindspec-g31.1", "bead/mindspec-g31.1")
+	mergeSHA := refHash(t, dir, "spec/121-g31")
+
+	fake.listEntries = []bead.WorktreeListEntry{
+		{Name: "worktree-mindspec-g31.1", Path: beadWt, Branch: "bead/mindspec-g31.1"},
+	}
+	fake.onRemove = func(name string) {
+		p := map[string]string{
+			"worktree-mindspec-g31.1": beadWt,
+			"worktree-spec-121-g31":   specWtPath,
+		}[name]
+		if p != "" {
+			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", p).Run()
+		}
+	}
+
+	var boundSHA, boundSecondParent string
+	var writeCalls int
+	mergeBindingFn = func(id string, updates map[string]interface{}) error {
+		writeCalls++
+		boundSHA, _ = updates["mindspec_landed_merge_sha"].(string)
+		boundSecondParent, _ = updates["mindspec_landed_second_parent"].(string)
+		return nil
+	}
+	// A well-formed but WRONG stored SHA — a stale binding from some prior
+	// life of this bead id, contradicting the merge located by identity.
+	mergeBindingReadFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
+	}
+
+	if _, err := g.FinalizeEpic("epic-1", "121-g31", "spec/121-g31", []string{"mindspec-g31.1"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if writeCalls != 1 {
+		t.Fatalf("a MISMATCHED pre-existing binding must be overwritten with the located merge's binding, writeCalls=%d", writeCalls)
+	}
+	if boundSHA != mergeSHA {
+		t.Errorf("expected the overwrite to record the LOCATED merge %q, got %q", mergeSHA, boundSHA)
+	}
+	if boundSecondParent == "" {
+		t.Error("expected a populated second parent in the overwrite")
+	}
+}
+
+// TestFinalizeEpic_StaleBindingOverwriteFailurePreservesBranch is G3-1's
+// fail-closed companion: when the correcting overwrite itself FAILS, the
+// bead's branch must survive (cleanup suppressed, recoverable refusal) —
+// the wrong stored binding alone must never license destroying the
+// surviving-branch datum.
+func TestFinalizeEpic_StaleBindingOverwriteFailurePreservesBranch(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "spec/121-g31f")
+
+	specWtPath := filepath.Join(dir, ".worktrees", "worktree-spec-121-g31f")
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/121-g31f")
+	t.Cleanup(func() { _ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", specWtPath).Run() })
+
+	beadWt := plantBeadWorktree(t, dir, "bead/mindspec-g31f.1", "g31f.txt")
+	runGitIn(t, specWtPath, "merge", "--no-ff", "-m", "Merge bead/mindspec-g31f.1", "bead/mindspec-g31f.1")
+
+	fake.listEntries = []bead.WorktreeListEntry{
+		{Name: "worktree-mindspec-g31f.1", Path: beadWt, Branch: "bead/mindspec-g31f.1"},
+	}
+
+	mainHashBefore := refHash(t, dir, "main")
+	mergeBindingFn = func(string, map[string]interface{}) error { return errSimulatedBindingWrite }
+	mergeBindingReadFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
+	}
+
+	_, err := g.FinalizeEpic("epic-1", "121-g31f", "spec/121-g31f", []string{"mindspec-g31f.1"})
+	if err == nil {
+		t.Fatal("expected the failed correcting overwrite to refuse")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("expected an ADR-0035 recovery line, got: %v", err)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-g31f.1") {
+		t.Error("bead branch must survive a failed binding overwrite")
+	}
+	if len(fake.removeCalls) != 0 {
+		t.Errorf("cleanup must be SUPPRESSED on a failed binding overwrite, got %v", fake.removeCalls)
+	}
+	if refHash(t, dir, "main") != mainHashBefore {
+		t.Error("main must be untouched by the aborted finalize")
+	}
+}
+
+// TestFinalizeEpic_SpecWorktreeMissing_MergedUnboundBindsBeforeCleanup is
+// the spec 121 final-review G1-1 fixture: the spec WORKTREE is gone (a
+// prior partial run removed it) but the bead's branch is already merged
+// into the spec branch with NO binding recorded. The pre-fix shape gated
+// the entire ancestry-check/binding/abort block on os.Stat(specWtPath)
+// while the cleanup leg deleted allow-set branches unconditionally — so
+// this exact state destroyed the merged-but-unbound branch with neither
+// the surviving-branch datum nor a binding, the no-evidence
+// attested-restore state R5 exists to prevent. Post-fix: the binding legs
+// run on g.Root regardless of the worktree, so the branch is BOUND before
+// any cleanup may touch it.
+func TestFinalizeEpic_SpecWorktreeMissing_MergedUnboundBindsBeforeCleanup(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "spec/121-g11")
+
+	// Merge the bead into the spec branch through a TEMPORARY worktree,
+	// then remove it — reproducing "a prior run merged, then the worktree
+	// was lost/removed before the binding was ever recorded".
+	specWtPath := filepath.Join(dir, ".worktrees", "worktree-spec-121-g11")
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/121-g11")
+	beadWt := plantBeadWorktree(t, dir, "bead/mindspec-g11.1", "g11.txt")
+	runGitIn(t, specWtPath, "merge", "--no-ff", "-m", "Merge bead/mindspec-g11.1", "bead/mindspec-g11.1")
+	mergeSHA := refHash(t, dir, "spec/121-g11")
+	runGitIn(t, dir, "worktree", "remove", "--force", specWtPath)
+	if _, statErr := os.Stat(specWtPath); statErr == nil {
+		t.Fatal("test setup: the spec worktree must be gone")
+	}
+
+	fake.listEntries = []bead.WorktreeListEntry{
+		{Name: "worktree-mindspec-g11.1", Path: beadWt, Branch: "bead/mindspec-g11.1"},
+	}
+	fake.onRemove = func(name string) {
+		if name == "worktree-mindspec-g11.1" {
+			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", beadWt).Run()
+		}
+	}
+
+	var boundSHA string
+	var branchAliveAtBindTime bool
+	var writeCalls int
+	mergeBindingFn = func(id string, updates map[string]interface{}) error {
+		writeCalls++
+		boundSHA, _ = updates["mindspec_landed_merge_sha"].(string)
+		// The load-bearing ordering: the surviving-branch datum must still
+		// exist at the moment the binding is written — bind BEFORE destroy.
+		branchAliveAtBindTime = branchExistsIn(t, dir, "bead/mindspec-g11.1")
+		return nil
+	}
+
+	result, err := g.FinalizeEpic("epic-1", "121-g11", "spec/121-g11", []string{"mindspec-g11.1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MergeStrategy != "direct" {
+		t.Fatalf("MergeStrategy = %q, want direct", result.MergeStrategy)
+	}
+	if writeCalls != 1 {
+		t.Fatalf("the merged-but-unbound bead must be BOUND despite the missing spec worktree, writeCalls=%d", writeCalls)
+	}
+	if boundSHA != mergeSHA {
+		t.Errorf("expected the bound merge SHA to be the original merge %q, got %q", mergeSHA, boundSHA)
+	}
+	if !branchAliveAtBindTime {
+		t.Error("the bead branch must still exist when the binding is written (bind before destroy)")
+	}
+}
+
+// TestFinalizeEpic_SpecWorktreeMissing_UnmergedRefusesNotDestroyed is
+// G1-1's other leg: a GENUINELY UNMERGED bead + a missing spec worktree
+// cannot merge (MergeInto needs the worktree) — finalize must refuse
+// recoverably, and above all the cleanup leg must never run: the pre-fix
+// fall-through skipped merge AND binding, then cleanup force-deleted the
+// unmerged branch's only copy of its work.
+func TestFinalizeEpic_SpecWorktreeMissing_UnmergedRefusesNotDestroyed(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "branch", "spec/121-g11u")
+	// No spec worktree is ever created for spec/121-g11u.
+
+	beadWt := plantBeadWorktree(t, dir, "bead/mindspec-g11u.1", "g11u.txt")
+	fake.listEntries = []bead.WorktreeListEntry{
+		{Name: "worktree-mindspec-g11u.1", Path: beadWt, Branch: "bead/mindspec-g11u.1"},
+	}
+
+	mainHashBefore := refHash(t, dir, "main")
+	var writeCalls int
+	mergeBindingFn = func(string, map[string]interface{}) error {
+		writeCalls++
+		return nil
+	}
+
+	_, err := g.FinalizeEpic("epic-1", "121-g11u", "spec/121-g11u", []string{"mindspec-g11u.1"})
+	if err == nil {
+		t.Fatal("expected the unmerged-bead-with-missing-worktree state to refuse")
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("expected an ADR-0035 recovery line, got: %v", err)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-g11u.1") {
+		t.Error("the unmerged bead branch must survive the refusal")
+	}
+	if writeCalls != 0 {
+		t.Errorf("nothing was merged, so nothing may be bound, writeCalls=%d", writeCalls)
+	}
+	if len(fake.removeCalls) != 0 {
+		t.Errorf("cleanup must never run on the refusal, got %v", fake.removeCalls)
+	}
+	if refHash(t, dir, "main") != mainHashBefore {
+		t.Error("main must be untouched by the refusal")
 	}
 }
 

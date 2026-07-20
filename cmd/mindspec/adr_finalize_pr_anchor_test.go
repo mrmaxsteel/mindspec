@@ -43,6 +43,10 @@ func TestADR0041_Section4FinalizeCarrierAnchors(t *testing.T) {
 	// amendment.
 	terms := []string{
 		"tracker-only",
+		// Spec 121 final-review G3-2: §4 must state auto-open's REAL gate
+		// (auto_open_finalize_pr, default true) — the pre-fix wording
+		// claimed "no config gate", contradicting R1 + the implementation.
+		"auto_open_finalize_pr",
 		"auto_merge_finalize_pr",
 		"default",
 		"green checks",
