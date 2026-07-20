@@ -146,9 +146,11 @@ var SubcommandTokens = map[string]struct{}{
 	"":                 {},
 	"add":              {},
 	"adr":              {},
+	"append":           {}, // panel disposition append (spec 117 Bead 2 R6(b) transactional write op)
 	"approve":          {},
 	"bash":             {}, // completion bash (cobra built-in)
 	"bead":             {}, // context bead
+	"check":            {}, // panel disposition check (spec 117 Bead 2 R1(b) completeness floor)
 	"claude":           {},
 	"cleanup":          {},
 	"codex":            {},
