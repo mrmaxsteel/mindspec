@@ -35,7 +35,7 @@ work_chunks:
       - cmd/mindspec/panel_disposition.go
       - internal/panel/testdata/seed116/
   - id: 4
-    depends_on: [1]
+    depends_on: [1, 2]
     key_file_paths:
       - internal/panel/disposition.go
       - internal/panel/disposition_store.go
@@ -51,8 +51,10 @@ Turns the approved spec into four implementation beads that build a durable,
 queryable panel-disposition telemetry store as **per-panel JSONL** under each
 spec's `reviews/` dir, written and queried by a **new Go verb family**
 (`mindspec panel disposition …`). Bead 1 is foundational (schema + validator +
-ADR-0043); Beads 2/3/4 each depend only on Bead 1 and are mutually independent
-(wave-2 parallel).
+ADR-0043); Beads 2 and 3 are the parallel Wave 2 (each depends only on Bead 1);
+Bead 4 (migration + skill) is Wave 3 and depends on Bead 1 + Bead 2 (it writes
+migrated records through Bead 2's append op). Graph: `1→2→4`, `1→3`; acyclic,
+serial depth 3.
 
 ## Write-mechanism decision — Go verb, not a tracked script
 
@@ -74,8 +76,13 @@ inherits the five mechanisms the spec mandates:
    any file mutation; exit-non-zero ⇒ nothing written" is the preflight/commit
    discipline the binary already implements; a script's ordering is unverifiable.
 4. **Transactional-write / atomicity contract (R6(b), AC7 T1/T2/T3).** A single
-   per-file lock spanning validate → uniqueness-check → atomic append needs real
-   file-locking + `-race`-testable concurrency; jq/bash cannot express it safely.
+   lock spanning validate → uniqueness-check → atomic append needs real
+   cross-process file-locking + `-race`-testable concurrency; jq/bash cannot express
+   it safely. The mechanism is the shipped **`internal/journal` lockfile idiom**
+   (spec 094): a DEDICATED `dispositions.lock` file (never the data file), acquired
+   via the build-tagged `acquireFileLock` (unix `syscall.Flock` `LOCK_EX` /
+   windows `O_EXCL`-retry) — so lock acquisition never opens/creates the data file
+   before validation, and the manifest's temp+rename cannot invalidate the held lock.
 5. **Unit-testability of the pinned AC3 numbers.** Q1–Q4's exact values and the
    exhaustive negative-fixture matrix are Go table tests, runnable in CI; a script's
    correctness would rest on hand jq one-liners with no regression net.
@@ -110,9 +117,11 @@ each is *cited, not amended* (the spec verified every posture at the gate):
 (owner decision 2026-07-20) + the panel-refined layout: append-only JSONL, one file
 per panel at `.mindspec/specs/<spec>/reviews/<panel>/dispositions.jsonl`, each file
 carrying its disposition rows plus one `record:"panel"` coverage manifest line;
-the transactional Go-verb append contract; rejected alternatives (Dolt table —
-worktree/embedded-Dolt-sharing + upstream-schema; "both" — ingest-drift; tracked
-script — no safe-render/ratchet/gate-before-mutate/atomicity). Domain(s): **workflow**
+the transactional Go-verb append contract (via the `internal/journal` dedicated-
+lockfile idiom — a `dispositions.lock` file, build-tagged flock/O_EXCL, so the
+lock never touches the data file before validation); rejected alternatives (Dolt
+table — worktree/embedded-Dolt-sharing + upstream-schema; "both" — ingest-drift;
+tracked script — no safe-render/ratchet/gate-before-mutate/atomicity). Domain(s): **workflow**
 (so mirroring it into this plan's `adr_citations` cannot trip `adr-cite-irrelevant`).
 Authored in Bead 1. No ADR is superseded; no divergence requiring a human stop.
 
@@ -127,30 +136,40 @@ Authored in Bead 1. No ADR is superseded; no divergence requiring a human stop.
   - Bead 4: `disposition_migrate_test.go` — round-trip fidelity vs the seed file.
 - **Cross-check.** AC3's numbers are additionally re-derivable with the documented jq
   one-liners over the seed, independent of the Go implementation.
-- **Fixtures / independence.** Bead 3 checks in its OWN copy of the seed
-  (`/Users/Max/replit/mindspec-panel-verdicts/spec-116/DISPOSITIONS.jsonl` + the 8
-  synthesized coverage manifests / slot-count table) under
-  `internal/panel/testdata/seed116/`, so it computes the pinned Q-numbers WITHOUT
-  waiting on Bead 4's migration write. Bead 2 and Bead 4 likewise use the seed file
-  directly as a fixture. Only Bead 1's schema/validator API and parent command are
-  consumed by 2/3/4 — the sole real dependency edge.
-- **Integration gates (every bead).** `go build ./...` + `go vet ./...` +
+- **Fixtures = MIGRATED form (P4).** Bead 1's `valid/` fixtures AND Bead 3's
+  `testdata/seed116/` are the MIGRATED/canonicalized records — `record`/`id`/
+  `created_at`(RFC3339)/`backfilled` present, canonical gate keys, `S-tests` (not
+  `Sonnet-tests`) — NOT the raw archive rows (which lack those fields and would fail
+  the validator). These small migrated fixtures are either hand-authored JSONL or
+  generated once by the Bead-4 migration transform and checked in; each is the
+  self-contained input its bead needs, so Bead 3 computes the pinned Q-numbers
+  WITHOUT waiting on Bead 4's live migration write. The RAW seed
+  (`/Users/Max/replit/mindspec-panel-verdicts/spec-116/DISPOSITIONS.jsonl`) stays the
+  migration SOURCE (Bead 4) and the jq cross-check input only. The sole real
+  dependency edges are Bead 1's schema/validator API (consumed by 2/3/4) and Bead 2's
+  `AppendRecord`/`check` (consumed by 4).
+- **Integration gates (every bead).** `go build ./...` + **`GOOS=windows go build ./...`
+  (cross-compile smoke — the release build cross-compiles windows; a tag-less flock
+  regression must fail a PR gate, not surface at the next tag)** + `go vet ./...` +
   `gofmt -l` clean + `golangci-lint run` (incl. the `internal/lint` render ratchet)
   + `mindspec validate spec 117-panel-review-telemetry`.
 
 ## Wave structure & dependency edges
 
 - **Wave 1:** Bead 1 (foundational schema + validator + ADR).
-- **Wave 2 (parallel):** Bead 2, Bead 3, Bead 4 — each `depends_on: [1]`, mutually
-  independent (no bead consumes another wave-2 bead's output).
-- **Edges:** `1→2`, `1→3`, `1→4`. Longest serial chain = 2 (≤3, well within the
-  heuristic). Bead count = 4 (within 3–5).
-- **Shared-file note (heuristic 2).** The four beads DO NOT co-edit one cobra file:
+- **Wave 2 (parallel):** Bead 2 + Bead 3 — each `depends_on: [1]`, mutually
+  independent (neither consumes the other's output).
+- **Wave 3:** Bead 4 — `depends_on: [1, 2]`: it writes migrated records through
+  Bead 2's `AppendRecord` and integration-tests against Bead 2's `check` leaf, so it
+  cannot compile/verify on a Bead-1-only base.
+- **Edges:** `1→2`, `2→4`, `1→3`. The graph is ACYCLIC; longest serial chain = 3
+  (`1→2→4`, at the heuristic ceiling). Bead count = 4 (within 3–5).
+- **Shared-file note (heuristic 2).** The beads DO NOT co-edit one cobra file:
   Bead 1 creates the `disposition` parent command in `cmd/mindspec/panel_disposition.go`;
   Beads 2/3 register their leaves from their OWN cmd files
   (`panel_disposition_store.go`, `panel_disposition_query.go`) via `init()`
-  `AddCommand`, and Bead 4 touches no cmd file. `R_scope` across beads is near-zero;
-  the substantive logic lives in disjoint `internal/panel/disposition_*.go` files.
+  `AddCommand`, and Bead 4 touches no cmd file. `R_scope` across beads is low; the
+  substantive logic lives in disjoint `internal/panel/disposition_*.go` files.
 
 ---
 
@@ -183,9 +202,15 @@ validator half of **AC3**, plus **AC5** and **AC6**.
    containing a `/Users/`-prefixed or `/tmp/`-prefixed path token, over rows AND
    manifests.
 4. Build the EXHAUSTIVE negative-fixture matrix under
-   `internal/panel/testdata/disposition/{valid,invalid}/` — `valid/` = the 21 seed
-   rows (raw, from the archive) + 8 synthesized manifests; `invalid/` = one file per
-   fixture: bad `record:"other"`; missing EACH required disposition field
+   `internal/panel/testdata/disposition/{valid,invalid}/` — `valid/` = the 21
+   **MIGRATED** disposition rows (canonicalized: `record:"disposition"`, minted `id`,
+   `created_at:"2026-07-11T00:00:00Z"`, `backfilled:true`, canonical gate keys,
+   `S-tests` not `Sonnet-tests`) + 8 **MIGRATED** coverage manifests (small tracked
+   fixtures — hand-authored or generated once by the Bead-4 transform and checked in;
+   NOT the raw archive rows, which lack `record`/`id`/`created_at`/`backfilled` and
+   would fail the validator). `invalid/` = one file per fixture:
+   out-of-enum `disposition:"fixed"` and uncanonical `gate:"gapfix"` (the AC3
+   representative set); bad `record:"other"`; missing EACH required disposition field
    (`record,spec,gate,panel,reviewer,model,severity,summary,convergent_with,
    disposition,created_at,backfilled,id`) and EACH required manifest field
    (`record,spec,gate,panel,round,slots,backfilled`); wrong-type for EACH string
@@ -210,8 +235,9 @@ validator half of **AC3**, plus **AC5** and **AC6**.
       fixture REJECTS (table-driven, one case per fixture file).
 - [ ] `go run ./cmd/mindspec panel disposition validate internal/panel/testdata/disposition/valid/*.jsonl`
       exits 0; the same over any `invalid/` file exits non-zero.
-- [ ] `go build ./...`, `go vet ./...`, `gofmt -l internal/panel cmd/mindspec` empty,
-      `golangci-lint run` (incl. `internal/lint` render ratchet) clean.
+- [ ] `go build ./...` AND `GOOS=windows go build ./...`, `go vet ./...`,
+      `gofmt -l internal/panel cmd/mindspec` empty, `golangci-lint run`
+      (incl. `internal/lint` render ratchet) clean.
 - [ ] `.mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md` exists, Status
       Accepted, Domain(s) includes `workflow`; `mindspec validate spec 117-panel-review-telemetry` passes.
 
@@ -236,60 +262,89 @@ plus the R1(b) completeness floor read from the durable manifest (AC2). Satisfie
 **R1(b)**, **R6**, **AC2**, and **AC7**.
 
 **Steps**
-1. Add `internal/panel/disposition_store.go`: `AppendRecord(specDir, panel, record)`
-   performing, under ONE per-file lock (e.g. `syscall.Flock` on the panel's
-   `dispositions.jsonl`, or an equivalent OS advisory lock) as one indivisible unit:
-   (a) `Validate`+`HygienePredicate` (Bead 1) AND a scan of the CURRENT file state,
-   (b) the uniqueness/idempotency check — a disposition row keyed on its stable
-   content-derived `id` (hash of `{spec,panel,reviewer,round,summary}`), a manifest
-   keyed on `{spec,panel,round}`, and (c) the atomic `O_APPEND` write. Refusal exits
-   before any mutation (file byte-unchanged); a duplicate key is a no-op (row) or an
-   update-or-no-op (manifest — never a second `record:"panel"` line for the key).
-2. Add `WriteTerminalManifest(specDir, panel, manifest)` (thin wrapper over
+1. Add the build-tagged lock helper (reuse/replicate the `internal/journal` idiom —
+   read `internal/journal/lock.go`, `lock_unix.go`, `lock_windows.go` first): a
+   `withDispositionLock(panelDir, fn)` that acquires `acquireFileLock` on a DEDICATED
+   `<panelDir>/dispositions.lock` file (unix `syscall.Flock` `LOCK_EX`, BLOCKING;
+   windows `O_EXCL`-lockfile with bounded retry), `MkdirAll` the panel dir 0700
+   first, `defer unlock()`. The lock is held on the lockfile, NEVER on
+   `dispositions.jsonl` — so lock acquisition never opens/creates the data file
+   before validation (closes the ADR-0041 gate-before-mutate hole), and any
+   temp+rename on the data file cannot invalidate the held descriptor. Invariant
+   (pinned): each op OPENS the lockfile per call (a fresh file description) and takes
+   a BLOCKING `LOCK_EX` — flock binds to the open file description, so two separate
+   descriptors of the same lockfile contend even within one process; the concurrency
+   tests depend on this.
+2. Add `internal/panel/disposition_store.go`: `AppendRecord(specDir, panel, record)`
+   performing, inside `withDispositionLock`, as one indivisible unit: (a)
+   `Validate`+`HygienePredicate` (Bead 1) of the record, BEFORE touching the data
+   file; (b) read the CURRENT `dispositions.jsonl` (rows + manifest) and run the
+   uniqueness/idempotency check — a disposition row keyed on its stable content-
+   derived `id` (hash of `{spec,panel,reviewer,summary}`; `round` is NOT part of the
+   key since migrated rows carry no `round`), a manifest keyed on `{spec,panel,round}`;
+   (c) the mutation: a disposition row is written by atomic `O_APPEND`; the manifest
+   is **no-op-if-exists** — if a `record:"panel"` line for `{spec,panel,round}` is
+   already present, do nothing (its terminal content is deterministic, so no in-place
+   "update" is ever needed), else append it. A validation/hygiene refusal exits
+   before any mutation (data file byte-unchanged); a duplicate row `id` is a no-op;
+   there is never a second `record:"panel"` line for a key.
+3. Add `WriteTerminalManifest(specDir, panel, manifest)` (thin wrapper over
    `AppendRecord` with `record:"panel"`) — EVERY terminal panel writes exactly one
    manifest, including a finding-less all-APPROVE panel (zero rows).
-3. Add `CheckCompleteness(specDir, panel)` (R1(b) floor): read ONLY the panel's
-   `dispositions.jsonl` (never raw verdict files); for every manifest slot whose
-   `verdict` is `REQUEST_CHANGES`/`REJECT`, require ≥1 disposition row naming that
-   slot token in `reviewer` or `convergent_with[]`; on violation return an error
-   naming the panel and uncovered slot.
-4. Add `cmd/mindspec/panel_disposition_store.go`: `append` leaf
+4. Add `CheckCompleteness(specDir, panel)` (R1(b) floor): read the panel's
+   `dispositions.jsonl` (its manifest line + its rows — the "reads only the manifest"
+   phrasing is shorthand for "reads only this one durable file, never a raw verdict
+   file"); for every manifest slot whose `verdict` is `REQUEST_CHANGES`/`REJECT`,
+   require ≥1 disposition row naming that slot token in `reviewer` or
+   `convergent_with[]`; on violation return an error naming the panel and uncovered
+   slot.
+5. Add `cmd/mindspec/panel_disposition_store.go`: `append` leaf
    (`--spec --panel --data @file|-`, dispatches to `AppendRecord`) and `check` leaf
    (`--spec [--panel]`, runs `CheckCompleteness`, exits non-zero naming panel+slot).
-5. Tests in `disposition_store_test.go`:
-   - **Completeness (AC2)**: build the migrated bead-2 panel file (manifest with
+6. Tests in `disposition_store_test.go` — all built on INLINE testdata the test
+   constructs itself in a temp dir (NOT the `--spec 116` live store, which Bead 4
+   lands; Bead 2 must verify on a Bead-1+2 base only):
+   - **Completeness (AC2)**: construct an INLINE bead-2 panel file (manifest with
      slot `S1` verdict `REQUEST_CHANGES` + its covering row) plus the two
      C1-canonicalized coverages (`panel-116-bead3a` slot `G1-codex`, `gapfix-panel`
-     slot `S-tests`); assert `check` PASSES on all; delete the `S1` row; assert it
-     FAILS naming `panel-116-bead2` + slot `S1`; assert the check never opens a raw
-     verdict file.
+     slot `S-tests`); assert `CheckCompleteness` PASSES on all; delete the `S1` row;
+     assert it FAILS naming `panel-116-bead2` + slot `S1`; assert the check never
+     opens a raw verdict file.
    - **Idempotency (AC7d)**: append the same row twice → one row; write terminal
-     capture twice for one `{spec,panel,round}` → one manifest.
+     capture twice for one `{spec,panel,round}` → one manifest (no-op-if-exists).
    - **Gate-before-mutate (AC7c)**: append a schema-invalid then a hygiene-violating
-     record → non-zero exit, target file byte-identical (checksum before/after).
+     record → non-zero exit, target data file byte-identical (checksum before/after)
+     AND no `dispositions.jsonl` created if none existed (lock is on the lockfile).
    - **Finding-less panel (AC7b)**: a zero-row all-APPROVE panel yields a file with
      exactly one `record:"panel"` line; its slots count toward Q4.
    - **Concurrency (AC7e), `-race`**: **T1** N goroutines append the same `id` → 1
      row; **T2** N goroutines write the same `{spec,panel,round}` manifest → 1
      manifest; **T3** N goroutines append N DISTINCT records → all N persist, every
-     line valid JSON, no interleave/corruption.
+     line valid JSON, no interleave/corruption. **T4 (cross-PROCESS, M4)**: spawn
+     two `go run ./cmd/mindspec panel disposition append …` SUBPROCESSES racing the
+     same lockfile (distinct records → both persist; same `id` → one) — proving the
+     lock serializes across processes, not just goroutines (flock binds to the open
+     file description).
 
 **Verification**
 - [ ] `go test ./internal/panel/ -run 'TestCompleteness|TestAppend|TestManifest' -race` passes.
-- [ ] `go test ./internal/panel/ -run TestAppendConcurrent -race` passes (T1/T2/T3).
-- [ ] `go run ./cmd/mindspec panel disposition check --spec 116-panel-message-escaping`
-      exits 0 on the fixture store; exits non-zero naming panel+slot after the S1-row
-      deletion.
-- [ ] `go build ./...`, `go vet ./...`, `golangci-lint run` clean.
+- [ ] `go test ./internal/panel/ -run TestAppendConcurrent -race` passes (T1/T2/T3/T4).
+- [ ] `go run ./cmd/mindspec panel disposition check --spec <tmp-inline-store>` (an
+      INLINE fixture the test writes, NOT `--spec 116`) exits 0; exits non-zero naming
+      `panel-116-bead2` + `S1` after the S1-row deletion.
+- [ ] `go build ./...` AND `GOOS=windows go build ./...` (the lock is build-tagged;
+      the windows cross-compile MUST pass), `go vet ./...`, `golangci-lint run` clean.
 
 **Acceptance Criteria**
-- [ ] **AC2**: completeness check passes on the migrated seed (incl. the two
-      canonicalized coverages) reading only `dispositions.jsonl`; fails naming
+- [ ] **AC2**: completeness check passes on the inline seed-shaped fixture (incl. the
+      two canonicalized coverages) reading only `dispositions.jsonl`; fails naming
       `panel-116-bead2` + `S1` after deleting the covering row.
-- [ ] **AC7**: (a) each panel file has exactly one manifest reproducing its slot
-      count; (b) finding-less panel still writes its manifest; (c) invalid/hygiene
-      refusal leaves file byte-unchanged; (d) row idempotent on `id`, manifest
-      idempotent on `{spec,panel,round}`; (e) T1/T2/T3 concurrency proofs.
+- [ ] **AC7**: (a) each panel file has exactly one manifest reproducing its slot count
+      (over inline fixtures; the migrated-store slot-count fidelity is Bead 4's AC4);
+      (b) finding-less panel still writes its manifest; (c) invalid/hygiene refusal
+      leaves the data file byte-unchanged (gate-before-mutate; the lockfile, not the
+      data file, is opened); (d) row idempotent on `id`, manifest idempotent
+      (no-op-if-exists) on `{spec,panel,round}`; (e) T1/T2/T3/T4 concurrency proofs.
 
 **Depends on**
 Bead 1.
@@ -311,24 +366,32 @@ Satisfies **R3** and the query half of **AC3**.
    Route all rendered text through `termsafe`/`idrender`.
 2. Add `cmd/mindspec/panel_disposition_query.go`: `query --metric Q1..Q5
    [--spec --gate --severity --disposition]` leaf.
-3. Check in `internal/panel/testdata/seed116/` — the raw seed
-   `DISPOSITIONS.jsonl` (21 rows) + the 8 coverage manifests (slot counts
-   9/9/8/8/8/8/12/4, canonical gate keys) as a self-contained fixture, so the pinned
-   numbers are computable WITHOUT Bead 4.
+3. Check in `internal/panel/testdata/seed116/` — the **MIGRATED** records (21
+   canonicalized disposition rows with `record`/`id`/`created_at`(RFC3339)/
+   `backfilled` present, canonical gate keys, `S-tests` not `Sonnet-tests`) + the 8
+   coverage manifests (slot counts 9/9/8/8/8/8/12/4) as a self-contained fixture — a
+   small tracked JSONL set (hand-authored or generated once by the Bead-4 transform),
+   NOT the raw archive rows. The pinned numbers are then computable WITHOUT Bead 4.
 4. Tests in `disposition_query_test.go` asserting EXACTLY: Q1 fable 3/5, opus 4/6,
    sonnet 6/7, gpt-5.6-sol 2/3; Q2 fable 0/5, opus 1/6, sonnet 1/7, gpt-5.6-sol 1/3;
    Q3 convergent rows = 4 of 21 (G1-codex, O1, S1, S-tests); Q4 spec_approve 5/9,
-   plan_approve 3/9, bead 3/32, final_review 2/12, adhoc 2/4; and the `0/N`
-   rendering for a synthetic zero-count model.
+   plan_approve 3/9, bead 3/32, final_review 2/12, adhoc 2/4. Note the seed already
+   exercises a real zero-NUMERATOR (`fable` false-positive 0/5); the `0/N` render test
+   ADDITIONALLY targets the divide-by-EMPTY guard — a synthetic model with ZERO rows
+   (N=0) must render `0/0` (or the pinned zero form) rather than panic or drop the
+   model, distinct from fable's 0/5.
 
 **Verification**
 - [ ] `go test ./internal/panel/ -run TestQueryMetrics` passes with the exact pinned
       Q1–Q4 values above and the `0/N` assertion.
-- [ ] `go run ./cmd/mindspec panel disposition query --metric Q4 --spec 116-panel-message-escaping`
-      prints the pinned per-gate pairs.
-- [ ] jq cross-check documented & green: `jq -r .model testdata/seed116/DISPOSITIONS.jsonl | sort | uniq -c`
+- [ ] `go run ./cmd/mindspec panel disposition query --metric Q4 --dir internal/panel/testdata/seed116`
+      (the migrated fixture, NOT the live `--spec 116` store) prints the pinned
+      per-gate pairs.
+- [ ] jq cross-check documented & green over the RAW archive seed (model counts are
+      migration-invariant): `jq -r .model /Users/Max/replit/mindspec-panel-verdicts/spec-116/DISPOSITIONS.jsonl | sort | uniq -c`
       → 5 fable/6 opus/7 sonnet/3 gpt-5.6-sol.
-- [ ] `go build ./...`, `go vet ./...`, `golangci-lint run` clean.
+- [ ] `go build ./...` AND `GOOS=windows go build ./...`, `go vet ./...`,
+      `golangci-lint run` clean.
 
 **Acceptance Criteria**
 - [ ] **AC3 (query half)**: Q1–Q4 over the seed fixture return EXACTLY the pinned
@@ -352,10 +415,13 @@ and the spec-level **AC-global**.
    (panels `panel-116-spec/plan/bead1/bead2/bead3a/bead3b`, `final-116`,
    `gapfix-panel`); map `gate` per the R4 table (`spec→spec_approve, plan→plan_approve,
    bead→bead, final→final_review, gapfix→adhoc`); carry `note/summary/severity/model`
-   verbatim; set `backfilled:true`, backfill `created_at:2026-07-11`, mint the stable
-   `id`; canonicalize skewed slot names `G-codex→G1-codex` (panel-116-bead3a) and
-   `Sonnet-tests→S-tests` (gapfix-panel) in `reviewer`/`convergent_with`, leaving
-   already-matching names verbatim.
+   verbatim; set `record:"disposition"`, `backfilled:true`, backfill
+   `created_at:"2026-07-11T00:00:00Z"` (full RFC 3339 — a date-only value would fail
+   the validator), and mint the stable `id` (hash of `{spec,panel,reviewer,summary}`;
+   migrated ROWS carry NO `round` field — only manifests get `round`); canonicalize
+   skewed slot names `G-codex→G1-codex` (panel-116-bead3a) and `Sonnet-tests→S-tests`
+   (gapfix-panel) in `reviewer`/`convergent_with`, leaving already-matching names
+   verbatim.
 2. Synthesize the 8 coverage manifests from the archive's per-panel verdict files
    (`verdict-<slot>.json`) — one `slots[]` entry per file (token, model, terminal
    `verdict`), `round:1`, `backfilled:true`, slot counts 9/9/8/8/8/8/12/4. Write every
@@ -372,29 +438,46 @@ and the spec-level **AC-global**.
 
 **Verification**
 - [ ] `go test ./internal/panel/ -run TestSeedMigration` passes: exactly 21 rows with
-      `spec=116` across the 8 files (+ one manifest each); `summary/note/severity/model`
-      byte-identical; `gate` mapped only per the R4 table; `reviewer`/`convergent_with`
-      byte-identical EXCEPT the two documented canonicalizations; every row+manifest
-      `backfilled:true`; every manifest `round:1` + correct slot count.
+      `spec=116` across the 8 files (+ one manifest each); `summary/note/severity/
+      model/disposition/spec/panel` byte-identical to the source seed (P6 — including
+      `disposition`, the central metric field, plus `spec`/`panel`); `gate` mapped
+      only per the R4 table; `reviewer`/`convergent_with` byte-identical EXCEPT the
+      two documented canonicalizations; every row+manifest `backfilled:true`; rows
+      carry NO `round`; every manifest `round:1` + correct slot count.
 - [ ] AC1 chain RED→GREEN:
       `grep -q 'disposition' plugins/mindspec/skills/ms-panel-tally/SKILL.md && grep -q 'disposition' .claude/skills/ms-panel-tally/SKILL.md && diff -q plugins/mindspec/skills/ms-panel-tally/SKILL.md .claude/skills/ms-panel-tally/SKILL.md`
       exits 0.
+- [ ] AC1 SUBSTANCE (P7 — beyond the bare grep): a test/grep asserts the capture step
+      text actually mandates ALL of — the `mindspec panel disposition append` call
+      per distinct finding, the terminal `record:"panel"` manifest write, the
+      `mindspec panel disposition check` completeness run, and the slot-identity +
+      R1(b) floor contract (e.g. `grep -Eq 'panel disposition append' … && grep -Eq
+      'record.*panel|coverage manifest' … && grep -Eq 'panel disposition check' … &&
+      grep -Eq 'slot|floor' …` on BOTH surfaces).
 - [ ] `go run ./cmd/mindspec panel disposition check --spec 116-panel-message-escaping`
-      exits 0 over the landed store (integration with Bead 2's leaf).
-- [ ] `go build ./...`, `go vet ./...`, `golangci-lint run` clean;
-      `mindspec validate spec 117-panel-review-telemetry` passes.
+      exits 0 over the LANDED store (integration with Bead 2's `check` leaf — the
+      landed-store check lives here, in the bead that owns the migration).
+- [ ] `go build ./...` AND `GOOS=windows go build ./...`, `go vet ./...`,
+      `golangci-lint run` clean; `mindspec validate spec 117-panel-review-telemetry` passes.
 
 **Acceptance Criteria**
 - [ ] **AC1**: both `/ms-panel-tally` surfaces contain the capture step and remain
-      byte-identical (grep+diff chain green).
+      byte-identical (grep+diff chain green), AND the step's SUBSTANCE mandates the
+      append-verb / terminal manifest / `check` / slot-identity+floor contract (P7).
 - [ ] **AC4**: the 8 per-panel files hold exactly 21 `spec=116` rows + one manifest
-      each; round-trip byte-identical except the two C1 canonicalizations; every
-      migrated record `backfilled:true`, each manifest `round:1`.
+      each; round-trip byte-identical (incl. `disposition`, `spec`, `panel`) except
+      the two C1 canonicalizations; every migrated record `backfilled:true`, rows
+      carry no `round`, each manifest `round:1` + correct slot count.
+- [ ] **AC7(a) slot-count fidelity over the MIGRATED store**: each landed panel file's
+      manifest `slots` roster reproduces the archive's verdict-file counts
+      (9/9/8/8/8/8/12/4) — the migrated-store half of AC7(a) (Bead 2 proves it over
+      inline fixtures).
 - [ ] **AC-global**: `mindspec validate spec 117-panel-review-telemetry` passes;
-      `go build ./...` and the touched packages' tests pass.
+      `go build ./...` (+ `GOOS=windows go build ./...`) and the touched packages'
+      tests pass.
 
 **Depends on**
-Bead 1.
+Bead 1, Bead 2.
 
 ## Provenance
 
@@ -405,13 +488,13 @@ Bead 1.
 | AC3 (validator accepts 21 rows/manifests + rejects full negative matrix) | Bead 1 — `TestDispositionValidate`/`TestHygiene` |
 | AC3 (Q1–Q4 pinned numbers + `0/N` rendering) | Bead 3 — `TestQueryMetrics` + jq cross-check |
 | AC4 (migration fidelity: 21 rows, canonicalization, backfilled, round:1) | Bead 4 — `TestSeedMigration` round-trip |
-| AC5 (hygiene predicate: zero `/Users//tmp` tokens; `/Users/…` fixture rejected) | Bead 1 — `TestHygiene` |
+| AC5 (hygiene predicate: zero `/Users//tmp` tokens; `/Users/…` fixture rejected) | Bead 1 — `TestHygiene` (predicate) **+ Bead 2 — AC7c (predicate enforced pre-write by the append op)** |
 | AC6 (ADR-0043 records decision + rejected Dolt/both/script) | Bead 1 — ADR authored; `mindspec validate` |
-| AC7 (manifest present incl. finding-less; gate-before-mutate; idempotency; T1/T2/T3) | Bead 2 — `TestAppend*`/`TestAppendConcurrent -race` |
-| AC-global (`mindspec validate` + `go build ./...` + touched tests) | Bead 4 — spec validate + full build/test |
-| R1 (capture at tally authority; slot-identity; floor) | Beads 4 (skill) + 2 (floor) |
-| R2 (row schema + validator) | Bead 1 |
+| AC7 (finding-less manifest; gate-before-mutate; idempotency; T1–T4) | Bead 2 — `TestAppend*`/`TestAppendConcurrent -race` (op behavior over inline fixtures) **+ Bead 4 — AC7(a) slot-count fidelity over the MIGRATED store** |
+| AC-global (`mindspec validate` + `go build ./...` + `GOOS=windows` + touched tests) | Bead 4 — spec validate + full build/test |
+| R1 (capture at tally authority; slot-identity; floor) | Bead 4 (skill capture, both surfaces) **+** Bead 2 (floor check) |
+| R2 (row + manifest schema + validator) | Bead 1 |
 | R3 (Q1–Q5 query surface) | Bead 3 |
 | R4 (seed migration) | Bead 4 |
-| R5 (path hygiene, public-repo posture) | Bead 1 (predicate) + Bead 2 (enforced pre-write) |
-| R6 (coverage manifest + transactional append op) | Bead 2 (op + manifest) + Bead 1 (schema) |
+| R5 (path hygiene, public-repo posture) | Bead 1 (predicate) **+** Bead 2 (enforced pre-write) |
+| R6 (coverage manifest + transactional append op) | Bead 2 (op + manifest + lockfile) **+** Bead 1 (schema) |

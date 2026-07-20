@@ -82,14 +82,24 @@ within a spec.
 (leaves `validate` / `append` / `check` / `query`), invoked by the
 `/ms-panel-tally` skill. Disposition rows are appended INCREMENTALLY as findings
 resolve across the tally→fix→re-panel loop; the manifest is appended ONCE at
-terminal state. Under ONE per-file lock/transaction, each write performs, as an
-indivisible unit: (a) R2-schema + path-hygiene validation of the record AND a
-check against the current file state, (b) the uniqueness/idempotency check on the
-stable key (a row on its `id`; a manifest on `{spec, panel, round}`), and (c) the
-atomic append. Consequences guaranteed: concurrent DISTINCT records both persist
-with no loss and no interleaved partial line; concurrent DUPLICATES collapse to
-exactly one; any validation/hygiene refusal exits non-zero and leaves the file
-BYTE-UNCHANGED (gate-before-mutate, ADR-0041).
+terminal state. The serialization mechanism is the shipped **`internal/journal`
+dedicated-lockfile idiom** (spec 094): the op holds a cross-process advisory lock
+on a SEPARATE `dispositions.lock` file — NEVER on `dispositions.jsonl` itself — via
+the build-tagged `acquireFileLock` (unix `syscall.Flock` `LOCK_EX`, blocking;
+windows `O_EXCL`-lockfile with bounded retry). Locking a separate file means lock
+acquisition never opens/creates the data file before validation, and the manifest
+path never needs an in-place "update". Under that lock, each write performs, as an
+indivisible unit: (a) R2-schema + path-hygiene validation of the record, BEFORE
+touching the data file, (b) a read of the current file + the uniqueness/idempotency
+check on the stable key (a row on its `id`; a manifest on `{spec, panel, round}`),
+and (c) the mutation — a row by atomic `O_APPEND`; the manifest **no-op-if-exists**
+(its terminal content is deterministic per `{spec, panel, round}`, so a present
+manifest is left as-is, never rewritten). Consequences guaranteed: concurrent
+DISTINCT records both persist with no loss and no interleaved partial line;
+concurrent DUPLICATES collapse to exactly one; any validation/hygiene refusal exits
+non-zero and leaves the data file BYTE-UNCHANGED (gate-before-mutate, ADR-0041).
+Because the lock is build-tagged, a `GOOS=windows go build ./...` smoke gates every
+PR so the release cross-compile cannot break invisibly.
 
 **The mechanism is a Go verb, not a tracked jq/bash script.** A Go verb — and
 only a Go verb — inherits the five mechanisms the spec mandates: the ADR-0042
