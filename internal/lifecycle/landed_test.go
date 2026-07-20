@@ -114,6 +114,24 @@ func landedMergeDiag(t *testing.T, dir string) string {
 		" | first-parent-merges: " + strings.TrimSpace(string(merges))
 }
 
+// assertSidesConflict verifies branch1 and branch2 genuinely conflict on a
+// three-way merge, using the NON-MUTATING `git merge-tree --write-tree`
+// plumbing (exit 1 == conflict) instead of a real `git merge`. A real merge
+// leaves runner-dependent in-progress state: on the CI runner a `git merge`
+// of two conflicting branches returned non-zero WITHOUT writing MERGE_HEAD,
+// so a follow-up `git merge --abort` fatals (spec 121 CI) — and the same
+// no-MERGE_HEAD state is what made the old conflict-then-`commit` fixture
+// produce a non-merge commit the first-parent scan could not find. merge-tree
+// checks the conflict touching neither the working tree, index, nor HEAD.
+func assertSidesConflict(t *testing.T, dir, branch1, branch2 string) {
+	t.Helper()
+	err := exec.Command("git", "-C", dir, "merge-tree", "--write-tree", branch1, branch2).Run()
+	exit, ok := err.(*exec.ExitError)
+	if err == nil || !ok || exit.ExitCode() != 1 {
+		t.Fatalf("test setup: expected %s and %s to conflict (merge-tree exit 1), got err=%v", branch1, branch2, err)
+	}
+}
+
 func TestFindLandedMerge_Identified(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
@@ -650,14 +668,10 @@ func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
 	run("commit", "-m", "spec edit")
 
 	// The two sides must genuinely CONFLICT (the property under test is a
-	// conflict-RESOLUTION merge). Assert that, then abort and build the
-	// resolved merge deterministically — see commitResolvedMerge for why a
-	// real conflict `commit` is not portable across git builds.
-	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "bead/bead-one")
-	if out, err := cmd.CombinedOutput(); err == nil {
-		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
-	}
-	run("merge", "--abort")
+	// conflict-RESOLUTION merge). Assert that non-mutatingly, then build the
+	// resolved merge deterministically — see commitResolvedMerge /
+	// assertSidesConflict for why a real `git merge` conflict is not portable.
+	assertSidesConflict(t, dir, "bead/bead-one", "spec/119-test")
 	// Resolve honestly (content matching NEITHER parent) and commit the merge
 	// with the deterministic "Merge bead/bead-one" subject FindLandedMerge's
 	// first-parent scan matches, exactly as an operator resolving a
@@ -712,11 +726,7 @@ func TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified(t *testi
 	run("add", ".")
 	run("commit", "-m", "spec edit")
 
-	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "bead/bead-one")
-	if out, err := cmd.CombinedOutput(); err == nil {
-		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
-	}
-	run("merge", "--abort")
+	assertSidesConflict(t, dir, "bead/bead-one", "spec/119-test")
 	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
 	run("add", ".")
 	// commit-tree (not a real conflict `commit`): portable across git builds
