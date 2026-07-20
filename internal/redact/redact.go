@@ -169,6 +169,7 @@ var SubcommandTokens = map[string]struct{}{
 	"plan":             {},
 	"populate":         {},
 	"powershell":       {}, // completion powershell (cobra built-in)
+	"query":            {}, // panel disposition query (spec 117 Bead 3 Q1-Q5 surface)
 	"record":           {},
 	"repair":           {},
 	"replay":           {}, // agentmind replay shim
