@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-20T09:08:32Z"
+approved_by: user
+status: Approved
 ---
 # Spec 117-panel-review-telemetry: Durable, queryable capture of panel review verdicts + finding dispositions
 
@@ -108,7 +108,7 @@ Proof discipline: the store-dependent proofs below (AC2–AC5, AC7) fix their RE
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-20
+- **Notes**: Approved via mindspec approve spec
