@@ -68,6 +68,52 @@ func mergeBead(t *testing.T, run func(args ...string), dir, beadID, specBranch s
 	run("merge", "--no-ff", "-m", "Merge bead/"+beadID, "bead/"+beadID)
 }
 
+// commitResolvedMerge builds a deterministic 2-parent merge commit whose tree
+// is the CURRENT index (a hand-staged conflict resolution), with the given
+// first/second parents and the deterministic "Merge <branch>" subject, and
+// fast-forwards the current branch to it. It exists because a REAL `git merge`
+// conflict followed by `git commit` is not portable across git builds — the
+// conflict-merge MERGE_MSG/commit behavior varies (spec 121 CI: some builds
+// abort on an empty MERGE_MSG, others produced a merge the first-parent scan
+// did not see), whereas `commit-tree` yields the identical 2-parent merge
+// shape on every git version. Callers stage the resolution and assert the
+// two sides genuinely conflict separately, so the property under test (a
+// conflict-RESOLUTION merge is identified) is preserved.
+func commitResolvedMerge(t *testing.T, dir, firstParent, secondParent, subject string) string {
+	t.Helper()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	tree := git("write-tree")
+	merge := git("commit-tree", tree, "-p", firstParent, "-p", secondParent, "-m", subject)
+	git("reset", "--hard", merge)
+	return merge
+}
+
+// landedMergeDiag renders the git state a FindLandedMerge failure needs to be
+// self-explaining when the failure does not reproduce locally (spec 121 CI):
+// the git build, and the first-parent merge commits the scan actually sees
+// (short SHA, parent list, subject) — so "the merge was never found" (an empty
+// or malformed scan) is distinguishable from a net-effect refusal straight
+// from the CI log, without a second blind push.
+func landedMergeDiag(t *testing.T, dir string) string {
+	t.Helper()
+	ver, _ := exec.Command("git", "version").CombinedOutput()
+	merges, _ := exec.Command("git", "-C", dir, "log", "--first-parent", "--merges",
+		"--format=%h parents=[%p] %s", "spec/119-test").CombinedOutput()
+	return "DIAG " + strings.TrimSpace(string(ver)) +
+		" | first-parent-merges: " + strings.TrimSpace(string(merges))
+}
+
 func TestFindLandedMerge_Identified(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
@@ -603,22 +649,22 @@ func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
 	run("add", ".")
 	run("commit", "-m", "spec edit")
 
-	// The merge must genuinely CONFLICT (raw exec — run() would t.Fatal).
-	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	// The two sides must genuinely CONFLICT (the property under test is a
+	// conflict-RESOLUTION merge). Assert that, then abort and build the
+	// resolved merge deterministically — see commitResolvedMerge for why a
+	// real conflict `commit` is not portable across git builds.
+	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "bead/bead-one")
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
 	}
-	// Resolve honestly (content matching NEITHER parent) and commit the
-	// merge with an explicit "Merge bead/bead-one" subject (the shape
-	// FindLandedMerge's first-parent scan matches), exactly as an operator
-	// resolving a gitutil.MergeInto conflict in the spec worktree would.
-	// An explicit -m (not --no-edit + MERGE_MSG) keeps the fixture
-	// portable: some git builds leave a conflict merge's MERGE_MSG empty
-	// after comment-strip, so `commit --no-edit` aborts on "empty message".
+	run("merge", "--abort")
+	// Resolve honestly (content matching NEITHER parent) and commit the merge
+	// with the deterministic "Merge bead/bead-one" subject FindLandedMerge's
+	// first-parent scan matches, exactly as an operator resolving a
+	// gitutil.MergeInto conflict in the spec worktree would.
 	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
 	run("add", ".")
-	run("commit", "-m", "Merge bead/bead-one")
-	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	mergeSHA := commitResolvedMerge(t, dir, "spec/119-test", "bead/bead-one", "Merge bead/bead-one")
 
 	// Advance the spec branch with unrelated later work: tip != M, so the
 	// R5(d) subsumption evaluates a genuine three-way, not ours==theirs.
@@ -628,7 +674,7 @@ func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
 
 	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
-		t.Fatalf("an honestly-conflict-resolved merge must reconcile (R5(d) must not over-refuse it), got: %v", err)
+		t.Fatalf("an honestly-conflict-resolved merge must reconcile (R5(d) must not over-refuse it), got: %v\n%s", err, landedMergeDiag(t, dir))
 	}
 	if landed.SHA != mergeSHA {
 		t.Errorf("SHA = %q, want the conflict-resolution merge %q", landed.SHA, mergeSHA)
@@ -666,16 +712,16 @@ func TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified(t *testi
 	run("add", ".")
 	run("commit", "-m", "spec edit")
 
-	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "bead/bead-one")
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
 	}
+	run("merge", "--abort")
 	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
 	run("add", ".")
-	// Explicit -m (not --no-edit + MERGE_MSG): portable across git builds
-	// that leave a conflict merge's MERGE_MSG empty after comment-strip.
-	run("commit", "-m", "Merge bead/bead-one")
-	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	// commit-tree (not a real conflict `commit`): portable across git builds
+	// — see commitResolvedMerge.
+	mergeSHA := commitResolvedMerge(t, dir, "spec/119-test", "bead/bead-one", "Merge bead/bead-one")
 
 	// The honest later rewrite of the RESOLVED region itself — work built
 	// on M, not a revert of it.
@@ -685,7 +731,7 @@ func TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified(t *testi
 
 	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
 	if err != nil {
-		t.Fatalf("a landed-then-evolved merge (resolved region honestly rewritten later) must still be identified, got: %v", err)
+		t.Fatalf("a landed-then-evolved merge (resolved region honestly rewritten later) must still be identified, got: %v\n%s", err, landedMergeDiag(t, dir))
 	}
 	if landed.SHA != mergeSHA {
 		t.Errorf("SHA = %q, want the conflict-resolution merge %q", landed.SHA, mergeSHA)
