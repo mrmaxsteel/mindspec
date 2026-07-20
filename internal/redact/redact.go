@@ -146,9 +146,11 @@ var SubcommandTokens = map[string]struct{}{
 	"":                 {},
 	"add":              {},
 	"adr":              {},
+	"append":           {}, // panel disposition append (spec 117 Bead 2 R6(b) transactional write op)
 	"approve":          {},
 	"bash":             {}, // completion bash (cobra built-in)
 	"bead":             {}, // context bead
+	"check":            {}, // panel disposition check (spec 117 Bead 2 R1(b) completeness floor)
 	"claude":           {},
 	"cleanup":          {},
 	"codex":            {},
@@ -157,6 +159,7 @@ var SubcommandTokens = map[string]struct{}{
 	"copilot":          {},
 	"create":           {},
 	"create-from-plan": {},
+	"disposition":      {}, // panel disposition (spec 117 telemetry store)
 	"docs":             {},
 	"fish":             {}, // completion fish (cobra built-in)
 	"help":             {}, // cobra `help` subcommand under any parent
@@ -168,6 +171,7 @@ var SubcommandTokens = map[string]struct{}{
 	"plan":             {},
 	"populate":         {},
 	"powershell":       {}, // completion powershell (cobra built-in)
+	"query":            {}, // panel disposition query (spec 117 Bead 3 Q1-Q5 surface)
 	"record":           {},
 	"repair":           {},
 	"replay":           {}, // agentmind replay shim

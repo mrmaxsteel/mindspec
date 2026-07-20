@@ -1,0 +1,1 @@
+{"backfilled": true, "gate": "spec_approve", "record": "panel", "round": 1, "slots": [{"model": "fable", "slot": "F1", "verdict": "APPROVE"}, {"model": "sonnet", "slot": "S2", "verdict": "REQUEST_CHANGES"}], "spec": "116"}
