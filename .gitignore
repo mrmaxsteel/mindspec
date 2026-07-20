@@ -3,6 +3,14 @@
 .mindspec/session.json
 .mindspec/current-spec.json
 
+# spec 117 — the panel-disposition store's dedicated per-panel lockfile
+# (internal/panel/disposition_store.go). It serializes concurrent
+# `mindspec panel disposition append`/`check` invocations on
+# <spec-dir>/reviews/<panel>/dispositions.lock and is never the durable
+# data file (dispositions.jsonl, which IS version-controlled); it is a
+# local runtime artifact, not part of the telemetry the store records.
+**/reviews/*/dispositions.lock
+
 # Beads runtime artifacts are handled by .beads/.gitignore
 # This rule catches any stray runtime files outside .beads/
 **/bd.sock
