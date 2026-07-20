@@ -157,6 +157,7 @@ var SubcommandTokens = map[string]struct{}{
 	"copilot":          {},
 	"create":           {},
 	"create-from-plan": {},
+	"disposition":      {}, // panel disposition (spec 117 telemetry store)
 	"docs":             {},
 	"fish":             {}, // completion fish (cobra built-in)
 	"help":             {}, // cobra `help` subcommand under any parent
