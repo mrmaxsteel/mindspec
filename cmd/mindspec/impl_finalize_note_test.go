@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 // TestImplApproveTail_FinalizeBranchComposition pins the mutual exclusion:
@@ -55,7 +56,11 @@ func TestImplApproveTail_FinalizeBranchComposition(t *testing.T) {
 			t.Cleanup(func() { _ = os.Chdir(origWd) })
 
 			var stdout, stderr bytes.Buffer
-			tailErr := implApproveTail(&stdout, &stderr, root, root, "091-x",
+			// AutoOpenFinalizePR false (zero-value cfg): this test pins
+			// NOTE composition only, not the spec 121 finalize-PR
+			// automation — a zero-value config keeps the automation
+			// inert so it never spawns a real gh process here.
+			tailErr := implApproveTail(&stdout, &stderr, root, root, "091-x", &config.Config{},
 				&approve.ImplResult{
 					SpecID:         "091-x",
 					SpecBranch:     "spec/091-x",

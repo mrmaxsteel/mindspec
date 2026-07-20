@@ -23,6 +23,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 // noopWorktreeOps is a no-op executor.WorktreeOps fake for the real-git
@@ -350,11 +351,31 @@ func TestFaultInjection_Complete_C3_ArtifactSyncCommit_KillThenConverge(t *testi
 // return with a terminal error, faithfully modeling "the process died right
 // after the merge+cleanup landed". Re-invocation converges through Bead 1's
 // merged-unclosed reconcile — this is also AC-5's end-to-end kill proof.
+//
+// Spec 121 R5(a)/(b): this fixture's real merge-time landed-binding write
+// never actually fires (gitutil.BranchExists — the safety check gating it
+// — reads the CALLING PROCESS's cwd, not root, a pre-existing property
+// unrelated to this test's fixture directory), so the re-invocation's
+// identification needs SOME other admissible datum once the branch is
+// really gone. A registered panel (scanned from the filesystem, never
+// via bd) stands in for that datum here, mirroring
+// TestRun_Reconcile_RealPanel_MissingRefWarnCloses's convention — its
+// reviewed_head_sha is pinned to the bead's OWN pre-merge tip so it is
+// fresh (not stale) for the FIRST Run call's ordinary panel gate too.
 func TestFaultInjection_Complete_C5_BeadToSpecMerge_KillThenConverge(t *testing.T) {
 	saveAndRestore(t)
 	const specID, beadID = "925-fic5", "mindspec-119fic5.1"
 	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
 	wireRealGitFaultSeams(t, specID)
+
+	beadTipSHA := gateRevParse(t, root, beadBranch)
+	writePanel(t, root, specID+"-"+beadID, panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 2,
+		ReviewedHeadSHA: beadTipSHA,
+	}, map[string]string{
+		"a-round-1.json": "APPROVE",
+		"b-round-1.json": "APPROVE",
+	})
 
 	// No bead worktree registered — complete.Run resolves the canonical
 	// bead/<id> ref directly (matching the shipped no-worktree-yet shape a

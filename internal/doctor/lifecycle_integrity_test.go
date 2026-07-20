@@ -108,6 +108,55 @@ func TestCheckLifecycleIntegrity_FinalizeOrphansReported(t *testing.T) {
 	}
 }
 
+// TestCheckLifecycleIntegrity_PullAdvisoryRendersAsWarnNotError is the
+// Bead 1 review MINOR fix (F1-3): a "pull_advisory" finding (spec 121
+// R2(c) — origin/main already agrees, only the local checkout lags) is NOT
+// a stranded-carrier finding. It must render at Warn severity under its
+// own distinct name ("local main behind origin (pull advisory)"), never
+// mislabeled as a "finalize orphan (pull_advisory)" at Error severity
+// (which would overstate harmless, self-clearing local staleness).
+func TestCheckLifecycleIntegrity_PullAdvisoryRendersAsWarnNotError(t *testing.T) {
+	root := t.TempDir()
+
+	advisory := lifecycle.FinalizeOrphan{
+		Kind:    "pull_advisory",
+		SpecID:  "119-test",
+		Message: "epic epic-1 is closed on origin/main but local main still shows open",
+	}
+	stubScanIntegrity(t, func(r string, c *phase.Cache) lifecycle.IntegrityFindings {
+		return lifecycle.IntegrityFindings{StaleTrackers: []lifecycle.FinalizeOrphan{advisory}}
+	})
+
+	r := &Report{}
+	checkLifecycleIntegrity(r, root)
+
+	var found *Check
+	for i := range r.Checks {
+		if strings.Contains(r.Checks[i].Name, "pull advisory") {
+			found = &r.Checks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a pull-advisory check, got %+v", r.Checks)
+	}
+	if found.Status != Warn {
+		t.Errorf("status = %v, want Warn (a pull_advisory is never a stranded-carrier Error)", found.Status)
+	}
+	if strings.Contains(found.Name, "finalize orphan") {
+		t.Errorf("a pull_advisory must NOT be named/rendered as a \"finalize orphan\"; got %q", found.Name)
+	}
+	if !strings.Contains(found.Message, advisory.Message) || !strings.Contains(found.Message, advisory.RecoveryCommand()) {
+		t.Errorf("message must be FullMessage() (message + recovery command); got %q", found.Message)
+	}
+	if strings.Contains(found.Message, "impl approve") {
+		t.Errorf("a pull_advisory must never carry the self-looping impl-approve recovery; got %q", found.Message)
+	}
+	if r.HasFailures() {
+		t.Error("a Warn-only pull_advisory must NOT trip HasFailures (Error/Missing only)")
+	}
+}
+
 // Healthy: an empty aggregate → no checks (read-only, no false positive).
 func TestCheckLifecycleIntegrity_Clean(t *testing.T) {
 	root := t.TempDir()

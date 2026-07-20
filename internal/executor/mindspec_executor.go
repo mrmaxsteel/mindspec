@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -430,6 +431,26 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg string) error {
 		if ancErr != nil || !isAnc {
 			return fmt.Errorf("bead branch %s is NOT merged into %s — aborting cleanup to prevent data loss", beadBranch, specBranch)
 		}
+
+		// Spec 121 R5(b), ADR-0041 §2(ii): the merge-time landed-binding is
+		// recorded FAIL-CLOSED, BEFORE any branch/worktree cleanup below —
+		// the third durable datum internal/lifecycle.FindLandedMerge
+		// consults once this bead's branch and worktree are gone. Gated on
+		// beadBranch
+		// actually existing and being confirmed merged (this scope): a
+		// beadBranch that never existed at all has nothing to bind (no
+		// merge relationship to record). A failure here SUPPRESSES cleanup
+		// and refuses recoverably (ADR-0035): the branch survives as the
+		// corroborating datum (the surviving-branch leg), a re-attempted
+		// MergeInto of an already-ancestor branch is a no-op, and the
+		// re-run's ensureLandedBinding locates the SAME merge by identity —
+		// never a silent warn-and-continue past an unrecorded binding.
+		if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch); bindErr != nil {
+			return guard.NewFailure(
+				fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
+				fmt.Sprintf("mindspec complete %s", beadID),
+			)
+		}
 	}
 
 	// Remove worktree and delete branch from repo root (not from inside the
@@ -602,40 +623,111 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			_ = g.commitWithExport(e.Path, "chore: commit remaining bead artifacts")
 		}
 		// Merge bead branch into spec branch if not already an ancestor.
-		if _, statErr := os.Stat(specWtPath); statErr == nil {
-			isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
-			if ancErr == nil && !isAnc {
-				// Spec 106 Bead 4 (Req 9): directional guard in front of
-				// the FinalizeEpic bead→spec auto-merge. guardMergeLayout
-				// checks ONLY the directional layout-regression invariant
-				// (a flat spec branch must not receive a canonical/legacy-
-				// layout bead merge) — it is NOT panel-gate enforcement,
-				// NOT the Spec 114/115 obligation-reconciliation backstop,
-				// and NOT the bd_close orphan check (Spec 115 mindspec-o4fd
-				// OQ1/OQ4): none of those three fire on this
-				// executor-owned merge path (ADR-0030: enforcement lives in
-				// internal/approve and internal/complete, not here).
-				// Mutates nothing on a block.
-				if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
-					return result, guardErr
-				}
-				if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
-					// Spec 092 Req 14(a) — SEMANTIC abort, not a
-					// warning: a bead→spec conflict here used to
-					// warn-and-continue, removing the spec worktree,
-					// direct-merging spec→main WITHOUT the conflicted
-					// bead's commits, deleting the spec branch, and
-					// exiting 0. New behavior: abort the in-progress
-					// merge, perform NO worktree removal, NO direct
-					// merge to main, NO branch deletion, and return
-					// non-zero (HC-4: the bead→spec merge is part of
-					// the terminal mutation). The recovery matches the
-					// post-abort reality: the spec worktree still
-					// exists because the abort preserved it.
-					return result, beadToSpecConflictFailure(e.Branch, specBranch, specWtPath,
-						fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
-				}
-				fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
+		//
+		// Spec 121 final-review G1-1: the ancestry check, both R5(b)
+		// binding legs, and the F1-1 fail-closed abort below all operate
+		// on g.Root — NOT the spec worktree — so they run REGARDLESS of
+		// whether specWtPath is stat-able. The prior shape gated this
+		// entire block on os.Stat(specWtPath) while the cleanup leg
+		// further down deletes allow-set bead branches unconditionally:
+		// with the worktree missing (a prior partial run removed it), a
+		// merged-but-unbound branch would be destroyed with neither the
+		// surviving-branch datum nor a binding ever recorded — the exact
+		// no-evidence attested-restore state R5 exists to prevent (same
+		// harm as F1-1, different trigger). Only the actual MergeInto (a
+		// genuinely unmerged bead) needs the worktree; when it is missing
+		// there, refuse recoverably rather than fall through to cleanup.
+		isAnc, ancErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+		switch {
+		case ancErr != nil:
+			// Spec 121 R5(b), ADR-0041 §2(ii) fail-closed (panel F1-1):
+			// an IsAncestor infra failure here must NOT silently fall
+			// through — the downstream cleanup leg further below
+			// force-deletes this bead's branch (`git branch -D`, keyed
+			// ONLY off allow-set membership, with no re-check of its
+			// own). Falling through here would let a possibly-
+			// already-merged-but-UNBOUND branch be destroyed with
+			// neither the surviving-branch datum nor a binding ever
+			// recorded — landing exactly in the no-evidence
+			// attested-restore state R5 exists to prevent. Mirror
+			// CompleteBead's identical ancestry-check-error handling
+			// (its own `ancErr != nil || !isAnc` safety-check abort):
+			// refuse recoverably, mutate nothing, preserve the branch.
+			return result, guard.NewFailure(
+				fmt.Sprintf("bead %s's branch %s: could not determine whether it is already merged into %s (%v) — refusing to merge or clean it up.", beadID, e.Branch, specBranch, ancErr),
+				fmt.Sprintf("mindspec impl approve %s", specID),
+			)
+		case isAnc:
+			// Spec 121 R5(b), ADR-0041 §2(ii) re-run convergence (plan Bead 2 panel G2):
+			// this bead's branch is ALREADY an ancestor of specBranch —
+			// either it was never actually merged here (a trivially-
+			// ancestor branch that never diverged; ensureLandedBinding's
+			// locate-by-identity finds nothing and no-ops), or it WAS
+			// merged (by a prior run of this very loop, or by
+			// CompleteBead) but that prior run's binding write failed
+			// and suppressed cleanup — in which case the binding is
+			// still ABSENT and must be recorded now, BEFORE the cleanup
+			// leg further down runs, so the fail-closed refusal
+			// converges here too, not just at CompleteBead's leg.
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch); bindErr != nil {
+				return result, guard.NewFailure(
+					fmt.Sprintf("bead %s's branch %s is already merged into %s but its landed-merge binding is missing and could not be recorded (%v) — refusing to clean it up before this binding is durable.", beadID, e.Branch, specBranch, bindErr),
+					fmt.Sprintf("mindspec impl approve %s", specID),
+				)
+			}
+		default:
+			// Genuinely unmerged — the only leg that truly needs the spec
+			// worktree (MergeInto runs inside it). G1-1: when it is
+			// missing, refuse recoverably — proceeding would skip the
+			// merge AND the binding while cleanup destroys the branch.
+			if _, statErr := os.Stat(specWtPath); statErr != nil {
+				return result, guard.NewFailure(
+					fmt.Sprintf("bead %s's branch %s is not yet merged into %s and the spec worktree (%s) is missing (%v) — refusing to merge or clean it up without the worktree.", beadID, e.Branch, specBranch, specWtPath, statErr),
+					fmt.Sprintf("mindspec impl approve %s", specID),
+				)
+			}
+			// Spec 106 Bead 4 (Req 9): directional guard in front of
+			// the FinalizeEpic bead→spec auto-merge. guardMergeLayout
+			// checks ONLY the directional layout-regression invariant
+			// (a flat spec branch must not receive a canonical/legacy-
+			// layout bead merge) — it is NOT panel-gate enforcement,
+			// NOT the Spec 114/115 obligation-reconciliation backstop,
+			// and NOT the bd_close orphan check (Spec 115 mindspec-o4fd
+			// OQ1/OQ4): none of those three fire on this
+			// executor-owned merge path (ADR-0030: enforcement lives in
+			// internal/approve and internal/complete, not here).
+			// Mutates nothing on a block.
+			if guardErr := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
+				return result, guardErr
+			}
+			if mergeErr := gitutil.MergeInto(specWtPath, e.Branch); mergeErr != nil {
+				// Spec 092 Req 14(a) — SEMANTIC abort, not a
+				// warning: a bead→spec conflict here used to
+				// warn-and-continue, removing the spec worktree,
+				// direct-merging spec→main WITHOUT the conflicted
+				// bead's commits, deleting the spec branch, and
+				// exiting 0. New behavior: abort the in-progress
+				// merge, perform NO worktree removal, NO direct
+				// merge to main, NO branch deletion, and return
+				// non-zero (HC-4: the bead→spec merge is part of
+				// the terminal mutation). The recovery matches the
+				// post-abort reality: the spec worktree still
+				// exists because the abort preserved it.
+				return result, beadToSpecConflictFailure(e.Branch, specBranch, specWtPath,
+					fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
+			}
+			fmt.Printf("Merged bead branch %s → %s\n", e.Branch, specBranch)
+
+			// Spec 121 R5(b), ADR-0041 §2(ii): record the merge-time
+			// landed-binding FAIL-CLOSED, BEFORE the cleanup leg
+			// further down removes this bead's worktree/branch. See
+			// CompleteBead's identical discipline above for the full
+			// rationale.
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch); bindErr != nil {
+				return result, guard.NewFailure(
+					fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean it up before this binding is durable.", beadID, e.Branch, specBranch, bindErr),
+					fmt.Sprintf("mindspec impl approve %s", specID),
+				)
 			}
 		}
 	}
@@ -697,16 +789,23 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// specBranchBase()'s fallback discipline, a fetch/detect error
 		// here is never a hard `impl approve` failure.
 		//
-		// Known blind spot (panel round 1, Group 5): the IsAncestor
-		// probe assumes the impl PR landed as a merge commit, FF, or
-		// rebase — anything that preserves the spec branch's commit
-		// SHAs in origin/main's history. A SQUASH-merged impl PR
-		// discards those SHAs, so preFinalizeTip is NOT an ancestor,
-		// detection misses, and the pre-fix behavior recurs (finalize
-		// commit stranded on the dead spec branch). This repo's
-		// workflow merges spec PRs with merge commits; a
-		// squash-tolerant detection (e.g. content-based JSONL
-		// comparison) is a deferred follow-up, not this fix.
+		// Per-consumer contract (spec 121 R4, ADR-0041 §2(iii)): SHA
+		// ancestry remains SUFFICIENT as-is for this probe — it decides
+		// carrier ROUTING, and an ancestor spec branch is a spent PR
+		// carrier regardless of later history (nothing pushed to it can
+		// reach main again; a later revert of its work on main is a
+		// main-side state the doctor/stale-tracker surface detects, not a
+		// routing input here). When ancestry is FALSE, fall back to the
+		// net-effect predicate over the spec branch's full diff — this is
+		// what closes the SQUASH blind spot (mindspec-3xqm item 1): a
+		// squash-merged impl PR discards the spec branch's SHAs, so
+		// ancestry alone would miss it and push the epic-close commit onto
+		// the now-dead spec-branch carrier (the pre-121 bug). On a
+		// content-fallback INFRA failure, this probe WARNS naming itself
+		// undetermined and proceeds on the ancestry answer alone (false) —
+		// a DELIBERATE fail-open (spec 121 R4): the stranded outcome stays
+		// fully detected by the shipped doctor finalize-orphan finding, the
+		// same absorb already covering this probe's own fetch-failure leg.
 		orphaned := false
 		if preFinalizeTip != "" {
 			if fetchErr := withWorkingDir(g.Root, func() error {
@@ -715,8 +814,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				fmt.Fprintf(os.Stderr, "warning: could not fetch origin/main to check protected-main finalize state: %v\n", fetchErr)
 			} else if isAnc, ancErr := gitutil.IsAncestor(g.Root, preFinalizeTip, "origin/main"); ancErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not determine whether %s was already merged into origin/main: %v\n", specBranch, ancErr)
+			} else if isAnc {
+				orphaned = true
+			} else if landed, neErr := netEffectLandedFn(g.Root, preFinalizeTip, "origin/main"); neErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not determine whether %s's content already landed on origin/main (net-effect probe undetermined) — proceeding on ancestry alone: %v\n", specBranch, neErr)
 			} else {
-				orphaned = isAnc
+				orphaned = landed
 			}
 		}
 
@@ -1312,6 +1415,139 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 // this seam exists: bug wu7t's finalizeOrphanedSpecBranch test needs a
 // deterministic, bd-free export stub.
 var execBeadExportFn = bead.Export
+
+// netEffectLandedFn is the ONE exported already-merged predicate
+// (gitutil.NetEffectLanded) the protected-main FinalizeEpic probe falls
+// back to when SHA ancestry is false (spec 121 R4, ADR-0041 §2(iii)) — the
+// squash-merge blind-spot fix. AC-17 anti-drift pins this seam's default to
+// be the identical symbol internal/lifecycle's doctor merged-carrier
+// suppression routes through, so neither consumer can drift into a private
+// reimplementation.
+var netEffectLandedFn = gitutil.NetEffectLanded
+
+// mergeBindingFn / mergeBindingReadFn are the spec 121 R5(b) merge-time
+// landed-binding seams (ADR-0041 §2(ii)): immediately after a bead->spec
+// gitutil.MergeInto succeeds, and BEFORE any branch/worktree cleanup for
+// that bead, both producer legs (CompleteBead and FinalizeEpic's auto-merge
+// loop) locate the landed merge BY IDENTITY and record it durably through
+// mergeBindingFn (bead.MergeMetadata) — the third admissible datum
+// internal/lifecycle.FindLandedMerge consults. mergeBindingReadFn
+// (bead.GetMetadata) lets ensureLandedBinding check whether a binding is
+// already recorded before writing again (idempotent re-runs, and the
+// FinalizeEpic already-ancestor "skip" leg's convergence check below).
+// Seamed so tests can inject a write failure without a real bd process —
+// the whole point of AC-22's kill test.
+var (
+	mergeBindingFn     = bead.MergeMetadata
+	mergeBindingReadFn = bead.GetMetadata
+)
+
+// errNoLandedMergeIdentified is locateLandedMergeByIdentity's local
+// not-found sentinel (test via errors.Is): a trivially-ancestor bead
+// branch (zero own commits since its spec-branch fork point) produces no
+// "Merge bead/<id>" commit by construction — `git merge --no-ff` of an
+// already-ancestor branch performs no merge and creates no commit — so
+// this is "nothing to bind", never an error.
+var errNoLandedMergeIdentified = errors.New("no landed merge commit identified by identity")
+
+// locateLandedMergeByIdentity is the executor-local, gitutil-only
+// counterpart of internal/lifecycle.FindLandedMerge (spec 121 R5(b),
+// ADR-0041 §2(ii)). internal/executor must not import internal/lifecycle —
+// it transitively pulls internal/phase, an enforcement package this
+// package's own contract (see the doc comment atop executor.go) forbids
+// importing — so the merge-time binding write locates its own subject
+// candidate directly via gitutil.FirstParentMerges, corroborated ONLY by
+// beadBranch's own surviving tip (the one datum available at merge/write
+// time, before any panel/binding read makes sense — this function IS the
+// write side of that third datum). Deliberately NEVER a rev-parse of the
+// current tip/HEAD: on a no-op re-run (MergeInto sees an already-ancestor
+// branch and performs no new merge) HEAD is NOT the merge commit, so the
+// newest subject-matching commit — the SAME merge every prior run would
+// have identified — is scanned for instead; one code path serves both the
+// first run and every re-run.
+func locateLandedMergeByIdentity(root, specBranch, beadBranch string) (mergeSHA, secondParent string, err error) {
+	wantSubject := "Merge " + beadBranch
+	merges, err := gitutil.FirstParentMerges(root, specBranch)
+	if err != nil {
+		return "", "", fmt.Errorf("scanning %s for a landed merge of %s: %w", specBranch, beadBranch, err)
+	}
+
+	var branchTip string
+	var branchSurvives bool
+	if tip, tipErr := gitutil.RevParseRef(root, beadBranch); tipErr != nil {
+		if !errors.Is(tipErr, gitutil.ErrRefNotFound) {
+			return "", "", fmt.Errorf("resolving %s: %w", beadBranch, tipErr)
+		}
+		// Genuinely absent — proceed uncorroborated below (a subject match
+		// is unique per bead in the normal lifecycle, so the newest one is
+		// the intended target regardless).
+	} else {
+		branchTip, branchSurvives = tip, true
+	}
+
+	for _, m := range merges {
+		if m.Subject != wantSubject || len(m.Parents) < 2 {
+			continue
+		}
+		candidateSecondParent := m.Parents[1]
+		if branchSurvives && branchTip != candidateSecondParent {
+			anc, ancErr := gitutil.IsAncestor(root, branchTip, candidateSecondParent)
+			if ancErr != nil || !anc {
+				continue
+			}
+		}
+		return m.SHA, candidateSecondParent, nil
+	}
+	return "", "", errNoLandedMergeIdentified
+}
+
+// ensureLandedBinding locates beadBranch's landed merge on specBranch by
+// identity and, when the merge-time binding is not yet recorded for
+// beadID, writes it via mergeBindingFn — fail-closed and BEFORE any
+// cleanup at either producer leg (ADR-0041 §2(ii)). A locate MISS
+// (errNoLandedMergeIdentified) is never itself an error: a trivially-
+// ancestor branch that never diverged (e.g. a bd_close orphan with zero
+// own commits) legitimately has nothing to bind. Only a genuine locate
+// infra failure, or a binding-write failure, is returned as an error —
+// the caller's job is to translate that into the fail-closed,
+// cleanup-suppressing refusal (CompleteBead / FinalizeEpic below).
+func (g *MindspecExecutor) ensureLandedBinding(beadID, specBranch, beadBranch string) error {
+	mergeSHA, secondParent, locErr := locateLandedMergeByIdentity(g.Root, specBranch, beadBranch)
+	if locErr != nil {
+		if errors.Is(locErr, errNoLandedMergeIdentified) {
+			return nil
+		}
+		return fmt.Errorf("locating landed merge of %s on %s: %w", beadBranch, specBranch, locErr)
+	}
+
+	// Spec 121 final-review G3-1: "already bound" means bound TO THE
+	// LOCATED MERGE — the prior skip returned nil on ANY non-empty stored
+	// SHA without comparing it to mergeSHA, so a stale/contradictory
+	// pre-existing binding (a reopened bead, or a crafted value) silently
+	// survived while the caller's cleanup destroyed the surviving-branch
+	// datum, leaving a WRONG binding for FindLandedMerge to contradict
+	// later (stuck in attested-restore). Skip only when the existing
+	// binding is CONSISTENT with the located merge; a mismatch falls
+	// through to the write below, which OVERWRITES it with the located
+	// merge's SHAs — and a failed overwrite fails closed via the write
+	// error, suppressing cleanup and preserving the branch.
+	if existing, readErr := mergeBindingReadFn(beadID); readErr == nil {
+		if sha, _ := existing["mindspec_landed_merge_sha"].(string); strings.TrimSpace(sha) == mergeSHA {
+			return nil // already bound to this located merge — convergent no-op
+		}
+	}
+	// A read failure is NOT treated as "already bound" — fall through and
+	// attempt the write; a persistent failure surfaces via the write below.
+
+	if bindErr := mergeBindingFn(beadID, map[string]interface{}{
+		"mindspec_landed_merge_sha":     mergeSHA,
+		"mindspec_landed_second_parent": secondParent,
+		"mindspec_landed_at":            time.Now().UTC().Format(time.RFC3339),
+	}); bindErr != nil {
+		return fmt.Errorf("recording the landed-merge binding for %s (merge %s): %w", beadID, mergeSHA, bindErr)
+	}
+	return nil
+}
 
 // resolveAnchorRoot returns the spec worktree path if it exists, otherwise
 // the main repo root. Bead worktrees are anchored under the spec worktree.

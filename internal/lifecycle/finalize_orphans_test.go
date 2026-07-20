@@ -2,8 +2,12 @@ package lifecycle
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // stubFinalizeOrphanSeams installs the finalize-orphan predicate's
@@ -18,24 +22,29 @@ func stubFinalizeOrphanSeams(t *testing.T,
 	origBranches := localBranchRefsFn
 	origCommitCount := finalizeOrphanCommitCountFn
 	origDiffStat := finalizeOrphanDiffStatFn
-	origIsAncestor := finalizeOrphanIsAncestorFn
+	origNetEffect := finalizeOrphanNetEffectFn
 	origFileAtRef := fileAtRefFn
+	origRevParseRef := revParseRefFn
 	t.Cleanup(func() {
 		localBranchRefsFn = origBranches
 		finalizeOrphanCommitCountFn = origCommitCount
 		finalizeOrphanDiffStatFn = origDiffStat
-		finalizeOrphanIsAncestorFn = origIsAncestor
+		finalizeOrphanNetEffectFn = origNetEffect
 		fileAtRefFn = origFileAtRef
+		revParseRefFn = origRevParseRef
 	})
 
 	localBranchRefsFn = func(workdir string) ([]string, error) { return branches, branchesErr }
 	finalizeOrphanCommitCountFn = func(workdir, base, head string) (int, error) { return commitCount, commitCountErr }
 	finalizeOrphanDiffStatFn = func(workdir, base, head string) (string, error) { return diffStat, diffStatErr }
-	// Default the G1 ancestry confirmation to "NOT merged" so the
-	// unmerged-carrier tests keep flagging; the merged/ancestry-error tests
+	// Default the net-effect confirmation to "NOT landed" so the
+	// unmerged-carrier tests keep flagging; the landed/error tests
 	// override this seam directly.
-	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return false, nil }
+	finalizeOrphanNetEffectFn = func(workdir, ref, target string) (bool, error) { return false, nil }
 	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) { return fileAtRef, fileAtRefErr }
+	// Default origin/main as resolvable (the common remote workflow); the
+	// no-remote-fallback tests override this seam directly.
+	revParseRefFn = func(workdir, ref string) (string, error) { return "deadbeefcafe", nil }
 }
 
 // (a) an outstanding chore/finalize-<specID> branch is flagged, with stats
@@ -110,20 +119,21 @@ func TestFindOutstandingFinalizeBranches_Healthy(t *testing.T) {
 	}
 }
 
-// (b2) G1 (spec 119 final-review): a carrier branch that IS an ancestor of
-// origin/main is the benign merged-but-undeleted residue
-// finalizeOrphanedSpecBranch deliberately leaves behind on success — it
-// must NOT be flagged, and the ancestry check must be asked about
-// origin/main (never local main).
+// (b2) G1 (spec 119 final-review) / spec 121 R4: a carrier branch whose
+// content is already net-effect LANDED on origin/main (the benign
+// merged-but-undeleted residue finalizeOrphanedSpecBranch deliberately
+// leaves behind on success, OR a squash-merged carrier — the squash blind
+// spot this bead closes) must NOT be flagged, and the check must be asked
+// about origin/main (never local main).
 func TestFindOutstandingFinalizeBranches_MergedCarrierNotFlagged(t *testing.T) {
 	stubFinalizeOrphanSeams(t,
 		[]string{"main", "chore/finalize-010-test"}, nil,
 		0, nil, "", nil, nil, nil,
 	)
-	var gotAncestor, gotDescendant string
-	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
-		gotAncestor, gotDescendant = ancestor, descendant
-		return true, nil // merged
+	var gotRef, gotTarget string
+	finalizeOrphanNetEffectFn = func(workdir, ref, target string) (bool, error) {
+		gotRef, gotTarget = ref, target
+		return true, nil // landed
 	}
 
 	orphans, err := FindOutstandingFinalizeBranches(".")
@@ -131,27 +141,28 @@ func TestFindOutstandingFinalizeBranches_MergedCarrierNotFlagged(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(orphans) != 0 {
-		t.Fatalf("a merged carrier must NOT be flagged, got %+v", orphans)
+		t.Fatalf("a landed carrier must NOT be flagged, got %+v", orphans)
 	}
-	if gotAncestor != "chore/finalize-010-test" {
-		t.Errorf("IsAncestor ancestor = %q, want the carrier branch", gotAncestor)
+	if gotRef != "chore/finalize-010-test" {
+		t.Errorf("NetEffectLanded ref = %q, want the carrier branch", gotRef)
 	}
-	if gotDescendant != "origin/main" {
-		t.Errorf("IsAncestor descendant = %q, want origin/main (never local main)", gotDescendant)
+	if gotTarget != "origin/main" {
+		t.Errorf("NetEffectLanded target = %q, want origin/main (never local main)", gotTarget)
 	}
 }
 
-// (b3) G1: when the ancestry of a carrier CANNOT be checked, the branch is
-// never asserted "unmerged" from absence of proof — it is skipped and the
-// error is returned. A later provable orphan in the same list still
-// survives (the ScanOrphanedClosedBeads mixed-list contract).
-func TestFindOutstandingFinalizeBranches_AncestryErrorNotAssertedUnmerged(t *testing.T) {
+// (b3) G1 / spec 121 R4: when a carrier's net-effect landed state CANNOT be
+// determined, the branch is never asserted "unmerged" from absence of
+// proof — it is skipped and the error is returned. A later provable orphan
+// in the same list still survives (the ScanOrphanedClosedBeads mixed-list
+// contract).
+func TestFindOutstandingFinalizeBranches_NetEffectErrorNotAssertedUnmerged(t *testing.T) {
 	stubFinalizeOrphanSeams(t,
 		[]string{"chore/finalize-010-err", "chore/finalize-011-real"}, nil,
 		2, nil, "1 file changed", nil, nil, nil,
 	)
-	finalizeOrphanIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
-		if ancestor == "chore/finalize-010-err" {
+	finalizeOrphanNetEffectFn = func(workdir, ref, target string) (bool, error) {
+		if ref == "chore/finalize-010-err" {
 			return false, errors.New("simulated missing origin/main")
 		}
 		return false, nil // 011-real is provably unmerged
@@ -159,15 +170,15 @@ func TestFindOutstandingFinalizeBranches_AncestryErrorNotAssertedUnmerged(t *tes
 
 	orphans, err := FindOutstandingFinalizeBranches(".")
 	if err == nil {
-		t.Fatal("expected the ancestry-check error to be returned, got nil")
+		t.Fatal("expected the net-effect-check error to be returned, got nil")
 	}
 	for _, o := range orphans {
 		if o.Branch == "chore/finalize-010-err" {
-			t.Errorf("the ancestry-error branch must NOT be asserted unmerged, got %+v", o)
+			t.Errorf("the net-effect-error branch must NOT be asserted unmerged, got %+v", o)
 		}
 	}
 	if len(orphans) != 1 || orphans[0].Branch != "chore/finalize-011-real" {
-		t.Errorf("the later provable orphan must survive the earlier ancestry error, got %+v", orphans)
+		t.Errorf("the later provable orphan must survive the earlier net-effect-check error, got %+v", orphans)
 	}
 }
 
@@ -263,6 +274,134 @@ func TestStaleTrackerOnMain_PropagatesReadError(t *testing.T) {
 	)
 	if _, err := StaleTrackerOnMain(".", "010-test", "epic-1", true); err == nil {
 		t.Fatal("expected a propagated error on git-read failure, got nil")
+	}
+}
+
+// (i) R2(c) (spec 121): when origin/main exists, the classifier consults
+// IT for the committed export — never possibly-stale local main.
+func TestStaleTrackerOnMain_ConsultsOriginMainFirst(t *testing.T) {
+	stubFinalizeOrphanSeams(t, nil, nil, 0, nil, "", nil, nil, nil)
+	var gotRefs []string
+	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) {
+		gotRefs = append(gotRefs, ref)
+		if ref == "origin/main" {
+			return []byte(`{"id":"epic-1","status":"open"}` + "\n"), nil
+		}
+		return []byte(`{"id":"epic-1","status":"open"}` + "\n"), nil
+	}
+	o, err := StaleTrackerOnMain(".", "010-test", "epic-1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o == nil || o.Kind != "stale_tracker" {
+		t.Fatalf("expected a stale_tracker finding, got %+v", o)
+	}
+	if len(gotRefs) == 0 || gotRefs[0] != "origin/main" {
+		t.Errorf("the FIRST committed-export read must be origin/main, got %v", gotRefs)
+	}
+}
+
+// (j) R2(c): the no-remote direct workflow (no origin/main ref at all)
+// falls back to local main.
+func TestStaleTrackerOnMain_NoRemoteFallsBackToLocalMain(t *testing.T) {
+	stubFinalizeOrphanSeams(t, nil, nil, 0, nil, "", nil, nil, nil)
+	revParseRefFn = func(workdir, ref string) (string, error) {
+		return "", fmt.Errorf("rev-parse %s: %w", ref, gitutil.ErrRefNotFound)
+	}
+	var gotRef string
+	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) {
+		gotRef = ref
+		return []byte(`{"id":"epic-1","status":"open"}` + "\n"), nil
+	}
+	o, err := StaleTrackerOnMain(".", "010-test", "epic-1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o == nil {
+		t.Fatal("expected a finding, got nil")
+	}
+	if gotRef != "main" {
+		t.Errorf("no-remote fallback must read local main, got ref %q", gotRef)
+	}
+}
+
+// (k) R2(c): a genuine (non-ErrRefNotFound) failure resolving origin/main
+// propagates rather than silently falling back to local main.
+func TestStaleTrackerOnMain_OriginMainResolveErrorPropagates(t *testing.T) {
+	stubFinalizeOrphanSeams(t, nil, nil, 0, nil, "", nil, nil, nil)
+	revParseRefFn = func(workdir, ref string) (string, error) {
+		return "", errors.New("simulated transient git failure")
+	}
+	if _, err := StaleTrackerOnMain(".", "010-test", "epic-1", true); err == nil {
+		t.Fatal("expected the transient origin/main resolution failure to propagate, got nil")
+	}
+}
+
+// (l) R2(c): origin/main already agrees (closed) but the DISTINCT local
+// main ref still lags — surfaced as a pull_advisory, NEVER the self-looping
+// `mindspec impl approve` recovery a stale_tracker finding carries.
+func TestStaleTrackerOnMain_PullAdvisoryWhenLocalLags(t *testing.T) {
+	stubFinalizeOrphanSeams(t, nil, nil, 0, nil, "", nil, nil, nil)
+	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) {
+		if ref == "origin/main" {
+			return []byte(`{"id":"epic-1","status":"closed"}` + "\n"), nil
+		}
+		return []byte(`{"id":"epic-1","status":"open"}` + "\n"), nil // local main lags
+	}
+	o, err := StaleTrackerOnMain(".", "010-test", "epic-1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o == nil || o.Kind != "pull_advisory" {
+		t.Fatalf("expected a pull_advisory finding, got %+v", o)
+	}
+	if strings.Contains(o.RecoveryCommand(), "impl approve") {
+		t.Errorf("a pull_advisory must never recommend the self-looping impl-approve recovery, got %q", o.RecoveryCommand())
+	}
+	if !strings.Contains(o.RecoveryCommand(), "pull") {
+		t.Errorf("expected the pull recovery line, got %q", o.RecoveryCommand())
+	}
+}
+
+// Spec 121 final-review S1-1: localStatus is parsed from local main's
+// committed .beads/issues.jsonl (agent-writable provenance) — a
+// control-byte-bearing status must render through termsafe.Escape, never
+// reach the message raw.
+func TestPullAdvisoryFinding_HostileStatusRendersEscaped(t *testing.T) {
+	o := pullAdvisoryFinding("010-test", "epic-1", "open\x1b[2J\x07forged")
+	if o == nil {
+		t.Fatal("expected a pull_advisory finding for a non-terminal local status")
+	}
+	if strings.ContainsAny(o.Message, "\x1b\x07") {
+		t.Errorf("the pull_advisory message carries raw control bytes: %q", o.Message)
+	}
+}
+
+// (m) R2(c): origin/main agrees AND local main agrees too — no finding of
+// any kind (no phantom pull_advisory when there is nothing to pull).
+func TestStaleTrackerOnMain_NoPullAdvisoryWhenLocalAgrees(t *testing.T) {
+	stubFinalizeOrphanSeams(t, nil, nil, 0, nil, "", nil, nil, nil)
+	fileAtRefFn = func(workdir, ref, path string) ([]byte, error) {
+		return []byte(`{"id":"epic-1","status":"closed"}` + "\n"), nil
+	}
+	o, err := StaleTrackerOnMain(".", "010-test", "epic-1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o != nil {
+		t.Errorf("expected no finding when both origin/main and local main agree, got %+v", o)
+	}
+}
+
+// TestFinalizeOrphanNetEffectFn_IsGitutilNetEffectLanded is AC-17's
+// lifecycle-side anti-drift pin: the doctor merged-carrier suppression's
+// seam default MUST be the identical exported symbol the executor probe
+// falls back to (internal/executor's netEffectLandedFn) — never a private
+// reimplementation at either site (the 119 AC-12 pattern,
+// doctor/lifecycle_integrity_test.go:169 precedent).
+func TestFinalizeOrphanNetEffectFn_IsGitutilNetEffectLanded(t *testing.T) {
+	if reflect.ValueOf(finalizeOrphanNetEffectFn).Pointer() != reflect.ValueOf(gitutil.NetEffectLanded).Pointer() {
+		t.Fatal("finalizeOrphanNetEffectFn must be gitutil.NetEffectLanded (AC-17 anti-drift: the doctor suppression and the executor probe must invoke the identical exported predicate)")
 	}
 }
 

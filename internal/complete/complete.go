@@ -113,6 +113,14 @@ var (
 	// shared predicate is reused by `mindspec next` and `mindspec doctor`.
 	// Tests swap this to drive the chicken-and-egg guard without a real repo.
 	findOrphanedClosedBeadsFn = lifecycle.FindOrphanedClosedBeads
+	// isBeadSelfOrphanedFn determines whether the INVOKED bead is itself a
+	// closed-but-unmerged orphan (ADR-0041 §2(i), spec 121 R6(a),
+	// mindspec-tpjn): when it is, the step-1.6 all-orphans refusal below
+	// demotes to a WARN, because refusing on siblings while the invoked
+	// bead's OWN recovery is what this run performs would otherwise be a
+	// deadlock. Tests swap this to drive the WARN-demotion and the
+	// infra-error-retains-refusal paths without a real repo.
+	isBeadSelfOrphanedFn = lifecycle.IsBeadSelfOrphaned
 	// resolveSpecPrefixFn resolves an explicit --spec hint (numeric prefix
 	// or full ID) for the Spec 119 R1/AC-2 lineage-mismatch check. Tests
 	// swap this to avoid a real `bd list --type=epic` call; production
@@ -478,25 +486,75 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, fmt.Errorf("resolved spec id %s is invalid: %w", specID, err)
 	}
 
-	// 1.6. bd_close lifecycle-bypass guard (bead mindspec-4gsz). Before ANY
-	// mutation, block if some OTHER sibling bead under this epic was closed
-	// without `mindspec complete` — its bead/<id> branch exists and is NOT an
-	// ancestor of the spec branch, so its work is unmerged and ungated. The
-	// shared predicate (also used by `mindspec next` and `mindspec doctor`)
-	// applies the IsAncestor confirmation so a benign merged-but-undeleted
-	// branch is not flagged. excludeBeadID = beadID avoids the chicken-and-egg
-	// of blocking on the very bead being completed (it may itself be an
+	// 1.6. bd_close lifecycle-bypass guard (bead mindspec-4gsz), converged
+	// for ANY set of simultaneously orphaned closed siblings (ADR-0041
+	// §2(i), spec 121 R6, mindspec-tpjn). Before ANY mutation, block if
+	// some OTHER sibling bead under this epic was closed without `mindspec
+	// complete` — its bead/<id> branch exists and is NOT an ancestor of the
+	// spec branch, so its work is unmerged and ungated. The shared predicate
+	// (also used by `mindspec next` and `mindspec doctor`) applies the
+	// IsAncestor confirmation so a benign merged-but-undeleted branch is not
+	// flagged. excludeBeadID = beadID avoids the chicken-and-egg of blocking
+	// on the very bead being completed (it may itself be an
 	// orphaned-yet-being-recovered branch — that is exactly what this run
 	// converges).
 	if orphans := findOrphanedClosedBeadsFn(specID, root, beadID); len(orphans) > 0 {
-		o := orphans[0]
-		// R4: o.BeadID is an ID-typed position (idrender.Bead);
-		// o.BeadBranch/o.SpecBranch carry a "bead/"/"spec/" prefix so
-		// they don't validate against the bare idvalidate grammar —
-		// escape as free text instead (mirroring internal/doctor's
-		// orphaned_beads.go render of the same lifecycle.Orphan shape).
-		return nil, fmt.Errorf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s (closed-but-unmerged).\nRun `mindspec complete %s` to recover, then re-run `mindspec complete %s`.",
-			idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch), idrender.Bead(o.BeadID), safeBeadID)
+		// §2(i) deadlock-free recovery graph (mindspec-tpjn): two (or
+		// more) simultaneously orphaned closed siblings, each refusing on
+		// the OTHER, previously had no non-manual exit. Determine whether
+		// the INVOKED bead is ITSELF the orphan being recovered — when it
+		// is, this refusal DEMOTES to a WARN naming every OTHER orphaned
+		// sibling, and this run's own recovery proceeds (a genuine
+		// forward step, never a re-run of the same refusal). A
+		// determination error is treated as NOT self-orphaned — the
+		// refusal below is RETAINED (retryable, nothing mutated yet)
+		// rather than demoted on unproven evidence.
+		selfOrphaned, selfErr := isBeadSelfOrphanedFn(specID, root, beadID)
+		if selfErr == nil && selfOrphaned {
+			names := make([]string, 0, len(orphans))
+			for _, o := range orphans {
+				names = append(names, idrender.Bead(o.BeadID))
+			}
+			recoveries := make([]string, 0, len(orphans))
+			for _, o := range orphans {
+				recoveries = append(recoveries, o.RecoveryCommand())
+			}
+			// R4: safeBeadID/names are ID-typed positions (idrender).
+			fmt.Printf("Warning: bead %s was closed without `mindspec complete` and is unmerged (closed-but-unmerged) — recovering it now.\nSibling(s) %s are ALSO closed-but-unmerged; recover each next: %s.\n",
+				safeBeadID, strings.Join(names, ", "), strings.Join(recoveries, "; "))
+		} else {
+			// F1-1 (panel MINOR): a determination ERROR is diagnostic-
+			// only here — the refusal below is RETAINED either way (a
+			// genuine "not self-orphaned" answer and an undetermined one
+			// take the identical path), but silently swallowing the
+			// error would leave the operator guessing why a
+			// self-recovery run got the all-orphans refusal instead of
+			// the WARN-demotion. This does not change the decision.
+			if selfErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not determine self-orphan status for %s: %v; retaining orphan refusal\n", safeBeadID, selfErr)
+			}
+			// R6(b): name ALL orphaned siblings (not just orphans[0])
+			// with the single recovery sequence, so the full non-manual
+			// exit is knowable from one refusal.
+			// R4: o.BeadID is an ID-typed position (idrender.Bead);
+			// o.BeadBranch carries a "bead/" prefix so it doesn't
+			// validate against the bare idvalidate grammar — escape as
+			// free text instead (mirroring internal/doctor's
+			// orphaned_beads.go render of the same lifecycle.Orphan
+			// shape).
+			var detail strings.Builder
+			recoveries := make([]string, 0, len(orphans)+1)
+			for i, o := range orphans {
+				if i > 0 {
+					detail.WriteString(", ")
+				}
+				fmt.Fprintf(&detail, "%s (branch %s)", idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch))
+				recoveries = append(recoveries, o.RecoveryCommand())
+			}
+			recoveries = append(recoveries, "mindspec complete "+safeBeadID)
+			return nil, fmt.Errorf("sibling bead(s) %s were closed without `mindspec complete` — unmerged into %s (closed-but-unmerged).\nRecover each in turn, then re-run: %s.",
+				detail.String(), termsafe.Escape(specBranch), strings.Join(recoveries, ", then "))
+		}
 	}
 
 	// 2. Find worktree matching bead (needed for commit/clean-tree paths).
@@ -545,6 +603,17 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if _, rpErr := exec.RevParseRef(root, beadHead); rpErr != nil && exec.IsRefNotFound(rpErr) {
 			landed, ok, mergedErr := mergedUnclosedFn(root, specBranch, beadID)
 			if mergedErr != nil {
+				// Spec 121 R5(c): a *lifecycle.LandedMergeNoEvidence names a
+				// subject-scan candidate that no admissible durable datum
+				// confirms — render the attested-restore forward exit
+				// (candidate SHAs + the exact restore command + the
+				// human-verification marker) instead of the generic infra-
+				// failure wrap below, which would otherwise bury the
+				// candidate's identity in a free-text %v.
+				var noEvidence *lifecycle.LandedMergeNoEvidence
+				if errors.As(mergedErr, &noEvidence) {
+					return nil, attestedRestoreFailure(beadID, specBranch, beadHead, noEvidence)
+				}
 				// R4: beadID is an ID-typed position — idrender.Bead.
 				return nil, fmt.Errorf("checking landed-merge state for %s: %w", safeBeadID, mergedErr)
 			}
@@ -1319,6 +1388,35 @@ func adrDivergenceFailure(beadID, findings string) error {
 		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", safeBeadID))
+}
+
+// attestedRestoreFailure renders spec 121 R5(c)'s attested-restore forward
+// exit (ADR-0041 §2(ii)): a subject-scan merge candidate exists on
+// specBranch but no admissible durable datum — a registered panel, a
+// surviving bead/<id> branch, or the merge-time landed-binding
+// (lifecycle.LandedMergeNoEvidence) — confirms it belongs to beadID.
+// Unlike every other recovery line in this file, the named restore command
+// is DELIBERATELY NON-MECHANICAL (ADR-0035): recreating bead/<id> at the
+// candidate's second parent only converges the state correctly if that
+// merge genuinely carried this bead's work, so the message carries an
+// explicit human-verification marker rather than inviting a blind re-run —
+// the one recovery line in this tree an agent must NOT paste without
+// looking first.
+func attestedRestoreFailure(beadID, specBranch, beadBranch string, ne *lifecycle.LandedMergeNoEvidence) error {
+	// R4: beadID is an ID-typed position — idrender.Bead. specBranch/
+	// beadBranch are the spine-derived branch operands (RAW, per this
+	// file's convention); ne.MergeSHA/ne.SecondParent are git-produced hex
+	// commit SHAs, not agent-writable free text.
+	safeBeadID := idrender.Bead(beadID)
+	restoreCmd := fmt.Sprintf("git branch %s %s", beadBranch, ne.SecondParent)
+	msg := fmt.Sprintf(
+		"bead %s has no active worktree and no %s branch; a candidate merge %s was found on %s but no admissible durable datum (a registered panel, a surviving branch, or a merge-time landed-binding) confirms it is this bead's landed merge — refusing to reconcile on the merge's subject text alone.\n"+
+			"if — and only if — you have verified (by inspecting its diff) that merge %s actually carried %s's work: running `%s` attests that merge %s carried THIS bead's work — verify before running; do not execute blindly.",
+		safeBeadID, beadBranch, ne.MergeSHA, specBranch, ne.MergeSHA, safeBeadID, restoreCmd, ne.MergeSHA)
+	return guard.NewFailure(msg,
+		restoreCmd,
+		fmt.Sprintf("mindspec complete %s", safeBeadID),
+	)
 }
 
 // warnWriter is the destination for WARN lines rendered from

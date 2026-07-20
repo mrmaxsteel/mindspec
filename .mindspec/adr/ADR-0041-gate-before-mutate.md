@@ -153,6 +153,67 @@ operator's Ctrl-C — between two of its mutations, the recovery contract is:
   `guard.NewFailure` naming the exact re-run command — it never lets the
   command exit 0 having only partially mutated state.
 
+#### §2(i)–(iii): Convergence-completeness (Spec 121 amendment)
+
+Spec 119 stated the forward-reconcile contract above in general terms —
+"re-invocation is always safe," "state re-derivation, never state
+assumption." Spec 121 found two concrete ways that promise could still fail
+to hold in practice, and pins the completing doctrine here as three named
+clauses of this section (§2), because each is a refinement of the same
+forward-reconcile contract rather than a new one:
+
+- **§2(i) — Deadlock-free recovery graph, genuine forward exits.** Every
+  refusal's named recovery MUST be a step that can actually change the fact
+  being refused on. A refusal whose only named recovery is bare
+  re-invocation, when re-invocation alone cannot change that fact, is a
+  deadlock, not a convergence path — the CONVERGENCE promise of §2 is
+  false for that state until a genuine forward exit is named. Two
+  instances this spec closes: **the `mindspec-tpjn` all-orphans
+  sequence** (`complete`'s step-1.6 preflight previously refused naming
+  only the first orphaned sibling, so two closed-but-unmerged siblings each
+  refusing on the other had no non-manual exit; the fix demotes to a WARN
+  when the invoked bead is itself orphaned-closed, and otherwise names
+  EVERY orphaned sibling with the full recovery sequence, so a finite
+  chain of `mindspec complete` invocations converges); and **the
+  `mindspec-q9ea` attested-restore exit** (the landed-merge identity
+  predicate's no-durable-datum state now refuses with a NAMED, explicitly
+  non-mechanical recovery — restoring the bead branch ref at the candidate
+  merge's second-parent SHA, carrying its own human-verification marker —
+  rather than a refusal with no forward path at all).
+- **§2(ii) — Durably corroborated, revert/reapply-aware landed evidence.**
+  Landed-work evidence a forward-reconcile decision relies on to CLOSE a
+  bead MUST be corroborated by a durable identity datum the lifecycle
+  itself recorded — a registered panel's `reviewed_head_sha`, a surviving
+  bead-branch ref, or the merge-time landed-binding this amendment
+  introduces — NEVER subject text alone, and never a content heuristic
+  over what the second parent's commits contain (that a merge carries
+  non-empty work is not evidence it carries THIS bead's work). The
+  corroborating datum MUST additionally be revert/reapply-aware BY NET
+  EFFECT: the first-parent chain SINCE the candidate merge, not merely the
+  merge's historical presence, so a subsequently-reverted merge is not
+  misidentified as landed while a revert-then-reapplied one still is (a
+  permanent "ever-reverted ⇒ reject" rule would itself violate §2(i)'s
+  deadlock-free rule by manufacturing a refusal an honest landed state can
+  never clear). The merge-time binding itself MUST be recorded FAIL-CLOSED
+  BEFORE any branch/worktree cleanup for that bead: a failed write
+  suppresses cleanup and refuses recoverably rather than warning and
+  continuing, so the branch survives as the corroborating datum and
+  re-invocation converges. This closes `mindspec-q9ea`'s subject-only
+  acceptance gap.
+- **§2(iii) — Content-aware already-merged re-derivation.** Where the
+  hosting workflow can discard a branch's SHAs entirely (a squash merge),
+  "already landed on the target ref" MUST be re-derived from CURRENT-state
+  net-effect content equivalence, not from SHA ancestry alone — ancestry
+  remains a valid SUFFICIENT condition where it holds, but its ABSENCE must
+  not be read as "not landed" when a squash (or an equivalent SHA-discarding
+  merge) is a normal part of the workflow, and ancestry HOLDING must not be
+  read as "landed forever" where the target's content can itself move
+  backward (a true-merge-then-revert). This closes the `mindspec-3xqm`
+  item-1 squash blind spot at both of its consumers (the protected-main
+  already-merged probe and the doctor merged-carrier suppression), which
+  route through one shared exported predicate so neither consumer can drift
+  into its own reimplementation.
+
 ### 3. The kill/forward-safe classification (AC-26's fault-injection matrix)
 
 Not every mutation point needs — or can honestly receive — an individual
@@ -188,6 +249,58 @@ not testing that point at all — it launders an untested claim into a
 green checkmark. The classification above is the standing rule for every
 future mutation point this contract's phase 2 grows: classify it as one of
 these two, honestly, before writing its test.
+
+### §4: The machine-owned finalize carrier (Spec 121 amendment)
+
+Spec 121 closes the one terminal step the forward-reconcile contract above
+still left an operator to perform by hand: on a protected `main`, the
+`chore/finalize-<specID>` carrier `FinalizeEpic` pushes (§2 already governs
+its content — the regenerated tracker export, nothing else) still needed a
+human to open, and then merge, its PR (`mindspec-uxl4`). §4 names the
+machine's authority over that carrier explicitly, as a COMPLETION of §2's
+forward-reconcile rather than a new grant:
+
+- **The carrier is tracker-only.** `chore/finalize-<specID>` never carries
+  reviewed code — the spec's implementation merges via the panel-gated
+  impl PR, exactly as before this amendment. Because the carrier's entire
+  content is a machine-regenerated `.beads/issues.jsonl` export, opening
+  its PR is **always safe**: the automation MAY auto-open (and
+  idempotently adopt an already-open) PR for it, gated by the
+  `auto_open_finalize_pr` config key — **default true** (on by default;
+  an operator may disable it, which also renders `auto_merge_finalize_pr`
+  inert).
+- **Auto-merging it is opt-in, never default.** Merging that PR into
+  `main` is admissible only behind an explicit config key
+  (`auto_merge_finalize_pr`, default **false**) — merging to `main`
+  without a human stays a deliberate operator policy, never a framework
+  default — **and** affirmative green checks (an absent/unreported checks
+  result is NOT green) **and** the head/base adoption pin (only a PR
+  whose head is exactly the machine-owned carrier and whose base is
+  `main` is ever adopted or merged; a same-head PR targeting a different
+  base is left alone, never auto-merged) **and** a TRUE MERGE COMMIT,
+  never squash or rebase, so the ancestry/net-effect consumers §2(iii)
+  and the doctor merged-carrier suppression already rely on observe the
+  carrier as landed.
+- **Every failure degrades, never fails the verb.** Every leg of this
+  automation (`pr create`, the existing-PR lookup, `pr checks`,
+  `pr merge`, the reconcile-by-query) is classified
+  DOCUMENTED-FORWARD-SAFE under §3 above: its failure is absorbed by a
+  warning naming the leg, the shipped NOTE plus the doctor
+  finalize-orphan surfacing, and the process exits 0 — the finalize
+  itself already succeeded durably before this automation ever runs, so
+  this automation can neither fail `impl approve` nor un-finalize it. A
+  leg failure after the server-side mutation may have already landed
+  (GitHub creating or merging while the client-side call itself errors)
+  is reconciled by re-querying the exact head→base PR state through the
+  same seam, rather than assumed unmerged.
+- **Amend, not a new ADR.** §4 grants NO new code-review or merge
+  AUTHORITY — the carrier holds no reviewed code, the merge is opt-in
+  (default off), checks-gated, and pinned to the machine-owned head and
+  `main` base, so it opens no new governance domain. It COMPLETES §2's
+  forward-reconcile of the merged-unclosed-on-protected-`main` state this
+  ADR already governs; ADR-0037's panel gate provably does not reach a
+  panel-less, tracker-only carrier, so no panel-doctrine question is
+  reopened either.
 
 ## Consequences
 

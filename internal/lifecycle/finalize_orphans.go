@@ -20,6 +20,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -37,8 +38,20 @@ var (
 	localBranchRefsFn           = gitutil.LocalBranchRefs
 	finalizeOrphanCommitCountFn = gitutil.CommitCount
 	finalizeOrphanDiffStatFn    = gitutil.DiffStat
-	finalizeOrphanIsAncestorFn  = gitutil.IsAncestor
 	fileAtRefFn                 = gitutil.FileAtRef
+	revParseRefFn               = gitutil.RevParseRef
+
+	// finalizeOrphanNetEffectFn is the ONE exported already-merged
+	// predicate (gitutil.NetEffectLanded) the doctor merged-carrier
+	// suppression routes through (spec 121 R4, ADR-0041 §2(iii)). Unlike
+	// the FinalizeEpic probe, SHA ancestry alone is NOT sufficient here:
+	// the suppression decision is the net-effect/current-content test EVEN
+	// WHEN ancestry holds, so a carrier truly (non-squash) merged and then
+	// REVERTED on origin/main is flagged again — suppressing it would hide
+	// a genuinely-stranded export behind a historical merge. AC-17
+	// anti-drift pins this seam's default to be the identical symbol the
+	// executor probe falls back to.
+	finalizeOrphanNetEffectFn = gitutil.NetEffectLanded
 )
 
 // FinalizeOrphan describes a leftover artifact from an interrupted
@@ -48,8 +61,11 @@ var (
 // reimplementation.
 type FinalizeOrphan struct {
 	// Kind is "finalize_branch" (an outstanding chore/finalize-<specID>
-	// branch) or "stale_tracker" (main's committed .beads/issues.jsonl
-	// disagrees with bd's live epic status).
+	// branch), "stale_tracker" (origin/main's committed
+	// .beads/issues.jsonl disagrees with bd's live epic status), or
+	// "pull_advisory" (spec 121 R2(c): origin/main's committed export
+	// already agrees, but the LOCAL main checkout has not yet been
+	// pulled — never a re-finalize recovery, which would self-loop).
 	Kind string
 	// SpecID is the spec this finalize orphan belongs to.
 	SpecID string
@@ -74,10 +90,18 @@ type FinalizeOrphan struct {
 // `spec/<id>`/`bead/<id>` convention; o.SpecID is an ID-typed position —
 // idrender.Spec.
 func (o FinalizeOrphan) RecoveryCommand() string {
-	if o.Kind == "finalize_branch" {
+	switch o.Kind {
+	case "finalize_branch":
 		return fmt.Sprintf("open a PR for %s and merge it (or delete the branch if it is superseded)", o.Branch)
+	case "pull_advisory":
+		// R2(c): origin/main's export already agrees — the recovery is a
+		// plain pull of local main, NEVER `mindspec impl approve`, which
+		// would self-loop against an export that already landed
+		// (ADR-0041 §2(i)'s deadlock-free rule).
+		return "git pull (update local main to the already-landed origin/main export)"
+	default:
+		return fmt.Sprintf("mindspec impl approve %s", idrender.Spec(o.SpecID))
 	}
-	return fmt.Sprintf("mindspec impl approve %s", idrender.Spec(o.SpecID))
 }
 
 // FullMessage combines Message and RecoveryCommand into the single rendered
@@ -99,19 +123,21 @@ func (o FinalizeOrphan) FullMessage() string {
 // against origin/main (Requirement 7), never local main — this predicate
 // never even reads local main.
 //
-// Merged-carrier suppression (spec 119 final-review G1): because the
-// recovery flow deliberately leaves the carrier branch behind LOCALLY even
-// after its PR merges, "the branch exists" alone is NOT proof of stranded
-// work. A carrier that IS an ancestor of origin/main is the benign
-// merged-but-undeleted state and is skipped — the same IsAncestor
-// confirmation ScanOrphanedClosedBeads (orphans.go) applies to bead
-// branches. When the ancestry of one branch CANNOT be checked, that branch
-// is never asserted "unmerged" from absence of proof: it is skipped and the
-// first such error is returned alongside the provable findings (the
+// Merged-carrier suppression (spec 119 final-review G1, spec 121 R4):
+// because the recovery flow deliberately leaves the carrier branch behind
+// LOCALLY even after its PR merges, "the branch exists" alone is NOT proof
+// of stranded work. The suppression decision is the NET-EFFECT already-
+// merged predicate (gitutil.NetEffectLanded via finalizeOrphanNetEffectFn),
+// not SHA ancestry alone (ADR-0041 §2(iii)): a carrier whose content
+// origin/main's current committed export already carries — including a
+// squash merge, or a LATER superseding export — is suppressed, while one
+// truly (even non-squash) merged and then REVERTED on origin/main is
+// flagged again, because ancestry alone would wrongly suppress it forever.
+// When a carrier's net-effect landed state CANNOT be determined, that
+// branch is never asserted "unmerged" from absence of proof: it is skipped
+// and the first such error is returned alongside the provable findings (the
 // mixed-list contract ScanOrphanedClosedBeads pioneered — later provable
-// findings survive an earlier branch's ancestry error). The check reads
-// only the locally available origin/main remote-tracking ref; no network
-// fetch is performed.
+// findings survive an earlier branch's error).
 func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 	branches, err := localBranchRefsFn(workdir)
 	if err != nil {
@@ -123,18 +149,18 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 		if !strings.HasPrefix(b, workspace.FinalizeBranchPrefix) {
 			continue
 		}
-		// Confirmation before assertion: a carrier already merged into
-		// origin/main is benign residue, not an orphan. An ancestry-check
-		// failure is recorded and the branch skipped — never reported as
-		// "unmerged" without proof.
-		isAnc, ancErr := finalizeOrphanIsAncestorFn(workdir, b, "origin/main")
-		if ancErr != nil {
+		// Confirmation before assertion: a carrier whose content is
+		// already landed (net effect) on origin/main is benign residue,
+		// not an orphan. A landed-check failure is recorded and the
+		// branch skipped — never reported as "unmerged" without proof.
+		landed, neErr := finalizeOrphanNetEffectFn(workdir, b, "origin/main")
+		if neErr != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("checking ancestry of %s against origin/main: %w", b, ancErr)
+				firstErr = fmt.Errorf("checking net-effect landed state of %s against origin/main: %w", b, neErr)
 			}
 			continue
 		}
-		if isAnc {
+		if landed {
 			continue
 		}
 		// Reverse-derivation gate (ADR-0042 §1 reverse, spec 120 AC-23,
@@ -166,35 +192,86 @@ func FindOutstandingFinalizeBranches(workdir string) ([]FinalizeOrphan, error) {
 	return out, firstErr
 }
 
-// StaleTrackerOnMain reports whether epicID's committed status inside
-// main's .beads/issues.jsonl (read via `git show main:.beads/issues.jsonl`)
-// is a non-terminal ("open"/"in_progress") status while liveClosed is true
-// — bd's LIVE state already has the epic closed. That divergence is the
-// tell-tale left by bug wu7t: main never received the finalize export that
-// would have synced it, which leaves the shipped bd post-merge hook poised
-// to silently revert Dolt's close on the next merge/FF.
+// mainExportRef resolves which ref's committed .beads/issues.jsonl export
+// the stale-tracker classifier consults (spec 121 R2(c), ADR-0041 §2(i)):
+// origin/main when it exists — refreshed by the CALLER's own fetch
+// discipline (e.g. the FinalizeEpic probe's `git fetch origin main`), never
+// possibly-stale local main — falling back to local main ONLY in the
+// no-remote direct workflow (no origin/main ref at all: RevParseRef's
+// ErrRefNotFound). Any OTHER rev-parse failure (a transient/structural git
+// error) propagates rather than silently falling back.
+func mainExportRef(workdir string) (string, error) {
+	if _, err := revParseRefFn(workdir, "origin/main"); err != nil {
+		if errors.Is(err, gitutil.ErrRefNotFound) {
+			return "main", nil
+		}
+		return "", err
+	}
+	return "origin/main", nil
+}
+
+// StaleTrackerOnMain reports whether epicID's committed status inside the
+// refreshed origin/main:.beads/issues.jsonl export (falling back to local
+// main only when no origin/main ref exists — mainExportRef) is a
+// non-terminal ("open"/"in_progress") status while liveClosed is true — bd's
+// LIVE state already has the epic closed. That divergence is the tell-tale
+// left by bug wu7t: main never received the finalize export that would have
+// synced it, which leaves the shipped bd post-merge hook poised to silently
+// revert Dolt's close on the next merge/FF.
+//
+// R2(c) (spec 121): consulting origin/main (rather than possibly-stale local
+// main) means this finding correctly clears the moment the finalize export
+// actually reaches origin/main, even before the local checkout has pulled.
+// When origin/main already agrees but the DISTINCT local main ref still
+// lags, that residual is harmless local staleness — surfaced only as a
+// "pull_advisory" finding whose recovery is a plain pull, never the
+// self-looping `mindspec impl approve` recovery a stale_tracker finding
+// carries (ADR-0041 §2(i)'s deadlock-free rule).
 //
 // Returns (nil, nil) — not itself an error — when liveClosed is false, when
-// epicID is not present in main's committed export, or when the two
-// statuses already agree. A genuine git-read failure (bad ref, no such
-// path) is propagated so a caller can distinguish "no finding" from
+// epicID is not present in the consulted export, or when the two statuses
+// already agree with no local lag. A genuine git-read failure (bad ref, no
+// such path) is propagated so a caller can distinguish "no finding" from
 // "could not check".
 func StaleTrackerOnMain(workdir, specID, epicID string, liveClosed bool) (*FinalizeOrphan, error) {
 	if !liveClosed {
 		return nil, nil
 	}
-	data, err := fileAtRefFn(workdir, "main", ".beads/issues.jsonl")
+	ref, err := mainExportRef(workdir)
 	if err != nil {
-		return nil, fmt.Errorf("reading main:.beads/issues.jsonl: %w", err)
+		return nil, fmt.Errorf("resolving main export ref: %w", err)
 	}
-	return staleTrackerFinding(specID, epicID, issueStatusesInJSONL(data)), nil
+	data, err := fileAtRefFn(workdir, ref, ".beads/issues.jsonl")
+	if err != nil {
+		return nil, fmt.Errorf("reading %s:.beads/issues.jsonl: %w", ref, err)
+	}
+	if o := staleTrackerFinding(specID, epicID, issueStatusesInJSONL(data)); o != nil {
+		return o, nil
+	}
+	if ref == "origin/main" {
+		// Deliberate swallow: this secondary local-main read is
+		// advisory-only (a "pull the latest main" nudge, never a
+		// stranded-carrier finding) — a read failure here (no local main
+		// ref, a transient git error) just means the advisory does not
+		// fire this run, never that the primary origin/main-agreement
+		// result above is discarded or an error is manufactured for a
+		// best-effort convenience surface.
+		if localData, lErr := fileAtRefFn(workdir, "main", ".beads/issues.jsonl"); lErr == nil {
+			localStatus := issueStatusesInJSONL(localData)[epicID]
+			if adv := pullAdvisoryFinding(specID, epicID, localStatus); adv != nil {
+				return adv, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // staleTrackerFinding is the pure classification core shared by
 // StaleTrackerOnMain and ScanIntegrityFindings (spec 119 final-review F1):
-// given main's ALREADY-PARSED committed id→status map, it reports the
-// stale-tracker divergence for one live-closed epic, or nil. The single
-// home of the finding's message template — neither consumer re-derives it.
+// given the consulted ref's ALREADY-PARSED committed id→status map, it
+// reports the stale-tracker divergence for one live-closed epic, or nil.
+// The single home of the finding's message template — neither consumer
+// re-derives it.
 func staleTrackerFinding(specID, epicID string, committed map[string]string) *FinalizeOrphan {
 	committedStatus, found := committed[epicID]
 	if !found || strings.EqualFold(committedStatus, "closed") {
@@ -209,6 +286,35 @@ func staleTrackerFinding(specID, epicID string, committed map[string]string) *Fi
 		Message: fmt.Sprintf(
 			"epic %s (spec %s) is closed in bd but main's committed .beads/issues.jsonl still shows status %q — the finalize export never reached main",
 			idrender.Bead(epicID), idrender.Spec(specID), committedStatus,
+		),
+	}
+}
+
+// pullAdvisoryFinding is the pure classification core for R2(c)'s
+// local-main-lag advisory (spec 121): given a live-closed epic whose
+// committed status is ALREADY terminal on origin/main (staleTrackerFinding
+// found nothing there), but the local main ref's own checked-out export
+// still shows localStatus as a non-terminal (or absent-from-local, the zero
+// value) status for it, the recovery is a plain pull — NEVER `mindspec impl
+// approve`, which would self-loop against an export that already landed
+// (ADR-0041 §2(i)). Returns nil when localStatus is empty (absent from
+// local main's export) or already closed (agreement — no lag).
+func pullAdvisoryFinding(specID, epicID, localStatus string) *FinalizeOrphan {
+	if localStatus == "" || strings.EqualFold(localStatus, "closed") {
+		return nil
+	}
+	// Spec 121 final-review S1-1: localStatus is parsed from local main's
+	// committed .beads/issues.jsonl — agent-writable provenance — so it
+	// renders through termsafe.Escape, the single shared mechanism every
+	// other untrusted-provenance render in this package uses (a bare %q is
+	// equivalently forced-safe via strconv.Quote, but convention coherence
+	// wins: one mechanism, no per-site re-derivation).
+	return &FinalizeOrphan{
+		Kind:   "pull_advisory",
+		SpecID: specID,
+		Message: fmt.Sprintf(
+			"epic %s (spec %s) is closed on origin/main but the local main checkout's .beads/issues.jsonl still shows status %s",
+			idrender.Bead(epicID), idrender.Spec(specID), termsafe.Escape(localStatus),
 		),
 	}
 }
