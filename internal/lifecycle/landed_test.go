@@ -609,12 +609,15 @@ func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
 		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
 	}
 	// Resolve honestly (content matching NEITHER parent) and commit the
-	// merge; --no-edit preserves MERGE_MSG's deterministic
-	// "Merge bead/bead-one" subject, exactly as an operator resolving a
-	// gitutil.MergeInto conflict in the spec worktree would.
+	// merge with an explicit "Merge bead/bead-one" subject (the shape
+	// FindLandedMerge's first-parent scan matches), exactly as an operator
+	// resolving a gitutil.MergeInto conflict in the spec worktree would.
+	// An explicit -m (not --no-edit + MERGE_MSG) keeps the fixture
+	// portable: some git builds leave a conflict merge's MERGE_MSG empty
+	// after comment-strip, so `commit --no-edit` aborts on "empty message".
 	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
 	run("add", ".")
-	run("commit", "--no-edit")
+	run("commit", "-m", "Merge bead/bead-one")
 	mergeSHA := revParseIn(t, dir, "spec/119-test")
 
 	// Advance the spec branch with unrelated later work: tip != M, so the
@@ -669,7 +672,9 @@ func TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified(t *testi
 	}
 	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
 	run("add", ".")
-	run("commit", "--no-edit")
+	// Explicit -m (not --no-edit + MERGE_MSG): portable across git builds
+	// that leave a conflict merge's MERGE_MSG empty after comment-strip.
+	run("commit", "-m", "Merge bead/bead-one")
 	mergeSHA := revParseIn(t, dir, "spec/119-test")
 
 	// The honest later rewrite of the RESOLVED region itself — work built
