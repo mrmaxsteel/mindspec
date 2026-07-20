@@ -1,49 +1,60 @@
 ---
-status: Draft
-spec_id: 117-panel-review-telemetry
-version: "1"
 adr_citations:
-  - ADR-0037
-  - ADR-0023
-  - ADR-0040
-  - ADR-0041
-  - ADR-0042
-  - ADR-0043
+    - ADR-0037
+    - ADR-0023
+    - ADR-0040
+    - ADR-0041
+    - ADR-0042
+    - ADR-0043
+approved_at: "2026-07-20T09:45:07Z"
+approved_by: user
+bead_ids:
+    - mindspec-a2tk.1
+    - mindspec-a2tk.2
+    - mindspec-a2tk.3
+    - mindspec-a2tk.4
+spec_id: 117-panel-review-telemetry
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/panel/disposition.go
-      - internal/panel/disposition_test.go
-      - cmd/mindspec/panel_disposition.go
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-  - id: 2
-    depends_on: [1]
-    key_file_paths:
-      - internal/panel/disposition.go
-      - internal/panel/disposition_store.go
-      - internal/panel/disposition_store_test.go
-      - cmd/mindspec/panel_disposition_store.go
-      - cmd/mindspec/panel_disposition.go
-  - id: 3
-    depends_on: [1]
-    key_file_paths:
-      - internal/panel/disposition.go
-      - internal/panel/disposition_query.go
-      - internal/panel/disposition_query_test.go
-      - cmd/mindspec/panel_disposition_query.go
-      - cmd/mindspec/panel_disposition.go
-      - internal/panel/testdata/seed116/
-  - id: 4
-    depends_on: [1, 2]
-    key_file_paths:
-      - internal/panel/disposition.go
-      - internal/panel/disposition_store.go
-      - internal/panel/disposition_migrate.go
-      - internal/panel/disposition_migrate_test.go
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - .claude/skills/ms-panel-tally/SKILL.md
-      - .mindspec/specs/116-panel-message-escaping/reviews/
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/panel/disposition.go
+        - internal/panel/disposition_test.go
+        - cmd/mindspec/panel_disposition.go
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+    - depends_on:
+        - 1
+      id: 2
+      key_file_paths:
+        - internal/panel/disposition.go
+        - internal/panel/disposition_store.go
+        - internal/panel/disposition_store_test.go
+        - cmd/mindspec/panel_disposition_store.go
+        - cmd/mindspec/panel_disposition.go
+    - depends_on:
+        - 1
+      id: 3
+      key_file_paths:
+        - internal/panel/disposition.go
+        - internal/panel/disposition_query.go
+        - internal/panel/disposition_query_test.go
+        - cmd/mindspec/panel_disposition_query.go
+        - cmd/mindspec/panel_disposition.go
+        - internal/panel/testdata/seed116/
+    - depends_on:
+        - 1
+        - 2
+      id: 4
+      key_file_paths:
+        - internal/panel/disposition.go
+        - internal/panel/disposition_store.go
+        - internal/panel/disposition_migrate.go
+        - internal/panel/disposition_migrate_test.go
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
+        - .mindspec/specs/116-panel-message-escaping/reviews/
 ---
 # Plan: 117-panel-review-telemetry
 
