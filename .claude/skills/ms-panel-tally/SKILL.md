@@ -43,7 +43,25 @@ When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) disp
 
    d. Write the consolidated list to `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md` for the fix subagent to read.
 
-3. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs among R1–R3 claude vs R4–R6 codex — see the per-slot table above), and the consolidated-changes path:
+3. **Capture dispositions (spec 117 — durable telemetry).** As you — the single decision authority — resolve each DISTINCT finding above, whether at this consolidation pass, at a later fix-round confirmation, via the § After a halt refutation procedure (item 5), or when filing a follow-up bead for a `deferred` finding, append ONE row per distinct finding to that panel's durable store with the canonical write op — `mindspec panel disposition append` — never a hand-edited file. **Two DIFFERENT spec identifiers appear below, do not conflate them:** the `--spec` FLAG takes the full `<NNN-slug>` spec id (e.g. `117-panel-review-telemetry`), the same value `mindspec validate spec` takes; the `spec` FIELD inside the row/manifest JSON is the BARE number `<NNN>` (e.g. `116`), which is what the migrated seed carries and what Q-queries group on.
+   ```bash
+   mindspec panel disposition append --spec <NNN-slug> --panel <panel-slug> \
+     --data '{"record":"disposition","id":"<content-hash-of-spec+panel+reviewer+summary>","spec":"<NNN>","gate":"<spec_approve|plan_approve|bead|final_review|adhoc>","panel":"<panel-slug>","reviewer":"<slot>","model":"<actual model that produced the verdict>","severity":"<blocking|major|minor>","summary":"<one-line finding summary>","convergent_with":["<slot>", ...],"disposition":"<confirmed-fixed|confirmed-deferred|confirmed-scope-trim|deferred|false-contamination|audited-refuted>","evidence_ref":"<fix commit / follow-up bead / refutation record>","note":"<free prose>","created_at":"<RFC-3339>","backfilled":false}'
+   ```
+   **Slot-identity contract (R1):** `reviewer` and every `convergent_with[]` entry MUST byte-match a verdict-file slot token (`verdict-<slot>.json` → `<slot>`) — never a display name, and never the verdict JSON's own (typically empty) `reviewer_id` field.
+
+   **At this panel's TERMINAL state** — the Allow handed to the merge terminal in § Then below, or an audited abandonment (§ After a halt, item 4) — write its ONE durable `record:"panel"` coverage manifest via the SAME op (again: `--spec <NNN-slug>` flag, bare `spec:"<NNN>"` field), one `slots[]` entry per verdict file in the panel (token/model/terminal verdict), even for a finding-less all-APPROVE panel:
+   ```bash
+   mindspec panel disposition append --spec <NNN-slug> --panel <panel-slug> \
+     --data '{"record":"panel","spec":"<NNN>","gate":"<spec_approve|plan_approve|bead|final_review|adhoc>","panel":"<panel-slug>","round":<N>,"slots":[{"slot":"<token>","model":"<model>","verdict":"<APPROVE|REQUEST_CHANGES|REJECT>"}, ...],"backfilled":false}'
+   ```
+   Then, before handing off, run the R1(b) completeness floor over that durable manifest:
+   ```bash
+   mindspec panel disposition check --spec <NNN-slug> --panel <panel-slug>
+   ```
+   `check` FAILS, naming the panel and the first uncovered slot, if any manifest slot whose terminal verdict is `REQUEST_CHANGES`/`REJECT` has no disposition row naming it as `reviewer` or in `convergent_with[]` — every such slot must be covered before this panel is considered captured.
+
+4. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs among R1–R3 claude vs R4–R6 codex — see the per-slot table above), and the consolidated-changes path:
    ```
    <mindspec panel tally output>
    Family split (APPROVEs): <claude>/3 claude, <codex>/3 codex
