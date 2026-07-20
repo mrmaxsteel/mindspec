@@ -1,0 +1,1 @@
+{"backfilled": true, "gate": "spec_approve", "panel": "panel-116-spec", "record": "panel", "round": 1, "slots": [{"model": "fable", "slot": "F1", "verdict": "APPROVE"}, {"model": "opus", "slot": "F1", "verdict": "REQUEST_CHANGES"}], "spec": "116"}

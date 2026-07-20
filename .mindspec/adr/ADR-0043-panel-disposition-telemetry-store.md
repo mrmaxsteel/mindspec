@@ -72,6 +72,22 @@ discriminator (`record ∈ {"disposition", "panel"}`), position-independent:
   panel still produces a manifest-only file), else that gate's Q4 denominator
   undercounts.
 
+**Implementation note added at Bead 1 (concrete-API footnote, no decision
+change).** `internal/panel` carries a pre-existing, machine-checked leaf
+invariant (`TestPanelLeafImports_StdlibPlusTermsafeOnly`, spec 116 AC7,
+amended spec 120 R2): its non-test files may import only
+`internal/termsafe` and `internal/idvalidate`, never `internal/config`.
+R2's `gate ∈ config.PanelGateKeys` enum-membership check therefore cannot
+import `config.PanelGateKeys` directly from `internal/panel/disposition.go`.
+Rather than relax that invariant or hand-duplicate the enum with no
+safety net, Bead 1 mirrors it as `panel.CanonicalGateKeys` (a commented,
+deliberate copy) and adds `cmd/mindspec`'s
+`TestDispositionGateKeysMirrorConfig` — the one place in the module that
+already imports both packages — asserting byte-for-byte parity on every
+test run. This keeps `internal/panel`'s leaf boundary intact while still
+honoring "never silently duplicate the enum": any future drift between
+the two copies fails a test immediately.
+
 **One file per panel** (not a single per-spec file) because a per-spec
 `DISPOSITIONS.jsonl` is merge-safe only CROSS-spec: parallel bead worktrees/panels
 WITHIN one spec would all append to the same EOF and git-conflict, or force a
