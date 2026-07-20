@@ -172,43 +172,90 @@ func gitRefParent(workdir, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ContentSubsumed is the shared three-way primitive behind leg (a): it
-// reports whether target's CURRENT tree already subsumes ref's content,
+// Subsumption is ContentSubsumedOutcome's three-way answer (spec 121
+// final-review r2 F2-2r): the two NOT-subsumed shapes of the three-way
+// merge carry OPPOSITE meanings for a caller asking "was this landed
+// change later backed out?", and collapsing them to one boolean is what
+// produced the R5(d) honest-rewrite permanent-refusal deadlock.
+type Subsumption int
+
+const (
+	// SubsumptionCleanDivergence: the three-way merges CLEANLY but the
+	// result differs from target's tree — re-applying ref's change would
+	// alter target, meaning target sits at (or has cleanly returned to)
+	// the base state on ref's own paths: the change was BACKED OUT (the
+	// exact shape a `git revert` leaves behind). Deliberately the ZERO
+	// value, so an error-path return (or a caller that wrongly ignores
+	// the error) reads as the fail-closed "not landed" answer, never a
+	// phantom identification.
+	SubsumptionCleanDivergence Subsumption = iota
+	// SubsumptionLanded: the merge result's tree equals target's CURRENT
+	// tree with no conflict — ref's content is present, net-effect, at
+	// target's tip.
+	SubsumptionLanded
+	// SubsumptionConflict: the three-way CONFLICTS — target's tip has
+	// ITSELF advanced past base on ref's own region, incompatibly with
+	// re-applying ref. For a ref already in target's history this means
+	// later work evolved/superseded ref's content rather than backing it
+	// out (landed-then-evolved); for an out-of-history ref it simply
+	// means the content is not subsumed.
+	SubsumptionConflict
+)
+
+// ContentSubsumedOutcome is the shared three-way primitive behind leg (a):
+// it classifies how target's CURRENT tree relates to ref's content,
 // computed as a three-way merge of base (the merge-base commit/tree),
-// ours=target, theirs=ref — landed iff the merge result's tree OID equals
-// target's own tree OID with no conflict. base, ref, and target may be any
-// commit-ish (a SHA, a branch, a remote-tracking ref); workdir=="" uses the
-// current directory.
+// ours=target, theirs=ref (see Subsumption for the trichotomy). base, ref,
+// and target may be any commit-ish (a SHA, a branch, a remote-tracking
+// ref); workdir=="" uses the current directory.
 //
-// A CONFLICT (merge-tree exit 1) is a definitive NOT-landed answer, never
-// an infra error. An infra failure (merge-tree exit >= 2 — including
+// A CONFLICT (merge-tree exit 1) is a definitive classification, never an
+// infra error. An infra failure (merge-tree exit >= 2 — including
 // "unsupported option" on git < 2.38, where --write-tree does not exist —
-// or a tree-resolution failure) is always propagated, never guessed into a
-// boolean.
-func ContentSubsumed(workdir, base, ref, target string) (bool, error) {
+// or a tree-resolution failure) is always propagated, never guessed into
+// an outcome.
+func ContentSubsumedOutcome(workdir, base, ref, target string) (Subsumption, error) {
 	if err := rejectOptionLike(base); err != nil {
-		return false, err
+		return SubsumptionCleanDivergence, err
 	}
 	if err := rejectOptionLike(ref); err != nil {
-		return false, err
+		return SubsumptionCleanDivergence, err
 	}
 	if err := rejectOptionLike(target); err != nil {
-		return false, err
+		return SubsumptionCleanDivergence, err
 	}
 
 	targetTree, err := treeOIDFn(workdir, target)
 	if err != nil {
-		return false, fmt.Errorf("resolving tree of %s: %w", target, err)
+		return SubsumptionCleanDivergence, fmt.Errorf("resolving tree of %s: %w", target, err)
 	}
 
 	res, err := mergeTreeWriteTreeFn(workdir, base, target, ref)
 	if err != nil {
-		return false, err
+		return SubsumptionCleanDivergence, err
 	}
 	if res.conflict {
-		return false, nil
+		return SubsumptionConflict, nil
 	}
-	return res.treeOID == targetTree, nil
+	if res.treeOID == targetTree {
+		return SubsumptionLanded, nil
+	}
+	return SubsumptionCleanDivergence, nil
+}
+
+// ContentSubsumed is the boolean projection of ContentSubsumedOutcome —
+// "is ref's content present, net-effect, at target's CURRENT tip?" — the
+// answer NetEffectLanded's leg (a) consumes (both NOT-subsumed shapes are
+// equally "not landed" there: leg (b)'s tracker-carrier fallback and the
+// AC-19(iv) revert re-detection both depend on that collapse, so this
+// projection's behavior is deliberately IDENTICAL to the pre-F2-2r
+// boolean).
+func ContentSubsumed(workdir, base, ref, target string) (bool, error) {
+	outcome, err := ContentSubsumedOutcome(workdir, base, ref, target)
+	if err != nil {
+		return false, err
+	}
+	return outcome == SubsumptionLanded, nil
 }
 
 // parseIssueStatuses parses a .beads/issues.jsonl blob (one JSON object per

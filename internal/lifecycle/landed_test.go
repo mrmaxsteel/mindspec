@@ -635,6 +635,89 @@ func TestFindLandedMerge_ConflictResolutionMergeIdentified(t *testing.T) {
 	}
 }
 
+// TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified is
+// spec 121 final-review r2 F2-2r (Probe 1): a conflict-resolution merge M
+// whose RESOLVED REGION is later legitimately rewritten on the spec branch
+// (honest work built ON M, no revert anywhere) must still be identified.
+// Pre-fix, R5(d) collapsed the resulting merge-tree CONFLICT to "reverted
+// after landing" — a factually false refusal that deadlocks the reconcile
+// path permanently (the branch can be restored, corroboration passes, and
+// the subsumption gate refuses again forever — the §2(i) class ADR-0041
+// forbids). Post-fix, a CONFLICT at the R5(d) three-way means both sides
+// advanced past M^1 on M's own region — landed-then-evolved — and
+// identifies; only the CLEAN not-subsumed shape (a genuine backout) refuses.
+func TestFindLandedMerge_ConflictResolvedRegionRewrittenLaterIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("base\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "seed conflict file")
+
+	run("checkout", "-b", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("bead side\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "bead edit")
+
+	run("checkout", "spec/119-test")
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("spec side\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "spec edit")
+
+	cmd := exec.Command("git", "-C", dir, "merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("test setup: expected a real merge conflict, merge succeeded: %s", out)
+	}
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("resolved: spec side + bead side\n"), 0644)
+	run("add", ".")
+	run("commit", "--no-edit")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// The honest later rewrite of the RESOLVED region itself — work built
+	// on M, not a revert of it.
+	os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("second edition, superseding the resolution\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "later rewrite of the resolved region")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("a landed-then-evolved merge (resolved region honestly rewritten later) must still be identified, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the conflict-resolution merge %q", landed.SHA, mergeSHA)
+	}
+	if _, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one"); err != nil || !ok {
+		t.Errorf("expected merged-unclosed (ok=true, err=nil), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestFindLandedMerge_CleanMergeContentRewrittenLaterIdentified is F2-2r's
+// Probe 2 — the WIDER blast radius: even a plain, clean, single-commit
+// mergeBead() merge is over-refused pre-fix once the file M introduced is
+// later rewritten on the spec branch (the three-way sees base-absent vs
+// two different added contents — a conflict). Honest later evolution of a
+// bead's own file is everyday spec-branch life; it must identify.
+func TestFindLandedMerge_CleanMergeContentRewrittenLaterIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// Later honest rewrite of the file the bead's merge introduced.
+	os.WriteFile(filepath.Join(dir, "bead-one.txt"), []byte("rewritten by later work built on the bead\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "later rewrite of the bead's file")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("a clean merge whose content was honestly rewritten later must still be identified, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the merge %q", landed.SHA, mergeSHA)
+	}
+	if _, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one"); err != nil || !ok {
+		t.Errorf("expected merged-unclosed (ok=true, err=nil), got ok=%v err=%v", ok, err)
+	}
+}
+
 // TestLandedBindingForBead_MalformedValuesTreatedAbsent is the spec 121
 // final-review G2-1 provenance-gate unit: the landed-binding values are
 // read from AGENT-WRITABLE bd metadata, so anything that is not a

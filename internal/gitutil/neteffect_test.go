@@ -297,6 +297,60 @@ func TestNetEffectLanded_NonTrackerDiffNeverReachesLegB(t *testing.T) {
 	}
 }
 
+// TestContentSubsumedOutcome_Trichotomy pins the spec 121 final-review r2
+// F2-2r discriminator on real-git fixtures: the three-way outcome of a
+// merge M's own change (base=M^1, ours=tip, theirs=M) is LANDED while the
+// content survives, CLEAN-DIVERGENCE after a genuine `git revert M` (the
+// tip returns to the base state on M's paths — the backed-out shape), and
+// CONFLICT when the tip itself rewrote M's region (landed-then-evolved).
+// It also pins that ContentSubsumed — NetEffectLanded's leg-(a) boolean
+// projection — collapses BOTH non-landed shapes to false, unchanged, so
+// the Bead-1 doctor/probe consumers (AC-19(iv)) are behaviorally
+// untouched by the trichotomy's introduction.
+func TestContentSubsumedOutcome_Trichotomy(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "seed.txt", "seed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "seed")
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "feature.txt", "feature content\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Merge feature", "feature")
+	mergeSHA := neRunGit(t, dir, "rev-parse", "HEAD")
+	mergeSHA = mergeSHA[:len(mergeSHA)-1] // trim trailing newline
+	base := mergeSHA + "^1"
+
+	// (a) content present at the tip → LANDED.
+	if got, err := ContentSubsumedOutcome(dir, base, mergeSHA, "main"); err != nil || got != SubsumptionLanded {
+		t.Fatalf("landed shape: got %v, %v; want SubsumptionLanded", got, err)
+	}
+
+	// (b) tip rewrote M's own file → CONFLICT (landed-then-evolved), and
+	// the boolean projection still reads false (not subsumed).
+	neWriteFile(t, dir, "feature.txt", "rewritten by later work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "later rewrite")
+	if got, err := ContentSubsumedOutcome(dir, base, mergeSHA, "main"); err != nil || got != SubsumptionConflict {
+		t.Fatalf("evolved shape: got %v, %v; want SubsumptionConflict", got, err)
+	}
+	if landed, err := ContentSubsumed(dir, base, mergeSHA, "main"); err != nil || landed {
+		t.Fatalf("boolean projection must stay false on the conflict shape, got %v, %v", landed, err)
+	}
+
+	// (c) a genuine revert of M (fresh repo state: back out the rewrite
+	// first, then revert the merge) → CLEAN divergence, boolean false.
+	neRunGit(t, dir, "revert", "--no-edit", "HEAD")              // undo the rewrite
+	neRunGit(t, dir, "revert", "--no-edit", "-m", "1", mergeSHA) // back out M
+	if got, err := ContentSubsumedOutcome(dir, base, mergeSHA, "main"); err != nil || got != SubsumptionCleanDivergence {
+		t.Fatalf("reverted shape: got %v, %v; want SubsumptionCleanDivergence", got, err)
+	}
+	if landed, err := ContentSubsumed(dir, base, mergeSHA, "main"); err != nil || landed {
+		t.Fatalf("boolean projection must stay false on the reverted shape, got %v, %v", landed, err)
+	}
+}
+
 // TestContentSubsumed_MergeTreeInfraErrorPropagates is the OLD-GIT subtest
 // (panel O1): a stubbed merge-tree primitive returning the unsupported-
 // --write-tree-shaped error (simulating git < 2.38) must propagate as an

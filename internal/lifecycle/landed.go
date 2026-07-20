@@ -95,10 +95,14 @@ var (
 	// stub a binding without a real bd process.
 	landedBindingMetadataFn = bead.GetMetadata
 	// landedContentSubsumedFn is Bead 1's shared net-effect primitive
-	// (gitutil.ContentSubsumed), consumed here for R5(d) revert/reapply-
-	// awareness: a positively-corroborated candidate is identified only
-	// while its own content is still subsumed at specBranch's CURRENT tip.
-	landedContentSubsumedFn = gitutil.ContentSubsumed
+	// (gitutil.ContentSubsumedOutcome — final-review r2 F2-2r: the
+	// trichotomy form, NOT the boolean projection NetEffectLanded's leg
+	// (a) consumes), consumed here for R5(d) revert/reapply-awareness: a
+	// positively-corroborated candidate is identified while its own
+	// content is subsumed at specBranch's CURRENT tip OR superseded by
+	// later work built on it (a three-way CONFLICT); only the CLEAN
+	// not-subsumed shape — a genuine backout — refuses.
+	landedContentSubsumedFn = gitutil.ContentSubsumedOutcome
 )
 
 // landedBinding is the merge-time landed-binding datum read back from bd
@@ -217,12 +221,18 @@ func resolveBranchTip(root, branch string) (tip string, survives bool, err error
 // out-of-band merge both land here).
 //
 // R5(d) revert/reapply-awareness: once a candidate is positively
-// corroborated, its OWN content-introducing change (M^1..M) must still be
-// subsumed at specBranch's CURRENT tip (gitutil.ContentSubsumed, Bead 1's
-// shared net-effect primitive) — a revert of M's content after the merge
-// is NOT identified; a revert-then-reapply, in either shape (a later
-// commit re-introducing the same net changes, or a cherry-pick of them),
-// leaves the content subsumed, so M is identified by construction. "Ever
+// corroborated, the three-way outcome of its OWN content-introducing
+// change (M^1..M) against specBranch's CURRENT tip
+// (gitutil.ContentSubsumedOutcome, Bead 1's shared net-effect primitive in
+// its final-review-r2 trichotomy form) decides identification: content
+// still subsumed → identified; a three-way CONFLICT (the tip itself
+// advanced past M^1 on M's region — later honest work built on/superseding
+// M) → identified (landed-then-evolved, the F2-2r fix); only a CLEAN
+// divergence (the tip sits at the base state on M's paths — the change was
+// genuinely backed out, exactly a `git revert M`'s shape) is NOT
+// identified. A revert-then-reapply, in either shape (a later commit
+// re-introducing the same net changes, or a cherry-pick of them), leaves
+// the content subsumed, so M is identified by construction. "Ever
 // reverted ⇒ reject" is structurally inexpressible under this mechanism.
 //
 // A fresh bead branch with zero own commits can never produce a matching
@@ -334,17 +344,39 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			}
 		}
 
-		// R5(d): revert/reapply-awareness — the net effect of M's own
-		// content-introducing change (M^1..M) must still be subsumed at
-		// specBranch's CURRENT tip. A revert of M's content on specBranch
-		// after the merge is NOT identified; a revert-then-reapply (either
-		// shape) leaves the content subsumed, so M is identified by
-		// construction (the AC-10(ii) anti-overreach guard).
-		subsumed, subErr := landedContentSubsumedFn(root, firstParent, m.SHA, specBranch)
+		// R5(d): revert/reapply-awareness. The three-way
+		// merge-tree(base=M^1, ours=tip, theirs=M) outcome is
+		// DISCRIMINATED (final-review r2 F2-2r), not collapsed to a
+		// boolean:
+		//
+		//   - SubsumptionLanded — M's content is present, net-effect, at
+		//     specBranch's CURRENT tip (includes both AC-10(ii)
+		//     revert-then-reapply shapes) → identified.
+		//   - SubsumptionConflict — the tip has ITSELF advanced past M^1
+		//     on M's own region, incompatibly with re-applying M. M is in
+		//     the tip's first-parent history, so this means later honest
+		//     work EVOLVED/superseded M's content (a conflict-resolution
+		//     region edited again, a bead's file rewritten by a later
+		//     bead) — landed-then-evolved → identified. Refusing here was
+		//     the F2-2r permanent-refusal deadlock: no recovery converges
+		//     (restoring the branch re-corroborates and re-refuses), and
+		//     the only exits were the bd-close bypass or reverting
+		//     legitimate later work — the §2(i) class ADR-0041 forbids.
+		//   - SubsumptionCleanDivergence — the three-way applies M's
+		//     change CLEANLY but the result differs from the tip: the tip
+		//     sits at the base state on M's own paths, i.e. the change
+		//     was genuinely BACKED OUT (exactly what a `git revert M`
+		//     leaves behind) → NOT identified (AC-10(i) RED-on-revert).
+		//     Conservative residual: content later removed cleanly and
+		//     fully by honest work is content-indistinguishable from a
+		//     revert, so it also refuses — by design, since any datum
+		//     here that accepted clean removal would accept every real
+		//     revert too.
+		outcome, subErr := landedContentSubsumedFn(root, firstParent, m.SHA, specBranch)
 		if subErr != nil {
 			return nil, fmt.Errorf("checking net effect of merge %s since it landed: %w", m.SHA, subErr)
 		}
-		if !subsumed {
+		if outcome == gitutil.SubsumptionCleanDivergence {
 			return nil, fmt.Errorf("%w: %s on %s (merge %s's content is no longer present at %s's current tip — it was reverted after landing)",
 				ErrLandedMergeNotFound, beadID, specBranch, m.SHA, specBranch)
 		}
