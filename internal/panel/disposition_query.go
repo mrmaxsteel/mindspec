@@ -336,16 +336,22 @@ type Q5Filter struct {
 // dimension of filter (gate/severity/disposition) — the finding-by-model
 // listing R3 mandates, filterable on those three axes. Rows are returned
 // in the order they were loaded (deterministic per LoadStore).
+//
+// Each filter dimension is matched CASE-INSENSITIVELY (strings.EqualFold):
+// stored gate/severity/disposition values are lowercase canonical tokens
+// (e.g. "major", "bead", "false-contamination"), so an operator's
+// `--severity MAJOR` matches the stored `major` rather than silently
+// returning zero rows (M1).
 func ComputeQ5(rows []DispositionRow, filter Q5Filter) []DispositionRow {
 	var out []DispositionRow
 	for _, row := range rows {
-		if filter.Gate != "" && row.Gate != filter.Gate {
+		if filter.Gate != "" && !strings.EqualFold(row.Gate, filter.Gate) {
 			continue
 		}
-		if filter.Severity != "" && row.Severity != filter.Severity {
+		if filter.Severity != "" && !strings.EqualFold(row.Severity, filter.Severity) {
 			continue
 		}
-		if filter.Disposition != "" && row.Disposition != filter.Disposition {
+		if filter.Disposition != "" && !strings.EqualFold(row.Disposition, filter.Disposition) {
 			continue
 		}
 		out = append(out, row)

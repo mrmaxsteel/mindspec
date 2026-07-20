@@ -74,7 +74,7 @@ Every bead merge — and, on the higher autonomy rungs, every gate — is judged
 - **Six distinct lenses, not six clones**: author-of-record (does the diff match the plan?), codebase pin (do the files and tests actually exist and pass?), contract stability, empirical prober (runs the validators by hand), schema correctness, and next-bead integration.
 - **N−1 approval threshold** — one dissent is tolerated; two is a fix round.
 - **Artifact hard gates** — a finding that names a missing measurement artifact (a benchmark, a cost projection, a regression baseline) blocks regardless of the vote count. Agents can't vote evidence into existence.
-- **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | verify | tally` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel.
+- **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | verify | tally` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel. `mindspec panel disposition validate | append | check | query` is the durable review-telemetry store behind them.
 - **A REJECT halts the track.** Auto-fixing a rejection is the definition of verification debt, so the loop never does it.
 
 Verdicts persist as JSON alongside the spec, so every merge carries its review history in the repo.

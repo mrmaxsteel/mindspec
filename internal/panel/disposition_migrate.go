@@ -38,17 +38,43 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
+// maintainerDefaultSeedPath / maintainerDefaultArchiveDir are the
+// migration's MAINTAINER-LOCAL source paths: the spec-116 seed dataset
+// and archive live OUTSIDE this repo, on the maintainer's machine, and
+// this one-shot Bead-4 migration is the only consumer. They are NOT
+// shipped-product configuration — a public checkout has no such
+// directory, and the round-trip tests that read them Skip when the path
+// is absent (disposition_migrate_test.go). To keep a machine-local
+// absolute path out of the shipped binary's fixed behavior (S3/M2), each
+// is overridable via an env var, falling back to the maintainer default.
 const (
-	// DefaultSeedPath is the raw spec-116 disposition seed's absolute
-	// path — the migration SOURCE (R4) and the jq cross-check input
-	// (plan's Testing Strategy).
-	DefaultSeedPath = "/Users/Max/replit/mindspec-panel-verdicts/spec-116/DISPOSITIONS.jsonl"
+	maintainerDefaultSeedPath   = "/Users/Max/replit/mindspec-panel-verdicts/spec-116/DISPOSITIONS.jsonl"
+	maintainerDefaultArchiveDir = "/Users/Max/replit/mindspec-panel-verdicts/spec-116"
+	seedPathEnvVar              = "MINDSPEC_SPEC116_SEED_PATH"
+	archiveDirEnvVar            = "MINDSPEC_SPEC116_ARCHIVE_DIR"
+)
 
-	// DefaultArchiveDir is the archive's spec-116 root: DefaultArchiveDir/
-	// <panel>/verdict-<slot>.json supplies every migrated coverage
-	// manifest's slot roster.
-	DefaultArchiveDir = "/Users/Max/replit/mindspec-panel-verdicts/spec-116"
+// DefaultSeedPath is the raw spec-116 disposition seed path — the
+// migration SOURCE (R4) and the jq cross-check input (plan's Testing
+// Strategy). It resolves from MINDSPEC_SPEC116_SEED_PATH when set, else
+// the maintainer-local default (see the const block above).
+var DefaultSeedPath = envOrDefault(seedPathEnvVar, maintainerDefaultSeedPath)
 
+// DefaultArchiveDir is the archive's spec-116 root: DefaultArchiveDir/
+// <panel>/verdict-<slot>.json supplies every migrated coverage
+// manifest's slot roster. It resolves from MINDSPEC_SPEC116_ARCHIVE_DIR
+// when set, else the maintainer-local default.
+var DefaultArchiveDir = envOrDefault(archiveDirEnvVar, maintainerDefaultArchiveDir)
+
+// envOrDefault returns os.Getenv(key) when it is non-empty, else def.
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+const (
 	// Spec116ID is the "spec" field value every migrated spec-116 record
 	// carries VERBATIM from the raw seed — a bare "116", never the spec
 	// DIRECTORY slug (Spec116DirName).
@@ -187,12 +213,16 @@ func slotModel(slot string) (string, error) {
 	}
 }
 
-// mintRowID derives DispositionRow.ID: a stable content hash of
-// {spec, panel, reviewer, summary} (R2's id contract — migrated rows
-// carry no round, so round is deliberately excluded from the key). The
-// same four inputs always mint the same id, so replaying the migration
-// is retry-idempotent through AppendRecord's own id-keyed dedup.
-func mintRowID(spec, panelName, reviewer, summary string) string {
+// DispositionRowID derives a disposition row's canonical DispositionRow.ID:
+// a stable content hash of {spec, panel, reviewer, summary} (R2's id
+// contract — a row carries no round, so round is deliberately excluded
+// from the key). The same four inputs always mint the same id, so both
+// the Bead-4 migration replay AND the live `panel disposition append`
+// leaf are retry-idempotent through AppendRecord's own id-keyed dedup
+// (R6). This is the SINGLE derivation shared by both writers — the CLI
+// append leaf overrides any operator-supplied id with this value so live
+// capture enforces the same stable-content-id contract the migration does.
+func DispositionRowID(spec, panelName, reviewer, summary string) string {
 	h := sha256.Sum256([]byte(spec + "\x00" + panelName + "\x00" + reviewer + "\x00" + summary))
 	return "d-" + hex.EncodeToString(h[:])[:16]
 }
@@ -272,7 +302,7 @@ func buildDispositionRowJSON(panelName string, r rawDispositionRow) ([]byte, err
 
 	row := DispositionRow{
 		Record:         RecordDisposition,
-		ID:             mintRowID(r.Spec, panelName, reviewer, r.Summary),
+		ID:             DispositionRowID(r.Spec, panelName, reviewer, r.Summary),
 		Spec:           r.Spec,
 		Gate:           canonicalGate,
 		Panel:          panelName,

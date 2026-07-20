@@ -101,7 +101,7 @@ resolve across the tally→fix→re-panel loop; the manifest is appended ONCE at
 terminal state. The serialization mechanism is the shipped **`internal/journal`
 dedicated-lockfile idiom** (spec 094): the op holds a cross-process advisory lock
 on a SEPARATE `dispositions.lock` file — NEVER on `dispositions.jsonl` itself — via
-the build-tagged `acquireFileLock` (unix `syscall.Flock` `LOCK_EX`, blocking;
+the build-tagged `acquireDispositionLock` (unix `syscall.Flock` `LOCK_EX`, blocking;
 windows `O_EXCL`-lockfile with bounded retry). Locking a separate file means lock
 acquisition never opens/creates the data file before validation, and the manifest
 path never needs an in-place "update". Under that lock, each write performs, as an

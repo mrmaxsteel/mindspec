@@ -589,3 +589,104 @@ func buildAppendCmd(binPath, workRoot, specID, panelName string, data []byte) *e
 	c.Dir = workRoot
 	return c
 }
+
+// --- FR-2: record↔destination consistency ---------------------------------
+
+// TestAppendRecord_PanelMismatch_Rejected proves FR-2: a record whose own
+// `panel` field names panel X must be REJECTED (before any mutation) when
+// appended to panel Y's store — otherwise a row for one panel silently
+// corrupts another panel's floor/Q attribution, which reads the record's
+// own fields, not its on-disk location.
+func TestAppendRecord_PanelMismatch_Rejected(t *testing.T) {
+	specDir := t.TempDir()
+	// Row's panel field says "panel-A"; we append it to "panel-B".
+	row := mustMarshal(t, testRow("d-mismatch", "panel-A", "S1", nil))
+
+	pathB := dispositionsPath(specDir, "panel-B")
+	if err := AppendRecord(specDir, "panel-B", row); err == nil {
+		t.Fatal("AppendRecord(row for panel-A → panel-B) = nil, want a record↔destination mismatch error")
+	}
+	// Gate-before-mutate: the destination file must not have been created.
+	if _, err := os.Stat(pathB); !os.IsNotExist(err) {
+		t.Errorf("dispositions.jsonl was created by a panel-mismatch refusal; the destination file must stay absent")
+	}
+
+	// The matching-panel append still succeeds (the guard rejects only the
+	// genuine mismatch, not a well-formed record).
+	rowB := mustMarshal(t, testRow("d-ok", "panel-B", "S1", nil))
+	if err := AppendRecord(specDir, "panel-B", rowB); err != nil {
+		t.Fatalf("AppendRecord(row for panel-B → panel-B) = %v, want nil", err)
+	}
+	if got := countLines(t, pathB); got != 1 {
+		t.Errorf("after one matching append, got %d line(s), want 1", got)
+	}
+}
+
+// TestAppendRecord_ManifestPanelMismatch_Rejected is the manifest-kind
+// analog of the FR-2 row check: a coverage manifest whose `panel` field
+// disagrees with the destination panel is rejected too.
+func TestAppendRecord_ManifestPanelMismatch_Rejected(t *testing.T) {
+	specDir := t.TempDir()
+	m := mustMarshal(t, testManifest("panel-A", 1, []ManifestSlot{{Slot: "S1", Model: "sonnet", Verdict: "APPROVE"}}))
+	if err := AppendRecord(specDir, "panel-B", m); err == nil {
+		t.Fatal("AppendRecord(manifest for panel-A → panel-B) = nil, want a record↔destination mismatch error")
+	}
+}
+
+// --- FR-4: same-key / different-payload conflict ---------------------------
+
+// TestAppendRecord_SameIDDifferentPayload_Conflict proves FR-4: two
+// records that share a (kind,key) but carry DIFFERENT semantic content are
+// a CONFLICT, not a retry — the append-only store must surface an error
+// rather than silently dropping the changed content as a no-op. A
+// byte-identical re-append (and one differing only in the volatile
+// created_at) remains an idempotent no-op.
+func TestAppendRecord_SameIDDifferentPayload_Conflict(t *testing.T) {
+	specDir := t.TempDir()
+
+	base := testRow("d-conflict", "panel-conflict", "S1", nil)
+	first := mustMarshal(t, base)
+	if err := AppendRecord(specDir, "panel-conflict", first); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+
+	// Identical re-append → idempotent no-op (true retry).
+	if err := AppendRecord(specDir, "panel-conflict", first); err != nil {
+		t.Fatalf("identical re-append = %v, want nil (idempotent retry)", err)
+	}
+
+	// Same id, differing ONLY in created_at → still a no-op (created_at is
+	// the volatile field FR-4 excludes from the semantic comparison).
+	tsOnly := base
+	tsOnly.CreatedAt = "2026-08-01T12:00:00Z"
+	if err := AppendRecord(specDir, "panel-conflict", mustMarshal(t, tsOnly)); err != nil {
+		t.Fatalf("re-append differing only in created_at = %v, want nil (volatile field ignored)", err)
+	}
+
+	path := dispositionsPath(specDir, "panel-conflict")
+	if got := countLines(t, path); got != 1 {
+		t.Fatalf("after retries, got %d line(s), want 1 (no duplicate rows)", got)
+	}
+
+	// Same id, CHANGED disposition → conflict error, and the stored file is
+	// left byte-unchanged.
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading store: %v", err)
+	}
+	changed := base
+	changed.Disposition = "audited-refuted"
+	if err := AppendRecord(specDir, "panel-conflict", mustMarshal(t, changed)); err == nil {
+		t.Fatal("AppendRecord(same id, changed disposition) = nil, want a same-key/different-content conflict error")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading store post-conflict: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("store changed after a conflict refusal:\nbefore: %s\nafter:  %s", before, after)
+	}
+	if got := countLines(t, path); got != 1 {
+		t.Errorf("after a conflicting append, got %d line(s), want 1 (the conflict must not append)", got)
+	}
+}

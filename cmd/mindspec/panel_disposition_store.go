@@ -43,7 +43,14 @@ already exist.
 --data supplies the one JSON line to append:
   - a literal JSON object, passed inline;
   - "-" to read the line from stdin;
-  - "@<path>" to read it from a file.`,
+  - "@<path>" to read it from a file.
+
+For a disposition row, the canonical "id" is COMPUTED from the record
+content (a content hash of {spec, panel, reviewer, summary}); any "id"
+you supply is overridden, so a re-append of the same finding is an
+idempotent retry rather than a duplicate. Prefer "@<file>" or "-" (a
+quoted heredoc) over an inline literal so untrusted finding text is
+never interpolated into a shell-quoted argument.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID, _ := cmd.Flags().GetString("spec")
@@ -67,6 +74,13 @@ already exist.
 		if err != nil {
 			return err
 		}
+
+		// FR-3: enforce the canonical content-derived id for a disposition
+		// row, overriding any operator-supplied id, so live capture gets
+		// R2's stable-content-id + R6 retry-idempotency for free (a no-op
+		// passthrough for a coverage manifest or an undecodable line, which
+		// AppendRecord's own Validate gate then accepts or rejects).
+		record = panel.CanonicalizeDispositionRowID(record)
 
 		specDir, err := resolveDispositionSpecDir(specID)
 		if err != nil {

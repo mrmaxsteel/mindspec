@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -226,6 +227,28 @@ func AppendRecord(specDir, panelName string, record []byte) error {
 			// panicking.
 			return err
 		}
+
+		// Record↔destination consistency (FR-2, gate-before-mutate): the
+		// record's OWN `panel` field must name the destination panel — a
+		// row/manifest for panel X must never land in panel Y's file,
+		// which would silently corrupt every floor/Q attribution that
+		// reads the record's own fields rather than its on-disk location.
+		// Validate (above) already proved `panel` is a non-empty string;
+		// `spec` likewise. We additionally require a non-empty `spec` here
+		// explicitly so the invariant is self-documenting at the write
+		// boundary. (The bare `spec` field intentionally differs from the
+		// <NNN-slug> spec DIRECTORY — the migration and its tests write to
+		// arbitrary target dirs — so specDir is not a reliable carrier of
+		// the expected bare spec, and the destination check is keyed on
+		// the panel segment, which specDir DOES encode verbatim.)
+		recPanel, _ := newMap["panel"].(string)
+		if recPanel != panelName {
+			return fmt.Errorf("panel: record's panel field %s does not match the destination panel %s (a record must be appended to its own panel's store)", termsafe.Escape(recPanel), termsafe.Escape(panelName))
+		}
+		if recSpec, _ := newMap["spec"].(string); strings.TrimSpace(recSpec) == "" {
+			return fmt.Errorf("panel: record for panel %s has an empty spec field (every record must carry a non-empty spec)", termsafe.Escape(panelName))
+		}
+
 		newKind, newKey := recordKey(newMap)
 
 		path := dispositionsPath(specDir, panelName)
@@ -243,12 +266,79 @@ func AppendRecord(specDir, panelName string, record []byte) error {
 			}
 			kind, key := recordKey(m)
 			if kind == newKind && key == newKey {
-				return nil // idempotent no-op: this exact key is already stored.
+				// Same (kind,key): a TRUE retry (byte-identical semantic
+				// content) is an idempotent no-op (R6). But an append-only
+				// store must never silently DROP changed content under an
+				// existing key — that is a conflict, not a retry — so
+				// compare the full payload (excluding the volatile
+				// created_at timestamp) and surface a mismatch (FR-4).
+				if recordsSemanticallyEqual(newMap, m) {
+					return nil // idempotent no-op: this exact content is already stored.
+				}
+				return fmt.Errorf("panel: a record with this id/key already exists with different content — the append-only store treats changed content under an existing key as a conflict, not a retry (key %s)", termsafe.Escape(newKey))
 			}
 		}
 
 		return appendDispositionLine(path, record)
 	})
+}
+
+// recordsSemanticallyEqual reports whether two already-decoded records
+// carry the same payload IGNORING the volatile `created_at` timestamp
+// (FR-4). Two writers minting the same content-derived id/key at
+// different wall-clock instants (a genuine retry) differ ONLY in
+// created_at, so excluding it lets a true retry no-op while any OTHER
+// field difference surfaces as a conflict.
+func recordsSemanticallyEqual(a, b map[string]interface{}) bool {
+	return reflect.DeepEqual(withoutVolatileFields(a), withoutVolatileFields(b))
+}
+
+// withoutVolatileFields returns a shallow copy of m with the volatile
+// `created_at` field removed. Nested values are shared, not cloned —
+// safe because the result is only ever read by reflect.DeepEqual.
+func withoutVolatileFields(m map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if k == "created_at" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// CanonicalizeDispositionRowID rewrites a `record:"disposition"` row's
+// `id` to the canonical content-derived DispositionRowID(spec, panel,
+// reviewer, summary), OVERRIDING any operator-supplied id, and returns
+// the re-marshaled line (FR-3). The live `panel disposition append` CLI
+// leaf calls this before AppendRecord so live capture enforces R2's
+// stable-content-id + R6 retry-idempotency automatically — the operator
+// never computes the hash, and a wrong or absent id is corrected here.
+//
+// It is a no-op passthrough for a coverage manifest (keyed on
+// {spec,panel,round}, not id) or for any input it cannot decode as a
+// disposition record — those cases are left to AppendRecord's own
+// Validate gate to accept or reject, so this helper never becomes a
+// second, divergent validation authority.
+func CanonicalizeDispositionRowID(record []byte) []byte {
+	m, err := decodeRecord(record)
+	if err != nil {
+		return record
+	}
+	if r, _ := m["record"].(string); r != RecordDisposition {
+		return record
+	}
+	spec, _ := m["spec"].(string)
+	panelField, _ := m["panel"].(string)
+	reviewer, _ := m["reviewer"].(string)
+	summary, _ := m["summary"].(string)
+	m["id"] = DispositionRowID(spec, panelField, reviewer, summary)
+
+	out, err := json.Marshal(m)
+	if err != nil {
+		return record
+	}
+	return out
 }
 
 // WriteTerminalManifest is a thin wrapper over AppendRecord (R6(a)):
