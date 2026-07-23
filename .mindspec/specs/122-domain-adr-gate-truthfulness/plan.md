@@ -1,54 +1,61 @@
 ---
-status: Draft
-spec_id: 122-domain-adr-gate-truthfulness
-version: "1"
 adr_citations:
     - ADR-0032
     - ADR-0041
     - ADR-0036
     - ADR-0039
     - ADR-0035
+approved_at: "2026-07-23T11:48:11Z"
+approved_by: user
+bead_ids:
+    - mindspec-gvb5.1
+    - mindspec-gvb5.2
+    - mindspec-gvb5.3
+    - mindspec-gvb5.4
+spec_id: 122-domain-adr-gate-truthfulness
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/validate/ownership_resolve.go
-      - internal/validate/spec.go
-      - internal/validate/plan.go
-      - internal/validate/hint_root.go
-      - internal/validate/spec_test.go
-      - internal/validate/plan_test.go
-      - internal/validate/corpus_guard_test.go
-      - internal/validate/adr0032_amendment_test.go
-      - .mindspec/adr/ADR-0032-adr-semantic-gates.md
-  - id: 2
-    depends_on:
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/validate/ownership_resolve.go
+        - internal/validate/spec.go
+        - internal/validate/plan.go
+        - internal/validate/hint_root.go
+        - internal/validate/spec_test.go
+        - internal/validate/plan_test.go
+        - internal/validate/corpus_guard_test.go
+        - internal/validate/adr0032_amendment_test.go
+        - .mindspec/adr/ADR-0032-adr-semantic-gates.md
+    - depends_on:
         - 1
-    key_file_paths:
-      - internal/validate/adr_domain_resolve.go
-      - internal/validate/adr_domain_resolve_test.go
-      - internal/validate/plan.go
-      - internal/validate/divergence.go
-      - internal/validate/plan_test.go
-      - internal/validate/divergence_test.go
-  - id: 3
-    depends_on:
+      id: 2
+      key_file_paths:
+        - internal/validate/adr_domain_resolve.go
+        - internal/validate/adr_domain_resolve_test.go
+        - internal/validate/plan.go
+        - internal/validate/divergence.go
+        - internal/validate/plan_test.go
+        - internal/validate/divergence_test.go
+    - depends_on:
         - 2
-    key_file_paths:
-      - internal/validate/plan.go
-      - internal/validate/divergence.go
-      - internal/validate/docsync.go
-      - internal/validate/plan_test.go
-      - internal/validate/divergence_test.go
-      - internal/validate/docsync_test.go
-  - id: 4
-    depends_on:
+      id: 3
+      key_file_paths:
+        - internal/validate/plan.go
+        - internal/validate/divergence.go
+        - internal/validate/docsync.go
+        - internal/validate/plan_test.go
+        - internal/validate/divergence_test.go
+        - internal/validate/docsync_test.go
+    - depends_on:
         - 1
         - 2
-    key_file_paths:
-      - internal/validate/corpus_guard_test.go
-      - internal/approve/spec_test.go
-      - cmd/mindspec/ceremony_guard_test.go
+      id: 4
+      key_file_paths:
+        - internal/validate/corpus_guard_test.go
+        - internal/approve/spec_test.go
+        - cmd/mindspec/ceremony_guard_test.go
 ---
 # Plan: 122-domain-adr-gate-truthfulness
 
