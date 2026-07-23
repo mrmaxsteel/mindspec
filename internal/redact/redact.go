@@ -174,6 +174,7 @@ var SubcommandTokens = map[string]struct{}{
 	"populate":         {},
 	"powershell":       {}, // completion powershell (cobra built-in)
 	"query":            {}, // panel disposition query (spec 117 Bead 3 Q1-Q5 surface)
+	"ready-check":      {}, // bead ready-check (spec 124 mechanical readiness floor verb)
 	"record":           {},
 	"repair":           {},
 	"replay":           {}, // agentmind replay shim
