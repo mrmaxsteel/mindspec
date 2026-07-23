@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
@@ -571,12 +572,38 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 		cov, proposedID := coverageOf(r, store, citations, d)
 		switch cov {
 		case notCovered:
+			// Spec 122 R3 (#145 friction 1): before falling back to the
+			// spec-100 remedies, scan the SAME in-hand store (already
+			// domain-resolving per R2) for UNCITED Accepted ADRs whose
+			// resolved Domain(s) cover d. When at least one exists, the
+			// TRUE governing fix is citing it — name it FIRST, ahead of
+			// the existing "amend a cited ADR" / "create a new ADR"
+			// remedies. The trigger is the EXISTENCE of an uncited
+			// covering ADR, not the emptiness of the citation list, so
+			// this also fires when the plan already cites some
+			// non-covering ADR(s).
+			if covering := uncitedCoveringADRs(store, citations, d); len(covering) > 0 {
+				ids := make([]string, len(covering))
+				for i, id := range covering {
+					ids[i] = termsafe.Escape(id)
+				}
+				idList := strings.Join(ids, ", ")
+				msg := fmt.Sprintf("impacted domain %q has no cited Accepted ADR, but uncited Accepted ADR(s) %s already cover it; add %s to the plan's `adr_citations` frontmatter", d, idList, idList)
+				if hasAcceptedCitation(store, citations) {
+					msg += fmt.Sprintf(", or add %q to the `Domain(s)` line of an existing cited Accepted ADR", d)
+				}
+				msg += fmt.Sprintf(", or run: mindspec adr create --domain %s", d)
+				r.AddError("adr-coverage-missing", msg)
+				continue
+			}
 			// Spec 100 R2 (mindspec-3d84): when the plan already cites
 			// at least one Accepted ADR, adding the uncovered domain to
 			// an EXISTING cited Accepted ADR's `Domain(s)` line is a
 			// legitimate (often the correct) remedy — not only creating a
 			// new ADR. Present both. When NO ADR is cited, the only
 			// remedy is `adr create`, so keep that hint alone.
+			// Degenerate case (no uncited covering ADR anywhere in the
+			// store): byte-identical to pre-Requirement-3 behavior.
 			if hasAcceptedCitation(store, citations) {
 				r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; either add %q to the `Domain(s)` line of an existing cited Accepted ADR, or run: mindspec adr create --domain %s", d, d, d))
 			} else {
@@ -608,6 +635,40 @@ func hasAcceptedCitation(store adr.Store, citations []ADRCitation) bool {
 		}
 	}
 	return false
+}
+
+// uncitedCoveringADRs is the Spec 122 R3 (#145 friction 1) probe: it
+// returns the sorted IDs of every Accepted ADR in store whose resolved
+// Domain(s) (per R2's domain-resolving decorator, already wrapped
+// around store by the caller) cover domain, EXCLUDING any ADR already
+// present in citations. The trigger checkADRCoverage acts on is the
+// EXISTENCE of such an ADR — not whether citations is empty — so a
+// plan that already cites some OTHER, non-covering Accepted ADR still
+// surfaces the true remedy. A store.List error degrades to "no
+// covering ADR found" (the existing spec-100 remedies stand
+// unchanged) rather than blocking the gate on a secondary read
+// failure.
+func uncitedCoveringADRs(store adr.Store, citations []ADRCitation, domain string) []string {
+	cited := make(map[string]struct{}, len(citations))
+	for _, c := range citations {
+		cited[strings.ToUpper(strings.TrimSpace(c.ID))] = struct{}{}
+	}
+	all, err := store.List(adr.ListOpts{Status: "Accepted"})
+	if err != nil {
+		return nil
+	}
+	want := strings.ToLower(strings.TrimSpace(domain))
+	var out []string
+	for _, a := range all {
+		if _, ok := cited[strings.ToUpper(strings.TrimSpace(a.ID))]; ok {
+			continue
+		}
+		if domainSliceContains(a.Domains, want) {
+			out = append(out, a.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // domainCoverage is the tri-state result of the coverage probe
