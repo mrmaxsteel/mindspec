@@ -3,7 +3,6 @@ package validate
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -514,7 +513,7 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 			r.AddError("internal-docs", fmt.Sprintf(
 				"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by <fallback: internal/%s/**>",
 				p, strings.Join(pkgs[p], ", "),
-				filepath.Join(".mindspec", "docs", "domains", p),
+				domainsRootLabelAtRef(exec, root, ownerRef)+"/"+p,
 				p,
 			))
 		}
@@ -582,7 +581,7 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		r.AddError("internal-docs", fmt.Sprintf(
 			"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by %s",
 			domain, strings.Join(a.files, ", "),
-			filepath.Join(".mindspec", "docs", "domains", domain),
+			domainsRootLabelAtRef(exec, root, ownerRef)+"/"+domain,
 			a.manifest,
 		))
 	}

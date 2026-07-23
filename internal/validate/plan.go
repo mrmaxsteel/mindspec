@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
@@ -144,6 +145,24 @@ func ValidatePlan(root, specID string) *Result {
 	for _, e := range normErrs {
 		r.AddError("impacted-domains-resolve", e)
 	}
+
+	// Spec 122 R1 (forward-only): promote a Rule-2 bare-name-no-manifest
+	// entry to a hard error ONLY when the SPEC's own frontmatter status —
+	// SpecStatusAt(specDir), NOT this function's `isApproved` above (which
+	// reads the PLAN's status) — is an explicit case-folded "Draft". Every
+	// other spec status (Approved, any other explicit non-Draft value, or
+	// empty because the spec has no frontmatter / no `status:` key) is
+	// grandfathered. Read against the ORIGINAL raw `impacted` entries
+	// (before the `impacted = normalized` reassignment below), alongside
+	// the existing normalizeImpactedDomains call, per the plan's
+	// caller-side severity gate.
+	if strings.EqualFold(SpecStatusAt(specDir), "Draft") {
+		bare := bareUnresolvedImpactedDomains(nil, root, "", impacted)
+		for _, e := range impactedDomainsForwardOnlyErrors(nil, root, "", bare) {
+			r.AddError("impacted-domains-resolve", e)
+		}
+	}
+
 	impacted = normalized
 
 	// Build the ADR store ONCE for both the citation and coverage
@@ -153,8 +172,16 @@ func ValidatePlan(root, specID string) *Result {
 	// reading the primary checkout's ADR dir. Spec 108 R8: wrap in the
 	// per-run memoizing decorator so checkADRCitations + checkADRCoverage
 	// read each distinct cited ADR from disk at most once across their
-	// O(domains × citations) Get calls.
-	store := newMemoStore(adrStoreForSpecFn(root, specDir))
+	// O(domains × citations) Get calls. Spec 122 R2: additionally wrap
+	// in the domain-resolving decorator so every comparison site below
+	// (checkADRCitations' intersectFold, checkADRCoverage's coverageOf)
+	// sees each ADR's Domain(s) entries resolved to owning-domain
+	// dir-names, symmetric with the spec side's normalizeImpactedDomains
+	// above. The plan path has no executor and reads the on-disk
+	// working tree (ValidatePlan builds none), so exec == nil /
+	// ownerRef == "" — the same working-tree read normalizeImpactedDomains
+	// takes just above.
+	store := newDomainResolvingStore(newMemoStore(adrStoreForSpecFn(root, specDir)), nil, root, "")
 
 	// Check ADR citations + fitness (Spec 039)
 	if len(fm.ADRCitations) == 0 {
@@ -480,6 +507,13 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 		// same citation — when an ADR is both Superseded AND irrelevant,
 		// the irrelevance error is the higher-priority signal and the
 		// status warning is noise on the same root cause.
+		//
+		// Spec 122 R2: store is the domain-resolving decorator, so
+		// a.Domains here is already RESOLVED (a directory-path entry
+		// like "src/orders/" reads as "orders"); this error therefore
+		// only fires when the intersection is empty even after
+		// resolution, and the message below renders the resolved set,
+		// not the ADR's literal Domain(s) text.
 		irrelevant := false
 		if len(impactedDomains) > 0 {
 			overlap := intersectFold(a.Domains, impactedDomains)
@@ -538,12 +572,38 @@ func checkADRCoverage(r *Result, store adr.Store, citations []ADRCitation, impac
 		cov, proposedID := coverageOf(r, store, citations, d)
 		switch cov {
 		case notCovered:
+			// Spec 122 R3 (#145 friction 1): before falling back to the
+			// spec-100 remedies, scan the SAME in-hand store (already
+			// domain-resolving per R2) for UNCITED Accepted ADRs whose
+			// resolved Domain(s) cover d. When at least one exists, the
+			// TRUE governing fix is citing it — name it FIRST, ahead of
+			// the existing "amend a cited ADR" / "create a new ADR"
+			// remedies. The trigger is the EXISTENCE of an uncited
+			// covering ADR, not the emptiness of the citation list, so
+			// this also fires when the plan already cites some
+			// non-covering ADR(s).
+			if covering := uncitedCoveringADRs(store, citations, d); len(covering) > 0 {
+				ids := make([]string, len(covering))
+				for i, id := range covering {
+					ids[i] = termsafe.Escape(id)
+				}
+				idList := strings.Join(ids, ", ")
+				msg := fmt.Sprintf("impacted domain %q has no cited Accepted ADR, but uncited Accepted ADR(s) %s already cover it; add %s to the plan's `adr_citations` frontmatter", d, idList, idList)
+				if hasAcceptedCitation(store, citations) {
+					msg += fmt.Sprintf(", or add %q to the `Domain(s)` line of an existing cited Accepted ADR", d)
+				}
+				msg += fmt.Sprintf(", or run: mindspec adr create --domain %s", d)
+				r.AddError("adr-coverage-missing", msg)
+				continue
+			}
 			// Spec 100 R2 (mindspec-3d84): when the plan already cites
 			// at least one Accepted ADR, adding the uncovered domain to
 			// an EXISTING cited Accepted ADR's `Domain(s)` line is a
 			// legitimate (often the correct) remedy — not only creating a
 			// new ADR. Present both. When NO ADR is cited, the only
 			// remedy is `adr create`, so keep that hint alone.
+			// Degenerate case (no uncited covering ADR anywhere in the
+			// store): byte-identical to pre-Requirement-3 behavior.
 			if hasAcceptedCitation(store, citations) {
 				r.AddError("adr-coverage-missing", fmt.Sprintf("impacted domain %q has no cited Accepted ADR; either add %q to the `Domain(s)` line of an existing cited Accepted ADR, or run: mindspec adr create --domain %s", d, d, d))
 			} else {
@@ -575,6 +635,65 @@ func hasAcceptedCitation(store adr.Store, citations []ADRCitation) bool {
 		}
 	}
 	return false
+}
+
+// uncitedCoveringADRs is the Spec 122 R3 (#145 friction 1) probe: it
+// returns the sorted IDs of every Accepted ADR in store whose resolved
+// Domain(s) (per R2's domain-resolving decorator, already wrapped
+// around store by the caller) cover domain, EXCLUDING any ADR already
+// present in citations. The trigger checkADRCoverage acts on is the
+// EXISTENCE of such an ADR — not whether citations is empty — so a
+// plan that already cites some OTHER, non-covering Accepted ADR still
+// surfaces the true remedy. A store.List error degrades to "no
+// covering ADR found" (the existing spec-100 remedies stand
+// unchanged) rather than blocking the gate on a secondary read
+// failure.
+//
+// Final-review G1 fix: in a spec worktree, store is typically an
+// adr.OverlayStore, whose List filters Status on the branch and
+// primary stores SEPARATELY and then union-dedups with branch entries
+// winning (internal/adr/overlaystore.go). That means a branch that
+// DEMOTES an existing ADR from Accepted to Proposed/Superseded still
+// gets it back: branch.List(Accepted) correctly excludes it, but
+// primary.List(Accepted) still returns the primary checkout's
+// stale-Accepted copy, and the union surfaces that stale copy as
+// "covering" — a lying hint, exactly this spec's anti-goal. Rather
+// than touch OverlayStore.List itself (shared with spec 123's
+// separate fix), re-verify every List-derived candidate through
+// store.Get, which IS branch-wins (returns the branch version when
+// present, internal/adr/overlaystore.go's Get), and keep the
+// candidate only if its re-fetched Status is still Accepted. A
+// Get failure (candidate vanished) drops the candidate rather than
+// surfacing it.
+func uncitedCoveringADRs(store adr.Store, citations []ADRCitation, domain string) []string {
+	cited := make(map[string]struct{}, len(citations))
+	for _, c := range citations {
+		cited[strings.ToUpper(strings.TrimSpace(c.ID))] = struct{}{}
+	}
+	all, err := store.List(adr.ListOpts{Status: "Accepted"})
+	if err != nil {
+		return nil
+	}
+	want := strings.ToLower(strings.TrimSpace(domain))
+	var out []string
+	for _, a := range all {
+		if _, ok := cited[strings.ToUpper(strings.TrimSpace(a.ID))]; ok {
+			continue
+		}
+		if !domainSliceContains(a.Domains, want) {
+			continue
+		}
+		// Re-verify via Get (branch-wins) so a branch-demoted ADR —
+		// present in List's stale-primary-Accepted union member — is
+		// excluded rather than named as a covering ADR.
+		current, err := store.Get(a.ID)
+		if err != nil || !strings.EqualFold(current.Status, "Accepted") {
+			continue
+		}
+		out = append(out, a.ID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // domainCoverage is the tri-state result of the coverage probe

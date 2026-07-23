@@ -1,9 +1,14 @@
 package validate
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1058,4 +1063,246 @@ func TestValidateDocsWorkingTreeIdiom(t *testing.T) {
 		ValidateDocsRange(t.TempDir(), "FORK", "bead/x-1", "", mock)
 		assertSingleDiff(t, mock, "FORK", "bead/x-1")
 	})
+}
+
+// TestInternalDocsHintLayoutAware — spec 122 AC-9 (R4a), the doc-sync
+// half: the internal-docs "no doc updates under .../" hint must print
+// the domains root that ACTUALLY resolves in the operator's workspace.
+// A FLATTENED workspace (.mindspec/domains/ present, .mindspec/docs/
+// domains/ absent) prints .mindspec/domains/... with no
+// .mindspec/docs/domains substring; a PRE-flatten (canonical) workspace
+// prints .mindspec/docs/domains/....
+func TestInternalDocsHintLayoutAware(t *testing.T) {
+	t.Run("flattened", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, ".mindspec", "domains", "workflow")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "OWNERSHIP.yaml"), []byte("paths:\n  - internal/validate/**\n"), 0o644); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
+
+		r := &Result{SubCommand: "docs"}
+		source := []string{"internal/validate/spec.go"}
+		docs := []string{"CLAUDE.md"}
+
+		checkInternalPackages(r, nil, root, "", source, docs)
+
+		var msg string
+		for _, issue := range r.Issues {
+			if issue.Name == "internal-docs" {
+				msg = issue.Message
+			}
+		}
+		if msg == "" {
+			t.Fatalf("expected internal-docs error, got %+v", r.Issues)
+		}
+		if !strings.Contains(msg, ".mindspec/domains/workflow") {
+			t.Errorf("expected the flat domains root in the hint, got: %q", msg)
+		}
+		if strings.Contains(msg, ".mindspec/docs/domains") {
+			t.Errorf("flat workspace hint must NOT contain the canonical literal, got: %q", msg)
+		}
+	})
+
+	t.Run("pre-flatten (canonical)", func(t *testing.T) {
+		root := t.TempDir()
+		writeOwnershipFixture(t, root, "workflow", []string{"internal/validate/**"})
+
+		r := &Result{SubCommand: "docs"}
+		source := []string{"internal/validate/spec.go"}
+		docs := []string{"CLAUDE.md"}
+
+		checkInternalPackages(r, nil, root, "", source, docs)
+
+		var msg string
+		for _, issue := range r.Issues {
+			if issue.Name == "internal-docs" {
+				msg = issue.Message
+			}
+		}
+		if msg == "" {
+			t.Fatalf("expected internal-docs error, got %+v", r.Issues)
+		}
+		if !strings.Contains(msg, ".mindspec/docs/domains/workflow") {
+			t.Errorf("expected the canonical domains root in the hint, got: %q", msg)
+		}
+	})
+}
+
+// hintLiteralGuardBannedSubstrings are the hard-coded domains-root
+// literals spec 122 AC-10's sweep guard forbids inside any
+// AddError/AddWarning operator-facing format string in this package:
+// the flat path, the canonical pre-flatten path, and the legacy path.
+// Every gate message must render its root through domainsRootLabel
+// (hint_root.go) instead of embedding one of these literally.
+var hintLiteralGuardBannedSubstrings = []string{
+	".mindspec/docs/domains",
+	".mindspec/domains",
+	"docs/domains",
+}
+
+// scanHintLiterals parses a single Go source (filename is cosmetic
+// metadata for parser.ParseFile/position reporting; src holds the
+// actual bytes — either a []byte, string, or nil to read from disk) and
+// returns one description per AddError/AddWarning CALL SITE whose
+// argument subtree contains (a) a string literal directly embedding a
+// banned domains-root literal (e.g. the pre-fix divergence.go pattern:
+// a literal baked straight into a fmt.Sprintf format string), or (b) a
+// `<pkg>.Join(...)` call (e.g. filepath.Join/path.Join) whose LEADING
+// string-literal arguments, joined with "/", reconstruct a banned
+// literal — the pre-fix docsync.go pattern: `filepath.Join(".mindspec",
+// "docs", "domains", p)`, where no SINGLE argument embeds the full
+// literal but the leading three do once joined; a trailing non-literal
+// argument (the dynamic domain/package name) does not defeat this,
+// since the guard only requires the ROOT PREFIX to be literal (spec 122
+// AC-10). Only call-site subtrees are inspected — not the whole file —
+// so a doc COMMENT explaining the three-tier precedence (e.g.
+// hint_root.go's own package doc) is deliberately exempt: go/ast's
+// expression tree never sees comments. This is a pure SYNTAX parse
+// (go/parser, no type-checking), so a throwaway sample source doesn't
+// need real Result/fmt scaffolding to resolve — only to parse.
+func scanHintLiterals(t *testing.T, filename string, src interface{}) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filename, src, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", filename, err)
+	}
+
+	var findings []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || (sel.Sel.Name != "AddError" && sel.Sel.Name != "AddWarning") {
+			return true
+		}
+		// Inspect the WHOLE call subtree — including any nested
+		// fmt.Sprintf and its format-string literal, plus any nested
+		// <pkg>.Join(...) call — for a banned substring.
+		ast.Inspect(call, func(inner ast.Node) bool {
+			switch v := inner.(type) {
+			case *ast.BasicLit:
+				if v.Kind != token.STRING {
+					return true
+				}
+				value, uqErr := strconv.Unquote(v.Value)
+				if uqErr != nil {
+					return true
+				}
+				for _, banned := range hintLiteralGuardBannedSubstrings {
+					if strings.Contains(value, banned) {
+						findings = append(findings, fmt.Sprintf("%s: %s call embeds hard-coded domains-root literal %q", fset.Position(call.Pos()), sel.Sel.Name, banned))
+					}
+				}
+			case *ast.CallExpr:
+				joinSel, ok := v.Fun.(*ast.SelectorExpr)
+				if !ok || joinSel.Sel.Name != "Join" {
+					return true
+				}
+				var segs []string
+				for _, arg := range v.Args {
+					lit, ok := arg.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						break // stop at the first non-literal (dynamic) segment
+					}
+					seg, uqErr := strconv.Unquote(lit.Value)
+					if uqErr != nil {
+						break
+					}
+					segs = append(segs, seg)
+				}
+				if len(segs) == 0 {
+					return true
+				}
+				joined := strings.Join(segs, "/")
+				for _, banned := range hintLiteralGuardBannedSubstrings {
+					if strings.Contains(joined, banned) {
+						findings = append(findings, fmt.Sprintf("%s: %s call's Join(%q...) reconstructs hard-coded domains-root literal %q", fset.Position(call.Pos()), sel.Sel.Name, joined, banned))
+					}
+				}
+			}
+			return true
+		})
+		return true
+	})
+	return findings
+}
+
+// TestHintLiteralSweep_PackageClean is spec 122 AC-10's guard proper:
+// every non-test .go file in this package must have ZERO
+// AddError/AddWarning call sites embedding a hard-coded domains-root
+// literal — every gate message renders its root through
+// domainsRootLabel (hint_root.go) instead (R4a).
+func TestHintLiteralSweep_PackageClean(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("expected to find package source files — glob pattern or cwd is wrong")
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		findings := scanHintLiterals(t, f, nil)
+		if len(findings) > 0 {
+			t.Errorf("%s: hard-coded domains-root literal(s) in gate message(s):\n%s", f, strings.Join(findings, "\n"))
+		}
+	}
+}
+
+// TestHintLiteralSweep_CatchesReintroducedLiteral is AC-10's
+// fixture-of-the-guard: a deliberately reintroduced hard-coded
+// domains-root literal in a test-local sample source (never written to
+// a real file, never compiled into the package) must turn the sweep
+// guard's scanner red, proving it actually detects the class of
+// regression it exists to catch.
+func TestHintLiteralSweep_CatchesReintroducedLiteral(t *testing.T) {
+	const sample = `package validate
+
+import "fmt"
+
+func reintroducedLiteralSample(r *Result) {
+	r.AddError("adr-divergence-unowned", fmt.Sprintf(
+		"create a new domain dir at .mindspec/docs/domains/%s/OWNERSHIP.yaml", "example"))
+}
+`
+	findings := scanHintLiterals(t, "sample.go", sample)
+	if len(findings) == 0 {
+		t.Fatal("expected the guard to flag the deliberately reintroduced literal, got none — the guard is not detecting the class it exists to catch")
+	}
+}
+
+// TestHintLiteralSweep_CatchesReintroducedJoinLiteral is a second
+// fixture-of-the-guard: the pre-fix REAL shape this spec closed in
+// docsync.go was not a single embedded literal but
+// `filepath.Join(".mindspec", "docs", "domains", domain)` — no ONE
+// argument contains the full literal, but the leading three
+// reconstruct it once joined, with a trailing DYNAMIC segment (the
+// domain/package name) that must not defeat detection. Confirms the
+// guard's Join-reconstruction leg (not just its direct-literal leg)
+// actually catches the class of regression that shipped here.
+func TestHintLiteralSweep_CatchesReintroducedJoinLiteral(t *testing.T) {
+	const sample = `package validate
+
+import (
+	"fmt"
+	"path/filepath"
+)
+
+func reintroducedJoinLiteralSample(r *Result, domain string) {
+	r.AddError("internal-docs", fmt.Sprintf(
+		"no doc updates under %s/", filepath.Join(".mindspec", "docs", "domains", domain)))
+}
+`
+	findings := scanHintLiterals(t, "sample.go", sample)
+	if len(findings) == 0 {
+		t.Fatal("expected the guard to flag the reintroduced filepath.Join-reconstructed literal, got none — the guard is not detecting the class it exists to catch")
+	}
 }
