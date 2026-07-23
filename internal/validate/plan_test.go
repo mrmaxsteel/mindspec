@@ -2301,3 +2301,98 @@ func TestSixOUTwoADRDomainResolvesBothSlashForms(t *testing.T) {
 		})
 	}
 }
+
+// TestPlanCoverageHintNamesUncitedCoveringADR — spec 122 AC-8 (#145
+// friction 1, R3): checkADRCoverage's notCovered branch must name the
+// TRUE governing fix — an uncited Accepted ADR whose resolved
+// Domain(s) already cover the notCovered domain — ahead of the
+// existing spec-100 remedies. Two citation-state subtests per the
+// spec's falsifier (the hint must not fire only on the
+// empty-citation branch: a plan that already cites some OTHER
+// non-covering Accepted ADR still gets the name-the-covering-ADR
+// hint), plus the degenerate negative half (no covering ADR anywhere
+// in the store keeps today's `:548`/`:550` message byte-identical).
+func TestPlanCoverageHintNamesUncitedCoveringADR(t *testing.T) {
+	t.Run("empty citations", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"orders"})
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders")
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if !strings.Contains(issue.Message, "ADR-0001") {
+				t.Errorf("expected message to name uncited covering ADR-0001, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected message to name the adr_citations remedy, got: %q", issue.Message)
+			}
+			citeIdx := strings.Index(issue.Message, "adr_citations")
+			createIdx := strings.Index(issue.Message, "mindspec adr create")
+			if citeIdx < 0 || createIdx < 0 || citeIdx > createIdx {
+				t.Errorf("expected the adr_citations remedy FIRST and `mindspec adr create` only as fallback, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
+
+	t.Run("cites a different non-covering Accepted ADR", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"orders"})
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders")
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0002", "Accepted", "search")
+		makePlanWithCitations(t, tmp, "  - id: ADR-0002\n    sections: [\"CLI\"]\n", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if !strings.Contains(issue.Message, "ADR-0001") {
+				t.Errorf("expected message to name uncited covering ADR-0001 even though ADR-0002 is cited, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected adr_citations remedy even with a non-covering citation present, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
+
+	t.Run("degenerate: no covering ADR anywhere keeps today's message", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"payments"})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected today's degenerate message (no adr_citations remedy) when no covering ADR exists anywhere, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "mindspec adr create --domain payments") {
+				t.Errorf("expected the create remedy, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
+}
