@@ -144,6 +144,24 @@ func ValidatePlan(root, specID string) *Result {
 	for _, e := range normErrs {
 		r.AddError("impacted-domains-resolve", e)
 	}
+
+	// Spec 122 R1 (forward-only): promote a Rule-2 bare-name-no-manifest
+	// entry to a hard error ONLY when the SPEC's own frontmatter status —
+	// SpecStatusAt(specDir), NOT this function's `isApproved` above (which
+	// reads the PLAN's status) — is an explicit case-folded "Draft". Every
+	// other spec status (Approved, any other explicit non-Draft value, or
+	// empty because the spec has no frontmatter / no `status:` key) is
+	// grandfathered. Read against the ORIGINAL raw `impacted` entries
+	// (before the `impacted = normalized` reassignment below), alongside
+	// the existing normalizeImpactedDomains call, per the plan's
+	// caller-side severity gate.
+	if strings.EqualFold(SpecStatusAt(specDir), "Draft") {
+		bare := bareUnresolvedImpactedDomains(nil, root, "", impacted)
+		for _, e := range impactedDomainsForwardOnlyErrors(nil, root, "", bare) {
+			r.AddError("impacted-domains-resolve", e)
+		}
+	}
+
 	impacted = normalized
 
 	// Build the ADR store ONCE for both the citation and coverage

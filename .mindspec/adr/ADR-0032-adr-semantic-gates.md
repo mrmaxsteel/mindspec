@@ -165,11 +165,6 @@ workflow source implements the gate mechanism this ADR governs.
 
 ## Amendment — authoring-time resolvability + symmetric name-resolution (2026-07-23, spec 122)
 
-<!-- PRE-DRAFT at PLAN time (spec 122, per the spec-117/ADR-0043 precedent):
-     this section is FINALIZED by spec 122's Bead 1 — the bead landing the
-     first Requirement-1/2 code — which removes this marker and adjusts
-     wording only where the concrete implementation forces it (AC-13). -->
-
 Spec 122 (`domain-adr-gate-truthfulness`; GH #178, #147, #145, #197 +
 bead `mindspec-6ou2`) amends sub-decisions 1 and 2 with two refinements
 of the coverage model this ADR records. No new gate lane, no new flag,

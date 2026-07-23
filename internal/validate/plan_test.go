@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
 func TestValidatePlan_WellFormed(t *testing.T) {
@@ -2060,5 +2061,194 @@ func TestValidatePlanMalformedBeadIDsZeroBD(t *testing.T) {
 	checkBeadIDs(r2, []string{"mindspec-9cyu.1"})
 	if len(r2.Issues) != 1 || r2.Issues[0].Severity != SevWarning || r2.Issues[0].Name != "bead-id-check" {
 		t.Fatalf("expected the clean dotted-child id to reach a real (PATH-starved) bd spawn attempt, reported as a bead-id-check warning; got: %+v", r2.Issues)
+	}
+}
+
+// --- Spec 122 Bead 1: forward-only Rule-2 authoring reject, plan side ---
+
+// writeTestSpecWithStatus is writeTestSpec (spec 087) extended with a
+// caller-declared spec.md YAML frontmatter block (spec 122 R1's
+// forward-only signal). frontmatter == "" omits the block entirely — the
+// no-frontmatter legacy shape (SpecStatus == "").
+func writeTestSpecWithStatus(t *testing.T, root, frontmatter string, impactedDomains []string) {
+	t.Helper()
+	specDir := filepath.Join(root, "docs", "specs", "999-test")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir specDir: %v", err)
+	}
+
+	var b strings.Builder
+	if frontmatter != "" {
+		b.WriteString("---\n")
+		b.WriteString(frontmatter)
+		b.WriteString("---\n\n")
+	}
+	b.WriteString("# Spec 999-test\n\n## Goal\n\nTest spec.\n\n## Impacted Domains\n\n")
+	for _, d := range impactedDomains {
+		b.WriteString("- " + d + ": touched by tests\n")
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+}
+
+// impactedDomainsResolveIssues filters r.Issues down to the
+// impacted-domains-resolve lane, per AC-1's scoping note (a plan citing no
+// covering ADR also raises adr-coverage-missing; that is a different lane
+// and not asserted by these tests).
+func impactedDomainsResolveIssues(r *Result) []Issue {
+	var out []Issue
+	for _, i := range r.Issues {
+		if i.Name == "impacted-domains-resolve" {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// TestImpactedDomainsForwardOnlyReject_ValidatePlan pins spec 122 R1 at the
+// plan-validate authoring gate — the plan-side half of AC-1 (#178 repro,
+// RED before this bead), AC-1b(i) (explicit-status grandfather), AC-2 (the
+// first remedy completes the red->green transition), and AC-4 (manifest-less
+// anti-overreach).
+func TestImpactedDomainsForwardOnlyReject_ValidatePlan(t *testing.T) {
+	const bareLabel = "api (orders — models)"
+
+	t.Run("draft-bare-label-rejects", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		matches := impactedDomainsResolveIssues(r)
+		if len(matches) != 1 {
+			t.Fatalf("expected exactly 1 impacted-domains-resolve issue, got %d: %+v", len(matches), r.Issues)
+		}
+		msg := matches[0].Message
+		if matches[0].Severity != SevError {
+			t.Errorf("expected SevError, got %v", matches[0].Severity)
+		}
+		if !strings.Contains(msg, "orders") {
+			t.Errorf("expected message to list available domain %q, got: %s", "orders", msg)
+		}
+		if !strings.Contains(msg, bareLabel) {
+			t.Errorf("expected message to name the offending entry verbatim, got: %s", msg)
+		}
+	})
+
+	t.Run("approved-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Approved\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for an Approved spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("no-frontmatter-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for a frontmatter-less spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("no-status-key-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "spec_id: \"999-test\"\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for a status-key-less spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("draft-remedy-applied-passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{"orders"})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve after applying the remedy, got: %+v", matches)
+		}
+	})
+
+	t.Run("draft-manifest-less-workspace-passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve in a manifest-less workspace, got: %+v", matches)
+		}
+	})
+}
+
+// TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight pins spec
+// 122 AC-3: an already-Approved spec carrying the SAME bare label, forced
+// to bead time (the complete-shaped divergence lane, ValidateDivergence)
+// with a diff changing src/orders/models.py, behaves EXACTLY as it did
+// before this bead — Rule 2's verbatim-keep drives the same per-file
+// attribution (today: an "adr-divergence-unowned" finding, since the bare
+// label names no real domain dir). This bead wires the forward-only reject
+// ONLY into the two AUTHORING consumers (checkImpactedDomainsResolutionParity
+// in spec.go, ValidatePlan in plan.go); divergence.go's own
+// normalizeImpactedDomains call (:155) is untouched by this bead, so this
+// pins BY CONSTRUCTION that forward-only is keyed on authoring status, not
+// on the bead-time path — an already-Approved spec is never newly
+// hard-failed at bead time.
+func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.T) {
+	const bareLabel = "api (orders — models)"
+
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", "999-divergence")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir specDir: %v", err)
+	}
+	specBody := "---\nstatus: Approved\n---\n\n# Spec 999-divergence\n\n## Goal\n\ntest fixture\n\n## Impacted Domains\n\n- " + bareLabel + "\n"
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specBody), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	planBody := "---\nstatus: Approved\nspec_id: 999-divergence\nversion: 1\nadr_citations:\n  - ADR-0001\n---\n\n## Bead 1\n**Steps**\n1. do\n**Verification**\n- [ ] check\n**Acceptance Criteria**\ndone\n"
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planBody), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+	writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders", "")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"src/orders/models.py"},
+	}
+
+	r, findings := ValidateDivergence(mock, tmp, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+
+	foundUnowned := false
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			foundUnowned = true
+		}
+		if i.Name == "impacted-domains-resolve" {
+			t.Errorf("forward-only must not newly hard-fail an Approved spec at bead time, got: %+v", i)
+		}
+	}
+	if !foundUnowned {
+		t.Fatalf("expected the pre-spec-122 adr-divergence-unowned finding unchanged for an Approved mid-flight spec, got issues=%+v findings=%+v", r.Issues, findings)
 	}
 }

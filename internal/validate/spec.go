@@ -208,12 +208,21 @@ func checkAcceptanceCriteria(r *Result, sections map[string]string) {
 // `loadImpactedDomains` extraction, same `normalizeImpactedDomains(nil, root,
 // "", impacted)` working-tree resolution, same `impacted-domains-resolve`
 // error code. A path-like zero/multi-owner entry fails here exactly as it
-// would fail at plan-approve; a bare-name-no-manifest entry that
-// normalizeImpactedDomains keeps verbatim (Rule 2, no error) still passes —
-// spec-approve adds no stricter rule than plan-approve already enforces.
-// Spec-approve does not consume the normalized domain set further (no
-// coverage/citation gates run here — R7c keeps those plan-approve-only), so
-// only the resolver's own errors are surfaced.
+// would fail at plan-approve. Spec-approve does not consume the normalized
+// domain set further (no coverage/citation gates run here — R7c keeps those
+// plan-approve-only), so only the resolver's own errors are surfaced.
+//
+// Spec 122 R1 (forward-only): a Rule-2 bare-name-no-manifest entry
+// (`normalizeImpactedDomains` keeps it verbatim, no error) is promoted to a
+// hard `impacted-domains-resolve` ERROR here ONLY when the spec's OWN
+// frontmatter status — read via SpecStatusAt(specDir), the parse-the-
+// contract signal, NOT the plan's status — is an explicit case-folded
+// "Draft". Every other status (Approved, any other explicit non-Draft
+// value, or empty because the spec has no frontmatter / no `status:` key)
+// is grandfathered: this keeps the ~35 Approved bare-label specs and the
+// ~22 status-less legacy specs (007-beads-tooling era) byte-identical, and
+// only catches a spec being newly authored as Draft with a label that can
+// never own a file.
 func checkImpactedDomainsResolutionParity(r *Result, root, specDir string) {
 	impacted, impErr := loadImpactedDomains(specDir)
 	if impErr != nil && !os.IsNotExist(errors.Unwrap(impErr)) {
@@ -225,6 +234,13 @@ func checkImpactedDomainsResolutionParity(r *Result, root, specDir string) {
 	_, normErrs := normalizeImpactedDomains(nil, root, "", impacted)
 	for _, e := range normErrs {
 		r.AddError("impacted-domains-resolve", e)
+	}
+
+	if strings.EqualFold(SpecStatusAt(specDir), "Draft") {
+		bare := bareUnresolvedImpactedDomains(nil, root, "", impacted)
+		for _, e := range impactedDomainsForwardOnlyErrors(nil, root, "", bare) {
+			r.AddError("impacted-domains-resolve", e)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package validate
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -295,5 +296,174 @@ func TestValidateSpec_ADRTouchpointExtractionBoundary(t *testing.T) {
 			t.Errorf("expected HasFailures() == false for a 110-shaped spec, got: %+v", r.Issues)
 		}
 		assertNoCoverageOrIrrelevant(t, r)
+	})
+}
+
+// --- Spec 122 Bead 1: forward-only Rule-2 authoring reject fixtures ---
+
+// writeSpecFixtureWithFrontmatter is writeSpecFixture extended with a
+// caller-declared spec.md YAML frontmatter block (spec 122 R1's
+// forward-only signal). frontmatter == "" omits the `---`-fenced block
+// entirely — the no-frontmatter legacy shape (SpecStatus == ""); pass a
+// block with no `status:` key (e.g. "approved_at: \"\"\n") to exercise the
+// other status-less shape, or "status: Draft\n" / "status: Approved\n" for
+// the explicit-status shapes.
+func writeSpecFixtureWithFrontmatter(t *testing.T, root, frontmatter, impactedDomainsBody, adrTouchpointsBody string) {
+	t.Helper()
+	specDir := filepath.Join(root, "docs", "specs", "999-test")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+
+	var b strings.Builder
+	if frontmatter != "" {
+		b.WriteString("---\n")
+		b.WriteString(frontmatter)
+		b.WriteString("---\n\n")
+	}
+	b.WriteString("# Spec 999-test\n\n" +
+		"## Goal\n\nDo something useful.\n\n" +
+		"## Impacted Domains\n\n" + impactedDomainsBody + "\n" +
+		"## ADR Touchpoints\n\n" + adrTouchpointsBody + "\n" +
+		"## Requirements\n\n1. First requirement\n2. Second requirement\n\n" +
+		"## Scope\n\n### In Scope\n- something\n\n### Out of Scope\n- something else\n\n" +
+		"## Acceptance Criteria\n\n- [ ] First criterion\n- [ ] Second criterion\n- [ ] Third criterion\n\n" +
+		"## Open Questions\n\nNone\n\n" +
+		"## Approval\n\n- **Status**: DRAFT\n")
+
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+}
+
+// TestImpactedDomainsForwardOnlyReject_SpecApprove pins spec 122 R1 at the
+// spec-approve authoring gate: AC-1 (#178 repro, forward, RED before this
+// bead), AC-1b(i) (explicit-status grandfather: Approved / no-frontmatter /
+// frontmatter-no-status-key all emit nothing), AC-2 (the first remedy
+// applied verbatim completes the red->green transition), and AC-4 (a
+// manifest-less workspace never newly fails, the anti-overreach guard).
+func TestImpactedDomainsForwardOnlyReject_SpecApprove(t *testing.T) {
+	const bareLabel = "api (orders — models)"
+	adrBody := "- [ADR-0001](../../adr/ADR-0001.md): relevant\n"
+
+	t.Run("draft-bare-label-rejects", func(t *testing.T) {
+		// AC-1 (RED today: zero product changes -> zero
+		// impacted-domains-resolve issues here; this subtest only holds
+		// green once bareUnresolvedImpactedDomains + the Draft-status
+		// severity gate exist).
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "core", "")
+		writeSpecFixtureWithFrontmatter(t, tmp, "status: Draft\n",
+			"- "+bareLabel+": touched by tests\n", adrBody)
+
+		r := ValidateSpec(tmp, "999-test")
+
+		var matches []*Issue
+		for i := range r.Issues {
+			if r.Issues[i].Name == "impacted-domains-resolve" {
+				matches = append(matches, &r.Issues[i])
+			}
+		}
+		if len(matches) != 1 {
+			t.Fatalf("expected exactly 1 impacted-domains-resolve issue, got %d: %+v", len(matches), r.Issues)
+		}
+		msg := matches[0].Message
+		if matches[0].Severity != SevError {
+			t.Errorf("expected SevError, got %v", matches[0].Severity)
+		}
+		if !strings.Contains(msg, "orders") {
+			t.Errorf("expected message to list available domain %q, got: %s", "orders", msg)
+		}
+		if !strings.Contains(msg, bareLabel) {
+			t.Errorf("expected message to name the offending entry verbatim, got: %s", msg)
+		}
+		if !strings.Contains(msg, "replacing the entry with one of those names") {
+			t.Errorf("expected message to carry the replace-label remedy, got: %s", msg)
+		}
+		if !strings.Contains(msg, "declaring a claimed path instead") {
+			t.Errorf("expected message to carry the declare-a-path remedy, got: %s", msg)
+		}
+	})
+
+	t.Run("approved-bare-label-grandfathered", func(t *testing.T) {
+		// AC-1b(i): an already-Approved spec with the SAME bare label
+		// emits NO impacted-domains-resolve error.
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "core", "")
+		writeSpecFixtureWithFrontmatter(t, tmp, "status: Approved\n",
+			"- "+bareLabel+": touched by tests\n", adrBody)
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "impacted-domains-resolve"); found {
+			t.Errorf("expected no impacted-domains-resolve for an Approved spec, got: %+v", r.Issues)
+		}
+	})
+
+	t.Run("no-frontmatter-bare-label-grandfathered", func(t *testing.T) {
+		// AC-1b(i): a spec with NO YAML frontmatter at all (SpecStatus =="")
+		// emits NO impacted-domains-resolve error — the pre-frontmatter
+		// legacy-spec shape.
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "core", "")
+		writeSpecFixtureWithFrontmatter(t, tmp, "",
+			"- "+bareLabel+": touched by tests\n", adrBody)
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "impacted-domains-resolve"); found {
+			t.Errorf("expected no impacted-domains-resolve for a frontmatter-less spec, got: %+v", r.Issues)
+		}
+	})
+
+	t.Run("no-status-key-bare-label-grandfathered", func(t *testing.T) {
+		// AC-1b(i): frontmatter present but no `status:` key (SpecStatus
+		// =="") emits NO impacted-domains-resolve error — the
+		// 038/039/041-shape legacy fixture.
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "core", "")
+		writeSpecFixtureWithFrontmatter(t, tmp, "spec_id: \"999-test\"\n",
+			"- "+bareLabel+": touched by tests\n", adrBody)
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "impacted-domains-resolve"); found {
+			t.Errorf("expected no impacted-domains-resolve for a status-key-less spec, got: %+v", r.Issues)
+		}
+	})
+
+	t.Run("draft-remedy-applied-passes", func(t *testing.T) {
+		// AC-2: applying the first remedy verbatim (entry -> "orders")
+		// completes the red->green transition, no other edit.
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "core", "")
+		writeSpecFixtureWithFrontmatter(t, tmp, "status: Draft\n",
+			"- orders: touched by tests\n", adrBody)
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "impacted-domains-resolve"); found {
+			t.Errorf("expected no impacted-domains-resolve after applying the remedy, got: %+v", r.Issues)
+		}
+	})
+
+	t.Run("draft-manifest-less-workspace-passes", func(t *testing.T) {
+		// AC-4: a workspace with NO loadable OWNERSHIP.yaml anywhere never
+		// newly fails, even for a Draft spec with a bare label — the
+		// anti-overreach guard (ADR-0036's manifest-less carve-out).
+		tmp := t.TempDir()
+		writeSpecFixtureWithFrontmatter(t, tmp, "status: Draft\n",
+			"- "+bareLabel+": touched by tests\n", "")
+
+		r := ValidateSpec(tmp, "999-test")
+
+		if found, _ := findSpecIssue(r, "impacted-domains-resolve"); found {
+			t.Errorf("expected no impacted-domains-resolve in a manifest-less workspace, got: %+v", r.Issues)
+		}
 	})
 }
