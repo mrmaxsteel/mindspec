@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-23T11:06:24Z"
+approved_by: user
+status: Approved
 ---
 # Spec 123-greenfield-first-run-integrity: Greenfield First Run Integrity
 
@@ -198,7 +198,7 @@ None. The following are recorded as plan-level choices, constrained only by the 
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-23
+- **Notes**: Approved via mindspec approve spec
