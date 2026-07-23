@@ -41,8 +41,9 @@ func TreeRootForSpecDir(specDir string) string
 // is the shared READ resolver every existing-file caller uses (show,
 // --supersedes, Supersede, CopyDomains): accepts canonical "ADR-0001" or
 // a full slugged stem, resolves canonical-number driven to the bare OR
-// slugged on-disk file, and errors (ADR-0035 recovery line, termsafe-
-// escaped filenames) when more than one file carries the number.
+// slugged on-disk file, and errors (a `recovery:`-prefixed prose
+// diagnostic — not ADR-0035's copy-pastable command form — with
+// termsafe-escaped filenames) when more than one file carries the number.
 func ADRFilePath(root, adrID string) (string, error)
 func ResolveADRFile(root, id string) (string, error)
 

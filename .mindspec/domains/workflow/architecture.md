@@ -557,8 +557,9 @@ derives `ADR.ID` as the canonical `ADR-<digits>` prefix of the stem —
 never the long stem. ID→file READ resolution goes through the shared
 `workspace.ResolveADRFile` (see the core domain docs): canonical-number
 driven, bare-or-slugged tolerant, and COLLISION-ERRORING when both a
-bare and a slugged file carry one number (with an ADR-0035 recovery
-line) — replacing the silent exact-`<id>.md` short-circuit in `show`
+bare and a slugged file carry one number (with a `recovery:`-prefixed
+prose diagnostic — not ADR-0035's copy-pastable command form) —
+replacing the silent exact-`<id>.md` short-circuit in `show`
 and the exact-join miss in `--supersedes`/`Supersede`/`CopyDomains`.
 Existing bare files keep their IDs and behavior; no rename migration
 (canonical `ADR-NNNN` remains the reference currency everywhere, so
@@ -572,24 +573,51 @@ prints, writes nothing), doctor nudge, and the `mindspec config` inert
 annotation retained until an enforcement spec removes it. The new
 `commands:` key (core domain: `config.Commands`) is the consumer's
 declared build/test guidance with the same stack (`mindspec commands
-populate`) — but NOT inert: `init` and every `setup <agent>` verb
-render its populated entries as the managed AGENTS.md "Build & Test"
-section through the ONE renderer `cfg.RenderBuildTestSection`, so a
-setup refresh re-renders from config and the operator's declaration
-survives every wholesale block replacement.
+populate`) — but NOT inert. Rendering the managed AGENTS.md
+"Build & Test" section from config goes through the ONE renderer
+`cfg.RenderBuildTestSection`, and only TWO verbs render it as ordinary
+operation: `init` (`internal/bootstrap`, the starter AGENTS.md /
+append block) and `setup codex` (`ensureAgentsMD`, which owns
+AGENTS.md's managed block outright and refreshes it from config on
+every run — so a codex setup refresh re-renders the operator's
+declaration and it survives every wholesale block replacement).
+`setup claude` and `setup copilot` do NOT render or refresh the
+Build & Test section on an ordinary run — on AGENTS.md they are
+heal-only (below; the heal reaches the same renderer, but only when a
+pre-123 leak is positively detected).
 
 Managed/scaffolded consumer content no longer carries framework facts:
 the starter `AGENTS.md` title is the neutral `# AGENTS.md` (was
 "# AGENTS.md — MindSpec Project"), and NO managed block hardcodes
 `make build`/`make test` — with `commands:` unset the Build & Test
 section is OMITTED entirely (never a placeholder that reads as
-runnable). `setup codex`'s `ensureAgentsMD` additionally heals the
-exact legacy leaked title line (`healLegacyAgentsMDTitle`,
-provenance-gated: only the byte-exact pre-123 title on the first line
-is rewritten — an operator's own title is never touched). All three
-setup verbs (`claude`, `codex`, `copilot`) also ensure the runtime
-gitignore entries (R4b), since `setup` is the onboarding verb for
-repos that never ran the greenfield-only `init`.
+runnable). ALL THREE setup verbs (`codex`, `claude`, `copilot`) heal a
+pre-123 framework leak in an EXISTING AGENTS.md (final review G3
+closed the former claude/copilot block gap); both heals are
+provenance-gated (FX-3: they fire only when the file also carries a
+well-formed MindSpec managed BEGIN/END pair — an operator's own file
+is never touched) and skipped in `--check` mode:
+
+- **Title heal** (`healLegacyAgentsMDTitle`, run by all three verbs):
+  rewrites only the byte-exact pre-123 leaked first line
+  ("# AGENTS.md — MindSpec Project") to the neutral `# AGENTS.md`.
+- **Block heal**: `setup codex` heals a leaked managed block as a
+  side effect of `ensureAgentsMD`'s unconditional config-sourced
+  refresh. `setup claude`/`setup copilot` instead run the narrow
+  `healLegacyAgentsMDBlock`: it rewrites the managed block from
+  config ONLY when the existing content positively carries a pre-123
+  leak — the exact legacy hardcoded Build & Test comment literals
+  (`legacyAgentsMDBlockLeakSnippets`) or the legacy title line. A
+  clean, already-config-sourced AGENTS.md is left byte-untouched and
+  config is not even loaded for it.
+
+Both the codex render and the claude/copilot block heal FAIL LOUD on a
+bad `.mindspec/config.yaml` (FX-1): the load error propagates and the
+existing block is left byte-untouched, never silently regenerated from
+`DefaultConfig` (which would erase the consumer's declared build
+guidance). All three setup verbs also ensure the runtime gitignore
+entries (R4b), since `setup` is the onboarding verb for repos that
+never ran the greenfield-only `init`.
 
 ### Ad-hoc panel path (#209)
 

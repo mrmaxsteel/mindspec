@@ -130,9 +130,11 @@ deliberately distinct resolvers in `internal/workspace/workspace.go`:
   (`idvalidate.ADRCanonicalPrefix`), and enumerates every file carrying
   that number: the bare `<canonical>.md` plus every `<canonical>-*.md`
   glob match. Exactly one candidate resolves; zero is "not found"; MORE
-  than one is a COLLISION error naming both files with an ADR-0035
-  recovery line (rename or remove the redundant file) — never a silent
-  short-circuit to the bare file. Resolution is canonical-number driven
+  than one is a COLLISION error naming both files, ending in a
+  `recovery:`-prefixed prose diagnostic (rename or remove the redundant
+  file so exactly one carries the number — guidance, not the
+  copy-pastable `recovery: <command>` form ADR-0035 defines for guard
+  failures) — never a silent short-circuit to the bare file. Resolution is canonical-number driven
   for EVERY input shape, so naming the full slugged stem while a genuine
   collision exists still surfaces the ambiguity. On-disk filenames
   rendered into the collision error are routed through `termsafe.Escape`
