@@ -39,6 +39,17 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
+	// 6. Heal a pre-123 leaked AGENTS.md title (spec 123 FX-5): `init`
+	// writes AGENTS.md for EVERY consumer, so a leaked title can survive
+	// on a copilot-only onboarding path. Provenance-gated + idempotent
+	// (FX-3), so applying it here is safe. RunCopilot does not otherwise
+	// manage AGENTS.md's block (codex owns that).
+	if !check {
+		if err := healLegacyAgentsMDTitle(root); err != nil {
+			return nil, err
+		}
+	}
+
 	return r, nil
 }
 

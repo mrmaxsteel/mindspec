@@ -29,12 +29,14 @@ var configCmd = &cobra.Command{
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
-	Long: `Print the effective config — including the panel:, models:, loop:,
-and runner: orchestration blocks (spec 109) alongside the pre-existing
-keys — to stdout. Read-only: it writes no file and exits 0 on a valid
-config. The models:, loop:, and runner: blocks are annotated "` + inertAnnotation + `"
-because only panel: and the pre-existing keys drive in-binary behavior
-in this release.
+	Long: `Print the effective config — including the panel:, models:, commands:,
+loop:, and runner: orchestration blocks (specs 109/123) alongside the
+pre-existing keys — to stdout. Read-only: it writes no file and exits 0
+on a valid config. The models:, loop:, and runner: blocks are annotated
+"` + inertAnnotation + `" because only panel: and the pre-existing keys
+drive in-binary behavior in this release; commands: (spec 123 R7b) is
+NOT annotated inert — a populated commands: key changes the managed
+AGENTS.md "Build & Test" section init/setup render today.
 
 With --gate <name> (spec 112 R8/R9), prints that single gate's resolved
 creation-time defaults instead — the expanded reviewer slots, expected
@@ -214,6 +216,28 @@ func renderConfig(cfg *config.Config) (string, error) {
 		sort.Strings(phases)
 		for _, k := range phases {
 			fmt.Fprintf(&b, "  %s: %s\n", escapeConfigValue(k), escapeConfigValue(cfg.Models[k]))
+		}
+	}
+	fmt.Fprintln(&b)
+
+	// commands: consumer build/test declaration (spec 123 R7b) — free-form
+	// task -> shell-command map beside models:. UNLIKE models/loop/runner,
+	// this key is NOT annotated inert: init/setup's managed AGENTS.md
+	// "Build & Test" section is config.Commands-sourced
+	// (config.Config.RenderBuildTestSection, ADR-0040's consumer-identity
+	// clause), so a populated commands: key changes generated content
+	// today. Map keys are sorted for deterministic output.
+	if len(cfg.Commands) == 0 {
+		fmt.Fprintln(&b, "commands: {}")
+	} else {
+		fmt.Fprintln(&b, "commands:")
+		tasks := make([]string, 0, len(cfg.Commands))
+		for k := range cfg.Commands {
+			tasks = append(tasks, k)
+		}
+		sort.Strings(tasks)
+		for _, k := range tasks {
+			fmt.Fprintf(&b, "  %s: %s\n", escapeConfigValue(k), escapeConfigValue(cfg.Commands[k]))
 		}
 	}
 	fmt.Fprintln(&b)
