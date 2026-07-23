@@ -40,6 +40,17 @@ Low-level git operations used only by `MindspecExecutor`:
 | `PRChecksWatch(branch)` | Watch CI checks via gh |
 | `MergePR(branch)` | Merge PR via gh |
 
+### Gitignore Ensure (`internal/gitutil/gitignore.go`, spec 123 R4)
+
+Unlike the executor-only helpers above, this surface is consumed by the
+workflow domain's scaffolding verbs (`internal/bootstrap`,
+`internal/setup`) and by `internal/doctor`'s not-gitignored `--fix`:
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `RuntimeIgnoreEntries` | The single canonical list of MindSpec local runtime files that must never be tracked (`.mindspec/session.json`, `.mindspec/focus` — ADR-0015). Bootstrap, setup, and doctor all consume THIS var, so the writer sides and the doctor detection side cannot drift. |
+| `EnsureGitignoreEntries(root, entries...)` | Entry-granular, byte-idempotent `.gitignore` append: existing bytes are never reordered or rewritten; only genuinely missing entries are appended once, under a shared header comment; creates the file if absent; a call with every entry present is a true no-op (the file is not opened for writing). Presence detection is exact-line (delimiter-stripped only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence). Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()` for locating the repository root

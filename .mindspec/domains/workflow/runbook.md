@@ -2,6 +2,36 @@
 
 ## Common Operations
 
+### Onboard a greenfield repo (spec 123)
+
+In an empty directory, the first-run verbs now compose in any order:
+
+```bash
+git init .
+mindspec init                      # scaffolds .mindspec/, context-map.md skeleton,
+                                   # neutral AGENTS.md, and gitignores the runtime files
+mindspec domain add alpha          # scaffolds the domain AND its context-map entry
+mindspec adr create "First decision" --domain alpha   # writes ADR-0001-first-decision.md
+mindspec setup codex               # refreshes the managed AGENTS.md block; also
+                                   # ensures the runtime gitignore entries
+mindspec doctor                    # green on the governed lanes; two DESIGNED Warns remain
+```
+
+- The two remaining doctor Warns on an untouched greenfield repo are
+  deliberate ZFC nudges, not failures: `missing-models` (run
+  `mindspec models populate`, declare the per-phase protocol) and
+  `missing-commands` (run `mindspec commands populate`, declare this
+  repo's real build/test — the framework never guesses; while unset,
+  the managed AGENTS.md "Build & Test" section is omitted entirely).
+- Recovering a pre-123 partial state (`domains/<name>/` present but no
+  context-map entry, or missing standard files): re-run
+  `mindspec domain add <name>` — it backfills whatever is missing and
+  never overwrites existing files. `mindspec doctor` names each
+  unmapped domain with exactly that recovery line.
+- A runtime file reported "not gitignored" by doctor: `mindspec doctor
+  --fix` appends the entry; a TRACKED runtime file is the worse state
+  and gets the existing untrack `--fix`.
+
 ### Start a New Spec
 
 Use `/spec-init` or create manually:

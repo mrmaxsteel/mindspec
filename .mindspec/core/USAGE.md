@@ -22,6 +22,8 @@ All agent operating guidance is emitted dynamically by `mindspec instruct` (run 
 
 If the project has not been set up yet, run `mindspec init` to scaffold the full flat directory structure, starter files (CLAUDE.md, AGENTS.md, state), and domain templates. All creation is additive — existing files are never overwritten. After init, `mindspec doctor` should report zero errors.
 
+Since spec 123, `init` also scaffolds the `.mindspec/context-map.md` skeleton (so the first `mindspec domain add <name>` succeeds and maps the domain) and ensures the runtime files (`.mindspec/session.json`, `.mindspec/focus`) are gitignored even when the repo already has a `.gitignore` — as does every `mindspec setup <agent>` verb. The scaffolded `AGENTS.md` is framework-generic: its title is a neutral `# AGENTS.md`, and the "Build & Test" section renders YOUR declared `commands:` from `.mindspec/config.yaml` — or is omitted entirely while unset (run `mindspec commands populate` for the declaration prompt; `mindspec models populate` similarly nudges the per-phase `models:` protocol, a declared-but-inert key). Two doctor Warns on a fresh repo — `missing-models`, `missing-commands` — are deliberate nudges to make those declarations, not failures. `mindspec adr create "<title>"` writes slugged `ADR-NNNN-<slug>.md` filenames (a `--slug` flag overrides the derivation) while every surface keeps reporting and accepting the canonical `ADR-NNNN` ID. `mindspec panel create <slug> --gate adhoc --target <ref>` (no `--spec`) creates a standalone review panel under `.mindspec/reviews/<slug>/` — talliable with `panel tally`, never consulted by the lifecycle gate.
+
 ## Phase 0.5: Idle
 
 **State**: No active spec molecules, or all molecules fully closed. (`state.json` may show `mode: idle` as a convenience cursor.)
@@ -332,3 +334,8 @@ Work is not complete until changes are committed.
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
 | `mindspec complete` | Close current bead and advance |
 | `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |
+| `mindspec domain add <name>` | Scaffold a domain + its context-map entry; re-run to backfill any partial state (spec 123) |
+| `mindspec adr create "<title>" [--slug <kebab>]` | Create a slugged ADR file; canonical `ADR-NNNN` stays the ID everywhere (spec 123) |
+| `mindspec models populate` | Print the prompt for declaring the per-phase `models:` protocol (writes nothing) |
+| `mindspec commands populate` | Print the prompt for declaring your build/test `commands:` (writes nothing) |
+| `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc (no owning spec) review panel at `.mindspec/reviews/<slug>/` |
