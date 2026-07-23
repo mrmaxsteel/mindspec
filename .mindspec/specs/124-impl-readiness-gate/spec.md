@@ -7,49 +7,174 @@ approved_by: ""
 
 ## Goal
 
-<Brief description of what this spec achieves and the target user outcome>
+Make bead readiness an evaluated fact instead of an assumption. Today the impl-dispatch flow checks only a bead's **status** before spending a full implementation + panel + fix cycle on it: `/ms-bead-impl` Phase A captures the bead and asserts "Status must be `open` or `in_progress`" (`plugins/mindspec/skills/ms-bead-impl/SKILL.md:29`) — nothing anywhere judges whether the bead is **ready to implement** (plan section concrete, claimed Rs/ACs resolvable, dependencies actually merged, no blocking open questions). An under-specified bead therefore consumes the most expensive path in the whole loop — impl, 8-reviewer panel, fix, re-panel, sometimes fix-of-fix — before the ambiguity surfaces.
+
+This spec adds a two-layer readiness gate, deliberately split along the ADR-0040 layering ratchet:
+
+1. **A deterministic mechanical floor in the binary** — a new read-only verb, `mindspec bead ready-check <bead-id>`, evaluating four mechanical signals (plan section present and non-placeholder, claimed R/AC tokens resolve in spec.md, declared dependencies closed AND merged with their declared files present, no blocking open markers) — wired **gate-before-mutate** (ADR-0041) into `mindspec next`'s claim path and re-run by `/ms-bead-impl` Phase A before staging.
+2. **A semantic readiness review in the impl subagent's prompt** — a mandatory Phase 0 in the staged prompt: before any file edit, the subagent evaluates five judgment signals and either proceeds or returns a structured, commit-less `NOT READY: <reasons>` report that `/ms-bead-cycle` routes to plan/spec revision instead of the fix loop.
+
+Target outcome: a deliberately under-specified bead is refused (mechanically at claim/dispatch, or semantically at Phase 0) with actionable, span-quoting reasons and **zero commits spent**, while a well-specified bead passes with no new interactive step and no refusal — both directions pinned by committed fixtures so the gate is falsifiable both ways and cannot decay into a subjective ceremony.
 
 ## Background
 
-<Context, motivation, and any relevant prior decisions>
+### The cost this spec attacks — just lived on spec 123
+
+Spec 123 (greenfield-first-run-integrity) took **three consecutive fix rounds** driven by final-review findings before it merged: `e28db191` (r1 seam fixes), `9bca51b3` ("fix(123): fix-of-fix (final-review r2 codex)"), and `ab12d8cb` (r3, a fix of the r1 fix's own heal logic). Each round is a full dispatch + panel + tally cycle. That is the exact rework class a cheap pre-code readiness refusal exists to prevent: gaps that were visible in the artifacts *before* any code was written surfaced only after implementation had already committed to an interpretation. A 9-slot decision panel independently ranked this gate the highest-leverage next move for the same reason: one cheap `NOT READY` prevents an entire downstream cycle.
+
+### The gap, precisely (bead `mindspec-p8t5`)
+
+- `/ms-bead-impl` Phase A resolves the bead (`bd show`), the plan section, the spec Rs/ACs, and the dependency chain — as **prompt inputs**, never as a gate. The only precondition is the status check (`SKILL.md:29`). Phase B dispatches unconditionally.
+- `mindspec next` claims the selected bead, creates `bead/<id>`, and creates the worktree (`cmd/mindspec/next.go`, `internal/next/`) with no readiness evaluation of any kind — the claim mutation lands before any fact about the bead's implementability is checked, the ordering defect class ADR-0041 exists to name.
+- `/ms-bead-cycle` cross-checks `bd ready` against the plan's dependency declarations (SKILL.md step 0.1) — a *dependency-wiring* consistency check, not a readiness judgment — and its only brakes are post-damage: `max-rounds` (default 3) and the Spec 109 loop-halt skeleton `loop.halt.max_consecutive_impl_failures` (`internal/config/config.go:382`, default 2 at `config.go:635-636`), which stop the loop only **after** failed implementations have been paid for.
+- Plan-approve's structural validation (`internal/validate/plan.go` — `bead-acceptance-criteria` hard error, `bead-depends` warning; scaffold contract in `internal/approve/spec.go:251-305`) fires **once, at approval time**. It cannot see temporal facts (is the dependency *merged yet*?), cross-document facts (does claimed `AC-7` exist in spec.md?), or post-approval drift (plan hand-edited after a bead was claimed). And its structural floor is satisfiable by the scaffold's own placeholders (`path/to/file.go`, and the angle-bracketed "Specific, measurable criterion for this bead" AC template literal), which are exactly what an under-specified bead ships.
+
+### Why the hybrid, and not one of the pure options
+
+- **Pure subagent self-gate** (the bead's option 1): matches Max's phrasing ("return NOT READY instead of coding"), needs no binary change — but it is prose, and ADR-0040's core lesson is that rules living only in skill prose get skimmed (the lola-f4a8 incident that motivated ADR-0037). It also pays a full dispatch before the abort, is untestable deterministically, and asks the same model class that would misread the bead to notice it is misreading.
+- **Pure orchestrator pre-flight** (option 2): cheaper than option 1 but the same prose problem, and the orchestrator context is the busiest, most skim-prone seat in the loop.
+- **Pure binary verb** (option 3 alone): deterministic, unit-testable, falsifiable — but the highest-value signals (are these ACs *actually decidable*? does this bead *contradict* its sibling?) are judgment, and per ADR-0040 the binary must never pretend to judge prose quality (that pretense is how subjective ceremonies get born).
+
+The hybrid assigns each signal to the layer that can actually evaluate it: **mechanical facts → L1 deterministic tooling** (unit-tested, falsifiable, gate-before-mutate at the claim choke point), **judgment → the prompt layer** (structured so its output is machine-routable even though its evaluation is not deterministic). The binary never judges semantics; the prose layer never re-states what the binary enforces — skill-content pin tests (the spec 123 AC-17 pattern) keep the two from drifting apart.
+
+### Anti-ceremony guardrail (the panel's explicit caution)
+
+A readiness gate that rejects valid beads is worse than no gate: it converts real work into appeals. Two structural defenses are in-scope requirements, not aspirations: (a) the mechanical floor consists only of signals a well-formed bead **always** satisfies (presence, resolvability, merged-ness — never prose quality), and (b) a committed **positive fixture** (a well-specified bead modeled on a real shipped one) is pinned green in CI alongside the **negative fixture** pinned red, so any future tightening of the floor that starts rejecting valid beads trips a test, not an operator.
 
 ## Impacted Domains
 
-- <domain-1>: <how it is impacted>
+- **workflow**: `cmd/mindspec/**` (the `bead ready-check` subcommand on the existing `beadCmd` family in `cmd/mindspec/bead.go`; the `next` claim-path gate + `--allow-not-ready` flag; ceremony-baseline update in `cmd/mindspec/ceremony_guard_test.go`), `internal/next/**` (gate placement before the claim mutation), `internal/validate/**` (reuse of the existing plan-frontmatter/section parsing — `WorkChunk`, positional `bead_ids[N-1]` mapping — as the readiness engine's substrate), `internal/guard/**` (refusal formatting per ADR-0035), `internal/termsafe/**` consumers (report rendering), `plugins/mindspec/skills/ms-bead-impl/SKILL.md` + `plugins/mindspec/skills/ms-bead-cycle/SKILL.md` (+ the autopilot halt table in `ms-spec-autopilot` if its halt list enumerates outcomes) (dispatch-time re-check, Phase 0 prompt block, NOT-READY routing).
+- **execution**: `internal/bead/**` (bd reads via the existing `bdcli.go` helpers — `ListJSON`, `GetMetadata`, dependency/status resolution; no bd schema change), `internal/gitutil/**` (merged-ness of dependency bead branches into the spec branch; declared-file presence at spec-branch HEAD).
+
+These match the current `.mindspec/domains/*/OWNERSHIP.yaml` attributions (workflow: `cmd/**`, `internal/next/**`, `internal/validate/**`, `internal/guard/**`, `internal/termsafe/**`, `plugins/mindspec/**`; execution: `internal/bead/**`, `internal/gitutil/**`). The `core` and `context-system` domains are not impacted (no config-schema key is added — see Non-Goals).
 
 ## ADR Touchpoints
 
-- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+No new ADR and no amendment is required: every architectural rule this spec leans on is already Accepted; this spec is an application of that doctrine, and each application is pinned by an AC below.
+
+- [ADR-0041: Gate-Before-Mutate](../../adr/ADR-0041-gate-before-mutate.md) — unchanged, APPLIED: readiness is derivable from facts available **before** the claim mutation, so `mindspec next` evaluates it before `bd update --claim`, branch creation, or worktree creation. A NOT-READY refusal leaves state byte-identical — "exit non-zero implies nothing changed" (AC-4). The verb itself is read-only, so it sits entirely in the preflight leg.
+- [ADR-0035: Agent Error Contract](../../adr/ADR-0035-agent-error-contract.md) — unchanged, APPLIED: every ready-check failure and every `next` refusal routes through `internal/guard` and ends in `recovery:` lines — per failing signal, a copy-pastable next step (edit the named plan section; `mindspec complete <dep-id>` for an unmerged dependency; `mindspec bead ready-check <id>` for the full report; `--allow-not-ready` for the deliberate override).
+- [ADR-0040: Orchestration Layering Ratchet](../../adr/ADR-0040-orchestration-layering-ratchet.md) — unchanged, APPLIED as the design's spine: deterministic invariants live in the binary (the mechanical floor), judgment lives in prompts (the Phase 0 semantic review), and no gate logic is re-stated as skill prose (the skills *invoke* the verb and *route* its outcomes; pin tests keep them honest). The decision-matrix invariant is respected: the semantic layer produces a structured verdict the orchestrator routes, but no skill decides what the mechanical evidence *is*.
+- [ADR-0034: Ceremony Collapse](../../adr/ADR-0034-ceremony-collapse.md) — unchanged, RESPECTED: this spec adds one verb and one flag, and pays for them explicitly — the spec-122 ceremony non-inflation baseline (`cmd/mindspec/ceremony_guard_test.go`) is updated in the same bead that adds each surface, so the inflation is deliberate and reviewed, never silent (AC-9).
+- [ADR-0036: Ownership Discovery — Zero Framework Cognition](../../adr/ADR-0036-ownership-discovery.md) — unchanged, RESPECTED: the mechanical floor reads only repo artifacts and mindspec's **own** scaffold literals (the plan template's placeholder strings are framework-authored text, not consumer cognition); it proposes no content and guesses nothing about the consumer's semantics.
+- [ADR-0037: Panel Gate as Enforced Contract](../../adr/ADR-0037-panel-gate-enforced-contract.md) — unchanged, PROTECTED: readiness gains no merge authority. `mindspec complete` and the panel gate never consult readiness state; a NOT-READY bead that was force-claimed and implemented anyway is judged by the panel exactly as today (AC-9's isolation clause).
 
 ## Requirements
 
-1. <Requirement 1>
-2. <Requirement 2>
+Each requirement carries a hard falsifier. "Readiness fixture pair" below means the two committed test fixtures of R6: NEGATIVE (deliberately under-specified) and POSITIVE (well-specified).
+
+1. **A deterministic, read-only readiness verb: `mindspec bead ready-check <bead-id>`.** The verb resolves the bead's owning spec from its lineage (never from cwd — the ADR-0041 lesson from `complete`), evaluates the four mechanical signals of R2, and prints a per-signal report: one line per signal with a stable signal ID (`MF-1`..`MF-4`), `PASS`/`FAIL`, and for each FAIL the evidence (file path + the offending or missing element). Exit 0 when all four pass; on any FAIL, exit non-zero via `internal/guard` with one `recovery:` line per failing signal. The verb performs **no mutation**: no bd writes, no git writes, no file writes — two consecutive runs against unchanged state produce identical output and leave `git status` and bd state untouched. Malformed bead IDs are refused at ingress via `idvalidate.BeadID` (the existing `cmd/mindspec/bead.go` pattern). All bead/plan-derived text rendered in the report passes through `termsafe.Escape` before reaching the terminal (bead descriptions and plan prose are agent-authored free text — the spec 113/120 trust-boundary rule).
+   *Falsified if*: the NEGATIVE fixture exits 0 or the POSITIVE fixture exits non-zero; or any FAIL line lacks a signal ID or a recovery line; or a run mutates bd state, git state, or any file; or a bead description containing terminal-escape bytes reaches the report unescaped.
+
+2. **The mechanical floor — four signals, all mechanical, none judging prose quality.** Signal definitions (the bead-index `N` is the bead ID's numeric suffix, mapping positionally to `work_chunks[N-1]`/`bead_ids[N-1]` per the spec 097 contract in `internal/validate/plan.go`):
+   - **MF-1 — plan section concrete-by-structure**: the plan's `## Bead N` section exists; its `**Acceptance Criteria**` block contains at least one entry that is not the scaffold's angle-bracketed AC placeholder (the "Specific, measurable criterion for this bead" template literal emitted by `scaffoldPlan`, `internal/approve/spec.go`); and `work_chunks[N-1].key_file_paths` is non-empty and contains no scaffold placeholder (`path/to/file.go`). Authoritative files-in-scope is the frontmatter, not prose (spec 097 R3/R4) — MF-1 never parses prose "Files:" lines.
+   - **MF-2 — claimed Rs/ACs resolve**: every `AC-<n>` / `R<n>` token harvested from the bead's bd description and its `## Bead N` plan section (harvest regex plan-level; the contract is the resolution rule) appears literally in the owning spec's `spec.md`. A claimed criterion that does not exist in the spec is a dangling promise.
+   - **MF-3 — dependencies merged and locatable**: for every bd dependency edge of the bead (the authoritative source — bd edges wired from `work_chunks[].depends_on`, spec 097 R3; the prose `**Depends on**` section is explicitly non-authoritative and is not parsed), the dependency bead is **closed** in bd, its work is **reachable from the spec branch HEAD** (merged — checked via `internal/gitutil`), and every file in the dependency's `key_file_paths` exists at spec-branch HEAD (the mechanical proxy for "helper API is locatable"; API-shape judgment is SR-3, not MF-3).
+   - **MF-4 — no blocking open markers**: the bead's `## Bead N` plan section and its bd description contain no unchecked `- [ ]` checkbox and none of the literal blocking tokens `TBD` (whole word) or `OPEN QUESTION` (case-insensitive). Spec-level open questions are already gated at spec-approve (`internal/validate/spec.go` `open-question` error) and are not re-scanned here.
+   *Falsified if*: any signal can be made to PASS on the NEGATIVE fixture's planted defect for that signal (placeholder AC, dangling `AC-99` claim, unmerged dependency, unchecked checkbox — one planted defect per signal); or any signal FAILs on the POSITIVE fixture; or MF-3 passes for a dependency that is closed in bd but whose branch is not merged into the spec branch (the split state that has bitten this repo — the verify-close class); or any signal's evaluation reads prose quality rather than presence/resolvability/merged-ness.
+
+3. **`mindspec next` gates the claim on the mechanical floor (gate-before-mutate).** After bead selection and before **any** mutation (no `bd update --claim`, no `bead/<id>` branch, no worktree), `next` evaluates R2 against the selected bead. On NOT READY it refuses: prints the per-signal report, exits non-zero, and leaves bd state, branches, and worktrees byte-identical to before the invocation; the refusal's recovery lines name the per-signal fixes plus the two escape hatches (`mindspec bead ready-check <id>` for the standalone report; re-run with `--allow-not-ready` to claim deliberately). A new `--allow-not-ready` flag proceeds past a failing floor, emitting a warning that names every failing signal (so the override is visible in the transcript, never silent). A passing floor adds no interactive step and no output beyond a single OK line.
+   *Falsified if*: `next` against the NEGATIVE fixture's bead claims it, creates a branch, or creates a worktree without `--allow-not-ready`; or the refusal path leaves any mutation behind; or `--allow-not-ready` proceeds without naming the failing signals; or `next` against the POSITIVE fixture's bead is refused or prompts interactively.
+
+4. **`/ms-bead-impl` re-checks at dispatch and stages the semantic Phase 0.** (a) Phase A's first step MUST run `mindspec bead ready-check <bead-id>` and stop (no prompt staged, no dispatch) on failure — this covers the stale-claim window: a bead claimed before this spec ships, or a plan/spec edited after the claim, is caught at dispatch even though `next` never saw it. (b) The staged-prompt skeleton (Phase A step 5) gains a mandatory **`## Phase 0 — readiness review (before any edit)`** section instructing the subagent to evaluate five semantic signals against the quoted spec/plan material before touching any file: **SR-1** the plan steps + ACs are implementable without inventing unstated behavior; **SR-2** each claimed AC is decidable (a concrete pass/fail check exists or is directly constructible); **SR-3** every helper the prompt says to reuse actually exists at the stated import path with the stated shape; **SR-4** the bead does not contradict the spec or a sibling bead's landed work; **SR-5** no ambiguity remains that would force the subagent to choose between materially different implementations. If any signal fails, the subagent makes **zero commits** and returns a report whose first line is exactly `NOT READY: <bead-id>` followed by numbered reasons, each tagged with its signal ID and quoting the offending or missing span verbatim (the grill's anchoring discipline) plus the concrete question whose answer would unblock it. If all pass, Phase 0 costs one line in the report ("Phase 0: READY") and coding proceeds.
+   *Falsified if*: the shipped `ms-bead-impl` SKILL.md stages a prompt without the Phase 0 section or dispatches without running the verb (pinned by AC-5/AC-6 content tests); or the prompt skeleton permits a NOT-READY return that has made a commit; or the mandated report shape lacks the `NOT READY: <bead-id>` first line, the signal tags, or the verbatim spans.
+
+5. **`/ms-bead-cycle` routes NOT READY as its own outcome — pre-damage triage, not an impl failure.** A subagent return whose first line is `NOT READY: <bead-id>` is handled distinctly from every existing outcome: **no panel round is consumed** (nothing was implemented; there is nothing to review), the outcome does **not** count toward `loop.halt.max_consecutive_impl_failures` (that brake, `internal/config/config.go:382`, exists to stop *repeated failed implementations* — post-damage; NOT READY is the pre-damage refusal that prevents them, and conflating the two would punish the gate for working), and the cycle **halts the bead and surfaces the reasons** with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch — never route a NOT READY into `/ms-bead-fix` (there is no implementation to fix). The bead worktree remains intact (zero commits — nothing to discard). Autopilot treats it as the existing bead-level halt class.
+   *Falsified if*: the shipped `ms-bead-cycle` SKILL.md routes a NOT-READY return into the panel or the fix loop, counts it toward the impl-failure halt counter, or lacks the halt-and-surface routing (pinned by AC-7's content test).
+
+6. **The gate is falsifiable in both directions via a committed readiness fixture pair.** The repo carries, under the test tree, (a) a NEGATIVE fixture: a spec+plan+bead arrangement with exactly one planted defect per mechanical signal (a placeholder-only AC block for MF-1, a claimed `AC-99` absent from spec.md for MF-2, a dependency bead closed-but-unmerged for MF-3, an unchecked `- [ ]` in the bead section for MF-4), and (b) a POSITIVE fixture: a fully-specified bead section modeled on a real shipped one (spec 123 Bead 1's shape: named files, named tests, resolvable ACs, merged deps). CI pins the NEGATIVE fixture to FAIL naming all four planted signals and the POSITIVE fixture to PASS with zero findings. Any future change that tightens the floor past what the POSITIVE fixture satisfies — the ceremony-creep failure mode — goes red in CI, not in an operator's face.
+   *Falsified if*: either fixture is absent from the tree; or the NEGATIVE fixture's test passes while any planted defect goes unflagged; or the POSITIVE fixture's test passes while the verb reports any finding against it.
+
+7. **Surface inflation is paid for, and prose cannot drift from the binary.** (a) The spec-122 ceremony non-inflation baseline (`cmd/mindspec/ceremony_guard_test.go`) is updated in the same bead that adds the `bead ready-check` verb and in the same bead that adds `--allow-not-ready` — the guard trips red on the new surfaces and the baseline update is the deliberate, reviewed acknowledgment; the guard test itself is never weakened or deleted. (b) Skill↔binary contract pins (the spec 123 AC-17 pattern): content tests assert the shipped `ms-bead-impl` SKILL.md contains the ready-check invocation and the Phase 0 block with the `NOT READY:` contract, and the shipped `ms-bead-cycle` SKILL.md contains the NOT-READY routing of R5 — so a future skill edit cannot silently detach the prose layer from the verb.
+   *Falsified if*: the verb or flag lands without a same-bead ceremony-baseline update (the guard is red or was weakened to pass); or either skill's mandated content can be removed without a test going red.
 
 ## Scope
 
 ### In Scope
-- <File or component 1>
+
+- `cmd/mindspec/bead.go` (+ a new engine package or `internal/validate` extension — placement plan-level): the `ready-check` subcommand, report rendering, exit semantics (R1, R2).
+- `internal/bead/bdcli.go` consumers + `internal/gitutil`: dependency status/closure reads and merged-ness/file-presence checks (R2 MF-3).
+- `cmd/mindspec/next.go` + `internal/next/**`: floor evaluation before the claim mutation, refusal, `--allow-not-ready` (R3).
+- `plugins/mindspec/skills/ms-bead-impl/SKILL.md`: Phase A ready-check step + Phase 0 prompt-skeleton block (R4).
+- `plugins/mindspec/skills/ms-bead-cycle/SKILL.md` (and the `ms-spec-autopilot` halt enumeration if applicable): NOT-READY outcome routing (R5).
+- Test fixtures (negative + positive readiness pair) and their CI pins (R6); skill-content pin tests and the ceremony-baseline update (R7).
+
+A natural decomposition is three beads: (1) the engine + verb + fixture pair (R1, R2, R6, R7a); (2) the `next` gate + flag (R3, R7a); (3) the skill layer + pin tests (R4, R5, R7b). Bead 2 and 3 both consume bead 1's engine/verb; the plan sequences them after it. Final bead structure is a plan decision.
 
 ### Out of Scope
-- <Explicitly excluded items>
+
+- Any change to `mindspec complete`, the panel gate, or any merge-authority surface — readiness never gates merges (ADR-0037 protected; see Non-Goals).
+- Any bd/beads binary or schema change; dependency edges, statuses, and metadata are read via the existing `internal/bead` helpers only.
+- The Spec 109 `loop:` config block — no new config key; `max_consecutive_impl_failures` semantics are untouched (R5 only *excludes* NOT READY from its count at the skill layer).
+- `/ms-bead-fix` dispatches — fix rounds take their concreteness from consolidated panel findings, a different (and already-reviewed) input contract; gating them is a separate question if it ever hurts.
+- Plan-approve-time validation (`internal/validate/plan.go`) — already covers the approval-time structural floor; this spec adds the claim/dispatch-time temporal and cross-document layer, not a second approval gate.
+- Auto-remediation: NOT READY never auto-dispatches a plan-refinement subagent (see Non-Goals).
 
 ## Non-Goals
 
-- <What this spec intentionally does not address>
+- **Not Spec 6's runtime brakes.** `max-rounds`, `panel_deadlock_rounds`, and `max_consecutive_impl_failures` stop the loop after damage; this gate refuses before it. The two mechanisms stay independent: this spec neither modifies the halt skeleton nor feeds it.
+- **Not a semantic-conformance gate.** The binary never judges prose quality, spec fitness, or design merit — mechanical presence/resolvability/merged-ness only. All judgment lives in the subagent's Phase 0, whose output is structured but whose evaluation is explicitly not deterministic and is never treated as binary truth.
+- **No new merge or approval authority.** READY/NOT READY influences claiming and dispatching only. It appears nowhere in `mindspec complete`, panel tally, or any lifecycle approval.
+- **No auto-refinement loop.** A NOT READY halts and surfaces; deciding whether and how to revise the plan is the operator's (or the spec-lifecycle's) job. Wiring an automatic plan-fixer is future work with its own failure modes.
+- **No readiness scoring, thresholds, or config.** Signals are individually pass/fail; there is no aggregate score, no tunable strictness knob, no config key. A knob would be ceremony's front door.
 
 ## Acceptance Criteria
 
-- [ ] <Specific, measurable criterion 1>
-- [ ] <Specific, measurable criterion 2>
+Each criterion is represented by an automated test whose setup reproduces the stated trigger; criteria marked *RED today* fail on current `main` with zero product changes (typically: the verb/flag/skill-content does not exist) and go RED again if the feature is reverted. Criteria marked *guard* pin behavior that must not change.
+
+- [ ] **AC-1** — Negative fixture refused with evidence: `mindspec bead ready-check <negative-bead>` exits non-zero; the report contains a FAIL line for each of MF-1..MF-4 naming its planted defect (placeholder AC block; dangling `AC-99`; closed-but-unmerged dependency; unchecked `- [ ]`), each with a `recovery:` line. *(R1/R2/R6; RED today — the verb does not exist)*
+- [ ] **AC-2** — Positive fixture passes, read-only, idempotent: `mindspec bead ready-check <positive-bead>` exits 0 with all four signals PASS; running it twice produces identical output; before/after comparison shows no bd mutation, no new/changed files, no new branches. *(R1/R6; RED today)*
+- [ ] **AC-3** — MF-3 temporal states: three fixture variants — dependency bead (i) open, (ii) closed in bd but its branch unmerged into the spec branch, (iii) closed+merged but a declared `key_file_paths` entry absent at spec-branch HEAD — each FAILs MF-3 with a state-specific message ((ii)'s recovery names the closed-but-unmerged inconsistency explicitly); a (iv) closed+merged+files-present variant PASSes. *(R2; RED today)*
+- [ ] **AC-4** — Gate-before-mutate in `next`: against the negative fixture's bead, `mindspec next` exits non-zero and a full state audit (bd status of the bead, `git branch` list, worktree list) is byte-identical to pre-invocation; with `--allow-not-ready` the claim proceeds and stderr names all failing signals; against the positive fixture's bead, `next` claims normally with no prompt and no refusal. *(R3; RED today — `next` claims the under-specified bead unconditionally)*
+- [ ] **AC-5** — Dispatch-time re-check pinned: a content test asserts the shipped `ms-bead-impl` SKILL.md's Phase A begins with the `mindspec bead ready-check` invocation and a stop-on-failure instruction. *(R4a/R7b; RED today)*
+- [ ] **AC-6** — Phase 0 contract pinned: a content test asserts the shipped `ms-bead-impl` prompt skeleton contains the `Phase 0 — readiness review` section with all five SR signal IDs, the zero-commit rule, and the exact `NOT READY: <bead-id>` first-line report shape with verbatim-span reasons. *(R4b/R7b; RED today)*
+- [ ] **AC-7** — NOT-READY routing pinned: a content test asserts the shipped `ms-bead-cycle` SKILL.md documents the NOT-READY outcome as: no panel round, excluded from `max_consecutive_impl_failures`, never routed to `/ms-bead-fix`, halt-and-surface with plan/spec-revision routing. *(R5/R7b; RED today)*
+- [ ] **AC-8** — Hostile-input render safety: a fixture bead whose bd description embeds terminal-escape sequences produces a ready-check report in which the hostile bytes are escaped via `termsafe` (the existing hostile-render test pattern, e.g. `cmd/mindspec/next_orphan_render_test.go`). *(R1; new-surface pin)*
+- [ ] **AC-9** — Ceremony accounting + gate isolation: (i) the spec-122 ceremony baseline test passes with exactly the new verb and `--allow-not-ready` added to its pinned sets — diff of the baseline shows only those additions; (ii) a `complete`-gate fixture demonstrates that readiness state (including a force-claimed NOT-READY bead) has zero effect on `mindspec complete`'s gate evaluation — byte-identical gate behavior with and without readiness findings. *(R7a guard + ADR-0037 protection)*
+- [ ] **AC-10** — End-to-end temporal flow: a two-bead plan (bead 2 depends on bead 1) approved via the real `plan approve` path: immediately after approval, `ready-check` PASSes bead 1 and FAILs bead 2 on MF-3 (dependency unmerged); after bead 1's branch is merged into the spec branch and closed, `ready-check` PASSes bead 2. Pins that readiness is a *temporal* fact re-derived per invocation, not a cached approval-time judgment. *(R1/R2 integration; RED today)*
 
 ## Validation Proofs
 
-- <command 1>: <Expected outcome>
+The implementation review MUST record successful output from concrete commands equivalent to:
+
+```bash
+go test ./cmd/mindspec/... ./internal/next/... ./internal/validate/... ./internal/bead/... ./internal/gitutil/...
+golangci-lint run ./...
+
+# Negative fixture (AC-1): all four signals FAIL with recovery lines
+mindspec bead ready-check <negative-bead-id>; test $? -ne 0
+
+# Positive fixture (AC-2): clean pass, no mutation
+mindspec bead ready-check <positive-bead-id> && git status --porcelain | wc -l   # 0
+
+# Gate-before-mutate (AC-4): refusal leaves no claim/branch/worktree
+mindspec next --spec <negative-spec>; test $? -ne 0
+git branch --list 'bead/*' | wc -l   # unchanged
+
+# Skill pins (AC-5/6/7):
+grep -n 'bead ready-check' plugins/mindspec/skills/ms-bead-impl/SKILL.md
+grep -n 'Phase 0 — readiness review' plugins/mindspec/skills/ms-bead-impl/SKILL.md
+grep -n 'NOT READY' plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+```
+
+The focused tests MUST map their subtest names or review evidence to every criterion AC-1 through AC-10; if final test names differ, review evidence MUST include the exact runnable `go test <package> -run <test>` commands covering each criterion.
 
 ## Open Questions
 
-- [ ] <Question that must be resolved before planning>
+None. All grill findings were self-answered headlessly (instructed non-interactive session) with repo-grounded defaults, recorded below; the remaining free choices are plan-level, constrained only by the observable contracts above (the MF-2 harvest regex, fixed observably by AC-1's dangling-`AC-99` pin; the engine's package placement, fixed by the domain attributions; the report's exact line format beyond signal-ID + PASS/FAIL + recovery, fixed by AC-1/AC-8).
+
+- [x] grill (self-answered, headless): [SYNONYM] "judges whether the bead is READY to implement" — readiness as a vague aggregate is unfalsifiable → replaced with four enumerated mechanical signals (MF-1..MF-4, R2) and five enumerated semantic signals (SR-1..SR-5, R4b), each individually pass/fail with its own falsifier and fixture pin.
+- [x] grill (self-answered, headless): [SEMANTIC] "its helper API is locatable" — "locatable" by whom, decided how? → split by layer: the mechanical proxy is "every `key_file_paths` entry of the dependency exists at spec-branch HEAD" (MF-3, deterministic); actual API-shape judgment is SR-3 in the subagent's Phase 0 (it reads the files the prompt names).
+- [x] grill (self-answered, headless): [CONTRADICTION] "no added friction on the happy path" (bead acceptance) vs a hard claim-time gate in `next` (R3) → reconciled: the floor contains only signals a well-formed bead always satisfies, the check is read-only and non-interactive, the POSITIVE fixture pins zero-refusal in CI (R6/AC-4), and `--allow-not-ready` is the deliberate escape. Hard-gate-with-override chosen over advisory-warn because ADR-0040's core lesson is that advisory prose gets skimmed — an advisory floor would be re-improvised under time pressure exactly like the pre-109 panel mix was.
+- [x] grill (self-answered, headless): [GROUNDING] "only checks a bead's STATUS before dispatching" → verified live: `plugins/mindspec/skills/ms-bead-impl/SKILL.md:29` ("Status must be `open` or `in_progress`.") is the sole precondition; `cmd/mindspec/next.go`/`internal/next` claim with no readiness evaluation; the bead's `SKILL.md:27` citation drifted two lines in the current tree and is corrected to `:29` here.
+- [x] grill (self-answered, headless): [SCENARIO] bead claimed before this spec ships, or plan/spec hand-edited after the claim — `next`'s gate never sees it → covered by the dispatch-time re-check (R4a): `/ms-bead-impl` Phase A re-runs the verb; it is read-only and idempotent, so the double evaluation costs one command.
+- [x] grill (self-answered, headless): [SCENARIO] dependency closed in bd but its branch never merged (the verify-close/`2u0u` class this repo has hit repeatedly) → MF-3 checks closure AND merged-ness AND declared-file presence as three separable states; AC-3 pins each variant with a state-specific message.
+- [x] grill (self-answered, headless): [SCENARIO] two orchestrators race the check → the verb is read-only, so concurrent evaluation is harmless by construction; the only mutation (the claim) stays inside `next`'s existing claim path, which already owns claim-contention recovery (`cmd/mindspec/next_recovery_test.go`).
+- [x] grill (self-answered, headless): [SEMANTIC] "NOT READY with actionable reasons" — "actionable" is not checkable → pinned to a machine-routable shape: first line exactly `NOT READY: <bead-id>`, numbered reasons each tagged with a signal ID, quoting the offending span verbatim (the grill's own anchoring discipline), plus the unblocking question; shape pinned by AC-6's content test.
+- [x] grill (self-answered, headless): [SCENARIO] empty/degenerate input — malformed bead ID, bead with no plan section at all, spec with no `work_chunks` → ingress `idvalidate.BeadID` refusal (existing `bead.go` pattern); a missing `## Bead N` section or missing chunk is an MF-1 FAIL (that IS the under-specified case), never a crash; both shapes exercised by the negative fixture.
+- [x] grill (self-answered, headless): verb naming — `mindspec bead ready` collides conceptually with `bd ready` (which lists dependency-unblocked work, a strictly weaker claim) → named `ready-check` to keep the two vocabularies distinct; the report can cross-reference `bd ready` without ambiguity.
+- [x] grill (self-answered, headless): [SCENARIO] should NOT READY release the claim or count toward the impl-failure brake? → neither: the worktree/claim remain intact (zero commits, nothing to discard; releasing would fight `next`'s recovery recipes), and it is excluded from `max_consecutive_impl_failures` because that brake counts failed *implementations* — counting the refusal that prevents them would penalize the gate for firing (R5).
+- [x] grill (self-answered, headless): [STRUCTURAL] does MF-4's `TBD`/`OPEN QUESTION` token scan re-create the spec-approve open-question gate? → no: `internal/validate/spec.go` gates the SPEC's Open Questions at approval; MF-4 scans only the bead's plan section and bd description — the surfaces that drift after approval — and the token list is closed (two tokens + unchecked checkbox), not a semantic judgment.
 
 ## Approval
 
