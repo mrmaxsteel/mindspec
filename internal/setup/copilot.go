@@ -39,23 +39,18 @@ func RunCopilot(root string, check bool) (*Result, error) {
 		return nil, err
 	}
 
-	// 6. Heal a pre-123 leaked AGENTS.md title (spec 123 FX-5): `init`
-	// writes AGENTS.md for EVERY consumer, so a leaked title can survive
-	// on a copilot-only onboarding path. Provenance-gated + idempotent
-	// (FX-3), so applying it here is safe.
-	//
-	// 6b. Heal a pre-123 leaked AGENTS.md managed BLOCK (final review G3,
-	// #211's remaining exposure): the title heal only reaches the
-	// pre-marker title line, so a copilot-only onboarding path previously
-	// kept a leaked framework `make build`/`make test` inside the managed
-	// block forever. healLegacyAgentsMDBlock is narrowly gated on
-	// positively detecting that leak (never a general takeover of
-	// AGENTS.md's block by copilot), so a clean repo is unaffected.
+	// 6. Heal a pre-123 leaked AGENTS.md (title and/or managed block, final
+	// review G3/FX-5, #211's exposure): `init` writes AGENTS.md for EVERY
+	// consumer, so a leaked title and/or a hardcoded `make build`/`make
+	// test` managed block can survive on a copilot-only onboarding path.
+	// healLegacyAgentsMD performs both heals ATOMICALLY (round-2
+	// final-review FIX C): it loads+validates config BEFORE either heal
+	// write, so a corrupt config.yaml aborts with AGENTS.md byte-unchanged
+	// rather than leaving a half-healed file. Narrowly gated on positively
+	// detecting a leak (never a general takeover of AGENTS.md by copilot),
+	// so a clean repo is unaffected and never even loads config.
 	if !check {
-		if err := healLegacyAgentsMDTitle(root); err != nil {
-			return nil, err
-		}
-		if err := healLegacyAgentsMDBlock(root); err != nil {
+		if err := healLegacyAgentsMD(root); err != nil {
 			return nil, err
 		}
 	}

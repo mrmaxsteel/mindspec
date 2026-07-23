@@ -80,13 +80,32 @@ func EnsureGitignoreEntries(root string, entries ...string) error {
 	// (a harmless duplicate line) when git disagrees, so the LAST match
 	// in the file is always the plain ignore rule and the path is
 	// actually ignored again.
+	//
+	// A re-append only helps when the defeating rule lives in THIS root
+	// file, appended AFTER our entry — last-match-wins within one file
+	// means a fresh plain line after it wins again. When our entry is
+	// already the LAST non-blank line in the root file and git still
+	// reports "not ignored", the defeat cannot be a same-file negation
+	// (nothing follows it here) — it must come from outside the root
+	// file's reach, most commonly a DEEPER .gitignore (e.g.
+	// .mindspec/.gitignore) whose patterns take precedence over the root
+	// file regardless of root-file line order (round-2 final-review FIX
+	// B). Appending another identical line in that case would not change
+	// the effective ignore-state at all, so we skip it rather than
+	// growing .gitignore forever on every call — that case is left for
+	// `mindspec doctor` (R4c) to Warn on, since only doctor's git-lane
+	// check can see the deeper file's effective precedence.
 	var toAppend []string
 	for _, e := range entries {
 		if !present[e] {
 			toAppend = append(toAppend, e)
 			continue
 		}
-		if ignored, ok := checkIgnored(root, e); ok && !ignored {
+		ignored, ok := checkIgnored(root, e)
+		if !ok || ignored {
+			continue
+		}
+		if hasLineAfterLastOccurrence(content, e) {
 			toAppend = append(toAppend, e)
 		}
 	}
@@ -112,18 +131,66 @@ func EnsureGitignoreEntries(root string, entries ...string) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
+// hasLineAfterLastOccurrence reports whether content has any non-blank line
+// AFTER the LAST exact occurrence of entry (line-delimiter stripped, same
+// comparison as the presence scan above). Used to decide whether a re-append
+// of entry can possibly change git's effective ignore-state: git applies
+// patterns within a single .gitignore in file order with last-match-wins, so
+// a re-append only helps when something (typically a negation) follows the
+// entry's last occurrence in THIS file. When nothing follows, our entry is
+// already the last word this file has on the matter, and appending an
+// identical duplicate line would not change anything (round-2 final-review
+// FIX B).
+func hasLineAfterLastOccurrence(content, entry string) bool {
+	lines := strings.Split(content, "\n")
+	lastIdx := -1
+	for i, line := range lines {
+		if strings.TrimSuffix(line, "\r") == entry {
+			lastIdx = i
+		}
+	}
+	if lastIdx == -1 {
+		// Not present at all — a re-append is simply an append, not
+		// relevant to this helper's "is a repeat append pointless"
+		// question, but return true (permissive) so callers that pass
+		// an absent entry are not accidentally short-circuited here
+		// (present[e] already routes absent entries directly into
+		// toAppend before this helper is ever consulted).
+		return true
+	}
+	for _, line := range lines[lastIdx+1:] {
+		if strings.TrimSuffix(line, "\r") != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // checkIgnored reports whether git actually treats entry as ignored under
-// root, via `git check-ignore --quiet`. ok is false when git could not make
-// a determination — most notably when root is not (yet) inside a git
-// repository, which the pre-existing EnsureGitignoreEntries unit tests
-// exercise deliberately against a plain (non-git) tempdir — so callers can
-// fall back to line-presence alone instead of misreading an indeterminate
-// result as "not ignored" and forcing a spurious re-append. `git
-// check-ignore` exits 0 when the path is ignored, 1 when it plainly is not,
-// and a non-{0,1} status (e.g. 128, "not a git repository") for every other
-// failure mode; only the first two are conclusive.
+// root, via `git check-ignore --quiet --no-index`. ok is false when git
+// could not make a determination — most notably when root is not (yet)
+// inside a git repository, which the pre-existing EnsureGitignoreEntries
+// unit tests exercise deliberately against a plain (non-git) tempdir — so
+// callers can fall back to line-presence alone instead of misreading an
+// indeterminate result as "not ignored" and forcing a spurious re-append.
+// `git check-ignore` exits 0 when the path is ignored, 1 when it plainly is
+// not, and a non-{0,1} status (e.g. 128, "not a git repository") for every
+// other failure mode; only the first two are conclusive.
+//
+// --no-index is mandatory here (round-2 final-review FIX A): without it,
+// git check-ignore special-cases paths that are ALREADY TRACKED in the
+// index and reports them as "not ignored" regardless of any matching
+// .gitignore rule (tracked files are, by design, not "ignored" from git's
+// add/status point of view). For a runtime file that a user has
+// accidentally committed before the ignore rule existed, that means this
+// helper would report ignored=false forever — even after the entry is
+// correctly present and would otherwise be honored — and
+// EnsureGitignoreEntries would re-append a duplicate line on every single
+// call (non-idempotent growth). --no-index asks git to evaluate the
+// .gitignore RULE only, exactly the question this function exists to
+// answer, independent of whether the path happens to be tracked.
 func checkIgnored(root, entry string) (ignored, ok bool) {
-	cmd := execCommand("git", gitArgs(root, "check-ignore", "--quiet", "--", entry)...)
+	cmd := execCommand("git", gitArgs(root, "check-ignore", "--quiet", "--no-index", "--", entry)...)
 	err := cmd.Run()
 	if err == nil {
 		return true, true

@@ -626,3 +626,97 @@ func TestRunCodex_HostileCommandValueEscapedInAgentsMD(t *testing.T) {
 		}
 	}
 }
+
+// TestRunClaude_CorruptConfigNoHalfHeal and TestRunCopilot_CorruptConfigNoHalfHeal
+// are the round-2 final-review FIX C pin: before the fix, RunClaude/RunCopilot
+// ran healLegacyAgentsMDTitle (a persisted WRITE) BEFORE
+// healLegacyAgentsMDBlock loaded+validated config, so a repo with BOTH a
+// leaked AGENTS.md (title AND block) AND a corrupt config.yaml ended up
+// observably HALF-HEALED: the title heal persisted to disk, then the block
+// heal failed loud on the bad config — leaving AGENTS.md with a fixed title
+// but a still-leaked `make build`/`make test` block. `setup codex` never had
+// this hole (it loads config first and fails clean, with zero writes).
+// After the fix, the whole heal is atomic: a bad config aborts with
+// AGENTS.md COMPLETELY byte-unchanged (title AND block both still leaked),
+// exactly like `setup codex`.
+func TestRunClaude_CorruptConfigNoHalfHeal(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An unrelated malformed key — same shape as
+	// TestRunCodex_MalformedConfigDoesNotClobberAgentsMD.
+	badCfg := "runner: typoo\n"
+	if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(badCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	leaked := leakedAgentsMDBlockFixture()
+	path := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(path, []byte(leaked), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, runErr := RunClaude(root, false)
+	if runErr == nil {
+		t.Fatal("expected RunClaude to FAIL LOUDLY on a malformed config, got nil error")
+	}
+	if !strings.Contains(runErr.Error(), "config.yaml") {
+		t.Errorf("error should name the config as the actionable cause, got: %v", runErr)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != leaked {
+		t.Errorf("AGENTS.md must be COMPLETELY byte-unchanged on a config load failure (no half-heal — title fixed but block still leaked):\nbefore:\n%s\nafter:\n%s", leaked, after)
+	}
+	// Belt-and-suspenders: explicitly confirm the title was NOT
+	// half-healed while the block heal failed.
+	if !strings.HasPrefix(string(after), legacyBadAgentsMDTitle) {
+		t.Errorf("half-heal detected: AGENTS.md title was rewritten even though the block heal failed on a corrupt config:\n%s", after)
+	}
+}
+
+func TestRunCopilot_CorruptConfigNoHalfHeal(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	badCfg := "runner: typoo\n"
+	if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(badCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	leaked := leakedAgentsMDBlockFixture()
+	path := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(path, []byte(leaked), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, runErr := RunCopilot(root, false)
+	if runErr == nil {
+		t.Fatal("expected RunCopilot to FAIL LOUDLY on a malformed config, got nil error")
+	}
+	if !strings.Contains(runErr.Error(), "config.yaml") {
+		t.Errorf("error should name the config as the actionable cause, got: %v", runErr)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != leaked {
+		t.Errorf("AGENTS.md must be COMPLETELY byte-unchanged on a config load failure (no half-heal — title fixed but block still leaked):\nbefore:\n%s\nafter:\n%s", leaked, after)
+	}
+	if !strings.HasPrefix(string(after), legacyBadAgentsMDTitle) {
+		t.Errorf("half-heal detected: AGENTS.md title was rewritten even though the block heal failed on a corrupt config:\n%s", after)
+	}
+}

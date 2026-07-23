@@ -192,17 +192,7 @@ func healLegacyAgentsMDBlock(root string) error {
 		return nil
 	}
 
-	firstLine, _, found := strings.Cut(content, "\n")
-	leaked := found && firstLine == legacyBadAgentsMDTitle
-	if !leaked {
-		for _, snippet := range legacyAgentsMDBlockLeakSnippets {
-			if strings.Contains(content, snippet) {
-				leaked = true
-				break
-			}
-		}
-	}
-	if !leaked {
+	if !agentsMDBlockLeaked(content) {
 		return nil
 	}
 
@@ -210,12 +200,109 @@ func healLegacyAgentsMDBlock(root string) error {
 	if err != nil {
 		return fmt.Errorf("loading .mindspec/config.yaml for AGENTS.md build guidance (fix the config; setup will not overwrite AGENTS.md from defaults): %w", err)
 	}
+	return writeHealedAgentsMDBlock(root, cfg)
+}
+
+// agentsMDBlockLeaked reports whether content positively carries a pre-123
+// leak of AGENTS.md's managed BLOCK: either the leaked legacy title (which
+// always shipped together with the hardcoded Build & Test block in the old
+// template), or the hardcoded Build & Test literal itself
+// (legacyAgentsMDBlockLeakSnippets) surviving independently of the title.
+// Pure detection, no write, no config load — shared by healLegacyAgentsMDBlock
+// and the atomic healLegacyAgentsMD (round-2 final-review FIX C) so both
+// agree on exactly what counts as "leaked".
+func agentsMDBlockLeaked(content string) bool {
+	firstLine, _, found := strings.Cut(content, "\n")
+	if found && firstLine == legacyBadAgentsMDTitle {
+		return true
+	}
+	for _, snippet := range legacyAgentsMDBlockLeakSnippets {
+		if strings.Contains(content, snippet) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeHealedAgentsMDBlock renders AGENTS.md's managed block from an
+// ALREADY-LOADED cfg and writes it via the shared ensureManagedDoc helper.
+// Factored out of healLegacyAgentsMDBlock so healLegacyAgentsMD (FIX C) can
+// perform the config.Load once, up front, and reuse the result here without
+// a second (redundant) load.
+func writeHealedAgentsMDBlock(root string, cfg *config.Config) error {
 	block := agentsMDManagedBlock(cfg)
 	full := "# AGENTS.md\n" + mindspecMarkerBegin + "\n" + block + mindspecMarkerEnd + "\n"
 	// A throwaway Result: this heal is a side-effect of setup claude/
 	// copilot, not itself an item their Result reports; ensureManagedDoc
 	// requires one to record Created/Skipped internally.
 	return ensureManagedDoc(root, "AGENTS.md", full, block, false, &Result{})
+}
+
+// healLegacyAgentsMD atomically heals a pre-123 leaked AGENTS.md (title
+// and/or managed block) for the claude/copilot onboarding paths (round-2
+// final-review FIX C). Before this fix, RunClaude/RunCopilot ran
+// healLegacyAgentsMDTitle (a persisted WRITE) BEFORE healLegacyAgentsMDBlock
+// loaded+validated config — so a repo with BOTH a leaked AGENTS.md AND a
+// corrupt config.yaml ended up observably HALF-HEALED: the title heal
+// persisted, then the block heal failed loud on the bad config, leaving
+// AGENTS.md with a fixed title but a still-leaked block. `setup codex`
+// never had this hole (ensureAgentsMD loads config FIRST and fails clean,
+// with no write at all).
+//
+// This function closes that gap by making the whole heal atomic:
+// detecting whether ANY heal is needed (title-leaked, block-leaked, or
+// both) is a pure read — no write, no config load, so a repo with nothing
+// to heal never even touches config.yaml (matching the pre-FIX-C
+// behavior other tests pin: a clean, already config-sourced AGENTS.md is
+// untouched and a bad-but-irrelevant config never newly fails setup).
+// Only when a leak is positively detected does it load+validate config —
+// and it does so BEFORE performing EITHER heal write. A bad config aborts
+// here, with AGENTS.md byte-unchanged: no title-only half-heal, exactly
+// like `setup codex`'s ensureAgentsMD.
+func healLegacyAgentsMD(root string) error {
+	path := filepath.Join(root, "AGENTS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := string(data)
+	if !hasWellFormedManagedMarkers(content) {
+		// FX-3 provenance gate: neither heal is eligible without positive
+		// proof mindspec generated this file.
+		return nil
+	}
+
+	firstLine, _, found := strings.Cut(content, "\n")
+	titleLeaked := found && firstLine == legacyBadAgentsMDTitle
+	blockLeaked := agentsMDBlockLeaked(content)
+	if !titleLeaked && !blockLeaked {
+		return nil
+	}
+
+	// Load+validate config BEFORE any write (fail-loud, atomic): a
+	// corrupt config aborts right here, with AGENTS.md untouched.
+	var cfg *config.Config
+	if blockLeaked {
+		cfg, err = config.Load(root)
+		if err != nil {
+			return fmt.Errorf("loading .mindspec/config.yaml for AGENTS.md build guidance (fix the config; setup will not overwrite AGENTS.md from defaults): %w", err)
+		}
+	}
+
+	if titleLeaked {
+		if err := healLegacyAgentsMDTitle(root); err != nil {
+			return err
+		}
+	}
+	if blockLeaked {
+		if err := writeHealedAgentsMDBlock(root, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // agentsMDBlockTemplate is the canonical content placed between

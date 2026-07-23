@@ -120,6 +120,142 @@ func TestEnsureGitignoreEntries_NegationDefeated(t *testing.T) {
 	}
 }
 
+// TestEnsureGitignoreEntries_TrackedFileNoIndex is the round-2 final-review
+// FIX A pin: `git check-ignore` WITHOUT --no-index reports a path as "not
+// ignored" whenever that path is ALREADY TRACKED in the index, regardless
+// of any matching .gitignore rule. Before FIX A, checkIgnored used
+// `--quiet` alone, so a tracked runtime file (e.g. accidentally committed
+// before the ignore rule existed) would be reported not-ignored on EVERY
+// call even though the rule is genuinely present and would otherwise be
+// honored — causing EnsureGitignoreEntries to re-append a duplicate entry
+// line on every single call (non-idempotent, unbounded .gitignore growth).
+// With --no-index, checkIgnored evaluates the ignore RULE only, independent
+// of tracked-status, so a tracked-but-rule-covered file converges to a true
+// no-op. The entry is deliberately NOT the last line in the seeded
+// .gitignore (a second, unrelated line follows it) so this test exercises
+// checkIgnored's tracked-vs-rule determination directly, rather than being
+// (correctly) short-circuited by the separate FIX B
+// last-line-in-file skip.
+func TestEnsureGitignoreEntries_TrackedFileNoIndex(t *testing.T) {
+	root := t.TempDir()
+	runGitignoreTestGit(t, root, "init", "-q")
+	runGitignoreTestGit(t, root, "config", "user.email", "test@example.com")
+	runGitignoreTestGit(t, root, "config", "user.name", "Test")
+
+	entry := ".mindspec/session.json"
+	seed := entry + "\nnode_modules/\n"
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, entry), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Force-track the runtime file, as if it had been committed before
+	// the ignore rule existed (or before `mindspec init` ran at all).
+	runGitignoreTestGit(t, root, "add", "-f", "--", entry, ".gitignore")
+	runGitignoreTestGit(t, root, "commit", "-q", "-m", "seed tracked runtime file")
+
+	// Ground truth: plain `git check-ignore` (no --no-index) reports the
+	// tracked path as NOT ignored despite the rule being present — this
+	// is exactly the trap FIX A closes via --no-index internally.
+	plain := exec.Command("git", "check-ignore", "--quiet", "--", entry)
+	plain.Dir = root
+	if err := plain.Run(); err == nil {
+		t.Fatalf("test setup invalid: plain git check-ignore unexpectedly reports %q ignored while tracked", entry)
+	}
+
+	first, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := EnsureGitignoreEntries(root, entry); err != nil {
+			t.Fatalf("call %d: EnsureGitignoreEntries: %v", i, err)
+		}
+		got, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(first) {
+			t.Fatalf("call %d: .gitignore changed for an already-tracked, already-rule-covered file (non-idempotent — checkIgnored missing --no-index):\nbefore:\n%s\nafter:\n%s", i, first, got)
+		}
+	}
+}
+
+// TestEnsureGitignoreEntries_DeeperNegationHonest is the round-2
+// final-review FIX B pin: a DEEPER .gitignore (e.g. .mindspec/.gitignore)
+// containing a negation for the runtime file takes precedence over the
+// root .gitignore's plain rule regardless of root-file line order — the
+// root file simply cannot reach in and override it. EnsureGitignoreEntries
+// must not discover this on every call and re-append an identical
+// duplicate line forever (it can never fix the deeper file from here); it
+// appends the root entry AT MOST ONCE (when first missing) and, once
+// present as the last line of the root file, must stop growing the file on
+// subsequent calls even though `git check-ignore` still (rightly) reports
+// the path as not-ignored.
+func TestEnsureGitignoreEntries_DeeperNegationHonest(t *testing.T) {
+	root := t.TempDir()
+	runGitignoreTestGit(t, root, "init", "-q")
+
+	entry := ".mindspec/session.json"
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A deeper .gitignore negates the runtime file; deeper files win
+	// over root regardless of order.
+	if err := os.WriteFile(filepath.Join(root, ".mindspec", ".gitignore"), []byte("!session.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ground truth: even with --no-index, the deeper negation wins.
+	groundTruth := func() bool {
+		cmd := exec.Command("git", "check-ignore", "--quiet", "--no-index", "--", entry)
+		cmd.Dir = root
+		return cmd.Run() == nil
+	}
+	if groundTruth() {
+		t.Fatalf("test setup invalid: %q reported ignored despite deeper negation", entry)
+	}
+
+	// First call: entry is missing, so it's appended exactly once.
+	if err := EnsureGitignoreEntries(root, entry); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	first, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := strings.Count(string(first), entry+"\n")
+	if n != 1 {
+		t.Fatalf("expected exactly one occurrence of %q after first call, got %d:\n%s", entry, n, first)
+	}
+	if groundTruth() {
+		t.Fatalf("test setup invalid: deeper negation should still defeat the root entry after first call")
+	}
+
+	// Repeated calls must NOT keep re-appending: the deeper negation is
+	// beyond the root file's reach, so once the entry is present (as the
+	// last line of the root file) a further identical append cannot
+	// help and must not happen.
+	for i := 0; i < 3; i++ {
+		if err := EnsureGitignoreEntries(root, entry); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		got, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(first) {
+			t.Fatalf("call %d: .gitignore kept growing despite an unreachable deeper negation (no loop guard):\nafter first call:\n%s\nafter call %d:\n%s", i, first, i, got)
+		}
+	}
+}
+
 func hasExactLine(content, want string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		if strings.TrimSuffix(line, "\r") == want {
