@@ -48,6 +48,7 @@ team lead spawns fresh agents per bead.`,
 		specFlag, _ := cmd.Flags().GetString("spec")
 		force, _ := cmd.Flags().GetBool("force")
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
+		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
 
 		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
 		// mutually exclusive selectors — the positional names a specific bead,
@@ -241,6 +242,42 @@ team lead spawns fresh agents per bead.`,
 		}
 		if err != nil {
 			return fmt.Errorf("selecting work: %w", err)
+		}
+
+		// Step 4.5: Gate-before-mutate readiness floor (spec 124 R3;
+		// ADR-0041's "preflight-leg-only addition" fourth-verb clause —
+		// mindspec next adopts ONLY the preflight leg of the gate-before-
+		// mutate contract for bead readiness). This MUST run after
+		// selection and BEFORE any claim/branch/worktree mutation below,
+		// so a NOT-READY refusal leaves bd state, branches, and worktrees
+		// byte-identical to their pre-call state (AC-4).
+		gateResult, gateErr := next.GateReadiness(root, selected.ID, allowNotReady)
+		if gateErr != nil {
+			return gateErr
+		}
+
+		// Step 4.6: On the --allow-not-ready proceed path, write the
+		// durable override marker (spec 124 R3 / AC-4) BEFORE any
+		// claim/branch/worktree mutation, FAIL-CLOSED. AC-4 requires the
+		// marker as a GUARANTEE, not best-effort: `--allow-not-ready`
+		// success ⟹ (marker durably written AND bead claimed). Writing
+		// advisory metadata to the not-yet-claimed bead is safe (the bead
+		// exists in bd regardless of claim status), and it keeps AC-4's
+		// refusal-zero-mutation intact — a plain refusal (no
+		// --allow-not-ready) never reaches here (gateErr returned above),
+		// and a marker-write failure refuses with nothing claimed, no
+		// worktree created. If the marker lands but ClaimBead then fails,
+		// the marker on an unclaimed bead is harmless advisory metadata a
+		// subsequent claim finds.
+		if len(gateResult.FailingSignals) > 0 {
+			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
+				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
+			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
+				return guard.NewFailure(
+					fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(selected.ID), err),
+					"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+				)
+			}
 		}
 
 		// Step 5: Claim
@@ -504,4 +541,5 @@ func init() {
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
 	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
+	nextCmd.Flags().Bool("allow-not-ready", false, "Proceed past a failing readiness floor (spec 124); records a durable override marker naming the bypassed signals")
 }
