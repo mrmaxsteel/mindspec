@@ -152,10 +152,19 @@ Extra stuff here.
 	}
 }
 
-// TestScaffoldPlanEmitsADRCitations (Spec 100 R4 AC1): the generated plan.md
-// skeleton names the exact `adr_citations` frontmatter key the gate reads, so
-// the author sees it up front. The key must appear inside the YAML frontmatter
-// region (between the opening and closing `---`).
+// TestScaffoldPlanEmitsADRCitations (Spec 100 R4 AC1; strengthened by Spec
+// 122 R5/AC-12b): the generated plan.md skeleton names the exact
+// `adr_citations` frontmatter key the gate reads, so the author sees it up
+// front. The key must appear inside the YAML frontmatter region (between
+// the opening and closing `---`).
+//
+// Spec 122 AC-12b additionally pins the commented REMEDY-GUIDANCE sentence
+// beside that key ("cite the Accepted ADRs whose Domain(s) cover" —
+// `internal/approve/spec.go`'s `scaffoldPlan`) so the documented-key remedy
+// text cannot silently drop; this half is red if that guidance sentence is
+// removed even though the bare `adr_citations` key remains (a mutation
+// probe recorded in review evidence: dropping the sentence while keeping
+// the key turns this assertion, and only this assertion, red).
 func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 	out := scaffoldPlan("100-x")
 
@@ -176,5 +185,14 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 	frontmatter := out[first : first+len(fence)+second]
 	if !strings.Contains(frontmatter, "adr_citations") {
 		t.Errorf("expected adr_citations within the frontmatter region, got frontmatter:\n%s", frontmatter)
+	}
+
+	// Spec 122 AC-12b: the commented remedy-guidance sentence beside the
+	// key — the actual working remedy ("cite the Accepted ADRs whose
+	// Domain(s) cover" this plan's impacted domains), not just the bare key
+	// name.
+	const guidanceSentence = "cite the Accepted ADRs whose Domain(s) cover"
+	if !strings.Contains(frontmatter, guidanceSentence) {
+		t.Errorf("expected the adr_citations remedy-guidance sentence %q within the frontmatter region, got frontmatter:\n%s", guidanceSentence, frontmatter)
 	}
 }
