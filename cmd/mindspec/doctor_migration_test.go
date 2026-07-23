@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/domain"
 )
 
 // mkMigrationWorkspace builds a hermetic, otherwise-healthy flat mindspec
@@ -41,6 +43,14 @@ func mkMigrationWorkspace(t *testing.T) string {
 	}
 	if err := os.WriteFile(filepath.Join(root, ".beads", "issues.jsonl"), []byte(""), 0o644); err != nil {
 		t.Fatalf("write issues.jsonl: %v", err)
+	}
+	// Spec 123 R1/R3: scaffold the context-map.md skeleton so the new
+	// missing-context-map doctor check doesn't itself turn this
+	// "otherwise-healthy" fixture unhealthy — this test isolates the
+	// exit-code assertion to the migration-metadata check, not context-map.
+	if err := os.WriteFile(filepath.Join(root, ".mindspec", "context-map.md"),
+		[]byte(domain.ContextMapSkeleton()), 0o644); err != nil {
+		t.Fatalf("write context-map.md: %v", err)
 	}
 	return root
 }

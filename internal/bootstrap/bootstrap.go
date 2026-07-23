@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/domain"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
@@ -204,6 +206,19 @@ func Run(root string, dryRun bool) (*Result, error) {
 		return nil, err
 	}
 
+	// Spec 123 R4a (#208): even when .gitignore already existed (the
+	// manifest item above is Skipped in that case — it carries no
+	// appendBlock), still ensure the two runtime entries are present, via
+	// the entry-granular gitutil helper that never reorders or rewrites
+	// existing bytes. This is a true no-op when the entries are already
+	// there — including immediately after the greenfield create-from-
+	// scratch write above, so it never double-writes a fresh starterGitignore.
+	if !dryRun {
+		if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
+			return nil, fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
+		}
+	}
+
 	return r, nil
 }
 
@@ -230,6 +245,11 @@ func manifest() []manifestItem {
 		{path: ".github/copilot-instructions.md", content: starterCopilotInstructionsMD, appendBlock: appendCopilotBlock},
 		// Gitignore: session.json and focus are local runtime files, not version-controlled
 		{path: ".gitignore", content: starterGitignore},
+		// Spec 123 R1 (#207): the context-map skeleton, so the very first
+		// `domain add` has a "## Bounded Contexts" section to insert into
+		// instead of erroring "reading context map". Create-only, like every
+		// other manifest item — never overwrites an existing context-map.md.
+		{path: ".mindspec/context-map.md", contentFunc: domain.ContextMapSkeleton},
 	}
 
 	return items

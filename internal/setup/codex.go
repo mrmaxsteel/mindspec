@@ -40,6 +40,11 @@ func RunCodex(root string, check bool) (*Result, error) {
 	// RunCodex, and RunCopilot stay aligned on ordering and semantics.
 	applyBeadsConfig(root, check, r)
 
+	// 6. Ensure MindSpec's runtime files are gitignored (spec 123 R4b).
+	if err := ensureGitignore(root, check, r); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 
