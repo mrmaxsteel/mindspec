@@ -49,9 +49,10 @@ var inlineCompositionAllowlist = map[string]inlineEntry{
 // joinWithIDAllowlist: audited filepath.Join-with-ID sites, each
 // naming its covering gate.
 var joinWithIDAllowlist = map[string]joinEntry{
-	"internal/contextpack/budgeter.go BuildBead filepath.Join(...specID...)": {Count: 1, Gate: "in-func idvalidate.SpecID immediately before the Join - agent-writable bd-metadata spec_id provenance (round 6 O3), GATED, never allowlisted-with-a-false-gate"},
-	"internal/layout/mover.go Mover.specExists filepath.Join(...specID...)":  {Count: 1, Gate: "callers validate before specExists: panelSpec routes idvalidate.SpecID-before-specExists (round-5 O3) and routeReviewSlug's numeric fallback only sees listSpecIDs validate-and-drop IDs"},
-	"internal/spec/list.go List filepath.Join(...specID...)":                 {Count: 1, Gate: "in-func validate-and-skip: idvalidate.SpecID on each enumerated dir name before the Join (agent-creatable dir provenance)"},
+	"internal/contextpack/budgeter.go BuildBead filepath.Join(...specID...)":             {Count: 1, Gate: "in-func idvalidate.SpecID immediately before the Join - agent-writable bd-metadata spec_id provenance (round 6 O3), GATED, never allowlisted-with-a-false-gate"},
+	"internal/layout/mover.go Mover.specExists filepath.Join(...specID...)":              {Count: 1, Gate: "callers validate before specExists: panelSpec routes idvalidate.SpecID-before-specExists (round-5 O3) and routeReviewSlug's numeric fallback only sees listSpecIDs validate-and-drop IDs"},
+	"internal/spec/list.go List filepath.Join(...specID...)":                             {Count: 1, Gate: "in-func validate-and-skip: idvalidate.SpecID on each enumerated dir name before the Join (agent-creatable dir provenance)"},
+	"internal/validate/readiness/fixtures.go writeWorkspace filepath.Join(...specID...)": {Count: 1, Gate: "fixture-only: specID is a test-authored literal constant in fixtures.go, never agent/runtime input"},
 }
 
 // rootEnumerationAllowlist: audited scan (f) sites whose enumerated
@@ -71,6 +72,7 @@ var rootEnumerationAllowlist = map[string]rootEnumEntry{
 // each naming its covering gate.
 var rawIDRenderAllowlist = map[string]renderEntry{
 	"cmd/mindspec/bead.go beadWorktreeCmd fmt.Sprintf(...beadID...)":                                                {Count: 1, Gate: "in-func R3 early gate: idvalidate.BeadID on args[0] before any render or composition (AC-6)"},
+	"cmd/mindspec/bead_ready.go beadReadyCheckCmd fmt.Sprintf(...beadID...)":                                        {Count: 1, Gate: "in-func early gate: idvalidate.BeadID on args[0] before any render or evaluation, rendered via termsafe.Escape (the bead.go beadWorktreeCmd pattern, spec 124 AC-1)"},
 	"cmd/mindspec/cleanup.go cleanupCmd fmt.Printf(...specID...)":                                                   {Count: 2, Gate: "renders only on the success path after executor.Cleanup's waist-composed operations accepted specID (an invalid ID errors at the (string,error) waist before any render)"},
 	"cmd/mindspec/finalize_pr.go finalizePRRunner.ghCreate fmt.Sprintf(...epicID...)":                               {Count: 2, Gate: "spec 121 R1/AC-20(ii): runFinalizePRAutomation gates idvalidate.BeadID(epicID) before ever constructing the finalizePRRunner this method renders from (functional gh argv positions — the templated PR title/body — not a display position)"},
 	"cmd/mindspec/finalize_pr.go finalizePRRunner.ghCreate fmt.Sprintf(...specID...)":                               {Count: 2, Gate: "spec 121 R1/AC-20(ii): runFinalizePRAutomation gates idvalidate.SpecID(specID) before ever constructing the finalizePRRunner this method renders from (functional gh argv positions — the templated PR title/body — not a display position)"},
@@ -177,5 +179,6 @@ var rawIDRenderAllowlist = map[string]renderEntry{
 	"internal/recording/recording.go AddBeadToPhase fmt.Fprintf(...beadID...)":                                      {Count: 1, Gate: "class-5 write-gate (spec 120): idvalidate on specID+beadID in-func; the skip-warning renders the rejected value via termsafe.Escape - the escaped-warning channel the spec prescribes for this best-effort path"},
 	"internal/recording/recording.go AddBeadToPhase fmt.Fprintf(...specID...)":                                      {Count: 1, Gate: "class-5 write-gate (spec 120): idvalidate on specID+beadID in-func; the skip-warning renders the rejected value via termsafe.Escape - the escaped-warning channel the spec prescribes for this best-effort path"},
 	"internal/spec/create.go Run fmt.Sprintf(...specID...)":                                                         {Count: 1, Gate: "in-func gate: validate.SpecID (== idvalidate.SpecID) at the top of Run (create.go:94) before any render"},
+	"internal/validate/readiness/fixtures.go FakeBDStore.Install fmt.Errorf(...beadID...)":                          {Count: 3, Gate: "fixture-only: beadID is test/fixture-controlled input to the in-memory lineage/record/landed-merge seams (never agent/runtime input); the errors surface only when a test forgets to register the id in the fake store"},
 	"internal/validate/state.go checkBeadStatus fmt.Sprintf(...beadID...)":                                          {Count: 3, Gate: "beadID idvalidate-gated in-func (state.go gate; rejection renders idrender-quoted); later renders see the validated id"},
 }
