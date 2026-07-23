@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-23T21:11:09Z"
+approved_by: user
+status: Approved
 ---
 # Spec 124-impl-readiness-gate: Impl-Readiness Gate — reject under-specified beads before coding
 
@@ -222,7 +222,7 @@ None. All grill findings were self-answered headlessly with repo-grounded defaul
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-23
+- **Notes**: Approved via mindspec approve spec
