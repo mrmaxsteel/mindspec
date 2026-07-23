@@ -426,6 +426,170 @@ func TestRunCopilot_HealsLeakedAgentsMDTitle(t *testing.T) {
 	}
 }
 
+// leakedAgentsMDBlockFixture returns the exact pre-123 leaked managed
+// block (bootstrap.go's old starterAgentsMD, #211): the legacy title AND
+// the hardcoded `make build`/`make test` Build & Test section, so a test
+// can seed a repo whose ONLY prior onboarding path was `setup claude` or
+// `setup copilot` (never codex) — the final-review G3 exposure.
+func leakedAgentsMDBlockFixture() string {
+	return `# AGENTS.md — MindSpec Project
+` + mindspecMarkerBegin + `
+
+This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
+
+## Build & Test
+
+` + "```bash" + `
+make build    # Build binary
+make test     # Run all tests
+` + "```" + `
+` + mindspecMarkerEnd + `
+
+## Operator-authored section
+
+Do not touch this part.
+`
+}
+
+// TestRunClaude_HealsLeakedFrameworkBlock is the G3 final-review pin: a
+// repo whose ONLY prior onboarding was `setup claude` (never codex) still
+// carries the pre-123 leaked managed BLOCK (make build/make test +
+// legacy title) — the pre-fix title-only heal left the block leak
+// forever. After `setup claude`, the block must be refreshed exactly like
+// `setup codex` already refreshes it: framework facts gone, Build & Test
+// omitted (no commands: declared), content outside the markers untouched.
+func TestRunClaude_HealsLeakedFrameworkBlock(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(leakedAgentsMDBlockFixture()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("RunClaude: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, forbidden := range []string{"make build", "make test", "MindSpec Project"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("setup claude left a leaked framework fact %q in AGENTS.md's managed block:\n%s", forbidden, content)
+		}
+	}
+	if !strings.Contains(content, "## Operator-authored section") || !strings.Contains(content, "Do not touch this part.") {
+		t.Errorf("content outside the managed markers must be untouched:\n%s", content)
+	}
+}
+
+// TestRunClaude_LeakedBlockHeal_CleanRepoUntouched confirms the heal is
+// narrow: a repo whose AGENTS.md is ALREADY config-sourced (no legacy
+// title, no hardcoded make build/test literal — the state `setup codex`
+// or a spec-123+ `mindspec init` leaves) is byte-untouched by `setup
+// claude`'s new healLegacyAgentsMDBlock step. RunClaude itself never
+// creates AGENTS.md (that remains codex/bootstrap's job) — this seeds an
+// already-onboarded AGENTS.md by hand to exercise the heal's negative
+// case directly, and confirms a second run is idempotent too.
+func TestRunClaude_LeakedBlockHeal_CleanRepoUntouched(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	clean := "# AGENTS.md\n" + mindspecMarkerBegin + "\n" + agentsMDManagedBlock(config.DefaultConfig()) + mindspecMarkerEnd + "\n"
+	path := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(path, []byte(clean), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("first RunClaude: %v", err)
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != clean {
+		t.Errorf("setup claude altered an already-clean, config-sourced AGENTS.md:\nbefore:\n%s\nafter:\n%s", clean, first)
+	}
+
+	// Idempotent re-run: a clean, already-healthy AGENTS.md stays byte-identical.
+	if _, err := RunClaude(root, false); err != nil {
+		t.Fatalf("second RunClaude: %v", err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("re-running setup claude on a clean repo changed AGENTS.md:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+// TestRunCopilot_HealsLeakedFrameworkBlock mirrors
+// TestRunClaude_HealsLeakedFrameworkBlock for the copilot onboarding path.
+func TestRunCopilot_HealsLeakedFrameworkBlock(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(leakedAgentsMDBlockFixture()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RunCopilot(root, false); err != nil {
+		t.Fatalf("RunCopilot: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, forbidden := range []string{"make build", "make test", "MindSpec Project"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("setup copilot left a leaked framework fact %q in AGENTS.md's managed block:\n%s", forbidden, content)
+		}
+	}
+	if !strings.Contains(content, "## Operator-authored section") || !strings.Contains(content, "Do not touch this part.") {
+		t.Errorf("content outside the managed markers must be untouched:\n%s", content)
+	}
+}
+
+// TestRunCopilot_LeakedBlockHeal_Idempotent pins idempotent re-run: once
+// healed, a second `setup copilot` is a true no-op on AGENTS.md.
+func TestRunCopilot_LeakedBlockHeal_Idempotent(t *testing.T) {
+	root := t.TempDir()
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(leakedAgentsMDBlockFixture()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RunCopilot(root, false); err != nil {
+		t.Fatalf("first RunCopilot: %v", err)
+	}
+	first, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RunCopilot(root, false); err != nil {
+		t.Fatalf("second RunCopilot: %v", err)
+	}
+	second, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("second setup copilot changed the already-healed AGENTS.md:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
 // TestRunCodex_HostileCommandValueEscapedInAgentsMD is the S-slot
 // coverage nicety: an end-to-end setup that WRITES AGENTS.md from a
 // hostile commands.build value inspects the resulting bytes and confirms

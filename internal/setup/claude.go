@@ -204,8 +204,19 @@ func RunClaude(root string, check bool) (*Result, error) {
 	// path. RunClaude does not otherwise manage AGENTS.md's block (codex
 	// owns that), but the cross-cutting title heal is provenance-gated
 	// and idempotent (FX-3), so applying it here is safe.
+	//
+	// 9b. Heal a pre-123 leaked AGENTS.md managed BLOCK (final review G3,
+	// #211's remaining exposure): the title heal above only reaches the
+	// pre-marker title line, so a claude-only onboarding path previously
+	// kept a leaked framework `make build`/`make test` inside the managed
+	// block forever. healLegacyAgentsMDBlock is narrowly gated on
+	// positively detecting that leak (never a general takeover of
+	// AGENTS.md's block), so a clean repo is unaffected.
 	if !check {
 		if err := healLegacyAgentsMDTitle(root); err != nil {
+			return nil, err
+		}
+		if err := healLegacyAgentsMDBlock(root); err != nil {
 			return nil, err
 		}
 	}

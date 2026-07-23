@@ -81,6 +81,45 @@ func TestEnsureGitignoreEntries_LeadingSpaceNotMistaken(t *testing.T) {
 	}
 }
 
+// TestEnsureGitignoreEntries_NegationDefeated is the G1 final-review pin: a
+// .gitignore that already contains the exact entry line, followed LATER by
+// a negation rule that un-ignores it, must not be reported as converged.
+// git applies patterns in file order with last-match-wins, so
+// ".mindspec/session.json" followed by "!.mindspec/session.json" leaves the
+// path genuinely NOT ignored even though the line-presence check alone
+// would say it is. EnsureGitignoreEntries must detect this via `git
+// check-ignore` and append the plain entry again so the LAST match in the
+// file re-ignores it.
+func TestEnsureGitignoreEntries_NegationDefeated(t *testing.T) {
+	root := t.TempDir()
+	runGitignoreTestGit(t, root, "init", "-q")
+
+	seed := ".mindspec/session.json\n!.mindspec/session.json\n"
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ground truth BEFORE the fix runs: the negation defeats the entry.
+	before := exec.Command("git", "check-ignore", "--quiet", "--", ".mindspec/session.json")
+	before.Dir = root
+	if err := before.Run(); err == nil {
+		t.Fatalf("test setup invalid: .mindspec/session.json is already ignored before EnsureGitignoreEntries runs")
+	}
+
+	if err := EnsureGitignoreEntries(root, ".mindspec/session.json"); err != nil {
+		t.Fatalf("EnsureGitignoreEntries: %v", err)
+	}
+
+	// The ground truth: git must now actually ignore the file, despite the
+	// original line already being present.
+	after := exec.Command("git", "check-ignore", "--quiet", "--", ".mindspec/session.json")
+	after.Dir = root
+	if err := after.Run(); err != nil {
+		data, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
+		t.Errorf("git check-ignore still misses .mindspec/session.json after ensure (err=%v):\n%s", err, data)
+	}
+}
+
 func hasExactLine(content, want string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		if strings.TrimSuffix(line, "\r") == want {

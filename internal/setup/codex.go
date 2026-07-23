@@ -132,6 +132,92 @@ func healLegacyAgentsMDTitle(root string) error {
 	return safeio.WriteFileNoSymlink(path, []byte("# AGENTS.md\n"+rest), 0o644)
 }
 
+// legacyAgentsMDBlockLeakSnippets are exact fragments of the pre-123
+// hardcoded managed-block Build & Test section (bootstrap.go's old
+// starterAgentsMD, #211) — including the OLD template's OWN comment text
+// ("# Build binary" / "# Run all tests"). A config-sourced block (spec
+// 123 R7, cfg.RenderBuildTestSection) never renders this: its comment is
+// always "# <commands.yaml key>" (e.g. "make build   # build"), so a
+// consumer who legitimately declares commands.build: "make build" as
+// THEIR OWN command never matches these snippets. Matching the OLD
+// literal comment text (not a bare "make build" substring) is what keeps
+// this heal narrow — it fires only on a genuine pre-123 leak, never on an
+// already-healthy, config-sourced repo that happens to use Make.
+var legacyAgentsMDBlockLeakSnippets = []string{
+	"make build    # Build binary",
+	"make test     # Run all tests",
+}
+
+// healLegacyAgentsMDBlock refreshes AGENTS.md's managed BLOCK (the
+// content BETWEEN the BEGIN/END markers — as opposed to the pre-marker
+// title healLegacyAgentsMDTitle handles) from the same config-sourced
+// template (agentsMDManagedBlock) `setup codex`'s ensureAgentsMD renders
+// on every run, but ONLY when the EXISTING block is positively a pre-123
+// leak: it still carries the exact legacy hardcoded Build & Test literal
+// (legacyAgentsMDBlockLeakSnippets), or the file's first line is still
+// the legacy title.
+//
+// `setup codex` already refreshes AGENTS.md's block unconditionally,
+// every run (ensureAgentsMD owns AGENTS.md outright), so a codex-run
+// consumer never keeps a leak. `setup claude`/`setup copilot` previously
+// healed only the pre-marker title, not the block itself — so a consumer
+// who ran ONLY claude or copilot kept a leaked framework `make build` in
+// the managed BLOCK forever (final review G3, the remaining #211
+// exposure: "NO framework leak in any consumer repo on any setup path").
+//
+// This is deliberately a NARROW heal, not a general takeover of AGENTS.md's
+// block by claude/copilot: a clean, already-config-sourced AGENTS.md
+// (whatever its content) is left byte-untouched and config is never even
+// loaded, so a repo with an unrelated bad config key that never leaked
+// does not newly start failing `setup claude`/`setup copilot` merely
+// because this heal now also reads config on every run.
+//
+// PROVENANCE-GATED (FX-3, same predicate as healLegacyAgentsMDTitle): only
+// a well-formed mindspec managed pair is eligible. FAIL-LOUD on a bad
+// config (FX-1, consistent with ensureAgentsMD): a config load error is
+// returned so the leaked block is left byte-untouched rather than
+// silently regenerated from DefaultConfig, which would erase a
+// consumer's declared build guidance.
+func healLegacyAgentsMDBlock(root string) error {
+	path := filepath.Join(root, "AGENTS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := string(data)
+	if !hasWellFormedManagedMarkers(content) {
+		return nil
+	}
+
+	firstLine, _, found := strings.Cut(content, "\n")
+	leaked := found && firstLine == legacyBadAgentsMDTitle
+	if !leaked {
+		for _, snippet := range legacyAgentsMDBlockLeakSnippets {
+			if strings.Contains(content, snippet) {
+				leaked = true
+				break
+			}
+		}
+	}
+	if !leaked {
+		return nil
+	}
+
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("loading .mindspec/config.yaml for AGENTS.md build guidance (fix the config; setup will not overwrite AGENTS.md from defaults): %w", err)
+	}
+	block := agentsMDManagedBlock(cfg)
+	full := "# AGENTS.md\n" + mindspecMarkerBegin + "\n" + block + mindspecMarkerEnd + "\n"
+	// A throwaway Result: this heal is a side-effect of setup claude/
+	// copilot, not itself an item their Result reports; ensureManagedDoc
+	// requires one to record Created/Skipped internally.
+	return ensureManagedDoc(root, "AGENTS.md", full, block, false, &Result{})
+}
+
 // agentsMDBlockTemplate is the canonical content placed between
 // BEGIN/END markers. Spec 123 R7(a) removed the mindspec-repo-specific
 // `make build`/`make test` hardcode; the %s placeholder is filled by

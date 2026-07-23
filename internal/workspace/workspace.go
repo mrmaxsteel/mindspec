@@ -17,6 +17,15 @@ import (
 // ErrNoRoot is returned when no project root marker is found.
 var ErrNoRoot = errors.New("no mindspec project root found (looked for .mindspec/, .git)")
 
+// ErrADRNotFound is the sentinel ResolveADRFile wraps into its returned
+// error when zero candidate files match id, so a caller layering multiple
+// resolution sources (e.g. adr.OverlayStore's branch-over-primary fallback)
+// can distinguish a genuine miss from every OTHER error ResolveADRFile can
+// return — most importantly the collision case (more than one file carries
+// the same canonical number) — via errors.Is, rather than by matching on
+// error-message text (final review G2).
+var ErrADRNotFound = errors.New("adr not found")
+
 // FindRoot walks up from startDir looking for .mindspec/ or .git at each level.
 // It checks .mindspec/ first, then .git, to identify the project root.
 // If the candidate is a git worktree (.git is a file, not a directory),
@@ -649,7 +658,7 @@ func ResolveADRFile(root, id string) (string, error) {
 
 	switch len(candidates) {
 	case 0:
-		return "", fmt.Errorf("%s not found", id)
+		return "", fmt.Errorf("%w: %s not found", ErrADRNotFound, id)
 	case 1:
 		return candidates[0], nil
 	default:
