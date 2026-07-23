@@ -648,6 +648,23 @@ func hasAcceptedCitation(store adr.Store, citations []ADRCitation) bool {
 // covering ADR found" (the existing spec-100 remedies stand
 // unchanged) rather than blocking the gate on a secondary read
 // failure.
+//
+// Final-review G1 fix: in a spec worktree, store is typically an
+// adr.OverlayStore, whose List filters Status on the branch and
+// primary stores SEPARATELY and then union-dedups with branch entries
+// winning (internal/adr/overlaystore.go). That means a branch that
+// DEMOTES an existing ADR from Accepted to Proposed/Superseded still
+// gets it back: branch.List(Accepted) correctly excludes it, but
+// primary.List(Accepted) still returns the primary checkout's
+// stale-Accepted copy, and the union surfaces that stale copy as
+// "covering" — a lying hint, exactly this spec's anti-goal. Rather
+// than touch OverlayStore.List itself (shared with spec 123's
+// separate fix), re-verify every List-derived candidate through
+// store.Get, which IS branch-wins (returns the branch version when
+// present, internal/adr/overlaystore.go's Get), and keep the
+// candidate only if its re-fetched Status is still Accepted. A
+// Get failure (candidate vanished) drops the candidate rather than
+// surfacing it.
 func uncitedCoveringADRs(store adr.Store, citations []ADRCitation, domain string) []string {
 	cited := make(map[string]struct{}, len(citations))
 	for _, c := range citations {
@@ -663,9 +680,17 @@ func uncitedCoveringADRs(store adr.Store, citations []ADRCitation, domain string
 		if _, ok := cited[strings.ToUpper(strings.TrimSpace(a.ID))]; ok {
 			continue
 		}
-		if domainSliceContains(a.Domains, want) {
-			out = append(out, a.ID)
+		if !domainSliceContains(a.Domains, want) {
+			continue
 		}
+		// Re-verify via Get (branch-wins) so a branch-demoted ADR —
+		// present in List's stale-primary-Accepted union member — is
+		// excluded rather than named as a covering ADR.
+		current, err := store.Get(a.ID)
+		if err != nil || !strings.EqualFold(current.Status, "Accepted") {
+			continue
+		}
+		out = append(out, a.ID)
 	}
 	sort.Strings(out)
 	return out

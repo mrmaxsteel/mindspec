@@ -1495,6 +1495,32 @@ func TestPlanRejectsUncoveredDomain(t *testing.T) {
 	}
 }
 
+func TestUncitedCoveringADRsExcludesBranchDemoted(t *testing.T) {
+	// Final-review G1: an adr.OverlayStore's List filters Status on the
+	// branch and primary stores SEPARATELY, then union-dedups with
+	// branch entries winning (internal/adr/overlaystore.go). So when a
+	// spec branch DEMOTES an existing ADR from Accepted to Proposed,
+	// branch.List(Accepted) correctly excludes it — but
+	// primary.List(Accepted) still returns the primary checkout's
+	// stale-Accepted copy, and the union hands it back. Before the G1
+	// fix, uncitedCoveringADRs trusted that stale List result and named
+	// the demoted ADR as "covering" — a lying hint, the exact
+	// untruthfulness spec 122 exists to kill. uncitedCoveringADRs must
+	// re-verify each candidate via store.Get (branch-wins) and drop it
+	// if the re-fetched Status is no longer Accepted.
+	primaryRoot := t.TempDir()
+	branchRoot := t.TempDir()
+	writeTestADRWithDomains(t, primaryRoot, "ADR-0001", "Accepted", "payments", "")
+	writeTestADRWithDomains(t, branchRoot, "ADR-0001", "Proposed", "payments", "")
+
+	store := adr.NewOverlayStore(adr.NewFileStore(branchRoot), adr.NewFileStore(primaryRoot))
+
+	covering := uncitedCoveringADRs(store, nil, "payments")
+	if len(covering) != 0 {
+		t.Errorf("expected no covering ADRs — ADR-0001 is demoted to Proposed on the branch — got: %v", covering)
+	}
+}
+
 func TestPlanSpecWorktreeADRVisible(t *testing.T) {
 	// mindspec-ew79: an ADR that exists ONLY on the spec branch (inside
 	// the spec worktree at root/.worktrees/worktree-spec-<id>/) must be

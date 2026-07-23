@@ -584,8 +584,12 @@ Bead `mindspec-gvb5.4` adds no behavior: the issue→test evidence map for
 #147/#145/6ou2 (citing the pre-existing pins, adding the genuinely-new
 #147 end-to-end divergence fixture that is red without R2 — the
 strict-inequality witness catches a reverted resolver), the
-`internal/approve` plan-scaffold `adr_citations` pin, the contextpack
-backtick-strip pin (6ou2 item 1), and
+`internal/approve` plan-scaffold `adr_citations` pin, and
 `cmd/mindspec/ceremony_guard_test.go`'s R7 guard that the CLI grew no
 new flag/key (pflag-metadata-based, so an underscore-spelled flag cannot
-slip past it).
+slip past it). The contextpack backtick-strip BEHAVIOR (6ou2 item 1)
+already works — `internal/contextpack/spec.go` strips `**`/backtick
+markdown noise from domain tokens before normalization (spec 087 Bead 1
+fixup) — but its regression PIN is DEFERRED to a follow-up bead per the
+plan's PF-3 decision, to avoid pulling the spec-excluded `context-system`
+domain into this spec's scope. It is NOT a Bead 4 deliverable.
