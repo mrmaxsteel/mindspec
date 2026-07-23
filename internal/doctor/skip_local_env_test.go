@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/domain"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -34,13 +35,16 @@ func TestRunWithOptions_SkipLocalEnv_OmitsDevEnvChecks(t *testing.T) {
 	// local git config that a plain `actions/checkout` never sets.
 	writeExecutable(t, filepath.Join(root, "scripts", "bd-jsonl-merge-driver.sh"))
 	// Round out the fixture so it is otherwise healthy: empty domains/specs
-	// enumeration roots and a durable Beads state file.
+	// enumeration roots, a durable Beads state file, and (spec 123 R1/R3) a
+	// context-map.md skeleton so the new missing-context-map check doesn't
+	// itself turn this "otherwise healthy" fixture unhealthy.
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "domains"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, filepath.Join(root, ".mindspec", "context-map.md"), domain.ContextMapSkeleton())
 	writeFile(t, filepath.Join(root, ".beads", "issues.jsonl"), "")
 
 	// Regression pin: without SkipLocalEnv, this fixture DOES fail.

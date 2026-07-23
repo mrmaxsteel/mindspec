@@ -34,6 +34,11 @@ func RunCopilot(root string, check bool) (*Result, error) {
 	// already has. Shared helper keeps the three entry points aligned.
 	applyBeadsConfig(root, check, r)
 
+	// 5. Ensure MindSpec's runtime files are gitignored (spec 123 R4b).
+	if err := ensureGitignore(root, check, r); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 

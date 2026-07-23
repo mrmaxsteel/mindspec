@@ -36,17 +36,22 @@ func (r *Report) HasFailures() bool {
 	return false
 }
 
-// Fix runs FixFunc on all checks that have one and are in Error or Warn
-// status. Fixed checks are updated to Fixed status.
+// Fix runs FixFunc on all checks that have one and are in Error, Warn, or
+// Missing status. Fixed checks are updated to Fixed status.
 //
-// Note for check authors: attaching a FixFunc to a Warn-status check opts
-// that check into auto-repair under `mindspec doctor --fix`. Leave FixFunc
-// nil on advisory-only warnings that should stay visible until the user
-// acts on them manually.
+// Note for check authors: attaching a FixFunc to a Warn- or Missing-status
+// check opts that check into auto-repair under `mindspec doctor --fix`.
+// Leave FixFunc nil on advisory-only warnings (or absent-artifacts that
+// require operator judgment to create) that should stay visible until the
+// user acts on them manually. Missing was added to this set by spec 123
+// (the missing-context-map check's --fix scaffolds a mechanical,
+// ZFC-safe skeleton) — no pre-existing Missing-status check attaches a
+// FixFunc, so this is additive, not a behavior change for any check that
+// predates it.
 func (r *Report) Fix() {
 	for i := range r.Checks {
 		c := &r.Checks[i]
-		if c.FixFunc != nil && (c.Status == Error || c.Status == Warn) {
+		if c.FixFunc != nil && (c.Status == Error || c.Status == Warn || c.Status == Missing) {
 			if err := c.FixFunc(); err != nil {
 				c.Message += fmt.Sprintf(" (fix failed: %v)", err)
 			} else {

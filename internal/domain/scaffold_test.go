@@ -5,9 +5,30 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// setupFlatRoot returns a temp dir bootstrapped as a FLAT tree — a bare
+// .mindspec/domains and .mindspec/specs directory, matching a real
+// `mindspec init` greenfield tree (spec 106 AC4: new projects are born
+// flat). DomainDir/ContextMapPath resolve under .mindspec/ directly.
+func setupFlatRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	prev := populatePromptWriter
+	populatePromptWriter = io.Discard
+	t.Cleanup(func() { populatePromptWriter = prev })
+
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "domains"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func setupTestRoot(t *testing.T) string {
 	t.Helper()
@@ -246,5 +267,143 @@ func TestTitleCase(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("titleCase(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// ─── spec 123 R2/AC-2: legacy partial-state convergence ────────────────────
+
+// TestAddConvergesLegacyState_MissingContextMap pins AC-2: the EXACT #207
+// aftermath — domains/alpha/ fully scaffolded (all 4 templates +
+// OWNERSHIP.yaml present) but context-map.md entirely ABSENT. `domain add
+// alpha` must exit 0, create the skeleton, backfill the ### Alpha entry,
+// and leave the five existing domain files byte-identical. A second re-run
+// refuses "already exists" and leaves the context map byte-identical (no
+// duplicate entry). RED on pre-spec-123 main: the dir-exists refusal fired
+// before any backfill could run.
+func TestAddConvergesLegacyState_MissingContextMap(t *testing.T) {
+	root := setupFlatRoot(t)
+
+	domainDir := filepath.Join(root, ".mindspec", "domains", "alpha")
+	if err := os.MkdirAll(domainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"overview.md":     "# Alpha Domain — Overview\ncustom overview\n",
+		"architecture.md": "# Alpha Domain — Architecture\ncustom architecture\n",
+		"interfaces.md":   "# Alpha Domain — Interfaces\ncustom interfaces\n",
+		"runbook.md":      "# Alpha Domain — Runbook\ncustom runbook\n",
+		"OWNERSHIP.yaml":  "paths: [\"internal/alpha/**\"]\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(domainDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// context-map.md is entirely ABSENT — the exact #207 aftermath.
+
+	if err := Add(root, "alpha"); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	cmPath := filepath.Join(root, ".mindspec", "context-map.md")
+	cmData, err := os.ReadFile(cmPath)
+	if err != nil {
+		t.Fatalf("context-map.md not created: %v", err)
+	}
+	if !strings.Contains(string(cmData), "### Alpha") {
+		t.Errorf("context map missing ### Alpha entry:\n%s", cmData)
+	}
+
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(domainDir, name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s was modified by backfill; want:\n%s\ngot:\n%s", name, want, got)
+		}
+	}
+
+	cmAfterFirst, _ := os.ReadFile(cmPath)
+
+	// Second re-run: fully scaffolded AND mapped now — refuses.
+	err = Add(root, "alpha")
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected 'already exists' on re-run, got: %v", err)
+	}
+	cmAfterSecond, _ := os.ReadFile(cmPath)
+	if string(cmAfterFirst) != string(cmAfterSecond) {
+		t.Errorf("context map changed on refused re-run (duplicate entry?); before:\n%s\nafter:\n%s",
+			cmAfterFirst, cmAfterSecond)
+	}
+}
+
+// TestAddBackfillsMissingStandardFiles pins AC-2b: domains/alpha/ present
+// but MISSING some standard files (runbook.md and OWNERSHIP.yaml absent,
+// others present) and no context-map entry. `domain add alpha` must exit 0,
+// write the missing standard files, backfill the ### Alpha entry, and leave
+// the already-present files byte-identical. RED on pre-spec-123 main:
+// scaffold.go's dir-exists refusal fired before any create-if-missing could
+// run, so missing files were never backfilled.
+func TestAddBackfillsMissingStandardFiles(t *testing.T) {
+	root := setupFlatRoot(t)
+
+	domainDir := filepath.Join(root, ".mindspec", "domains", "alpha")
+	if err := os.MkdirAll(domainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	present := map[string]string{
+		"overview.md":     "# Alpha Domain — Overview\ncustom\n",
+		"architecture.md": "# Alpha Domain — Architecture\ncustom\n",
+		"interfaces.md":   "# Alpha Domain — Interfaces\ncustom\n",
+	}
+	for name, content := range present {
+		if err := os.WriteFile(filepath.Join(domainDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// runbook.md, OWNERSHIP.yaml, and context-map.md are deliberately absent.
+
+	if err := Add(root, "alpha"); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	for name, want := range present {
+		got, err := os.ReadFile(filepath.Join(domainDir, name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s modified during backfill; want:\n%s\ngot:\n%s", name, want, got)
+		}
+	}
+
+	for _, name := range []string{"runbook.md", "OWNERSHIP.yaml"} {
+		if _, err := os.Stat(filepath.Join(domainDir, name)); err != nil {
+			t.Errorf("%s not backfilled: %v", name, err)
+		}
+	}
+
+	cmData, err := os.ReadFile(filepath.Join(root, ".mindspec", "context-map.md"))
+	if err != nil {
+		t.Fatalf("context-map.md not created: %v", err)
+	}
+	if !strings.Contains(string(cmData), "### Alpha") {
+		t.Errorf("context map missing ### Alpha entry:\n%s", cmData)
+	}
+}
+
+// TestScaffoldMappedCheckIsSharedHelper is the AC-4 anti-drift identity
+// pin: Add's convergence-check seam var must still point at the exact
+// exported HasEntry — the SAME helper doctor's unmapped-domain detection
+// consumes (its own mirrored seam var, docsMappedCheck, is pinned by
+// TestDocsMappedCheckIsSharedHelper in internal/doctor) — never a private
+// reimplementation that could silently disagree about what "mapped" means.
+func TestScaffoldMappedCheckIsSharedHelper(t *testing.T) {
+	got := reflect.ValueOf(scaffoldMappedCheck).Pointer()
+	want := reflect.ValueOf(HasEntry).Pointer()
+	if got != want {
+		t.Fatal("scaffoldMappedCheck has drifted from HasEntry — Add's convergence check and doctor's " +
+			"unmapped-domain detection must consume ONE shared 'mapped' predicate (spec 123 R3/AC-4)")
 	}
 }

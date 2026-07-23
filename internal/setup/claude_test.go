@@ -23,10 +23,11 @@ func TestRunClaude_FreshSetup(t *testing.T) {
 
 	// Should create settings.json, 4 lifecycle skill files, 8 plugin skill
 	// files, 1 workflow file (spec 111 R8: .claude/workflows/ms-panel.js),
-	// and CLAUDE.md = 15 items (spec 093 thinned 16 → 11; +ms-spec-grill;
-	// +ms-panel workflow).
-	if len(r.Created) != 15 {
-		t.Errorf("expected 15 created items, got %d: %v", len(r.Created), r.Created)
+	// CLAUDE.md, and the spec-123 R4b gitignore-runtime-entries ensure = 16
+	// items (spec 093 thinned 16 → 11; +ms-spec-grill; +ms-panel workflow;
+	// +gitignore ensure).
+	if len(r.Created) != 16 {
+		t.Errorf("expected 16 created items, got %d: %v", len(r.Created), r.Created)
 	}
 
 	// Verify settings.json exists and has hooks
@@ -103,8 +104,8 @@ func TestRunClaude_Idempotent(t *testing.T) {
 	if len(r2.Created) != 0 {
 		t.Errorf("second run should create nothing, got %d: %v", len(r2.Created), r2.Created)
 	}
-	if len(r2.Skipped) != 15 {
-		t.Errorf("second run should skip 15 items, got %d: %v", len(r2.Skipped), r2.Skipped)
+	if len(r2.Skipped) != 16 {
+		t.Errorf("second run should skip 16 items, got %d: %v", len(r2.Skipped), r2.Skipped)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
 	pluginmindspec "github.com/mrmaxsteel/mindspec/plugins/mindspec"
 )
@@ -191,6 +192,12 @@ func RunClaude(root string, check bool) (*Result, error) {
 	// so --check still reports pending drift without writing.
 	applyBeadsConfig(root, check, r)
 
+	// 8. Ensure MindSpec's runtime files are gitignored (spec 123 R4b) —
+	// setup is the onboarding verb for repos that never ran `mindspec init`.
+	if err := ensureGitignore(root, check, r); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 
@@ -243,6 +250,37 @@ func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]strin
 		}
 
 		r.Notices = append(r.Notices, relPath+" (user-modified — left in place; delete it to receive the canonical version)")
+	}
+	return nil
+}
+
+// ensureGitignore ensures MindSpec's local runtime files (ADR-0015:
+// .mindspec/session.json, .mindspec/focus) are gitignored (spec 123 R4b) —
+// the onboarding-time counterpart to bootstrap's R4a ensure, for repos that
+// never ran the greenfield-only `mindspec init`. Shared by RunClaude,
+// RunCodex, and RunCopilot so the three entry points can't drift. check
+// mode writes nothing; a byte-idempotent re-run reports Skipped, not
+// Created, so callers counting exact item totals stay stable.
+func ensureGitignore(root string, check bool, r *Result) error {
+	const label = ".gitignore (runtime entries)"
+
+	if check {
+		r.Skipped = append(r.Skipped, label+" (--check writes nothing)")
+		return nil
+	}
+
+	path := filepath.Join(root, ".gitignore")
+	before, _ := os.ReadFile(path)
+
+	if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
+		return fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
+	}
+
+	after, _ := os.ReadFile(path)
+	if string(before) == string(after) {
+		r.Skipped = append(r.Skipped, label)
+	} else {
+		r.Created = append(r.Created, label)
 	}
 	return nil
 }
