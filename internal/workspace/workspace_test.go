@@ -3,7 +3,10 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func TestFindRoot_MindspecDir(t *testing.T) {
@@ -1524,4 +1527,203 @@ func TestDetectWorktreeContextRejectsMalformedNames(t *testing.T) {
 			t.Errorf("letter-suffixed spec worktree: got kind=%s spec=%q bead=%q", kind, specID, beadID)
 		}
 	})
+}
+
+// --- ResolveADRFile (spec 123 R5(c)) ---
+
+func writeFileMust(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestResolveADRFile_Bare pins the plain bare-file case: a canonical ID
+// resolves to its bare "<id>.md" file when no slugged sibling exists.
+func TestResolveADRFile_Bare(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0001.md"), "# ADR-0001: Bare\n")
+
+	got, err := ResolveADRFile(root, "ADR-0001")
+	if err != nil {
+		t.Fatalf("ResolveADRFile: %v", err)
+	}
+	want := filepath.Join(adrDir, "ADR-0001.md")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestResolveADRFile_SluggedOnly pins the slug-tolerant lookup: a
+// canonical ID resolves to its slugged file when no bare sibling exists.
+func TestResolveADRFile_SluggedOnly(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0001-my-slug.md"), "# ADR-0001: Slugged\n")
+
+	got, err := ResolveADRFile(root, "ADR-0001")
+	if err != nil {
+		t.Fatalf("ResolveADRFile: %v", err)
+	}
+	want := filepath.Join(adrDir, "ADR-0001-my-slug.md")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestResolveADRFile_FullSluggedInputUniqueResolves pins that a
+// caller-supplied FULL slugged stem still resolves when it is the ONLY
+// file carrying its canonical number (the slug is ergonomics — canonical
+// ADR-NNNN is the reference currency). This is the AC-9 guard leg at the
+// resolver level: a full slugged citation keeps working absent a
+// collision.
+func TestResolveADRFile_FullSluggedInputUniqueResolves(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0001-my-slug.md"), "# ADR-0001: Slugged\n")
+
+	got, err := ResolveADRFile(root, "ADR-0001-my-slug")
+	if err != nil {
+		t.Fatalf("ResolveADRFile with full slugged input: %v", err)
+	}
+	want := filepath.Join(adrDir, "ADR-0001-my-slug.md")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestResolveADRFile_FullSluggedInputCollisionErrors is the FX-2 pin
+// (spec 123 R5(c), input-shape-independent collision detection): a FULL
+// slugged input must NOT bypass collision detection. With both a bare
+// ADR-0001.md and a slugged ADR-0001-my-slug.md present — a genuine
+// number-collision — `ResolveADRFile("ADR-0001-my-slug")` must return
+// the ambiguity error rather than silently resolving to the named file.
+// RED on revert to an exact-join-for-full-slugged short-circuit.
+func TestResolveADRFile_FullSluggedInputCollisionErrors(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0001.md"), "# ADR-0001: Bare\n")
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0001-my-slug.md"), "# ADR-0001: Slugged\n")
+
+	_, err := ResolveADRFile(root, "ADR-0001-my-slug")
+	if err == nil {
+		t.Fatal("expected collision error for full-slugged input against a sibling collision, got nil")
+	}
+	if !strings.Contains(err.Error(), "ADR-0001.md") || !strings.Contains(err.Error(), "ADR-0001-my-slug.md") {
+		t.Errorf("error must name both colliding paths, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery:") {
+		t.Errorf("expected an ADR-0035 recovery line, got: %v", err)
+	}
+}
+
+// TestResolveADRFile_CollisionEscapesHostileFilename is the FX-1 pin
+// (spec 116 R4 / ADR-0042): the collision error renders on-disk
+// filenames through termsafe.Escape, so a control byte (ESC 0x1b) in a
+// filename can never reach CLI stderr raw and forge terminal output. The
+// hostile file name shares a canonical number with a bare sibling to
+// force the collision branch. RED on revert to a raw filepath.Base
+// render.
+func TestResolveADRFile_CollisionEscapesHostileFilename(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	// A slugged file whose stem carries a raw ESC byte. idvalidate.ADRID
+	// would reject such a stem as an INPUT, but nothing stops it existing
+	// ON DISK — an operator or agent can create the file directly — and
+	// the glob enumerates it as a candidate.
+	hostile := "ADR-0007-x\x1b[31mred.md"
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0007.md"), "# ADR-0007: Bare\n")
+	writeFileMust(t, filepath.Join(adrDir, hostile), "# ADR-0007: Hostile\n")
+
+	_, err := ResolveADRFile(root, "ADR-0007")
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if strings.ContainsRune(err.Error(), '\x1b') {
+		t.Errorf("collision error leaked a raw ESC byte from an on-disk filename: %q", err.Error())
+	}
+	// termsafe.Escape wraps a control-byte string as a quoted Go literal,
+	// so the escaped form of the hostile base name appears in the message.
+	if !strings.Contains(err.Error(), termsafe.Escape("ADR-0007-x\x1b[31mred.md")) {
+		t.Errorf("expected the termsafe-escaped hostile filename in the error, got: %q", err.Error())
+	}
+}
+
+// TestResolveADRFile_Collision is the AC-10 collision pin: a bare AND a
+// slugged file sharing the same canonical number make a bare-canonical
+// lookup error, naming both paths with an ADR-0035 recovery line —
+// never the silent short-circuit to the bare file.
+func TestResolveADRFile_Collision(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0002.md"), "# ADR-0002: Bare\n")
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0002-foo.md"), "# ADR-0002: Foo\n")
+
+	_, err := ResolveADRFile(root, "ADR-0002")
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ADR-0002.md") || !strings.Contains(err.Error(), "ADR-0002-foo.md") {
+		t.Errorf("error must name both paths, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery:") {
+		t.Errorf("expected an ADR-0035 recovery line, got: %v", err)
+	}
+}
+
+// TestResolveADRFile_MultipleSluggedCollision pins the collision check
+// also fires when TWO OR MORE slugged files share a canonical number
+// with no bare file present.
+func TestResolveADRFile_MultipleSluggedCollision(t *testing.T) {
+	root := t.TempDir()
+	adrDir := ADRDir(root)
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0003-first.md"), "# ADR-0003: First\n")
+	writeFileMust(t, filepath.Join(adrDir, "ADR-0003-second.md"), "# ADR-0003: Second\n")
+
+	_, err := ResolveADRFile(root, "ADR-0003")
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ADR-0003-first.md") || !strings.Contains(err.Error(), "ADR-0003-second.md") {
+		t.Errorf("error must name both paths, got: %v", err)
+	}
+}
+
+// TestResolveADRFile_NotFound pins the not-found case for both a
+// canonical ID and a full slugged input whose canonical number carries
+// no file on disk at all.
+func TestResolveADRFile_NotFound(t *testing.T) {
+	root := t.TempDir()
+	// Ensure the ADR dir exists but is empty.
+	if err := os.MkdirAll(ADRDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ResolveADRFile(root, "ADR-9999"); err == nil {
+		t.Error("expected not-found error for canonical id, got nil")
+	} else if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found', got: %v", err)
+	}
+
+	if _, err := ResolveADRFile(root, "ADR-9999-nope"); err == nil {
+		t.Error("expected not-found error for full slugged id, got nil")
+	} else if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found', got: %v", err)
+	}
+}
+
+// TestResolveADRFile_InvalidID pins SEC-1 defense-in-depth: an
+// unvalidated id (glob metacharacter, path separator) is rejected before
+// any filepath.Glob/Join runs.
+func TestResolveADRFile_InvalidID(t *testing.T) {
+	root := t.TempDir()
+	for _, bad := range []string{"ADR-0001*", "../etc/passwd", "ADR-0001/../x"} {
+		if _, err := ResolveADRFile(root, bad); err == nil {
+			t.Errorf("ResolveADRFile(%q) expected error, got nil", bad)
+		}
+	}
 }

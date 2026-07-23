@@ -68,9 +68,20 @@ var adrCreateCmd = &cobra.Command{
 			}
 		}
 
+		// R5(a) (spec 123): --slug overrides the derived-from-title
+		// filename slug. Only pass a non-nil override when the flag was
+		// actually set, so an unset --slug falls through to title
+		// derivation (adr.CreateOpts.SlugOverride nil vs "" distinction).
+		var slugOverride *string
+		if cmd.Flags().Changed("slug") {
+			s, _ := cmd.Flags().GetString("slug")
+			slugOverride = &s
+		}
+
 		path, err := adr.CreateUnion(root, numberingRoots, args[0], adr.CreateOpts{
-			Domains:    domains,
-			Supersedes: supersedes,
+			Domains:      domains,
+			Supersedes:   supersedes,
+			SlugOverride: slugOverride,
 		})
 		if err != nil {
 			return err
@@ -186,6 +197,7 @@ var adrShowCmd = &cobra.Command{
 func init() {
 	adrCreateCmd.Flags().String("domain", "", "Domain(s) for the ADR (comma-separated)")
 	adrCreateCmd.Flags().String("supersedes", "", "ADR ID to supersede (e.g., ADR-0001)")
+	adrCreateCmd.Flags().String("slug", "", "Override the derived filename slug (lowercase kebab-case); empty writes the bare ADR-NNNN.md form")
 
 	adrListCmd.Flags().String("status", "", "Filter by status (e.g., accepted, proposed, superseded)")
 	adrListCmd.Flags().String("domain", "", "Filter by domain")

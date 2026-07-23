@@ -7,9 +7,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // ErrNoRoot is returned when no project root marker is found.
@@ -575,11 +577,92 @@ func TreeRootForSpecDir(specDir string) string {
 
 // ADRFilePath returns the on-disk path for a single ADR file by ID.
 // Returns an error if adrID is not a well-formed ADR identifier.
+//
+// This is the exact-join WRITE-target resolver: it composes the path a
+// NEW file should be written to (or the path CreateWithID's own
+// existence probe checks before writing), and never resolves an EXISTING
+// on-disk file that may be slugged. Every READ site that needs to find
+// an ADR that might already carry a slug (show, --supersedes, Supersede,
+// CopyDomains) must use ResolveADRFile instead (spec 123 R5(c)).
 func ADRFilePath(root, adrID string) (string, error) {
 	if err := idvalidate.ADRID(adrID); err != nil {
 		return "", err
 	}
 	return filepath.Join(ADRDir(root), adrID+".md"), nil
+}
+
+// ResolveADRFile resolves an ADR identifier — canonical ("ADR-0001") or a
+// full slugged filename stem ("ADR-0001-my-slug") — to the on-disk path
+// of the file that carries it. It is the shared READ-resolution helper
+// spec 123 R5(c) introduces beside the exact-join ADRFilePath, used by
+// every caller that must tolerate an existing file being either bare or
+// slugged (show, --supersedes, Supersede, CopyDomains).
+//
+// Resolution is CANONICAL-NUMBER driven for EVERY input shape — bare,
+// canonical, or full-slugged — so collision detection is complete and
+// input-shape-independent (FX-2): a caller that names the full slugged
+// stem while a genuine number-collision exists still gets the ambiguity
+// error, never a silent resolution to one of the colliding files.
+//
+//   - id is validated via idvalidate.ADRID first (SEC-1 discipline: no
+//     unvalidated id reaches filepath.Glob/Join — an id containing a
+//     glob metacharacter or path separator is rejected before either
+//     runs).
+//   - The canonical "ADR-<digits>" prefix is derived from id, then every
+//     file carrying that number is enumerated: the bare "<canonical>.md"
+//     (if present) plus every "<canonical>-*.md" glob match. Exactly one
+//     candidate resolves normally (the slug in the input, if any, is
+//     ergonomics — canonical ADR-NNNN is the reference currency). Zero
+//     candidates is "not found". More than one is a COLLISION — the
+//     caller must rename or remove the redundant file so exactly one
+//     file carries the number (ADR-0035 recovery line), never the silent
+//     short-circuit to the bare file the pre-123 exact-join behavior
+//     produced.
+//
+// R4 (spec 116, ADR-0042): the on-disk filenames rendered into the
+// collision error are attacker-influenceable (an operator or an agent
+// can create a file with a control-byte name), so each is routed through
+// termsafe.Escape before it reaches the message — the error surfaces on
+// CLI stderr via cobra, so a raw ESC/newline byte in a filename would
+// otherwise forge terminal output.
+func ResolveADRFile(root, id string) (string, error) {
+	if err := idvalidate.ADRID(id); err != nil {
+		return "", err
+	}
+
+	dir := ADRDir(root)
+	canonical := idvalidate.ADRCanonicalPrefix(id)
+
+	var candidates []string
+	barePath := filepath.Join(dir, canonical+".md")
+	if _, statErr := os.Stat(barePath); statErr == nil {
+		candidates = append(candidates, barePath)
+	} else if !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+
+	slugMatches, globErr := filepath.Glob(filepath.Join(dir, canonical+"-*.md"))
+	if globErr != nil {
+		return "", globErr
+	}
+	candidates = append(candidates, slugMatches...)
+
+	switch len(candidates) {
+	case 0:
+		return "", fmt.Errorf("%s not found", id)
+	case 1:
+		return candidates[0], nil
+	default:
+		names := make([]string, len(candidates))
+		for i, c := range candidates {
+			names[i] = termsafe.Escape(filepath.Base(c))
+		}
+		sort.Strings(names)
+		return "", fmt.Errorf(
+			"%s is ambiguous: matches %s\nrecovery: rename or remove the redundant ADR file so exactly one of %s carries %s",
+			id, strings.Join(names, ", "), strings.Join(names, ", "), canonical,
+		)
+	}
 }
 
 // DomainDir returns the path to a specific domain's doc directory under root,
