@@ -551,15 +551,21 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 // configShowReviewRoots returns the roots `config show` scans for
 // registered panels: the repo root itself (the legacy/canonical root
 // `review/` convention) plus every spec's own directory (the co-located
-// `<spec-dir>/reviews/` convention, spec 106). panel.Scan already globs
-// both the `review/` and `reviews/` segments under each given root, so
-// this list is the set of DIRECTORIES to check, not the segment names.
-// Unlike internal/complete's panelGateRoots, this is not layout-aware or
-// bead-scoped — `config show` has no bead/spec context, so it checks every
-// convention that might hold a registered panel. Best-effort: an
-// unreadable specs directory yields just the repo root.
+// `<spec-dir>/reviews/` convention, spec 106) plus the workspace dir
+// (`.mindspec`, spec 123 R8c — the ad-hoc `.mindspec/reviews/<slug>`
+// convention `panel create --gate adhoc` now produces). panel.Scan
+// already globs both the `review/` and `reviews/` segments under each
+// given root, so this list is the set of DIRECTORIES to check, not the
+// segment names. Unlike internal/complete's panelGateRoots (which is
+// NEVER extended to `.mindspec` — ad-hoc panels stay outside every
+// lifecycle gate, ADR-0037), this is not layout-aware or bead-scoped —
+// `config show` (and `panel tally`/`panel verify` via
+// findPanelRegistration, panel.go) has no bead/spec context, so it
+// checks every convention that might hold a registered panel.
+// Best-effort: an unreadable specs directory yields just the repo root
+// plus the workspace dir.
 func configShowReviewRoots(root string) []string {
-	roots := []string{root}
+	roots := []string{root, workspace.MindspecDir(root)}
 	specsDir := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
