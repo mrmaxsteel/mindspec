@@ -670,3 +670,365 @@ func TestValidateDivergenceZeroOwnerEntryErrors(t *testing.T) {
 		t.Errorf("expected impacted-domains-resolve error naming the zero-owner entry, got %+v", r.Issues)
 	}
 }
+
+// TestSixOUTwoCompleteShapedCoverageProbePasses pins spec 122 AC-5's
+// bead-time half — bead mindspec-6ou2's ACTUAL filed scenario (items
+// 3/4): domain dir `orders` claims `src/orders/**`; the spec's
+// `## Impacted Domains` is the file-path form `src/orders/api.py`
+// (already resolved fine spec-side by spec 100 — this is NOT the
+// spec-side failure); the plan cites an Accepted ADR whose `Domain(s)`
+// line declares the SAME territory as a directory path, in BOTH slash
+// forms across sibling subtests. Before spec 122 R2 the ADR-side
+// literal `src/orders/` / `src/orders` never resolved to the
+// spec-resolved name `orders`, so the changed file `src/orders/api.py`
+// failed the coverage probe (RED today — see the plan-lane sibling
+// TestSixOUTwoADRDomainResolvesBothSlashForms in plan_test.go for the
+// validate-plan half of the same repro). After R2 both forms resolve
+// and the bead-time coverage probe passes with NO --override-adr.
+func TestSixOUTwoCompleteShapedCoverageProbePasses(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+	}{
+		{"with trailing slash", "src/orders/"},
+		{"without trailing slash", "src/orders"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-sixou2")
+			writeSpecAndPlan(t, root, specDir, "999-sixou2",
+				[]string{"src/orders/api.py"},
+				[]string{"ADR-0090"},
+			)
+			writeManifest(t, root, "orders", "paths:\n  - src/orders/**\n")
+			writeADR(t, root, "ADR-0090", "Accepted", []string{tc.label})
+
+			mock := &executor.MockExecutor{
+				ChangedFilesResult: []string{"src/orders/api.py"},
+			}
+
+			r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+			if r == nil {
+				t.Fatal("nil result")
+			}
+			if r.HasFailures() {
+				t.Fatalf("label %q: expected zero-override coverage pass, got %+v", tc.label, r.Issues)
+			}
+			if len(findings) != 0 {
+				t.Errorf("label %q: expected no findings, got %+v", tc.label, findings)
+			}
+		})
+	}
+}
+
+// Test147EndToEndZeroErrors is the genuinely-new R5a pin (spec 122
+// AC-7): the FULL #147 shape through the complete-shaped divergence
+// lane. Spec Impacted Domains are file paths (`genevieve/review.py`,
+// `genevieve/summarizer.py`); domain dir `genevieve` claims
+// `genevieve/**/*.py` AND `.github/workflows/code-review.yaml`; the
+// cited Accepted ADR's `Domain(s)` line lists those SAME file-path
+// strings (not the domain name); the bead's diff touches
+// `genevieve/summarizer.py` and `.github/workflows/code-review.yaml`.
+//
+// Before spec 122 R2: the spec side resolves fine (spec 100 — pinned
+// standalone, cited not re-authored, by
+// TestValidateDivergenceFilePathImpactedDomainResolves above), but the
+// ADR's literal `Domain(s)` entries never equal the resolved domain
+// name `genevieve`, so the coverage probe fails for both changed files
+// (RED today at the coverage step — the #147 coverage tail). After R2,
+// the ADR-side entries resolve to `genevieve` (a bare file path claimed
+// by exactly one domain's OWNERSHIP paths:) and the lane returns ZERO
+// errors: no unowned finding, no coverage failure, no override needed.
+func Test147EndToEndZeroErrors(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-genevieve147")
+	writeSpecAndPlan(t, root, specDir, "999-genevieve147",
+		[]string{"genevieve/review.py", "genevieve/summarizer.py"},
+		[]string{"ADR-0147"},
+	)
+	writeManifest(t, root, "genevieve",
+		"paths:\n  - genevieve/**/*.py\n  - .github/workflows/code-review.yaml\n")
+	writeADR(t, root, "ADR-0147", "Accepted",
+		[]string{"genevieve/review.py", "genevieve/summarizer.py"})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"genevieve/summarizer.py", ".github/workflows/code-review.yaml"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Fatalf("expected zero errors for the full #147 shape, got %+v", r.Issues)
+	}
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			t.Errorf("unexpected adr-divergence-unowned: %+v", i)
+		}
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
+
+// TestValidateDivergenceUnownedSplitNamesRealOwner — spec 122 AC-11
+// (R4b, #178 option 2): when a changed file IS claimed by some
+// domain's OWNERSHIP but that domain is NOT in the spec's resolved
+// DECLARED Impacted Domains, the adr-divergence-unowned message must
+// name the REAL owning domain and the add-to-Impacted-Domains remedy —
+// not the unqualified "not claimed by any OWNERSHIP.yaml" text. A
+// sibling file claimed by NO manifest at all still gets the
+// genuinely-unowned message. Both remain ERRORS under the same finding
+// code and the same --override-adr/--supersede-adr escapes — the
+// PASS/FAIL boundary is unchanged, only the message truth changes.
+func TestValidateDivergenceUnownedSplitNamesRealOwner(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-scope-drift")
+	writeSpecAndPlan(t, root, specDir, "999-scope-drift",
+		[]string{"workflow"},
+		[]string{},
+	)
+	writeManifest(t, root, "workflow", "paths:\n  - internal/validate/**\n")
+	writeManifest(t, root, "execution", "paths:\n  - internal/gitutil/**\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/gitutil/x.go", "internal/nope/y.go"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if !r.HasFailures() {
+		t.Fatalf("expected failures, got %+v", r.Issues)
+	}
+
+	var ownedMsg, unownedMsg string
+	for _, i := range r.Issues {
+		if i.Name != "adr-divergence-unowned" {
+			continue
+		}
+		if strings.Contains(i.Message, "internal/gitutil/x.go") {
+			ownedMsg = i.Message
+		}
+		if strings.Contains(i.Message, "internal/nope/y.go") {
+			unownedMsg = i.Message
+		}
+	}
+	if ownedMsg == "" {
+		t.Fatalf("expected an adr-divergence-unowned finding for internal/gitutil/x.go, got %+v", r.Issues)
+	}
+	if !strings.Contains(ownedMsg, "execution") {
+		t.Errorf("expected the real owner 'execution' named, got: %q", ownedMsg)
+	}
+	if !strings.Contains(strings.ToLower(ownedMsg), "impacted domains") {
+		t.Errorf("expected the add-to-Impacted-Domains remedy, got: %q", ownedMsg)
+	}
+	if strings.Contains(ownedMsg, "not claimed by any OWNERSHIP.yaml") {
+		t.Errorf("owned-but-undeclared file must NOT get the unqualified genuinely-unowned text, got: %q", ownedMsg)
+	}
+
+	if unownedMsg == "" {
+		t.Fatalf("expected a genuinely-unowned finding for internal/nope/y.go, got %+v", r.Issues)
+	}
+	if !strings.Contains(unownedMsg, "not claimed by any OWNERSHIP.yaml") {
+		t.Errorf("expected the genuinely-unowned message for a file no manifest claims, got: %q", unownedMsg)
+	}
+
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 unowned findings, got %+v", findings)
+	}
+	for _, f := range findings {
+		if f.Kind != "unowned" {
+			t.Errorf("expected Kind=unowned for both findings, got %+v", f)
+		}
+		if f.Domain != "" || f.ManifestPath != "" {
+			t.Errorf("expected empty Domain/ManifestPath on unowned findings, got %+v", f)
+		}
+	}
+}
+
+// TestValidateDivergenceUnownedHintLayoutAware — spec 122 AC-9 (R4a),
+// the divergence half: a genuinely-unowned finding's claim-it remedy
+// must print the domains root that ACTUALLY resolves in the operator's
+// workspace. In a FLATTENED workspace (.mindspec/domains/ present,
+// .mindspec/docs/domains/ absent) it prints `.mindspec/domains/...` and
+// never the substring `.mindspec/docs/domains`; in a PRE-flatten
+// (canonical) workspace it prints `.mindspec/docs/domains/...`.
+func TestValidateDivergenceUnownedHintLayoutAware(t *testing.T) {
+	t.Run("flattened", func(t *testing.T) {
+		root := t.TempDir()
+		specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-flat")
+		writeSpecAndPlan(t, root, specDir, "999-flat",
+			[]string{"core"},
+			[]string{},
+		)
+		writeFlatManifest(t, root, "core", "paths:\n  - internal/core/**\n")
+
+		mock := &executor.MockExecutor{
+			ChangedFilesResult: []string{"internal/payments/charge.go"},
+		}
+
+		r, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+		if r == nil {
+			t.Fatal("nil result")
+		}
+		var msg string
+		for _, i := range r.Issues {
+			if i.Name == "adr-divergence-unowned" {
+				msg = i.Message
+			}
+		}
+		if msg == "" {
+			t.Fatalf("expected adr-divergence-unowned, got %+v", r.Issues)
+		}
+		if !strings.Contains(msg, ".mindspec/domains/") {
+			t.Errorf("expected the flat domains root in the hint, got: %q", msg)
+		}
+		if strings.Contains(msg, ".mindspec/docs/domains") {
+			t.Errorf("flat workspace hint must NOT contain the canonical literal, got: %q", msg)
+		}
+	})
+
+	t.Run("pre-flatten (canonical)", func(t *testing.T) {
+		root := t.TempDir()
+		specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-canonical")
+		writeSpecAndPlan(t, root, specDir, "999-canonical",
+			[]string{"core"},
+			[]string{},
+		)
+		writeManifest(t, root, "core", "paths:\n  - internal/core/**\n")
+
+		mock := &executor.MockExecutor{
+			ChangedFilesResult: []string{"internal/payments/charge.go"},
+		}
+
+		r, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+		if r == nil {
+			t.Fatal("nil result")
+		}
+		var msg string
+		for _, i := range r.Issues {
+			if i.Name == "adr-divergence-unowned" {
+				msg = i.Message
+			}
+		}
+		if msg == "" {
+			t.Fatalf("expected adr-divergence-unowned, got %+v", r.Issues)
+		}
+		if !strings.Contains(msg, ".mindspec/docs/domains/") {
+			t.Errorf("expected the canonical domains root in the hint, got: %q", msg)
+		}
+	})
+}
+
+// TestValidateDivergenceUnownedIndeterminateOnBrokenSibling — spec 122
+// Bead 3 FX-1 (gvb5.3 codex): the R4(b) full-enumeration re-attribution
+// must NEVER classify a file as "genuinely unowned" when ownership is
+// INDETERMINATE because a domain's OWNERSHIP.yaml failed to load. A
+// malformed sibling manifest (`a-broken`, sorted BEFORE the declared
+// owner) is outside the spec's declared candidate set, so the
+// declared-set attribution pass never touches it — only the FX-1
+// full-enumeration re-attribution hits it. Before the fix the
+// attribution error was swallowed (`_, _, _`) and the gate confidently
+// LIED "not claimed by any OWNERSHIP.yaml"; after, the load failure is
+// surfaced with its remedy and the confident-unowned message is never
+// emitted. Pass/fail boundary unchanged (still a SevError, overridable
+// via --override-adr exactly as today).
+func TestValidateDivergenceUnownedIndeterminateOnBrokenSibling(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-broken-sibling")
+	writeSpecAndPlan(t, root, specDir, "999-broken-sibling",
+		[]string{"workflow"},
+		[]string{},
+	)
+	// Declared owner claims internal/validate/**, NOT gitutil — so the
+	// changed file reaches the genuinely-unowned branch under the
+	// DECLARED set (workflow's manifest is valid, no attribution error).
+	writeManifest(t, root, "workflow", "paths:\n  - internal/validate/**\n")
+	// Malformed sibling manifest that sorts before workflow: unterminated
+	// YAML flow sequence → LoadOwnership returns a parse error.
+	writeManifest(t, root, "a-broken", "paths: [ unterminated\n")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/gitutil/x.go"},
+	}
+
+	r, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if !r.HasFailures() {
+		t.Fatalf("expected a failure (indeterminate ownership stays a blocking error), got %+v", r.Issues)
+	}
+
+	var attrMsg, unownedMsg string
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-attribute" && strings.Contains(i.Message, "internal/gitutil/x.go") {
+			attrMsg = i.Message
+		}
+		if i.Name == "adr-divergence-unowned" && strings.Contains(i.Message, "internal/gitutil/x.go") {
+			unownedMsg = i.Message
+		}
+	}
+	if attrMsg == "" {
+		t.Fatalf("expected an adr-divergence-attribute (indeterminate ownership) error naming the file, got %+v", r.Issues)
+	}
+	if !strings.Contains(attrMsg, "could not be") {
+		t.Errorf("expected the indeterminate message to name the load failure, got: %q", attrMsg)
+	}
+	if unownedMsg != "" && strings.Contains(unownedMsg, "not claimed by any OWNERSHIP.yaml") {
+		t.Errorf("indeterminate ownership must NOT be reported as genuinely unowned, got: %q", unownedMsg)
+	}
+}
+
+// TestValidateDivergenceUnownedHintRefConsistentRoot — spec 122 Bead 3
+// FX-2 (gvb5.3 codex): in the ref-anchored divergence lane the
+// genuinely-unowned hint's domains root must be resolved from the SAME
+// tree the ownership enumeration read (ownerRef), not the ambient
+// checkout. Here the ambient tree is CANONICAL (writeSpecAndPlan
+// materializes .mindspec/docs/, and no .mindspec/domains/ on disk → the
+// ambient label would be .mindspec/docs/domains) while the inspected
+// REF is FLAT (domains live at .mindspec/domains/). The hint must name
+// the REF's flat root and never the ambient canonical substring.
+func TestValidateDivergenceUnownedHintRefConsistentRoot(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-ref-flat")
+	// Empty Impacted Domains → the candidate set falls back to the
+	// ref enumeration (listDomainDirsAtRef), driven entirely by the mock.
+	writeSpecAndPlan(t, root, specDir, "999-ref-flat", nil, []string{})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"internal/payments/charge.go"},
+		TreeDirsAtRefFn: func(ref, dirPath string) ([]string, error) {
+			if dirPath == ".mindspec/domains" {
+				return []string{"core"}, nil // the ref is FLAT
+			}
+			return nil, nil // canonical/legacy roots are empty at the ref
+		},
+		// FileAtRefOrAbsent defaults to absent → `core` claims nothing →
+		// the changed file is genuinely unowned, with no load error.
+	}
+
+	r, _ := ValidateDivergence(mock, root, specDir, "mindspec-x.1", "BASE", "HEAD", "REFSHA", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	var msg string
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			msg = i.Message
+		}
+	}
+	if msg == "" {
+		t.Fatalf("expected an adr-divergence-unowned hint, got %+v", r.Issues)
+	}
+	if !strings.Contains(msg, ".mindspec/domains/") {
+		t.Errorf("expected the REF's flat domains root in the hint, got: %q", msg)
+	}
+	if strings.Contains(msg, ".mindspec/docs/domains") {
+		t.Errorf("ref-anchored hint must NOT print the ambient canonical root, got: %q", msg)
+	}
+}

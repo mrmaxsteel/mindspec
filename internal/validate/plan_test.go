@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
 func TestValidatePlan_WellFormed(t *testing.T) {
@@ -1494,6 +1495,32 @@ func TestPlanRejectsUncoveredDomain(t *testing.T) {
 	}
 }
 
+func TestUncitedCoveringADRsExcludesBranchDemoted(t *testing.T) {
+	// Final-review G1: an adr.OverlayStore's List filters Status on the
+	// branch and primary stores SEPARATELY, then union-dedups with
+	// branch entries winning (internal/adr/overlaystore.go). So when a
+	// spec branch DEMOTES an existing ADR from Accepted to Proposed,
+	// branch.List(Accepted) correctly excludes it — but
+	// primary.List(Accepted) still returns the primary checkout's
+	// stale-Accepted copy, and the union hands it back. Before the G1
+	// fix, uncitedCoveringADRs trusted that stale List result and named
+	// the demoted ADR as "covering" — a lying hint, the exact
+	// untruthfulness spec 122 exists to kill. uncitedCoveringADRs must
+	// re-verify each candidate via store.Get (branch-wins) and drop it
+	// if the re-fetched Status is no longer Accepted.
+	primaryRoot := t.TempDir()
+	branchRoot := t.TempDir()
+	writeTestADRWithDomains(t, primaryRoot, "ADR-0001", "Accepted", "payments", "")
+	writeTestADRWithDomains(t, branchRoot, "ADR-0001", "Proposed", "payments", "")
+
+	store := adr.NewOverlayStore(adr.NewFileStore(branchRoot), adr.NewFileStore(primaryRoot))
+
+	covering := uncitedCoveringADRs(store, nil, "payments")
+	if len(covering) != 0 {
+		t.Errorf("expected no covering ADRs — ADR-0001 is demoted to Proposed on the branch — got: %v", covering)
+	}
+}
+
 func TestPlanSpecWorktreeADRVisible(t *testing.T) {
 	// mindspec-ew79: an ADR that exists ONLY on the spec branch (inside
 	// the spec worktree at root/.worktrees/worktree-spec-<id>/) must be
@@ -2061,4 +2088,337 @@ func TestValidatePlanMalformedBeadIDsZeroBD(t *testing.T) {
 	if len(r2.Issues) != 1 || r2.Issues[0].Severity != SevWarning || r2.Issues[0].Name != "bead-id-check" {
 		t.Fatalf("expected the clean dotted-child id to reach a real (PATH-starved) bd spawn attempt, reported as a bead-id-check warning; got: %+v", r2.Issues)
 	}
+}
+
+// --- Spec 122 Bead 1: forward-only Rule-2 authoring reject, plan side ---
+
+// writeTestSpecWithStatus is writeTestSpec (spec 087) extended with a
+// caller-declared spec.md YAML frontmatter block (spec 122 R1's
+// forward-only signal). frontmatter == "" omits the block entirely — the
+// no-frontmatter legacy shape (SpecStatus == "").
+func writeTestSpecWithStatus(t *testing.T, root, frontmatter string, impactedDomains []string) {
+	t.Helper()
+	specDir := filepath.Join(root, "docs", "specs", "999-test")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir specDir: %v", err)
+	}
+
+	var b strings.Builder
+	if frontmatter != "" {
+		b.WriteString("---\n")
+		b.WriteString(frontmatter)
+		b.WriteString("---\n\n")
+	}
+	b.WriteString("# Spec 999-test\n\n## Goal\n\nTest spec.\n\n## Impacted Domains\n\n")
+	for _, d := range impactedDomains {
+		b.WriteString("- " + d + ": touched by tests\n")
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+}
+
+// impactedDomainsResolveIssues filters r.Issues down to the
+// impacted-domains-resolve lane, per AC-1's scoping note (a plan citing no
+// covering ADR also raises adr-coverage-missing; that is a different lane
+// and not asserted by these tests).
+func impactedDomainsResolveIssues(r *Result) []Issue {
+	var out []Issue
+	for _, i := range r.Issues {
+		if i.Name == "impacted-domains-resolve" {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// TestImpactedDomainsForwardOnlyReject_ValidatePlan pins spec 122 R1 at the
+// plan-validate authoring gate — the plan-side half of AC-1 (#178 repro,
+// RED before this bead), AC-1b(i) (explicit-status grandfather), AC-2 (the
+// first remedy completes the red->green transition), and AC-4 (manifest-less
+// anti-overreach).
+func TestImpactedDomainsForwardOnlyReject_ValidatePlan(t *testing.T) {
+	const bareLabel = "api (orders — models)"
+
+	t.Run("draft-bare-label-rejects", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		matches := impactedDomainsResolveIssues(r)
+		if len(matches) != 1 {
+			t.Fatalf("expected exactly 1 impacted-domains-resolve issue, got %d: %+v", len(matches), r.Issues)
+		}
+		msg := matches[0].Message
+		if matches[0].Severity != SevError {
+			t.Errorf("expected SevError, got %v", matches[0].Severity)
+		}
+		if !strings.Contains(msg, "orders") {
+			t.Errorf("expected message to list available domain %q, got: %s", "orders", msg)
+		}
+		if !strings.Contains(msg, bareLabel) {
+			t.Errorf("expected message to name the offending entry verbatim, got: %s", msg)
+		}
+	})
+
+	t.Run("approved-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Approved\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for an Approved spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("no-frontmatter-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for a frontmatter-less spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("no-status-key-bare-label-grandfathered", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "spec_id: \"999-test\"\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve for a status-key-less spec, got: %+v", matches)
+		}
+	})
+
+	t.Run("draft-remedy-applied-passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{"orders"})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve after applying the remedy, got: %+v", matches)
+		}
+	})
+
+	t.Run("draft-manifest-less-workspace-passes", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpecWithStatus(t, tmp, "status: Draft\n", []string{bareLabel})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+		if matches := impactedDomainsResolveIssues(r); len(matches) != 0 {
+			t.Errorf("expected no impacted-domains-resolve in a manifest-less workspace, got: %+v", matches)
+		}
+	})
+}
+
+// TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight pins spec
+// 122 AC-3: an already-Approved spec carrying the SAME bare label, forced
+// to bead time (the complete-shaped divergence lane, ValidateDivergence)
+// with a diff changing src/orders/models.py, behaves EXACTLY as it did
+// before this bead — Rule 2's verbatim-keep drives the same per-file
+// attribution (today: an "adr-divergence-unowned" finding, since the bare
+// label names no real domain dir). This bead wires the forward-only reject
+// ONLY into the two AUTHORING consumers (checkImpactedDomainsResolutionParity
+// in spec.go, ValidatePlan in plan.go); divergence.go's own
+// normalizeImpactedDomains call (:155) is untouched by this bead, so this
+// pins BY CONSTRUCTION that forward-only is keyed on authoring status, not
+// on the bead-time path — an already-Approved spec is never newly
+// hard-failed at bead time.
+func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.T) {
+	const bareLabel = "api (orders — models)"
+
+	tmp := t.TempDir()
+	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", "999-divergence")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir specDir: %v", err)
+	}
+	specBody := "---\nstatus: Approved\n---\n\n# Spec 999-divergence\n\n## Goal\n\ntest fixture\n\n## Impacted Domains\n\n- " + bareLabel + "\n"
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specBody), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	planBody := "---\nstatus: Approved\nspec_id: 999-divergence\nversion: 1\nadr_citations:\n  - ADR-0001\n---\n\n## Bead 1\n**Steps**\n1. do\n**Verification**\n- [ ] check\n**Acceptance Criteria**\ndone\n"
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planBody), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+	writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders", "")
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"src/orders/models.py"},
+	}
+
+	r, findings := ValidateDivergence(mock, tmp, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+
+	foundUnowned := false
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			foundUnowned = true
+		}
+		if i.Name == "impacted-domains-resolve" {
+			t.Errorf("forward-only must not newly hard-fail an Approved spec at bead time, got: %+v", i)
+		}
+	}
+	if !foundUnowned {
+		t.Fatalf("expected the pre-spec-122 adr-divergence-unowned finding unchanged for an Approved mid-flight spec, got issues=%+v findings=%+v", r.Issues, findings)
+	}
+}
+
+// TestSixOUTwoADRDomainResolvesBothSlashForms pins spec 122 AC-5 — bead
+// mindspec-6ou2's ACTUAL filed scenario (items 3/4) — at validate-plan
+// time: domain dir `orders` claims `src/orders/**`; the spec's
+// `## Impacted Domains` is the file/path form `src/orders/api.py`
+// (spec-side resolves fine via spec 100 — this is NOT the spec-side
+// failure); the plan cites an Accepted ADR whose `Domain(s)` line
+// declares the SAME territory as a directory path, in BOTH slash forms
+// across sibling subtests (one ADR writing `- **Domain(s)**:
+// src/orders/`, one writing `src/orders`, no trailing slash). Before
+// spec 122 R2, `validate plan` emitted BOTH `adr-cite-irrelevant` AND
+// `adr-coverage-missing` for BOTH forms (RED today — the spec-resolved
+// name `orders` never equalled the ADR's literal path); after R2, zero
+// errors from both lanes for BOTH forms. See
+// TestSixOUTwoCompleteShapedCoverageProbePasses in divergence_test.go
+// for the bead-time half of the same repro.
+func TestSixOUTwoADRDomainResolvesBothSlashForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+	}{
+		{"with trailing slash", "src/orders/"},
+		{"without trailing slash", "src/orders"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			writeTestSpec(t, tmp, []string{"src/orders/api.py"})
+			writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+			// Canonical adr dir: writeManifest materializes .mindspec/docs,
+			// so the ADR must live in the canonical adr dir to be visible
+			// to the store (TestPlanCoverageFilePathImpactedResolves
+			// precedent above).
+			writeCanonicalADRWithDomains(t, tmp, "ADR-0090", "Accepted", tc.label)
+			makePlanWithCitations(t, tmp, "  - id: ADR-0090\n    sections: [\"CLI\"]\n", true)
+
+			r := ValidatePlan(tmp, "999-test")
+
+			for _, issue := range r.Issues {
+				if issue.Name == "adr-cite-irrelevant" {
+					t.Errorf("label %q: unexpected adr-cite-irrelevant: %s", tc.label, issue.Message)
+				}
+				if issue.Name == "adr-coverage-missing" {
+					t.Errorf("label %q: unexpected adr-coverage-missing: %s", tc.label, issue.Message)
+				}
+			}
+		})
+	}
+}
+
+// TestPlanCoverageHintNamesUncitedCoveringADR — spec 122 AC-8 (#145
+// friction 1, R3): checkADRCoverage's notCovered branch must name the
+// TRUE governing fix — an uncited Accepted ADR whose resolved
+// Domain(s) already cover the notCovered domain — ahead of the
+// existing spec-100 remedies. Two citation-state subtests per the
+// spec's falsifier (the hint must not fire only on the
+// empty-citation branch: a plan that already cites some OTHER
+// non-covering Accepted ADR still gets the name-the-covering-ADR
+// hint), plus the degenerate negative half (no covering ADR anywhere
+// in the store keeps today's `:548`/`:550` message byte-identical).
+func TestPlanCoverageHintNamesUncitedCoveringADR(t *testing.T) {
+	t.Run("empty citations", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"orders"})
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders")
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if !strings.Contains(issue.Message, "ADR-0001") {
+				t.Errorf("expected message to name uncited covering ADR-0001, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected message to name the adr_citations remedy, got: %q", issue.Message)
+			}
+			citeIdx := strings.Index(issue.Message, "adr_citations")
+			createIdx := strings.Index(issue.Message, "mindspec adr create")
+			if citeIdx < 0 || createIdx < 0 || citeIdx > createIdx {
+				t.Errorf("expected the adr_citations remedy FIRST and `mindspec adr create` only as fallback, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
+
+	t.Run("cites a different non-covering Accepted ADR", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"orders"})
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders")
+		writeCanonicalADRWithDomains(t, tmp, "ADR-0002", "Accepted", "search")
+		makePlanWithCitations(t, tmp, "  - id: ADR-0002\n    sections: [\"CLI\"]\n", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if !strings.Contains(issue.Message, "ADR-0001") {
+				t.Errorf("expected message to name uncited covering ADR-0001 even though ADR-0002 is cited, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected adr_citations remedy even with a non-covering citation present, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
+
+	t.Run("degenerate: no covering ADR anywhere keeps today's message", func(t *testing.T) {
+		tmp := t.TempDir()
+		writeTestSpec(t, tmp, []string{"payments"})
+		makePlanWithCitations(t, tmp, "", true)
+
+		r := ValidatePlan(tmp, "999-test")
+
+		found := false
+		for _, issue := range r.Issues {
+			if issue.Name != "adr-coverage-missing" {
+				continue
+			}
+			found = true
+			if strings.Contains(issue.Message, "adr_citations") {
+				t.Errorf("expected today's degenerate message (no adr_citations remedy) when no covering ADR exists anywhere, got: %q", issue.Message)
+			}
+			if !strings.Contains(issue.Message, "mindspec adr create --domain payments") {
+				t.Errorf("expected the create remedy, got: %q", issue.Message)
+			}
+		}
+		if !found {
+			t.Fatalf("expected adr-coverage-missing error, got: %v", r.Issues)
+		}
+	})
 }

@@ -174,3 +174,125 @@ func normalizeImpactedDomains(exec executor.Executor, root, ownerRef string, ent
 
 	return normalized, errs
 }
+
+// bareUnresolvedImpactedDomains is a SEPARATE, signature-preserving
+// helper (spec 122 R1, PF-2) that identifies the Rule-2 entries — bare
+// tokens naming no domain dir (:119-125 above) — but ONLY when the
+// ownership model is IN USE in this workspace: at least one enumerated
+// domain dir whose OWNERSHIP.yaml actually LOADS (Ownership.ManifestPath
+// != "", i.e. Source() != "missing") through the SAME per-run ownCache
+// normalizeImpactedDomains uses — not the mere on-disk PRESENCE of a
+// domains directory or domain sub-directory, which is the resolved
+// boundary the spec draws (a scaffolded-but-empty domains tree must not
+// flip this gate). When no domain's manifest loads anywhere (a
+// manifest-less workspace, or every domain dir under the enumeration
+// root has no OWNERSHIP.yaml on disk), this returns nil — Rule 2's
+// verbatim-keep, no-error carve-out is preserved exactly (ADR-0036's
+// manifest-less doctrine, carve-out (ii)).
+//
+// It does NOT change normalizeImpactedDomains's 2-return contract or
+// touch its 4 existing production call sites (plan.go:143, spec.go's
+// checkImpactedDomainsResolutionParity, ownership.go's
+// ResolveCandidateDomains, divergence.go:155): it independently
+// re-enumerates domains and re-scans entries using the identical Rule-1 /
+// Rule-2 predicate (a domain-dir name is never "bare"; a path-like entry
+// with "/" is Rule-3 territory, not Rule 2). The returned entries are
+// VERBATIM (trimmed, first-seen order, case-fold de-duplicated) —
+// unescaped; callers apply termsafe.Escape when rendering, per the
+// existing discipline at this call site.
+//
+// The caller decides severity: only the two AUTHORING consumers
+// (checkImpactedDomainsResolutionParity in spec.go, ValidatePlan in
+// plan.go) invoke this helper, and only promote a returned entry to an
+// ERROR when the SPEC's own frontmatter status (validate.SpecStatusAt,
+// NOT plan.go's isApproved which reads the PLAN's status) is an explicit
+// case-folded "Draft" — every other status (Approved, any other explicit
+// non-Draft value, or empty because no frontmatter / no status: key) is
+// grandfathered and this helper's result is simply not surfaced.
+func bareUnresolvedImpactedDomains(exec executor.Executor, root, ownerRef string, entries []string) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	domains, derr := resolveDomains(exec, root, ownerRef)
+	if derr != nil || len(domains) == 0 {
+		return nil
+	}
+	domainSet := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		domainSet[d] = struct{}{}
+	}
+
+	// Ownership-model-in-use predicate: at least one domain dir whose
+	// manifest actually LOADS (ManifestPath set), not merely a domain dir
+	// that exists with no OWNERSHIP.yaml on disk (LoadOwnership returns a
+	// non-error, ManifestPath=="" Ownership for a missing manifest file —
+	// that is NOT "in use").
+	ownCache := newOwnershipCache(exec, root, ownerRef)
+	modelInUse := false
+	for _, d := range domains {
+		o, err := ownCache.get(d)
+		if err == nil && o != nil && o.ManifestPath != "" {
+			modelInUse = true
+			break
+		}
+	}
+	if !modelInUse {
+		return nil
+	}
+
+	var bare []string
+	seen := make(map[string]struct{}, len(entries))
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		if _, ok := domainSet[entry]; ok {
+			continue // Rule 1: names a domain dir.
+		}
+		if strings.Contains(entry, "/") {
+			continue // Rule 3 territory: path-like, not a bare Rule-2 token.
+		}
+		key := strings.ToLower(entry)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		bare = append(bare, entry)
+	}
+	return bare
+}
+
+// impactedDomainsForwardOnlyErrors renders Requirement 1's forward-only
+// error text for each Rule-2-bare entry bareUnresolvedImpactedDomains
+// returned: the entry verbatim (termsafe-escaped per the existing
+// discipline at this site — the fl91/SessionStart lesson), why it failed,
+// the sorted + per-element-escaped list of available domain-dir names,
+// and both working remedies (replace the label with one of those names,
+// or declare a claimed path under the layout-aware domains root). One
+// message per entry, matching the shape of the sibling Rule-3
+// zero/multi-owner errors above.
+func impactedDomainsForwardOnlyErrors(exec executor.Executor, root, ownerRef string, bare []string) []string {
+	if len(bare) == 0 {
+		return nil
+	}
+
+	domains, _ := resolveDomains(exec, root, ownerRef)
+	sortedDomains := append([]string(nil), domains...)
+	sort.Strings(sortedDomains)
+	safeDomains := make([]string, len(sortedDomains))
+	for i, d := range sortedDomains {
+		safeDomains[i] = termsafe.Escape(d)
+	}
+	domainsList := strings.Join(safeDomains, ", ")
+	rootLabel := domainsRootLabel(root)
+
+	msgs := make([]string, 0, len(bare))
+	for _, entry := range bare {
+		msgs = append(msgs, fmt.Sprintf(
+			"Impacted-Domains entry %s names neither a domain-dir name nor a path claimed by any domain's OWNERSHIP.yaml paths: (available domain dirs: %s); fix by replacing the entry with one of those names, or by declaring a claimed path instead (claim it in %s/<name>/OWNERSHIP.yaml if not yet claimed)",
+			termsafe.Escape(entry), domainsList, rootLabel))
+	}
+	return msgs
+}

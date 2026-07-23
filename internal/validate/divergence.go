@@ -31,6 +31,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // DivergenceFinding is the structured machine-readable record of a single
@@ -133,8 +134,14 @@ func ValidateDivergence(
 	// checkout, so spec-introduced ADRs count at bead-complete time.
 	// Spec 108 R8: wrap in the per-run memoizing decorator so the
 	// per-(file × citation) coverageOf loop below reads each distinct
-	// cited ADR from disk at most once.
-	store := newMemoStore(adrStoreForSpecFn(root, specDir))
+	// cited ADR from disk at most once. Spec 122 R2: additionally wrap
+	// in the domain-resolving decorator so the coverageOf probe below
+	// sees each cited ADR's Domain(s) entries resolved to owning-domain
+	// dir-names — symmetric with candidateDomains' spec-side resolution
+	// just below. This lane passes its OWN exec + ownerRef (not nil/"")
+	// so ADR-side resolution reads the SAME ref-anchored tree the
+	// spec-side normalizeImpactedDomains call below reads.
+	store := newDomainResolvingStore(newMemoStore(adrStoreForSpecFn(root, specDir)), exec, root, ownerRef)
 
 	// Resolve domain list to consult for attribution. Prefer the
 	// spec's declared impacted-domains; when that's empty (spec has
@@ -217,9 +224,53 @@ func ValidateDivergence(
 		}
 
 		if domain == "" {
-			r.AddError("adr-divergence-unowned",
-				fmt.Sprintf("file %s is not claimed by any OWNERSHIP.yaml for the spec's impacted domains %v; add it to an existing manifest or create a new domain dir at .mindspec/docs/domains/<name>/OWNERSHIP.yaml",
-					path, meta.Domains))
+			// Spec 122 R4(b): before declaring the file genuinely
+			// unowned, re-attribute it against the FULL domain
+			// enumeration (not just the spec's resolved DECLARED
+			// candidate set) — the docsync.go checkInternalPackages
+			// pattern, no new discovery mechanism. This distinguishes
+			// "owned by a domain the spec didn't declare" (scope drift
+			// — #178's option 2) from "genuinely unowned": the
+			// pass/fail boundary is unchanged (both remain errors,
+			// overridable exactly as today), only the message names the
+			// TRUE remedy.
+			//
+			// FX-1 (gvb5.3 codex): ownership is INDETERMINATE — and must
+			// NEVER be classified as genuinely unowned — when the full
+			// enumeration cannot be read (discErr) OR any domain's
+			// OWNERSHIP.yaml fails to load during attribution (attrErr2,
+			// which attributeDomainCached returns on the FIRST unreadable
+			// manifest, e.g. a malformed sibling sorted before a valid
+			// owner). Swallowing either error would make the gate LIE
+			// "not claimed by any OWNERSHIP.yaml" while a broken manifest
+			// hides a real owner — the same load-error-swallowing
+			// anti-pattern fixed on the ADR side in Bead 2. Surface the
+			// load failure with its remedy instead; still a SevError,
+			// overridable via --override-adr exactly as today.
+			allDomains, discErr := resolveDomains(exec, root, ownerRef)
+			if discErr != nil {
+				r.AddError("adr-divergence-attribute",
+					fmt.Sprintf("ownership of %s could not be determined: enumerating domains failed: %v; it may be claimed by a domain whose tree failed to load — fix that and re-run",
+						termsafe.Escape(path), discErr))
+				continue
+			}
+			realOwner, _, attrErr2 := attributeDomainCached(ownCache, path, allDomains)
+			if attrErr2 != nil {
+				r.AddError("adr-divergence-attribute",
+					fmt.Sprintf("ownership of %s could not be fully determined: %v; %s may be claimed by a domain whose OWNERSHIP.yaml failed to load — fix that manifest and re-run",
+						termsafe.Escape(path), attrErr2, termsafe.Escape(path)))
+				continue
+			}
+			if realOwner != "" {
+				safeOwner := termsafe.Escape(realOwner)
+				r.AddError("adr-divergence-unowned",
+					fmt.Sprintf("file %s is claimed by domain %s's OWNERSHIP.yaml, but %s is not in the spec's declared Impacted Domains %v; add %s to the spec's `## Impacted Domains`",
+						termsafe.Escape(path), safeOwner, safeOwner, meta.Domains, safeOwner))
+			} else {
+				r.AddError("adr-divergence-unowned",
+					fmt.Sprintf("file %s is not claimed by any OWNERSHIP.yaml for the spec's impacted domains %v; add it to an existing manifest or create a new domain dir at %s/<name>/OWNERSHIP.yaml",
+						termsafe.Escape(path), meta.Domains, domainsRootLabelAtRef(exec, root, ownerRef)))
+			}
 			findings = append(findings, DivergenceFinding{
 				Path: path,
 				Kind: "unowned",
