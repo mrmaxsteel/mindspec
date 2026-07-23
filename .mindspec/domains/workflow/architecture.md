@@ -454,3 +454,138 @@ production seam has no test double (e.g. `internal/validate`'s
 `bead.BeadExists` → real `bd show`, which has no mock seam) — a
 scoped-PATH technique (a scratch `bin/` containing only a `git` symlink)
 rather than a dependency on this dev machine's real Dolt store.
+
+## Domain/ADR gate truthfulness (spec 122, ADR-0032 third amendment)
+
+Spec 122 (beads `mindspec-gvb5.1` through `.4`; GH #147/#178/#145/#197 +
+bead `mindspec-6ou2`) makes the domain/ADR gate lanes in
+`internal/validate` reject bad domain labels at authoring time, resolve
+BOTH sides of every coverage comparison, and tell the truth in their
+remedy hints. It adds NO new gate lane, flag, config key, or override
+(spec 122 R7 — the ceremony non-inflation guard in
+`cmd/mindspec/ceremony_guard_test.go` pins this); the existing escapes
+(`--override-adr`, `--supersede-adr`, `--allow-doc-skew`) are untouched.
+ADR-0032 carries the codifying record as its THIRD `## Amendment`
+section, including the evidenced supersession of bead `mindspec-6ou2`'s
+6/6 panel decision (2026-06-26).
+
+### Forward-only Rule-2 authoring reject (R1)
+
+`normalizeImpactedDomains`'s Rule 2 keeps a bare `## Impacted Domains`
+token that names no domain dir verbatim with no error — which let a
+label that can never own a file (so every downstream coverage decision
+is vacuously false) survive into an approved spec.
+`bareUnresolvedImpactedDomains` + `impactedDomainsForwardOnlyErrors`
+(`internal/validate/ownership_resolve.go`) now identify those Rule-2
+entries and the two AUTHORING consumers —
+`checkImpactedDomainsResolutionParity` (`spec.go`, so `validate spec` /
+`spec approve` see it) and `ValidatePlan` (`plan.go`) — promote them to
+hard `impacted-domains-resolve` errors, but ONLY when:
+
+- the SPEC's own frontmatter status (`SpecStatusAt(specDir)` — never the
+  plan's `isApproved`) is an explicit case-folded `Draft`. `Approved`,
+  any other explicit non-Draft value, and status-less legacy specs (no
+  frontmatter / no `status:` key) are GRANDFATHERED — the existing
+  corpus never newly reddens; and
+- the ownership model is IN USE: at least one enumerated domain dir
+  whose `OWNERSHIP.yaml` actually LOADS (`ManifestPath != ""` through
+  the shared per-run `ownershipCache`). A manifest-less workspace, or a
+  scaffolded-but-empty domains tree, keeps Rule 2's verbatim-keep
+  exactly (ADR-0036's manifest-less doctrine).
+
+The error text names the offending entry (termsafe-escaped, per element
+— the fl91 lesson), the sorted available domain-dir names, and both
+working remedies (rename to a real domain-dir name, or claim a path
+under the LAYOUT-AWARE domains root — see the hint-root helper below).
+
+### ADR-side symmetric name-resolution (R2, supersedes 6ou2)
+
+Before spec 122, a cited ADR's `Domain(s)` line was compared to the
+spec's RESOLVED Impacted-Domains set by literal string equality, so an
+ADR writing a directory path (`src/orders/`) never intersected the
+spec-resolved name `orders` — the spurious `adr-cite-irrelevant` /
+`adr-coverage-missing` pair (6ou2 items 3/4, #147's coverage tail).
+`domainResolvingStore` (`internal/validate/adr_domain_resolve.go`) is an
+`adr.Store` decorator that resolves every returned ADR's `Domains`
+through the SAME deterministic explicit-manifest mechanism the spec side
+already uses (glob-match against per-domain OWNERSHIP `paths:` minus
+`exclude:`), layered at the two GATE-LANE store constructions only —
+`ValidatePlan` and `ValidateDivergence`, each wrapping the spec-108
+`newMemoStore`, each fed the lane's own exec/root/ownerRef so both
+comparison sides read the same tree. The cmd-side `adrReadStore`
+(`cmd/mindspec/adr.go`) is deliberately NOT wrapped: `adr show`/`adr
+list` keep rendering the author's literal `Domain(s)` line.
+
+Resolution is literal-first, two ordered phases: **Phase 1** glob-matches
+the trimmed literal token against every domain's `paths:`; exactly one
+clean owner is authoritative and returns immediately. **Phase 2** (zero
+literal owners only) runs the exclude-gated synthetic-child probe
+`<trimmed>/x` so a slashless directory label (`src/orders`) still
+matches a `src/orders/**` glob — a domain that excludes the DECLARED
+label is never resurrected by the probe. Three safety doctrines hold
+throughout: (1) **no-new-error** — zero/ambiguous resolution leaves the
+entry exactly as authored and compares literally as before; ADR
+`Domain(s)` lines are historical documents this gate must not force
+churn on (mindspec's own ADR-0032/-0031 lines carry non-short-tag
+tokens); (2) **indeterminate-on-load-error** — if ANY enumerated
+domain's manifest fails to load, cardinality is unknowable and the entry
+stays literal, never promoted; (3) tuple/prose tokens (no `/`, e.g.
+`api (lola, tools)`) are never parsed or guessed — which is what answers
+the ZFC objection in 6ou2's superseded panel decision (resolution is
+restricted to deterministic path-shaped entries against EXPLICIT
+manifests, the identical spec-100 mechanism).
+
+### Truthful gate hints (R3/R4)
+
+- **Uncited-covering-ADR remedy (`plan.go`, #145 friction 1).** When
+  `checkADRCoverage` finds domain `d` notCovered but the same in-hand
+  (already domain-resolving) store contains UNCITED Accepted ADRs whose
+  resolved `Domain(s)` cover `d`, the `adr-coverage-missing` error now
+  names those ADR IDs and the true governing fix — add them to the
+  plan's `adr_citations` frontmatter — FIRST, ahead of the spec-100
+  remedies (amend a cited ADR's `Domain(s)`; `mindspec adr create` last).
+  The trigger is the EXISTENCE of an uncited covering ADR
+  (`uncitedCoveringADRs`), not an empty citation list; a `store.List`
+  failure degrades to the pre-existing remedies rather than blocking on
+  a secondary read.
+- **Layout-aware, ref-consistent hint roots (`hint_root.go`).**
+  `domainsRootLabel(root)` renders the domains-enumeration root that
+  ACTUALLY resolves in the workspace (flat `.mindspec/domains` →
+  canonical `.mindspec/docs/domains` → legacy `docs/domains`, mirroring
+  `workspace.DomainsDir` exactly) instead of a hard-coded pre-flatten
+  literal; `domainsRootLabelAtRef(exec, root, ownerRef)` is its
+  ref-consistent sibling for the bead-time lanes, resolving the label
+  from the SAME git tree the ownership enumeration read (via the
+  existing `domainsTreeRoots` + `TreeDirsAtRef` seam), falling back to
+  the ambient label on a git read failure or an unpopulated ref. Wired
+  into `docsync.go`'s two `internal-docs` templates, `divergence.go`'s
+  unowned remedy, and R1's error text; a hard-coded-literal sweep guard
+  keeps new hint sites from regressing.
+- **Owned-vs-unowned split (`divergence.go`, #178's message half).**
+  When a diffed file is not claimed by the spec's DECLARED candidate
+  domains, `ValidateDivergence` re-attributes it against the FULL domain
+  enumeration (the `checkInternalPackages` pattern — message truthfulness
+  only; the candidate-set pass/fail boundary and blast-radius guard are
+  unchanged) and splits the finding: **owned-but-undeclared** (scope
+  drift) names the real owning domain and the true remedy — add that
+  domain to the spec's `## Impacted Domains`; **genuinely unowned**
+  keeps the claim-it remedy, now with the layout-aware root. Ownership
+  is INDETERMINATE — a distinct `adr-divergence-attribute` error naming
+  the load failure and its remedy, never a false "not claimed by any
+  OWNERSHIP.yaml" — when the enumeration cannot be read or any domain's
+  manifest fails to load during attribution (a broken manifest may hide
+  a real owner; the same load-error-swallowing anti-pattern fixed on the
+  ADR side). All three are `SevError`, overridable via `--override-adr`
+  exactly as before.
+
+### Regression evidence + non-inflation pins (R5/R7, Bead 4 — test-only)
+
+Bead `mindspec-gvb5.4` adds no behavior: the issue→test evidence map for
+#147/#145/6ou2 (citing the pre-existing pins, adding the genuinely-new
+#147 end-to-end divergence fixture that is red without R2 — the
+strict-inequality witness catches a reverted resolver), the
+`internal/approve` plan-scaffold `adr_citations` pin, the contextpack
+backtick-strip pin (6ou2 item 1), and
+`cmd/mindspec/ceremony_guard_test.go`'s R7 guard that the CLI grew no
+new flag/key (pflag-metadata-based, so an underscore-spelled flag cannot
+slip past it).
