@@ -670,3 +670,105 @@ func TestValidateDivergenceZeroOwnerEntryErrors(t *testing.T) {
 		t.Errorf("expected impacted-domains-resolve error naming the zero-owner entry, got %+v", r.Issues)
 	}
 }
+
+// TestSixOUTwoCompleteShapedCoverageProbePasses pins spec 122 AC-5's
+// bead-time half — bead mindspec-6ou2's ACTUAL filed scenario (items
+// 3/4): domain dir `orders` claims `src/orders/**`; the spec's
+// `## Impacted Domains` is the file-path form `src/orders/api.py`
+// (already resolved fine spec-side by spec 100 — this is NOT the
+// spec-side failure); the plan cites an Accepted ADR whose `Domain(s)`
+// line declares the SAME territory as a directory path, in BOTH slash
+// forms across sibling subtests. Before spec 122 R2 the ADR-side
+// literal `src/orders/` / `src/orders` never resolved to the
+// spec-resolved name `orders`, so the changed file `src/orders/api.py`
+// failed the coverage probe (RED today — see the plan-lane sibling
+// TestSixOUTwoADRDomainResolvesBothSlashForms in plan_test.go for the
+// validate-plan half of the same repro). After R2 both forms resolve
+// and the bead-time coverage probe passes with NO --override-adr.
+func TestSixOUTwoCompleteShapedCoverageProbePasses(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+	}{
+		{"with trailing slash", "src/orders/"},
+		{"without trailing slash", "src/orders"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-sixou2")
+			writeSpecAndPlan(t, root, specDir, "999-sixou2",
+				[]string{"src/orders/api.py"},
+				[]string{"ADR-0090"},
+			)
+			writeManifest(t, root, "orders", "paths:\n  - src/orders/**\n")
+			writeADR(t, root, "ADR-0090", "Accepted", []string{tc.label})
+
+			mock := &executor.MockExecutor{
+				ChangedFilesResult: []string{"src/orders/api.py"},
+			}
+
+			r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+			if r == nil {
+				t.Fatal("nil result")
+			}
+			if r.HasFailures() {
+				t.Fatalf("label %q: expected zero-override coverage pass, got %+v", tc.label, r.Issues)
+			}
+			if len(findings) != 0 {
+				t.Errorf("label %q: expected no findings, got %+v", tc.label, findings)
+			}
+		})
+	}
+}
+
+// Test147EndToEndZeroErrors is the genuinely-new R5a pin (spec 122
+// AC-7): the FULL #147 shape through the complete-shaped divergence
+// lane. Spec Impacted Domains are file paths (`genevieve/review.py`,
+// `genevieve/summarizer.py`); domain dir `genevieve` claims
+// `genevieve/**/*.py` AND `.github/workflows/code-review.yaml`; the
+// cited Accepted ADR's `Domain(s)` line lists those SAME file-path
+// strings (not the domain name); the bead's diff touches
+// `genevieve/summarizer.py` and `.github/workflows/code-review.yaml`.
+//
+// Before spec 122 R2: the spec side resolves fine (spec 100 — pinned
+// standalone, cited not re-authored, by
+// TestValidateDivergenceFilePathImpactedDomainResolves above), but the
+// ADR's literal `Domain(s)` entries never equal the resolved domain
+// name `genevieve`, so the coverage probe fails for both changed files
+// (RED today at the coverage step — the #147 coverage tail). After R2,
+// the ADR-side entries resolve to `genevieve` (a bare file path claimed
+// by exactly one domain's OWNERSHIP paths:) and the lane returns ZERO
+// errors: no unowned finding, no coverage failure, no override needed.
+func Test147EndToEndZeroErrors(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, ".mindspec", "docs", "specs", "999-genevieve147")
+	writeSpecAndPlan(t, root, specDir, "999-genevieve147",
+		[]string{"genevieve/review.py", "genevieve/summarizer.py"},
+		[]string{"ADR-0147"},
+	)
+	writeManifest(t, root, "genevieve",
+		"paths:\n  - genevieve/**/*.py\n  - .github/workflows/code-review.yaml\n")
+	writeADR(t, root, "ADR-0147", "Accepted",
+		[]string{"genevieve/review.py", "genevieve/summarizer.py"})
+
+	mock := &executor.MockExecutor{
+		ChangedFilesResult: []string{"genevieve/summarizer.py", ".github/workflows/code-review.yaml"},
+	}
+
+	r, findings := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	if r == nil {
+		t.Fatal("nil result")
+	}
+	if r.HasFailures() {
+		t.Fatalf("expected zero errors for the full #147 shape, got %+v", r.Issues)
+	}
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			t.Errorf("unexpected adr-divergence-unowned: %+v", i)
+		}
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}

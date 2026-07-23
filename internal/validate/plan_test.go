@@ -2252,3 +2252,52 @@ func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.
 		t.Fatalf("expected the pre-spec-122 adr-divergence-unowned finding unchanged for an Approved mid-flight spec, got issues=%+v findings=%+v", r.Issues, findings)
 	}
 }
+
+// TestSixOUTwoADRDomainResolvesBothSlashForms pins spec 122 AC-5 — bead
+// mindspec-6ou2's ACTUAL filed scenario (items 3/4) — at validate-plan
+// time: domain dir `orders` claims `src/orders/**`; the spec's
+// `## Impacted Domains` is the file/path form `src/orders/api.py`
+// (spec-side resolves fine via spec 100 — this is NOT the spec-side
+// failure); the plan cites an Accepted ADR whose `Domain(s)` line
+// declares the SAME territory as a directory path, in BOTH slash forms
+// across sibling subtests (one ADR writing `- **Domain(s)**:
+// src/orders/`, one writing `src/orders`, no trailing slash). Before
+// spec 122 R2, `validate plan` emitted BOTH `adr-cite-irrelevant` AND
+// `adr-coverage-missing` for BOTH forms (RED today — the spec-resolved
+// name `orders` never equalled the ADR's literal path); after R2, zero
+// errors from both lanes for BOTH forms. See
+// TestSixOUTwoCompleteShapedCoverageProbePasses in divergence_test.go
+// for the bead-time half of the same repro.
+func TestSixOUTwoADRDomainResolvesBothSlashForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+	}{
+		{"with trailing slash", "src/orders/"},
+		{"without trailing slash", "src/orders"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			writeTestSpec(t, tmp, []string{"src/orders/api.py"})
+			writeManifest(t, tmp, "orders", "paths:\n  - src/orders/**\n")
+			// Canonical adr dir: writeManifest materializes .mindspec/docs,
+			// so the ADR must live in the canonical adr dir to be visible
+			// to the store (TestPlanCoverageFilePathImpactedResolves
+			// precedent above).
+			writeCanonicalADRWithDomains(t, tmp, "ADR-0090", "Accepted", tc.label)
+			makePlanWithCitations(t, tmp, "  - id: ADR-0090\n    sections: [\"CLI\"]\n", true)
+
+			r := ValidatePlan(tmp, "999-test")
+
+			for _, issue := range r.Issues {
+				if issue.Name == "adr-cite-irrelevant" {
+					t.Errorf("label %q: unexpected adr-cite-irrelevant: %s", tc.label, issue.Message)
+				}
+				if issue.Name == "adr-coverage-missing" {
+					t.Errorf("label %q: unexpected adr-coverage-missing: %s", tc.label, issue.Message)
+				}
+			}
+		})
+	}
+}

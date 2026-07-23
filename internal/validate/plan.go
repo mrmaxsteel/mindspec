@@ -171,8 +171,16 @@ func ValidatePlan(root, specID string) *Result {
 	// reading the primary checkout's ADR dir. Spec 108 R8: wrap in the
 	// per-run memoizing decorator so checkADRCitations + checkADRCoverage
 	// read each distinct cited ADR from disk at most once across their
-	// O(domains × citations) Get calls.
-	store := newMemoStore(adrStoreForSpecFn(root, specDir))
+	// O(domains × citations) Get calls. Spec 122 R2: additionally wrap
+	// in the domain-resolving decorator so every comparison site below
+	// (checkADRCitations' intersectFold, checkADRCoverage's coverageOf)
+	// sees each ADR's Domain(s) entries resolved to owning-domain
+	// dir-names, symmetric with the spec side's normalizeImpactedDomains
+	// above. The plan path has no executor and reads the on-disk
+	// working tree (ValidatePlan builds none), so exec == nil /
+	// ownerRef == "" — the same working-tree read normalizeImpactedDomains
+	// takes just above.
+	store := newDomainResolvingStore(newMemoStore(adrStoreForSpecFn(root, specDir)), nil, root, "")
 
 	// Check ADR citations + fitness (Spec 039)
 	if len(fm.ADRCitations) == 0 {
@@ -498,6 +506,13 @@ func checkADRCitations(r *Result, store adr.Store, citations []ADRCitation, impa
 		// same citation — when an ADR is both Superseded AND irrelevant,
 		// the irrelevance error is the higher-priority signal and the
 		// status warning is noise on the same root cause.
+		//
+		// Spec 122 R2: store is the domain-resolving decorator, so
+		// a.Domains here is already RESOLVED (a directory-path entry
+		// like "src/orders/" reads as "orders"); this error therefore
+		// only fires when the intersection is empty even after
+		// resolution, and the message below renders the resolved set,
+		// not the ADR's literal Domain(s) text.
 		irrelevant := false
 		if len(impactedDomains) > 0 {
 			overlap := intersectFold(a.Domains, impactedDomains)
